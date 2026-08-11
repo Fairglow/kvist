@@ -54,6 +54,20 @@ pub struct ProjectConfig {
     pub component_root: PathBuf,
     /// Resource bounds for component discovery.
     pub discovery: DiscoveryLimits,
+    /// VCS selected for durable-artifact tracking inspection.
+    pub vcs: VcsSelection,
+}
+
+/// Supported VCS selection for durable-artifact tracking inspection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VcsSelection {
+    /// Detect exactly one supported VCS; colocated Git/jj repositories require
+    /// an explicit selection.
+    Auto,
+    /// Use Git's index and ignore semantics.
+    Git,
+    /// Use Jujutsu's current working-copy snapshot.
+    Jujutsu,
 }
 
 /// Loads and validates `kvist.toml` from an explicit project root.
@@ -156,7 +170,36 @@ fn parse(config_path: &Path, contents: &str) -> Result<ProjectConfig> {
     Ok(ProjectConfig {
         component_root: normalize_component_root(config_path, component_root)?,
         discovery: parse_discovery_limits(config_path, table)?,
+        vcs: parse_vcs_selection(config_path, table)?,
     })
+}
+
+fn parse_vcs_selection(
+    config_path: &Path,
+    table: &toml::map::Map<String, toml::Value>,
+) -> Result<VcsSelection> {
+    let Some(vcs) = table.get("vcs") else {
+        return Ok(VcsSelection::Auto);
+    };
+    let vcs = vcs
+        .as_table()
+        .ok_or_else(|| invalid_configuration(config_path, "`vcs` must be a TOML table"))?;
+    let kind = match vcs.get("kind") {
+        Some(value) => value
+            .as_str()
+            .ok_or_else(|| invalid_configuration(config_path, "`vcs.kind` must be a string"))?,
+        None => "auto",
+    };
+
+    match kind {
+        "auto" => Ok(VcsSelection::Auto),
+        "git" => Ok(VcsSelection::Git),
+        "jj" => Ok(VcsSelection::Jujutsu),
+        _ => Err(invalid_configuration(
+            config_path,
+            "`vcs.kind` must be `auto`, `git`, or `jj`",
+        )),
+    }
 }
 
 fn parse_discovery_limits(

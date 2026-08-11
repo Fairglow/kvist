@@ -18,8 +18,10 @@ The CLI provides `init`, `doctor`, `tree`, `spec new`, and `spec validate`.
 it is a no-op for a current project and refuses every other existing state.
 `doctor` reports project-state diagnostics without modifying files. `tree`
 renders component layout, and specification commands create or validate
-component contracts. Commands use project-local configuration and produce
-deterministic, non-interactive output.
+component contracts. `doctor` also reports whether every required root and
+discovered component artifact is tracked by the selected Git or jj repository.
+Commands use project-local configuration and produce deterministic,
+non-interactive output.
 
 </details>
 
@@ -37,6 +39,8 @@ deterministic, non-interactive output.
   through explicit user action.
 - The root component performs no network or LLM invocation. It does not follow
   link-like paths and requires a trusted workspace before future task execution.
+- VCS inspection never stages, commits, or snapshots a working copy. Git uses
+  native tracking and ignore semantics; jj inspects only its saved snapshot.
 
 </details>
 
@@ -55,5 +59,7 @@ hierarchy violations, and reports missing or malformed adjacent artifacts.
 Specification validation uses the versioned three-layer Markdown format and
 returns line-aware diagnostics. Every operation returns contextual errors
 rather than silently repairing, migrating, overwriting, or following links.
+VCS auto-selection refuses a checkout containing both Git and jj until the
+project owner selects one in `kvist.toml`.
 
 </details>

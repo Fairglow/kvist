@@ -32,7 +32,10 @@ integer configuration `schema_version = 1` and a non-empty relative `component_r
 containing only normal path segments. `[discovery]` supports positive bounded
 limits for depth, scanned directories, recognized components, entries per
 directory, and encoded relative-path bytes; omitted values use deterministic
-defaults. Other keys, including `[llm]`, are not validated or used.
+defaults. `[vcs].kind` accepts `auto`, `git`, or `jj` and selects the
+read-only durable-artifact tracking diagnostics emitted by `doctor`; `auto`
+requires exactly one detected supported repository. `[llm]` is not validated
+or used.
 
 ## Validation and tree
 
@@ -55,8 +58,13 @@ same treatment. Discovery rejects link-like non-artifact descendants, reports
 link-like required artifacts as invalid, applies configured resource bounds,
 and requires every intermediate directory to be a component before recognizing
 an artifact-bearing descendant. It does not provide canonical containment or
-TOCTOU protection. No network or LLM operation is implemented. `.gitignore`
-semantics are not implemented; P1-R5 owns VCS-aware Git/jj ignore handling.
-Root inspection validates the current TODO mapping and root
+TOCTOU protection. No network or LLM operation is implemented. `doctor` uses
+Git's native index and ignore semantics to report tracked, ignored, and
+untracked durable artifacts without staging or committing. jj inspection uses
+its saved working-copy snapshot with `--ignore-working-copy`; a non-listed
+artifact may be ignored, excluded by snapshot rules, or newer than that
+snapshot. VCS queries are batched below an 8 KiB argument budget; a durable
+path too large for an individual query is reported as unavailable rather than
+failing all tracking diagnostics. Root inspection validates the current TODO mapping and root
 contract/documentation version markers, but Phase 2 still owns the complete
 TODO schema and specification-to-project association.

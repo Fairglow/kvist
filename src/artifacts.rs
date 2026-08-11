@@ -38,6 +38,11 @@ max_components = 10000
 max_entries_per_directory = 10000
 max_relative_path_bytes = 4096
 
+[vcs]
+# `auto` selects exactly one detected supported VCS. Set `git` or `jj` when
+# both are present in a colocated checkout.
+kind = "auto"
+
 [llm]
 # External LLM integration is opt-in. No provider is configured by default.
 provider = "none"
@@ -211,6 +216,7 @@ mod tests {
             Some(i64::from(CONFIGURATION_VERSION))
         );
         assert_eq!(config["component_root"].as_str(), Some("src"));
+        assert_eq!(config["vcs"]["kind"].as_str(), Some("auto"));
         assert_eq!(config["llm"]["provider"].as_str(), Some("none"));
     }
 

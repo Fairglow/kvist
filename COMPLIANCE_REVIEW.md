@@ -62,3 +62,30 @@ recorded responsibility of the clean-slate documentation pass.
 | Mismatch resolved | `SPEC.md` previously implied that `init` refused a current project, while `DOCS.md` documented its idempotent no-op behavior. | The contract now explicitly permits a no-op only for `current`; all other existing states remain refused. |
 | Mismatch resolved | `ROOT_CONTRACT.md` requires task ordering, while the observed YAML validator intentionally permits any non-empty task field values and order. | Ordering is an authoring and future execution rule, not a Phase 1 parser constraint. `SPEC.md` records that boundary; P2-01/P2-03 own schema and lifecycle enforcement. |
 | Underspecified | The documentation does not independently establish all line-aware diagnostic or future task-execution trust-boundary details stated in the specification. | Retain the requirement in `SPEC.md`; the Phase 2 trusted-workspace policy and its implementation review remain deferred. |
+
+## Root component VCS tracking review
+
+**Scope:** Git/jj durable-artifact tracking diagnostics in `doctor`.
+
+The clean-slate documenter reviewed source and tests without access to the
+contract. The source-blind reviewer then compared only `src/SPEC.md`,
+`src/DOCS.md`, and `ROOT_CONTRACT.md`.
+
+| Classification | Finding | Arbitration |
+| --- | --- | --- |
+| Compliant | The observed command set, root-state handling, deterministic discovery, bounded parsing, link rejection, and no-clobber writes match the root contract. | None. |
+| Compliant | VCS inspection is read-only; Git uses index and native ignore semantics, while jj uses an explicit selected saved snapshot. | None. |
+| Compliant | `DOCS.md` records observed behavior rather than reproducing the specification. | None. |
+| Deferred | This comparison establishes documentation consistency, not independent proof of source behavior. Task execution must enforce complete tracking before Phase 2 runs user tasks. | P2 execution and its trusted-workspace policy own that enforcement. |
+
+## Final root component VCS review
+
+**Scope:** Final root `SPEC.md`, source-derived `DOCS.md`, and
+`ROOT_CONTRACT.md`.
+
+| Classification | Finding | Arbitration |
+| --- | --- | --- |
+| Compliant | The command/state contract, initialization gating, read-only diagnostics, discovery, specification validation, link rejection, no-clobber writes, and VCS inspection agree across the scope documents. | None. |
+| Compliant | The artifact layout, versioned three-layer specification, durable project-file state, and discrepancy process agree with the root contract. | None. |
+| Deferred | The source-blind comparison cannot prove prior test/spec sequencing, independent review execution, or TODO ordering. | The retained runbook, review records, and P2 execution lifecycle own those process checks. |
+| Deferred | The source-derived record does not establish the specification's future trusted-workspace prerequisite because task execution is not implemented. | P2 trusted-workspace and execution policy own this requirement. |

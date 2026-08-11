@@ -74,7 +74,7 @@ accidental traversal only; they do not remove the TOCTOU limitation above.
 
 | Path | Version and required defaults | Purpose |
 | --- | --- | --- |
-| `kvist.toml` | configuration schema `1`; `component_root = "src"`; `llm.provider = "none"` | Project-local configuration with opt-in external LLM integration. |
+| `kvist.toml` | configuration schema `1`; `component_root = "src"`; `vcs.kind = "auto"`; `llm.provider = "none"` | Project-local configuration with VCS and opt-in external LLM settings. |
 | `ROOT_CONTRACT.md` | `<!-- kvist-root-contract-version: 1 -->` | Global architectural and compliance constraints for every component. |
 | `src/SPEC.md` | `<!-- kvist-specification-version: 1 -->` | Root component contract with the three progressive-disclosure layers. |
 | `src/TODOS.yaml` | `schema_version: 1` | Ordered lifecycle tasks: tests, implementation, security audit, compliance review. |
@@ -122,15 +122,31 @@ define every permitted rewrite and remain opt-in.
 
 Before Phase 2 task execution, durable artifacts (`kvist.toml`,
 `ROOT_CONTRACT.md`, and each component's `SPEC.md`, `TODOS.yaml`, and
-`DOCS.md`) are expected to be tracked in a supported VCS. Kvist is VCS-aware,
-not Git-only: Git and jj are the initial supported systems. Kvist must never
-auto-stage or commit. Required artifacts ignored by the selected VCS must be
-reported rather than hidden. Transient logs, locks, raw provider data, and
-credentials are untracked. Phase 1 does not yet implement VCS inspection; its
-dedicated remediation task defines that work before Phase 2.
-Kvist intentionally does not implement `.gitignore` semantics in discovery:
-full VCS-aware Git/jj ignore handling belongs to P1-R5, because Git ignore
-rules depend on tracked state.
+`DOCS.md`) must be tracked in a supported VCS. `kvist doctor` inspects every
+root and discovered component artifact without staging or committing.
+
+`[vcs].kind` defaults to `"auto"`, which selects the one detected VCS. Set it
+to `"git"` or `"jj"` for a colocated checkout containing both. Git inspection
+uses Git's index and native ignore rules, so an ignored required artifact is
+reported as `ignored`. jj inspection uses `--ignore-working-copy` and the
+saved working-copy snapshot, avoiding an automatic jj snapshot or other
+mutation. A required file absent from that snapshot is reported as not tracked
+and may be ignored, excluded by `snapshot.auto-track`, or newer than the saved
+snapshot; Kvist does not run a mutating jj command merely to distinguish those
+cases. Transient logs, locks, raw provider data, and credentials remain
+untracked.
+
+VCS tracking is advisory in Phase 1 because task execution does not exist yet.
+Phase 2 must make a complete tracking inspection a precondition for execution.
+Git and jj queries are batched below an 8 KiB argument budget; an individual
+durable path that cannot fit in that budget is reported with unavailable
+tracking status rather than causing the entire inspection to fail.
+CI installs jj 0.44.0 in its dedicated VCS job; local environments without jj
+continue to receive Git/no-repository diagnostics, while the jj fixture is
+skipped.
+Kvist intentionally does not apply VCS ignores to component discovery:
+discovery remains deterministic and its own directory policy is independent of
+tracked-state semantics.
 
 ## Component discovery policy
 

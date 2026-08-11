@@ -1,7 +1,7 @@
 use std::{fs, path::Path, process::Command};
 
 use kvist::{
-    config::{self, DiscoveryLimits, MAX_DISCOVERY_LIMITS},
+    config::{self, DiscoveryLimits, MAX_DISCOVERY_LIMITS, VcsSelection},
     discovery::{ComponentArtifact, discover_with_limits},
     init::initialize,
     project_state::{ProjectState, inspect},
@@ -133,10 +133,12 @@ fn discovery_configuration_defaults_and_invalid_ranges_are_enforced() {
 
     let default = config::load(project.path()).expect("default config");
     assert_eq!(default.discovery, DiscoveryLimits::default());
+    assert_eq!(default.vcs, VcsSelection::Auto);
 
     for discovery in [
         "[discovery]\nmax_depth = 0\n",
         "[discovery]\nmax_directories = \"many\"\n",
+        "[vcs]\nkind = \"unsupported\"\n",
         &format!(
             "[discovery]\nmax_relative_path_bytes = {}\n",
             MAX_DISCOVERY_LIMITS.max_relative_path_bytes + 1

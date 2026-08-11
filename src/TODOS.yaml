@@ -12,3 +12,15 @@ tasks:
   - id: compliance_review
     status: done
     description: Run the clean-slate documentation and source-blind compliance procedure.
+  - id: vcs_tracking_tests
+    status: done
+    description: Define Git and jj tracking fixtures, including ignored durable artifacts and read-only behavior.
+  - id: vcs_tracking_implementation
+    status: done
+    description: Add read-only Git and jj durable-artifact tracking diagnostics to doctor.
+  - id: vcs_tracking_security_audit
+    status: done
+    description: Review VCS command construction, selection ambiguity, and non-mutating inspection behavior.
+  - id: vcs_tracking_compliance_review
+    status: done
+    description: Compare the root VCS tracking contract against clean-slate observed documentation.

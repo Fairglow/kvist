@@ -18,29 +18,40 @@ use crate::{
         TODO_QUEUE_VERSION,
     },
     config,
+    discovery::{self, ComponentArtifact},
     filesystem::is_link_like,
     specification::{self, SpecificationDiagnosticKind},
+    vcs::{self, VcsInspection},
 };
+
+/// Required root artifacts, in stable diagnostic order.
+pub const REQUIRED_ROOT_ARTIFACT_PATHS: [&str; 5] = [
+    "kvist.toml",
+    "ROOT_CONTRACT.md",
+    "src/SPEC.md",
+    "src/TODOS.yaml",
+    "src/DOCS.md",
+];
 
 const ARTIFACTS: [Artifact; 5] = [
     Artifact {
-        path: "kvist.toml",
+        path: REQUIRED_ROOT_ARTIFACT_PATHS[0],
         kind: ArtifactKind::Configuration,
     },
     Artifact {
-        path: "ROOT_CONTRACT.md",
+        path: REQUIRED_ROOT_ARTIFACT_PATHS[1],
         kind: ArtifactKind::RootContract,
     },
     Artifact {
-        path: "src/SPEC.md",
+        path: REQUIRED_ROOT_ARTIFACT_PATHS[2],
         kind: ArtifactKind::Specification,
     },
     Artifact {
-        path: "src/TODOS.yaml",
+        path: REQUIRED_ROOT_ARTIFACT_PATHS[3],
         kind: ArtifactKind::TodoQueue,
     },
     Artifact {
-        path: "src/DOCS.md",
+        path: REQUIRED_ROOT_ARTIFACT_PATHS[4],
         kind: ArtifactKind::Documentation,
     },
 ];
@@ -128,6 +139,8 @@ pub struct ProjectInspection {
     pub artifacts: Vec<ArtifactStatus>,
     /// Project-root diagnostic when inspection could not enumerate artifacts.
     pub root_diagnostic: Option<String>,
+    /// Read-only durable-artifact tracking inspection.
+    pub vcs: VcsInspection,
     /// Action the owner can take without Kvist rewriting project content.
     pub guidance: String,
 }
@@ -145,6 +158,21 @@ impl fmt::Display for ProjectInspection {
         }
         for artifact in &self.artifacts {
             writeln!(formatter, "{}: {}", artifact.path, artifact.status)?;
+        }
+        writeln!(formatter, "vcs: {}", self.vcs.summary)?;
+        if let Some(repository_root) = &self.vcs.repository_root {
+            writeln!(formatter, "vcs repository: {}", repository_root.display())?;
+        }
+        for artifact in &self.vcs.artifacts {
+            writeln!(
+                formatter,
+                "vcs {}: {}",
+                artifact.path.display(),
+                artifact.state.description()
+            )?;
+        }
+        if let Some(diagnostic) = &self.vcs.diagnostic {
+            writeln!(formatter, "vcs diagnostic: {diagnostic}")?;
         }
         write!(formatter, "guidance: {}", self.guidance)
     }
@@ -180,6 +208,9 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
                 .map(|artifact| missing_status(artifact.path))
                 .collect(),
             root_diagnostic: None,
+            vcs: VcsInspection::not_checked(
+                "root artifacts do not exist yet; initialize and validate the project first",
+            ),
             guidance: "run `kvist init` to create the Phase 1 root artifacts".to_owned(),
         });
     }
@@ -194,6 +225,7 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         state,
         artifacts,
         root_diagnostic: None,
+        vcs: inspect_vcs(project_dir, state),
         guidance: guidance(state).to_owned(),
     })
 }
@@ -206,8 +238,60 @@ fn invalid_root_inspection(project_dir: &Path) -> ProjectInspection {
         root_diagnostic: Some(
             "project path must be a real directory, not a file or link-like path".to_owned(),
         ),
+        vcs: VcsInspection::not_checked(
+            "project root is not a real directory, so durable artifact paths cannot be inspected",
+        ),
         guidance: guidance(ProjectState::Invalid).to_owned(),
     }
+}
+
+fn inspect_vcs(project_dir: &Path, state: ProjectState) -> VcsInspection {
+    if state != ProjectState::Current {
+        return VcsInspection::not_checked(
+            "root artifact state is not current; repair it before checking durable-artifact tracking",
+        );
+    }
+
+    let config = match config::load(project_dir) {
+        Ok(config) => config,
+        Err(error) => {
+            return VcsInspection::not_checked(format!(
+                "cannot load current project configuration for VCS inspection: {error}"
+            ));
+        }
+    };
+    let discovery = match discovery::discover_with_limits(
+        &project_dir.join(&config.component_root),
+        config.discovery,
+    ) {
+        Ok(discovery) => discovery,
+        Err(error) => {
+            return VcsInspection::not_checked(format!(
+                "cannot discover component artifacts for VCS inspection: {error}"
+            ));
+        }
+    };
+
+    let mut required_paths = REQUIRED_ROOT_ARTIFACT_PATHS
+        .iter()
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    for component in discovery.components {
+        let component_dir = if component.relative_path == Path::new(".") {
+            config.component_root.clone()
+        } else {
+            config.component_root.join(component.relative_path)
+        };
+        for artifact in [
+            ComponentArtifact::Specification,
+            ComponentArtifact::TaskQueue,
+            ComponentArtifact::Documentation,
+        ] {
+            required_paths.push(component_dir.join(artifact.filename()));
+        }
+    }
+
+    vcs::inspect(project_dir, config.vcs, required_paths)
 }
 
 fn inspect_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactStatus> {

@@ -117,10 +117,20 @@ root `SPEC.md` validation succeed; the runbook has been executed with its
 source-blind review and arbitration record retained in
 `COMPLIANCE_REVIEW.md`.
 
-### TODO P1-R5 — Inspect VCS tracking before Phase 2 execution
+### DONE P1-R5 — Inspect VCS tracking before Phase 2 execution
 
-**Why:** durable project state must be reviewable and mergeable before task
-execution, but Phase 1 currently does not inspect any VCS.
+**Completed decision:** `kvist doctor` now performs a read-only durable-artifact
+tracking inspection once root artifacts are current and component discovery
+succeeds. It checks the root artifact set and each discovered component's
+three required paths. `[vcs].kind` is `auto`, `git`, or `jj`; `auto` requires
+exactly one detected VCS, so a Git/jj-colocated checkout requires an explicit
+owner choice. Git uses `git ls-files` and native `git check-ignore` semantics
+to distinguish tracked, ignored, and untracked files. jj uses an explicit
+path-only `file list` template with `--ignore-working-copy`, never triggering
+a snapshot. A jj path absent from its saved snapshot is reported rather than
+hidden because it may be ignored, excluded by snapshot rules, or newer than
+the saved snapshot. Neither implementation stages, commits, nor otherwise
+mutates VCS state.
 
 **Acceptance criteria:**
 
@@ -134,9 +144,14 @@ execution, but Phase 1 currently does not inspect any VCS.
 - Define deterministic diagnostics and behavior for no VCS, unsupported VCS,
   ignored required artifacts, and mixed working trees.
 
-**Verification:** Git and jj fixtures for tracked and ignored durable
-artifacts; fixtures proving that diagnostics never stage, commit, or expose
-transient/credential material.
+**Verification:** Git fixtures cover tracked, ignored, nested-component,
+no-repository, malformed-repository, and no-mutation diagnostics. The jj
+fixture, when jj is installed, covers explicit selection, non-default
+file-list templates, dash-prefixed paths, and saved-snapshot tracking. The
+independent documentation and source-blind review records are retained in
+`src/DOCS.md` and `COMPLIANCE_REVIEW.md`. CI installs jj 0.44.0 in its
+dedicated VCS test job. Unit coverage proves that VCS query batching stays
+within the 8 KiB argument budget and isolates individually unqueryable paths.
 
 ## Phase 2 — Task execution and LLM runner
 

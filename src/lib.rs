@@ -17,6 +17,7 @@ pub mod init;
 pub mod project_state;
 pub mod specification;
 pub mod tree;
+pub mod vcs;
 
 use clap::Parser;
 
