@@ -5,8 +5,8 @@
 
 **Current state:** The CLI contract, testable dispatch boundary, domain error
 model, and versioned root artifact templates are implemented. Filesystem
-commands, component discovery, and specification processing remain
-unimplemented.
+initialization is implemented. Component discovery and specification processing
+remain unimplemented.
 
 ## Tracking rules
 
@@ -62,7 +62,7 @@ linter, and targeted tests.
 **Verification:** test generated template content against the documented schema
 and required invariants.
 
-### TODO P1-03 — Implement safe, idempotent `kvist init`
+### DONE P1-03 — Implement safe, idempotent `kvist init`
 
 **Depends on:** P1-01, P1-02  
 **Acceptance criteria:**

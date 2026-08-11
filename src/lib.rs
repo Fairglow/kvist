@@ -9,13 +9,14 @@
 pub mod artifacts;
 pub mod cli;
 mod error;
+pub mod init;
 
 use clap::Parser;
 
 pub use error::{KvistError, Result};
 
 /// Parses process arguments and dispatches the requested command.
-pub fn run() -> Result<()> {
+pub fn run() -> Result<cli::CommandOutput> {
     let cli = cli::Cli::try_parse()?;
     cli::execute(cli.command)
 }

@@ -1,4 +1,7 @@
-use std::io::{self, Write};
+use std::{
+    io::{self, Write},
+    path::PathBuf,
+};
 
 use thiserror::Error;
 
@@ -9,6 +12,58 @@ pub enum KvistError {
     /// A command-line syntax or help error produced by the parser.
     #[error(transparent)]
     ArgumentParsing(#[from] clap::Error),
+    /// The requested project location is not a real directory.
+    #[error("project directory `{path}` must be a directory")]
+    ProjectPathNotDirectory {
+        /// Path supplied to `kvist init`.
+        path: PathBuf,
+    },
+    /// Initialization would follow a project-root symbolic link.
+    #[error("refusing to initialize through symbolic link `{path}`")]
+    ProjectPathIsSymlink {
+        /// Symbolic-link path supplied to `kvist init`.
+        path: PathBuf,
+    },
+    /// An artifact parent is not a real directory.
+    #[error("artifact parent `{path}` must be a directory")]
+    ArtifactParentNotDirectory {
+        /// Invalid parent path.
+        path: PathBuf,
+    },
+    /// Initialization would follow an artifact-directory symbolic link.
+    #[error("refusing to write artifacts through symbolic link `{path}`")]
+    ArtifactParentIsSymlink {
+        /// Symbolic-link parent path.
+        path: PathBuf,
+    },
+    /// An existing artifact path is not a regular file.
+    #[error("artifact path `{path}` must be a regular file")]
+    ArtifactPathNotFile {
+        /// Invalid artifact path.
+        path: PathBuf,
+    },
+    /// Existing Kvist artifacts require an explicit user decision.
+    #[error(
+        "cannot initialize `{project_dir}` because Kvist artifacts already exist: {artifacts:?}; \
+         inspect or remove them explicitly before retrying"
+    )]
+    ExistingArtifacts {
+        /// Project root that contains the conflict.
+        project_dir: PathBuf,
+        /// Existing generated artifact paths.
+        artifacts: Vec<PathBuf>,
+    },
+    /// A filesystem operation failed.
+    #[error("cannot {operation} `{path}`: {source}")]
+    Io {
+        /// Filesystem operation being attempted.
+        operation: &'static str,
+        /// Path associated with the failure.
+        path: PathBuf,
+        /// Underlying I/O failure.
+        #[source]
+        source: io::Error,
+    },
     /// A command is part of the stable CLI contract but is not implemented in
     /// the current development phase.
     #[error("`{command}` is not available yet; {next_step}")]
@@ -28,7 +83,7 @@ impl KvistError {
     pub fn exit_code(&self) -> u8 {
         match self {
             Self::ArgumentParsing(error) => error.exit_code() as u8,
-            Self::CommandUnavailable { .. } => 1,
+            _ => 1,
         }
     }
 
@@ -36,7 +91,7 @@ impl KvistError {
     pub fn print(&self) -> io::Result<()> {
         match self {
             Self::ArgumentParsing(error) => error.print(),
-            Self::CommandUnavailable { .. } => {
+            _ => {
                 let mut stderr = io::stderr().lock();
                 writeln!(stderr, "error: {self}")
             }

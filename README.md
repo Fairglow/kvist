@@ -13,9 +13,8 @@ for human-directed AI development. Its product architecture is defined in
 | `kvist spec new <COMPONENT_DIR>` | Create a layered `SPEC.md` for a component directory. |
 | `kvist spec validate <SPEC_FILE>` | Validate a layered `SPEC.md` file. |
 
-The commands are defined and provide help output now. Their filesystem behavior
-is implemented by later Phase 1 tasks and currently returns an explicit
-unavailable-command error.
+`kvist init` is implemented. `tree` and `spec` currently return an explicit
+unavailable-command error until their Phase 1 tasks are complete.
 
 ## Configuration and platform policy
 
@@ -48,6 +47,12 @@ path; Kvist must never silently rewrite user-authored artifacts. The initial
 templates contain no credentials, configured external provider, copyright
 notices, or license terms.
 
+`kvist init` creates a missing target directory, rejects a symbolic-link root
+or artifact parent, and writes each artifact through a same-directory temporary
+file with no-clobber persistence. It never merges a partial Kvist artifact set
+or overwrites existing artifacts. A complete existing set is reported as
+already initialized without modification.
+
 ## Dependencies
 
 The CLI uses [clap](https://crates.io/crates/clap) 4 for typed, accessible
@@ -59,3 +64,5 @@ security, licensing, maintenance, and operational benefits are justified.
 
 Tests use [toml](https://crates.io/crates/toml) 1 to verify that the
 configuration template is valid TOML; it is a development-only dependency.
+The runtime uses [tempfile](https://crates.io/crates/tempfile) 3 for
+same-directory, no-clobber atomic artifact writes.

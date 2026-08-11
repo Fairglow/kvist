@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::{KvistError, Result};
+use crate::{KvistError, Result, init};
 
 /// Kvist's top-level command-line interface.
 #[derive(Debug, Parser)]
@@ -60,16 +60,32 @@ pub enum SpecCommand {
     },
 }
 
+/// Successful command output written by the binary at the process boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandOutput(String);
+
+impl CommandOutput {
+    fn message(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+}
+
+impl std::fmt::Display for CommandOutput {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 /// Executes a parsed command.
 ///
 /// This dispatch layer deliberately contains no process handling; callers can
 /// test command behavior and choose how errors are presented.
-pub fn execute(command: Command) -> Result<()> {
+pub fn execute(command: Command) -> Result<CommandOutput> {
     let (command, next_step) = match command {
-        Command::Init(_) => (
-            "init",
-            "project initialization will be implemented in Phase 1 task P1-03",
-        ),
+        Command::Init(project) => {
+            return init::initialize(&project.path)
+                .map(|outcome| CommandOutput::message(outcome.to_string()));
+        }
         Command::Tree(_) => (
             "tree",
             "component discovery and rendering will be implemented in Phase 1 task P1-05",
