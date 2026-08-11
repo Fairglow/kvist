@@ -3,8 +3,9 @@
 **Scope:** Phase 1 — Core CLI Engine (`kvist-cli`) from
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md).
 
-**Current state:** The crate is initialized as a Rust 2024 binary with a
-placeholder `main.rs`. No Phase 1 behavior exists yet.
+**Current state:** The CLI contract, testable dispatch boundary, domain error
+model, and initial platform/configuration policy are implemented. Filesystem
+commands and specification processing remain unimplemented.
 
 ## Tracking rules
 
@@ -26,7 +27,7 @@ their filesystem behavior and malformed inputs.
 
 ## Tasks
 
-### TODO P1-01 — Define core CLI contracts and module boundaries
+### DONE P1-01 — Define core CLI contracts and module boundaries
 
 **Depends on:** none  
 **Acceptance criteria:**
@@ -169,6 +170,6 @@ binary smoke test using only documented commands.
 | Status | Item | Owner / resolution |
 | --- | --- | --- |
 | OPEN | Exact `kvist.toml` schema and configuration versioning policy | Define in P1-02 before implementing `init`. |
-| OPEN | CLI argument parser and error-reporting crates, if any | Evaluate in P1-01 using dependency, license, and maintenance criteria. |
+| RESOLVED | CLI argument parser and error-reporting crates | Use `clap` 4 with `derive` for typed parsing/help and `thiserror` 2 for domain errors; both are permissively licensed, mature, and widely maintained. |
 | OPEN | Whether symlinks are rejected or traversed within a canonical project root | Define in P1-04 before filesystem traversal. |
 | OPEN | Name and syntax of the specification generation command | Define in P1-01; `SPEC.md` template requirements are fixed by P1-06. |
