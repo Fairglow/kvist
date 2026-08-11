@@ -5,7 +5,7 @@ use std::{
 };
 
 use kvist::init::initialize;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use kvist::{project_state::inspect, vcs::VcsArtifactState};
 use tempfile::TempDir;
 
@@ -105,7 +105,7 @@ fn doctor_reports_a_malformed_git_repository_as_an_inspection_failure() {
     assert!(stdout.contains("vcs diagnostic: cannot inspect Git"));
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 fn doctor_tracks_git_artifacts_in_non_utf8_component_paths() {
     use std::{ffi::OsString, os::unix::ffi::OsStringExt};

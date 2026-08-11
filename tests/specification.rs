@@ -1,11 +1,13 @@
 use std::fs;
 
+#[cfg(unix)]
+use kvist::specification::COMPONENT_SPEC_TEMPLATE;
 use kvist::{
     artifacts::root_artifacts,
     init::initialize,
     specification::{
-        COMPONENT_SPEC_TEMPLATE, MAX_SPECIFICATION_BYTES, SpecificationDiagnosticKind,
-        SpecificationLayer, SpecificationSection, validate, validate_file,
+        MAX_SPECIFICATION_BYTES, SpecificationDiagnosticKind, SpecificationLayer,
+        SpecificationSection, validate, validate_file,
     },
 };
 use tempfile::TempDir;

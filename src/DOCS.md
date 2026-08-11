@@ -142,7 +142,7 @@ be ignored, excluded by `snapshot.auto-track`, or newer than the saved snapshot.
 one. Missing tools, repositories, malformed repositories, failed commands, or
 a project outside the selected repository yield diagnostic-only VCS results.
 
-On Unix, Git path handling preserves arbitrary native path bytes through
+On Linux, Git path handling preserves arbitrary native path bytes through
 NUL-delimited output and can track non-UTF-8 component paths. jj fileset
 construction requires UTF-8 normal path segments; unrepresentable paths are
 `unknown`. On non-Unix platforms, VCS command paths returned by Git or jj must

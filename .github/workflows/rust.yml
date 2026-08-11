@@ -51,8 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: jj@0.44.0
+      - name: Install jj 0.44.0
+        run: cargo install --locked --version 0.44.0 jj-cli
       - name: Test Git and jj tracking
         run: cargo test --locked --test vcs
