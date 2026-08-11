@@ -175,6 +175,26 @@ pub enum KvistError {
         /// Line-aware validation diagnostics.
         diagnostics: String,
     },
+    /// A specification path is not a regular file.
+    #[error("specification `{path}` must be a regular file")]
+    SpecificationNotFile {
+        /// Invalid specification path.
+        path: PathBuf,
+    },
+    /// Validation would follow a symbolic-link specification.
+    #[error("refusing to validate specification through symbolic link `{path}`")]
+    SpecificationIsSymlink {
+        /// Symbolic-link specification path.
+        path: PathBuf,
+    },
+    /// The specification exceeds the bounded parsing limit.
+    #[error("specification `{path}` exceeds the {max_bytes}-byte limit")]
+    SpecificationTooLarge {
+        /// Oversized specification path.
+        path: PathBuf,
+        /// Maximum permitted specification size.
+        max_bytes: u64,
+    },
     /// A filesystem operation failed.
     #[error("cannot {operation} `{path}`: {source}")]
     Io {

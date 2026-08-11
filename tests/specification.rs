@@ -4,8 +4,8 @@ use kvist::{
     artifacts::root_artifacts,
     init::initialize,
     specification::{
-        SpecificationDiagnosticKind, SpecificationLayer, SpecificationSection, validate,
-        validate_file,
+        COMPONENT_SPEC_TEMPLATE, MAX_SPECIFICATION_BYTES, SpecificationDiagnosticKind,
+        SpecificationLayer, SpecificationSection, validate, validate_file,
     },
 };
 use tempfile::TempDir;
@@ -163,6 +163,34 @@ fn validates_a_specification_file_without_writing_it() {
         fs::read_to_string(&path).expect("read specification after validation"),
         contents
     );
+}
+
+#[test]
+fn rejects_specification_files_above_the_parsing_limit() {
+    let directory = TempDir::new().expect("create temporary directory");
+    let path = directory.path().join("SPEC.md");
+    fs::write(&path, vec![b'x'; MAX_SPECIFICATION_BYTES as usize + 1])
+        .expect("write oversized specification");
+
+    let error = validate_file(&path).expect_err("reject oversized specification");
+
+    assert!(error.to_string().contains("exceeds the"));
+}
+
+#[cfg(unix)]
+#[test]
+fn rejects_symbolic_link_specifications() {
+    use std::os::unix::fs::symlink;
+
+    let directory = TempDir::new().expect("create temporary directory");
+    let target = directory.path().join("target.md");
+    fs::write(&target, COMPONENT_SPEC_TEMPLATE).expect("write specification target");
+    let path = directory.path().join("SPEC.md");
+    symlink(&target, &path).expect("create specification link");
+
+    let error = validate_file(&path).expect_err("reject specification link");
+
+    assert!(error.to_string().contains("symbolic link"));
 }
 
 #[test]

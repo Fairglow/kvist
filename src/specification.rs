@@ -11,6 +11,9 @@ use std::{
 
 use crate::{KvistError, Result, artifacts::TEMPLATE_VERSION, file_io::write_new_file_atomically};
 
+/// Maximum supported size of a specification read from disk.
+pub const MAX_SPECIFICATION_BYTES: u64 = 1024 * 1024;
+
 /// Deterministic template for a newly created component specification.
 pub const COMPONENT_SPEC_TEMPLATE: &str = r#"<!-- kvist-template-version: 1 -->
 # Component Specification
@@ -277,6 +280,29 @@ pub fn validate(contents: &str) -> SpecificationValidation {
 
 /// Reads and validates a UTF-8 `SPEC.md` file.
 pub fn validate_file(path: &Path) -> Result<SpecificationValidation> {
+    let metadata = fs::symlink_metadata(path).map_err(|source| KvistError::Io {
+        operation: "inspect specification",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err(KvistError::SpecificationIsSymlink {
+            path: path.to_path_buf(),
+        });
+    }
+    if !file_type.is_file() {
+        return Err(KvistError::SpecificationNotFile {
+            path: path.to_path_buf(),
+        });
+    }
+    if metadata.len() > MAX_SPECIFICATION_BYTES {
+        return Err(KvistError::SpecificationTooLarge {
+            path: path.to_path_buf(),
+            max_bytes: MAX_SPECIFICATION_BYTES,
+        });
+    }
+
     let contents = fs::read_to_string(path).map_err(|source| KvistError::Io {
         operation: "read specification",
         path: path.to_path_buf(),

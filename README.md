@@ -94,6 +94,9 @@ diagnostics for version, ordering, syntax, missing-heading, and empty-section
 issues. It is read-only: all Markdown outside the required structure remains
 user-authored and untouched.
 
+`spec validate` accepts only regular UTF-8 files up to 1 MiB and rejects
+symbolic links before parsing.
+
 `kvist spec new <COMPONENT_DIR>` creates the missing directory when necessary,
 validates the deterministic template before writing, and persists `SPEC.md`
 through a same-directory no-clobber atomic write. It never overwrites an

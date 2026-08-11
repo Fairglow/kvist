@@ -3,11 +3,10 @@
 **Scope:** Phase 1 — Core CLI Engine (`kvist-cli`) from
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md).
 
-**Current state:** The CLI contract, testable dispatch boundary, domain error
-model, and versioned root artifact templates are implemented. Filesystem
-initialization and component discovery are implemented. Terminal tree rendering
-and layered specification validation are implemented. Specification generation
-and validation commands are implemented.
+**Current state:** Phase 1 is complete. The CLI contract, versioned root
+artifacts, safe initialization, deterministic discovery and tree rendering,
+and specification generation and validation are implemented and independently
+reviewed.
 
 ## Tracking rules
 
@@ -149,7 +148,7 @@ structure, UTF-8 input, and diagnostic locations.
 **Verification:** integration tests for successful generation, existing-file
 protection, invalid targets, and generated-document validation.
 
-### TODO P1-08 — Perform Phase 1 integration, security, and compliance review
+### DONE P1-08 — Perform Phase 1 integration, security, and compliance review
 
 **Depends on:** P1-03, P1-05, P1-07  
 **Acceptance criteria:**
