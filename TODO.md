@@ -4,8 +4,9 @@
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md).
 
 **Current state:** The CLI contract, testable dispatch boundary, domain error
-model, and initial platform/configuration policy are implemented. Filesystem
-commands and specification processing remain unimplemented.
+model, and versioned root artifact templates are implemented. Filesystem
+commands, component discovery, and specification processing remain
+unimplemented.
 
 ## Tracking rules
 
@@ -43,7 +44,7 @@ their filesystem behavior and malformed inputs.
 **Verification:** unit-test command parsing and error rendering; run formatter,
 linter, and targeted tests.
 
-### TODO P1-02 — Specify the root project artifact schemas and templates
+### DONE P1-02 — Specify the root project artifact schemas and templates
 
 **Depends on:** P1-01  
 **Acceptance criteria:**
@@ -169,7 +170,7 @@ binary smoke test using only documented commands.
 
 | Status | Item | Owner / resolution |
 | --- | --- | --- |
-| OPEN | Exact `kvist.toml` schema and configuration versioning policy | Define in P1-02 before implementing `init`. |
+| RESOLVED | Initial `kvist.toml` schema and configuration versioning policy | Use `schema_version = 1`, `component_root = "src"`, and opt-in `llm.provider = "none"`; incompatible changes need explicit migration. |
 | RESOLVED | CLI argument parser and error-reporting crates | Use `clap` 4 with `derive` for typed parsing/help and `thiserror` 2 for domain errors; both are permissively licensed, mature, and widely maintained. |
 | OPEN | Whether symlinks are rejected or traversed within a canonical project root | Define in P1-04 before filesystem traversal. |
-| OPEN | Name and syntax of the specification generation command | Define in P1-01; `SPEC.md` template requirements are fixed by P1-06. |
+| RESOLVED | Name and syntax of the specification generation command | `kvist spec new <COMPONENT_DIR>` creates a specification and `kvist spec validate <SPEC_FILE>` validates one. |

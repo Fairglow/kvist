@@ -6,6 +6,7 @@
 //! owns command parsing, dispatch, and domain errors so those behaviors remain
 //! testable without spawning a process.
 
+pub mod artifacts;
 pub mod cli;
 mod error;
 
