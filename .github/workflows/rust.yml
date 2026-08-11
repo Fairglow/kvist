@@ -10,13 +10,36 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  quality:
+    name: Quality (${{ matrix.os }}, stable)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Verify lockfile and formatting
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked
+      - name: Release build
+        run: cargo build --locked --release
+
+  msrv:
+    name: MSRV (Rust 1.85.0)
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.85.0
+      - name: Check
+        run: cargo check --locked
+      - name: Test
+        run: cargo test --locked

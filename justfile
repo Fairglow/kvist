@@ -1,28 +1,28 @@
-# Just recipes for build actions
-alias old := outdated
+# Optional convenience recipes using only Cargo and Rustup.
+#
+# `just` itself is optional; the equivalent Cargo commands are documented in
+# README.md. The default recipes do not depend on cargo-nextest, cargo-outdated,
+# unbuffer, nightly Rust, or generated log files.
 
-all: format build test
+all: format lint build test release
 
-build: lint
-    time unbuffer cargo build 2>&1 | tee build.log
+build:
+    cargo build --locked
 
-# Check formatting without modifying files (useful in CI).
 format:
     cargo fmt --check
 
 lint:
-    unbuffer cargo clippy 2>&1 | tee lints.log
-
-outdated:
-    cargo outdated --depth=1
-
-# Format using nightly rustfmt (enables unstable options in rustfmt.toml).
-# The stable compiler is unaffected — only the formatter binary is from nightly.
-reformat:
-    cargo fmt
+    cargo clippy --locked --all-targets -- -D warnings
 
 release:
-    cargo build --release
+    cargo build --locked --release
 
 test:
-    unbuffer cargo nextest run --test-threads num-cpus 2>&1 | tee test.log
+    cargo test --locked
+
+msrv:
+    cargo +1.85.0 test --locked
+
+reformat:
+    cargo fmt

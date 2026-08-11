@@ -29,6 +29,27 @@ ARM64 systems. Filesystem behavior must be covered on every supported platform;
 platform-specific differences must be explicit in the relevant command
 documentation and tests.
 
+## Toolchain and quality gates
+
+Kvist's MSRV is Rust **1.85**, the first stable release supporting edition
+2024. CI tests the MSRV on Linux and current stable Rust on Linux, macOS, and
+Windows. `Cargo.lock` is committed and every CI build/test command uses
+`--locked`.
+
+The portable default quality gate uses only Cargo:
+
+```bash
+cargo fmt --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+cargo build --locked --release
+```
+
+`just` is an optional wrapper for these commands; `just all` runs the same
+gate, and `just msrv` runs tests with Rust 1.85.0. Dependency updates must be
+small, intentional changes with a stated purpose, lockfile update, and passing
+MSRV and stable CI.
+
 ### Filesystem threat model
 
 Phase 1 discovery supports ordinary local checkouts and malformed or untrusted

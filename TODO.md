@@ -78,25 +78,17 @@ and Unix link tests cover supported behavior. Permission-error testing is
 documented for unprivileged supported-platform manual/release testing rather
 than flaky root-bypassing automated tests.
 
-### TODO P1-R3 — Make quality gates reproducible and enforced in CI
+### DONE P1-R3 — Make quality gates reproducible and enforced in CI
 
-**Why:** local review used `cargo fmt --check`, strict all-target Clippy, tests,
-and a release build, but GitHub Actions currently runs only build and tests.
-The new `justfile` additionally assumes optional tools (`unbuffer`,
-`cargo-nextest`, and `cargo-outdated`) without provisioning or fallback.
+**Completed decision:** MSRV is Rust 1.85 (the edition-2024 baseline).
+`Cargo.lock` is committed and every CI build/test uses `--locked`. GitHub
+Actions runs format, strict all-target Clippy, tests, and release builds on
+stable Linux/macOS/Windows, plus check/test on Rust 1.85. The default `just`
+recipes use Cargo/Rustup only; optional external cargo tools are not required.
 
-**Acceptance criteria:**
-
-- Define the supported Rust toolchain/MSRV and dependency update policy.
-- Make CI run formatting, `cargo clippy --all-targets -- -D warnings`, tests,
-  and release build, with lockfile enforcement.
-- Either provision optional recipe tools in a documented developer bootstrap or
-  make the default recipes use only the supported Rust toolchain.
-- Add platform CI coverage for Linux, macOS, and Windows or explicitly narrow
-  the support statement in `README.md`.
-
-**Verification:** clean checkout executes the documented default quality gate
-and required CI jobs run it without undeclared tools.
+**Verification:** a clean checkout runs the documented Cargo gate and
+`just all` without undeclared tools. CI enforces the same stable-platform gate
+and MSRV check/test.
 
 ### TODO P1-R4 — Dogfood the lifecycle and publish a review runbook
 
@@ -264,6 +256,7 @@ fixture.
 | Decision | Current contract |
 | --- | --- |
 | Implementation language | Stable Rust, edition 2024; headless local CLI. |
+| Toolchain and dependencies | MSRV Rust 1.85; `Cargo.lock` is committed; intentional dependency updates must pass MSRV and stable CI. |
 | Initial CLI | `init`, `tree`, `spec new`, and `spec validate`; project paths default to the current directory where applicable. |
 | Project location | One project-local `kvist.toml`; no global configuration or parent-directory discovery. |
 | Root artifact paths | `kvist.toml`, `ROOT_CONTRACT.md`, and `src/{SPEC.md,TODOS.yaml,DOCS.md}`. |
