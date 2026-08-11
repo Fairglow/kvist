@@ -2,16 +2,14 @@
 
 use std::{
     collections::BTreeSet,
-    fmt, fs,
-    io::{self, Write},
+    fmt, fs, io,
     path::{Path, PathBuf},
 };
-
-use tempfile::NamedTempFile;
 
 use crate::{
     KvistError, Result,
     artifacts::{ArtifactTemplate, root_artifacts},
+    file_io::write_new_file_atomically,
 };
 
 /// The observable result of an initialization attempt.
@@ -73,7 +71,7 @@ pub fn initialize(project_dir: &Path) -> Result<InitOutcome> {
 
     create_artifact_parents(project_dir, root_artifacts())?;
     for artifact in root_artifacts() {
-        write_artifact_atomically(project_dir, artifact)?;
+        write_new_file_atomically(&project_dir.join(artifact.relative_path), artifact.contents)?;
     }
 
     Ok(InitOutcome::Initialized {
@@ -204,46 +202,4 @@ fn validate_artifact_parent(path: &Path, metadata: &fs::Metadata) -> Result<()> 
     }
 
     Ok(())
-}
-
-fn write_artifact_atomically(project_dir: &Path, artifact: &ArtifactTemplate) -> Result<()> {
-    let destination = project_dir.join(artifact.relative_path);
-    let Some(parent) = destination.parent() else {
-        return Err(KvistError::Io {
-            operation: "determine artifact parent",
-            path: destination,
-            source: io::Error::other("artifact destination has no parent"),
-        });
-    };
-    let mut temporary_file = NamedTempFile::new_in(parent).map_err(|source| KvistError::Io {
-        operation: "create temporary artifact",
-        path: parent.to_path_buf(),
-        source,
-    })?;
-
-    temporary_file
-        .write_all(artifact.contents.as_bytes())
-        .map_err(|source| KvistError::Io {
-            operation: "write temporary artifact",
-            path: destination.clone(),
-            source,
-        })?;
-    temporary_file
-        .as_file()
-        .sync_all()
-        .map_err(|source| KvistError::Io {
-            operation: "sync temporary artifact",
-            path: destination.clone(),
-            source,
-        })?;
-
-    // `persist_noclobber` retains the no-overwrite guarantee after preflight.
-    temporary_file
-        .persist_noclobber(&destination)
-        .map(|_| ())
-        .map_err(|error| KvistError::Io {
-            operation: "persist generated artifact without overwriting",
-            path: destination,
-            source: error.error,
-        })
 }

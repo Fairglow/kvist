@@ -13,8 +13,8 @@ for human-directed AI development. Its product architecture is defined in
 | `kvist spec new <COMPONENT_DIR>` | Create a layered `SPEC.md` for a component directory. |
 | `kvist spec validate <SPEC_FILE>` | Validate a layered `SPEC.md` file. |
 
-`kvist init` and `kvist tree` are implemented. `spec` currently returns an
-explicit unavailable-command error until its Phase 1 tasks are complete.
+All Phase 1 commands are implemented: `kvist init`, `kvist tree`, `kvist spec
+new`, and `kvist spec validate`.
 
 ## Configuration and platform policy
 
@@ -93,6 +93,12 @@ closing tag. The validator returns deterministic, one-based line and column
 diagnostics for version, ordering, syntax, missing-heading, and empty-section
 issues. It is read-only: all Markdown outside the required structure remains
 user-authored and untouched.
+
+`kvist spec new <COMPONENT_DIR>` creates the missing directory when necessary,
+validates the deterministic template before writing, and persists `SPEC.md`
+through a same-directory no-clobber atomic write. It never overwrites an
+existing specification. `kvist spec validate <SPEC_FILE>` reports either a
+success line or line-aware validation errors without modifying the file.
 
 ## Dependencies
 

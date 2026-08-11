@@ -4,9 +4,50 @@
 //! required template marker, disclosure layers, and required headings remains
 //! user-authored content and is preserved by callers.
 
-use std::{fs, path::Path};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 
-use crate::{KvistError, Result, artifacts::TEMPLATE_VERSION};
+use crate::{KvistError, Result, artifacts::TEMPLATE_VERSION, file_io::write_new_file_atomically};
+
+/// Deterministic template for a newly created component specification.
+pub const COMPONENT_SPEC_TEMPLATE: &str = r#"<!-- kvist-template-version: 1 -->
+# Component Specification
+
+<details open>
+<summary>Layer 1: Executive summary and public contract</summary>
+
+## Purpose
+
+[Describe this component's purpose and why it exists.]
+
+## Public contract
+
+[Describe callers, inputs, outputs, and observable behavior.]
+
+</details>
+
+<details>
+<summary>Layer 2: Architectural guarantees</summary>
+
+## Constraints and invariants
+
+[Describe performance bounds, concurrency invariants, memory limits, dependency
+policy, and compatibility commitments.]
+
+</details>
+
+<details>
+<summary>Layer 3: Detailed strategy and algorithms</summary>
+
+## Design and failure paths
+
+[Describe algorithms, state transitions, validation, error handling, and edge
+cases.]
+
+</details>
+"#;
 
 /// A required progressive-disclosure layer in `SPEC.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -175,6 +216,40 @@ impl SpecificationValidation {
     }
 }
 
+/// A successfully generated component specification.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeneratedSpecification {
+    /// New `SPEC.md` path.
+    pub path: PathBuf,
+}
+
+/// Creates a validated `SPEC.md` in a component directory without overwriting.
+pub fn create(component_dir: &Path) -> Result<GeneratedSpecification> {
+    ensure_component_directory(component_dir)?;
+    let path = component_dir.join("SPEC.md");
+    match fs::symlink_metadata(&path) {
+        Ok(_) => return Err(KvistError::SpecificationAlreadyExists { path }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "inspect specification destination",
+                path,
+                source,
+            });
+        }
+    }
+
+    let validation = validate(COMPONENT_SPEC_TEMPLATE);
+    if !validation.is_valid() {
+        return Err(KvistError::GeneratedSpecificationInvalid {
+            diagnostics: format_diagnostics(&validation.diagnostics),
+        });
+    }
+    write_new_file_atomically(&path, COMPONENT_SPEC_TEMPLATE)?;
+
+    Ok(GeneratedSpecification { path })
+}
+
 /// Validates a UTF-8 `SPEC.md` document without modifying its contents.
 pub fn validate(contents: &str) -> SpecificationValidation {
     let lines = contents.lines().collect::<Vec<_>>();
@@ -208,6 +283,22 @@ pub fn validate_file(path: &Path) -> Result<SpecificationValidation> {
         source,
     })?;
     Ok(validate(&contents))
+}
+
+/// Renders structured diagnostics in a stable human-readable form.
+pub fn format_diagnostics(diagnostics: &[SpecificationDiagnostic]) -> String {
+    diagnostics
+        .iter()
+        .map(|diagnostic| {
+            format!(
+                "{}:{}: {}",
+                diagnostic.line,
+                diagnostic.column,
+                diagnostic_message(&diagnostic.kind)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -427,5 +518,111 @@ fn diagnostic(kind: SpecificationDiagnosticKind, line: usize) -> SpecificationDi
         kind,
         line,
         column: 1,
+    }
+}
+
+fn ensure_component_directory(component_dir: &Path) -> Result<()> {
+    match fs::symlink_metadata(component_dir) {
+        Ok(metadata) => validate_component_directory(component_dir, &metadata),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            fs::create_dir_all(component_dir).map_err(|source| KvistError::Io {
+                operation: "create component directory",
+                path: component_dir.to_path_buf(),
+                source,
+            })?;
+            let metadata =
+                fs::symlink_metadata(component_dir).map_err(|source| KvistError::Io {
+                    operation: "inspect component directory",
+                    path: component_dir.to_path_buf(),
+                    source,
+                })?;
+            validate_component_directory(component_dir, &metadata)
+        }
+        Err(source) => Err(KvistError::Io {
+            operation: "inspect component directory",
+            path: component_dir.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn validate_component_directory(component_dir: &Path, metadata: &fs::Metadata) -> Result<()> {
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() {
+        return Err(KvistError::ComponentDirectoryIsSymlink {
+            path: component_dir.to_path_buf(),
+        });
+    }
+    if !file_type.is_dir() {
+        return Err(KvistError::ComponentDirectoryNotDirectory {
+            path: component_dir.to_path_buf(),
+        });
+    }
+
+    Ok(())
+}
+
+fn diagnostic_message(kind: &SpecificationDiagnosticKind) -> String {
+    match kind {
+        SpecificationDiagnosticKind::MissingTemplateVersion => {
+            "expected template version marker on line 1".to_owned()
+        }
+        SpecificationDiagnosticKind::InvalidTemplateVersion => {
+            "template version must be a positive integer".to_owned()
+        }
+        SpecificationDiagnosticKind::UnsupportedTemplateVersion { found, supported } => {
+            format!("template version {found} is unsupported; expected {supported}")
+        }
+        SpecificationDiagnosticKind::MissingLayer { layer } => {
+            format!("missing {} layer", layer_name(*layer))
+        }
+        SpecificationDiagnosticKind::DuplicateLayer { layer } => {
+            format!("duplicate {} layer", layer_name(*layer))
+        }
+        SpecificationDiagnosticKind::InvalidLayerSyntax { layer } => {
+            format!("invalid {} layer syntax", layer_name(*layer))
+        }
+        SpecificationDiagnosticKind::UnclosedLayer { layer } => {
+            format!("unclosed {} layer", layer_name(*layer))
+        }
+        SpecificationDiagnosticKind::InvalidLayerOrder { layer } => {
+            format!("{} layer is out of order", layer_name(*layer))
+        }
+        SpecificationDiagnosticKind::MissingSection { layer, section } => {
+            format!(
+                "missing {} in {} layer",
+                section.heading(),
+                layer_name(*layer)
+            )
+        }
+        SpecificationDiagnosticKind::DuplicateSection { layer, section } => {
+            format!(
+                "duplicate {} in {} layer",
+                section.heading(),
+                layer_name(*layer)
+            )
+        }
+        SpecificationDiagnosticKind::InvalidSectionOrder { layer, section } => {
+            format!(
+                "{} is out of order in {} layer",
+                section.heading(),
+                layer_name(*layer)
+            )
+        }
+        SpecificationDiagnosticKind::EmptySection { layer, section } => {
+            format!(
+                "{} has no content in {} layer",
+                section.heading(),
+                layer_name(*layer)
+            )
+        }
+    }
+}
+
+const fn layer_name(layer: SpecificationLayer) -> &'static str {
+    match layer {
+        SpecificationLayer::ExecutiveSummary => "executive summary",
+        SpecificationLayer::ArchitecturalGuarantees => "architectural guarantees",
+        SpecificationLayer::DetailedStrategy => "detailed strategy",
     }
 }

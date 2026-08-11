@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::{KvistError, Result, init, tree};
+use crate::{KvistError, Result, init, specification, tree};
 
 /// Kvist's top-level command-line interface.
 #[derive(Debug, Parser)]
@@ -81,29 +81,35 @@ impl std::fmt::Display for CommandOutput {
 /// This dispatch layer deliberately contains no process handling; callers can
 /// test command behavior and choose how errors are presented.
 pub fn execute(command: Command) -> Result<CommandOutput> {
-    let (command, next_step) = match command {
-        Command::Init(project) => {
-            return init::initialize(&project.path)
-                .map(|outcome| CommandOutput::message(outcome.to_string()));
-        }
-        Command::Tree(project) => {
-            return tree::render_project(&project.path).map(CommandOutput::message);
-        }
+    match command {
+        Command::Init(project) => init::initialize(&project.path)
+            .map(|outcome| CommandOutput::message(outcome.to_string())),
+        Command::Tree(project) => tree::render_project(&project.path).map(CommandOutput::message),
         Command::Spec {
-            command: SpecCommand::New { .. },
-        } => (
-            "spec new",
-            "specification generation will be implemented in Phase 1 task P1-07",
-        ),
+            command: SpecCommand::New { component_dir },
+        } => specification::create(&component_dir).map(|generated| {
+            CommandOutput::message(format!(
+                "created specification at {}",
+                generated.path.display()
+            ))
+        }),
         Command::Spec {
-            command: SpecCommand::Validate { .. },
-        } => (
-            "spec validate",
-            "specification validation will be implemented in Phase 1 task P1-06",
-        ),
-    };
-
-    Err(KvistError::CommandUnavailable { command, next_step })
+            command: SpecCommand::Validate { spec_file },
+        } => {
+            let validation = specification::validate_file(&spec_file)?;
+            if validation.is_valid() {
+                Ok(CommandOutput::message(format!(
+                    "valid specification: {}",
+                    spec_file.display()
+                )))
+            } else {
+                Err(KvistError::SpecificationValidationFailed {
+                    path: spec_file,
+                    diagnostics: specification::format_diagnostics(&validation.diagnostics),
+                })
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -188,20 +194,5 @@ mod tests {
         let error = Cli::try_parse_from(["kvist", "unknown"]).expect_err("invalid command");
 
         assert_eq!(error.kind(), ErrorKind::InvalidSubcommand);
-    }
-
-    #[test]
-    fn unavailable_command_errors_explain_the_next_implementation_step() {
-        let error = execute(Command::Spec {
-            command: SpecCommand::New {
-                component_dir: PathBuf::from("src/network"),
-            },
-        })
-        .expect_err("specification generation is not implemented yet");
-
-        assert_eq!(
-            error.to_string(),
-            "`spec new` is not available yet; specification generation will be implemented in Phase 1 task P1-07"
-        );
     }
 }

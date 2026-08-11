@@ -11,6 +11,7 @@ pub mod cli;
 pub mod config;
 pub mod discovery;
 mod error;
+mod file_io;
 pub mod init;
 pub mod specification;
 pub mod tree;

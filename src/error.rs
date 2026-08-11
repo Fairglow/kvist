@@ -141,6 +141,40 @@ pub enum KvistError {
         /// Version supported by this binary.
         supported_version: i64,
     },
+    /// A component target is not a real directory.
+    #[error("component directory `{path}` must be a directory")]
+    ComponentDirectoryNotDirectory {
+        /// Invalid component-directory path.
+        path: PathBuf,
+    },
+    /// Specification generation would follow a component-directory symlink.
+    #[error("refusing to create a specification through symbolic link `{path}`")]
+    ComponentDirectoryIsSymlink {
+        /// Symbolic-link component-directory path.
+        path: PathBuf,
+    },
+    /// A specification already exists and must never be overwritten implicitly.
+    #[error(
+        "specification `{path}` already exists; edit it or remove it explicitly before retrying"
+    )]
+    SpecificationAlreadyExists {
+        /// Existing specification path.
+        path: PathBuf,
+    },
+    /// The checked-in generation template no longer satisfies its own contract.
+    #[error("generated specification template is invalid: {diagnostics}")]
+    GeneratedSpecificationInvalid {
+        /// Rendered validation diagnostics.
+        diagnostics: String,
+    },
+    /// A specification failed validation.
+    #[error("specification `{path}` is invalid:\n{diagnostics}")]
+    SpecificationValidationFailed {
+        /// Invalid specification path.
+        path: PathBuf,
+        /// Line-aware validation diagnostics.
+        diagnostics: String,
+    },
     /// A filesystem operation failed.
     #[error("cannot {operation} `{path}`: {source}")]
     Io {
@@ -151,15 +185,6 @@ pub enum KvistError {
         /// Underlying I/O failure.
         #[source]
         source: io::Error,
-    },
-    /// A command is part of the stable CLI contract but is not implemented in
-    /// the current development phase.
-    #[error("`{command}` is not available yet; {next_step}")]
-    CommandUnavailable {
-        /// Command name as shown to the user.
-        command: &'static str,
-        /// Specific next action that explains the command's status.
-        next_step: &'static str,
     },
 }
 

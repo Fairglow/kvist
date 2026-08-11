@@ -7,7 +7,7 @@
 model, and versioned root artifact templates are implemented. Filesystem
 initialization and component discovery are implemented. Terminal tree rendering
 and layered specification validation are implemented. Specification generation
-remains unimplemented.
+and validation commands are implemented.
 
 ## Tracking rules
 
@@ -132,7 +132,7 @@ integration tests for valid, empty, malformed, and unreadable project layouts.
 **Verification:** parser tests covering valid specifications, each invalid
 structure, UTF-8 input, and diagnostic locations.
 
-### TODO P1-07 — Implement specification templates and generation workflow
+### DONE P1-07 — Implement specification templates and generation workflow
 
 **Depends on:** P1-01, P1-02, P1-06  
 **Acceptance criteria:**
