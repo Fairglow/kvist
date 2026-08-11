@@ -1,0 +1,14 @@
+schema_version: 1
+tasks:
+  - id: write_tests
+    status: done
+    description: Define and maintain automated tests for the root component contract.
+  - id: implement_code
+    status: done
+    description: Implement the Phase 1 root CLI behavior until tests pass.
+  - id: security_audit
+    status: done
+    description: Review filesystem boundaries, resource limits, link handling, and memory safety.
+  - id: compliance_review
+    status: done
+    description: Run the clean-slate documentation and source-blind compliance procedure.

@@ -46,3 +46,19 @@ the resulting partial Kvist artifact set is intentionally preserved and a
 subsequent `init` refuses to merge or overwrite it. `doctor` provides
 read-only diagnostics; Phase 1 has no automatic repair or migration, so
 explicit user intervention is required.
+
+## Root component dogfooding review
+
+**Scope:** `src/SPEC.md`, `src/DOCS.md`, and `ROOT_CONTRACT.md`.
+
+The source-blind review was conducted under
+[`REVIEW_RUNBOOK.md`](REVIEW_RUNBOOK.md). The reviewer had access only to the
+three scope documents; implementation verification remains the separately
+recorded responsibility of the clean-slate documentation pass.
+
+| Classification | Finding | Arbitration |
+| --- | --- | --- |
+| Compliant | The observed documentation describes bounded I/O, link rejection, deterministic discovery, atomic per-file writes, and root-state classification required by the root specification. | None. |
+| Mismatch resolved | `SPEC.md` previously implied that `init` refused a current project, while `DOCS.md` documented its idempotent no-op behavior. | The contract now explicitly permits a no-op only for `current`; all other existing states remain refused. |
+| Mismatch resolved | `ROOT_CONTRACT.md` requires task ordering, while the observed YAML validator intentionally permits any non-empty task field values and order. | Ordering is an authoring and future execution rule, not a Phase 1 parser constraint. `SPEC.md` records that boundary; P2-01/P2-03 own schema and lifecycle enforcement. |
+| Underspecified | The documentation does not independently establish all line-aware diagnostic or future task-execution trust-boundary details stated in the specification. | Retain the requirement in `SPEC.md`; the Phase 2 trusted-workspace policy and its implementation review remain deferred. |

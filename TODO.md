@@ -90,11 +90,16 @@ recipes use Cargo/Rustup only; optional external cargo tools are not required.
 `just all` without undeclared tools. CI enforces the same stable-platform gate
 and MSRV check/test.
 
-### TODO P1-R4 — Dogfood the lifecycle and publish a review runbook
+### DONE P1-R4 — Dogfood the lifecycle and publish a review runbook
 
-**Why:** the engine generates lifecycle artifacts for user projects, but Kvist's
-own repository is not yet a validated Kvist project. The independent review
-was performed manually and has no repeatable command/runbook.
+**Completed decision:** Kvist dogfoods its generated lifecycle layout. The
+repository tracks the validated root artifact set (`kvist.toml`,
+`ROOT_CONTRACT.md`, `src/SPEC.md`, `src/TODOS.yaml`, and `src/DOCS.md`).
+`REVIEW_RUNBOOK.md` defines the clean-slate and source-blind roles, their
+permitted inputs, evidence locations, arbitration owner, retention policy, and
+clean-checkout commands. The root component's documentation and compliance
+record are intentionally distinct from the historical repository-level
+`DOCS.md` and Phase 1 review record.
 
 **Acceptance criteria:**
 
@@ -107,8 +112,10 @@ was performed manually and has no repeatable command/runbook.
 - Ensure generated `DOCS.md` is never confused with user-authored design
   documentation.
 
-**Verification:** execute the runbook from a clean checkout and retain only
-the intended review artifacts.
+**Verification:** the root artifact set is validated by `doctor`; `tree` and
+root `SPEC.md` validation succeed; the runbook has been executed with its
+source-blind review and arbitration record retained in
+`COMPLIANCE_REVIEW.md`.
 
 ### TODO P1-R5 — Inspect VCS tracking before Phase 2 execution
 
