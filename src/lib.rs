@@ -13,6 +13,7 @@ pub mod discovery;
 mod error;
 mod file_io;
 pub mod init;
+pub mod project_state;
 pub mod specification;
 pub mod tree;
 

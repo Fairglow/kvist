@@ -53,6 +53,17 @@ pub enum KvistError {
         /// Existing generated artifact paths.
         artifacts: Vec<PathBuf>,
     },
+    /// A project is not safe for `init` to modify.
+    #[error(
+        "cannot initialize `{project_dir}` because its Kvist project state is {state}; \
+         run `kvist doctor {project_dir}` and repair or migrate it explicitly"
+    )]
+    ProjectStateNotInitializable {
+        /// Project root that was inspected.
+        project_dir: PathBuf,
+        /// State reported by the read-only inspector.
+        state: String,
+    },
     /// The component root does not exist.
     #[error("component root `{path}` does not exist")]
     ComponentRootNotFound {

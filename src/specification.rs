@@ -9,13 +9,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{KvistError, Result, artifacts::TEMPLATE_VERSION, file_io::write_new_file_atomically};
+use crate::{
+    KvistError, Result, artifacts::SPECIFICATION_VERSION, file_io::write_new_file_atomically,
+};
 
 /// Maximum supported size of a specification read from disk.
 pub const MAX_SPECIFICATION_BYTES: u64 = 1024 * 1024;
 
 /// Deterministic template for a newly created component specification.
-pub const COMPONENT_SPEC_TEMPLATE: &str = r#"<!-- kvist-template-version: 1 -->
+pub const COMPONENT_SPEC_TEMPLATE: &str = r#"<!-- kvist-specification-version: 1 -->
 # Component Specification
 
 <details open>
@@ -346,7 +348,7 @@ fn validate_template_version(
         return None;
     };
     let Some(version_text) = first_line
-        .strip_prefix("<!-- kvist-template-version: ")
+        .strip_prefix("<!-- kvist-specification-version: ")
         .and_then(|value| value.strip_suffix(" -->"))
     else {
         diagnostics.push(diagnostic(
@@ -369,11 +371,11 @@ fn validate_template_version(
         ));
         return None;
     }
-    if version != TEMPLATE_VERSION {
+    if version != SPECIFICATION_VERSION {
         diagnostics.push(diagnostic(
             SpecificationDiagnosticKind::UnsupportedTemplateVersion {
                 found: version,
-                supported: TEMPLATE_VERSION,
+                supported: SPECIFICATION_VERSION,
             },
             1,
         ));

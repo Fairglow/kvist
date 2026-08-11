@@ -5,7 +5,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use crate::{KvistError, Result, artifacts::TEMPLATE_VERSION};
+use crate::{KvistError, Result, artifacts::CONFIGURATION_VERSION};
 
 /// Maximum supported size of `kvist.toml`.
 pub const MAX_CONFIGURATION_BYTES: u64 = 64 * 1024;
@@ -90,7 +90,13 @@ fn parse(config_path: &Path, contents: &str) -> Result<ProjectConfig> {
         .get("schema_version")
         .and_then(toml::Value::as_integer)
         .ok_or_else(|| invalid_configuration(config_path, "`schema_version` must be an integer"))?;
-    let supported_version = i64::from(TEMPLATE_VERSION);
+    if schema_version <= 0 {
+        return Err(invalid_configuration(
+            config_path,
+            "`schema_version` must be a positive integer",
+        ));
+    }
+    let supported_version = i64::from(CONFIGURATION_VERSION);
     if schema_version != supported_version {
         return Err(KvistError::UnsupportedProjectConfigurationVersion {
             path: config_path.to_path_buf(),

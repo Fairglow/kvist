@@ -56,8 +56,11 @@ fn initialization_of_a_complete_project_is_idempotent() {
     let project = TempDir::new().expect("create temporary project");
     initialize(project.path()).expect("first initialization");
     let config_path = project.path().join("kvist.toml");
-    fs::write(&config_path, "# user change\nschema_version = 1\n")
-        .expect("modify existing configuration");
+    fs::write(
+        &config_path,
+        "# user change\nschema_version = 1\ncomponent_root = \"src\"\n",
+    )
+    .expect("modify existing configuration");
 
     let outcome = initialize(project.path()).expect("second initialization");
 
@@ -69,7 +72,7 @@ fn initialization_of_a_complete_project_is_idempotent() {
     );
     assert_eq!(
         fs::read_to_string(config_path).expect("read existing configuration"),
-        "# user change\nschema_version = 1\n"
+        "# user change\nschema_version = 1\ncomponent_root = \"src\"\n"
     );
 }
 
@@ -77,14 +80,19 @@ fn initialization_of_a_complete_project_is_idempotent() {
 fn partial_kvist_artifacts_are_rejected_without_overwriting_them() {
     let project = TempDir::new().expect("create temporary project");
     let config = project.path().join("kvist.toml");
-    fs::write(&config, "user-authored configuration").expect("create conflicting file");
+    fs::write(
+        &config,
+        "# user-authored configuration\nschema_version = 1\ncomponent_root = \"src\"\n",
+    )
+    .expect("create conflicting file");
 
     let error = initialize(project.path()).expect_err("partial artifacts must be rejected");
 
-    assert!(error.to_string().contains("Kvist artifacts already exist"));
+    assert!(error.to_string().contains("state is partial"));
+    assert!(error.to_string().contains("kvist doctor"));
     assert_eq!(
         fs::read_to_string(&config).expect("read conflicting file"),
-        "user-authored configuration"
+        "# user-authored configuration\nschema_version = 1\ncomponent_root = \"src\"\n"
     );
     assert!(!project.path().join("ROOT_CONTRACT.md").exists());
 }
@@ -96,7 +104,7 @@ fn invalid_artifact_parent_prevents_any_artifact_write() {
 
     let error = initialize(project.path()).expect_err("invalid parent must be rejected");
 
-    assert!(error.to_string().contains("artifact parent"));
+    assert!(error.to_string().contains("state is invalid"));
     assert!(!project.path().join("kvist.toml").exists());
 }
 

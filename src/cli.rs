@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::{KvistError, Result, init, specification, tree};
+use crate::{KvistError, Result, init, project_state, specification, tree};
 
 /// Kvist's top-level command-line interface.
 #[derive(Debug, Parser)]
@@ -27,6 +27,8 @@ pub enum Command {
     Init(ProjectDirectory),
     /// Render the component tree for a Kvist project.
     Tree(ProjectDirectory),
+    /// Inspect root artifacts without changing the project.
+    Doctor(ProjectDirectory),
     /// Create or validate a component specification.
     Spec {
         /// Specification operation to execute.
@@ -85,6 +87,8 @@ pub fn execute(command: Command) -> Result<CommandOutput> {
         Command::Init(project) => init::initialize(&project.path)
             .map(|outcome| CommandOutput::message(outcome.to_string())),
         Command::Tree(project) => tree::render_project(&project.path).map(CommandOutput::message),
+        Command::Doctor(project) => project_state::inspect(&project.path)
+            .map(|inspection| CommandOutput::message(inspection.to_string())),
         Command::Spec {
             command: SpecCommand::New { component_dir },
         } => specification::create(&component_dir).map(|generated| {
@@ -141,6 +145,17 @@ mod tests {
     }
 
     #[test]
+    fn parses_doctor_with_the_current_directory_by_default() {
+        let cli = Cli::try_parse_from(["kvist", "doctor"]).expect("valid doctor command");
+
+        let Command::Doctor(project) = cli.command else {
+            panic!("expected doctor command");
+        };
+
+        assert_eq!(project.path, PathBuf::from("."));
+    }
+
+    #[test]
     fn parses_specification_creation() {
         let cli = Cli::try_parse_from(["kvist", "spec", "new", "src/network"])
             .expect("valid specification creation command");
@@ -186,6 +201,7 @@ mod tests {
         let help = error.to_string();
         assert!(help.contains("init"));
         assert!(help.contains("tree"));
+        assert!(help.contains("doctor"));
         assert!(help.contains("spec"));
     }
 

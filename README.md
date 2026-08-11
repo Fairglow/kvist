@@ -9,11 +9,12 @@ for human-directed AI development. Its product architecture is defined in
 | Command | Contract |
 | --- | --- |
 | `kvist init [PROJECT_DIR]` | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory. |
+| `kvist doctor [PROJECT_DIR]` | Read-only inspection of the root artifact state and recovery guidance. |
 | `kvist tree [PROJECT_DIR]` | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory. |
 | `kvist spec new <COMPONENT_DIR>` | Create a layered `SPEC.md` for a component directory. |
 | `kvist spec validate <SPEC_FILE>` | Validate a layered `SPEC.md` file. |
 
-All Phase 1 commands are implemented: `kvist init`, `kvist tree`, `kvist spec
+All Phase 1 commands are implemented: `kvist init`, `kvist doctor`, `kvist tree`, `kvist spec
 new`, and `kvist spec validate`.
 
 ## Configuration and platform policy
@@ -34,23 +35,47 @@ documentation and tests.
 
 | Path | Version and required defaults | Purpose |
 | --- | --- | --- |
-| `kvist.toml` | `schema_version = 1`; `component_root = "src"`; `llm.provider = "none"` | Project-local configuration with opt-in external LLM integration. |
-| `ROOT_CONTRACT.md` | `kvist-template-version: 1` | Global architectural and compliance constraints for every component. |
-| `src/SPEC.md` | `kvist-template-version: 1` | Root component contract with the three progressive-disclosure layers. |
+| `kvist.toml` | configuration schema `1`; `component_root = "src"`; `llm.provider = "none"` | Project-local configuration with opt-in external LLM integration. |
+| `ROOT_CONTRACT.md` | `<!-- kvist-root-contract-version: 1 -->` | Global architectural and compliance constraints for every component. |
+| `src/SPEC.md` | `<!-- kvist-specification-version: 1 -->` | Root component contract with the three progressive-disclosure layers. |
 | `src/TODOS.yaml` | `schema_version: 1` | Ordered lifecycle tasks: tests, implementation, security audit, compliance review. |
-| `src/DOCS.md` | `kvist-template-version: 1` | Independently reverse-engineered implementation documentation. |
+| `src/DOCS.md` | `<!-- kvist-documentation-version: 1 -->` | Independently reverse-engineered implementation documentation. |
 
-Template and schema versions are positive integers. Backward-incompatible
-changes must increment the relevant version and include an explicit migration
-path; Kvist must never silently rewrite user-authored artifacts. The initial
-templates contain no credentials, configured external provider, copyright
-notices, or license terms.
+The configuration, root-contract, specification, TODO-queue, and documentation
+versions are independent positive-integer domains. Backward-incompatible
+changes must increment only the relevant domain and include an explicit
+migration path; Kvist must never silently rewrite user-authored artifacts. The
+initial templates contain no credentials, configured external provider,
+copyright notices, or license terms.
 
 `kvist init` creates a missing target directory, rejects a symbolic-link root
 or artifact parent, and writes each artifact through a same-directory temporary
-file with no-clobber persistence. It never merges a partial Kvist artifact set
-or overwrites existing artifacts. A complete existing set is reported as
-already initialized without modification.
+file with no-clobber persistence. It writes only an **uninitialized** project
+and reports **already initialized** only after every required artifact validates
+as current. It refuses partial, invalid, and unsupported-version projects
+without overwriting them.
+
+`kvist doctor [PROJECT_DIR]` is the read-only recovery guidance surface. It
+classifies a project as `uninitialized`, `current`, `partial`, `invalid`, or
+`unsupported-version`, listing each required artifact and an actionable
+diagnostic. `partial` means one or more, but not all, valid root artifacts are
+present. `invalid` covers malformed content, incorrect filesystem types, and
+symbolic links; `unsupported-version` has precedence when any artifact has a
+well-formed version this binary does not support. Phase 1 has no automatic
+repair or migration: preserve user content, use `doctor` to inspect it, then
+repair or migrate explicitly. Any future repair or migration command must
+define every permitted rewrite and remain opt-in.
+
+## Version-control policy
+
+Before Phase 2 task execution, durable artifacts (`kvist.toml`,
+`ROOT_CONTRACT.md`, and each component's `SPEC.md`, `TODOS.yaml`, and
+`DOCS.md`) are expected to be tracked in a supported VCS. Kvist is VCS-aware,
+not Git-only: Git and jj are the initial supported systems. Kvist must never
+auto-stage or commit. Required artifacts ignored by the selected VCS must be
+reported rather than hidden. Transient logs, locks, raw provider data, and
+credentials are untracked. Phase 1 does not yet implement VCS inspection; its
+dedicated remediation task defines that work before Phase 2.
 
 ## Component discovery policy
 
@@ -78,7 +103,7 @@ artifact layout. Invalid output lists both malformed and missing artifacts.
 
 ## Specification format
 
-`SPEC.md` starts with `<!-- kvist-template-version: 1 -->` on line 1, followed
+`SPEC.md` starts with `<!-- kvist-specification-version: 1 -->` on line 1, followed
 by the three ordered collapsible sections below. The required summaries and
 headings are exact so Kvist can validate them without rewriting user content.
 
@@ -96,6 +121,9 @@ user-authored and untouched.
 
 `spec validate` accepts only regular UTF-8 files up to 1 MiB and rejects
 symbolic links before parsing.
+
+Root-state inspection applies the same 1 MiB bound to `ROOT_CONTRACT.md`,
+`src/TODOS.yaml`, and `src/DOCS.md` before reading or parsing them.
 
 `kvist spec new <COMPONENT_DIR>` creates the missing directory when necessary,
 validates the deterministic template before writing, and persists `SPEC.md`
@@ -116,3 +144,6 @@ The runtime uses [toml](https://crates.io/crates/toml) 1 to validate the
 project-local configuration before reading its component tree.
 The runtime uses [tempfile](https://crates.io/crates/tempfile) 3 for
 same-directory, no-clobber atomic artifact writes.
+The runtime uses [serde_yaml](https://crates.io/crates/serde_yaml) 0.9 only to
+parse the current root `TODOS.yaml` mapping and distinguish its schema version
+from malformed content; Phase 2 will define its full queue schema.

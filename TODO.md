@@ -11,9 +11,8 @@ component discovery, and specification validation are implemented.
 
 Phase 1 is **feature complete but not foundation complete**. The remediation
 items below must be resolved before Phase 2 executes user tasks or invokes an
-LLM. In particular, Kvist has no validated project-state model, no recovery
-path for a partial initialization, no bounded component-count traversal, and
-CI does not enforce all local quality gates.
+LLM. In particular, Kvist still lacks bounded component-count traversal,
+enforced CI quality gates, lifecycle dogfooding, and VCS tracking inspection.
 
 ## Status conventions
 
@@ -30,38 +29,30 @@ resolve an open decision through code.
 | Status | Deliverable | Implemented behavior |
 | --- | --- | --- |
 | DONE | CLI foundation | Typed Rust CLI, contextual errors, process boundary in `main.rs`. |
-| DONE | Project initialization | Deterministic templates, no-clobber writes, direct symlink checks, idempotent complete-set detection. |
+| DONE | Project initialization | Deterministic templates, no-clobber writes, direct symlink checks, and validated five-state initialization semantics. |
 | DONE | Discovery and tree | Read-only lexical traversal, component layout statuses, plain ASCII output. |
 | DONE | Specification workflow | Version-1 layered Markdown template, line-aware validation, safe creation and validation commands. |
 | DONE | Initial review | End-to-end test, clean-slate `DOCS.md`, and source-blind `COMPLIANCE_REVIEW.md`. |
 
 ## Phase 1 remediation gate
 
-### TODO P1-R1 — Define validated project state, recovery, and migration semantics
+### DONE P1-R1 — Define validated project state, recovery, and migration semantics
 
-**Why:** `init` treats any complete set of five regular files as initialized,
-does not validate their contents or versions, and deliberately leaves a partial
-set after a mid-operation failure with no repair path.
+**Completed decision:** `project_state::inspect` validates all five root
+artifacts and classifies `uninitialized`, `current`, `partial`, `invalid`, and
+`unsupported-version`. The independent configuration, root-contract,
+specification, TODO-queue, and documentation version domains are all `1`.
+`init` writes only uninitialized projects, returns already initialized only for
+validated current projects, and refuses every other state without overwriting.
+`kvist doctor [PROJECT_DIR]` is the read-only diagnostic and recovery guidance
+surface. Phase 1 has no automatic repair or migration; a future explicit
+repair/migration command must define and opt into every rewrite. An interrupted
+safe-write sequence is therefore deterministically inspectable as `partial`.
 
-**Acceptance criteria:**
-
-- Define the project states `uninitialized`, `current`, `partial`, `invalid`,
-  and `unsupported-version`, including the exact artifact and content checks
-  that distinguish them.
-- Split independent version domains for configuration, root contract,
-  specification, TODO queue, and compliance documentation; do not use one
-  template version as a proxy for every schema.
-- Define safe behavior for `init` against every state. Specify whether a
-  read-only `kvist doctor`, an explicit `init --repair`, and/or a migration
-  command is the recovery surface. Never overwrite user content implicitly.
-- Make root initialization transactional where practical, or make partial
-  recovery deterministic, inspectable, and testable.
-- Add migration fixtures for current, partial, invalid, and unsupported-version
-  projects.
-
-**Verification:** integration tests for every project state, an interrupted
-write simulation, migration/repair refusal paths, and preservation of
-user-authored files.
+**Verification:** unit and integration tests cover every state, all independent
+unsupported-version domains, malformed content and artifact types, doctor
+output and read-only behavior, refusal/preservation for partial/invalid/
+unsupported projects, and independent version constants.
 
 ### TODO P1-R2 — Bound discovery and document the filesystem threat model
 
@@ -124,6 +115,27 @@ was performed manually and has no repeatable command/runbook.
 
 **Verification:** execute the runbook from a clean checkout and retain only
 the intended review artifacts.
+
+### TODO P1-R5 — Inspect VCS tracking before Phase 2 execution
+
+**Why:** durable project state must be reviewable and mergeable before task
+execution, but Phase 1 currently does not inspect any VCS.
+
+**Acceptance criteria:**
+
+- Before Phase 2 task execution, verify that `kvist.toml`, `ROOT_CONTRACT.md`,
+  and every component's `SPEC.md`, `TODOS.yaml`, and `DOCS.md` are tracked in
+  a supported VCS.
+- Support Git and jj without treating Git as the only VCS. Report a required
+  artifact ignored by the selected VCS rather than hiding it.
+- Never auto-stage or commit. Keep transient logs, locks, raw provider data,
+  and credentials untracked.
+- Define deterministic diagnostics and behavior for no VCS, unsupported VCS,
+  ignored required artifacts, and mixed working trees.
+
+**Verification:** Git and jj fixtures for tracked and ignored durable
+artifacts; fixtures proving that diagnostics never stage, commit, or expose
+transient/credential material.
 
 ## Phase 2 — Task execution and LLM runner
 
@@ -255,33 +267,31 @@ fixture.
 | Root artifact paths | `kvist.toml`, `ROOT_CONTRACT.md`, and `src/{SPEC.md,TODOS.yaml,DOCS.md}`. |
 | Initial configuration | Version `1`, `component_root = "src"`, `llm.provider = "none"`. |
 | Specification format | Version-1 Markdown with exact three ordered `<details>` layers and required headings. |
+| Root-state and recovery | Five-state read-only inspection. Phase 1 never repairs or migrates automatically; `doctor` guides explicit user recovery. |
+| Artifact version domains | Configuration, root contract, specification, TODO queue, and documentation have independent version domains. |
+| VCS policy | Before Phase 2, durable artifacts must be tracked in a supported VCS (Git or jj); required ignored artifacts are reported. Kvist never auto-stages or commits; logs, locks, raw provider data, and credentials remain untracked. |
 | Filesystem safety | No-clobber atomic file persistence, direct symlink rejection, lexical discovery, ignored VCS/build directories, 64-level depth limit. |
-| Input limits | `kvist.toml` at most 64 KiB; `SPEC.md` at most 1 MiB. |
-| Dependencies | `clap`, `thiserror`, `toml`, and `tempfile`; add dependencies only with a documented need. |
+| Input limits | `kvist.toml` at most 64 KiB; specifications and root contract/TODO/documentation inspection at most 1 MiB each. |
+| Dependencies | `clap`, `thiserror`, `toml`, `tempfile`, and `serde_yaml`; add dependencies only with a documented need. |
 | Review model | Clean-slate source documentation followed by source-blind specification comparison. |
 
 ## Open questions requiring an explicit decision
 
-1. **Project recovery:** Which explicit command repairs a partial or
-   unsupported-version project, and what may it rewrite?
-2. **Hierarchy invariant:** Must every intermediate directory in a component
+1. **Hierarchy invariant:** Must every intermediate directory in a component
    path be a component, or may a component sit below an ordinary source
    directory?
-3. **Schema versioning:** Are configuration, contract, specification, TODO,
-   and documentation versions independently evolved, and what compatibility
-   window must Kvist support?
-4. **Task execution trust:** Who authorizes repository-defined test commands
+2. **Task execution trust:** Who authorizes repository-defined test commands
    and LLM execution, and what isolation or consent is required?
-5. **Provider interface:** Which provider CLIs are first-class, what exact
+3. **Provider interface:** Which provider CLIs are first-class, what exact
    protocol do they implement, and where may credentials live?
-6. **Context contract:** How are parent interfaces represented, and what is the
+4. **Context contract:** How are parent interfaces represented, and what is the
    normative algorithm for selecting local files while excluding peers?
-7. **Staleness semantics:** Which parent/spec/config changes invalidate which
+5. **Staleness semantics:** Which parent/spec/config changes invalidate which
    child artifacts, and is invalidation based on hashes, explicit edges, or
    both?
-8. **Automation interface:** Is stable JSON output and a documented exit-code
+6. **Automation interface:** Is stable JSON output and a documented exit-code
    taxonomy required before the web view, watcher, and CI integrations?
-9. **Platform/security scope:** Is Kvist supported on Windows junctions and
+7. **Platform/security scope:** Is Kvist supported on Windows junctions and
    hostile workspaces, or only trusted local checkouts?
-10. **Distribution and license:** What exact BSL/double-license text, Cargo
+8. **Distribution and license:** What exact BSL/double-license text, Cargo
     metadata, release channel, MSRV, and binary distribution policy apply?

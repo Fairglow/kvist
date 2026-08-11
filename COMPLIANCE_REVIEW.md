@@ -1,6 +1,6 @@
 # Phase 1 Compliance and Security Review
 
-**Scope:** Core CLI Engine (`init`, `tree`, `spec new`, and `spec validate`).
+**Scope:** Core CLI Engine (`init`, `doctor`, `tree`, `spec new`, and `spec validate`).
 
 ## Independent review process
 
@@ -26,13 +26,15 @@ by tests.
 - No unsafe Rust, shared mutable state, network access, or background processes
   are used by Phase 1 commands.
 - Generated files use same-directory temporary files, file synchronization, and
-  no-clobber persistence. Existing and partial artifact sets are not
-  overwritten.
+  no-clobber persistence. `init` writes only uninitialized projects; `doctor`
+  classifies current, partial, invalid, and unsupported-version projects
+  without modifying them.
 - Project, configuration, component, and specification symlinks are rejected
   at direct checked paths; discovery does not traverse symlink entries.
-- Configuration and specification parsing are bounded to 64 KiB and 1 MiB,
-  respectively. Parsed component roots must be non-empty relative paths with
-  normal path segments only.
+- Configuration parsing is bounded to 64 KiB; specification and root
+  contract/TODO/documentation inspection are each bounded to 1 MiB. Parsed
+  component roots must be non-empty relative paths with normal path segments
+  only.
 - Filesystem, parsing, and validation failures are surfaced with contextual
   errors. CLI output is deterministic plain ASCII and does not emit secrets.
 
@@ -41,5 +43,6 @@ by tests.
 Initialization writes each artifact atomically but is not a multi-file
 transaction. If an I/O failure occurs after an earlier artifact is persisted,
 the resulting partial Kvist artifact set is intentionally preserved and a
-subsequent `init` refuses to merge or overwrite it; explicit user intervention
-is required.
+subsequent `init` refuses to merge or overwrite it. `doctor` provides
+read-only diagnostics; Phase 1 has no automatic repair or migration, so
+explicit user intervention is required.

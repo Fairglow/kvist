@@ -10,6 +10,7 @@ use crate::{
     KvistError, Result,
     artifacts::{ArtifactTemplate, root_artifacts},
     file_io::write_new_file_atomically,
+    project_state::{self, ProjectState},
 };
 
 /// The observable result of an initialization attempt.
@@ -50,23 +51,23 @@ impl fmt::Display for InitOutcome {
 
 /// Initializes `project_dir` with Kvist's complete root artifact set.
 ///
-/// Existing complete projects are reported without modification. Any partial
-/// Kvist artifact set is rejected to prevent implicit merging or overwrites.
+/// Only an uninitialized project is written. A validated current project is
+/// reported unchanged; partial, invalid, and unsupported projects are refused.
 pub fn initialize(project_dir: &Path) -> Result<InitOutcome> {
     ensure_project_directory(project_dir)?;
-    validate_existing_artifact_parents(project_dir, root_artifacts())?;
-
-    let existing_artifacts = existing_artifacts(project_dir, root_artifacts())?;
-    if existing_artifacts.len() == root_artifacts().len() {
-        return Ok(InitOutcome::AlreadyInitialized {
-            project_dir: project_dir.to_path_buf(),
-        });
-    }
-    if !existing_artifacts.is_empty() {
-        return Err(KvistError::ExistingArtifacts {
-            project_dir: project_dir.to_path_buf(),
-            artifacts: existing_artifacts,
-        });
+    match project_state::inspect(project_dir)?.state {
+        ProjectState::Uninitialized => {}
+        ProjectState::Current => {
+            return Ok(InitOutcome::AlreadyInitialized {
+                project_dir: project_dir.to_path_buf(),
+            });
+        }
+        state => {
+            return Err(KvistError::ProjectStateNotInitializable {
+                project_dir: project_dir.to_path_buf(),
+                state: state.name().to_owned(),
+            });
+        }
     }
 
     create_artifact_parents(project_dir, root_artifacts())?;
@@ -118,47 +119,6 @@ fn validate_project_directory(project_dir: &Path) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn validate_existing_artifact_parents(
-    project_dir: &Path,
-    artifacts: &[ArtifactTemplate],
-) -> Result<()> {
-    for parent in artifact_parent_paths(project_dir, artifacts) {
-        match fs::symlink_metadata(&parent) {
-            Ok(metadata) => validate_artifact_parent(&parent, &metadata),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(source) => Err(KvistError::Io {
-                operation: "inspect artifact parent",
-                path: parent,
-                source,
-            }),
-        }?;
-    }
-
-    Ok(())
-}
-
-fn existing_artifacts(project_dir: &Path, artifacts: &[ArtifactTemplate]) -> Result<Vec<PathBuf>> {
-    let mut existing = Vec::new();
-
-    for artifact in artifacts {
-        let path = project_dir.join(artifact.relative_path);
-        match fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type().is_file() => existing.push(path),
-            Ok(_) => return Err(KvistError::ArtifactPathNotFile { path }),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(source) => {
-                return Err(KvistError::Io {
-                    operation: "inspect generated artifact",
-                    path,
-                    source,
-                });
-            }
-        }
-    }
-
-    Ok(existing)
 }
 
 fn create_artifact_parents(project_dir: &Path, artifacts: &[ArtifactTemplate]) -> Result<()> {

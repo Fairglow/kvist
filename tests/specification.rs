@@ -43,8 +43,8 @@ fn detects_missing_template_version_at_the_first_line() {
 #[test]
 fn detects_unsupported_template_versions() {
     let contents = valid_specification().replacen(
-        "<!-- kvist-template-version: 1 -->",
-        "<!-- kvist-template-version: 99 -->",
+        "<!-- kvist-specification-version: 1 -->",
+        "<!-- kvist-specification-version: 99 -->",
         1,
     );
 
@@ -61,7 +61,7 @@ fn detects_unsupported_template_versions() {
 
 #[test]
 fn detects_missing_layers_and_reports_end_of_file_location() {
-    let contents = "<!-- kvist-template-version: 1 -->\n# Root Component Specification\n";
+    let contents = "<!-- kvist-specification-version: 1 -->\n# Root Component Specification\n";
 
     let validation = validate(contents);
 
@@ -78,7 +78,7 @@ fn detects_missing_layers_and_reports_end_of_file_location() {
 #[test]
 fn detects_out_of_order_layers() {
     let contents = concat!(
-        "<!-- kvist-template-version: 1 -->\n",
+        "<!-- kvist-specification-version: 1 -->\n",
         "<details>\n",
         "<summary>Layer 2: Architectural guarantees</summary>\n",
         "## Constraints and invariants\ncontent\n</details>\n",

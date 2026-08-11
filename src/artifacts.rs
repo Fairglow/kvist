@@ -3,8 +3,16 @@
 //! These templates contain no user-specific values, credentials, or license
 //! terms. Filesystem creation belongs to the `init` command implementation.
 
-/// Current format version of all initial root artifact templates.
-pub const TEMPLATE_VERSION: u32 = 1;
+/// Current schema version for `kvist.toml`.
+pub const CONFIGURATION_VERSION: u32 = 1;
+/// Current document version for `ROOT_CONTRACT.md`.
+pub const ROOT_CONTRACT_VERSION: u32 = 1;
+/// Current document version for `SPEC.md`.
+pub const SPECIFICATION_VERSION: u32 = 1;
+/// Current schema version for `TODOS.yaml`.
+pub const TODO_QUEUE_VERSION: u32 = 1;
+/// Current document version for `DOCS.md`.
+pub const DOCUMENTATION_VERSION: u32 = 1;
 
 /// A file generated when initializing a Kvist project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +35,7 @@ component_root = "src"
 provider = "none"
 "#;
 
-const ROOT_CONTRACT: &str = r#"<!-- kvist-template-version: 1 -->
+const ROOT_CONTRACT: &str = r#"<!-- kvist-root-contract-version: 1 -->
 # Kvist Root Contract
 
 This contract applies to every component in this project. It is the global
@@ -55,7 +63,7 @@ constraint set injected into component work.
   arbitration; do not silently alter either artifact.
 "#;
 
-const ROOT_SPEC: &str = r#"<!-- kvist-template-version: 1 -->
+const ROOT_SPEC: &str = r#"<!-- kvist-specification-version: 1 -->
 # Root Component Specification
 
 <details open>
@@ -108,7 +116,7 @@ tasks:
     description: Run the independent documentation and compliance review.
 "#;
 
-const ROOT_DOCS: &str = r#"<!-- kvist-template-version: 1 -->
+const ROOT_DOCS: &str = r#"<!-- kvist-documentation-version: 1 -->
 # Root Component Compliance Documentation
 
 This document is produced by reverse-engineering implemented behavior without
@@ -192,7 +200,7 @@ mod tests {
 
         assert_eq!(
             config["schema_version"].as_integer(),
-            Some(i64::from(TEMPLATE_VERSION))
+            Some(i64::from(CONFIGURATION_VERSION))
         );
         assert_eq!(config["component_root"].as_str(), Some("src"));
         assert_eq!(config["llm"]["provider"].as_str(), Some("none"));
@@ -200,9 +208,9 @@ mod tests {
 
     #[test]
     fn markdown_templates_are_versioned_and_follow_the_lifecycle() {
-        for template in [ROOT_CONTRACT, ROOT_SPEC, ROOT_DOCS] {
-            assert!(template.contains("<!-- kvist-template-version: 1 -->"));
-        }
+        assert!(ROOT_CONTRACT.starts_with("<!-- kvist-root-contract-version: 1 -->"));
+        assert!(ROOT_SPEC.starts_with("<!-- kvist-specification-version: 1 -->"));
+        assert!(ROOT_DOCS.starts_with("<!-- kvist-documentation-version: 1 -->"));
 
         assert!(ROOT_SPEC.contains("Layer 1: Executive summary and public contract"));
         assert!(ROOT_SPEC.contains("Layer 2: Architectural guarantees"));
