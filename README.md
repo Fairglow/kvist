@@ -1,5 +1,7 @@
 # Kvist
 
+[![Rust](https://github.com/Fairglow/kvist/actions/workflows/rust.yml/badge.svg)](https://github.com/Fairglow/kvist/actions/workflows/rust.yml)
+
 Kvist is a Rust CLI for a filesystem-native, spec-driven architecture workflow
 for human-directed AI development. Its product architecture is defined in
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md).
