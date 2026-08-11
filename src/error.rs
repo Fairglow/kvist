@@ -53,6 +53,35 @@ pub enum KvistError {
         /// Existing generated artifact paths.
         artifacts: Vec<PathBuf>,
     },
+    /// The component root does not exist.
+    #[error("component root `{path}` does not exist")]
+    ComponentRootNotFound {
+        /// Missing component-root path.
+        path: PathBuf,
+    },
+    /// The component root is not a real directory.
+    #[error("component root `{path}` must be a directory")]
+    ComponentRootNotDirectory {
+        /// Invalid component-root path.
+        path: PathBuf,
+    },
+    /// Discovery would follow a symbolic-link component root.
+    #[error("refusing to discover components through symbolic link `{path}`")]
+    ComponentRootIsSymlink {
+        /// Symbolic-link component-root path.
+        path: PathBuf,
+    },
+    /// Discovery reached the configured traversal bound.
+    #[error(
+        "component discovery reached its maximum depth of {max_depth} at `{path}`; \
+         reduce nesting or make the traversal bound configurable"
+    )]
+    ComponentDiscoveryDepthExceeded {
+        /// Directory at the traversal boundary.
+        path: PathBuf,
+        /// Maximum allowed depth below the component root.
+        max_depth: usize,
+    },
     /// A filesystem operation failed.
     #[error("cannot {operation} `{path}`: {source}")]
     Io {

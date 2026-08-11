@@ -30,8 +30,7 @@ documentation and tests.
 
 ## Root artifact templates
 
-`kvist init` will create the following deterministic, UTF-8 templates. Writing
-them to disk is intentionally deferred until its implementation is complete.
+`kvist init` creates the following deterministic, UTF-8 templates.
 
 | Path | Version and required defaults | Purpose |
 | --- | --- | --- |
@@ -52,6 +51,24 @@ or artifact parent, and writes each artifact through a same-directory temporary
 file with no-clobber persistence. It never merges a partial Kvist artifact set
 or overwrites existing artifacts. A complete existing set is reported as
 already initialized without modification.
+
+## Component discovery policy
+
+The discovery model is read-only and accepts an explicit component-root
+directory (the initial configuration uses `src`). The root is always a
+component; a descendant is a component only when at least one of `SPEC.md`,
+`TODOS.yaml`, or `DOCS.md` exists beside it. This prevents ordinary source
+directories from becoming components while retaining incomplete layouts for
+diagnosis.
+
+Each artifact must be a regular file. Missing artifacts produce an incomplete
+status; directories, symbolic links, and other filesystem objects at required
+artifact paths produce an invalid status. Content validation is intentionally
+deferred to the specification and task-queue validators.
+
+Traversal never follows symbolic links, skips `.git`, `.hg`, `.jj`,
+`node_modules`, and `target` directories, visits paths in lexical order, and
+reports an error rather than silently truncating beyond 64 directory levels.
 
 ## Dependencies
 

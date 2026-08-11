@@ -8,6 +8,7 @@
 
 pub mod artifacts;
 pub mod cli;
+pub mod discovery;
 mod error;
 pub mod init;
 

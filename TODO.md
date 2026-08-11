@@ -5,8 +5,8 @@
 
 **Current state:** The CLI contract, testable dispatch boundary, domain error
 model, and versioned root artifact templates are implemented. Filesystem
-initialization is implemented. Component discovery and specification processing
-remain unimplemented.
+initialization and component discovery are implemented. Terminal tree rendering
+and specification processing remain unimplemented.
 
 ## Tracking rules
 
@@ -80,7 +80,7 @@ and required invariants.
 initialized directory, conflicting files, unwritable paths, and nested target
 paths.
 
-### TODO P1-04 — Define the component discovery model
+### DONE P1-04 — Define the component discovery model
 
 **Depends on:** P1-02  
 **Acceptance criteria:**
@@ -172,5 +172,5 @@ binary smoke test using only documented commands.
 | --- | --- | --- |
 | RESOLVED | Initial `kvist.toml` schema and configuration versioning policy | Use `schema_version = 1`, `component_root = "src"`, and opt-in `llm.provider = "none"`; incompatible changes need explicit migration. |
 | RESOLVED | CLI argument parser and error-reporting crates | Use `clap` 4 with `derive` for typed parsing/help and `thiserror` 2 for domain errors; both are permissively licensed, mature, and widely maintained. |
-| OPEN | Whether symlinks are rejected or traversed within a canonical project root | Define in P1-04 before filesystem traversal. |
+| RESOLVED | Symlink policy for component traversal | Reject a symbolic-link component root and never follow symbolic links while discovering descendants; symbolic-link artifacts are invalid layouts. |
 | RESOLVED | Name and syntax of the specification generation command | `kvist spec new <COMPONENT_DIR>` creates a specification and `kvist spec validate <SPEC_FILE>` validates one. |
