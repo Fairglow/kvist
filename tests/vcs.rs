@@ -24,6 +24,7 @@ fn run(program: &str, arguments: &[&str], directory: &Path) -> Output {
         .expect("run VCS command")
 }
 
+#[cfg(target_os = "linux")]
 fn command_exists(program: &str) -> bool {
     Command::new(program).arg("--version").output().is_ok()
 }
@@ -137,6 +138,7 @@ fn doctor_tracks_git_artifacts_in_non_utf8_component_paths() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn doctor_reports_jj_snapshot_tracking_when_jj_is_available() {
     if !command_exists("jj") {
