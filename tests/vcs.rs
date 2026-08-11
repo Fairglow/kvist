@@ -65,7 +65,8 @@ fn doctor_reports_git_tracked_and_ignored_durable_artifacts_without_mutation() {
     assert!(stdout.contains("vcs: required durable artifacts need attention"));
     assert!(stdout.contains("vcs kvist.toml: tracked"));
     assert!(stdout.contains("vcs src/DOCS.md: ignored"));
-    assert!(stdout.contains("vcs src/child/SPEC.md: tracked"));
+    let nested_specification = Path::new("src").join("child").join("SPEC.md");
+    assert!(stdout.contains(&format!("vcs {}: tracked", nested_specification.display())));
     assert_eq!(
         run("git", &["status", "--porcelain=v1"], project.path()).stdout,
         before
