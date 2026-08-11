@@ -76,6 +76,24 @@ Its first line identifies the configured component root; every subsequent line
 reports a component's relative path and complete, incomplete, or invalid
 artifact layout. Invalid output lists both malformed and missing artifacts.
 
+## Specification format
+
+`SPEC.md` starts with `<!-- kvist-template-version: 1 -->` on line 1, followed
+by the three ordered collapsible sections below. The required summaries and
+headings are exact so Kvist can validate them without rewriting user content.
+
+| Layer | `<details>` syntax | Required headings |
+| --- | --- | --- |
+| Executive summary and public contract | `<details open>` / `Layer 1: Executive summary and public contract` | `## Purpose`, `## Public contract` |
+| Architectural guarantees | `<details>` / `Layer 2: Architectural guarantees` | `## Constraints and invariants` |
+| Detailed strategy and algorithms | `<details>` / `Layer 3: Detailed strategy and algorithms` | `## Design and failure paths` |
+
+Every required heading needs non-whitespace content before the next heading or
+closing tag. The validator returns deterministic, one-based line and column
+diagnostics for version, ordering, syntax, missing-heading, and empty-section
+issues. It is read-only: all Markdown outside the required structure remains
+user-authored and untouched.
+
 ## Dependencies
 
 The CLI uses [clap](https://crates.io/crates/clap) 4 for typed, accessible

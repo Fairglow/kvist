@@ -6,7 +6,8 @@
 **Current state:** The CLI contract, testable dispatch boundary, domain error
 model, and versioned root artifact templates are implemented. Filesystem
 initialization and component discovery are implemented. Terminal tree rendering
-is implemented. Specification processing remains unimplemented.
+and layered specification validation are implemented. Specification generation
+remains unimplemented.
 
 ## Tracking rules
 
@@ -114,7 +115,7 @@ layouts.
 **Verification:** snapshot or golden tests for deterministic output and
 integration tests for valid, empty, malformed, and unreadable project layouts.
 
-### TODO P1-06 — Define the layered `SPEC.md` format and validation model
+### DONE P1-06 — Define the layered `SPEC.md` format and validation model
 
 **Depends on:** P1-02  
 **Acceptance criteria:**
