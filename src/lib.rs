@@ -8,9 +8,11 @@
 
 pub mod artifacts;
 pub mod cli;
+pub mod config;
 pub mod discovery;
 mod error;
 pub mod init;
+pub mod tree;
 
 use clap::Parser;
 

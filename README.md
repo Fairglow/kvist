@@ -13,8 +13,8 @@ for human-directed AI development. Its product architecture is defined in
 | `kvist spec new <COMPONENT_DIR>` | Create a layered `SPEC.md` for a component directory. |
 | `kvist spec validate <SPEC_FILE>` | Validate a layered `SPEC.md` file. |
 
-`kvist init` is implemented. `tree` and `spec` currently return an explicit
-unavailable-command error until their Phase 1 tasks are complete.
+`kvist init` and `kvist tree` are implemented. `spec` currently returns an
+explicit unavailable-command error until its Phase 1 tasks are complete.
 
 ## Configuration and platform policy
 
@@ -70,6 +70,12 @@ Traversal never follows symbolic links, skips `.git`, `.hg`, `.jj`,
 `node_modules`, and `target` directories, visits paths in lexical order, and
 reports an error rather than silently truncating beyond 64 directory levels.
 
+`kvist tree` reads only the selected project's `kvist.toml`, renders plain
+ASCII with no terminal capability detection, and never writes project files.
+Its first line identifies the configured component root; every subsequent line
+reports a component's relative path and complete, incomplete, or invalid
+artifact layout. Invalid output lists both malformed and missing artifacts.
+
 ## Dependencies
 
 The CLI uses [clap](https://crates.io/crates/clap) 4 for typed, accessible
@@ -79,7 +85,7 @@ errors. Both are mature, widely maintained Rust ecosystem dependencies. The
 project keeps its dependency graph small and adds dependencies only when their
 security, licensing, maintenance, and operational benefits are justified.
 
-Tests use [toml](https://crates.io/crates/toml) 1 to verify that the
-configuration template is valid TOML; it is a development-only dependency.
+The runtime uses [toml](https://crates.io/crates/toml) 1 to validate the
+project-local configuration before reading its component tree.
 The runtime uses [tempfile](https://crates.io/crates/tempfile) 3 for
 same-directory, no-clobber atomic artifact writes.

@@ -6,7 +6,7 @@
 **Current state:** The CLI contract, testable dispatch boundary, domain error
 model, and versioned root artifact templates are implemented. Filesystem
 initialization and component discovery are implemented. Terminal tree rendering
-and specification processing remain unimplemented.
+is implemented. Specification processing remains unimplemented.
 
 ## Tracking rules
 
@@ -98,7 +98,7 @@ paths.
 incomplete, malformed, cyclic/symlink (where supported), and permission-error
 layouts.
 
-### TODO P1-05 — Implement `kvist tree` and terminal rendering
+### DONE P1-05 — Implement `kvist tree` and terminal rendering
 
 **Depends on:** P1-01, P1-04  
 **Acceptance criteria:**

@@ -82,6 +82,65 @@ pub enum KvistError {
         /// Maximum allowed depth below the component root.
         max_depth: usize,
     },
+    /// The project root does not exist or cannot be used as a directory.
+    #[error("project root `{path}` must be a directory")]
+    ProjectRootNotDirectory {
+        /// Invalid project-root path.
+        path: PathBuf,
+    },
+    /// Loading configuration would follow a symbolic-link project root.
+    #[error("refusing to load project configuration through symbolic link `{path}`")]
+    ProjectRootIsSymlink {
+        /// Symbolic-link project-root path.
+        path: PathBuf,
+    },
+    /// The required project-local configuration file is absent.
+    #[error("Kvist project configuration `{path}` does not exist; run `kvist init` first")]
+    ProjectConfigurationMissing {
+        /// Missing configuration path.
+        path: PathBuf,
+    },
+    /// The project-local configuration is not a regular file.
+    #[error("Kvist project configuration `{path}` must be a regular file")]
+    ProjectConfigurationNotFile {
+        /// Invalid configuration path.
+        path: PathBuf,
+    },
+    /// Loading configuration would follow a symbolic link.
+    #[error("refusing to load project configuration through symbolic link `{path}`")]
+    ProjectConfigurationIsSymlink {
+        /// Symbolic-link configuration path.
+        path: PathBuf,
+    },
+    /// The configuration exceeds the bounded parsing limit.
+    #[error("Kvist project configuration `{path}` exceeds the {max_bytes}-byte limit")]
+    ProjectConfigurationTooLarge {
+        /// Oversized configuration path.
+        path: PathBuf,
+        /// Maximum permitted configuration size.
+        max_bytes: u64,
+    },
+    /// The configuration cannot be parsed or violates its schema.
+    #[error("invalid Kvist project configuration `{path}`: {reason}")]
+    InvalidProjectConfiguration {
+        /// Invalid configuration path.
+        path: PathBuf,
+        /// Actionable schema or parsing diagnostic.
+        reason: String,
+    },
+    /// The configuration schema version is unsupported.
+    #[error(
+        "unsupported Kvist project configuration version {version} in `{path}`; \
+         this binary supports version {supported_version}"
+    )]
+    UnsupportedProjectConfigurationVersion {
+        /// Configuration path.
+        path: PathBuf,
+        /// Version read from the configuration.
+        version: i64,
+        /// Version supported by this binary.
+        supported_version: i64,
+    },
     /// A filesystem operation failed.
     #[error("cannot {operation} `{path}`: {source}")]
     Io {

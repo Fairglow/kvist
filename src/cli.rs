@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::{KvistError, Result, init};
+use crate::{KvistError, Result, init, tree};
 
 /// Kvist's top-level command-line interface.
 #[derive(Debug, Parser)]
@@ -86,10 +86,9 @@ pub fn execute(command: Command) -> Result<CommandOutput> {
             return init::initialize(&project.path)
                 .map(|outcome| CommandOutput::message(outcome.to_string()));
         }
-        Command::Tree(_) => (
-            "tree",
-            "component discovery and rendering will be implemented in Phase 1 task P1-05",
-        ),
+        Command::Tree(project) => {
+            return tree::render_project(&project.path).map(CommandOutput::message);
+        }
         Command::Spec {
             command: SpecCommand::New { .. },
         } => (
@@ -193,14 +192,16 @@ mod tests {
 
     #[test]
     fn unavailable_command_errors_explain_the_next_implementation_step() {
-        let error = execute(Command::Tree(ProjectDirectory {
-            path: PathBuf::from("."),
-        }))
-        .expect_err("tree is not implemented yet");
+        let error = execute(Command::Spec {
+            command: SpecCommand::New {
+                component_dir: PathBuf::from("src/network"),
+            },
+        })
+        .expect_err("specification generation is not implemented yet");
 
         assert_eq!(
             error.to_string(),
-            "`tree` is not available yet; component discovery and rendering will be implemented in Phase 1 task P1-05"
+            "`spec new` is not available yet; specification generation will be implemented in Phase 1 task P1-07"
         );
     }
 }
