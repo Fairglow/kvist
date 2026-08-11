@@ -159,13 +159,13 @@ fn ignores_known_non_component_directories() {
 
 #[cfg(unix)]
 #[test]
-fn does_not_follow_cyclic_directory_links() {
+fn rejects_link_like_descendants_without_following_them() {
     use std::os::unix::fs::symlink;
 
     let (_project, component_root) = initialized_component_root();
     symlink(&component_root, component_root.join("cycle")).expect("create cyclic link");
 
-    let discovery = discover(&component_root).expect("discover components");
+    let error = discover(&component_root).expect_err("link-like descendants must be rejected");
 
-    assert_eq!(discovery.components.len(), 1);
+    assert!(error.to_string().contains("link-like component path"));
 }

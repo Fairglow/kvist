@@ -30,6 +30,14 @@ schema_version = 1
 # Directory containing the root component and its descendants.
 component_root = "src"
 
+[discovery]
+# Bounded, deterministic traversal limits. Each has a documented hard maximum.
+max_depth = 64
+max_directories = 10000
+max_components = 10000
+max_entries_per_directory = 10000
+max_relative_path_bytes = 4096
+
 [llm]
 # External LLM integration is opt-in. No provider is configured by default.
 provider = "none"

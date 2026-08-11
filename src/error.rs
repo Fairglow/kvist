@@ -19,7 +19,9 @@ pub enum KvistError {
         path: PathBuf,
     },
     /// Initialization would follow a project-root symbolic link.
-    #[error("refusing to initialize through symbolic link `{path}`")]
+    #[error(
+        "refusing to initialize through link-like path `{path}` (symbolic link or Windows reparse point)"
+    )]
     ProjectPathIsSymlink {
         /// Symbolic-link path supplied to `kvist init`.
         path: PathBuf,
@@ -31,7 +33,9 @@ pub enum KvistError {
         path: PathBuf,
     },
     /// Initialization would follow an artifact-directory symbolic link.
-    #[error("refusing to write artifacts through symbolic link `{path}`")]
+    #[error(
+        "refusing to write artifacts through link-like path `{path}` (symbolic link or Windows reparse point)"
+    )]
     ArtifactParentIsSymlink {
         /// Symbolic-link parent path.
         path: PathBuf,
@@ -77,9 +81,17 @@ pub enum KvistError {
         path: PathBuf,
     },
     /// Discovery would follow a symbolic-link component root.
-    #[error("refusing to discover components through symbolic link `{path}`")]
+    #[error(
+        "refusing to discover components through link-like path `{path}` (symbolic link or Windows reparse point)"
+    )]
     ComponentRootIsSymlink {
         /// Symbolic-link component-root path.
+        path: PathBuf,
+    },
+    /// Discovery encountered a link-like descendant.
+    #[error("refusing to inspect link-like component path `{path}`")]
+    ComponentDiscoveryLinkLikePath {
+        /// Link-like path that would otherwise be inspected or traversed.
         path: PathBuf,
     },
     /// Discovery reached the configured traversal bound.
@@ -93,6 +105,56 @@ pub enum KvistError {
         /// Maximum allowed depth below the component root.
         max_depth: usize,
     },
+    /// Discovery has inspected too many directories.
+    #[error(
+        "component discovery exceeded its maximum of {max_directories} scanned directories at `{path}`"
+    )]
+    ComponentDiscoveryDirectoryLimitExceeded {
+        /// Directory that would exceed the limit.
+        path: PathBuf,
+        /// Configured directory limit.
+        max_directories: usize,
+    },
+    /// Discovery has recognized too many components.
+    #[error(
+        "component discovery exceeded its maximum of {max_components} recognized components at `{path}`"
+    )]
+    ComponentDiscoveryComponentLimitExceeded {
+        /// Component that would exceed the limit.
+        path: PathBuf,
+        /// Configured component limit.
+        max_components: usize,
+    },
+    /// A directory contains too many entries to inspect safely.
+    #[error(
+        "component discovery exceeded its maximum of {max_entries} entries in directory `{path}`"
+    )]
+    ComponentDiscoveryEntriesPerDirectoryExceeded {
+        /// Directory whose entry count exceeds the limit.
+        path: PathBuf,
+        /// Configured entry limit.
+        max_entries: usize,
+    },
+    /// A relative component path is too long to represent within the policy.
+    #[error(
+        "component discovery exceeded its maximum relative path length of {max_bytes} encoded bytes at `{path}`"
+    )]
+    ComponentDiscoveryRelativePathTooLong {
+        /// Path whose relative representation is too long.
+        path: PathBuf,
+        /// Configured encoded-byte limit.
+        max_bytes: usize,
+    },
+    /// A recognized component appears below an ordinary directory.
+    #[error(
+        "component `{path}` is below ordinary directory `{intermediate}`; every intermediate directory must be a component"
+    )]
+    ComponentDiscoveryHierarchyViolation {
+        /// Relative path of the recognized descendant component.
+        path: PathBuf,
+        /// Relative path of the first ordinary intermediate directory.
+        intermediate: PathBuf,
+    },
     /// The project root does not exist or cannot be used as a directory.
     #[error("project root `{path}` must be a directory")]
     ProjectRootNotDirectory {
@@ -100,7 +162,9 @@ pub enum KvistError {
         path: PathBuf,
     },
     /// Loading configuration would follow a symbolic-link project root.
-    #[error("refusing to load project configuration through symbolic link `{path}`")]
+    #[error(
+        "refusing to load project configuration through link-like path `{path}` (symbolic link or Windows reparse point)"
+    )]
     ProjectRootIsSymlink {
         /// Symbolic-link project-root path.
         path: PathBuf,
@@ -118,7 +182,9 @@ pub enum KvistError {
         path: PathBuf,
     },
     /// Loading configuration would follow a symbolic link.
-    #[error("refusing to load project configuration through symbolic link `{path}`")]
+    #[error(
+        "refusing to load project configuration through link-like path `{path}` (symbolic link or Windows reparse point)"
+    )]
     ProjectConfigurationIsSymlink {
         /// Symbolic-link configuration path.
         path: PathBuf,
@@ -159,7 +225,9 @@ pub enum KvistError {
         path: PathBuf,
     },
     /// Specification generation would follow a component-directory symlink.
-    #[error("refusing to create a specification through symbolic link `{path}`")]
+    #[error(
+        "refusing to create a specification through link-like path `{path}` (symbolic link or Windows reparse point)"
+    )]
     ComponentDirectoryIsSymlink {
         /// Symbolic-link component-directory path.
         path: PathBuf,
@@ -193,7 +261,9 @@ pub enum KvistError {
         path: PathBuf,
     },
     /// Validation would follow a symbolic-link specification.
-    #[error("refusing to validate specification through symbolic link `{path}`")]
+    #[error(
+        "refusing to validate specification through link-like path `{path}` (symbolic link or Windows reparse point)"
+    )]
     SpecificationIsSymlink {
         /// Symbolic-link specification path.
         path: PathBuf,

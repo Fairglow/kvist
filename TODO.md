@@ -11,8 +11,8 @@ component discovery, and specification validation are implemented.
 
 Phase 1 is **feature complete but not foundation complete**. The remediation
 items below must be resolved before Phase 2 executes user tasks or invokes an
-LLM. In particular, Kvist still lacks bounded component-count traversal,
-enforced CI quality gates, lifecycle dogfooding, and VCS tracking inspection.
+LLM. In particular, Kvist still lacks enforced CI quality gates, lifecycle
+dogfooding, and VCS tracking inspection.
 
 ## Status conventions
 
@@ -54,27 +54,29 @@ unsupported-version domains, malformed content and artifact types, doctor
 output and read-only behavior, refusal/preservation for partial/invalid/
 unsupported projects, and independent version constants.
 
-### TODO P1-R2 — Bound discovery and document the filesystem threat model
+### DONE P1-R2 — Bound discovery and document the filesystem threat model
 
-**Why:** discovery has a depth limit but no maximum component count, directory
-entry count, path length, or total metadata-read budget. Direct symlink checks
-do not establish canonical containment or eliminate time-of-check/time-of-use
-races.
+**Completed decision:** Kvist supports malformed or untrusted *static*
+workspaces for bounded read-only Phase 1 inspection, but is not a sandbox,
+does not establish canonical containment, and cannot prevent concurrent
+filesystem changes/TOCTOU. Phase 2 execution requires a separately authorized
+trusted-workspace policy. Unix symbolic links and Windows reparse points
+(including junctions) are link-like and rejected whenever discovery directly
+inspects a component root or non-artifact descendant; link-like required
+artifacts are invalid. Component paths require a component at every
+intermediate directory. The configurable `[discovery]` limits have defaults
+of depth 64, directories/components/entries 10,000 each, and relative path
+4,096 encoded bytes; hard maxima are 256, 100,000, 100,000, 100,000, and
+32,768 respectively. Invalid limits make the root state invalid. `.gitignore`
+semantics remain deliberately unimplemented until P1-R5 because Git ignore
+rules depend on tracked state.
 
-**Acceptance criteria:**
-
-- Define supported filesystem and attacker assumptions: trusted local checkout,
-  hostile workspace, or both. Specify Windows junction/reparse-point behavior.
-- Add configurable, documented limits for discovered directories/components,
-  directory entries, and path bytes. Report the exact exceeded limit.
-- Decide whether component descendants beneath a non-component directory are
-  legal. Enforce the chosen hierarchy invariant instead of merely indenting
-  their relative path in tree output.
-- Add supported-platform permission-error tests and tests for each resource
-  limit, symlink/junction behavior, and malformed intermediate path.
-
-**Verification:** deterministic limit tests, Unix and Windows platform coverage
-where available, and no uncontrolled traversal of ignored or linked paths.
+**Verification:** deterministic direct and `tree` limit tests cover depth,
+directories, components, entries, and encoded path length; configuration
+default/range tests cover `tree`, `doctor`, and `init` propagation; hierarchy
+and Unix link tests cover supported behavior. Permission-error testing is
+documented for unprivileged supported-platform manual/release testing rather
+than flaky root-bypassing automated tests.
 
 ### TODO P1-R3 — Make quality gates reproducible and enforced in CI
 
@@ -270,17 +272,14 @@ fixture.
 | Root-state and recovery | Five-state read-only inspection. Phase 1 never repairs or migrates automatically; `doctor` guides explicit user recovery. |
 | Artifact version domains | Configuration, root contract, specification, TODO queue, and documentation have independent version domains. |
 | VCS policy | Before Phase 2, durable artifacts must be tracked in a supported VCS (Git or jj); required ignored artifacts are reported. Kvist never auto-stages or commits; logs, locks, raw provider data, and credentials remain untracked. |
-| Filesystem safety | No-clobber atomic file persistence, direct symlink rejection, lexical discovery, ignored VCS/build directories, 64-level depth limit. |
+| Filesystem safety | No-clobber atomic file persistence; direct Unix-link/Windows-reparse rejection; lexical, bounded discovery; component-only intermediate hierarchy; ignored VCS/build directories. Static-workspace inspection is not a sandbox or TOCTOU defense; Phase 2 requires a trusted-workspace policy. |
 | Input limits | `kvist.toml` at most 64 KiB; specifications and root contract/TODO/documentation inspection at most 1 MiB each. |
 | Dependencies | `clap`, `thiserror`, `toml`, `tempfile`, and `serde_yaml`; add dependencies only with a documented need. |
 | Review model | Clean-slate source documentation followed by source-blind specification comparison. |
 
 ## Open questions requiring an explicit decision
 
-1. **Hierarchy invariant:** Must every intermediate directory in a component
-   path be a component, or may a component sit below an ordinary source
-   directory?
-2. **Task execution trust:** Who authorizes repository-defined test commands
+1. **Task execution trust:** Who authorizes repository-defined test commands
    and LLM execution, and what isolation or consent is required?
 3. **Provider interface:** Which provider CLIs are first-class, what exact
    protocol do they implement, and where may credentials live?
@@ -291,7 +290,5 @@ fixture.
    both?
 6. **Automation interface:** Is stable JSON output and a documented exit-code
    taxonomy required before the web view, watcher, and CI integrations?
-7. **Platform/security scope:** Is Kvist supported on Windows junctions and
-   hostile workspaces, or only trusted local checkouts?
-8. **Distribution and license:** What exact BSL/double-license text, Cargo
+7. **Distribution and license:** What exact BSL/double-license text, Cargo
     metadata, release channel, MSRV, and binary distribution policy apply?

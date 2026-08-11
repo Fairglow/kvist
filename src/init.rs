@@ -10,6 +10,7 @@ use crate::{
     KvistError, Result,
     artifacts::{ArtifactTemplate, root_artifacts},
     file_io::write_new_file_atomically,
+    filesystem::is_link_like,
     project_state::{self, ProjectState},
 };
 
@@ -107,7 +108,7 @@ fn validate_project_directory(project_dir: &Path) -> Result<()> {
     })?;
     let file_type = metadata.file_type();
 
-    if file_type.is_symlink() {
+    if is_link_like(&metadata) {
         return Err(KvistError::ProjectPathIsSymlink {
             path: project_dir.to_path_buf(),
         });
@@ -150,7 +151,7 @@ fn artifact_parent_paths(project_dir: &Path, artifacts: &[ArtifactTemplate]) -> 
 
 fn validate_artifact_parent(path: &Path, metadata: &fs::Metadata) -> Result<()> {
     let file_type = metadata.file_type();
-    if file_type.is_symlink() {
+    if is_link_like(metadata) {
         return Err(KvistError::ArtifactParentIsSymlink {
             path: path.to_path_buf(),
         });

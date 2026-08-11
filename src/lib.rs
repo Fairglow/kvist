@@ -12,6 +12,7 @@ pub mod config;
 pub mod discovery;
 mod error;
 mod file_io;
+mod filesystem;
 pub mod init;
 pub mod project_state;
 pub mod specification;

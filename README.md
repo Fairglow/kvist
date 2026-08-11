@@ -29,6 +29,24 @@ ARM64 systems. Filesystem behavior must be covered on every supported platform;
 platform-specific differences must be explicit in the relevant command
 documentation and tests.
 
+### Filesystem threat model
+
+Phase 1 discovery supports ordinary local checkouts and malformed or untrusted
+**static** workspaces: it bounds reads, reports malformed layouts, and refuses
+link-like paths it directly inspects. It is not a sandbox, does not establish
+canonical containment, and makes no guarantee if another process changes the
+filesystem between metadata checks and use (TOCTOU). Do not treat `init`,
+`doctor`, `tree`, or specification validation as authorization to run
+repository code. Phase 2 execution requires a separately documented trusted
+workspace policy and explicit execution authorization.
+
+On Unix, symbolic links are link-like; on Windows, all reparse points,
+including junctions and symbolic links, are link-like. Link-like
+project/configuration/component paths are refused, while a link-like required
+artifact is invalid. Discovery refuses link-like non-artifact descendants
+rather than following or silently traversing them. These direct checks reduce
+accidental traversal only; they do not remove the TOCTOU limitation above.
+
 ## Root artifact templates
 
 `kvist init` creates the following deterministic, UTF-8 templates.
@@ -48,8 +66,21 @@ migration path; Kvist must never silently rewrite user-authored artifacts. The
 initial templates contain no credentials, configured external provider,
 copyright notices, or license terms.
 
-`kvist init` creates a missing target directory, rejects a symbolic-link root
-or artifact parent, and writes each artifact through a same-directory temporary
+`[discovery]` may configure bounded tree traversal. Omitted values use the
+defaults below; values must be positive integers and may not exceed their hard
+maximum, otherwise `doctor` classifies the project invalid and `init`/`tree`
+refuse it.
+
+| Key | Default | Hard maximum | Meaning |
+| --- | ---: | ---: | --- |
+| `max_depth` | 64 | 256 | Levels below `component_root`. |
+| `max_directories` | 10,000 | 100,000 | Directories whose entries are scanned, including the root. |
+| `max_components` | 10,000 | 100,000 | Recognized components, including the root. |
+| `max_entries_per_directory` | 10,000 | 100,000 | Entries read from one directory. |
+| `max_relative_path_bytes` | 4,096 | 32,768 | Platform-encoded bytes in a path relative to `component_root`. |
+
+`kvist init` creates a missing target directory, rejects a link-like root or
+artifact parent, and writes each artifact through a same-directory temporary
 file with no-clobber persistence. It writes only an **uninitialized** project
 and reports **already initialized** only after every required artifact validates
 as current. It refuses partial, invalid, and unsupported-version projects
@@ -76,6 +107,9 @@ auto-stage or commit. Required artifacts ignored by the selected VCS must be
 reported rather than hidden. Transient logs, locks, raw provider data, and
 credentials are untracked. Phase 1 does not yet implement VCS inspection; its
 dedicated remediation task defines that work before Phase 2.
+Kvist intentionally does not implement `.gitignore` semantics in discovery:
+full VCS-aware Git/jj ignore handling belongs to P1-R5, because Git ignore
+rules depend on tracked state.
 
 ## Component discovery policy
 
@@ -86,14 +120,27 @@ component; a descendant is a component only when at least one of `SPEC.md`,
 directories from becoming components while retaining incomplete layouts for
 diagnosis.
 
+Every intermediate directory from the component root to a recognized
+descendant must itself be a component. A recognized artifact-bearing directory
+below an ordinary directory is an actionable discovery error, not a tree entry
+with ambiguous indentation.
+
 Each artifact must be a regular file. Missing artifacts produce an incomplete
 status; directories, symbolic links, and other filesystem objects at required
 artifact paths produce an invalid status. Content validation is intentionally
 deferred to the specification and task-queue validators.
 
-Traversal never follows symbolic links, skips `.git`, `.hg`, `.jj`,
-`node_modules`, and `target` directories, visits paths in lexical order, and
-reports an error rather than silently truncating beyond 64 directory levels.
+Traversal skips `.git`, `.hg`, `.jj`, `node_modules`, and `target` directories,
+visits paths in lexical order, and reports the exact configured limit or
+hierarchy violation rather than silently truncating.
+
+Permission failures are reported as filesystem errors with the operation and
+path. The automated suite does not alter permissions: root and privileged CI
+accounts can bypass those checks, making such tests flaky. Permission behavior
+is exercised in supported-platform release/manual testing with an unprivileged
+account, a directory that denies enumeration, and a required artifact that
+denies metadata/read access; each case must produce a nonzero command result
+without writes.
 
 `kvist tree` reads only the selected project's `kvist.toml`, renders plain
 ASCII with no terminal capability detection, and never writes project files.

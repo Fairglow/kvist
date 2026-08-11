@@ -29,8 +29,10 @@ and never overwrites an existing path.
 
 `kvist.toml` must be a regular UTF-8 TOML file of at most 65,536 bytes with
 integer configuration `schema_version = 1` and a non-empty relative `component_root`
-containing only normal path segments. Other keys, including `[llm]`, are not
-validated or used.
+containing only normal path segments. `[discovery]` supports positive bounded
+limits for depth, scanned directories, recognized components, entries per
+directory, and encoded relative-path bytes; omitted values use deterministic
+defaults. Other keys, including `[llm]`, are not validated or used.
 
 ## Validation and tree
 
@@ -48,8 +50,13 @@ missing, or invalid. It ignores artifact contents, skips `.git`, `.hg`, `.jj`,
 ## Safety, limits, and limitations
 
 Unsafe Rust is forbidden. Direct project, configuration, component, and
-specification symlinks are rejected; discovery does not follow symlink entries.
-Discovery permits at most 64 levels below the component root. No network or LLM
-operation is implemented. Root inspection validates the current TODO mapping
-and root contract/documentation version markers, but Phase 2 still owns the
-complete TODO schema and specification-to-project association.
+specification link-like paths are rejected; Windows reparse points receive the
+same treatment. Discovery rejects link-like non-artifact descendants, reports
+link-like required artifacts as invalid, applies configured resource bounds,
+and requires every intermediate directory to be a component before recognizing
+an artifact-bearing descendant. It does not provide canonical containment or
+TOCTOU protection. No network or LLM operation is implemented. `.gitignore`
+semantics are not implemented; P1-R5 owns VCS-aware Git/jj ignore handling.
+Root inspection validates the current TODO mapping and root
+contract/documentation version markers, but Phase 2 still owns the complete
+TODO schema and specification-to-project association.

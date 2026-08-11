@@ -18,6 +18,7 @@ use crate::{
         TODO_QUEUE_VERSION,
     },
     config,
+    filesystem::is_link_like,
     specification::{self, SpecificationDiagnosticKind},
 };
 
@@ -155,7 +156,7 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
     let root_exists = match fs::symlink_metadata(project_dir) {
         Ok(metadata) => {
             let file_type = metadata.file_type();
-            if file_type.is_symlink() || !file_type.is_dir() {
+            if is_link_like(&metadata) || !file_type.is_dir() {
                 return Ok(invalid_root_inspection(project_dir));
             }
             true
@@ -203,7 +204,7 @@ fn invalid_root_inspection(project_dir: &Path) -> ProjectInspection {
         state: ProjectState::Invalid,
         artifacts: Vec::new(),
         root_diagnostic: Some(
-            "project path must be a real directory, not a file or symbolic link".to_owned(),
+            "project path must be a real directory, not a file or link-like path".to_owned(),
         ),
         guidance: guidance(ProjectState::Invalid).to_owned(),
     }
@@ -234,8 +235,8 @@ fn inspect_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactSt
         }
     };
     let file_type = metadata.file_type();
-    if file_type.is_symlink() {
-        return Ok(invalid_status(artifact.path, "invalid (symbolic link)"));
+    if is_link_like(&metadata) {
+        return Ok(invalid_status(artifact.path, "invalid (link-like path)"));
     }
     if !file_type.is_file() {
         return Ok(invalid_status(
@@ -256,8 +257,8 @@ fn parent_problem(project_dir: &Path, relative_path: &str) -> Result<Option<Stri
     }
     let path = project_dir.join(parent);
     match fs::symlink_metadata(&path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Ok(Some(format!(
-            "invalid (parent `{}` is a symbolic link)",
+        Ok(metadata) if is_link_like(&metadata) => Ok(Some(format!(
+            "invalid (parent `{}` is link-like)",
             parent.display()
         ))),
         Ok(metadata) if !metadata.file_type().is_dir() => Ok(Some(format!(

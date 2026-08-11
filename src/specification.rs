@@ -11,6 +11,7 @@ use std::{
 
 use crate::{
     KvistError, Result, artifacts::SPECIFICATION_VERSION, file_io::write_new_file_atomically,
+    filesystem::is_link_like,
 };
 
 /// Maximum supported size of a specification read from disk.
@@ -288,7 +289,7 @@ pub fn validate_file(path: &Path) -> Result<SpecificationValidation> {
         source,
     })?;
     let file_type = metadata.file_type();
-    if file_type.is_symlink() {
+    if is_link_like(&metadata) {
         return Err(KvistError::SpecificationIsSymlink {
             path: path.to_path_buf(),
         });
@@ -576,7 +577,7 @@ fn ensure_component_directory(component_dir: &Path) -> Result<()> {
 
 fn validate_component_directory(component_dir: &Path, metadata: &fs::Metadata) -> Result<()> {
     let file_type = metadata.file_type();
-    if file_type.is_symlink() {
+    if is_link_like(metadata) {
         return Err(KvistError::ComponentDirectoryIsSymlink {
             path: component_dir.to_path_buf(),
         });

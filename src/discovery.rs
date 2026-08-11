@@ -9,6 +9,7 @@ use std::{
 };
 
 use crate::{KvistError, Result};
+use crate::{config::DiscoveryLimits, filesystem::is_link_like};
 
 /// Maximum number of directory levels below the component root to traverse.
 pub const MAX_COMPONENT_DEPTH: usize = 64;
@@ -138,19 +139,46 @@ pub struct Discovery {
 
 /// Discovers components rooted at `component_root`.
 ///
-/// Discovery never follows symbolic links. It recursively examines only normal
-/// directories beneath `component_root`, skips `IGNORED_DIRECTORY_NAMES`, and
-/// rejects layouts deeper than `MAX_COMPONENT_DEPTH` rather than truncating
-/// them silently. The root is always represented; descendants are represented
-/// only when at least one required adjacent artifact exists.
+/// Discovery refuses link-like roots and non-artifact descendants rather than
+/// following them. It recursively examines only normal directories beneath
+/// `component_root`, skips `IGNORED_DIRECTORY_NAMES`, and rejects layouts
+/// beyond its limits rather than truncating them silently. The root is always
+/// represented; descendants are represented only when at least one required
+/// adjacent artifact exists.
 pub fn discover(component_root: &Path) -> Result<Discovery> {
+    discover_with_limits(component_root, DiscoveryLimits::default())
+}
+
+/// Discovers components using explicit resource limits.
+///
+/// This is used by project commands after loading `kvist.toml`; the public
+/// [`discover`] API retains its deterministic default limits for direct users.
+pub fn discover_with_limits(component_root: &Path, limits: DiscoveryLimits) -> Result<Discovery> {
     validate_component_root(component_root)?;
 
-    let mut components = Vec::new();
-    scan_directory(component_root, Path::new(""), 0, true, &mut components)?;
-    components.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    let mut context = ScanContext {
+        limits,
+        scanned_directories: 0,
+        components: Vec::new(),
+    };
+    scan_directory(
+        component_root,
+        Path::new(""),
+        ScanPosition {
+            depth: 0,
+            is_root: true,
+            parent_is_component: true,
+            ordinary_intermediate: None,
+        },
+        &mut context,
+    )?;
+    context
+        .components
+        .sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
 
-    Ok(Discovery { components })
+    Ok(Discovery {
+        components: context.components,
+    })
 }
 
 fn validate_component_root(component_root: &Path) -> Result<()> {
@@ -171,7 +199,7 @@ fn validate_component_root(component_root: &Path) -> Result<()> {
     };
     let file_type = metadata.file_type();
 
-    if file_type.is_symlink() {
+    if is_link_like(&metadata) {
         return Err(KvistError::ComponentRootIsSymlink {
             path: component_root.to_path_buf(),
         });
@@ -185,58 +213,138 @@ fn validate_component_root(component_root: &Path) -> Result<()> {
     Ok(())
 }
 
+struct ScanContext {
+    limits: DiscoveryLimits,
+    scanned_directories: usize,
+    components: Vec<Component>,
+}
+
+struct ScanPosition {
+    depth: usize,
+    is_root: bool,
+    parent_is_component: bool,
+    ordinary_intermediate: Option<PathBuf>,
+}
+
 fn scan_directory(
     directory: &Path,
     relative_path: &Path,
-    depth: usize,
-    is_root: bool,
-    components: &mut Vec<Component>,
+    position: ScanPosition,
+    context: &mut ScanContext,
 ) -> Result<()> {
+    context.scanned_directories += 1;
+    if context.scanned_directories > context.limits.max_directories {
+        return Err(KvistError::ComponentDiscoveryDirectoryLimitExceeded {
+            path: directory.to_path_buf(),
+            max_directories: context.limits.max_directories,
+        });
+    }
+
     let component = inspect_component(directory, relative_path)?;
-    if is_root || component.is_candidate() {
-        components.push(component);
+    let is_component = position.is_root || component.is_candidate();
+    if !position.is_root && is_component && !position.parent_is_component {
+        return Err(KvistError::ComponentDiscoveryHierarchyViolation {
+            path: relative_path.to_path_buf(),
+            intermediate: position
+                .ordinary_intermediate
+                .expect("ordinary intermediate is known for non-component parent"),
+        });
+    }
+    if is_component {
+        if context.components.len() == context.limits.max_components {
+            return Err(KvistError::ComponentDiscoveryComponentLimitExceeded {
+                path: directory.to_path_buf(),
+                max_components: context.limits.max_components,
+            });
+        }
+        context.components.push(component);
     }
 
     let mut children = Vec::new();
-    let entries = fs::read_dir(directory).map_err(|source| KvistError::Io {
+    let read_entries = fs::read_dir(directory).map_err(|source| KvistError::Io {
         operation: "read component directory",
         path: directory.to_path_buf(),
         source,
     })?;
-    for entry in entries {
+    let mut entries = Vec::new();
+    for entry in read_entries {
         let entry = entry.map_err(|source| KvistError::Io {
             operation: "read component directory entry",
             path: directory.to_path_buf(),
             source,
         })?;
-        let file_type = entry.file_type().map_err(|source| KvistError::Io {
+        if entries.len() == context.limits.max_entries_per_directory {
+            return Err(KvistError::ComponentDiscoveryEntriesPerDirectoryExceeded {
+                path: directory.to_path_buf(),
+                max_entries: context.limits.max_entries_per_directory,
+            });
+        }
+        entries.push(entry);
+    }
+    entries.sort_by_key(|entry| entry.file_name());
+
+    for entry in entries {
+        let name = entry.file_name();
+        if is_artifact_name(&name) {
+            continue;
+        }
+        let entry_path = entry.path();
+        let metadata = fs::symlink_metadata(&entry_path).map_err(|source| KvistError::Io {
             operation: "inspect component directory entry",
-            path: entry.path(),
+            path: entry_path.clone(),
             source,
         })?;
+        let file_type = metadata.file_type();
 
-        if !file_type.is_dir() || is_ignored_directory(&entry.file_name()) {
+        if is_link_like(&metadata) {
+            return Err(KvistError::ComponentDiscoveryLinkLikePath { path: entry_path });
+        }
+        if !file_type.is_dir() || is_ignored_directory(&name) {
             continue;
         }
 
-        children.push((entry.path(), relative_path.join(entry.file_name())));
+        let child_relative_path = relative_path.join(name);
+        if child_relative_path.as_os_str().as_encoded_bytes().len()
+            > context.limits.max_relative_path_bytes
+        {
+            return Err(KvistError::ComponentDiscoveryRelativePathTooLong {
+                path: child_relative_path,
+                max_bytes: context.limits.max_relative_path_bytes,
+            });
+        }
+        children.push((entry_path, child_relative_path));
     }
     children.sort_by(|left, right| left.1.cmp(&right.1));
 
-    if depth == MAX_COMPONENT_DEPTH && !children.is_empty() {
+    if position.depth == context.limits.max_depth && !children.is_empty() {
         return Err(KvistError::ComponentDiscoveryDepthExceeded {
             path: directory.to_path_buf(),
-            max_depth: MAX_COMPONENT_DEPTH,
+            max_depth: context.limits.max_depth,
         });
     }
 
     for (child_directory, child_relative_path) in children {
+        let child_ordinary_intermediate = if is_component {
+            None
+        } else {
+            Some(
+                position
+                    .ordinary_intermediate
+                    .as_deref()
+                    .unwrap_or(relative_path)
+                    .to_path_buf(),
+            )
+        };
         scan_directory(
             &child_directory,
             &child_relative_path,
-            depth + 1,
-            false,
-            components,
+            ScanPosition {
+                depth: position.depth + 1,
+                is_root: false,
+                parent_is_component: is_component,
+                ordinary_intermediate: child_ordinary_intermediate,
+            },
+            context,
         )?;
     }
 
@@ -263,12 +371,12 @@ fn inspect_component(directory: &Path, relative_path: &Path) -> Result<Component
 fn inspect_artifact(directory: &Path, artifact: ComponentArtifact) -> Result<ArtifactStatus> {
     let path = directory.join(artifact.filename());
     match fs::symlink_metadata(&path) {
+        Ok(metadata) if is_link_like(&metadata) => {
+            Ok(ArtifactStatus::Invalid(InvalidArtifactKind::SymbolicLink))
+        }
         Ok(metadata) if metadata.file_type().is_file() => Ok(ArtifactStatus::Present),
         Ok(metadata) if metadata.file_type().is_dir() => {
             Ok(ArtifactStatus::Invalid(InvalidArtifactKind::Directory))
-        }
-        Ok(metadata) if metadata.file_type().is_symlink() => {
-            Ok(ArtifactStatus::Invalid(InvalidArtifactKind::SymbolicLink))
         }
         Ok(_) => Ok(ArtifactStatus::Invalid(InvalidArtifactKind::Other)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(ArtifactStatus::Missing),
@@ -284,6 +392,12 @@ fn is_ignored_directory(name: &std::ffi::OsStr) -> bool {
     IGNORED_DIRECTORY_NAMES
         .iter()
         .any(|ignored_name| name == std::ffi::OsStr::new(ignored_name))
+}
+
+fn is_artifact_name(name: &std::ffi::OsStr) -> bool {
+    REQUIRED_ARTIFACTS
+        .iter()
+        .any(|artifact| name == std::ffi::OsStr::new(artifact.filename()))
 }
 
 const fn artifact_index(artifact: ComponentArtifact) -> usize {
