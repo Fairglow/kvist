@@ -225,6 +225,16 @@ and atomic-state-update integration tests.
 
 **Depends on:** P2-02
 **Status:** BLOCKED — requires product decisions below.
+**Decision gates (owner approval required before tests or code):**
+
+1. Provider set and executable discovery: first-class CLIs, version support,
+   lookup paths, and missing/ambiguous executable behavior.
+2. Protocol and invocation: request/response framing, arguments, stdin/stdout,
+   working directory, exit-code mapping, timeout, cancellation, and output cap.
+3. Trust and privacy: credential sources, environment allowlist, redaction,
+   telemetry, network consent, and retained evidence.
+4. Context manifest: target/parent/root inputs, explicit extra-file approval,
+   and the rule excluding peer implementations.
 **Acceptance criteria:**
 
 - Define a provider-neutral request/response contract for external CLIs,
@@ -245,6 +255,14 @@ redaction, and output limits.
 
 **Depends on:** P2-01, P2-03
 **Status:** BLOCKED — requires test-command policy.
+**Decision gates (owner approval required before tests or code):**
+
+1. Policy artifact: versioned location, schema, and component inheritance.
+2. Authority: who approves commands and how a changed policy is detected.
+3. Execution boundary: trusted-workspace/isolation requirement, command
+   working directory, environment allowlist, timeout, cancellation, and output cap.
+4. Verification semantics: required task states, durable redacted result
+   record, failure/cancellation handling, and retry/recovery policy.
 **Acceptance criteria:**
 
 - Define where test commands are configured and who may approve changes to

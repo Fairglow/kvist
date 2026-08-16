@@ -290,4 +290,25 @@ attempt-file entries are directory-synced where the platform supports durable
 directory synchronization. Other platforms retain the record but do not claim
 that directory-entry durability guarantee.
 
+## Execution-policy decision gates
+
+P2-04 cannot implement a provider runner until the project owner records:
+first-class provider executable names and discovery rules; a versioned
+request/response protocol; the exact working directory, stdin, arguments, and
+allowed environment; per-provider timeout, cancellation, and output limits;
+credential locations, inheritance, redaction, and telemetry policy; whether
+network-capable providers require per-run consent; and the exact local context
+manifest (target component, immediate parent interface, root contract, and
+explicitly required files only). Shell command construction, implicit
+credential discovery, peer implementation context, and implicit network
+consent are prohibited until an approved policy says otherwise.
+
+P2-05 cannot execute repository-defined tests until the owner records the
+versioned location and schema for approved commands; the authority that
+approves additions or changes; the trusted-workspace/isolation prerequisite;
+working-directory, environment, timeout, cancellation, and output-limit
+rules; which task transitions require successful verification; and the durable
+redacted result record. Kvist must reject absent, malformed, unapproved, or
+changed command policy rather than execute repository text by default.
+
 </details>

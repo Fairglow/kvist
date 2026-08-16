@@ -1,10 +1,10 @@
 schema_version: 2
 component:
-  specification_revision: sha256:b5f94d9678bd54d7a333993f19edacb4055f6636496d844d87aee3089d566666
+  specification_revision: sha256:4094e9394033bc562971bcd107d54fbdbbaa1bada51f68a470cefa10ac267be5
   parent_specification: null
   revalidation:
     state: current
-    checked_at: 2026-08-16T13:09:54Z
+    checked_at: 2026-08-16T14:00:52Z
     stale_since: null
     causes: []
 tasks:
@@ -236,3 +236,99 @@ tasks:
       updated_at: 2026-08-16T13:15:52Z
       completed_at: 2026-08-16T13:15:52Z
     blocked_reason: null
+  - id: p2-04-write-tests
+    title: Define provider runner tests
+    description: Define fake-provider tests after the owner approves discovery, protocol, consent, credentials, context, and limits.
+    context: No provider policy exists.
+    purpose: Prevent an implicit subprocess or network contract.
+    expected_outcome: Approved policy yields failing success, timeout, cancellation, redaction, and output-limit fixtures.
+    kind: test
+    status: blocked
+    depends_on: []
+    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-04]
+    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
+    blocked_reason: Owner must approve all P2-04 provider decision gates.
+  - id: p2-04-implement-code
+    title: Implement approved provider contract
+    description: Implement only the owner-approved provider protocol and policy.
+    context: Provider execution controls credentials and network exposure.
+    purpose: Preserve explicit execution trust boundaries.
+    expected_outcome: Provider runner conforms to approved policy and tests.
+    kind: implementation
+    status: blocked
+    depends_on: [p2-04-write-tests]
+    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-04]
+    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
+    blocked_reason: Provider policy is not approved.
+  - id: p2-04-security-audit
+    title: Audit provider boundary
+    description: Audit approved subprocess, credential, network, and context policy.
+    context: Provider invocation is security-sensitive.
+    purpose: Independently validate the trust boundary.
+    expected_outcome: Retained provider security findings.
+    kind: security-audit
+    status: blocked
+    depends_on: [p2-04-implement-code]
+    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-04]
+    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
+    blocked_reason: Provider implementation is blocked.
+  - id: p2-04-compliance-review
+    title: Review provider compliance
+    description: Compare observed provider behavior with approved policy.
+    context: Implementers cannot certify provider execution.
+    purpose: Retain independent compliance evidence.
+    expected_outcome: Source-blind provider review.
+    kind: compliance-review
+    status: blocked
+    depends_on: [p2-04-security-audit]
+    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-04]
+    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
+    blocked_reason: Provider audit is blocked.
+  - id: p2-05-write-tests
+    title: Define verification command tests
+    description: Define policy, timeout, cancellation, output, and persistence fixtures after approval.
+    context: Repository text is not execution authority.
+    purpose: Prevent implicit arbitrary test execution.
+    expected_outcome: Approved policy yields failing verification fixtures.
+    kind: test
+    status: blocked
+    depends_on: []
+    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-05]
+    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
+    blocked_reason: Owner must approve all P2-05 test-command decision gates.
+  - id: p2-05-implement-code
+    title: Implement approved test verification
+    description: Execute only approved commands with captured redacted evidence.
+    context: Verification affects task completion trust.
+    purpose: Enforce explicit command authority.
+    expected_outcome: Approved verifier and fixtures pass.
+    kind: implementation
+    status: blocked
+    depends_on: [p2-05-write-tests]
+    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-05]
+    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
+    blocked_reason: Test-command policy is not approved.
+  - id: p2-05-security-audit
+    title: Audit verification boundary
+    description: Audit approved command authority and evidence handling.
+    context: Test execution can run untrusted code.
+    purpose: Independently validate execution controls.
+    expected_outcome: Retained verification security findings.
+    kind: security-audit
+    status: blocked
+    depends_on: [p2-05-implement-code]
+    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-05]
+    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
+    blocked_reason: Verification implementation is blocked.
+  - id: p2-05-compliance-review
+    title: Review verification compliance
+    description: Compare observed verification behavior with approved policy.
+    context: Implementers cannot certify execution controls.
+    purpose: Retain independent review evidence.
+    expected_outcome: Source-blind verification review.
+    kind: compliance-review
+    status: blocked
+    depends_on: [p2-05-security-audit]
+    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-05]
+    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
+    blocked_reason: Verification audit is blocked.
