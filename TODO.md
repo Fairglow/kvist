@@ -202,9 +202,12 @@ clean-slate/source-blind review evidence are retained in
 **Verification:** golden tests for text and any machine-readable output, plus
 state fixtures produced by P1-R1.
 
-### TODO P2-03 — Implement safe task selection and execution state updates
+### IN PROGRESS P2-03 — Implement safe task selection and execution state updates
 
 **Depends on:** P2-01, P2-02
+**Current evidence:** The task selection and transition contract, lock and
+attempt-record recovery rules, and focused failing CLI fixtures are retained
+in `src/SPEC.md`, `src/TODOS.yaml`, and `tests/task_commands.rs`.
 **Acceptance criteria:**
 
 - Select only ready tasks whose dependencies are complete and whose component

@@ -243,4 +243,47 @@ diagnostics, or queue evidence cannot forge report records. This versioned
 report is designed for scripts and future web/LSP clients; consumers must
 treat unknown future versions as unsupported rather than guessing semantics.
 
+## Task selection and state updates
+
+`kvist task next COMPONENT_DIR` selects but does not modify the first ready
+task in declared queue order. `kvist task transition COMPONENT_DIR TASK_ID
+STATUS` is the only phase-2 writer; it changes one task status and records the
+attempt. Both commands require a current root project, a discovered complete
+component, a valid version-2 queue, current component revalidation, and
+complete VCS tracking. `COMPONENT_DIR` is a component-root-relative normal
+path; `.` names the configured component root. These commands do not invoke
+providers, tests, shells, or network services.
+
+A task is ready only when it is `pending`, every explicit dependency is
+`completed`, and every preceding lifecycle role in its transitive dependency
+chain is `completed`. `next` prints the selected task ID or `no ready task`.
+Stale, blocked, incomplete, invalid, unsupported, untracked, or otherwise
+non-current components are rejected rather than treated as empty queues.
+
+Transitions use the version-2 state machine. Moving to `in-progress` requires
+that the task is ready; moving to `completed` requires `in-progress`; and
+moving to `pending` or `blocked` requires an active or blocked task as allowed
+by the state machine. The command supplies a nonblank `--reason` only for
+`blocked`; every other status stores `blocked_reason: null`. It sets
+`updated_at` to the current whole-second UTC time, and sets `completed_at`
+only when entering `completed`. It never changes queue revisions,
+revalidation evidence, task definitions, dependencies, or requirements.
+
+Before reading the queue, a transition atomically creates
+`COMPONENT_DIR/.kvist-task.lock` with no replacement. Its contents identify
+the command start time and task ID; another transition fails while the lock
+exists. Stale locks are never removed automatically: the owner must inspect
+the component, confirm no writer is active, and remove the named lock
+explicitly. The lock is removed only after the queue and audit sequence
+finishes or an in-process failure is handled.
+
+Each transition appends an attempt record to
+`COMPONENT_DIR/.kvist-attempts/TASK_ID.jsonl`. The record sequence is
+`prepared` before the atomic queue replacement and `committed` after it. Queue
+replacement is a same-directory no-clobber temporary write, file sync, rename,
+and parent-directory sync. A cancellation or crash can leave a prepared record
+and either old or new queue; it never reports success unless the committed
+record is written. Future recovery tooling must retain and reconcile prepared
+records explicitly rather than guessing or silently repairing them.
+
 </details>

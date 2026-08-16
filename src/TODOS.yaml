@@ -1,10 +1,10 @@
 schema_version: 2
 component:
-  specification_revision: sha256:dbd80b114196737836cadf55d2ca0d06b151a12b3bb030a639aa2331a83ec50f
+  specification_revision: sha256:3e7d7d2f3b3ff636b489d5d7141a28649572be260107c168a832d56b01b308f2
   parent_specification: null
   revalidation:
     state: current
-    checked_at: 2026-08-16T12:27:01Z
+    checked_at: 2026-08-16T12:54:50Z
     stale_since: null
     causes: []
 tasks:
@@ -159,4 +159,80 @@ tasks:
       created_at: 2026-08-16T12:19:23Z
       updated_at: 2026-08-16T12:28:42Z
       completed_at: 2026-08-16T12:28:42Z
+    blocked_reason: null
+  - id: p2-03-write-tests
+    title: Define task selection and transition tests
+    description: Write focused integration tests for ready-task selection, revalidation gates, lifecycle and dependency completion, lock contention, atomic queue replacement, prepared/committed audit records, and cancellation recovery evidence.
+    context: The validated queue has no executor, lock, writer, or durable attempt evidence, so later task automation could race or infer unsafe readiness.
+    purpose: Establish executable evidence for the workflow-control boundary before any state transition can mutate a user-authored queue.
+    expected_outcome: Focused tests initially fail for deterministic next-task output, stale and blocked refusal, illegal transitions, concurrent locks, preserved old queue on failed writes, and inspectable prepared records.
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - ROOT_CONTRACT.md#Change-and-compliance-rules
+      - SPEC.md#Task-selection-and-state-updates
+      - TODO.md#P2-03
+    timestamps:
+      created_at: 2026-08-16T12:54:50Z
+      updated_at: 2026-08-16T12:55:20Z
+      completed_at: 2026-08-16T12:55:20Z
+    blocked_reason: null
+  - id: p2-03-implement-code
+    title: Implement task selection and atomic transitions
+    description: Add the task CLI, readiness checks, lock protocol, atomic queue update, and append-only prepared/committed attempt records.
+    context: Subsequent provider and test execution depends on one deterministic, auditable state mutation boundary.
+    purpose: Prevent concurrent corruption and false completion while preserving durable recovery evidence.
+    expected_outcome: A current tracked component can select one ready task and persist only legal transitions under the documented lock and audit protocol.
+    kind: implementation
+    status: pending
+    depends_on:
+      - p2-03-write-tests
+    requirements:
+      - ROOT_CONTRACT.md#Non-negotiable-architecture
+      - SPEC.md#Task-selection-and-state-updates
+      - TODO.md#P2-03
+    timestamps:
+      created_at: 2026-08-16T12:54:50Z
+      updated_at: 2026-08-16T12:54:50Z
+      completed_at: null
+    blocked_reason: null
+  - id: p2-03-security-audit
+    title: Audit task mutation boundaries
+    description: Review lock ownership, file replacement, audit sequencing, state eligibility, path handling, and crash behavior before execution can mutate workflow state.
+    context: Task transitions become durable execution-control data and must resist unsafe concurrent or malformed workspace input.
+    purpose: Confirm no transition bypasses readiness or lifecycle gates and that crashes leave actionable evidence instead of false success.
+    expected_outcome: An independent audit records findings or confirms the lock, atomic-write, and attempt-record boundary.
+    kind: security-audit
+    status: pending
+    depends_on:
+      - p2-03-implement-code
+    requirements:
+      - ROOT_CONTRACT.md#Change-and-compliance-rules
+      - SPEC.md#Task-selection-and-state-updates
+      - TODO.md#P2-03
+    timestamps:
+      created_at: 2026-08-16T12:54:50Z
+      updated_at: 2026-08-16T12:54:50Z
+      completed_at: null
+    blocked_reason: null
+  - id: p2-03-compliance-review
+    title: Independently review task mutation compliance
+    description: Produce source-derived documentation and source-blind comparison for task selection, transition, locking, and recovery behavior.
+    context: The implementer cannot certify an execution-control writer that later automation will trust.
+    purpose: Verify the durable workflow mutation contract and all deliberate recovery limits before provider integration.
+    expected_outcome: Retained independent documentation and review classify the transition boundary as compliant, mismatched, deferred, or underspecified.
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - p2-03-security-audit
+    requirements:
+      - REVIEW_RUNBOOK.md#Clean-slate-documentation-pass
+      - REVIEW_RUNBOOK.md#Source-blind-compliance-pass
+      - ROOT_CONTRACT.md#Change-and-compliance-rules
+      - TODO.md#P2-03
+    timestamps:
+      created_at: 2026-08-16T12:54:50Z
+      updated_at: 2026-08-16T12:54:50Z
+      completed_at: null
     blocked_reason: null
