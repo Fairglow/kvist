@@ -10,7 +10,7 @@ pub const ROOT_CONTRACT_VERSION: u32 = 1;
 /// Current document version for `SPEC.md`.
 pub const SPECIFICATION_VERSION: u32 = 1;
 /// Current schema version for `TODOS.yaml`.
-pub const TODO_QUEUE_VERSION: u32 = 1;
+pub const TODO_QUEUE_VERSION: u32 = 2;
 /// Current document version for `DOCS.md`.
 pub const DOCUMENTATION_VERSION: u32 = 1;
 
@@ -113,20 +113,16 @@ cases.]
 </details>
 "#;
 
-const ROOT_TODOS: &str = r#"schema_version: 1
-tasks:
-  - id: write_tests
-    status: pending
-    description: Define failing tests for the component specification.
-  - id: implement_code
-    status: pending
-    description: Implement the specified behavior until tests pass.
-  - id: security_audit
-    status: pending
-    description: Review memory safety, input boundaries, and concurrency invariants.
-  - id: compliance_review
-    status: pending
-    description: Run the independent documentation and compliance review.
+const ROOT_TODOS: &str = r#"schema_version: 2
+component:
+  specification_revision: sha256:d47faba18fc80961e3cf1872cbd0d74ccc114a9667dfbc6b84dbbfac2234a1bd
+  parent_specification: null
+  revalidation:
+    state: current
+    checked_at: 2026-01-01T00:00:00Z
+    stale_since: null
+    causes: []
+tasks: []
 "#;
 
 const ROOT_DOCS: &str = r#"<!-- kvist-documentation-version: 1 -->
@@ -233,22 +229,9 @@ mod tests {
     }
 
     #[test]
-    fn todo_template_has_the_required_ordered_lifecycle_stages() {
-        let task_ids = ROOT_TODOS
-            .lines()
-            .filter_map(|line| line.strip_prefix("  - id: "))
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            task_ids,
-            [
-                "write_tests",
-                "implement_code",
-                "security_audit",
-                "compliance_review"
-            ]
-        );
-        assert!(ROOT_TODOS.starts_with("schema_version: 1\n"));
+    fn todo_template_uses_the_current_schema_and_is_valid() {
+        assert!(ROOT_TODOS.starts_with("schema_version: 2\n"));
+        crate::task_queue::parse(ROOT_TODOS).expect("valid TODO queue template");
     }
 
     #[test]

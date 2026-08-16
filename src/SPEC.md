@@ -23,6 +23,16 @@ discovered component artifact is tracked by the selected Git or jj repository.
 Commands use project-local configuration and produce deterministic,
 non-interactive output.
 
+The root component also owns the version-2 `TODOS.yaml` contract. A queue is a
+durable, version-controlled execution plan for one component, not an informal
+checklist. Every task records its stable identity, actionable work, reason,
+expected result, source requirement references, dependencies, lifecycle role,
+state, and audit timestamps. The queue records the component and immediate
+parent specification revisions that its plan was reviewed against so later
+tools can identify stale work before selecting or executing it. Until the
+future queue CLI exists, the YAML file itself is the human task-content
+interaction surface; `doctor` reports only its root-artifact validity.
+
 </details>
 
 <details>
@@ -41,6 +51,24 @@ non-interactive output.
   link-like paths and requires a trusted workspace before future task execution.
 - VCS inspection never stages, commits, or snapshots a working copy. Git uses
   native tracking and ignore semantics; jj inspects only its saved snapshot.
+- A filesystem-loaded TODO queue is UTF-8 YAML at most 1 MiB. The root
+  artifact reader enforces this bound before parsing; the public in-memory
+  parser validates a caller-provided string and therefore has no independent
+  byte limit. Every future filesystem queue loader must apply the same bound
+  before calling it. Its schema version is independent of every other artifact
+  version. Schema validation rejects unknown fields, duplicate task IDs,
+  invalid references, dependency cycles, invalid lifecycle order, invalid
+  state-specific metadata, non-canonical collections, and malformed timestamps
+  rather than silently discarding user-authored state.
+- Canonical queue serialization preserves declared task order and emits a
+  stable field order, two-space indentation, LF endings, sorted dependency and
+  requirement-reference lists, and normalized timestamps. Equivalent queue
+  values therefore produce byte-identical output for reproducible VCS diffs.
+- A task is executable only when its component revalidation state is `current`,
+  its dependencies are `completed`, and its lifecycle predecessors have
+  completed. Phase 2's execution implementation owns the lock, atomic write,
+  and attempt-record behavior; this schema supplies the validated data it
+  needs and does not itself execute commands.
 
 </details>
 
@@ -55,11 +83,101 @@ projects, performs no writes for current projects, and refuses every other
 existing state. `TODOS.yaml` ordering is a root-contract authoring rule; the
 Phase 1 parser deliberately performs only structural validation. Discovery
 reads a configured component root lexically, rejects resource-limit and
-hierarchy violations, and reports missing or malformed adjacent artifacts.
+hierarchy violations, and reports missing or filesystem-malformed adjacent
+artifacts. Content validation of a non-root component's adjacent artifacts is
+owned by that artifact's future component-inspection surface, not discovery.
 Specification validation uses the versioned three-layer Markdown format and
 returns line-aware diagnostics. Every operation returns contextual errors
 rather than silently repairing, migrating, overwriting, or following links.
 VCS auto-selection refuses a checkout containing both Git and jj until the
 project owner selects one in `kvist.toml`.
+
+## TODO queue schema and validation
+
+`TODOS.yaml` version 2 is a mapping with exactly `schema_version`, `component`,
+and `tasks`. `schema_version` is the integer `2`. The `component` mapping has
+these fields:
+
+| Field | Value | Tool use |
+| --- | --- | --- |
+| `specification_revision` | `sha256:` followed by 64 lowercase hexadecimal digits | The digest of this component's exact UTF-8 `SPEC.md` bytes when its queue was reviewed. P2-02 inspection will compare it with the current file to detect a local specification change. |
+| `parent_specification` | `null` for the root component, otherwise a mapping with `path: "../SPEC.md"` and `revision` | Limits dependency tracking to the immediate parent. Component hierarchy rules make that parent exactly one directory above the child, so the path is always `../SPEC.md`; its revision is the recorded SHA-256 digest. P2-02 inspection will compare it with the current parent file to detect the ripple effect without loading peer components. |
+| `revalidation` | mapping described below | Records whether the plan is safe to select and the evidence needed to explain or resolve stale state. |
+
+`revalidation` has `state`, `checked_at`, `stale_since`, and `causes`.
+`state` is `current` or `stale`. A current queue has a valid UTC timestamp in
+`checked_at`, `null` `stale_since`, and no causes. A stale queue has valid UTC
+timestamps in both fields, a `stale_since` not later than `checked_at`, and
+one or more causes. Each cause records `kind`, `path`, `expected_revision`,
+and `observed_revision`; `kind` is
+`component-specification-revision-changed` or
+`parent-specification-revision-changed`; its nonblank path and distinct valid
+expected and observed revisions are required. This makes staleness attributable
+rather than a lossy boolean.
+
+Every task mapping has these fields:
+
+| Field | Value and constraint | Tool use |
+| --- | --- | --- |
+| `id` | 1-64 character lowercase kebab-case identifier | Stable dependency target, audit key, machine-readable selection target, and VCS-merge anchor. IDs are unique and never renumbered or reused. |
+| `title` | Nonblank one-line summary, at most 120 Unicode scalar values | Human task-list label and stable concise status output. |
+| `description` | Nonblank actionable work description, at most 4,096 Unicode scalar values | Gives an implementer the bounded scope of the task; it is included in future execution context. |
+| `context` | Nonblank background or triggering condition, at most 4,096 Unicode scalar values | Explains why the task exists and lets reviewers judge whether the task still applies after change. |
+| `purpose` | Nonblank value or risk addressed, at most 4,096 Unicode scalar values | Explains usefulness, preventing activity that has no architectural value. |
+| `expected_outcome` | Nonblank, observable completion condition, at most 4,096 Unicode scalar values | Supplies the completion assertion for the executor, reviewers, and later compliance comparison. |
+| `kind` | `test`, `implementation`, `security-audit`, or `compliance-review` | Enforces the mandatory lifecycle and tells execution which trust boundary applies. |
+| `status` | `pending`, `in-progress`, `blocked`, or `completed` | Controls eligibility and exposes progress without inference from prose. |
+| `depends_on` | Lexically sorted, duplicate-free task-ID list | Defines the local directed acyclic graph. Selection requires all listed tasks to be completed. |
+| `requirements` | Lexically sorted, duplicate-free `SOURCE#LOCATOR` strings with nonblank parts | Links task intent to a precise specification, contract, or roadmap requirement for traceability. `SOURCE` identifies the durable artifact and `LOCATOR` identifies its local requirement/heading. Tools retain and display these references; review uses them to form its evidence set. |
+| `timestamps` | Mapping described below | Provides attributable, comparable transition history without trusting file modification time. |
+| `blocked_reason` | `null` unless status is `blocked`, then nonblank text | Makes a blocked task actionable and visible to automated status reporting rather than silently skipping it. |
+
+`timestamps` has `created_at`, `updated_at`, and `completed_at`. The first two
+are UTC RFC 3339 instants with whole seconds (`YYYY-MM-DDTHH:MM:SSZ`);
+`completed_at` is `null` unless status is `completed`, when it is a UTC instant
+not earlier than `created_at` or `updated_at`. `updated_at` must not precede
+`created_at`. Tools set these values on creation and every persisted state
+transition. A version-1 migration records the instant it created each
+version-2 task record and retains the original file in version control; it
+must not invent an earlier historical instant.
+
+Task states transition only as follows: `pending` to `in-progress` or
+`blocked`; `in-progress` to `pending`, `blocked`, or `completed`; and
+`blocked` to `pending` or `in-progress`. `completed` is terminal for a task
+ID: renewed work needs a new task linked by a requirement reference, keeping
+the completed evidence intact. Every transition updates `updated_at`; only the
+transition to `completed` sets `completed_at`. The future state-update command
+will reject all other transitions and write an append-only attempt record.
+
+Dependencies may point only to a different task in the same queue. All IDs
+must exist, the graph must be acyclic, and a task can depend only on an earlier
+declared task. Declared task order is the deterministic human and execution
+tie-breaker; it is not inferred from hash-map iteration. For version 2, a
+"deliverable" is the explicit transitive dependency chain terminating at a
+later lifecycle task; there is deliberately no separate deliverable-grouping
+field. Lifecycle work in a chain is declared in this order: `test`,
+`implementation`, `security-audit`, `compliance-review`, with each later role
+having a preceding role of the required kind in that chain. The schema
+validates this kind-based ordering. Requirement references and explicit
+dependencies, rather than unstated grouping, are the traceability evidence
+that the chain addresses the same component change.
+
+P2-02 inspection will hash the target component's `SPEC.md` and, for a child,
+only its immediate parent's `SPEC.md`. A digest mismatch will create the
+corresponding revalidation cause and make the queue stale. The later atomic
+state-update command will persist that derived result; it will never silently
+rewrite the recorded revisions. A human will revalidate by reviewing affected
+tasks, updating their requirement references or task plan as needed, recording
+the new digests, and clearing causes with a new `checked_at`. This provides the
+upstream-change ripple signal while preserving the component context boundary.
+
+Version 1 is intentionally unsupported by the version-2 parser. Migration is
+explicit and no-clobber: preserve the original file in VCS, map each legacy
+`id`, `status`, and `description` into a new complete task record, add the
+human-reviewed title/context/purpose/expected outcome/requirements, compute
+the component and parent revisions, and record fresh timestamps. Kvist must
+not invent missing provenance or overwrite the legacy file automatically. A
+future `todo migrate` command will perform only this documented, opt-in
+transformation and retain migration evidence.
 
 </details>

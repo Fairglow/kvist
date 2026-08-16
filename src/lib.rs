@@ -16,6 +16,7 @@ mod filesystem;
 pub mod init;
 pub mod project_state;
 pub mod specification;
+pub mod task_queue;
 pub mod tree;
 pub mod vcs;
 

@@ -9,8 +9,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde_yaml::Value;
-
 use crate::{
     KvistError, Result,
     artifacts::{
@@ -21,6 +19,7 @@ use crate::{
     discovery::{self, ComponentArtifact},
     filesystem::is_link_like,
     specification::{self, SpecificationDiagnosticKind},
+    task_queue::{self, TaskQueueError},
     vcs::{self, VcsInspection},
 };
 
@@ -517,63 +516,19 @@ fn validate_todo_queue(relative_path: &'static str, path: &Path) -> Result<Artif
         Ok(contents) => contents,
         Err(status) => return Ok(status),
     };
-    let value: Value = match serde_yaml::from_str(&contents) {
-        Ok(value) => value,
-        Err(error) => {
-            return Ok(invalid_status(
-                relative_path,
-                format!("invalid (YAML parse error: {error})"),
-            ));
-        }
-    };
-    let Some(root) = value.as_mapping() else {
-        return Ok(invalid_status(
+    match task_queue::parse(&contents) {
+        Ok(_) => Ok(valid_status(
             relative_path,
-            "invalid (root value must be a mapping)",
-        ));
-    };
-    let version = root
-        .get(Value::String("schema_version".to_owned()))
-        .and_then(Value::as_u64);
-    let Some(version) = version else {
-        return Ok(invalid_status(
-            relative_path,
-            "invalid (`schema_version` must be a positive integer)",
-        ));
-    };
-    if version == 0 {
-        return Ok(invalid_status(
-            relative_path,
-            "invalid (`schema_version` must be a positive integer)",
-        ));
-    }
-    if version != u64::from(TODO_QUEUE_VERSION) {
-        return Ok(unsupported_status(
+            format!("valid (TODO queue version {TODO_QUEUE_VERSION})"),
+        )),
+        Err(TaskQueueError::UnsupportedVersion { found, .. }) => Ok(unsupported_status(
             relative_path,
             format!(
-                "unsupported version {version} (supported TODO queue version {TODO_QUEUE_VERSION})"
+                "unsupported version {found} (supported TODO queue version {TODO_QUEUE_VERSION})"
             ),
-        ));
+        )),
+        Err(error) => Ok(invalid_status(relative_path, format!("invalid ({error})"))),
     }
-    let Some(tasks) = root
-        .get(Value::String("tasks".to_owned()))
-        .and_then(Value::as_sequence)
-    else {
-        return Ok(invalid_status(
-            relative_path,
-            "invalid (`tasks` must be a non-empty sequence)",
-        ));
-    };
-    if tasks.is_empty() || tasks.iter().any(|task| !valid_task(task)) {
-        return Ok(invalid_status(
-            relative_path,
-            "invalid (each task requires non-empty string `id`, `status`, and `description` fields)",
-        ));
-    }
-    Ok(valid_status(
-        relative_path,
-        format!("valid (TODO queue version {TODO_QUEUE_VERSION})"),
-    ))
 }
 
 fn read_root_text_artifact(
@@ -606,17 +561,6 @@ fn read_root_text_artifact(
             source,
         }),
     }
-}
-
-fn valid_task(task: &Value) -> bool {
-    let Some(task) = task.as_mapping() else {
-        return false;
-    };
-    ["id", "status", "description"].iter().all(|key| {
-        task.get(Value::String((*key).to_owned()))
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.trim().is_empty())
-    })
 }
 
 fn classify(artifacts: &[ArtifactStatus]) -> ProjectState {
@@ -706,7 +650,7 @@ mod tests {
         assert_eq!(CONFIGURATION_VERSION, 1);
         assert_eq!(ROOT_CONTRACT_VERSION, 1);
         assert_eq!(SPECIFICATION_VERSION, 1);
-        assert_eq!(TODO_QUEUE_VERSION, 1);
+        assert_eq!(TODO_QUEUE_VERSION, 2);
         assert_eq!(DOCUMENTATION_VERSION, 1);
     }
 

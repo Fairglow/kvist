@@ -79,7 +79,7 @@ accidental traversal only; they do not remove the TOCTOU limitation above.
 | `kvist.toml` | configuration schema `1`; `component_root = "src"`; `vcs.kind = "auto"`; `llm.provider = "none"` | Project-local configuration with VCS and opt-in external LLM settings. |
 | `ROOT_CONTRACT.md` | `<!-- kvist-root-contract-version: 1 -->` | Global architectural and compliance constraints for every component. |
 | `src/SPEC.md` | `<!-- kvist-specification-version: 1 -->` | Root component contract with the three progressive-disclosure layers. |
-| `src/TODOS.yaml` | `schema_version: 1` | Ordered lifecycle tasks: tests, implementation, security audit, compliance review. |
+| `src/TODOS.yaml` | `schema_version: 2` | Versioned, traceable component execution plan with ordered lifecycle tasks. |
 | `src/DOCS.md` | `<!-- kvist-documentation-version: 1 -->` | Independently reverse-engineered implementation documentation. |
 
 The configuration, root-contract, specification, TODO-queue, and documentation
@@ -230,6 +230,134 @@ The runtime uses [toml](https://crates.io/crates/toml) 1 to validate the
 project-local configuration before reading its component tree.
 The runtime uses [tempfile](https://crates.io/crates/tempfile) 3 for
 same-directory, no-clobber atomic artifact writes.
-The runtime uses [serde_yaml](https://crates.io/crates/serde_yaml) 0.9 only to
-parse the current root `TODOS.yaml` mapping and distinguish its schema version
-from malformed content; Phase 2 will define its full queue schema.
+The runtime uses [serde](https://crates.io/crates/serde) 1 and
+[serde_yaml](https://crates.io/crates/serde_yaml) 0.9 for the typed,
+versioned `TODOS.yaml` schema. They are used only for project-local durable
+workflow data; they do not send queue contents over the network.
+
+## TODO queue format
+
+`TODOS.yaml` is the durable execution plan for exactly one component. It is
+not a scratchpad or an agent transcript. It records the work that is authorized
+to happen, why that work matters, which requirement demands it, what must
+happen before it, and what outcome proves it is complete. Keeping that
+information in a validated, version-controlled file lets humans, CI, the
+future CLI executor, and future web/LSP views reach the same decision without
+depending on chat history.
+
+Schema version 2 is the current format. The whole document is a UTF-8 YAML
+mapping with **only** these top-level fields:
+
+```yaml
+schema_version: 2
+component:
+  specification_revision: sha256:<64-lowercase-hex-digits>
+  parent_specification: null
+  revalidation:
+    state: current
+    checked_at: 2026-08-13T20:19:53Z
+    stale_since: null
+    causes: []
+tasks:
+  - id: write-tests
+    title: Write queue tests
+    description: Define executable coverage for the queue contract.
+    context: The queue will control future task execution.
+    purpose: Prevent execution from relying on unvalidated workflow data.
+    expected_outcome: Valid and invalid queue behavior is covered by tests.
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - SPEC.md#TODO-queue-schema-and-validation
+    timestamps:
+      created_at: 2026-08-13T20:19:53Z
+      updated_at: 2026-08-13T20:19:53Z
+      completed_at: null
+    blocked_reason: null
+```
+
+### Component revision and revalidation fields
+
+| Field | Allowed values | Purpose and tool use |
+| --- | --- | --- |
+| `schema_version` | Integer `2` | Selects the parser contract independently of Kvist, specification, configuration, and documentation versions. An unsupported version is refused rather than guessed or rewritten. |
+| `component.specification_revision` | `sha256:` plus 64 lowercase hexadecimal digits | Fingerprints the exact component `SPEC.md` reviewed when the queue was planned. The forthcoming project-inspection layer will compare it with the current specification to discover that local work needs revalidation. |
+| `component.parent_specification` | `null` for the root, otherwise `{ path: "../SPEC.md", revision: "sha256:..." }` | Records the only allowed upstream contract: the immediate parent. It lets tools detect an upstream change without loading peer implementations or violating the context boundary. |
+| `parent_specification.path` | Exactly `../SPEC.md` | Prevents a queue from disguising peer or arbitrary-project inputs as a parent dependency. |
+| `parent_specification.revision` | SHA-256 revision format above | Is the parent specification the component plan was reviewed against; a later mismatch produces explicit stale evidence. |
+| `revalidation.state` | `current` or `stale` | `current` permits later task selection; `stale` prevents it until human revalidation records a reviewed plan. |
+| `revalidation.checked_at` | Whole-second UTC RFC 3339 (`YYYY-MM-DDTHH:MM:SSZ`) | Records when revision comparison last ran, rather than relying on ambiguous filesystem modification time. |
+| `revalidation.stale_since` | `null` when current; UTC timestamp when stale | Preserves how long the current stale condition has existed for status views and review prioritization. |
+| `revalidation.causes` | Empty when current; nonempty cause list when stale | Retains the evidence behind staleness. A tool never hides a changed contract behind an unexplained flag. |
+| `causes[].kind` | `component-specification-revision-changed` or `parent-specification-revision-changed` | Tells the revalidator whether the component's own contract or its immediate parent changed. |
+| `causes[].path` | Nonblank component-relative specification path | Identifies the exact artifact inspected. |
+| `causes[].expected_revision` | SHA-256 revision | Preserves the revision on which the old plan relied. |
+| `causes[].observed_revision` | Different SHA-256 revision | Preserves the revision that invalidated the plan. |
+
+A current queue must have `stale_since: null` and `causes: []`. A stale queue
+must have both timestamps, with `stale_since` no later than `checked_at`, and
+at least one cause whose nonblank path has different valid expected and
+observed revisions. This means staleness is inspectable evidence, not a
+mutable boolean. The forthcoming project-inspection layer will derive the
+mismatch when a component or immediate parent `SPEC.md` changes; a human then reviews
+affected tasks, updates their requirement links and revisions as necessary,
+records a fresh `checked_at`, and clears the causes. No later task-selection
+tool may silently treat a stale plan as current.
+
+### Task fields
+
+Each task is a single bounded unit of work. Unknown task fields, duplicate IDs,
+empty traceability fields, malformed timestamps, invalid state metadata,
+unknown dependencies, dependency cycles, future-position dependencies, and
+non-canonical dependency/reference lists are rejected.
+
+| Field | Allowed values | Purpose and tool use |
+| --- | --- | ---|
+| `id` | Unique 1-64 character lowercase kebab-case identifier | Stable local primary key for dependency edges, task selection, audit records, status output, and merge review. Never renumber or reuse it. |
+| `title` | Trimmed, nonblank, one-line text up to 120 Unicode scalar values | Short human label for CLI, CI, and UI status lists. |
+| `description` | Trimmed, nonblank work instruction up to 4,096 Unicode scalar values | Bounded implementation scope supplied to the future execution context. |
+| `context` | Trimmed, nonblank background up to 4,096 Unicode scalar values | Explains the triggering condition and lets an owner decide whether the task is still relevant after a change. |
+| `purpose` | Trimmed, nonblank value/risk statement up to 4,096 Unicode scalar values | Explains why the task is useful. It prevents work with no architectural or user value from being treated as required. |
+| `expected_outcome` | Trimmed, nonblank observable completion condition up to 4,096 Unicode scalar values | Gives the executor and reviewers a concrete completion assertion and later compliance evidence. |
+| `kind` | `test`, `implementation`, `security-audit`, or `compliance-review` | Declares the lifecycle trust boundary. Non-test tasks must transitively depend on the preceding lifecycle kind, so implementation cannot precede tests and an implementer cannot self-certify. |
+| `status` | `pending`, `in-progress`, `blocked`, or `completed` | Is the authoritative workflow state used by later ready-task selection and status views. |
+| `depends_on` | Lexically sorted, duplicate-free list of earlier task IDs | Defines the component-local DAG. A task becomes ready only after every listed task is completed. Declared task order is the deterministic tie-breaker. |
+| `requirements` | Lexically sorted, duplicate-free `SOURCE#LOCATOR` strings | Links the task to the exact specification, root-contract, roadmap, or runbook requirement that justifies it. Review and execution surfaces retain these references as evidence. |
+| `timestamps.created_at` | UTC timestamp | Records when this version-2 task record was created. |
+| `timestamps.updated_at` | UTC timestamp not earlier than `created_at` | Records the most recent durable task update. |
+| `timestamps.completed_at` | `null`, or UTC timestamp for a completed task | Proves when a terminal task completion was recorded. It is required only for `completed` and may not predate `updated_at`. |
+| `blocked_reason` | `null`, or trimmed nonblank text for a blocked task | Makes a blocked task actionable instead of allowing tools to silently skip it. It is required only for `blocked`. |
+
+The legal task transitions are `pending -> in-progress | blocked`,
+`in-progress -> pending | blocked | completed`, and
+`blocked -> pending | in-progress`. `completed` is terminal: new work uses a
+new ID and a requirement link, preserving the completed task's audit trail.
+Future atomic state updates will set `updated_at`, set `completed_at` only for
+completion, and retain attempt evidence rather than overwriting history.
+
+### Ordering, serialization, and migration
+
+Dependencies are local to one queue, must refer to earlier declared tasks, and
+must form a directed acyclic graph. In version 2, a deliverable is its explicit
+transitive dependency chain; there is no implicit feature-grouping field. The
+required lifecycle is expressed in that chain as test, implementation, security
+audit, then compliance review. Requirement references and explicit dependency
+edges make the chain's scope reviewable while still allowing several small
+tasks within a component.
+
+Kvist serializes a validated queue deterministically: fixed field order,
+two-space indentation, LF line endings, preserved declared task order, and
+sorted dependency and requirement lists. Strings are emitted in quoted YAML
+form so punctuation, timestamps, and multiline text do not receive
+parser-dependent meanings. Deterministic output gives VCS a meaningful diff
+and lets automation compare semantically equal queues reproducibly.
+
+Version 1 was only an illustrative list and is intentionally unsupported by
+the version-2 parser. Migration is explicit: keep the version-1 file in VCS,
+create complete version-2 records from each legacy task, supply the missing
+title/context/purpose/expected outcome/requirements through human review,
+record the migration instant as the record creation time, and compute reviewed
+component and parent revisions. Kvist never fabricates older provenance or
+silently rewrites a user-owned queue. A future opt-in migration command will
+perform only this documented transformation and retain its evidence.

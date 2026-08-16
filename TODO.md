@@ -158,9 +158,14 @@ within the 8 KiB argument budget and isolates individually unqueryable paths.
 Phase 2 begins only after the Phase 1 remediation gate is resolved or each
 explicit exception is approved and recorded above.
 
-### TODO P2-01 — Specify independent TODO queue and dependency graph schemas
+### COMPLETE P2-01 — Specify independent TODO queue and dependency graph schemas
 
 **Depends on:** P1-R1
+**Current evidence:** Version-2 parsing, semantic validation, deterministic
+serialization, root-inspection integration, and contract tests are complete.
+Independent security audit and clean-slate/source-blind compliance review are
+complete. `COMPLIANCE_REVIEW.md` records the review evidence and explicit
+Phase 2 deferrals.
 **Acceptance criteria:**
 
 - Define a versioned `TODOS.yaml` schema using `serde`/`serde_yaml`, with

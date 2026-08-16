@@ -89,3 +89,61 @@ contract. The source-blind reviewer then compared only `src/SPEC.md`,
 | Compliant | The artifact layout, versioned three-layer specification, durable project-file state, and discrepancy process agree with the root contract. | None. |
 | Deferred | The source-blind comparison cannot prove prior test/spec sequencing, independent review execution, or TODO ordering. | The retained runbook, review records, and P2 execution lifecycle own those process checks. |
 | Deferred | The source-derived record does not establish the specification's future trusted-workspace prerequisite because task execution is not implemented. | P2 trusted-workspace and execution policy own this requirement. |
+
+## Phase 2 P2-01 TODO queue contract review
+
+**Scope:** Version-2 `TODOS.yaml` parsing, semantic validation, canonical
+serialization, root-artifact inspection integration, and their public contract
+documents.
+
+**Independent roles and permitted inputs:**
+
+| Role | Permitted inputs | Result |
+| --- | --- | --- |
+| Security reviewer | P2-01 implementation, direct integration, dependency manifest, and focused tests | No security vulnerabilities found in the reviewed boundary. |
+| Clean-slate documenter | Rust source, tests, and manifests only | Rewrote `src/DOCS.md` from observed behavior without reading the queue specification, README, queue, root contract, or prior reviews. |
+| Source-blind reviewer | `src/SPEC.md`, `src/DOCS.md`, and `ROOT_CONTRACT.md` only | Identified documentation-contract ambiguities below; it did not inspect source or tests. |
+
+### Security result
+
+The security review found no exploitable vulnerability in the typed YAML
+boundary. Its review covered unknown-field rejection, dependency traversal,
+cycle detection, timestamp/revision validation, deterministic YAML escaping,
+state metadata, and error handling. This is not a claim that future queue
+loading, hashing, locking, subprocess execution, or persistence is safe:
+those surfaces do not exist yet and remain separate Phase 2 trust boundaries.
+
+### Source-blind findings and explicit arbitration
+
+The source-blind comparison found that the observed behavior was more precise
+than several parts of the intended contract. The project architect's
+documentation arbitration is recorded here rather than silently changing the
+meaning of either artifact.
+
+| Classification | Finding | Arbitration decision |
+| --- | --- | --- |
+| Deferred, clarified | The observed queue parser accepts an in-memory string without a byte limit, while root artifact inspection bounds a filesystem queue to 1 MiB. | `src/SPEC.md` now assigns the 1 MiB bound to every filesystem loader before parsing and explicitly preserves the in-memory API boundary. Future loaders must apply that bound. |
+| Deferred, clarified | The observed implementation validates recorded SHA-256-shaped revisions but does not hash `SPEC.md` files or derive stale causes. | `src/SPEC.md` now assigns comparison and stale derivation explicitly to P2-02. Version-2 parsing remains responsible only for representing and validating stale evidence. |
+| Clarified | The observed parent path is exactly `../SPEC.md`; the prior contract described it only generally as a relative parent path. | The specification now makes the literal path explicit and ties it to the existing component-hierarchy rule. |
+| Clarified | The observed requirement locator is `SOURCE#LOCATOR`, and stale evidence requires ordered timestamps plus distinct revisions; these constraints were not fully stated in the specification. | The specification now defines each syntax and invariant so consumers need not infer it from source or observed documentation. |
+| Clarified | The observed lifecycle check is kind-based over a task's explicit transitive dependency chain. Version 2 has no separate deliverable-group field. | The specification defines a v2 deliverable as that explicit chain. Requirement references and dependency edges are the mandatory traceability proof of scope. Introducing a stronger grouping key would require a future versioned schema change and migration, not an undocumented extension. |
+| Clarified | Human readers have no queue-content CLI yet. | The specification and observed documentation now state that durable YAML is the current human content surface and `doctor` reports root-artifact validity only. |
+| Clarified | Discovery reports missing and filesystem-malformed adjacent artifacts, not their content validity. | The specification now reserves non-root content validation for a future component-inspection surface. |
+
+### Final source-blind compliance result
+
+After the documented arbitrations, a source-blind reviewer compared only
+`ROOT_CONTRACT.md`, `src/SPEC.md`, `src/DOCS.md`, `TODO.md`, and this review
+record. It did not inspect Rust source, tests, manifests, diffs, or the queue
+artifact. The reviewer found the documentation contract **compliant**:
+
+| Classification | Finding | Arbitration |
+| --- | --- | --- |
+| Compliant | The specification and source-derived documentation agree on the version-2 structure, validation, lifecycle/dependency rules, timestamps, state metadata, deterministic serialization, and root inspection's sole 1 MiB pre-parse queue bound. | None. |
+| Compliant | The documented absence of unique/canonical revalidation causes and cause-kind/path correspondence checks does not conflict with a stated version-2 requirement. | None. |
+| Deferred | General filesystem queue loaders, revision hashing and stale-cause derivation, task selection/transitions/persistence, queue CLI commands, and migration remain unimplemented future work. | P2-02 and P2-03 own their implementation and separate review. |
+
+The completed test suite and `kvist doctor .` independently verified that the
+current root `src/TODOS.yaml` is a valid version-2 queue. No implementation
+requirement was removed, no queue state was silently rewritten, and no future
+execution behavior is claimed as implemented.

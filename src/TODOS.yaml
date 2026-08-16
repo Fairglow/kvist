@@ -1,26 +1,86 @@
-schema_version: 1
+schema_version: 2
+component:
+  specification_revision: sha256:a8839b6dcd90bd0fefff57a55ee2c86014309033da9e7969c0e8ee5177f9e8e8
+  parent_specification: null
+  revalidation:
+    state: current
+    checked_at: 2026-08-13T21:06:31Z
+    stale_since: null
+    causes: []
 tasks:
-  - id: write_tests
-    status: done
-    description: Define and maintain automated tests for the root component contract.
-  - id: implement_code
-    status: done
-    description: Implement the Phase 1 root CLI behavior until tests pass.
-  - id: security_audit
-    status: done
-    description: Review filesystem boundaries, resource limits, link handling, and memory safety.
-  - id: compliance_review
-    status: done
-    description: Run the clean-slate documentation and source-blind compliance procedure.
-  - id: vcs_tracking_tests
-    status: done
-    description: Define Git and jj tracking fixtures, including ignored durable artifacts and read-only behavior.
-  - id: vcs_tracking_implementation
-    status: done
-    description: Add read-only Git and jj durable-artifact tracking diagnostics to doctor.
-  - id: vcs_tracking_security_audit
-    status: done
-    description: Review VCS command construction, selection ambiguity, and non-mutating inspection behavior.
-  - id: vcs_tracking_compliance_review
-    status: done
-    description: Compare the root VCS tracking contract against clean-slate observed documentation.
+  - id: p2-01-write-tests
+    title: Define TODO queue schema tests
+    description: Write focused parser, serialization, dependency-graph, and task-state transition tests for the version-2 TODO queue contract before production implementation.
+    context: Phase 1 accepted only an illustrative YAML list, so malformed task relationships and non-deterministic queue data could not be detected before future task execution.
+    purpose: Establish executable evidence for the durable task-plan contract before any executor relies on it, preventing a weak parser from becoming the authority for workflow state.
+    expected_outcome: The test suite expresses and initially fails for valid canonical queues, duplicate IDs, unknown dependencies, cycles, invalid transitions, malformed state metadata, and deterministic serialization.
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - ROOT_CONTRACT.md#Change-and-compliance-rules
+      - SPEC.md#TODO-queue-schema-and-validation
+      - TODO.md#P2-01
+    timestamps:
+      created_at: 2026-08-13T20:19:53Z
+      updated_at: 2026-08-13T20:20:00Z
+      completed_at: 2026-08-13T20:20:00Z
+    blocked_reason: null
+  - id: p2-01-implement-code
+    title: Implement the version-2 TODO queue schema
+    description: Add typed serde and serde_yaml parsing, semantic validation, task transition rules, and canonical serialization, then integrate it with root project inspection.
+    context: Future task selection, locking, execution, and review must consume one validated, machine-readable source of workflow truth rather than independently interpreting YAML.
+    purpose: Make task state safe, deterministic, and inspectable so every later Phase 2 tool shares the same contract and diagnostics.
+    expected_outcome: Version-2 queues validate through the reusable task-queue module and root inspection, while malformed or version-1 queues are rejected with actionable diagnostics and generated projects receive a valid template.
+    kind: implementation
+    status: completed
+    depends_on:
+      - p2-01-write-tests
+    requirements:
+      - ROOT_CONTRACT.md#Non-negotiable-architecture
+      - SPEC.md#TODO-queue-schema-and-validation
+      - TODO.md#P2-01
+    timestamps:
+      created_at: 2026-08-13T20:19:53Z
+      updated_at: 2026-08-13T20:30:00Z
+      completed_at: 2026-08-13T20:30:00Z
+    blocked_reason: null
+  - id: p2-01-security-audit
+    title: Audit TODO queue trust boundaries
+    description: Review YAML parsing, input limits, identifier and timestamp validation, dependency traversal, digest handling, and serialization for unsafe acceptance or denial-of-service paths.
+    context: TODO files are version-controlled but user-authored input and will become execution-control data in subsequent Phase 2 work.
+    purpose: Confirm that untrusted queue content cannot bypass lifecycle gates, conceal stale dependencies, destabilize output, or cause unbounded graph processing.
+    expected_outcome: An independent security finding record either confirms the queue boundary and resource controls or identifies remediations before an executor can consume the schema.
+    kind: security-audit
+    status: completed
+    depends_on:
+      - p2-01-implement-code
+    requirements:
+      - ROOT_CONTRACT.md#Change-and-compliance-rules
+      - SPEC.md#TODO-queue-schema-and-validation
+      - TODO.md#P2-01
+    timestamps:
+      created_at: 2026-08-13T20:19:53Z
+      updated_at: 2026-08-13T21:07:00Z
+      completed_at: 2026-08-13T21:07:00Z
+    blocked_reason: null
+  - id: p2-01-compliance-review
+    title: Independently review TODO queue compliance
+    description: Produce clean-slate observed documentation and compare it with the queue specification, recording each discrepancy for explicit architectural arbitration.
+    context: The implementer cannot certify their own workflow-control format; the product requires independent clean-slate and source-blind review.
+    purpose: Verify that documented requirements, implementation behavior, and future tool assumptions remain aligned before this format becomes the workflow system of record.
+    expected_outcome: Retained independent documentation and a source-blind comparison identify the queue schema as compliant, mismatched, deferred, or underspecified without silently changing requirements.
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - p2-01-security-audit
+    requirements:
+      - REVIEW_RUNBOOK.md#Clean-slate-documentation-pass
+      - REVIEW_RUNBOOK.md#Source-blind-compliance-pass
+      - ROOT_CONTRACT.md#Change-and-compliance-rules
+      - TODO.md#P2-01
+    timestamps:
+      created_at: 2026-08-13T20:19:53Z
+      updated_at: 2026-08-16T12:10:01Z
+      completed_at: 2026-08-16T12:10:01Z
+    blocked_reason: null

@@ -76,11 +76,7 @@ fn init_refuses_partial_invalid_and_unsupported_projects_without_overwriting() {
     let unsupported = TempDir::new().expect("unsupported project");
     initialize(unsupported.path()).expect("initialize");
     let todos = unsupported.path().join("src/TODOS.yaml");
-    fs::write(
-        &todos,
-        "schema_version: 2\ntasks:\n  - id: task\n    status: pending\n    description: task\n",
-    )
-    .expect("write unsupported version");
+    fs::write(&todos, "schema_version: 99\ntasks: []\n").expect("write unsupported version");
     let unsupported_before = fs::read_to_string(&todos).expect("read");
     let error = initialize(unsupported.path()).expect_err("unsupported must be refused");
     assert!(error.to_string().contains("state is unsupported-version"));
@@ -99,7 +95,10 @@ fn invalid_contents_and_artifact_types_are_classified_as_invalid() {
         ),
         ("ROOT_CONTRACT.md", "# Kvist Root Contract\n"),
         ("src/SPEC.md", "<!-- kvist-specification-version: 1 -->\n"),
-        ("src/TODOS.yaml", "schema_version: 1\ntasks: invalid\n"),
+        (
+            "src/TODOS.yaml",
+            "schema_version: 2\ncomponent: invalid\ntasks: []\n",
+        ),
         ("src/DOCS.md", "<!-- kvist-documentation-version: 1 -->\n"),
     ];
 
@@ -165,7 +164,7 @@ fn version_domains_are_independent_public_constants() {
     assert_eq!(CONFIGURATION_VERSION, 1);
     assert_eq!(ROOT_CONTRACT_VERSION, 1);
     assert_eq!(SPECIFICATION_VERSION, 1);
-    assert_eq!(TODO_QUEUE_VERSION, 1);
+    assert_eq!(TODO_QUEUE_VERSION, 2);
     assert_eq!(DOCUMENTATION_VERSION, 1);
 }
 
