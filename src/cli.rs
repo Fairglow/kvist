@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::{KvistError, Result, init, project_state, specification, tree};
+use crate::{KvistError, Result, init, project_state, specification, status, tree};
 
 /// Kvist's top-level command-line interface.
 #[derive(Debug, Parser)]
@@ -29,6 +29,15 @@ pub enum Command {
     Tree(ProjectDirectory),
     /// Inspect root artifacts without changing the project.
     Doctor(ProjectDirectory),
+    /// Render a versioned project and component status report.
+    Status {
+        /// Project directory; defaults to the current working directory.
+        #[arg(value_name = "PROJECT_DIR", default_value = ".")]
+        path: PathBuf,
+        /// Stable report representation for scripts and tools.
+        #[arg(long, value_enum, default_value_t = status::StatusFormat::Text)]
+        format: status::StatusFormat,
+    },
     /// Create or validate a component specification.
     Spec {
         /// Specification operation to execute.
@@ -89,6 +98,8 @@ pub fn execute(command: Command) -> Result<CommandOutput> {
         Command::Tree(project) => tree::render_project(&project.path).map(CommandOutput::message),
         Command::Doctor(project) => project_state::inspect(&project.path)
             .map(|inspection| CommandOutput::message(inspection.to_string())),
+        Command::Status { path, format } => project_state::inspect(&path)
+            .map(|inspection| CommandOutput::message(status::render(&inspection, format))),
         Command::Spec {
             command: SpecCommand::New { component_dir },
         } => specification::create(&component_dir).map(|generated| {

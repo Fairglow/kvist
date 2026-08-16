@@ -13,15 +13,16 @@ automation.
 
 ## Public contract
 
-The CLI provides `init`, `doctor`, `tree`, `spec new`, and `spec validate`.
+The CLI provides `init`, `doctor`, `status`, `tree`, `spec new`, and `spec validate`.
 `init` creates a validated root artifact set only in an uninitialized project;
 it is a no-op for a current project and refuses every other existing state.
-`doctor` reports project-state diagnostics without modifying files. `tree`
-renders component layout, and specification commands create or validate
-component contracts. `doctor` also reports whether every required root and
-discovered component artifact is tracked by the selected Git or jj repository.
-Commands use project-local configuration and produce deterministic,
-non-interactive output.
+`doctor` reports project-state diagnostics without modifying files. `status`
+reports a versioned, machine-readable project and component inspection without
+modifying files. `tree` renders component layout, and specification commands
+create or validate component contracts. `doctor` also reports whether every
+required root and discovered component artifact is tracked by the selected Git
+or jj repository. Commands use project-local configuration and produce
+deterministic, non-interactive output.
 
 The root component also owns the version-2 `TODOS.yaml` contract. A queue is a
 durable, version-controlled execution plan for one component, not an informal
@@ -69,6 +70,19 @@ interaction surface; `doctor` reports only its root-artifact validity.
   completed. Phase 2's execution implementation owns the lock, atomic write,
   and attempt-record behavior; this schema supplies the validated data it
   needs and does not itself execute commands.
+- Status inspection is read-only. It validates each discovered component's
+  adjacent artifacts with the same versioned parsers as root inspection,
+  compares only the component `SPEC.md` and immediate parent `SPEC.md` exact
+  UTF-8 bytes with recorded SHA-256 revisions, and never writes derived stale
+  evidence. Component status precedence is unsupported version, invalid,
+  missing, stale, blocked, then current, so an actionable artifact failure
+  cannot be hidden by a lower-priority workflow state.
+- `status` output has format version 1. Its default text and `--format json`
+  variants contain the same information in deterministic component and
+  artifact order. A completed inspection exits 0 regardless of its reported
+  state; inspection I/O failures exit 1; parser help exits 0 and parser input
+  errors use clap's nonzero exit status. JSON is a report, not an instruction
+  to mutate project state.
 
 </details>
 
@@ -179,5 +193,54 @@ the component and parent revisions, and record fresh timestamps. Kvist must
 not invent missing provenance or overwrite the legacy file automatically. A
 future `todo migrate` command will perform only this documented, opt-in
 transformation and retain migration evidence.
+
+## Project status inspection
+
+`kvist status [PROJECT_DIR] [--format text|json]` is the phase-2 read-only
+inspection surface. It first runs the existing root inspection. When the root
+state is not `current`, it reports that state and no component records because
+the configured component root cannot be trusted. When it is current, it loads
+the validated project configuration, discovers components with configured
+limits, and emits one record for every discovered component in lexical order,
+including the configured component root as `.`. Discovery failures become a
+top-level inspection failure record; they do not suppress the valid root
+result or mutate files.
+
+Each component record has its path relative to `component_root`, the states of
+`SPEC.md`, `TODOS.yaml`, and `DOCS.md`, a component state, and optional
+revalidation causes. Artifact states are `valid`, `missing`, `invalid`, or
+`unsupported-version`. A complete component validates all three contents:
+specifications use the specification validator; queues use the version-2
+queue parser after the 1 MiB UTF-8 bound; and documentation uses its existing
+version marker and heading validation. An incomplete or filesystem-invalid
+component retains its discovery artifact state without attempting content
+reads.
+
+For a valid queue, inspection computes SHA-256 over the exact bytes of that
+component's valid `SPEC.md` and, for a non-root component, its immediate
+parent's valid `SPEC.md`. It compares those values only with
+`component.specification_revision` and
+`component.parent_specification.revision`, respectively. A mismatch produces
+the corresponding attributable cause with paths `SPEC.md` or `../SPEC.md`;
+the in-memory revalidation result is stale when either the queue records
+`stale` or inspection finds a mismatch. Inspection never changes queue
+timestamps, task state, recorded revisions, or files. A `blocked` component
+has a valid, current queue with one or more blocked tasks and no higher
+precedence condition. A `current` component has valid artifacts, current
+revalidation, and no blocked tasks.
+
+The text format begins with `status-format-version: 1`, followed by project
+and root states, then component records in lexical order. The JSON format is a
+single UTF-8 object with `format_version`, `project_path`, `project_state`,
+`component_root`, `components`, and `discovery_error` keys in that order.
+Components contain
+`path`, `state`, `artifacts`, and `revalidation_causes` keys in that order;
+artifacts are ordered `SPEC.md`, `TODOS.yaml`, `DOCS.md`. JSON path strings
+are lossy display representations and must not be used as persistent file
+identifiers. Text-format dynamic values escape backslashes, carriage returns,
+line feeds, tabs, and other ASCII control characters, so untrusted paths,
+diagnostics, or queue evidence cannot forge report records. This versioned
+report is designed for scripts and future web/LSP clients; consumers must
+treat unknown future versions as unsupported rather than guessing semantics.
 
 </details>

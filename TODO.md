@@ -181,9 +181,15 @@ Phase 2 deferrals.
 **Verification:** parser/serializer, malformed YAML, cycle, state-transition,
 and deterministic-output tests.
 
-### TODO P2-02 — Implement project inspection and machine-readable status
+### COMPLETE P2-02 — Implement project inspection and machine-readable status
 
 **Depends on:** P1-R1, P2-01
+**Current evidence:** `kvist status` now renders deterministic version-1 text
+and JSON reports from the shared root/component inspection model. It reports
+missing, invalid, unsupported-version, stale, blocked, and current state
+without writing files. Focused fixtures, independent security audit, and
+clean-slate/source-blind review evidence are retained in
+`COMPLIANCE_REVIEW.md`.
 **Acceptance criteria:**
 
 - Build one validated project/component state model shared by `init`, `tree`,

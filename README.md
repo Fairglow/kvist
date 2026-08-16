@@ -12,12 +12,14 @@ for human-directed AI development. Its product architecture is defined in
 | --- | --- |
 | `kvist init [PROJECT_DIR]` | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory. |
 | `kvist doctor [PROJECT_DIR]` | Read-only inspection of the root artifact state and recovery guidance. |
+| `kvist status [PROJECT_DIR] [--format text\|json]` | Read-only versioned inspection of project and component workflow state. |
 | `kvist tree [PROJECT_DIR]` | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory. |
 | `kvist spec new <COMPONENT_DIR>` | Create a layered `SPEC.md` for a component directory. |
 | `kvist spec validate <SPEC_FILE>` | Validate a layered `SPEC.md` file. |
 
-All Phase 1 commands are implemented: `kvist init`, `kvist doctor`, `kvist tree`, `kvist spec
-new`, and `kvist spec validate`.
+The Phase 1 commands are implemented: `kvist init`, `kvist doctor`, `kvist
+tree`, `kvist spec new`, and `kvist spec validate`. Phase 2 also provides the
+read-only `kvist status` inspection surface.
 
 ## Configuration and platform policy
 
@@ -59,7 +61,7 @@ Phase 1 discovery supports ordinary local checkouts and malformed or untrusted
 link-like paths it directly inspects. It is not a sandbox, does not establish
 canonical containment, and makes no guarantee if another process changes the
 filesystem between metadata checks and use (TOCTOU). Do not treat `init`,
-`doctor`, `tree`, or specification validation as authorization to run
+`doctor`, `status`, `tree`, or specification validation as authorization to run
 repository code. Phase 2 execution requires a separately documented trusted
 workspace policy and explicit execution authorization.
 
@@ -119,6 +121,25 @@ well-formed version this binary does not support. Phase 1 has no automatic
 repair or migration: preserve user content, use `doctor` to inspect it, then
 repair or migrate explicitly. Any future repair or migration command must
 define every permitted rewrite and remain opt-in.
+
+## Project status reports
+
+`kvist status [PROJECT_DIR] [--format text|json]` inspects the current root
+project and every discovered component without writing files. It reports
+`unsupported-version`, `invalid`, `missing`, `stale`, `blocked`, and `current`
+component states in precedence order. Valid queue records are compared against
+the exact SHA-256 digest of the component `SPEC.md` and, for a child, its
+immediate parent's `SPEC.md`; a mismatch appears as attributable stale
+evidence but is never persisted by inspection.
+
+Text output begins with `status-format-version: 1`; JSON output is a compact
+object with `format_version`, `project_path`, `project_state`,
+`component_root`, `components`, and `discovery_error`. Both are deterministic
+and report the same configured component root, ordered components, and
+adjacent `SPEC.md`, `TODOS.yaml`, and `DOCS.md` states. Dynamic text fields
+escape ASCII control characters. JSON path strings are lossy display text and
+are not persistent file identifiers. A completed inspection exits successfully
+regardless of the reported project state; I/O failures exit nonzero.
 
 ## Version-control policy
 

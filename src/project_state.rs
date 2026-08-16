@@ -9,6 +9,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use sha2::{Digest, Sha256};
+
 use crate::{
     KvistError, Result,
     artifacts::{
@@ -19,7 +21,7 @@ use crate::{
     discovery::{self, ComponentArtifact},
     filesystem::is_link_like,
     specification::{self, SpecificationDiagnosticKind},
-    task_queue::{self, TaskQueueError},
+    task_queue::{self, StalenessCause, StalenessCauseKind, TaskQueue, TaskQueueError, TaskStatus},
     vcs::{self, VcsInspection},
 };
 
@@ -142,6 +144,103 @@ pub struct ProjectInspection {
     pub vcs: VcsInspection,
     /// Action the owner can take without Kvist rewriting project content.
     pub guidance: String,
+    /// Configured component root when the root project is current.
+    pub component_root: Option<PathBuf>,
+    /// Per-component inspection results in lexical path order.
+    pub components: Vec<ComponentInspection>,
+    /// Discovery failure captured without changing root-artifact classification.
+    pub discovery_error: Option<String>,
+}
+
+/// The inspected state of one discovered component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComponentState {
+    /// All component artifacts and workflow evidence are valid and ready.
+    Current,
+    /// An artifact uses a well-formed version this binary cannot inspect.
+    UnsupportedVersion,
+    /// An artifact or required parent contract cannot be validated.
+    Invalid,
+    /// One or more adjacent component artifacts are absent.
+    Missing,
+    /// The recorded or freshly derived specification evidence is stale.
+    Stale,
+    /// A current queue contains one or more explicitly blocked tasks.
+    Blocked,
+}
+
+impl ComponentState {
+    /// Stable lowercase name used by text and JSON status reports.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::UnsupportedVersion => "unsupported-version",
+            Self::Invalid => "invalid",
+            Self::Missing => "missing",
+            Self::Stale => "stale",
+            Self::Blocked => "blocked",
+        }
+    }
+}
+
+/// The inspected state of one adjacent component artifact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComponentArtifactState {
+    /// A supported, valid artifact was read and parsed.
+    Valid,
+    /// No artifact exists at the expected path.
+    Missing,
+    /// An artifact has an invalid type, encoding, or content.
+    Invalid,
+    /// An artifact declares a supported-shape but unsupported version.
+    UnsupportedVersion,
+}
+
+impl ComponentArtifactState {
+    /// Stable lowercase name used by text and JSON status reports.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Valid => "valid",
+            Self::Missing => "missing",
+            Self::Invalid => "invalid",
+            Self::UnsupportedVersion => "unsupported-version",
+        }
+    }
+}
+
+/// Status inspection for one adjacent component artifact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentArtifactInspection {
+    /// Filename adjacent to the component directory.
+    pub path: &'static str,
+    /// Validated artifact state.
+    pub state: ComponentArtifactState,
+}
+
+/// An attributable recorded or derived specification revision mismatch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevalidationCause {
+    /// The changed local or immediate-parent specification.
+    pub kind: StalenessCauseKind,
+    /// Path relative to the component context.
+    pub path: String,
+    /// Revision recorded when the task queue was reviewed.
+    pub expected_revision: String,
+    /// Revision observed by this inspection.
+    pub observed_revision: String,
+}
+
+/// Complete read-only inspection for one discovered component.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentInspection {
+    /// Component path relative to the configured component root.
+    pub path: PathBuf,
+    /// Aggregate state with stable precedence.
+    pub state: ComponentState,
+    /// Adjacent artifact states in specification, queue, documentation order.
+    pub artifacts: Vec<ComponentArtifactInspection>,
+    /// Recorded and freshly derived evidence explaining stale state.
+    pub revalidation_causes: Vec<RevalidationCause>,
 }
 
 impl fmt::Display for ProjectInspection {
@@ -211,6 +310,9 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
                 "root artifacts do not exist yet; initialize and validate the project first",
             ),
             guidance: "run `kvist init` to create the Phase 1 root artifacts".to_owned(),
+            component_root: None,
+            components: Vec::new(),
+            discovery_error: None,
         });
     }
 
@@ -219,6 +321,7 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         .map(|artifact| inspect_artifact(project_dir, *artifact))
         .collect::<Result<Vec<_>>>()?;
     let state = classify(&artifacts);
+    let (component_root, components, discovery_error) = inspect_components(project_dir, state)?;
     Ok(ProjectInspection {
         project_dir: project_dir.to_path_buf(),
         state,
@@ -226,6 +329,9 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         root_diagnostic: None,
         vcs: inspect_vcs(project_dir, state),
         guidance: guidance(state).to_owned(),
+        component_root,
+        components,
+        discovery_error,
     })
 }
 
@@ -241,7 +347,334 @@ fn invalid_root_inspection(project_dir: &Path) -> ProjectInspection {
             "project root is not a real directory, so durable artifact paths cannot be inspected",
         ),
         guidance: guidance(ProjectState::Invalid).to_owned(),
+        component_root: None,
+        components: Vec::new(),
+        discovery_error: None,
     }
+}
+
+fn inspect_components(
+    project_dir: &Path,
+    project_state: ProjectState,
+) -> Result<(Option<PathBuf>, Vec<ComponentInspection>, Option<String>)> {
+    if project_state != ProjectState::Current {
+        return Ok((None, Vec::new(), None));
+    }
+
+    let config = match config::load(project_dir) {
+        Ok(config) => config,
+        Err(error) => return Ok((None, Vec::new(), Some(error.to_string()))),
+    };
+    let component_root = config.component_root.clone();
+    let discovery =
+        match discovery::discover_with_limits(&project_dir.join(&component_root), config.discovery)
+        {
+            Ok(discovery) => discovery,
+            Err(error) => return Ok((Some(component_root), Vec::new(), Some(error.to_string()))),
+        };
+
+    let components = discovery
+        .components
+        .iter()
+        .map(|component| inspect_component(&project_dir.join(&component_root), component))
+        .collect::<Result<Vec<_>>>()?;
+    Ok((Some(component_root), components, None))
+}
+
+fn inspect_component(
+    component_root: &Path,
+    component: &discovery::Component,
+) -> Result<ComponentInspection> {
+    let component_dir = component_root.join(&component.relative_path);
+    let specification_path = component_dir.join(ComponentArtifact::Specification.filename());
+    let queue_path = component_dir.join(ComponentArtifact::TaskQueue.filename());
+    let documentation_path = component_dir.join(ComponentArtifact::Documentation.filename());
+
+    let (specification_state, specification_contents) =
+        inspect_component_specification(&specification_path)?;
+    let (queue_state, queue) = inspect_component_queue(&queue_path)?;
+    let documentation_state = inspect_component_documentation(&documentation_path)?;
+    let artifacts = vec![
+        ComponentArtifactInspection {
+            path: ComponentArtifact::Specification.filename(),
+            state: specification_state,
+        },
+        ComponentArtifactInspection {
+            path: ComponentArtifact::TaskQueue.filename(),
+            state: queue_state,
+        },
+        ComponentArtifactInspection {
+            path: ComponentArtifact::Documentation.filename(),
+            state: documentation_state,
+        },
+    ];
+
+    let mut revalidation_causes = Vec::new();
+    let mut context_is_invalid = false;
+    let mut queue_is_stale = false;
+    let mut has_blocked_task = false;
+    if let Some(queue) = queue {
+        queue_is_stale = matches!(
+            queue.component.revalidation.state,
+            task_queue::RevalidationState::Stale
+        );
+        revalidation_causes.extend(
+            queue
+                .component
+                .revalidation
+                .causes
+                .iter()
+                .map(revalidation_cause),
+        );
+
+        if let Some(specification_contents) = specification_contents.as_deref() {
+            let observed_revision = sha256_revision(specification_contents);
+            add_revision_cause(
+                &mut revalidation_causes,
+                StalenessCauseKind::ComponentSpecificationRevisionChanged,
+                "SPEC.md",
+                &queue.component.specification_revision,
+                observed_revision,
+            );
+        }
+
+        let is_component_root = is_component_root(&component.relative_path);
+        match (&queue.component.parent_specification, is_component_root) {
+            (None, true) => {}
+            (Some(_), true) | (None, false) => context_is_invalid = true,
+            (Some(parent), false) => {
+                let parent_specification = component_dir
+                    .join("..")
+                    .join(ComponentArtifact::Specification.filename());
+                let (state, contents) = inspect_component_specification(&parent_specification)?;
+                if state != ComponentArtifactState::Valid {
+                    context_is_invalid = true;
+                } else if let Some(contents) = contents {
+                    add_revision_cause(
+                        &mut revalidation_causes,
+                        StalenessCauseKind::ParentSpecificationRevisionChanged,
+                        "../SPEC.md",
+                        &parent.revision,
+                        sha256_revision(&contents),
+                    );
+                }
+            }
+        }
+        has_blocked_task = queue
+            .tasks
+            .iter()
+            .any(|task| task.status == TaskStatus::Blocked);
+    }
+
+    let state = if artifacts
+        .iter()
+        .any(|artifact| artifact.state == ComponentArtifactState::UnsupportedVersion)
+    {
+        ComponentState::UnsupportedVersion
+    } else if artifacts
+        .iter()
+        .any(|artifact| artifact.state == ComponentArtifactState::Invalid)
+        || context_is_invalid
+    {
+        ComponentState::Invalid
+    } else if artifacts
+        .iter()
+        .any(|artifact| artifact.state == ComponentArtifactState::Missing)
+    {
+        ComponentState::Missing
+    } else if queue_is_stale || !revalidation_causes.is_empty() {
+        ComponentState::Stale
+    } else if has_blocked_task {
+        ComponentState::Blocked
+    } else {
+        ComponentState::Current
+    };
+
+    Ok(ComponentInspection {
+        path: if is_component_root(&component.relative_path) {
+            PathBuf::from(".")
+        } else {
+            component.relative_path.clone()
+        },
+        state,
+        artifacts,
+        revalidation_causes,
+    })
+}
+
+fn is_component_root(path: &Path) -> bool {
+    path.as_os_str().is_empty() || path == Path::new(".")
+}
+
+fn revalidation_cause(cause: &StalenessCause) -> RevalidationCause {
+    RevalidationCause {
+        kind: cause.kind,
+        path: cause.path.clone(),
+        expected_revision: cause.expected_revision.clone(),
+        observed_revision: cause.observed_revision.clone(),
+    }
+}
+
+fn add_revision_cause(
+    causes: &mut Vec<RevalidationCause>,
+    kind: StalenessCauseKind,
+    path: &str,
+    expected_revision: &str,
+    observed_revision: String,
+) {
+    if expected_revision == observed_revision {
+        return;
+    }
+    let cause = RevalidationCause {
+        kind,
+        path: path.to_owned(),
+        expected_revision: expected_revision.to_owned(),
+        observed_revision,
+    };
+    if !causes.contains(&cause) {
+        causes.push(cause);
+    }
+}
+
+fn sha256_revision(contents: &str) -> String {
+    format!("sha256:{:x}", Sha256::digest(contents.as_bytes()))
+}
+
+fn inspect_component_specification(
+    path: &Path,
+) -> Result<(ComponentArtifactState, Option<String>)> {
+    let Some(contents) = read_component_text_artifact(path)? else {
+        return Ok((component_path_state(path)?, None));
+    };
+    let validation = specification::validate(&contents);
+    if validation.is_valid() {
+        Ok((ComponentArtifactState::Valid, Some(contents)))
+    } else if validation.diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic.kind,
+            SpecificationDiagnosticKind::UnsupportedTemplateVersion { .. }
+        )
+    }) {
+        Ok((ComponentArtifactState::UnsupportedVersion, None))
+    } else {
+        Ok((ComponentArtifactState::Invalid, None))
+    }
+}
+
+fn inspect_component_queue(path: &Path) -> Result<(ComponentArtifactState, Option<TaskQueue>)> {
+    let Some(contents) = read_component_text_artifact(path)? else {
+        return Ok((component_path_state(path)?, None));
+    };
+    match task_queue::parse(&contents) {
+        Ok(queue) => Ok((ComponentArtifactState::Valid, Some(queue))),
+        Err(TaskQueueError::UnsupportedVersion { .. }) => {
+            Ok((ComponentArtifactState::UnsupportedVersion, None))
+        }
+        Err(_) => Ok((ComponentArtifactState::Invalid, None)),
+    }
+}
+
+fn inspect_component_documentation(path: &Path) -> Result<ComponentArtifactState> {
+    let Some(contents) = read_component_text_artifact(path)? else {
+        return component_path_state(path);
+    };
+    Ok(markdown_component_state(
+        &contents,
+        "kvist-documentation-version",
+        DOCUMENTATION_VERSION,
+        "# Root Component Compliance Documentation",
+    ))
+}
+
+fn read_component_text_artifact(path: &Path) -> Result<Option<String>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "inspect component artifact",
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if is_link_like(&metadata) || !metadata.file_type().is_file() {
+        return Ok(None);
+    }
+    if metadata.len() > MAX_ROOT_TEXT_ARTIFACT_BYTES {
+        return Ok(None);
+    }
+    match fs::read_to_string(path) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(source) if source.kind() == io::ErrorKind::InvalidData => Ok(None),
+        Err(source) => Err(KvistError::Io {
+            operation: "read component artifact",
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn component_path_state(path: &Path) -> Result<ComponentArtifactState> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(ComponentArtifactState::Missing);
+        }
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "inspect component artifact",
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if is_link_like(&metadata)
+        || !metadata.file_type().is_file()
+        || metadata.len() > MAX_ROOT_TEXT_ARTIFACT_BYTES
+    {
+        return Ok(ComponentArtifactState::Invalid);
+    }
+    match fs::read_to_string(path) {
+        Ok(_) => Ok(ComponentArtifactState::Invalid),
+        Err(source) if source.kind() == io::ErrorKind::InvalidData => {
+            Ok(ComponentArtifactState::Invalid)
+        }
+        Err(source) => Err(KvistError::Io {
+            operation: "read component artifact",
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn markdown_component_state(
+    contents: &str,
+    marker_name: &str,
+    supported_version: u32,
+    required_heading: &str,
+) -> ComponentArtifactState {
+    let expected_prefix = format!("<!-- {marker_name}: ");
+    let first_line = contents.lines().next().unwrap_or_default();
+    let Some(version_text) = first_line
+        .strip_prefix(&expected_prefix)
+        .and_then(|value| value.strip_suffix(" -->"))
+    else {
+        return ComponentArtifactState::Invalid;
+    };
+    let Ok(version) = version_text.parse::<u32>() else {
+        return ComponentArtifactState::Invalid;
+    };
+    if version == 0 {
+        return ComponentArtifactState::Invalid;
+    }
+    if version != supported_version {
+        return ComponentArtifactState::UnsupportedVersion;
+    }
+    if !contents.lines().any(|line| line == required_heading) {
+        return ComponentArtifactState::Invalid;
+    }
+    ComponentArtifactState::Valid
 }
 
 fn inspect_vcs(project_dir: &Path, state: ProjectState) -> VcsInspection {

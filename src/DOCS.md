@@ -20,6 +20,8 @@ The available commands are:
   `Kvist project already initialized at <path>`.
 * `kvist doctor [PROJECT_DIR]` performs a read-only root-artifact inspection
   and writes its multi-line report to standard output.
+* `kvist status [PROJECT_DIR] [--format text|json]` performs a read-only
+  project and component inspection. It defaults to `.` and text output.
 * `kvist tree [PROJECT_DIR]` loads configuration, discovers components, and
   renders a deterministic ASCII tree.
 * `kvist spec new COMPONENT_DIR` creates a new `SPEC.md`.
@@ -31,10 +33,10 @@ Unknown commands are rejected by the argument parser. `main` owns output and
 exit handling; `kvist::run()` parses process arguments and `cli::execute`
 returns a displayable `CommandOutput` or `KvistError`.
 
-There is no CLI command that loads, creates, selects, updates, or persists
-task-queue records. The queue functionality described below is a public Rust
-library API only. Humans inspect queue content directly in the durable YAML
-file; `doctor` reports only the root queue artifact's validity.
+There is no queue-management CLI that creates, selects, updates, or persists
+task-queue records. `status` loads queues only as read-only component
+inspection data. Humans otherwise inspect queue content directly in the
+durable YAML file; `doctor` reports only the root queue artifact's validity.
 
 ## Root artifacts and project state
 
@@ -114,6 +116,57 @@ be component candidates.
 `tree` uses configured limits and prints `component root: <configured path>`,
 then lexical components indented two spaces per normal path segment. Each line
 ends in `[complete]`, `[incomplete: missing ...]`, or `[invalid: ...]`.
+
+## Project and component status inspection
+
+`project_state::inspect` produces a root `ProjectInspection` with optional
+component root, lexical `ComponentInspection` records, and an optional
+discovery error. `init` uses its root state to gate writes, `doctor` displays
+its root diagnostics, and `status` renders its component records. `tree` uses
+the same configuration limits and `discovery::Component` layout model, while
+queue parsing is shared by root and component inspection. No task executor
+exists yet.
+
+`status` renders `status-format-version: 1` text in this order: project path,
+project state, component root or `unavailable`, optional discovery error, then
+one lexical component record with adjacent artifacts and stale causes. Compact
+JSON has these top-level keys in order: `format_version`, `project_path`,
+`project_state`, `component_root`, `components`, and `discovery_error`. A
+component object has `path`, `state`, `artifacts`, and
+`revalidation_causes` keys in order; its artifact array is ordered `SPEC.md`,
+`TODOS.yaml`, `DOCS.md`, and each item has `path` then `state`. A current root
+uses the configured component root and lexical, bounded discovery. If
+discovery fails, the report has no component records and carries the error;
+the already determined root state is retained. A root that is not current has
+no component root or component records. Status omits root-artifact, VCS, and
+guidance details from its own output, although its root inspection invokes the
+existing read-only VCS inspection when the root is current.
+
+Every discovered component has `SPEC.md`, `TODOS.yaml`, and `DOCS.md` entries
+in that order. Each must be a regular non-link UTF-8 file of at most 1 MiB.
+Specification, queue, and documentation content use the corresponding
+existing validators. Component state precedence is
+`unsupported-version`, `invalid`, `missing`, `stale`, `blocked`, then
+`current`. A topology-inconsistent queue parent, or an unreadable immediate
+parent specification, makes an otherwise present child invalid.
+
+For valid component queues, inspection retains recorded staleness causes and
+computes a SHA-256 fingerprint over the exact valid component specification
+bytes. It compares that fingerprint with the queue's component revision and,
+for children, compares the immediate parent's specification with its recorded
+parent revision. A differing digest adds a local or parent cause and makes the
+component stale. It retains recorded stale causes without reconciling them to
+newly derived causes. A blocked task produces `blocked` only when no higher
+precedence condition applies. Status does not write its derived evidence,
+timestamps, revisions, task state, or any other file.
+
+Text dynamically escapes backslashes and ASCII control characters. JSON
+escapes JSON control characters, quotes, and backslashes; all rendered paths
+are lossy display text. Inspection is path-based and point-in-time: it checks
+metadata and links before separate file reads and traversal, so it does not
+provide a descriptor-based TOCTOU guarantee. Inspection I/O errors fail the
+command; invalid artifacts and discovery errors are generally represented in
+the successful report.
 
 When root artifacts are current, `doctor` also discovers components and asks
 the configured VCS about every root artifact and every discovered component's
@@ -216,11 +269,12 @@ parse/serialize cycle is stable for valid data.
 
 The implementation contains no general-purpose queue-file loader or reusable
 queue-loader size-bound API; root inspection is the only queue-file reader and
-applies its 1 MiB root-artifact limit before parsing. It also contains no
+applies its 1 MiB root-artifact limit before parsing. Status separately reads
+component queues only for inspection. It contains no
 queue-specific CLI command, task selection engine, dependency-completion
-enforcer, transition executor, timestamp generator, revision-hashing
-operation, revalidation evaluator, task-queue migration, or queue persistence
-API. Queue validation verifies the shape and relationships described above;
+enforcer, transition executor, timestamp generator, task-queue migration, or
+queue persistence API. Queue validation verifies the shape and relationships
+described above;
 it does not compare recorded revisions with files, resolve requirement
 locators, verify that status history actually followed
 `can_transition_to`, require unique or canonical revalidation causes, or

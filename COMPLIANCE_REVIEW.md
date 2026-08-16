@@ -147,3 +147,38 @@ The completed test suite and `kvist doctor .` independently verified that the
 current root `src/TODOS.yaml` is a valid version-2 queue. No implementation
 requirement was removed, no queue state was silently rewritten, and no future
 execution behavior is claimed as implemented.
+
+## Phase 2 P2-02 project status review
+
+**Scope:** Read-only project/component inspection, SHA-256 revalidation
+comparison, and version-1 `kvist status` text and JSON reports.
+
+| Role | Permitted inputs | Result |
+| --- | --- | --- |
+| Security reviewer | P2-02 source, tests, manifest, root contract, and specification | Found and remediated text control-character injection; no blocking finding remained. |
+| Clean-slate documenter | Source, tests, manifest, and generated configuration only | Derived the status command, component-state precedence, validation, hashing, escaping, and point-in-time limitations in `src/DOCS.md`. |
+| Source-blind reviewer | `ROOT_CONTRACT.md`, `src/SPEC.md`, `src/DOCS.md`, `README.md`, roadmap, and runbook only | Found the final documented status contract compliant; it correctly deferred execution integration to P2-03. |
+
+### Security result and arbitration
+
+The audit found that unescaped control characters in filesystem paths or stored
+stale-cause paths could forge lines in the default text report. A regression
+fixture now verifies deterministic escaping of such a component path; text
+rendering escapes backslashes and ASCII control characters, while JSON uses
+its own string escaping.
+
+The audit also identified the existing path-based metadata/read TOCTOU
+limitation. This is not a newly claimed security guarantee: the documented
+static-workspace threat model already states that Kvist does not pin directory
+or file descriptors and cannot prevent concurrent filesystem replacement.
+P2-02 retains that explicit limitation; P2 execution must define and enforce
+its separate trusted-workspace boundary before running user-controlled work.
+
+### Final compliance result
+
+| Classification | Finding | Arbitration |
+| --- | --- | --- |
+| Compliant | `status` reports root and lexical component state without writing durable workflow data; version-1 text and JSON report shapes, ordering, output escaping, and exit behavior are documented. | None. |
+| Compliant | Valid component queues are compared only with their own and immediate parent's valid specification bytes. Missing, invalid, unsupported-version, stale, blocked, and current precedence is explicit. | None. |
+| Compliant | The initial text/JSON report-parity gap was resolved by adding `component_root` to the version-1 JSON object and its fixture. | None. |
+| Deferred | The source-blind pass cannot establish test fixture execution, and task execution/persistence does not exist. | Retain test-gate evidence separately; P2-03 owns executor integration. |

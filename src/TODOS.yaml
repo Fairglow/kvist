@@ -1,10 +1,10 @@
 schema_version: 2
 component:
-  specification_revision: sha256:a8839b6dcd90bd0fefff57a55ee2c86014309033da9e7969c0e8ee5177f9e8e8
+  specification_revision: sha256:dbd80b114196737836cadf55d2ca0d06b151a12b3bb030a639aa2331a83ec50f
   parent_specification: null
   revalidation:
     state: current
-    checked_at: 2026-08-13T21:06:31Z
+    checked_at: 2026-08-16T12:27:01Z
     stale_since: null
     causes: []
 tasks:
@@ -83,4 +83,80 @@ tasks:
       created_at: 2026-08-13T20:19:53Z
       updated_at: 2026-08-16T12:10:01Z
       completed_at: 2026-08-16T12:10:01Z
+    blocked_reason: null
+  - id: p2-02-write-tests
+    title: Define project status inspection tests
+    description: Write focused integration and unit tests for deterministic text and JSON status reports, artifact-state precedence, staleness causes, blocked queues, and read-only operation.
+    context: Root inspection validates only the root queue today, so scripts cannot determine whether a discovered component is missing, invalid, stale, blocked, or current.
+    purpose: Establish executable evidence for the project-wide inspection contract before the status implementation becomes the shared execution precondition.
+    expected_outcome: Focused tests initially fail for valid current components, malformed and unsupported component artifacts, local and parent revision mismatches, blocked tasks, stable report formats, and no-write inspection.
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - ROOT_CONTRACT.md#Change-and-compliance-rules
+      - SPEC.md#Project-status-inspection
+      - TODO.md#P2-02
+    timestamps:
+      created_at: 2026-08-16T12:19:23Z
+      updated_at: 2026-08-16T12:20:09Z
+      completed_at: 2026-08-16T12:20:09Z
+    blocked_reason: null
+  - id: p2-02-implement-code
+    title: Implement project status inspection
+    description: Add the shared read-only component inspection model, SHA-256 revalidation comparison, and versioned text and JSON status command.
+    context: Future task selection and automation need one validated component state model rather than independent filesystem and queue interpretations.
+    purpose: Make missing, invalid, unsupported, stale, blocked, and current component state deterministic and inspectable without mutating durable workflow state.
+    expected_outcome: The status command reports every discovered component in stable text and JSON formats with attributable stale causes and preserves all inspected files.
+    kind: implementation
+    status: completed
+    depends_on:
+      - p2-02-write-tests
+    requirements:
+      - ROOT_CONTRACT.md#Non-negotiable-architecture
+      - SPEC.md#Project-status-inspection
+      - TODO.md#P2-02
+    timestamps:
+      created_at: 2026-08-16T12:19:23Z
+      updated_at: 2026-08-16T12:22:01Z
+      completed_at: 2026-08-16T12:22:01Z
+    blocked_reason: null
+  - id: p2-02-security-audit
+    title: Audit project status inspection boundaries
+    description: Review component discovery reuse, bounded artifact reads, digest comparison, JSON serialization, path handling, and no-write behavior for unsafe acceptance or denial-of-service paths.
+    context: Project status consumes untrusted filesystem and queue data that future execution will treat as an eligibility signal.
+    purpose: Confirm that inspection cannot hide invalid workflow evidence, follow links, exceed resource limits, or mutate state while diagnosing projects.
+    expected_outcome: An independent audit records findings or confirms the status inspection trust boundary before task selection consumes its result.
+    kind: security-audit
+    status: completed
+    depends_on:
+      - p2-02-implement-code
+    requirements:
+      - ROOT_CONTRACT.md#Change-and-compliance-rules
+      - SPEC.md#Project-status-inspection
+      - TODO.md#P2-02
+    timestamps:
+      created_at: 2026-08-16T12:19:23Z
+      updated_at: 2026-08-16T12:24:05Z
+      completed_at: 2026-08-16T12:24:05Z
+    blocked_reason: null
+  - id: p2-02-compliance-review
+    title: Independently review project status compliance
+    description: Produce source-derived documentation and compare it with the status specification without exposing source code to the compliance reviewer.
+    context: The status model will be an execution and automation boundary, so its implementer cannot certify the observed behavior.
+    purpose: Verify that status output, component-state precedence, and deferred persistence behavior remain aligned with the component contract.
+    expected_outcome: Retained clean-slate documentation and a source-blind comparison classify the status implementation as compliant, mismatched, deferred, or underspecified.
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - p2-02-security-audit
+    requirements:
+      - REVIEW_RUNBOOK.md#Clean-slate-documentation-pass
+      - REVIEW_RUNBOOK.md#Source-blind-compliance-pass
+      - ROOT_CONTRACT.md#Change-and-compliance-rules
+      - TODO.md#P2-02
+    timestamps:
+      created_at: 2026-08-16T12:19:23Z
+      updated_at: 2026-08-16T12:28:42Z
+      completed_at: 2026-08-16T12:28:42Z
     blocked_reason: null
