@@ -283,7 +283,11 @@ Each transition appends an attempt record to
 replacement is a same-directory no-clobber temporary write, file sync, rename,
 and parent-directory sync. A cancellation or crash can leave a prepared record
 and either old or new queue; it never reports success unless the committed
-record is written. Future recovery tooling must retain and reconcile prepared
-records explicitly rather than guessing or silently repairing them.
+record is written. A trailing prepared record fences subsequent transitions for
+that task until future recovery tooling explicitly reconciles it; Kvist never
+guesses or silently repairs the record. Attempt-directory and newly created
+attempt-file entries are directory-synced where the platform supports durable
+directory synchronization. Other platforms retain the record but do not claim
+that directory-entry durability guarantee.
 
 </details>

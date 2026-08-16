@@ -11,7 +11,7 @@ use serde::Serialize;
 use crate::{
     KvistError, Result,
     discovery::ComponentArtifact,
-    file_io::{replace_file_atomically, write_new_file_atomically},
+    file_io::{replace_file_atomically, sync_directory, write_new_file_atomically},
     filesystem::is_link_like,
     project_state::{self, ComponentState, MAX_ROOT_TEXT_ARTIFACT_BYTES, ProjectState},
     task_queue::{Task, TaskQueue, TaskStatus, Timestamp, parse, serialize},
@@ -44,6 +44,7 @@ pub fn transition(
     let result = (|| {
         let context = validate_context(component_path)?;
         let mut queue = read_queue(&context.component_dir)?;
+        ensure_attempt_recovered(&context.component_dir, task_id)?;
         let task_index = queue
             .tasks
             .iter()
@@ -345,6 +346,7 @@ fn attempt_path(component_dir: &Path, task_id: &str) -> Result<PathBuf> {
                 path: directory.clone(),
                 source,
             })?;
+            sync_directory(component_dir)?;
         }
         Err(source) => {
             return Err(KvistError::Io {
@@ -388,7 +390,7 @@ impl<'a> AttemptRecord<'a> {
 }
 
 fn append_attempt(path: &Path, record: AttemptRecord<'_>) -> Result<()> {
-    if let Ok(metadata) = fs::symlink_metadata(path) {
+    let existed = if let Ok(metadata) = fs::symlink_metadata(path) {
         if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
             return Err(KvistError::Io {
                 operation: "append attempt record",
@@ -396,7 +398,10 @@ fn append_attempt(path: &Path, record: AttemptRecord<'_>) -> Result<()> {
                 source: io::Error::other("attempt record must be a regular file"),
             });
         }
-    }
+        true
+    } else {
+        false
+    };
     let encoded =
         serde_json::to_string(&record).map_err(|error| KvistError::TaskQueueUnavailable {
             path: path.to_path_buf(),
@@ -418,7 +423,46 @@ fn append_attempt(path: &Path, record: AttemptRecord<'_>) -> Result<()> {
             operation: "append attempt record",
             path: path.to_path_buf(),
             source,
-        })
+        })?;
+    if !existed {
+        let parent = path.parent().ok_or_else(|| KvistError::Io {
+            operation: "determine attempt record parent",
+            path: path.to_path_buf(),
+            source: io::Error::other("attempt record has no parent"),
+        })?;
+        sync_directory(parent)?;
+    }
+    Ok(())
+}
+
+fn ensure_attempt_recovered(component_dir: &Path, task_id: &str) -> Result<()> {
+    let path = component_dir
+        .join(".kvist-attempts")
+        .join(format!("{task_id}.jsonl"));
+    let contents = match fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "read attempt record",
+                path,
+                source,
+            });
+        }
+    };
+    if contents
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .is_some_and(|line| line.contains(r#""phase":"prepared""#))
+    {
+        return Err(KvistError::TaskQueueUnavailable {
+            path,
+            reason: "a prepared task attempt requires explicit recovery before another transition"
+                .to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn status_name(status: TaskStatus) -> &'static str {

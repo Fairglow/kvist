@@ -91,7 +91,8 @@ pub(crate) fn replace_file_atomically(destination: &Path, contents: &str) -> Res
     sync_directory(parent)
 }
 
-fn sync_directory(path: &Path) -> Result<()> {
+/// Synchronizes a directory after a durable entry change where supported.
+pub(crate) fn sync_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         File::open(path)
