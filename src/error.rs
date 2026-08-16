@@ -276,6 +276,93 @@ pub enum KvistError {
         /// Maximum permitted specification size.
         max_bytes: u64,
     },
+    /// A task command requires a normal component-root-relative path.
+    #[error(
+        "component directory `{path}` must be `.` or a normal path relative to the configured component root"
+    )]
+    TaskComponentPathInvalid {
+        /// User-supplied component path.
+        path: PathBuf,
+    },
+    /// A task command can only run from a complete current project.
+    #[error(
+        "cannot run task command because project `{project_dir}` is not current (state: {state})"
+    )]
+    TaskProjectNotCurrent {
+        /// Current project root.
+        project_dir: PathBuf,
+        /// Inspected project state.
+        state: String,
+    },
+    /// The requested directory is not a discovered current component.
+    #[error("cannot run task command because component `{component}` is {state}")]
+    TaskComponentNotCurrent {
+        /// Component-root-relative component path.
+        component: PathBuf,
+        /// Inspected component state or absence.
+        state: String,
+    },
+    /// Task mutation and selection require every durable artifact to be tracked.
+    #[error(
+        "cannot run task command because durable artifacts are not completely VCS tracked: {summary}"
+    )]
+    TaskVcsNotCurrent {
+        /// VCS inspection summary.
+        summary: String,
+    },
+    /// A task queue unexpectedly changed after component revalidation.
+    #[error("cannot use TODO queue `{path}` after revalidation: {reason}")]
+    TaskQueueUnavailable {
+        /// Queue path.
+        path: PathBuf,
+        /// Read or validation failure.
+        reason: String,
+    },
+    /// Another writer or an explicitly retained stale lock owns the component.
+    #[error(
+        "cannot transition task `{task_id}` because component lock `{path}` already exists; inspect the owner and remove it explicitly only when no writer is active"
+    )]
+    TaskLockExists {
+        /// Existing lock path.
+        path: PathBuf,
+        /// Target task.
+        task_id: String,
+    },
+    /// A requested task is not in the selected component queue.
+    #[error("task `{task_id}` does not exist in component `{component}`")]
+    TaskNotFound {
+        /// Component-root-relative component path.
+        component: PathBuf,
+        /// Requested task ID.
+        task_id: String,
+    },
+    /// A task is not eligible to start work.
+    #[error("task `{task_id}` is not ready: {reason}")]
+    TaskNotReady {
+        /// Requested task ID.
+        task_id: String,
+        /// Blocking condition.
+        reason: String,
+    },
+    /// A state-machine transition or reason violates the task command contract.
+    #[error("cannot transition task `{task_id}` from {from} to {to}: {reason}")]
+    TaskTransitionInvalid {
+        /// Target task.
+        task_id: String,
+        /// Existing status.
+        from: String,
+        /// Requested status.
+        to: String,
+        /// Contract violation.
+        reason: String,
+    },
+    /// The system clock could not provide a UTC timestamp for a transition.
+    #[error("cannot determine the current UTC timestamp for a task transition: {source}")]
+    TaskClock {
+        /// Underlying clock error.
+        #[source]
+        source: std::time::SystemTimeError,
+    },
     /// A filesystem operation failed.
     #[error("cannot {operation} `{path}`: {source}")]
     Io {

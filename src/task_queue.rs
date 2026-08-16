@@ -1,6 +1,7 @@
 //! Versioned, durable task-queue parsing and semantic validation.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -168,6 +169,39 @@ impl TaskStatus {
     }
 }
 
+fn unix_seconds_to_rfc3339(seconds: u64) -> String {
+    let day_seconds = 24 * 60 * 60;
+    let days = seconds / day_seconds;
+    let time = seconds % day_seconds;
+    let (year, month, day) = civil_date_from_days(days);
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        time / 3600,
+        (time % 3600) / 60,
+        time % 60
+    )
+}
+
+fn civil_date_from_days(days_since_epoch: u64) -> (u64, u64, u64) {
+    let days = days_since_epoch + 719_468;
+    let era = days / 146_097;
+    let day_of_era = days % 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = (month_prime as i64 + if month_prime < 10 { 3 } else { -9 }) as u64;
+    (year + u64::from(month <= 2), month, day)
+}
+
+impl std::fmt::Display for Timestamp {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 /// Timestamps that make a task's state understandable without file metadata.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -186,6 +220,11 @@ pub struct TaskTimestamps {
 pub struct Timestamp(String);
 
 impl Timestamp {
+    pub(crate) fn now() -> std::result::Result<Self, SystemTimeError> {
+        let seconds = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        Ok(Self(unix_seconds_to_rfc3339(seconds)))
+    }
+
     fn validate(&self, field: &str) -> std::result::Result<(), TaskQueueError> {
         let value = self.0.as_bytes();
         if value.len() != 20

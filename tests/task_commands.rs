@@ -9,11 +9,27 @@ use tempfile::TempDir;
 const GENERATED_SPECIFICATION_REVISION: &str =
     "sha256:d47faba18fc80961e3cf1872cbd0d74ccc114a9667dfbc6b84dbbfac2234a1bd";
 
-fn run_kvist(arguments: &[&str]) -> Output {
+fn run_kvist(project: &TempDir, arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_kvist"))
         .args(arguments)
+        .current_dir(project.path())
         .output()
         .expect("run kvist command")
+}
+
+fn track_project(project: &TempDir) {
+    let status = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(project.path())
+        .status()
+        .expect("initialize Git");
+    assert!(status.success());
+    let status = Command::new("git")
+        .args(["add", "."])
+        .current_dir(project.path())
+        .status()
+        .expect("track project artifacts");
+    assert!(status.success());
 }
 
 fn queue() -> String {
@@ -71,17 +87,10 @@ fn task_next_selects_the_first_ready_task_without_writing_the_queue() {
     initialize(project.path()).expect("initialize");
     let queue_path = project.path().join("src/TODOS.yaml");
     fs::write(&queue_path, queue()).expect("write queue");
+    track_project(&project);
     let before = fs::read(&queue_path).expect("read before");
 
-    let output = run_kvist(&[
-        "task",
-        "next",
-        project
-            .path()
-            .join("src")
-            .to_str()
-            .expect("UTF-8 component"),
-    ]);
+    let output = run_kvist(&project, &["task", "next", "."]);
 
     assert!(output.status.success());
     assert_eq!(output.stderr, b"");
@@ -90,23 +99,29 @@ fn task_next_selects_the_first_ready_task_without_writing_the_queue() {
 }
 
 #[test]
+fn task_next_requires_complete_vcs_tracking() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    let output = run_kvist(&project, &["task", "next", "."]);
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("VCS tracked"));
+}
+
+#[test]
 fn task_transition_writes_auditable_atomic_state_change() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     let queue_path = project.path().join("src/TODOS.yaml");
     fs::write(&queue_path, queue()).expect("write queue");
+    track_project(&project);
 
-    let output = run_kvist(&[
-        "task",
-        "transition",
-        project
-            .path()
-            .join("src")
-            .to_str()
-            .expect("UTF-8 component"),
-        "implement-code",
-        "in-progress",
-    ]);
+    let output = run_kvist(
+        &project,
+        &["task", "transition", ".", "implement-code", "in-progress"],
+    );
 
     assert!(output.status.success());
     assert_eq!(output.stderr, b"");
@@ -125,5 +140,49 @@ fn task_transition_writes_auditable_atomic_state_change() {
     .expect("read audit");
     assert!(audit.contains("\"prepared\""));
     assert!(audit.contains("\"committed\""));
+    assert!(!project.path().join("src/.kvist-task.lock").exists());
+}
+
+#[test]
+fn task_transition_refuses_an_existing_component_lock() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    track_project(&project);
+    fs::write(
+        project.path().join("src/.kvist-task.lock"),
+        "started_at: 2026-08-16T12:54:50Z\ntask_id: implement-code\n",
+    )
+    .expect("write retained lock");
+
+    let output = run_kvist(
+        &project,
+        &["task", "transition", ".", "implement-code", "in-progress"],
+    );
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("lock"));
+    assert!(
+        !project
+            .path()
+            .join("src/.kvist-attempts/implement-code.jsonl")
+            .exists()
+    );
+}
+
+#[test]
+fn task_transition_requires_a_block_reason() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    track_project(&project);
+
+    let output = run_kvist(
+        &project,
+        &["task", "transition", ".", "implement-code", "blocked"],
+    );
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("--reason"));
     assert!(!project.path().join("src/.kvist-task.lock").exists());
 }

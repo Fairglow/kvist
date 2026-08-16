@@ -2,9 +2,12 @@
 
 use std::path::PathBuf;
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
-use crate::{KvistError, Result, init, project_state, specification, status, tree};
+use crate::{
+    KvistError, Result, init, project_state, specification, status, task_commands,
+    task_queue::TaskStatus, tree,
+};
 
 /// Kvist's top-level command-line interface.
 #[derive(Debug, Parser)]
@@ -37,6 +40,12 @@ pub enum Command {
         /// Stable report representation for scripts and tools.
         #[arg(long, value_enum, default_value_t = status::StatusFormat::Text)]
         format: status::StatusFormat,
+    },
+    /// Select or transition component tasks.
+    Task {
+        /// Task operation to execute from the current project root.
+        #[command(subcommand)]
+        command: TaskCommand,
     },
     /// Create or validate a component specification.
     Spec {
@@ -71,6 +80,52 @@ pub enum SpecCommand {
     },
 }
 
+/// Task selection and state-transition operations.
+#[derive(Debug, Subcommand)]
+pub enum TaskCommand {
+    /// Print the first ready task without changing durable state.
+    Next {
+        /// Component-root-relative component directory; `.` selects the root component.
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: PathBuf,
+    },
+    /// Persist one legal task status transition and audit attempt.
+    Transition {
+        /// Component-root-relative component directory; `.` selects the root component.
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: PathBuf,
+        /// Queue-local task identifier.
+        #[arg(value_name = "TASK_ID")]
+        task_id: String,
+        /// Requested durable task status.
+        #[arg(value_name = "STATUS")]
+        status: TaskStatusArgument,
+        /// Required nonblank blocker explanation only when STATUS is `blocked`.
+        #[arg(long)]
+        reason: Option<String>,
+    },
+}
+
+/// Command-line spelling of a queue task status.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum TaskStatusArgument {
+    Pending,
+    InProgress,
+    Blocked,
+    Completed,
+}
+
+impl From<TaskStatusArgument> for TaskStatus {
+    fn from(status: TaskStatusArgument) -> Self {
+        match status {
+            TaskStatusArgument::Pending => Self::Pending,
+            TaskStatusArgument::InProgress => Self::InProgress,
+            TaskStatusArgument::Blocked => Self::Blocked,
+            TaskStatusArgument::Completed => Self::Completed,
+        }
+    }
+}
+
 /// Successful command output written by the binary at the process boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandOutput(String);
@@ -100,6 +155,19 @@ pub fn execute(command: Command) -> Result<CommandOutput> {
             .map(|inspection| CommandOutput::message(inspection.to_string())),
         Command::Status { path, format } => project_state::inspect(&path)
             .map(|inspection| CommandOutput::message(status::render(&inspection, format))),
+        Command::Task {
+            command: TaskCommand::Next { component_dir },
+        } => task_commands::next(&component_dir).map(CommandOutput::message),
+        Command::Task {
+            command:
+                TaskCommand::Transition {
+                    component_dir,
+                    task_id,
+                    status,
+                    reason,
+                },
+        } => task_commands::transition(&component_dir, &task_id, status.into(), reason.as_deref())
+            .map(CommandOutput::message),
         Command::Spec {
             command: SpecCommand::New { component_dir },
         } => specification::create(&component_dir).map(|generated| {
