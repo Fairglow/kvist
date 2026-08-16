@@ -182,3 +182,16 @@ its separate trusted-workspace boundary before running user-controlled work.
 | Compliant | Valid component queues are compared only with their own and immediate parent's valid specification bytes. Missing, invalid, unsupported-version, stale, blocked, and current precedence is explicit. | None. |
 | Compliant | The initial text/JSON report-parity gap was resolved by adding `component_root` to the version-1 JSON object and its fixture. | None. |
 | Deferred | The source-blind pass cannot establish test fixture execution, and task execution/persistence does not exist. | Retain test-gate evidence separately; P2-03 owns executor integration. |
+
+## Phase 2 P2-03 task workflow review
+
+The clean-slate documenter derived task selection, transition, locking, audit,
+and recovery behavior from source and tests only. The source-blind reviewer
+then compared `ROOT_CONTRACT.md`, `src/SPEC.md`, `src/DOCS.md`, README, roadmap,
+and runbook only.
+
+| Classification | Finding | Arbitration |
+| --- | --- | --- |
+| Compliant | Ready-task selection, legal transitions, VCS/component gates, locking, prepared/committed records, and atomic replacement are consistently documented. | None. |
+| Compliant | The audit remediated text injection, attempt-directory durability on supported platforms, and recovery fencing for trailing prepared records. | None. |
+| Deferred | Provider/test execution and explicit prepared-record recovery remain later Phase 2 work. | P2-04 through P2-06 own those boundaries. |

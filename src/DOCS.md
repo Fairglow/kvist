@@ -22,6 +22,9 @@ The available commands are:
   and writes its multi-line report to standard output.
 * `kvist status [PROJECT_DIR] [--format text|json]` performs a read-only
   project and component inspection. It defaults to `.` and text output.
+* `kvist task next COMPONENT_DIR` selects one ready task without writing.
+* `kvist task transition COMPONENT_DIR TASK_ID STATUS [--reason REASON]`
+  persists one audited task-state transition.
 * `kvist tree [PROJECT_DIR]` loads configuration, discovers components, and
   renders a deterministic ASCII tree.
 * `kvist spec new COMPONENT_DIR` creates a new `SPEC.md`.
@@ -33,8 +36,9 @@ Unknown commands are rejected by the argument parser. `main` owns output and
 exit handling; `kvist::run()` parses process arguments and `cli::execute`
 returns a displayable `CommandOutput` or `KvistError`.
 
-There is no queue-management CLI that creates, selects, updates, or persists
-task-queue records. `status` loads queues only as read-only component
+Task commands select and transition existing queue records but do not create
+queues, revise task definitions, revalidate specifications, migrate queues, or
+execute providers/tests. `status` loads queues only as read-only component
 inspection data. Humans otherwise inspect queue content directly in the
 durable YAML file; `doctor` reports only the root queue artifact's validity.
 
@@ -265,16 +269,35 @@ U+001F (the latter as four-digit lowercase `\u` escapes). Enum values are
 unquoted kebab-case names. Serialization ends with a newline and a
 parse/serialize cycle is stable for valid data.
 
+## Task selection and state updates
+
+`kvist task next COMPONENT_DIR` validates a component-root-relative path, the
+current project/component state, and complete VCS tracking, then prints the
+first declared pending task whose dependency chain is completed or `no ready
+task`. It does not write files. `kvist task transition COMPONENT_DIR TASK_ID
+STATUS [--reason REASON]` applies only legal queue state transitions, requires
+readiness for `in-progress`, requires a nonblank reason only for `blocked`,
+and updates UTC task timestamps.
+
+Transitions create a no-clobber component lock, append a `prepared` JSONL
+attempt, atomically replace `TODOS.yaml`, then append `committed`. A trailing
+prepared record fences another transition for that task until explicit future
+recovery. The writer rejects invalid queues, stale or non-current components,
+incomplete VCS tracking, unknown task IDs, illegal transitions, locks, clock,
+and filesystem failures. Attempt directories and new attempt files are
+directory-synced on Unix; other platforms retain the records without a
+directory-entry durability guarantee. The commands do not invoke providers,
+tests, shells, networks, or task execution.
+
 ## Observable omissions and failure behavior
 
 The implementation contains no general-purpose queue-file loader or reusable
 queue-loader size-bound API; root inspection is the only queue-file reader and
 applies its 1 MiB root-artifact limit before parsing. Status separately reads
-component queues only for inspection. It contains no
-queue-specific CLI command, task selection engine, dependency-completion
-enforcer, transition executor, timestamp generator, task-queue migration, or
-queue persistence API. Queue validation verifies the shape and relationships
-described above;
+component queues only for inspection. It contains no queue creation,
+specification revalidation, task execution, task-queue migration, or
+general-purpose queue persistence API. Queue validation verifies the shape and
+relationships described above;
 it does not compare recorded revisions with files, resolve requirement
 locators, verify that status history actually followed
 `can_transition_to`, require unique or canonical revalidation causes, or

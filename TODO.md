@@ -202,7 +202,7 @@ clean-slate/source-blind review evidence are retained in
 **Verification:** golden tests for text and any machine-readable output, plus
 state fixtures produced by P1-R1.
 
-### IN PROGRESS P2-03 — Implement safe task selection and execution state updates
+### COMPLETE P2-03 — Implement safe task selection and execution state updates
 
 **Depends on:** P2-01, P2-02
 **Current evidence:** The task selection and transition contract, lock and

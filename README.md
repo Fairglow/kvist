@@ -354,8 +354,9 @@ The legal task transitions are `pending -> in-progress | blocked`,
 `in-progress -> pending | blocked | completed`, and
 `blocked -> pending | in-progress`. `completed` is terminal: new work uses a
 new ID and a requirement link, preserving the completed task's audit trail.
-Future atomic state updates will set `updated_at`, set `completed_at` only for
-completion, and retain attempt evidence rather than overwriting history.
+`kvist task transition` sets `updated_at`, sets `completed_at` only for
+completion, and retains prepared/committed attempt evidence rather than
+overwriting history.
 
 ### Ordering, serialization, and migration
 
