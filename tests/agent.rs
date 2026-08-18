@@ -102,13 +102,11 @@ fn execute_agent_parses_json_run_record_for_token_feedback() {
     let mut log_file_path = None;
     for _ in 0..100 {
         if let Ok(entries) = fs::read_dir(&logs_dir) {
-            for entry in entries {
-                if let Ok(entry) = entry {
-                    let path = entry.path();
-                    if path.extension().and_then(|s| s.to_str()) == Some("log") {
-                        log_file_path = Some(path);
-                        break;
-                    }
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|s| s.to_str()) == Some("log") {
+                    log_file_path = Some(path);
+                    break;
                 }
             }
         }

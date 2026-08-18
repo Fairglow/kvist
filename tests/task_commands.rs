@@ -302,8 +302,7 @@ fn spec_accept_on_child_updates_parent_revision() {
     .expect("write child docs");
 
     // Create a child TODOS.yaml with parent reference
-    let child_queue = format!(
-        r#"schema_version: 2
+    let child_queue = r#"schema_version: 2
 component:
   specification_revision: sha256:d47faba18fc80961e3cf1872cbd0d74ccc114a9667dfbc6b84dbbfac2234a1bd
   parent_specification:
@@ -320,7 +319,7 @@ component:
         observed_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 tasks: []
 "#
-    );
+    .to_string();
     fs::write(child_dir.join("TODOS.yaml"), &child_queue).expect("write child queue");
     track_project(&project);
 

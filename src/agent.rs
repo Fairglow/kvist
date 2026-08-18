@@ -50,7 +50,7 @@ pub fn split_command(
         });
     }
 
-    let program = raw_arg_trim(&raw_args[0]).to_owned();
+    let program = raw_arg_trim(raw_args[0]).to_owned();
     let mut args = Vec::new();
 
     for raw_arg in &raw_args[1..] {
