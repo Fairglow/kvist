@@ -16,6 +16,9 @@ Traditional AI tools (copilots and auto-writers) operate on a "generate and debu
 
 1. **Specs Over Code:** You cannot write a line of code until you have a validated specification (`SPEC.md`) and an ordered, dependency-mapped task queue (`TODOS.yaml`).
 2. **Lifecycle Order Enforcement (Test-Driven Development):** Implementations _cannot_ precede tests. Reviewers _cannot_ self-certify. By grounding Kvist in a strict **Test-First (TDD) methodology**, we ensure that executable unit tests are written to prove specification contracts before any implementation begins.
+   - **Isolated Component Unit Testing & Mocking:** Testing primarily occurs at the unit level for each component. Each component is validated in isolation, leveraging lightweight mocking or fakes to simulate surrounding components or external infrastructure, ensuring its specifications can be mathematically or behaviorally proven.
+   - **Top-Level Integration Testing:** To ensure that separate components mesh perfectly, Kvist structures top-level integration tests at the root or orchestration layer (e.g., Component C). These stitch together actual component boundaries (e.g. network parsing, db storage, and application orchestration) and may still utilize mocking for downstream external cloud boundaries.
+   - **Adversarial Fuzzing:** To guarantee that Layer 2 safety boundaries (like length limits, size bounds, or packet limits) are completely impenetrable, the test-writing phase strongly encourages establishing fuzz-testing or property-based harnesses, subjecting the implementation to thousands of randomized, adversarial inputs.
 3. **Double-Blind Verification (DOCS.md vs. User Docs):** To prevent "hallucinated compliance," the developer agent implementing the code never writes the documentation. A clean-slate "Documenter" agent reverse-engineers the raw code into a documentation file, and a third "Reviewer" agent compares this file against the original `SPEC.md`.
 
 ### Differentiating User Docs vs. Component Implementation Records (`DOCS.md`)
@@ -146,7 +149,7 @@ token_limit = 100000
 
 # 2. DEVELOPER: Highly focused, cost-effective model for TDD tests and implementation
 [agent.profiles.developer]
-command_template = "gemini-cli --model gemini-1.5-flash --prompt '{prompt}' --files {context_files}"
+command_template = "gemini-cli --model gemini-2.5-flash --prompt '{prompt}' --files {context_files}"
 token_limit = 50000
 
 # 3. AUDITOR: Specialized security auditing agent
@@ -156,14 +159,14 @@ token_limit = 50000
 
 # 4. REVIEWER: Neutral, source-blind clean-slate documenter and compliance checker
 [agent.profiles.reviewer]
-command_template = "gemini-cli --model gemini-1.5-pro --prompt '{prompt}' --files {context_files}"
+command_template = "gemini-cli --model gemini-2.5-pro --prompt '{prompt}' --files {context_files}"
 token_limit = 100000
 ```
 
 ### Role Taxonomy:
 
-- **Architect (Stage 1 & 2):** System decomposition, specification interview, and TODO task generation. (Highly suited to premium reasoning models like Claude 3.5 Sonnet / Gemini 1.5 Pro).
-- **Developer (Stage 3):** Writing unit tests and fulfilling code implementations. (Best suited to fast, cost-efficient models like Gemini 1.5 Flash / Claude Haiku).
+- **Architect (Stage 1 & 2):** System decomposition, specification interview, and TODO task generation. (Highly suited to premium reasoning models like Claude 3.5 Sonnet / Gemini 2.5 Pro).
+- **Developer (Stage 3):** Writing unit tests and fulfilling code implementations. (Best suited to fast, cost-efficient models like Gemini 2.5 Flash / Claude Haiku).
 - **Auditor (Stage 4):** Evaluates boundaries, safety invariants, and validates memory/concurrency safety. (Requires precise, security-focused models).
 - **Reviewer / Documenter (Stage 4):** Conducts clean-slate documentation (reverse-engineering `DOCS.md` from raw code) and performs the final spec-to-doc compliance comparison. (Requires a neutral, highly logical model).
 
