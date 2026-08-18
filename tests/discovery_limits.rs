@@ -228,3 +228,75 @@ fn discovery_rejects_unix_directory_links() {
             .contains("link-like component path")
     );
 }
+
+#[test]
+fn agent_configuration_loading_is_supported_and_validated() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+
+    // 1. Loading with default agent configurations
+    let config = config::load(project.path()).expect("default agent config load");
+    assert_eq!(
+        config.agent.architect.command_template,
+        "claude --non-interactive --dangerously-skip-permissions --message '{prompt}' {context_files}"
+    );
+    assert_eq!(config.agent.architect.token_limit, None);
+    assert_eq!(
+        config.agent.developer.command_template,
+        "gemini-cli --prompt '{prompt}' --files {context_files}"
+    );
+    assert_eq!(config.agent.developer.token_limit, None);
+
+    // 2. Custom valid agent configurations
+    let custom_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.architect]
+command_template = "custom-architect --prompt '{prompt}' {context_files}"
+token_limit = 25000
+
+[agent.profiles.developer]
+command_template = "custom-developer --files {context_files} '{prompt}'"
+token_limit = 10000
+"#;
+    fs::write(project.path().join("kvist.toml"), custom_toml).expect("write custom config");
+    let config = config::load(project.path()).expect("custom agent config load");
+    assert_eq!(
+        config.agent.architect.command_template,
+        "custom-architect --prompt '{prompt}' {context_files}"
+    );
+    assert_eq!(config.agent.architect.token_limit, Some(25000));
+    assert_eq!(
+        config.agent.developer.command_template,
+        "custom-developer --files {context_files} '{prompt}'"
+    );
+    assert_eq!(config.agent.developer.token_limit, Some(10000));
+
+    // 3. Invalid agent configurations (e.g. invalid types)
+    for invalid in [
+        "[agent]\nprofiles = \"not-a-table\"\n",
+        "[agent.profiles]\narchitect = \"not-a-table\"\n",
+        "[agent.profiles.architect]\ncommand_template = 12345\n",
+        "[agent.profiles.architect]\ntoken_limit = \"not-an-integer\"\n",
+        "[agent.profiles.architect]\ntoken_limit = 0\n",
+        "[agent.profiles.architect]\ntoken_limit = -5\n",
+    ] {
+        fs::write(
+            project.path().join("kvist.toml"),
+            format!("schema_version = 1\ncomponent_root = \"src\"\n{invalid}"),
+        )
+        .expect("write invalid config");
+        match config::load(project.path()) {
+            Ok(cfg) => panic!(
+                "Expected error for configuration:\n{invalid}\nBut got successful parse: {cfg:?}"
+            ),
+            Err(error) => {
+                assert!(
+                    error
+                        .to_string()
+                        .contains("invalid Kvist project configuration"),
+                    "Expected invalid config error but got: {error}"
+                );
+            }
+        }
+    }
+}

@@ -47,6 +47,34 @@ pub const MAX_DISCOVERY_LIMITS: DiscoveryLimits = DiscoveryLimits {
     max_relative_path_bytes: 32_768,
 };
 
+/// Configuration for the external agent execution runners.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentConfig {
+    pub architect: AgentProfile,
+    pub developer: AgentProfile,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentProfile {
+    pub command_template: String,
+    pub token_limit: Option<usize>,
+}
+
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self {
+            architect: AgentProfile {
+                command_template: "claude --non-interactive --dangerously-skip-permissions --message '{prompt}' {context_files}".to_owned(),
+                token_limit: None,
+            },
+            developer: AgentProfile {
+                command_template: "gemini-cli --prompt '{prompt}' --files {context_files}".to_owned(),
+                token_limit: None,
+            },
+        }
+    }
+}
+
 /// Parsed project configuration required by Phase 1 commands.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProjectConfig {
@@ -56,6 +84,8 @@ pub struct ProjectConfig {
     pub discovery: DiscoveryLimits,
     /// VCS selected for durable-artifact tracking inspection.
     pub vcs: VcsSelection,
+    /// Configuration for external agent CLI execution.
+    pub agent: AgentConfig,
 }
 
 /// Supported VCS selection for durable-artifact tracking inspection.
@@ -171,6 +201,7 @@ fn parse(config_path: &Path, contents: &str) -> Result<ProjectConfig> {
         component_root: normalize_component_root(config_path, component_root)?,
         discovery: parse_discovery_limits(config_path, table)?,
         vcs: parse_vcs_selection(config_path, table)?,
+        agent: parse_agent_config(config_path, table)?,
     })
 }
 
@@ -325,4 +356,102 @@ fn invalid_configuration(config_path: &Path, reason: &str) -> KvistError {
         path: config_path.to_path_buf(),
         reason: reason.to_owned(),
     }
+}
+
+fn parse_agent_config(
+    config_path: &Path,
+    table: &toml::map::Map<String, toml::Value>,
+) -> Result<AgentConfig> {
+    let mut default_config = AgentConfig::default();
+    let Some(agent) = table.get("agent") else {
+        return Ok(default_config);
+    };
+    let agent = agent
+        .as_table()
+        .ok_or_else(|| invalid_configuration(config_path, "`agent` must be a TOML table"))?;
+
+    let Some(profiles) = agent.get("profiles") else {
+        return Ok(default_config);
+    };
+    let profiles = profiles.as_table().ok_or_else(|| {
+        invalid_configuration(config_path, "`agent.profiles` must be a TOML table")
+    })?;
+
+    if let Some(architect) = profiles.get("architect") {
+        let architect = architect.as_table().ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`agent.profiles.architect` must be a TOML table",
+            )
+        })?;
+        if let Some(template) = architect.get("command_template") {
+            default_config.architect.command_template = template
+                .as_str()
+                .ok_or_else(|| {
+                    invalid_configuration(
+                        config_path,
+                        "`agent.profiles.architect.command_template` must be a string",
+                    )
+                })?
+                .to_owned();
+        }
+        if let Some(limit) = architect.get("token_limit") {
+            let limit = limit.as_integer().ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`agent.profiles.architect.token_limit` must be a positive integer",
+                )
+            })?;
+            let limit = usize::try_from(limit)
+                .ok()
+                .filter(|val| *val > 0)
+                .ok_or_else(|| {
+                    invalid_configuration(
+                        config_path,
+                        "`agent.profiles.architect.token_limit` must be a positive integer",
+                    )
+                })?;
+            default_config.architect.token_limit = Some(limit);
+        }
+    }
+
+    if let Some(developer) = profiles.get("developer") {
+        let developer = developer.as_table().ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`agent.profiles.developer` must be a TOML table",
+            )
+        })?;
+        if let Some(template) = developer.get("command_template") {
+            default_config.developer.command_template = template
+                .as_str()
+                .ok_or_else(|| {
+                    invalid_configuration(
+                        config_path,
+                        "`agent.profiles.developer.command_template` must be a string",
+                    )
+                })?
+                .to_owned();
+        }
+        if let Some(limit) = developer.get("token_limit") {
+            let limit = limit.as_integer().ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`agent.profiles.developer.token_limit` must be a positive integer",
+                )
+            })?;
+            let limit = usize::try_from(limit)
+                .ok()
+                .filter(|val| *val > 0)
+                .ok_or_else(|| {
+                    invalid_configuration(
+                        config_path,
+                        "`agent.profiles.developer.token_limit` must be a positive integer",
+                    )
+                })?;
+            default_config.developer.token_limit = Some(limit);
+        }
+    }
+
+    Ok(default_config)
 }
