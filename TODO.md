@@ -24,134 +24,9 @@ dogfooding, and VCS tracking inspection.
 Keep this file current with the implementation it tracks. Do not silently
 resolve an open decision through code.
 
-## Phase 1 completed baseline
+## Baseline Completed
 
-| Status | Deliverable | Implemented behavior |
-| --- | --- | --- |
-| DONE | CLI foundation | Typed Rust CLI, contextual errors, process boundary in `main.rs`. |
-| DONE | Project initialization | Deterministic templates, no-clobber writes, direct symlink checks, and validated five-state initialization semantics. |
-| DONE | Discovery and tree | Read-only lexical traversal, component layout statuses, plain ASCII output. |
-| DONE | Specification workflow | Version-1 layered Markdown template, line-aware validation, safe creation and validation commands. |
-| DONE | Initial review | End-to-end test, clean-slate `DOCS.md`, and source-blind `COMPLIANCE_REVIEW.md`. |
-
-## Phase 1 remediation gate
-
-### DONE P1-R1 — Define validated project state, recovery, and migration semantics
-
-**Completed decision:** `project_state::inspect` validates all five root
-artifacts and classifies `uninitialized`, `current`, `partial`, `invalid`, and
-`unsupported-version`. The independent configuration, root-contract,
-specification, TODO-queue, and documentation version domains are all `1`.
-`init` writes only uninitialized projects, returns already initialized only for
-validated current projects, and refuses every other state without overwriting.
-`kvist doctor [PROJECT_DIR]` is the read-only diagnostic and recovery guidance
-surface. Phase 1 has no automatic repair or migration; a future explicit
-repair/migration command must define and opt into every rewrite. An interrupted
-safe-write sequence is therefore deterministically inspectable as `partial`.
-
-**Verification:** unit and integration tests cover every state, all independent
-unsupported-version domains, malformed content and artifact types, doctor
-output and read-only behavior, refusal/preservation for partial/invalid/
-unsupported projects, and independent version constants.
-
-### DONE P1-R2 — Bound discovery and document the filesystem threat model
-
-**Completed decision:** Kvist supports malformed or untrusted *static*
-workspaces for bounded read-only Phase 1 inspection, but is not a sandbox,
-does not establish canonical containment, and cannot prevent concurrent
-filesystem changes/TOCTOU. Phase 2 execution requires a separately authorized
-trusted-workspace policy. Unix symbolic links and Windows reparse points
-(including junctions) are link-like and rejected whenever discovery directly
-inspects a component root or non-artifact descendant; link-like required
-artifacts are invalid. Component paths require a component at every
-intermediate directory. The configurable `[discovery]` limits have defaults
-of depth 64, directories/components/entries 10,000 each, and relative path
-4,096 encoded bytes; hard maxima are 256, 100,000, 100,000, 100,000, and
-32,768 respectively. Invalid limits make the root state invalid. `.gitignore`
-semantics remain deliberately unimplemented until P1-R5 because Git ignore
-rules depend on tracked state.
-
-**Verification:** deterministic direct and `tree` limit tests cover depth,
-directories, components, entries, and encoded path length; configuration
-default/range tests cover `tree`, `doctor`, and `init` propagation; hierarchy
-and Unix link tests cover supported behavior. Permission-error testing is
-documented for unprivileged supported-platform manual/release testing rather
-than flaky root-bypassing automated tests.
-
-### DONE P1-R3 — Make quality gates reproducible and enforced in CI
-
-**Completed decision:** MSRV is Rust 1.85 (the edition-2024 baseline).
-`Cargo.lock` is committed and every CI build/test uses `--locked`. GitHub
-Actions runs format, strict all-target Clippy, tests, and release builds on
-stable Linux/macOS/Windows, plus check/test on Rust 1.85. The default `just`
-recipes use Cargo/Rustup only; optional external cargo tools are not required.
-
-**Verification:** a clean checkout runs the documented Cargo gate and
-`just all` without undeclared tools. CI enforces the same stable-platform gate
-and MSRV check/test.
-
-### DONE P1-R4 — Dogfood the lifecycle and publish a review runbook
-
-**Completed decision:** Kvist dogfoods its generated lifecycle layout. The
-repository tracks the validated root artifact set (`kvist.toml`,
-`ROOT_CONTRACT.md`, `src/SPEC.md`, `src/TODOS.yaml`, and `src/DOCS.md`).
-`REVIEW_RUNBOOK.md` defines the clean-slate and source-blind roles, their
-permitted inputs, evidence locations, arbitration owner, retention policy, and
-clean-checkout commands. The root component's documentation and compliance
-record are intentionally distinct from the historical repository-level
-`DOCS.md` and Phase 1 review record.
-
-**Acceptance criteria:**
-
-- Decide whether Kvist's repository dogfoods its own generated project layout.
-  If yes, add the complete root artifact set and keep it valid; if no, document
-  the exception and rationale.
-- Define a repeatable clean-slate documenter and source-blind compliance-review
-  procedure, including permitted inputs, output paths, discrepancy records,
-  and arbitration ownership.
-- Ensure generated `DOCS.md` is never confused with user-authored design
-  documentation.
-
-**Verification:** the root artifact set is validated by `doctor`; `tree` and
-root `SPEC.md` validation succeed; the runbook has been executed with its
-source-blind review and arbitration record retained in
-`COMPLIANCE_REVIEW.md`.
-
-### DONE P1-R5 — Inspect VCS tracking before Phase 2 execution
-
-**Completed decision:** `kvist doctor` now performs a read-only durable-artifact
-tracking inspection once root artifacts are current and component discovery
-succeeds. It checks the root artifact set and each discovered component's
-three required paths. `[vcs].kind` is `auto`, `git`, or `jj`; `auto` requires
-exactly one detected VCS, so a Git/jj-colocated checkout requires an explicit
-owner choice. Git uses `git ls-files` and native `git check-ignore` semantics
-to distinguish tracked, ignored, and untracked files. jj uses an explicit
-path-only `file list` template with `--ignore-working-copy`, never triggering
-a snapshot. A jj path absent from its saved snapshot is reported rather than
-hidden because it may be ignored, excluded by snapshot rules, or newer than
-the saved snapshot. Neither implementation stages, commits, nor otherwise
-mutates VCS state.
-
-**Acceptance criteria:**
-
-- Before Phase 2 task execution, verify that `kvist.toml`, `ROOT_CONTRACT.md`,
-  and every component's `SPEC.md`, `TODOS.yaml`, and `DOCS.md` are tracked in
-  a supported VCS.
-- Support Git and jj without treating Git as the only VCS. Report a required
-  artifact ignored by the selected VCS rather than hiding it.
-- Never auto-stage or commit. Keep transient logs, locks, raw provider data,
-  and credentials untracked.
-- Define deterministic diagnostics and behavior for no VCS, unsupported VCS,
-  ignored required artifacts, and mixed working trees.
-
-**Verification:** Git fixtures cover tracked, ignored, nested-component,
-no-repository, malformed-repository, and no-mutation diagnostics. The jj
-fixture, when jj is installed, covers explicit selection, non-default
-file-list templates, dash-prefixed paths, and saved-snapshot tracking. The
-independent documentation and source-blind review records are retained in
-`src/DOCS.md` and `COMPLIANCE_REVIEW.md`. CI installs jj 0.44.0 in its
-dedicated VCS test job. Unit coverage proves that VCS query batching stays
-within the 8 KiB argument budget and isolates individually unqueryable paths.
+Phase 1 core CLI engine features, including `init`, `tree`, `spec new`, `spec validate`, bounded directory traversal, direct symlink safety checks, and read-only VCS tracking diagnostics are complete and fully covered by our integration test suite.
 
 ## Phase 2 — Task execution and LLM runner
 
@@ -221,35 +96,19 @@ in `src/SPEC.md`, `src/TODOS.yaml`, and `tests/task_commands.rs`.
 **Verification:** dependency, lock contention, crash-recovery, cancellation,
 and atomic-state-update integration tests.
 
-### TODO P2-04 — Define the external LLM provider contract and credentials policy
+### TODO P2-04 — Define User-Provided Agent Invocation Contract
 
 **Depends on:** P2-02
-**Status:** BLOCKED — requires product decisions below.
-**Decision gates (owner approval required before tests or code):**
-
-1. Provider set and executable discovery: first-class CLIs, version support,
-   lookup paths, and missing/ambiguous executable behavior.
-2. Protocol and invocation: request/response framing, arguments, stdin/stdout,
-   working directory, exit-code mapping, timeout, cancellation, and output cap.
-3. Trust and privacy: credential sources, environment allowlist, redaction,
-   telemetry, network consent, and retained evidence.
-4. Context manifest: target/parent/root inputs, explicit extra-file approval,
-   and the rule excluding peer implementations.
+**Status:** Scoped — Credential and Trust models clarified.
+**Strategic Alignment:** Kvist acts purely as a development process enforcer and wrapper, carrying NO API keys or credentials. The user supplies their preferred AI agent/runner (e.g., Claude Code, Gemini CLI, Cursor, or a custom runner script), and that agent handles its own credentials and execution trust.
 **Acceptance criteria:**
 
-- Define a provider-neutral request/response contract for external CLIs,
-  including executable discovery, argument construction, working directory,
-  context files, stdin/stdout protocol, timeouts, cancellation, output-size
-  limits, and exit-code mapping.
-- Define credential sourcing, redaction, environment inheritance, telemetry
-  policy, and whether network access requires explicit per-run consent.
-- Preserve strict context slicing: target component, parent interface, root
-  contract, and no peer implementation unless explicitly required.
-- Never invoke a shell to construct provider commands.
+- Define the command-line invocation protocol used by Kvist to launch the user-provided agent/runner.
+- Support configuring agent paths, settings, and task-specific model routing (e.g., advanced model for specification breakdown, and a simple model for individual TODO implementation) in `kvist.toml`.
+- Implement token-usage tracking and reporting interfaces, enabling Kvist to parse token consumption from agent outputs and enforce limits per component or task.
+- Preserve strict context slicing: Kvist feeds only local target component directories, immediate parent interface contracts, and `ROOT_CONTRACT.md` to the agent.
 
-**Verification:** fake-provider integration tests for success, malformed
-output, timeout, cancellation, missing executable, nonzero exit, secret
-redaction, and output limits.
+**Verification:** integration tests for agent invocation, custom path handling, token output parsing, and context slicing bounds.
 
 ### TODO P2-05 — Implement test-command verification as an explicit trust boundary
 
@@ -263,7 +122,7 @@ redaction, and output limits.
    working directory, environment allowlist, timeout, cancellation, and output cap.
 4. Verification semantics: required task states, durable redacted result
    record, failure/cancellation handling, and retry/recovery policy.
-**Acceptance criteria:**
+   **Acceptance criteria:**
 
 - Define where test commands are configured and who may approve changes to
   them; do not execute arbitrary repository text implicitly.
@@ -280,15 +139,11 @@ nonzero exit, and result-persistence integration tests.
 **Depends on:** P2-03, P2-04, P2-05
 **Acceptance criteria:**
 
-- Drive one approved task at a time through context preparation, provider
-  invocation, change inspection, test verification, and state transition.
-- Preserve an inspectable attempt record without persisting secrets or opaque
-  chat-only state as project truth.
-- Stop safely on failure and report the task, stage, evidence path, and
-  recovery action.
+- Drive one approved task at a time through context preparation, user-provided agent invocation, change inspection, test verification, and state transition.
+- Support parallel execution: Let Kvist manage concurrent/asynchronous execution of tasks across different, independent components in the tree, utilizing component-level locks (`.kvist-task.lock`) to prevent state collision.
+- Record progress state durably as things progress, enabling the developer to jump around, expand on things that might have been partially completed, or update specifications at any level.
 
-**Verification:** end-to-end fixtures using a fake provider and test command,
-including a failed implementation and resumed execution.
+**Verification:** end-to-end fixtures using a mock user-provided agent and test command, including parallel component execution, failure handling, and state resumption.
 
 ### TODO P2-07 — Perform Phase 2 security and compliance review
 
@@ -307,35 +162,186 @@ fixture.
 
 ## Decisions already adopted
 
-| Decision | Current contract |
-| --- | --- |
-| Implementation language | Stable Rust, edition 2024; headless local CLI. |
-| Toolchain and dependencies | MSRV Rust 1.85; `Cargo.lock` is committed; intentional dependency updates must pass MSRV and stable CI. |
-| Initial CLI | `init`, `tree`, `spec new`, and `spec validate`; project paths default to the current directory where applicable. |
-| Project location | One project-local `kvist.toml`; no global configuration or parent-directory discovery. |
-| Root artifact paths | `kvist.toml`, `ROOT_CONTRACT.md`, and `src/{SPEC.md,TODOS.yaml,DOCS.md}`. |
-| Initial configuration | Version `1`, `component_root = "src"`, `llm.provider = "none"`. |
-| Specification format | Version-1 Markdown with exact three ordered `<details>` layers and required headings. |
-| Root-state and recovery | Five-state read-only inspection. Phase 1 never repairs or migrates automatically; `doctor` guides explicit user recovery. |
-| Artifact version domains | Configuration, root contract, specification, TODO queue, and documentation have independent version domains. |
-| VCS policy | Before Phase 2, durable artifacts must be tracked in a supported VCS (Git or jj); required ignored artifacts are reported. Kvist never auto-stages or commits; logs, locks, raw provider data, and credentials remain untracked. |
-| Filesystem safety | No-clobber atomic file persistence; direct Unix-link/Windows-reparse rejection; lexical, bounded discovery; component-only intermediate hierarchy; ignored VCS/build directories. Static-workspace inspection is not a sandbox or TOCTOU defense; Phase 2 requires a trusted-workspace policy. |
-| Input limits | `kvist.toml` at most 64 KiB; specifications and root contract/TODO/documentation inspection at most 1 MiB each. |
-| Dependencies | `clap`, `thiserror`, `toml`, `tempfile`, and `serde_yaml`; add dependencies only with a documented need. |
-| Review model | Clean-slate source documentation followed by source-blind specification comparison. |
+| Decision                   | Current contract                                                                                                                                                                                                                                                                               |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Implementation language    | Stable Rust, edition 2024; headless local CLI.                                                                                                                                                                                                                                                 |
+| Toolchain and dependencies | MSRV Rust 1.85; `Cargo.lock` is committed; intentional dependency updates must pass MSRV and stable CI.                                                                                                                                                                                        |
+| Initial CLI                | `init`, `tree`, `spec new`, and `spec validate`; project paths default to the current directory where applicable.                                                                                                                                                                              |
+| Project location           | One project-local `kvist.toml`; no global configuration or parent-directory discovery.                                                                                                                                                                                                         |
+| Root artifact paths        | `kvist.toml`, `ROOT_CONTRACT.md`, and `src/{SPEC.md,TODOS.yaml,DOCS.md}`.                                                                                                                                                                                                                      |
+| Initial configuration      | Version `1`, `component_root = "src"`, `llm.provider = "none"`.                                                                                                                                                                                                                                |
+| Specification format       | Version-1 Markdown with exact three ordered `<details>` layers and required headings.                                                                                                                                                                                                          |
+| Root-state and recovery    | Five-state read-only inspection. Phase 1 never repairs or migrates automatically; `doctor` guides explicit user recovery.                                                                                                                                                                      |
+| Artifact version domains   | Configuration, root contract, specification, TODO queue, and documentation have independent version domains.                                                                                                                                                                                   |
+| VCS policy                 | Before Phase 2, durable artifacts must be tracked in a supported VCS (Git or jj); required ignored artifacts are reported. Kvist never auto-stages or commits; logs, locks, raw provider data, and credentials remain untracked.                                                               |
+| Filesystem safety          | No-clobber atomic file persistence; direct Unix-link/Windows-reparse rejection; lexical, bounded discovery; component-only intermediate hierarchy; ignored VCS/build directories. Static-workspace inspection is not a sandbox or TOCTOU defense; Phase 2 requires a trusted-workspace policy. |
+| Input limits               | `kvist.toml` at most 64 KiB; specifications and root contract/TODO/documentation inspection at most 1 MiB each.                                                                                                                                                                                |
+| Dependencies               | `clap`, `thiserror`, `toml`, `tempfile`, and `serde_yaml`; add dependencies only with a documented need.                                                                                                                                                                                       |
+| Review model               | Clean-slate source documentation followed by source-blind specification comparison.                                                                                                                                                                                                            |
 
 ## Open questions requiring an explicit decision
 
-1. **Task execution trust:** Who authorizes repository-defined test commands
-   and LLM execution, and what isolation or consent is required?
-3. **Provider interface:** Which provider CLIs are first-class, what exact
-   protocol do they implement, and where may credentials live?
-4. **Context contract:** How are parent interfaces represented, and what is the
-   normative algorithm for selecting local files while excluding peers?
-5. **Staleness semantics:** Which parent/spec/config changes invalidate which
-   child artifacts, and is invalidation based on hashes, explicit edges, or
-   both?
-6. **Automation interface:** Is stable JSON output and a documented exit-code
-   taxonomy required before the web view, watcher, and CI integrations?
-7. **Distribution and license:** What exact BSL/double-license text, Cargo
-    metadata, release channel, MSRV, and binary distribution policy apply?
+### 1. **Task Execution Trust & Sandboxing Boundary**
+
+- **The Decision:** Kvist acts purely as a process enforcer and context-slicing wrapper. The execution of the AI agent itself is delegated to a user-provided executable (e.g., a wrapper script, Claude Code, Cursor, or Gemini CLI) that operates under the user's host permissions.
+- **The Impact:** Kvist carries **NO credentials or API keys**, completely eliminating credential leakage risks. Execution trust is fully owned by the user-provided runner. Kvist's role is restricted to preparing strict, minimal context boundaries (the target component directory, its parent interface, and the root contract) and invoking the user's agent with these scoped inputs.
+- **How It Works:** In `kvist.toml`, the user configures the command path (e.g., `agent_runner = "claude-code --non-interactive"`). Kvist executes this command, mounting or supplying only the sliced directory, and monitors stdout/stderr or metadata outputs for completion status and token reporting.
+
+### 2. **Provider and Agent Interface Protocol**
+
+- **The Decision:** Define a simple, open-ended shell-invocation protocol that passes context inputs and gathers agent results without coupling Kvist to any specific LLM provider or SDK.
+- **The Impact:** Since Kvist is provider-agnostic, users can configure any local, cloud, or enterprise agent.
+- **How It Works:** Kvist launches the configured runner command, passing a structured environment or JSON input describing the target task (e.g., writing tests, code implementation) and the paths of the allowed context files. The runner performs the task and returns a standard JSON structure on stdout containing:
+  - `status`: success, failure, or blocked.
+  - `tokens_used`: input/output token counts for reporting.
+  - `error_message`: if failure occurred.
+
+### 3. **Agent and Model Tiering for Task Specialization**
+
+- **The Decision:** Support configuring different models/agents and settings for different tasks based on complexity and context size.
+- **The Impact:** Dramatically reduces API costs while maximizing reasoning quality where it matters most (the high-level design and compliance boundaries).
+- **How It Works:** In `kvist.toml`, users can define agent profiles:
+  - **Architect Profile (Advanced Model, e.g., Claude 3.5 Sonnet, Gemini 1.5 Pro):** Assigned to Stage 1 (creating/validating specs, designing sub-component hierarchies, breaking specs into `TODOS.yaml` tasks) and Stage 4 (triple-blind compliance verification, specification drift analysis, security audit).
+  - **Developer Profile (Simple Model, e.g., Claude Haiku, Gemini 1.5 Flash):** Assigned to Stage 3 (writing unit tests, implementing individual TODO items, and generating inline source docstrings).
+
+### 4. **Asynchronous & Parallel Multi-Component Execution**
+
+- **The Decision:** Support concurrent task execution across separate, independent component directories.
+- **The Impact:** Speeds up execution in large-scale multi-component codebases by allowing multiple agents to implement different branches of the component tree in parallel.
+- **How It Works:** Since each component is self-contained with its own `SPEC.md` and `TODOS.yaml`, Kvist can spawn multiple asynchronous workers. Each component directory is protected by its own `.kvist-task.lock` lockfile, preventing simultaneous writes and ensuring absolute thread-safety during concurrent executions.
+
+### 5. **Open-Ended Iterative Human-Agent Design Workflow**
+
+- **The Decision:** Optimize Kvist for a fluid, jump-around developer experience rather than a linear, one-way progression.
+- **The Impact:** Human engineers can continuously edit specifications at any layer of the hierarchy, and the engine automatically handles the dependency cascades.
+- **How It Works:**
+  - A user can jump into any component (even one previously marked "completed"), edit its `SPEC.md`, and add new requirements.
+  - Kvist automatically detects this during the next status check, marks that component and its children `Stale`, and re-opens the task execution loop.
+  - Work can be handed off asynchronously: the human user designs/refines the spec, and then hands off the implementation, test generation, and compliance review to the agent runner on demand.
+
+### 6. **Licensing and Enterprise Distribution**
+
+- **The Decision:** Determine what exact BSL/double-license terms, Cargo metadata, release channel, and binary distribution policy apply to ensure open non-commercial access while safeguarding enterprise commercial use.
+
+## UX and Developer Experience Improvements
+
+### TODO UX-01 — Implement a Revalidation / Accept CLI Interface
+
+**Context:** Currently, when a component specification or parent contract changes, the component is marked `Stale`, but Kvist provides no CLI command to accept these changes. Developers must manually compute SHA-256 hashes and edit `TODOS.yaml`.
+**Acceptance criteria:**
+
+- Create `kvist spec accept <COMPONENT_DIR>` to resolve staleness programmatically.
+- The command must compute the new SHA-256 digest of `SPEC.md`, update `specification_revision` in `TODOS.yaml`, and set `revalidation.state` to `Current` while clearing `causes`.
+
+### TODO UX-02 — Add Missing Status Filters
+
+**Context:** `TASKS.md` requires listing only specifications, implementations, and blocked/unfinished work, but `kvist status` currently outputs the entire tree state unconditionally.
+**Acceptance criteria:**
+
+- Add `--only-specs` to list components and validate their `SPEC.md` without queue details.
+- Add `--only-impls` to list implementation statuses across components.
+- Add `--unfinished` to show only blocked, stale, or incomplete components.
+
+### TODO UX-03 — Support "Transparent" Namespace Directories
+
+**Context:** Discovery rejects components that live below ordinary directories, forcing developers to initialize meaningless "ghost components" just for namespacing (e.g., `src/network/protocols/http` forces `protocols` to be a Kvist component).
+**Acceptance criteria:**
+
+- Refactor the discovery engine in `src/discovery.rs` to allow pass-through / transparent directories.
+- Ensure that only directories containing Kvist artifacts are treated as components, without strict hierarchical unbroken chain requirements.
+
+## Phase 2 Remediation & Security Improvements
+
+### TODO P2-04b — General CLI-Wrapper Template Engine for External Agents
+
+**Context:** To support as many different user-provided AI agents as possible (e.g., Claude Code, Gemini CLI, Aider, Cursor, or custom local wraps) without requiring Kvist to store credentials or carry out native API integrations. Kvist will launch these agents via configurable CLI commands.
+**Acceptance criteria:**
+
+- Define standard interpolation templates in `kvist.toml` for calling external agent commands (e.g., `agent_command = "claude-code --non-interactive --message '{prompt}' --file {context_files}"`).
+- Implement robust string interpolation that safely substitutes `{prompt}`, `{context_files}`, and `{target_directory}` without shell injection risks.
+- Support exit-code mapping and standard JSON output parsing for agent status reporting.
+
+### TODO P2-05b — Implement Sandboxing for Test Executions
+
+**Context:** Running repository-defined test commands directly on the host machine is a severe security vulnerability against malicious LLM-generated code.
+**Acceptance criteria:**
+
+- Implement secure sandboxing boundaries for test command executions (e.g., via Docker, gVisor, or WASM).
+- Ensure only the local directory context is mounted and network access is restrictively controlled.
+
+## UX and Developer Experience Improvements (Terminal Focus)
+
+### TODO UX-04 — Agent Output Redirection, Logging, and Streamlining
+
+**Context:** We want Kvist's standard CLI UX to remain exceptionally clean and streamlined (e.g., simple spinners or success indicators). However, the raw output (stdout, stderr, execution logs) of user-provided agents must be captured and made available to the user upon request.
+**Acceptance criteria:**
+
+- Redirect the raw output of launched agents to untracked local component log files (e.g., `<component_dir>/.kvist/logs/<task_id>_<timestamp>.log`).
+- Implement the `kvist task log <COMPONENT_DIR> <TASK_ID>` command to display or stream the raw agent execution logs.
+- Add a `--verbose` or `--stream` flag to the task execution loop to pipe raw agent output directly to the console in real-time.
+
+## Phase 3 — AI Skill Definitions & Standard Prompts
+
+**Context:** The KVIST engine heavily relies on predictable, high-quality outputs from AI agents executing the lifecycle. Standardized "Skills" (system prompts, context rules, and structured output formats) must be rigorously defined for the terminal-UX agent.
+
+### TODO P3-01 — Component Hierarchy & Feasibility Skills
+
+**Acceptance criteria:**
+
+- **Hierarchy Creation Skill:** Prompting guidelines to recursively break down a complex system into self-contained sub-components.
+- **Specification Generation & Review Skill:** Prompting guidelines for the interactive "Interview" mode to define purpose, constraints, and algorithms without writing code.
+- **Feasibility Analysis Skill:** A skill for reviewing a draft `SPEC.md` for logical gaps, contradictions, or missing edge cases before tasks are generated.
+
+### TODO P3-02 — Task Generation & TODO Queue Skills
+
+**Acceptance criteria:**
+
+- **Task Breakdown Skill:** Prompting guidelines to convert a validated `SPEC.md` into atomic tasks strictly following the required lifecycle ordering (Test -> Implementation -> Security -> Review).
+
+### TODO P3-03 — Execution Skills (Testing & Implementation)
+
+**Acceptance criteria:**
+
+- **Unit Test Generation Skill:** Directives for writing tests that explicitly verify Layer 1 and Layer 2 invariants from `SPEC.md`.
+- **Implementation Skill:** Guidelines for fulfilling the tests.
+- **Source Code Documentation Skill:** Instructions for writing language-native docstrings (e.g., `///` in Rust) that cleanly map implementation details to spec requirements, enabling easier reverse-engineering.
+
+### TODO P3-04 — Clean-Slate Documenter Skill
+
+**Acceptance criteria:**
+
+- **Reverse-Engineering Skill:** Define the prompt for the clean-slate agent that extracts `DOCS.md` from raw source code and docstrings _without_ seeing the original `SPEC.md`. Must capture contracts, constraints, and error handling accurately.
+
+### TODO P3-05 — Compliance & Review Skills (Triple-Blind Loop)
+
+**Acceptance criteria:**
+
+- **Code Review Skill:** General structural, stylistic, and idiomatic code review.
+- **Security Review Skill:** Focuses explicitly on memory safety, thread-safety, boundaries, and input validation invariants defined in Layer 2.
+- **Test Coverage Review Skill:** Validates that tests comprehensively cover edge cases and failure paths defined in Layer 3.
+- **Error Handling & Logging Review Skill:** Ensures error states are safely propagated and observability requirements are met.
+- **Specification Drift / Contract Fulfillment Skill:** The final compliance prompt that compares the original `SPEC.md` against the generated `DOCS.md` to flag hallucinations or missed requirements.
+
+## Phase 4 — Deferred Visual Web UI & Graphical Ecosystem
+
+**Context:** Deferring all graphical elements (the embedded Axum server, Monaco editor visualizer, and serving commands) to prioritize a robust, process-enforcing CLI core and perfect terminal UX.
+
+### TODO P4-01 — Embedded Web Server & API
+
+**Acceptance criteria:**
+
+- Add `kvist serve` command that spawns a lightweight `axum` server.
+- Implement API routes for reading component states, specs, and queues.
+
+### TODO P4-02 — Interactive Tree & Monaco Editor UI
+
+**Acceptance criteria:**
+
+- Embed a SPA (e.g., React or similar) into the Rust binary.
+- Integrate Monaco Editor to display and edit `SPEC.md` and source files.
+
+### TODO P4-03 — Conflict Arbitration UI
+
+**Acceptance criteria:**
+
+- Implement Web-based interactive arbitration prompts (Redesign, Accept, Manual Edit, AI Trade-off Analysis).
