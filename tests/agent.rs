@@ -137,6 +137,7 @@ fn execute_agent_parses_json_run_record_for_token_feedback() {
     assert_eq!(result.tokens_output, Some(450));
 }
 
+#[cfg(unix)]
 fn log_path_val(opt: Option<PathBuf>) -> PathBuf {
     opt.unwrap()
 }
