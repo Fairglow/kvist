@@ -8,14 +8,14 @@ for human-directed AI development. Its product architecture is defined in
 
 ## Initial CLI contract
 
-| Command | Contract |
-| --- | --- |
-| `kvist init [PROJECT_DIR]` | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory. |
-| `kvist doctor [PROJECT_DIR]` | Read-only inspection of the root artifact state and recovery guidance. |
-| `kvist status [PROJECT_DIR] [--format text\|json]` | Read-only versioned inspection of project and component workflow state. |
-| `kvist tree [PROJECT_DIR]` | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory. |
-| `kvist spec new <COMPONENT_DIR>` | Create a layered `SPEC.md` for a component directory. |
-| `kvist spec validate <SPEC_FILE>` | Validate a layered `SPEC.md` file. |
+| Command                                            | Contract                                                                                     |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `kvist init [PROJECT_DIR]`                         | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.   |
+| `kvist doctor [PROJECT_DIR]`                       | Read-only inspection of the root artifact state and recovery guidance.                       |
+| `kvist status [PROJECT_DIR] [--format text\|json]` | Read-only versioned inspection of project and component workflow state.                      |
+| `kvist tree [PROJECT_DIR]`                         | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory. |
+| `kvist spec new <COMPONENT_DIR>`                   | Create a layered `SPEC.md` for a component directory.                                        |
+| `kvist spec validate <SPEC_FILE>`                  | Validate a layered `SPEC.md` file.                                                           |
 
 The Phase 1 commands are implemented: `kvist init`, `kvist doctor`, `kvist
 tree`, `kvist spec new`, and `kvist spec validate`. Phase 2 also provides the
@@ -35,8 +35,7 @@ documentation and tests.
 
 ## Toolchain and quality gates
 
-Kvist's MSRV is Rust **1.85**, the first stable release supporting edition
-2024. CI tests the MSRV on Linux and current stable Rust on Linux, macOS, and
+Kvist's MSRV is Rust **1.85**, the first stable release supporting edition 2024. CI tests the MSRV on Linux and current stable Rust on Linux, macOS, and
 Windows. `Cargo.lock` is committed and every CI build/test command uses
 `--locked`.
 
@@ -76,13 +75,13 @@ accidental traversal only; they do not remove the TOCTOU limitation above.
 
 `kvist init` creates the following deterministic, UTF-8 templates.
 
-| Path | Version and required defaults | Purpose |
-| --- | --- | --- |
-| `kvist.toml` | configuration schema `1`; `component_root = "src"`; `vcs.kind = "auto"`; `llm.provider = "none"` | Project-local configuration with VCS and opt-in external LLM settings. |
-| `ROOT_CONTRACT.md` | `<!-- kvist-root-contract-version: 1 -->` | Global architectural and compliance constraints for every component. |
-| `src/SPEC.md` | `<!-- kvist-specification-version: 1 -->` | Root component contract with the three progressive-disclosure layers. |
-| `src/TODOS.yaml` | `schema_version: 2` | Versioned, traceable component execution plan with ordered lifecycle tasks. |
-| `src/DOCS.md` | `<!-- kvist-documentation-version: 1 -->` | Independently reverse-engineered implementation documentation. |
+| Path               | Version and required defaults                                                                    | Purpose                                                                     |
+| ------------------ | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `kvist.toml`       | configuration schema `1`; `component_root = "src"`; `vcs.kind = "auto"`; `llm.provider = "none"` | Project-local configuration with VCS and opt-in external LLM settings.      |
+| `ROOT_CONTRACT.md` | `<!-- kvist-root-contract-version: 1 -->`                                                        | Global architectural and compliance constraints for every component.        |
+| `src/SPEC.md`      | `<!-- kvist-specification-version: 1 -->`                                                        | Root component contract with the three progressive-disclosure layers.       |
+| `src/TODOS.yaml`   | `schema_version: 2`                                                                              | Versioned, traceable component execution plan with ordered lifecycle tasks. |
+| `src/DOCS.md`      | `<!-- kvist-documentation-version: 1 -->`                                                        | Independently reverse-engineered implementation documentation.              |
 
 The configuration, root-contract, specification, TODO-queue, and documentation
 versions are independent positive-integer domains. Backward-incompatible
@@ -96,13 +95,13 @@ defaults below; values must be positive integers and may not exceed their hard
 maximum, otherwise `doctor` classifies the project invalid and `init`/`tree`
 refuse it.
 
-| Key | Default | Hard maximum | Meaning |
-| --- | ---: | ---: | --- |
-| `max_depth` | 64 | 256 | Levels below `component_root`. |
-| `max_directories` | 10,000 | 100,000 | Directories whose entries are scanned, including the root. |
-| `max_components` | 10,000 | 100,000 | Recognized components, including the root. |
-| `max_entries_per_directory` | 10,000 | 100,000 | Entries read from one directory. |
-| `max_relative_path_bytes` | 4,096 | 32,768 | Platform-encoded bytes in a path relative to `component_root`. |
+| Key                         | Default | Hard maximum | Meaning                                                        |
+| --------------------------- | ------: | -----------: | -------------------------------------------------------------- |
+| `max_depth`                 |      64 |          256 | Levels below `component_root`.                                 |
+| `max_directories`           |  10,000 |      100,000 | Directories whose entries are scanned, including the root.     |
+| `max_components`            |  10,000 |      100,000 | Recognized components, including the root.                     |
+| `max_entries_per_directory` |  10,000 |      100,000 | Entries read from one directory.                               |
+| `max_relative_path_bytes`   |   4,096 |       32,768 | Platform-encoded bytes in a path relative to `component_root`. |
 
 `kvist init` creates a missing target directory, rejects a link-like root or
 artifact parent, and writes each artifact through a same-directory temporary
@@ -214,11 +213,11 @@ artifact layout. Invalid output lists both malformed and missing artifacts.
 by the three ordered collapsible sections below. The required summaries and
 headings are exact so Kvist can validate them without rewriting user content.
 
-| Layer | `<details>` syntax | Required headings |
-| --- | --- | --- |
+| Layer                                 | `<details>` syntax                                                  | Required headings                  |
+| ------------------------------------- | ------------------------------------------------------------------- | ---------------------------------- |
 | Executive summary and public contract | `<details open>` / `Layer 1: Executive summary and public contract` | `## Purpose`, `## Public contract` |
-| Architectural guarantees | `<details>` / `Layer 2: Architectural guarantees` | `## Constraints and invariants` |
-| Detailed strategy and algorithms | `<details>` / `Layer 3: Detailed strategy and algorithms` | `## Design and failure paths` |
+| Architectural guarantees              | `<details>` / `Layer 2: Architectural guarantees`                   | `## Constraints and invariants`    |
+| Detailed strategy and algorithms      | `<details>` / `Layer 3: Detailed strategy and algorithms`           | `## Design and failure paths`      |
 
 Every required heading needs non-whitespace content before the next heading or
 closing tag. The validator returns deterministic, one-based line and column
@@ -300,21 +299,21 @@ tasks:
 
 ### Component revision and revalidation fields
 
-| Field | Allowed values | Purpose and tool use |
-| --- | --- | --- |
-| `schema_version` | Integer `2` | Selects the parser contract independently of Kvist, specification, configuration, and documentation versions. An unsupported version is refused rather than guessed or rewritten. |
-| `component.specification_revision` | `sha256:` plus 64 lowercase hexadecimal digits | Fingerprints the exact component `SPEC.md` reviewed when the queue was planned. The forthcoming project-inspection layer will compare it with the current specification to discover that local work needs revalidation. |
-| `component.parent_specification` | `null` for the root, otherwise `{ path: "../SPEC.md", revision: "sha256:..." }` | Records the only allowed upstream contract: the immediate parent. It lets tools detect an upstream change without loading peer implementations or violating the context boundary. |
-| `parent_specification.path` | Exactly `../SPEC.md` | Prevents a queue from disguising peer or arbitrary-project inputs as a parent dependency. |
-| `parent_specification.revision` | SHA-256 revision format above | Is the parent specification the component plan was reviewed against; a later mismatch produces explicit stale evidence. |
-| `revalidation.state` | `current` or `stale` | `current` permits later task selection; `stale` prevents it until human revalidation records a reviewed plan. |
-| `revalidation.checked_at` | Whole-second UTC RFC 3339 (`YYYY-MM-DDTHH:MM:SSZ`) | Records when revision comparison last ran, rather than relying on ambiguous filesystem modification time. |
-| `revalidation.stale_since` | `null` when current; UTC timestamp when stale | Preserves how long the current stale condition has existed for status views and review prioritization. |
-| `revalidation.causes` | Empty when current; nonempty cause list when stale | Retains the evidence behind staleness. A tool never hides a changed contract behind an unexplained flag. |
-| `causes[].kind` | `component-specification-revision-changed` or `parent-specification-revision-changed` | Tells the revalidator whether the component's own contract or its immediate parent changed. |
-| `causes[].path` | Nonblank component-relative specification path | Identifies the exact artifact inspected. |
-| `causes[].expected_revision` | SHA-256 revision | Preserves the revision on which the old plan relied. |
-| `causes[].observed_revision` | Different SHA-256 revision | Preserves the revision that invalidated the plan. |
+| Field                              | Allowed values                                                                        | Purpose and tool use                                                                                                                                                                                                    |
+| ---------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_version`                   | Integer `2`                                                                           | Selects the parser contract independently of Kvist, specification, configuration, and documentation versions. An unsupported version is refused rather than guessed or rewritten.                                       |
+| `component.specification_revision` | `sha256:` plus 64 lowercase hexadecimal digits                                        | Fingerprints the exact component `SPEC.md` reviewed when the queue was planned. The forthcoming project-inspection layer will compare it with the current specification to discover that local work needs revalidation. |
+| `component.parent_specification`   | `null` for the root, otherwise `{ path: "../SPEC.md", revision: "sha256:..." }`       | Records the only allowed upstream contract: the immediate parent. It lets tools detect an upstream change without loading peer implementations or violating the context boundary.                                       |
+| `parent_specification.path`        | Exactly `../SPEC.md`                                                                  | Prevents a queue from disguising peer or arbitrary-project inputs as a parent dependency.                                                                                                                               |
+| `parent_specification.revision`    | SHA-256 revision format above                                                         | Is the parent specification the component plan was reviewed against; a later mismatch produces explicit stale evidence.                                                                                                 |
+| `revalidation.state`               | `current` or `stale`                                                                  | `current` permits later task selection; `stale` prevents it until human revalidation records a reviewed plan.                                                                                                           |
+| `revalidation.checked_at`          | Whole-second UTC RFC 3339 (`YYYY-MM-DDTHH:MM:SSZ`)                                    | Records when revision comparison last ran, rather than relying on ambiguous filesystem modification time.                                                                                                               |
+| `revalidation.stale_since`         | `null` when current; UTC timestamp when stale                                         | Preserves how long the current stale condition has existed for status views and review prioritization.                                                                                                                  |
+| `revalidation.causes`              | Empty when current; nonempty cause list when stale                                    | Retains the evidence behind staleness. A tool never hides a changed contract behind an unexplained flag.                                                                                                                |
+| `causes[].kind`                    | `component-specification-revision-changed` or `parent-specification-revision-changed` | Tells the revalidator whether the component's own contract or its immediate parent changed.                                                                                                                             |
+| `causes[].path`                    | Nonblank component-relative specification path                                        | Identifies the exact artifact inspected.                                                                                                                                                                                |
+| `causes[].expected_revision`       | SHA-256 revision                                                                      | Preserves the revision on which the old plan relied.                                                                                                                                                                    |
+| `causes[].observed_revision`       | Different SHA-256 revision                                                            | Preserves the revision that invalidated the plan.                                                                                                                                                                       |
 
 A current queue must have `stale_since: null` and `causes: []`. A stale queue
 must have both timestamps, with `stale_since` no later than `checked_at`, and
@@ -333,22 +332,22 @@ empty traceability fields, malformed timestamps, invalid state metadata,
 unknown dependencies, dependency cycles, future-position dependencies, and
 non-canonical dependency/reference lists are rejected.
 
-| Field | Allowed values | Purpose and tool use |
-| --- | --- | ---|
-| `id` | Unique 1-64 character lowercase kebab-case identifier | Stable local primary key for dependency edges, task selection, audit records, status output, and merge review. Never renumber or reuse it. |
-| `title` | Trimmed, nonblank, one-line text up to 120 Unicode scalar values | Short human label for CLI, CI, and UI status lists. |
-| `description` | Trimmed, nonblank work instruction up to 4,096 Unicode scalar values | Bounded implementation scope supplied to the future execution context. |
-| `context` | Trimmed, nonblank background up to 4,096 Unicode scalar values | Explains the triggering condition and lets an owner decide whether the task is still relevant after a change. |
-| `purpose` | Trimmed, nonblank value/risk statement up to 4,096 Unicode scalar values | Explains why the task is useful. It prevents work with no architectural or user value from being treated as required. |
-| `expected_outcome` | Trimmed, nonblank observable completion condition up to 4,096 Unicode scalar values | Gives the executor and reviewers a concrete completion assertion and later compliance evidence. |
-| `kind` | `test`, `implementation`, `security-audit`, or `compliance-review` | Declares the lifecycle trust boundary. Non-test tasks must transitively depend on the preceding lifecycle kind, so implementation cannot precede tests and an implementer cannot self-certify. |
-| `status` | `pending`, `in-progress`, `blocked`, or `completed` | Is the authoritative workflow state used by later ready-task selection and status views. |
-| `depends_on` | Lexically sorted, duplicate-free list of earlier task IDs | Defines the component-local DAG. A task becomes ready only after every listed task is completed. Declared task order is the deterministic tie-breaker. |
-| `requirements` | Lexically sorted, duplicate-free `SOURCE#LOCATOR` strings | Links the task to the exact specification, root-contract, roadmap, or runbook requirement that justifies it. Review and execution surfaces retain these references as evidence. |
-| `timestamps.created_at` | UTC timestamp | Records when this version-2 task record was created. |
-| `timestamps.updated_at` | UTC timestamp not earlier than `created_at` | Records the most recent durable task update. |
-| `timestamps.completed_at` | `null`, or UTC timestamp for a completed task | Proves when a terminal task completion was recorded. It is required only for `completed` and may not predate `updated_at`. |
-| `blocked_reason` | `null`, or trimmed nonblank text for a blocked task | Makes a blocked task actionable instead of allowing tools to silently skip it. It is required only for `blocked`. |
+| Field                     | Allowed values                                                                      | Purpose and tool use                                                                                                                                                                           |
+| ------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                      | Unique 1-64 character lowercase kebab-case identifier                               | Stable local primary key for dependency edges, task selection, audit records, status output, and merge review. Never renumber or reuse it.                                                     |
+| `title`                   | Trimmed, nonblank, one-line text up to 120 Unicode scalar values                    | Short human label for CLI, CI, and UI status lists.                                                                                                                                            |
+| `description`             | Trimmed, nonblank work instruction up to 4,096 Unicode scalar values                | Bounded implementation scope supplied to the future execution context.                                                                                                                         |
+| `context`                 | Trimmed, nonblank background up to 4,096 Unicode scalar values                      | Explains the triggering condition and lets an owner decide whether the task is still relevant after a change.                                                                                  |
+| `purpose`                 | Trimmed, nonblank value/risk statement up to 4,096 Unicode scalar values            | Explains why the task is useful. It prevents work with no architectural or user value from being treated as required.                                                                          |
+| `expected_outcome`        | Trimmed, nonblank observable completion condition up to 4,096 Unicode scalar values | Gives the executor and reviewers a concrete completion assertion and later compliance evidence.                                                                                                |
+| `kind`                    | `test`, `implementation`, `security-audit`, or `compliance-review`                  | Declares the lifecycle trust boundary. Non-test tasks must transitively depend on the preceding lifecycle kind, so implementation cannot precede tests and an implementer cannot self-certify. |
+| `status`                  | `pending`, `in-progress`, `blocked`, or `completed`                                 | Is the authoritative workflow state used by later ready-task selection and status views.                                                                                                       |
+| `depends_on`              | Lexically sorted, duplicate-free list of earlier task IDs                           | Defines the component-local DAG. A task becomes ready only after every listed task is completed. Declared task order is the deterministic tie-breaker.                                         |
+| `requirements`            | Lexically sorted, duplicate-free `SOURCE#LOCATOR` strings                           | Links the task to the exact specification, root-contract, roadmap, or runbook requirement that justifies it. Review and execution surfaces retain these references as evidence.                |
+| `timestamps.created_at`   | UTC timestamp                                                                       | Records when this version-2 task record was created.                                                                                                                                           |
+| `timestamps.updated_at`   | UTC timestamp not earlier than `created_at`                                         | Records the most recent durable task update.                                                                                                                                                   |
+| `timestamps.completed_at` | `null`, or UTC timestamp for a completed task                                       | Proves when a terminal task completion was recorded. It is required only for `completed` and may not predate `updated_at`.                                                                     |
+| `blocked_reason`          | `null`, or trimmed nonblank text for a blocked task                                 | Makes a blocked task actionable instead of allowing tools to silently skip it. It is required only for `blocked`.                                                                              |
 
 The legal task transitions are `pending -> in-progress | blocked`,
 `in-progress -> pending | blocked | completed`, and
@@ -383,3 +382,92 @@ record the migration instant as the record creation time, and compute reviewed
 component and parent revisions. Kvist never fabricates older provenance or
 silently rewrites a user-owned queue. A future opt-in migration command will
 perform only this documented transformation and retain its evidence.
+
+## User Vision and CLI-Centric Workflow
+
+Kvist is designed as a process enforcer and local orchestration wrapper for human-directed, spec-driven AI development. Instead of building a heavy proprietary agent framework, Kvist positions the human user as the Principal System Architect and delegates task execution, testing, and reviews to external AI agents supplied entirely by the user.
+
+### Standard Operating Workflow
+
+1. **Human Design (Stage 1):** The user writes or refines the layered `SPEC.md` for a component.
+2. **Task Breakdown (Stage 2):** The user or an advanced AI agent generates a structured `TODOS.yaml` containing the atomic implementation, testing, and review tasks in legal order.
+3. **Execution Handoff (Stage 3):** The user initiates task execution. Kvist slices the local directory context (providing _only_ the target component directory, its `SPEC.md`, its `TODOS.yaml`, and `ROOT_CONTRACT.md`, strictly excluding peer component implementations) and invokes the user's local agent.
+4. **Validation & Review (Stage 4):** The agent implements the task and runs tests. For compliance review, Kvist launches a clean-slate agent to reverse-engineer documentation (`DOCS.md`) and validates it against the spec.
+5. **Continuous Iteration:** Human users can jump around the codebase fluidly. Updating a spec at any level automatically propagates `Stale` states downstream. Work can be handed off asynchronously, allowing parallel development across different component branches.
+
+## External AI Agent Integration Guide
+
+Since the user supplies their own AI agent (which handles its own credentials, API keys, and environment), Kvist remains entirely credential-free. Kvist connects to external agents by executing them as CLI commands, using configurable string interpolation templates in `kvist.toml`.
+
+### Supported Placeholders
+
+When Kvist triggers a task execution, it interpolates the following placeholders in the template:
+
+- `{prompt}`: The generated prompt containing process instructions and target task description.
+- `{context_files}`: Space-separated absolute paths of the sliced, allowed context files (e.g. `SPEC.md`, `TODOS.yaml`, local test files).
+- `{target_directory}`: The active component's subdirectory path.
+
+### Configuration Examples (`kvist.toml`)
+
+Users configure their active agent runners in `kvist.toml`. Because different tasks require different levels of reasoning, Kvist supports **Agent Model Tiering** (using advanced models for architecture and compliance, and cheaper/faster models for code writing):
+
+```toml
+[agent.profiles.architect]
+# Advanced model (e.g. Claude 3.5 Sonnet, Gemini 1.5 Pro) for Specs, TODO breakdowns, and Compliance Reviews
+command_template = "claude --non-interactive --dangerously-skip-permissions --message '{prompt}' {context_files}"
+
+[agent.profiles.developer]
+# Simple, fast model (e.g. Claude Haiku, Gemini 1.5 Flash) for test-writing and code implementation
+command_template = "gemini-cli --prompt '{prompt}' --files {context_files}"
+```
+
+#### Major Agent Integration Examples
+
+- **Claude Code (Anthropic CLI):**
+  ```toml
+  command_template = "claude --non-interactive --dangerously-skip-permissions --message '{prompt}' {context_files}"
+  ```
+- **Aider (Open-Source AI Pair Programmer):**
+  ```toml
+  command_template = "aider --yes-to-all --message '{prompt}' {context_files}"
+  ```
+- **Gemini CLI (`gemini-cli`):**
+  ```toml
+  command_template = "gemini-cli --prompt '{prompt}' --files {context_files}"
+  ```
+- **Ollama + Mods (Local Private Execution):**
+  ```toml
+  command_template = "cat {context_files} | mods --model llama3 '{prompt}'"
+  ```
+- **Cursor CLI (Editor-integrated Edits):**
+  ```toml
+  command_template = "cursor --raw-input '{prompt}' {context_files}"
+  ```
+
+## Text Editor Integration and BKMs
+
+Kvist's design principles prioritize keeping standard CLI outputs clean and streamlined while providing seamless hooks into the developer's favorite environment. When manual human intervention is required—such as editing a specification, reviewing a diff, or resolving an arbitration conflict—Kvist follows industry Best Known Methods (BKM) to integrate with text editors:
+
+### 1. The Unix Standard: `$EDITOR` and `$VISUAL`
+
+The primary BKM for opening file editors from a terminal-native tool is to read the standard `$EDITOR` (or `$VISUAL`) shell environment variables.
+
+- **How Kvist Uses It:** When Kvist needs to open a file for editing (e.g., resolving a discrepancy, editing a specification, or during an interactive `spec new` flow), it checks if `$EDITOR` is set (e.g., `vim`, `nano`, `code --wait`, `zed --wait`, `subl -w`, `nvim`).
+- **Subprocess Spawning:** Kvist spawns the configured editor as a blocking subprocess on the specific file path, pausing execution and cleanly passing control to the terminal or launching the editor. Once the user saves the file and closes the editor, the subprocess exits and Kvist resumes.
+
+### 2. Project-Local Fallbacks (`kvist.toml`)
+
+If the global shell environment variable is unset or needs to be overridden for a specific project, Kvist provides a project-level fallback setting in `kvist.toml`:
+
+```toml
+[editor]
+preferred = "zed --wait"  # Or "code --wait", "nvim", etc.
+```
+
+### 3. Native File/Folder Openers
+
+For commands designed to open the active component directory directly in the user's GUI editor (e.g. `kvist open <COMPONENT_DIR>`), Kvist falls back to platform-native launchers if no preferred editor is configured:
+
+- **macOS:** `open <path>`
+- **Linux:** `xdg-open <path>`
+- **Windows:** `start <path>`
