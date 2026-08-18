@@ -280,6 +280,31 @@ fixture.
 - Implement the `kvist task log <COMPONENT_DIR> <TASK_ID>` command to display or stream the raw agent execution logs.
 - Add a `--verbose` or `--stream` flag to the task execution loop to pipe raw agent output directly to the console in real-time.
 
+### TODO UX-05 — Multi-Platform Shell Tab-Completions
+
+**Context:** Full tab-completion on all major platforms (Bash, Zsh, Fish, PowerShell) is crucial for ease of use and speed.
+**Acceptance criteria:**
+
+- Add `clap_complete` to dependencies.
+- Implement a `kvist completions <SHELL>` subcommand that generates shell completion scripts for all major shells on stdout.
+- Ensure all subcommands, arguments, and value-enums are dynamically completion-discoverable across platforms.
+
+### TODO UX-06 — Command-Line Actionable Guidance & Next-Step Prompts
+
+**Context:** The user must always feel in control and understand the process. They must never be left in the dark about what state the system is in or what needs to be done next.
+**Acceptance criteria:**
+
+- Ensure all terminal output sequences end with a clear, actionable instruction for what command the user should run next (e.g., if status is stale, prompt "Run 'kvist spec accept <COMPONENT_DIR>' to revalidate").
+- In `kvist task run`, output status markers that explain what the agent did, what files were edited, and suggest next verification runs.
+
+### TODO UX-07 — Uniform Structured JSON Output Support for All Commands
+
+**Context:** Users must be able to easily wrap Kvist inside their own scripts, IDE extensions, or custom GUIs/UIs. All CLI commands must support structured, machine-readable output.
+**Acceptance criteria:**
+
+- Support a uniform `--json` or `--format json` flag across every single Kvist command (including `init`, `spec new`, `spec accept`, `task run`, and `task log`).
+- Document stable, versioned JSON output schemas for all commands to prevent wrapping integrations from breaking.
+
 ## Phase 3 — AI Skill Definitions & Standard Prompts
 
 **Context:** The KVIST engine heavily relies on predictable, high-quality outputs from AI agents executing the lifecycle. Standardized "Skills" (system prompts, context rules, and structured output formats) must be rigorously defined for the terminal-UX agent.
