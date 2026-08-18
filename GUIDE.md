@@ -1,9 +1,10 @@
 # Kvist: The Spec-Driven AI Orchestrator
-## Comprehensive User Guide and Development Walk-through
+
+## Comprehensive User Guide, Philosophy, and Development Walk-through
 
 Welcome to **Kvist**. This guide serves as both an architectural reference and a complete, hands-on walk-through showing how Kvist can be used to construct a complex software project from scratch using user-provided AI agents.
 
-Kvist is built on a core thesis: **AI code generation is fast but fundamentally fragile.** Without rigorous structure, letting an LLM write code directly inside a repository leads to "vibe coding"—a state of creeping technical debt, specification drift, and cascading test failures. 
+Kvist is built on a core thesis: **AI code generation is fast but fundamentally fragile.** Without rigorous structure, letting an LLM write code directly inside a repository leads to "vibe coding"—a state of creeping technical debt, specification drift, and cascading test failures.
 
 Kvist solves this by enforcing a strict, double-blind development lifecycle where **human engineers act as Principal Architects** and **AI agents execute highly-scoped, atomically validated task queues.**
 
@@ -14,187 +15,162 @@ Kvist solves this by enforcing a strict, double-blind development lifecycle wher
 Traditional AI tools (copilots and auto-writers) operate on a "generate and debug" loop. This model breaks down as projects scale. Kvist introduces three rigid constraints to restore software engineering rigor:
 
 1. **Specs Over Code:** You cannot write a line of code until you have a validated specification (`SPEC.md`) and an ordered, dependency-mapped task queue (`TODOS.yaml`).
-2. **Lifecycle Order Enforcement:** Implementations *cannot* precede tests. Reviewers *cannot* self-certify. A task's lifecycle is hardcoded to force quality:
-   `Test Writing` $\rightarrow$ `Code Implementation` $\rightarrow$ `Security Audit` $\rightarrow$ `Compliance Review`
-3. **Double-Blind Verification:** The developer agent implementing the code never writes the documentation. A clean-slate "Documenter" agent reverse-engineers a `DOCS.md` from the raw code, and a third "Reviewer" agent compares `DOCS.md` against the original `SPEC.md` to flag hallucinations or missed requirements.
+2. **Lifecycle Order Enforcement (Test-Driven Development):** Implementations _cannot_ precede tests. Reviewers _cannot_ self-certify. By grounding Kvist in a strict **Test-First (TDD) methodology**, we ensure that executable unit tests are written to prove specification contracts before any implementation begins.
+3. **Double-Blind Verification (DOCS.md vs. User Docs):** To prevent "hallucinated compliance," the developer agent implementing the code never writes the documentation. A clean-slate "Documenter" agent reverse-engineers the raw code into a documentation file, and a third "Reviewer" agent compares this file against the original `SPEC.md`.
+
+### Differentiating User Docs vs. Component Implementation Records (`DOCS.md`)
+
+It is crucial to differentiate between two completely different types of documentation in a software project:
+
+- **User-Facing Documentation (Public Docs):** Usually written in a dedicated `/docs/` directory. It explains _how_ to integrate with, configure, and use a component from the perspective of an external human developer.
+- **Component Implementation Records (`DOCS.md` / `IMPL.md`):** This is a private, structural file written to the component directory (physically mapped as `DOCS.md` for CLI compatibility, but logically representing `IMPL.md`). This file is **not** written for end-users. It is a reverse-engineered blueprint of the raw code—documenting every private structure, internal state machine, and algorithm observed in the source.
+  - _Why they are different:_ The end-user does not care about private parsing helpers, but the double-blind "Reviewer" agent absolutely needs them to verify Layer 2/3 boundary compliance. Reserving `DOCS.md` for this private verifier role prevents double-work and keeps human-facing documentation clean.
 
 ---
 
 ## 2. High-Level Project Decomposition
 
-To build a project with Kvist, you begin by breaking down your high-level idea into a modular hierarchy of components.
+To build a project with Kvist, you begin by breaking down your high-level project vision into a modular hierarchy of components, including your central business/application logic orchestrator.
 
 ```
-                  ┌──────────────────────┐
-                  │   Root Component     │
-                  │   (ROOT_CONTRACT)    │
-                  └──────────┬───────────┘
-                             │
-              ┌──────────────┴──────────────┐
-              ▼                             ▼
-     ┌─────────────────┐           ┌─────────────────┐
-     │  Component A    │           │  Component B    │
-     │ (network/http)  │           │   (db/storage)  │
-     └─────────────────┘           └─────────────────┘
+                           ┌──────────────────────┐
+                           │   Root Component     │
+                           │   (ROOT_CONTRACT)    │
+                           └──────────┬───────────┘
+                                      │
+              ┌───────────────────────┼──────────────────────┐
+              ▼                       ▼                      ▼
+     ┌─────────────────┐     ┌─────────────────┐    ┌─────────────────┐
+     │  Component A    │     │  Component B    │    │  Component C    │
+     │ (network/http)  │     │   (db/storage)  │    │ (app/orchestra) │
+     └─────────────────┘     └─────────────────┘    └─────────────────┘
 ```
 
-### Stage 1: Initializing the Project Root
-Run `kvist init` to set up the project. This command writes the fundamental root artifacts:
-* `kvist.toml`: Project-wide settings and directory discovery limits.
-* `ROOT_CONTRACT.md`: The immutable architectural rules, change-management protocols, and compliance standards for the entire codebase.
+### Bridging the Gap: From Vision to Scaffolded Components
 
-### Stage 2: Slicing into Modular Components
-In Kvist, a **component is simply a directory with a specification (`SPEC.md`) and a queue (`TODOS.yaml`)**. 
-* Organize your folders to match your logical component tree (e.g., `src/parser`, `src/storage`).
-* Create a new component using `kvist spec new <COMPONENT_DIR>`. This command populates a deterministic, layered `SPEC.md` template consisting of three progressive-disclosure sections:
-  * **Layer 1: Contract & Public Interface** (What the caller depends on).
-  * **Layer 2: Internal Invariants & Boundaries** (Memory, safety, and security limits).
-  * **Layer 3: Algorithms & Failure Paths** (Concrete implementation details).
+How do we take the step from a high-level project idea into concrete Kvist components?
 
-### Stage 3: Planning the Task Queue
-Using your configured **Architect Agent Profile** (which runs a high-reasoning model), you break the `SPEC.md` down into atomic work items inside `TODOS.yaml`. 
-* Each task maps to a specific heading or requirement locator in `SPEC.md` (e.g., `SPEC.md#Layer-2-Boundaries`).
-* Tasks must declare their depends-on relationships, forming a directed acyclic graph (DAG) where test tasks are parents to implementation tasks.
+1. **The System Vision (`VISION.md`):** The human architect drafts a high-level vision document in the project root. This describes the core features, the business logic orchestrator (**Component C**), and its dependencies on infrastructure (Component A: parser/network, Component B: database).
+2. **Decomposition (The Architect Agent):** An advanced **Architect Agent** (configured with a high-level reasoning model) analyzes `VISION.md`. It proposes the optimal folder tree and the boundaries between components, saving the design blueprint.
+3. **Scaffolding:** The user initializes the root via `kvist init`, then creates each recommended component directory structure using the CLI:
+   ```bash
+   kvist spec new src/network/http
+   kvist spec new src/db/storage
+   kvist spec new src/app/orchestra
+   ```
 
 ---
 
-## 3. The Component Development Flow: A Walk-through
+## 3. The Collaborative Iterative Design Loop
 
-Let’s trace the development of a concrete project idea: **An HTTP Request Parser**. We want to implement this under `src/http_parser`.
+Writing specifications and executing tasks in Kvist is an open-ended, highly interactive collaboration between the human architect and specialized AI agent roles.
 
 ```
-                    [ HUMAN ARCHITECT ]
-                     Drafts SPEC.md
-                           │
-                           ▼
-                  [ ARCHITECT AGENT ]
-                  Generates TODOS.yaml
-                           │
-                           ▼
-                 [ DEVELOPER AGENT ]
-            Fulfills `task run` for tests
-                           │
-                           ▼
-                 [ DEVELOPER AGENT ]
-            Fulfills `task run` for code
-                           │
-                           ▼
-                  [ AUDITOR AGENT ]
-               Conducts Security Audit
-                           │
-                           ▼
-                  [ REVIEWER AGENT ]
-           Executes Compliance Verification
+                     ┌──────────────────────────┐
+                     │     Human Architect      │
+                     │  Drafts Core Spec Invar  │
+                     └────────────┬─────────────┘
+                                  │
+                                  ▼
+                     ┌──────────────────────────┐
+                     │     Architect Agent      │
+                     │  Expands Details/Algos   │
+                     └────────────┬─────────────┘
+                                  │
+                                  ▼
+                     ┌──────────────────────────┐
+                     │  Iterative Human Review  │
+                     │  Sign Off (spec accept)  │
+                     └────────────┬─────────────┘
+                                  │ (Autonomous Hand-off)
+                                  ▼
+                     ┌──────────────────────────┐
+                     │   Task Execution Loop    │
+                     │   Run to Completion      │
+                     └────────────┬─────────────┘
+                                  │
+                                  ▼
+                     ┌──────────────────────────┐
+                     │   Compliance Feedback    │
+                     │   (Success or Drift?)    │
+                     └────────────┬─────────────┘
+                                  ├────────────────────────┐
+                   (No Drift: Done)                        │ (Drift Detected)
+                                  ▼                        ▼
+                     ┌──────────────────────────┐  ┌────────────────┐
+                     │   Component Completed    │  │ Human Decision │
+                     └──────────────────────────┘  └───────┬────────┘
+                                                           │
+                                   ┌───────────────────────┴───────────────┐
+                                   ▼                                       ▼
+                       [ Re-Prompt Redesign ]                    [ Accept Drift Changes ]
+                     (Re-run Implementation)                     (spec accept updates spec)
 ```
 
-### Step 1: Initialize the Component
-The Human Architect initiates the parser component:
-```bash
-kvist spec new src/http_parser
-```
-This writes a template `SPEC.md` at `src/http_parser/SPEC.md`.
+### Stage 1: The Iterative Spec Design Loop
 
-### Step 2: Define the Interface and Boundaries
-The Human Architect fills out the layered specification:
-* **Layer 1:** Define the `parse_request(raw: &[u8]) -> Result<Request, ParseError>` public signature.
-* **Layer 2:** Establish bounds—reject headers longer than 8 KiB; prevent buffer overflows; restrict request methods to GET, POST, and PUT.
-* **Layer 3:** Implement a state-machine algorithm that parses line-by-line using CRLF (`\r\n`) markers.
+The human user does not need to write a massive, verbose specification by hand.
 
-### Step 3: Schedule the Task Queue
-The Architect AI model reads the completed `SPEC.md` and generates the `TODOS.yaml` containing the ordered dependencies:
-1. `write-parser-tests` (Kind: `Test`): Explicitly writes unit tests for GET/POST methods and boundary violations (>8 KiB).
-2. `impl-parser-logic` (Kind: `Implementation`, depends on `write-parser-tests`): Fulfills the parsing logic so all unit tests pass.
-3. `parser-security-audit` (Kind: `SecurityAudit`, depends on `impl-parser-logic`): Reviews bounds and memory usage.
-4. `parser-compliance-review` (Kind: `ComplianceReview`, depends on `parser-security-audit`): Runs the triple-blind compliance check.
+1. **Outline:** The human outlines the main public interfaces (Layer 1) and non-negotiable boundaries (Layer 2) inside `SPEC.md`.
+2. **Expansion:** The Architect Agent builds upon that outline, fleshing out Layer 3 algorithms, error propagation, and failure states.
+3. **Sign-off:** The human reviews the draft, adjusts it, and once satisfied, runs:
+   ```bash
+   kvist spec accept <COMPONENT_DIR>
+   ```
+   This formally "signs off" on the specification as accepted, freezing its hash as the current component plan.
 
-The developer tracks this queue using:
-```bash
-kvist status src/http_parser
-```
+### Stage 2: Hand-off and Autonomous Component Execution
 
-### Step 4: Write the Tests (Test-Driven Development)
-The human hands off task execution to Kvist's automated loop. Since `write-parser-tests` has no incomplete dependencies, it is ready:
-```bash
-kvist task run src/http_parser write-parser-tests
-```
-Kvist slices the context (providing only the `src/http_parser` subdirectory, its `SPEC.md`, its `TODOS.yaml`, and the global `ROOT_CONTRACT.md`), launches your configured local agent runner (using your cheaper/faster **Developer Profile**), and redirects logs silently.
+Once the spec is completed and signed off, the human can step back and let the agent execute the component flow until completion:
 
-The agent writes the tests to `src/http_parser/tests.rs` (initially failing because the code is empty) and exits.
-
-To review what the agent did or see raw compiler outputs, the human operator runs:
-```bash
-kvist task log src/http_parser write-parser-tests
-```
-
-### Step 5: Fulfill the Code Implementation
-With the tests task successfully completed, `impl-parser-logic` becomes the next eligible task. The human fires:
-```bash
-kvist task run src/http_parser
-```
-*(Omiting the task ID automatically selects the next eligible task: `impl-parser-logic`)*.
-
-The agent runner modifies `src/http_parser/lib.rs`, implements the state machine, and verifies that the tests now pass successfully.
-
-### Step 6: Security Audit & Triple-Blind Review
-* **Security Audit:** An independent Auditor agent reviews the implementation against the Layer 2 boundaries and certifies that no memory safety hazards or out-of-bounds reads are possible.
-* **Compliance Review:** 
-  1. A clean-slate agent reverse-engineers `src/http_parser/DOCS.md` strictly from the implemented code, knowing nothing of the original spec.
-  2. A reviewer agent compares `DOCS.md` against `SPEC.md`. If there is 100% compliance, the task queue is marked complete.
-  3. If there is a mismatch (e.g. the developer agent implemented a DELETE method not in the spec), a conflict is flagged, prompting the human architect to arbitrate.
+- **The Microsurveillance Path:** The user can follow along task-by-task, manually invoking `kvist task run` for each TODO item, inspecting log outputs with `kvist task log`, and verifying each transition.
+- **The Trust-the-Process Path:** The user lets Kvist drive the task loop autonomously, running all pending items to completion.
+- **The Bubble-up Feedback Gate:** At the end of the run, the validation results bubble up. If the triple-blind review detects **specification drift** (e.g., the code implemented a behavior not described in the specification), Kvist halts and prompts the user:
+  - **Option A (Trigger Redesign):** Re-prompt the developer agent with the discrepancy logs, returning the task to the execution phase.
+  - **Option B (Accept Changes):** Accept the implementation changes, updating `SPEC.md` using `kvist spec accept` to incorporate the new behavior and returning the workflow back to the design phase.
 
 ---
 
-## 4. Current State: Settled Architecture vs. Upcoming Roadmap
+## 4. Mapping External Agent Roles & Settings
 
-Kvist is under active development. Below is a detailed outline of our current production-grade capabilities versus what is upcoming on our roadmap.
+Kvist relies on four distinct external agent roles, allowing you to configure different AI models and reasoning depths per role in your global `~/.config/kvist/config.toml`:
 
-### ───────── Settled Architecture (Fully Implemented & Verified) ─────────
+```toml
+# Kvist Global User Configuration
 
-* **Config-Precedence Chain:** Config is resolved dynamically: Local Project Override (`.kvist/config.toml`) $\rightarrow$ Root `kvist.toml` `[agent]` $\rightarrow$ XDG User Home (`~/.config/kvist/config.toml`) $\rightarrow$ System Global (`/etc/kvist/config.toml`).
-* **Safe CLI Interpolation templates:** Commands are split POSIX-style and executed as direct OS sub-commands without shell wrapper risk, preventing shell injection. Placeholders `{prompt}`, `{context_files}`, and `{target_directory}` are fully supported.
-* **Asynchronous Progress Logs:** External agent stdout/stderr is written in real-time to log files (`.kvist/logs/<task>_<timestamp>.log`). Real-time terminal streaming is toggled via `--stream`.
-* **The `kvist task log` command:** Operator utility to easily inspect and output raw execution logs.
-* **The `kvist spec accept` command:** Revalidates component specifications, updates TOD0.yaml hashes, and clears staleness programmatically.
-* **VCS Durability Enforcement:** All Kvist core assets must be tracked in Git or Jujutsu before tasks can be transitioned or run, preventing silent, uncommitted loss.
+[agent.profiles]
+# 1. ARCHITECT: High-level reasoning for design and decomposition
+[agent.profiles.architect]
+command_template = "claude --non-interactive --model claude-3-5-sonnet --message '{prompt}' {context_files}"
+token_limit = 100000
 
-### ───────── Upcoming Features & Roadmap (In Progress / Placeholders) ─────────
+# 2. DEVELOPER: Highly focused, cost-effective model for TDD tests and implementation
+[agent.profiles.developer]
+command_template = "gemini-cli --model gemini-1.5-flash --prompt '{prompt}' --files {context_files}"
+token_limit = 50000
 
-```
-[ PLACEHOLDER: P2-05b ─ Test Executions Sandboxing ]
-Status: IN DESIGN
-Target: Safely executes repository test commands in isolated sandboxes 
-(e.g., Docker, WASM, or gVisor) to protect the host machine against 
-malicious, hallucinated, or unvalidated AI-generated script modifications.
-```
+# 3. AUDITOR: Specialized security auditing agent
+[agent.profiles.auditor]
+command_template = "claude --non-interactive --model claude-3-5-sonnet --message '{prompt}' {context_files}"
+token_limit = 50000
 
-```
-[ PLACEHOLDER: UX-05 ─ Multi-Platform Shell Completions ]
-Status: PLANNED
-Target: Ship a completions sub-command utilizing clap_complete to generate 
-highly responsive tab-completion bindings natively on Bash, Zsh, Fish, 
-and PowerShell.
+# 4. REVIEWER: Neutral, source-blind clean-slate documenter and compliance checker
+[agent.profiles.reviewer]
+command_template = "gemini-cli --model gemini-1.5-pro --prompt '{prompt}' --files {context_files}"
+token_limit = 100000
 ```
 
-```
-[ PLACEHOLDER: UX-07 ─ Uniform Structured JSON Outputs ]
-Status: PLANNED
-Target: Introduce a global `--json` flag on all subcommands. This returns 
-stable, documented schemas on stdout, enabling third-party IDE extensions 
-or custom dashboards to wrap Kvist programmatically.
-```
+### Role Taxonomy:
 
-```
-[ PLACEHOLDER: Phase 3 ─ AI Skill Prompt Books ]
-Status: IN DESIGN
-Target: Expose specialized prompting catalogs ("skills") for writing 
-unit tests, clean-slate reverse-engineering, security audits, and 
-specification feasibility analysis, ensuring predictable, high-quality results.
-```
+- **Architect (Stage 1 & 2):** System decomposition, specification interview, and TODO task generation. (Highly suited to premium reasoning models like Claude 3.5 Sonnet / Gemini 1.5 Pro).
+- **Developer (Stage 3):** Writing unit tests and fulfilling code implementations. (Best suited to fast, cost-efficient models like Gemini 1.5 Flash / Claude Haiku).
+- **Auditor (Stage 4):** Evaluates boundaries, safety invariants, and validates memory/concurrency safety. (Requires precise, security-focused models).
+- **Reviewer / Documenter (Stage 4):** Conducts clean-slate documentation (reverse-engineering `DOCS.md` from raw code) and performs the final spec-to-doc compliance comparison. (Requires a neutral, highly logical model).
 
 ---
 
-## Summary: A Glimpse into the Future of Engineering
+## 5. Summary: A Glimpse into the Future of Engineering
 
-Kvist elevates AI development from a series of speculative trials to a precise, auditable manufacturing line. By wrapping standard CLI tools and putting the developer in absolute, structured control, Kvist delivers reliability you can trust. 
+Kvist elevates AI development from a series of speculative trials to a precise, auditable manufacturing line. By wrapping standard CLI tools, enforcing Test-Driven Development (TDD), and putting the developer in absolute, structured control, Kvist delivers reliability you can trust.
 
-Whether you are building a small library or managing a complex distributed system, Kvist ensures that your specifications remain the absolute source of truth, and your code behaves exactly as specified.
+Whether you are building a small utility or managing a complex distributed application, Kvist ensures that your specifications remain the absolute source of truth, and your code behaves exactly as specified.
