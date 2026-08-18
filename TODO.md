@@ -96,11 +96,10 @@ in `src/SPEC.md`, `src/TODOS.yaml`, and `tests/task_commands.rs`.
 **Verification:** dependency, lock contention, crash-recovery, cancellation,
 and atomic-state-update integration tests.
 
-### TODO P2-04 — Define User-Provided Agent Invocation Contract
+### COMPLETE P2-04 — Define User-Provided Agent Invocation Contract
 
 **Depends on:** P2-02
-**Status:** Scoped — Credential and Trust models clarified.
-**Strategic Alignment:** Kvist acts purely as a development process enforcer and wrapper, carrying NO API keys or credentials. The user supplies their preferred AI agent/runner (e.g., Claude Code, Gemini CLI, Cursor, or a custom runner script), and that agent handles its own credentials and execution trust.
+**Current evidence:** Implemented under `src/config.rs` and `src/agent.rs` with full XDG/APPDATA persistent loading, multi-tier override chains, and safe program parameter tokenization.
 **Acceptance criteria:**
 
 - Define the command-line invocation protocol used by Kvist to launch the user-provided agent/runner.
@@ -134,9 +133,10 @@ and atomic-state-update integration tests.
 **Verification:** command policy, timeout, cancellation, output limit,
 nonzero exit, and result-persistence integration tests.
 
-### TODO P2-06 — Implement the atomic task execution loop
+### COMPLETE P2-06 — Implement the atomic task execution loop
 
 **Depends on:** P2-03, P2-04, P2-05
+**Current evidence:** Integrated `kvist task run <COMPONENT_DIR> [TASK_ID]` driver under `src/task_commands.rs` and `src/cli.rs`. It resolves dependencies, triggers atomic InProgress transitions, launches interpolated commands, redirects logs asynchronously, and resolves output status Completed/Blocked.
 **Acceptance criteria:**
 
 - Drive one approved task at a time through context preparation, user-provided agent invocation, change inspection, test verification, and state transition.
@@ -225,7 +225,7 @@ fixture.
 
 ## UX and Developer Experience Improvements
 
-### TODO UX-01 — Implement a Revalidation / Accept CLI Interface
+### DONE UX-01 — Implement a Revalidation / Accept CLI Interface
 
 **Context:** Currently, when a component specification or parent contract changes, the component is marked `Stale`, but Kvist provides no CLI command to accept these changes. Developers must manually compute SHA-256 hashes and edit `TODOS.yaml`.
 **Acceptance criteria:**
@@ -252,7 +252,7 @@ fixture.
 
 ## Phase 2 Remediation & Security Improvements
 
-### TODO P2-04b — General CLI-Wrapper Template Engine for External Agents
+### DONE P2-04b — General CLI-Wrapper Template Engine for External Agents
 
 **Context:** To support as many different user-provided AI agents as possible (e.g., Claude Code, Gemini CLI, Aider, Cursor, or custom local wraps) without requiring Kvist to store credentials or carry out native API integrations. Kvist will launch these agents via configurable CLI commands.
 **Acceptance criteria:**
@@ -271,7 +271,7 @@ fixture.
 
 ## UX and Developer Experience Improvements (Terminal Focus)
 
-### TODO UX-04 — Agent Output Redirection, Logging, and Streamlining
+### DONE UX-04 — Agent Output Redirection, Logging, and Streamlining
 
 **Context:** We want Kvist's standard CLI UX to remain exceptionally clean and streamlined (e.g., simple spinners or success indicators). However, the raw output (stdout, stderr, execution logs) of user-provided agents must be captured and made available to the user upon request.
 **Acceptance criteria:**
