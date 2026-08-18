@@ -358,3 +358,90 @@ tasks: []
     assert!(updated_child_contents.contains(&parent_hash));
     assert!(updated_child_contents.contains("state: current"));
 }
+
+#[test]
+fn task_run_executes_successfully_and_transitions_completed() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    // Configure a mock echo command in kvist.toml for developer agent profile
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "echo 'mocking execute' {context_files}"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+
+    // Run next task (implement-code)
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(
+        output.status.success(),
+        "run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stderr, b"");
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout_str.contains("executed successfully and transitioned to completed"));
+    assert!(stdout_str.contains("Logs written to"));
+
+    // Verify task status is indeed Completed in TODOS.yaml
+    let queue_contents =
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(queue_contents.contains("status: completed"));
+}
+
+#[test]
+fn task_run_auto_selects_and_executes_next_ready_task() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "echo 'mock auto select'"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+
+    // Omit task id argument; should auto-select implement-code
+    let output = run_kvist(&project, &["task", "run", "."]);
+    assert!(
+        output.status.success(),
+        "auto-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout_str.contains("task `implement-code` executed successfully"));
+}
+
+#[test]
+#[cfg(unix)]
+fn task_run_transitions_to_blocked_on_agent_failure() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    // Configure a command template that exits with a failure code (e.g. false)
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "false"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+
+    // Run task and verify failure
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(output.status.success()); // Kvist CLI handles failures gracefully and exits 0 but marks task Blocked
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout_str.contains("failed during execution and has been transitioned to blocked"));
+
+    // Verify task status is Blocked in TODOS.yaml and contains the blocker_reason
+    let queue_contents =
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(queue_contents.contains("status: blocked"));
+    assert!(queue_contents.contains("agent failed during task execution"));
+}

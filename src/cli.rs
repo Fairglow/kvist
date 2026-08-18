@@ -110,6 +110,18 @@ pub enum TaskCommand {
         #[arg(long)]
         reason: Option<String>,
     },
+    /// Run an external AI agent to execute a task, tracking progress and token usage.
+    Run {
+        /// Component-root-relative component directory; `.` selects the root component.
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: PathBuf,
+        /// Optional queue-local task identifier; if omitted, automatically selects the next ready task.
+        #[arg(value_name = "TASK_ID")]
+        task_id: Option<String>,
+        /// Optional flag to stream agent stdout and stderr directly to the console.
+        #[arg(long)]
+        stream: bool,
+    },
 }
 
 /// Command-line spelling of a queue task status.
@@ -173,6 +185,15 @@ pub fn execute(command: Command) -> Result<CommandOutput> {
                     reason,
                 },
         } => task_commands::transition(&component_dir, &task_id, status.into(), reason.as_deref())
+            .map(CommandOutput::message),
+        Command::Task {
+            command:
+                TaskCommand::Run {
+                    component_dir,
+                    task_id,
+                    stream,
+                },
+        } => task_commands::run_task(&component_dir, task_id.as_deref(), stream)
             .map(CommandOutput::message),
         Command::Spec {
             command: SpecCommand::New { component_dir },

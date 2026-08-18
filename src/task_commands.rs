@@ -14,7 +14,7 @@ use crate::{
     file_io::{replace_file_atomically, sync_directory, write_new_file_atomically},
     filesystem::is_link_like,
     project_state::{self, ComponentState, MAX_ROOT_TEXT_ARTIFACT_BYTES, ProjectState},
-    task_queue::{Task, TaskQueue, TaskStatus, Timestamp, parse, serialize},
+    task_queue::{Task, TaskKind, TaskQueue, TaskStatus, Timestamp, parse, serialize},
     vcs::VcsArtifactState,
 };
 
@@ -662,4 +662,190 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
         component_dir: project_dir.join(component_root).join(&component_path),
         component_path,
     })
+}
+
+/// Launches the external agent to execute a task, transitions the task to InProgress,
+/// captures logs, parses token usage, and transitions the task to Completed/Blocked based on exit.
+pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) -> Result<String> {
+    let context = validate_context(component_path)?;
+    let mut queue = read_queue(&context.component_dir)?;
+
+    // 1. Determine the task to run
+    let task_id = match task_id_opt {
+        Some(id) => id.to_owned(),
+        None => {
+            // Pick next ready task
+            let ready_tasks = get_ready_tasks(&queue);
+            let Some(first_ready) = ready_tasks.first() else {
+                return Err(KvistError::TaskQueueUnavailable {
+                    path: context
+                        .component_dir
+                        .join(ComponentArtifact::TaskQueue.filename()),
+                    reason: "no ready tasks available in the queue".to_owned(),
+                });
+            };
+            first_ready.id.clone()
+        }
+    };
+
+    // Verify task is ready/valid to run
+    let task_index = queue
+        .tasks
+        .iter()
+        .position(|t| t.id == task_id)
+        .ok_or_else(|| KvistError::TaskQueueUnavailable {
+            path: context
+                .component_dir
+                .join(ComponentArtifact::TaskQueue.filename()),
+            reason: format!("task `{task_id}` not found in the queue"),
+        })?;
+
+    let task = &queue.tasks[task_index];
+
+    // Ensure task is ready or in-progress
+    let ready_ids: Vec<String> = get_ready_tasks(&queue).into_iter().map(|t| t.id).collect();
+    if task.status != TaskStatus::InProgress && !ready_ids.contains(&task_id) {
+        return Err(KvistError::TaskQueueUnavailable {
+            path: context
+                .component_dir
+                .join(ComponentArtifact::TaskQueue.filename()),
+            reason: format!("task `{task_id}` is not ready for execution"),
+        });
+    }
+
+    // 2. Transition task status to InProgress atomically (if not already InProgress)
+    if task.status != TaskStatus::InProgress {
+        // Transition to InProgress
+        let _ = transition(component_path, &task_id, TaskStatus::InProgress, None)?;
+        // Re-read queue to reflect transition
+        queue = read_queue(&context.component_dir)?;
+    }
+
+    let task = &queue.tasks[task_index];
+
+    // 3. Load agent profile matching task type
+    let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+        operation: "determine current project directory",
+        path: PathBuf::from("."),
+        source,
+    })?;
+    let config = crate::config::load(&project_dir)?;
+    let agent_profile = match task.kind {
+        TaskKind::Test | TaskKind::Implementation => &config.agent.developer,
+        TaskKind::SecurityAudit | TaskKind::ComplianceReview => &config.agent.architect,
+    };
+
+    // 4. Sliced context files gathering
+    let spec_path = context
+        .component_dir
+        .join(ComponentArtifact::Specification.filename());
+    let queue_path = context
+        .component_dir
+        .join(ComponentArtifact::TaskQueue.filename());
+    let root_contract = project_dir.join("ROOT_CONTRACT.md");
+    let mut context_files = vec![spec_path, queue_path, root_contract];
+
+    // If there is a parent specification, add it to context too
+    if queue.component.parent_specification.is_some() {
+        let parent_spec = context.component_dir.join("../SPEC.md");
+        if parent_spec.exists() {
+            context_files.push(parent_spec);
+        }
+    }
+
+    // 5. Build prompt
+    let prompt = format!(
+        "Task Details:\n\
+         - ID: {}\n\
+         - Title: {}\n\
+         - Role/Kind: {:?}\n\
+         - Description: {}\n\
+         - Context: {}\n\
+         - Purpose: {}\n\
+         - Expected Outcome: {}\n\n\
+         Instructions:\n\
+         You are the developer agent tasked with executing the task above. \n\
+         Ensure all invariants defined in SPEC.md are maintained. \n\
+         Fulfill all task requirements. When finished, write your results.",
+        task.id,
+        task.title,
+        task.kind,
+        task.description,
+        task.context,
+        task.purpose,
+        task.expected_outcome
+    );
+
+    println!("Running task `{task_id}` via external agent...");
+
+    // 6. Execute agent
+    let run_result = crate::agent::execute_agent(
+        agent_profile,
+        &prompt,
+        &context_files,
+        &context.component_dir,
+        &task_id,
+        stream,
+    )?;
+
+    // 7. Transition task status depending on outcome
+    if run_result.success {
+        // Transition to Completed
+        // In P2-05, we will add test-command verification, but for now we transition to Completed!
+        let _ = transition(component_path, &task_id, TaskStatus::Completed, None)?;
+
+        let token_summary = match (run_result.tokens_input, run_result.tokens_output) {
+            (Some(in_tok), Some(out_tok)) => {
+                format!(" [Tokens used - Input: {}, Output: {}]", in_tok, out_tok)
+            }
+            _ => "".to_owned(),
+        };
+        Ok(format!(
+            "task `{task_id}` executed successfully and transitioned to completed.{}\nLogs written to: {}",
+            token_summary,
+            run_result.log_path.display()
+        ))
+    } else {
+        // Transition to Blocked
+        let blocker_reason = format!(
+            "agent failed during task execution. Raw execution logs are written to: {}",
+            run_result.log_path.display()
+        );
+        let _ = transition(
+            component_path,
+            &task_id,
+            TaskStatus::Blocked,
+            Some(&blocker_reason),
+        )?;
+        Ok(format!(
+            "task `{task_id}` failed during execution and has been transitioned to blocked.\nLogs written to: {}",
+            run_result.log_path.display()
+        ))
+    }
+}
+
+fn get_ready_tasks(queue: &TaskQueue) -> Vec<Task> {
+    // A task is ready if its status is Pending or InProgress, and all its depends_on tasks are Completed
+    let mut ready = Vec::new();
+    for task in &queue.tasks {
+        if task.status == TaskStatus::Pending || task.status == TaskStatus::InProgress {
+            // Check dependencies
+            let mut deps_complete = true;
+            for dep_id in &task.depends_on {
+                if let Some(dep_task) = queue.tasks.iter().find(|t| &t.id == dep_id) {
+                    if dep_task.status != TaskStatus::Completed {
+                        deps_complete = false;
+                        break;
+                    }
+                } else {
+                    deps_complete = false;
+                    break;
+                }
+            }
+            if deps_complete {
+                ready.push(task.clone());
+            }
+        }
+    }
+    ready
 }
