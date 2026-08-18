@@ -78,6 +78,12 @@ pub enum SpecCommand {
         #[arg(value_name = "SPEC_FILE")]
         spec_file: PathBuf,
     },
+    /// Revalidate a component specification, resetting the stale state back to Current.
+    Accept {
+        /// Component-root-relative component directory; `.` selects the root component.
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: PathBuf,
+    },
 }
 
 /// Task selection and state-transition operations.
@@ -192,6 +198,9 @@ pub fn execute(command: Command) -> Result<CommandOutput> {
                 })
             }
         }
+        Command::Spec {
+            command: SpecCommand::Accept { component_dir },
+        } => task_commands::accept(&component_dir).map(CommandOutput::message),
     }
 }
 

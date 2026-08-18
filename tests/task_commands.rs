@@ -186,3 +186,175 @@ fn task_transition_requires_a_block_reason() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("--reason"));
     assert!(!project.path().join("src/.kvist-task.lock").exists());
 }
+
+#[test]
+fn spec_accept_resolves_staleness_and_updates_queue_revisions() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    track_project(&project);
+
+    // 1. Modify the specification slightly to make it stale
+    let spec_path = project.path().join("src/SPEC.md");
+    let original_spec = fs::read_to_string(&spec_path).expect("read spec");
+    // Append a minor valid edit inside Layer 1 without breaking structural headings
+    let updated_spec =
+        original_spec.replace("## Purpose", "## Purpose\nThis is a newly accepted change.");
+    fs::write(&spec_path, &updated_spec).expect("write updated spec");
+
+    // Verify it is stale under status
+    let output = run_kvist(&project, &["status", "."]);
+    assert!(String::from_utf8_lossy(&output.stdout).contains("state: stale"));
+
+    // 2. Run spec accept
+    let output = run_kvist(&project, &["spec", "accept", "."]);
+    assert!(output.status.success());
+    assert_eq!(output.stderr, b"");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("accepted specification change"));
+
+    // Verify it is no longer stale under status
+    let output = run_kvist(&project, &["status", "."]);
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("state: stale"));
+
+    // Verify TODOS.yaml has been updated with the correct SHA-256 hash
+    use sha2::{Digest, Sha256};
+    let expected_hash = format!("sha256:{:x}", Sha256::digest(updated_spec.as_bytes()));
+    let queue_contents =
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(queue_contents.contains(&expected_hash));
+    assert!(queue_contents.contains("state: current"));
+}
+
+#[test]
+fn spec_accept_rejects_invalid_specifications() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    // 1. Create a valid child component
+    let child_dir = project.path().join("src/child");
+    fs::create_dir_all(&child_dir).expect("create child dir");
+    let output_child_spec = run_kvist(&project, &["spec", "new", "src/child"]);
+    assert!(output_child_spec.status.success());
+    fs::write(
+        child_dir.join("DOCS.md"),
+        "<!-- kvist-documentation-version: 1 -->\n# Root Component Compliance Documentation\n",
+    )
+    .expect("write child docs");
+
+    // Create a child TODOS.yaml with parent reference
+    let child_queue = format!(
+        r#"schema_version: 2
+component:
+  specification_revision: sha256:d47faba18fc80961e3cf1872cbd0d74ccc114a9667dfbc6b84dbbfac2234a1bd
+  parent_specification:
+    path: ../SPEC.md
+    revision: {GENERATED_SPECIFICATION_REVISION}
+  revalidation:
+    state: current
+    checked_at: 2026-08-16T12:54:50Z
+    stale_since: null
+    causes: []
+tasks: []
+"#
+    );
+    fs::write(child_dir.join("TODOS.yaml"), &child_queue).expect("write child queue");
+    track_project(&project);
+
+    // 2. Write an invalid child spec
+    let spec_path = child_dir.join("SPEC.md");
+    fs::write(&spec_path, "# invalid specification").expect("write invalid child spec");
+
+    // 3. Run spec accept and assert failure
+    let output = run_kvist(&project, &["spec", "accept", "child"]);
+    assert!(
+        !output.status.success(),
+        "Expected failure but got success. Stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("is invalid"),
+        "Expected 'is invalid' in stderr, but got: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!project.path().join("src/child/.kvist-task.lock").exists());
+}
+
+#[test]
+fn spec_accept_on_child_updates_parent_revision() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    // 1. Initialize a child component at src/child
+    let child_dir = project.path().join("src/child");
+    fs::create_dir_all(&child_dir).expect("create child dir");
+    let output_child = run_kvist(&project, &["spec", "new", "src/child"]);
+    assert!(
+        output_child.status.success(),
+        "Failed to create child spec. Stderr: {}",
+        String::from_utf8_lossy(&output_child.stderr)
+    );
+    fs::write(
+        child_dir.join("DOCS.md"),
+        "<!-- kvist-documentation-version: 1 -->\n# Root Component Compliance Documentation\n",
+    )
+    .expect("write child docs");
+
+    // Create a child TODOS.yaml with parent reference
+    let child_queue = format!(
+        r#"schema_version: 2
+component:
+  specification_revision: sha256:d47faba18fc80961e3cf1872cbd0d74ccc114a9667dfbc6b84dbbfac2234a1bd
+  parent_specification:
+    path: ../SPEC.md
+    revision: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  revalidation:
+    state: stale
+    checked_at: 2026-08-16T12:54:50Z
+    stale_since: 2026-08-16T12:54:50Z
+    causes:
+      - kind: parent-specification-revision-changed
+        path: ../SPEC.md
+        expected_revision: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        observed_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+tasks: []
+"#
+    );
+    fs::write(child_dir.join("TODOS.yaml"), &child_queue).expect("write child queue");
+    track_project(&project);
+
+    // Let's run status and print it out to see why child is considered invalid!
+    let status_out = run_kvist(&project, &["status", "."]);
+    println!(
+        "STATUS OUTPUT:\n{}",
+        String::from_utf8_lossy(&status_out.stdout)
+    );
+    println!(
+        "STATUS STDERR:\n{}",
+        String::from_utf8_lossy(&status_out.stderr)
+    );
+
+    // 2. Run spec accept on child
+    let output = run_kvist(&project, &["spec", "accept", "child"]);
+    assert!(
+        output.status.success(),
+        "spec accept child failed. Stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("accepted specification change"));
+
+    // Verify child TODOS.yaml has been updated with parent's correct SHA-256 hash
+    let parent_spec_contents =
+        fs::read_to_string(project.path().join("src/SPEC.md")).expect("read parent spec");
+    use sha2::{Digest, Sha256};
+    let parent_hash = format!(
+        "sha256:{:x}",
+        Sha256::digest(parent_spec_contents.as_bytes())
+    );
+
+    let updated_child_contents =
+        fs::read_to_string(child_dir.join("TODOS.yaml")).expect("read child queue");
+    assert!(updated_child_contents.contains(&parent_hash));
+    assert!(updated_child_contents.contains("state: current"));
+}

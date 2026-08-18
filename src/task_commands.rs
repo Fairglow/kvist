@@ -473,3 +473,193 @@ fn status_name(status: TaskStatus) -> &'static str {
         TaskStatus::Completed => "completed",
     }
 }
+
+/// Revalidates the component specification, updating the specification hash inside TODOS.yaml
+/// and resetting the revalidation state back to Current.
+pub fn accept(component_path: &Path) -> Result<String> {
+    let context = validate_accept_context(component_path)?;
+    let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+    let lock_path = context.component_dir.join(".kvist-task.lock");
+    let lock = TaskLock::create(&lock_path, "accept", &started_at)?;
+
+    let result = (|| {
+        let context = validate_accept_context(component_path)?;
+        let mut queue = read_queue(&context.component_dir)?;
+
+        // 1. Read and validate the local specification
+        let spec_path = context
+            .component_dir
+            .join(ComponentArtifact::Specification.filename());
+        let spec_metadata = fs::symlink_metadata(&spec_path).map_err(|source| KvistError::Io {
+            operation: "inspect component specification",
+            path: spec_path.clone(),
+            source,
+        })?;
+        if is_link_like(&spec_metadata) || !spec_metadata.file_type().is_file() {
+            return Err(KvistError::SpecificationValidationFailed {
+                path: spec_path,
+                diagnostics: "it is not a regular non-link file".to_owned(),
+            });
+        }
+        if spec_metadata.len() > MAX_ROOT_TEXT_ARTIFACT_BYTES {
+            return Err(KvistError::SpecificationValidationFailed {
+                path: spec_path,
+                diagnostics: format!(
+                    "it exceeds the {MAX_ROOT_TEXT_ARTIFACT_BYTES}-byte component artifact limit"
+                ),
+            });
+        }
+        let spec_contents = fs::read_to_string(&spec_path).map_err(|source| KvistError::Io {
+            operation: "read component specification",
+            path: spec_path.clone(),
+            source,
+        })?;
+
+        // Rigorously validate specification structure
+        let spec_validation = crate::specification::validate(&spec_contents);
+        if !spec_validation.is_valid() {
+            return Err(KvistError::SpecificationValidationFailed {
+                path: spec_path,
+                diagnostics: crate::specification::format_diagnostics(&spec_validation.diagnostics),
+            });
+        }
+
+        // 2. Compute the new specification SHA-256 revision
+        use sha2::{Digest, Sha256};
+        let new_hash = format!("sha256:{:x}", Sha256::digest(spec_contents.as_bytes()));
+
+        // 3. If there is an immediate parent, update its revision to current parent's revision
+        if let Some(ref mut parent) = queue.component.parent_specification {
+            let parent_spec_path = context.component_dir.join("../SPEC.md");
+            let parent_metadata =
+                fs::symlink_metadata(&parent_spec_path).map_err(|source| KvistError::Io {
+                    operation: "inspect parent specification",
+                    path: parent_spec_path.clone(),
+                    source,
+                })?;
+            if is_link_like(&parent_metadata) || !parent_metadata.file_type().is_file() {
+                return Err(KvistError::SpecificationValidationFailed {
+                    path: parent_spec_path,
+                    diagnostics: "parent specification is not a regular non-link file".to_owned(),
+                });
+            }
+            if parent_metadata.len() > MAX_ROOT_TEXT_ARTIFACT_BYTES {
+                return Err(KvistError::SpecificationValidationFailed {
+                    path: parent_spec_path,
+                    diagnostics: format!(
+                        "parent specification exceeds the {MAX_ROOT_TEXT_ARTIFACT_BYTES}-byte component artifact limit"
+                    ),
+                });
+            }
+            let parent_contents =
+                fs::read_to_string(&parent_spec_path).map_err(|source| KvistError::Io {
+                    operation: "read parent specification",
+                    path: parent_spec_path.clone(),
+                    source,
+                })?;
+            // Rigorously validate parent specification structure too
+            let parent_validation = crate::specification::validate(&parent_contents);
+            if !parent_validation.is_valid() {
+                return Err(KvistError::SpecificationValidationFailed {
+                    path: parent_spec_path,
+                    diagnostics: crate::specification::format_diagnostics(
+                        &parent_validation.diagnostics,
+                    ),
+                });
+            }
+            let parent_hash = format!("sha256:{:x}", Sha256::digest(parent_contents.as_bytes()));
+            parent.revision = parent_hash;
+        }
+
+        // 4. Update the queue component state and clear revalidation causes
+        queue.component.specification_revision = new_hash.clone();
+        queue.component.revalidation.state = crate::task_queue::RevalidationState::Current;
+        queue.component.revalidation.checked_at = started_at.clone();
+        queue.component.revalidation.stale_since = None;
+        queue.component.revalidation.causes = Vec::new();
+
+        // 5. Serialize and replace the YAML queue atomically
+        let serialized = serialize(&queue).map_err(|error| KvistError::TaskQueueUnavailable {
+            path: context
+                .component_dir
+                .join(ComponentArtifact::TaskQueue.filename()),
+            reason: error.to_string(),
+        })?;
+        replace_file_atomically(
+            &context
+                .component_dir
+                .join(ComponentArtifact::TaskQueue.filename()),
+            &serialized,
+        )?;
+
+        Ok(format!(
+            "accepted specification change for component {}",
+            context.component_path.display()
+        ))
+    })();
+
+    let release = lock.release();
+    match (result, release) {
+        (Ok(output), Ok(())) => Ok(output),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), _) => Err(error),
+    }
+}
+
+fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
+    let component_path = normalize_component_path(component_path)?;
+    let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+        operation: "determine current project directory",
+        path: PathBuf::from("."),
+        source,
+    })?;
+    let inspection = project_state::inspect(&project_dir)?;
+    if inspection.state != ProjectState::Current {
+        return Err(KvistError::TaskProjectNotCurrent {
+            project_dir,
+            state: inspection.state.name().to_owned(),
+        });
+    }
+    if inspection.vcs.artifacts.is_empty()
+        || inspection
+            .vcs
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.state != VcsArtifactState::Tracked)
+    {
+        return Err(KvistError::TaskVcsNotCurrent {
+            summary: inspection.vcs.summary,
+        });
+    }
+    let component = inspection
+        .components
+        .iter()
+        .find(|component| component.path == component_path)
+        .ok_or_else(|| KvistError::TaskComponentNotCurrent {
+            component: component_path.clone(),
+            state: "not a discovered component".to_owned(),
+        })?;
+
+    // We allow Current, Stale, and Blocked component states for accepting spec changes.
+    let is_allowed = matches!(
+        component.state,
+        ComponentState::Current | ComponentState::Stale | ComponentState::Blocked
+    );
+    if !is_allowed {
+        return Err(KvistError::TaskComponentNotCurrent {
+            component: component_path.clone(),
+            state: component.state.name().to_owned(),
+        });
+    }
+    let component_root =
+        inspection
+            .component_root
+            .ok_or_else(|| KvistError::TaskComponentNotCurrent {
+                component: component_path.clone(),
+                state: "component root is unavailable".to_owned(),
+            })?;
+    Ok(TaskContext {
+        component_dir: project_dir.join(component_root).join(&component_path),
+        component_path,
+    })
+}
