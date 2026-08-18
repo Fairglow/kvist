@@ -1,7 +1,6 @@
 //! Filesystem helpers with no-clobber atomic write semantics.
 
 use std::{
-    fs::File,
     io::{self, Write},
     path::Path,
 };
@@ -95,6 +94,7 @@ pub(crate) fn replace_file_atomically(destination: &Path, contents: &str) -> Res
 pub(crate) fn sync_directory(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
+        use std::fs::File;
         File::open(path)
             .and_then(|directory| directory.sync_all())
             .map_err(|source| KvistError::Io {
