@@ -849,3 +849,58 @@ fn get_ready_tasks(queue: &TaskQueue) -> Vec<Task> {
     }
     ready
 }
+
+/// Reads and returns the most recent execution log file for a specific task.
+pub fn task_log(component_path: &Path, task_id: &str) -> Result<String> {
+    let context = validate_context(component_path)?;
+    let logs_dir = context.component_dir.join(".kvist").join("logs");
+
+    if !logs_dir.is_dir() {
+        return Err(KvistError::TaskQueueUnavailable {
+            path: context
+                .component_dir
+                .join(ComponentArtifact::TaskQueue.filename()),
+            reason: format!("no execution logs found for task `{task_id}`"),
+        });
+    }
+
+    let mut log_files = Vec::new();
+    let entries = fs::read_dir(&logs_dir).map_err(|source| KvistError::Io {
+        operation: "read agent logs directory",
+        path: logs_dir.clone(),
+        source,
+    })?;
+
+    let prefix = format!("{task_id}_");
+    for entry in entries {
+        let entry = entry.map_err(|source| KvistError::Io {
+            operation: "inspect agent log file",
+            path: logs_dir.clone(),
+            source,
+        })?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        if name_str.starts_with(&prefix) && name_str.ends_with(".log") {
+            log_files.push(entry.path());
+        }
+    }
+
+    // Sort by name in descending order (which corresponds to lexical timestamp sorting)
+    log_files.sort();
+    let Some(most_recent) = log_files.last() else {
+        return Err(KvistError::TaskQueueUnavailable {
+            path: context
+                .component_dir
+                .join(ComponentArtifact::TaskQueue.filename()),
+            reason: format!("no execution logs found for task `{task_id}`"),
+        });
+    };
+
+    let contents = fs::read_to_string(most_recent).map_err(|source| KvistError::Io {
+        operation: "read task execution log",
+        path: most_recent.clone(),
+        source,
+    })?;
+
+    Ok(contents)
+}

@@ -122,6 +122,15 @@ pub enum TaskCommand {
         #[arg(long)]
         stream: bool,
     },
+    /// View the raw execution log of an agent task attempt.
+    Log {
+        /// Component-root-relative component directory; `.` selects the root component.
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: PathBuf,
+        /// Queue-local task identifier.
+        #[arg(value_name = "TASK_ID")]
+        task_id: String,
+    },
 }
 
 /// Command-line spelling of a queue task status.
@@ -195,6 +204,13 @@ pub fn execute(command: Command) -> Result<CommandOutput> {
                 },
         } => task_commands::run_task(&component_dir, task_id.as_deref(), stream)
             .map(CommandOutput::message),
+        Command::Task {
+            command:
+                TaskCommand::Log {
+                    component_dir,
+                    task_id,
+                },
+        } => task_commands::task_log(&component_dir, &task_id).map(CommandOutput::message),
         Command::Spec {
             command: SpecCommand::New { component_dir },
         } => specification::create(&component_dir).map(|generated| {

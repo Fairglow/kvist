@@ -445,3 +445,37 @@ command_template = "false"
     assert!(queue_contents.contains("status: blocked"));
     assert!(queue_contents.contains("agent failed during task execution"));
 }
+
+#[test]
+fn task_log_reads_and_outputs_the_most_recent_log_file() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    // Configure a developer agent that echoes some specific log content
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "echo 'my expected log output'"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+
+    // 1. Run the task to generate the execution log
+    let run_output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(run_output.status.success());
+
+    // 2. Read the log via task log CLI and assert correct output
+    let log_output = run_kvist(&project, &["task", "log", ".", "implement-code"]);
+    assert!(
+        log_output.status.success(),
+        "Log command failed: {}",
+        String::from_utf8_lossy(&log_output.stderr)
+    );
+    let stdout_str = String::from_utf8_lossy(&log_output.stdout);
+    assert!(
+        stdout_str.contains("my expected log output"),
+        "Expected log contents not found in output: {}",
+        stdout_str
+    );
+}
