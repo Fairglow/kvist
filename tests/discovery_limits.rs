@@ -271,6 +271,34 @@ token_limit = 10000
     );
     assert_eq!(config.agent.developer.token_limit, Some(10000));
 
+    // 2b. Project-local `.kvist/config.toml` overrides root `kvist.toml`
+    // Reset kvist.toml to not contain any agent block
+    fs::write(
+        project.path().join("kvist.toml"),
+        "schema_version = 1\ncomponent_root = \"src\"\n",
+    )
+    .expect("reset config");
+    let local_dir = project.path().join(".kvist");
+    fs::create_dir_all(&local_dir).expect("create .kvist dir");
+    let local_config_toml = r#"[agent.profiles.architect]
+command_template = "local-override-architect '{prompt}'"
+token_limit = 500
+[agent.profiles.developer]
+command_template = "local-override-developer"
+"#;
+    fs::write(local_dir.join("config.toml"), local_config_toml).expect("write local config");
+    let config = config::load(project.path()).expect("local override config load");
+    assert_eq!(
+        config.agent.architect.command_template,
+        "local-override-architect '{prompt}'"
+    );
+    assert_eq!(config.agent.architect.token_limit, Some(500));
+    assert_eq!(
+        config.agent.developer.command_template,
+        "local-override-developer"
+    );
+    assert_eq!(config.agent.developer.token_limit, None);
+
     // 3. Invalid agent configurations (e.g. invalid types)
     for invalid in [
         "[agent]\nprofiles = \"not-a-table\"\n",

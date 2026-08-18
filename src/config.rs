@@ -136,7 +136,7 @@ pub fn load(project_root: &Path) -> Result<ProjectConfig> {
         path: config_path.clone(),
         source,
     })?;
-    parse(&config_path, &contents)
+    parse(&config_path, project_root, &contents)
 }
 
 fn validate_project_root(project_root: &Path) -> Result<()> {
@@ -160,7 +160,7 @@ fn validate_project_root(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn parse(config_path: &Path, contents: &str) -> Result<ProjectConfig> {
+fn parse(config_path: &Path, project_root: &Path, contents: &str) -> Result<ProjectConfig> {
     let value: toml::Value =
         toml::from_str(contents).map_err(|error| KvistError::InvalidProjectConfiguration {
             path: config_path.to_path_buf(),
@@ -201,7 +201,7 @@ fn parse(config_path: &Path, contents: &str) -> Result<ProjectConfig> {
         component_root: normalize_component_root(config_path, component_root)?,
         discovery: parse_discovery_limits(config_path, table)?,
         vcs: parse_vcs_selection(config_path, table)?,
-        agent: parse_agent_config(config_path, table)?,
+        agent: load_agent_config(project_root, table)?,
     })
 }
 
@@ -358,7 +358,121 @@ fn invalid_configuration(config_path: &Path, reason: &str) -> KvistError {
     }
 }
 
-fn parse_agent_config(
+/// Returns the standard user-specific global configuration path for Kvist.
+pub fn global_user_config_path() -> Option<PathBuf> {
+    if cfg!(windows) {
+        std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .map(|path| path.join("kvist").join("config.toml"))
+    } else {
+        // Unix / macOS conforming to XDG standards
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .map(|path| path.join(".config"))
+            });
+        base.map(|path| path.join("kvist").join("config.toml"))
+    }
+}
+
+/// Returns the standard system-wide global configuration path for Kvist.
+pub fn global_system_config_path() -> Option<PathBuf> {
+    if cfg!(windows) {
+        std::env::var_os("ProgramData")
+            .map(PathBuf::from)
+            .map(|path| path.join("kvist").join("config.toml"))
+    } else {
+        Some(PathBuf::from("/etc/kvist/config.toml"))
+    }
+}
+
+const DEFAULT_GLOBAL_CONFIG_TEMPLATE: &str = r#"# Kvist Global User Configuration
+
+[agent.profiles.architect]
+command_template = "claude --non-interactive --dangerously-skip-permissions --message '{prompt}' {context_files}"
+
+[agent.profiles.developer]
+command_template = "gemini-cli --prompt '{prompt}' --files {context_files}"
+"#;
+
+fn toml_table_from_str(path: &Path, contents: &str) -> Result<toml::map::Map<String, toml::Value>> {
+    let value: toml::Value =
+        toml::from_str(contents).map_err(|error| KvistError::InvalidProjectConfiguration {
+            path: path.to_path_buf(),
+            reason: error.to_string(),
+        })?;
+    value
+        .as_table()
+        .cloned()
+        .ok_or_else(|| invalid_configuration(path, "root value must be a TOML table"))
+}
+
+fn load_agent_config(
+    project_root: &Path,
+    table: &toml::map::Map<String, toml::Value>,
+) -> Result<AgentConfig> {
+    // Priority 1: Check if `agent` table exists directly in the project-root `kvist.toml`
+    if table.contains_key("agent") {
+        return parse_agent_config_from_table(Path::new("kvist.toml"), table);
+    }
+
+    // Priority 2: Check if project-local `.kvist/config.toml` exists
+    let local_path = project_root.join(".kvist").join("config.toml");
+    if local_path.is_file() {
+        let contents = fs::read_to_string(&local_path).map_err(|source| KvistError::Io {
+            operation: "read project-local agent configuration",
+            path: local_path.clone(),
+            source,
+        })?;
+        let parsed_table = toml_table_from_str(&local_path, &contents)?;
+        return parse_agent_config_from_table(&local_path, &parsed_table);
+    }
+
+    // Priority 3: Check global user-specific configuration path
+    if let Some(user_path) = global_user_config_path() {
+        if user_path.is_file() {
+            let contents = fs::read_to_string(&user_path).map_err(|source| KvistError::Io {
+                operation: "read global user configuration",
+                path: user_path.clone(),
+                source,
+            })?;
+            let parsed_table = toml_table_from_str(&user_path, &contents)?;
+            return parse_agent_config_from_table(&user_path, &parsed_table);
+        }
+    }
+
+    // Priority 4: Check global system-wide configuration path
+    if let Some(system_path) = global_system_config_path() {
+        if system_path.is_file() {
+            let contents = fs::read_to_string(&system_path).map_err(|source| KvistError::Io {
+                operation: "read global system configuration",
+                path: system_path.clone(),
+                source,
+            })?;
+            let parsed_table = toml_table_from_str(&system_path, &contents)?;
+            return parse_agent_config_from_table(&system_path, &parsed_table);
+        }
+    }
+
+    // Priority 5: Fallback - Attempt to initialize the global config file on disk
+    if let Some(user_path) = global_user_config_path() {
+        if let Some(parent) = user_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if fs::write(&user_path, DEFAULT_GLOBAL_CONFIG_TEMPLATE).is_ok() {
+            let parsed_table = toml_table_from_str(&user_path, DEFAULT_GLOBAL_CONFIG_TEMPLATE)?;
+            return parse_agent_config_from_table(&user_path, &parsed_table);
+        }
+    }
+
+    // Ultima ratio: parse default template from memory if writing file fails
+    let parsed_table = toml_table_from_str(Path::new("default"), DEFAULT_GLOBAL_CONFIG_TEMPLATE)?;
+    parse_agent_config_from_table(Path::new("default"), &parsed_table)
+}
+
+fn parse_agent_config_from_table(
     config_path: &Path,
     table: &toml::map::Map<String, toml::Value>,
 ) -> Result<AgentConfig> {
