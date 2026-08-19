@@ -48,6 +48,7 @@ fn status_reports_a_current_initialized_project_in_stable_text_and_json() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     let project_path = project.path().to_string_lossy();
+    let project_path_escaped = project_path.replace('\\', "\\\\");
 
     let text = run_kvist(&[
         "status",
@@ -58,7 +59,7 @@ fn status_reports_a_current_initialized_project_in_stable_text_and_json() {
     assert_eq!(
         String::from_utf8(text.stdout).expect("UTF-8 text output"),
         format!(
-            "status-format-version: 1\nproject: {project_path}\nproject-state: current\ncomponent-root: src\ncomponent: . state: current\n  SPEC.md: valid\n  TODOS.yaml: valid\n  DOCS.md: valid\n  revalidation-causes: []\n"
+            "status-format-version: 1\nproject: {project_path_escaped}\nproject-state: current\ncomponent-root: src\ncomponent: . state: current\n  SPEC.md: valid\n  TODOS.yaml: valid\n  DOCS.md: valid\n  revalidation-causes: []\n"
         )
     );
 
@@ -167,6 +168,7 @@ fn status_surfaces_component_missing_unsupported_stale_and_blocked_states_withou
 }
 
 #[test]
+#[cfg(unix)]
 fn status_escapes_control_characters_in_text_component_paths() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
