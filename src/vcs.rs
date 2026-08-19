@@ -300,10 +300,14 @@ fn inspect_git(
         Ok(path) => path,
         Err(diagnostic) => return VcsInspection::unavailable("inspection failed", diagnostic),
     };
-    let repository_paths = required_paths
+    let repository_paths = match required_paths
         .iter()
-        .map(|path| project_relative.join(path))
-        .collect::<Vec<_>>();
+        .map(|path| git_repository_path(&project_relative.join(path)))
+        .collect::<std::result::Result<Vec<_>, _>>()
+    {
+        Ok(paths) => paths,
+        Err(diagnostic) => return VcsInspection::unavailable("inspection failed", diagnostic),
+    };
     let (path_batches, unqueryable_paths) = batch_paths(repository_paths.clone());
     let mut tracked = BTreeSet::new();
     for batch in path_batches {
@@ -394,6 +398,26 @@ fn git_ignored(
         .collect::<Vec<_>>();
     let output = run_with_input("git", &args, repository_root, &input)?;
     parse_paths(output, b'\0', "Git")
+}
+
+fn git_repository_path(path: &Path) -> std::result::Result<PathBuf, String> {
+    let mut git_path = OsString::new();
+    for component in path.components() {
+        let Component::Normal(segment) = component else {
+            return Err(format!(
+                "Git repository path `{}` must contain only normal components",
+                path.display()
+            ));
+        };
+        if !git_path.is_empty() {
+            git_path.push("/");
+        }
+        git_path.push(segment);
+    }
+    if git_path.is_empty() {
+        return Err("Git repository path must not be empty".to_owned());
+    }
+    Ok(PathBuf::from(git_path))
 }
 
 fn inspect_jj(
@@ -727,6 +751,13 @@ mod tests {
             jj_fileset(&Path::new("src").join("SPEC.md")).expect("UTF-8 path"),
             r#"root:"src/SPEC.md""#
         );
+    }
+
+    #[test]
+    fn git_repository_paths_use_forward_slash_component_separators() {
+        let path = git_repository_path(&Path::new("src").join("DOCS.md")).expect("normal Git path");
+
+        assert_eq!(path.as_os_str().as_encoded_bytes(), b"src/DOCS.md");
     }
 
     #[test]
