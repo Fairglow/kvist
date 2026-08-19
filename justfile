@@ -15,14 +15,19 @@ format:
 lint:
     cargo clippy --locked --all-targets -- -D warnings
 
-release:
-    cargo build --locked --release
-
-test:
-    cargo test --locked
-
 msrv:
     cargo +1.85.0 test --locked
 
 reformat:
     cargo fmt
+
+release:
+    cargo build --locked --release
+
+test:
+    #cargo test --locked
+    cargo nextest run --locked --test-threads num-cpus
+
+wine:
+    cargo build --locked --target x86_64-pc-windows-gnu
+    cargo test --target x86_64-pc-windows-gnu
