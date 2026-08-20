@@ -109,10 +109,10 @@ and atomic-state-update integration tests.
 
 **Verification:** integration tests for agent invocation, custom path handling, token output parsing, and context slicing bounds.
 
-### TODO P2-05 — Implement test-command verification as an explicit trust boundary
+### COMPLETE P2-05 — Implement test-command verification as an explicit trust boundary
 
 **Depends on:** P2-01, P2-03
-**Status:** BLOCKED — requires test-command policy.
+**Current evidence:** Implemented under `src/config.rs` and `src/task_commands.rs` with explicit test-command policies, working directory isolation, timeout boundaries, capped stdout/stderr buffers, and canonical cryptographic SHA-256 policy approval.
 **Decision gates (owner approval required before tests or code):**
 
 1. Policy artifact: versioned location, schema, and component inheritance.

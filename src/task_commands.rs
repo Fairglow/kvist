@@ -790,21 +790,82 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
 
     // 7. Transition task status depending on outcome
     if run_result.success {
-        // Transition to Completed
-        // In P2-05, we will add test-command verification, but for now we transition to Completed!
-        let _ = transition(component_path, &task_id, TaskStatus::Completed, None)?;
-
-        let token_summary = match (run_result.tokens_input, run_result.tokens_output) {
-            (Some(in_tok), Some(out_tok)) => {
-                format!(" [Tokens used - Input: {}, Output: {}]", in_tok, out_tok)
+        if task.kind == TaskKind::Implementation {
+            println!("Running test-command verification...");
+            match verify_task(component_path, &task_id, &project_dir, &config) {
+                Ok(verify_res) => {
+                    if verify_res.success {
+                        let _ = transition(component_path, &task_id, TaskStatus::Completed, None)?;
+                        let token_summary =
+                            match (run_result.tokens_input, run_result.tokens_output) {
+                                (Some(in_tok), Some(out_tok)) => {
+                                    format!(
+                                        " [Tokens used - Input: {}, Output: {}]",
+                                        in_tok, out_tok
+                                    )
+                                }
+                                _ => "".to_owned(),
+                            };
+                        Ok(format!(
+                            "task `{task_id}` executed and verified successfully and transitioned to completed.{}\nLogs written to: {}",
+                            token_summary,
+                            run_result.log_path.display()
+                        ))
+                    } else {
+                        let timed_out_msg = if verify_res.timed_out {
+                            " (timed out)"
+                        } else {
+                            ""
+                        };
+                        let blocker_reason = format!(
+                            "test-command verification failed{}. Command: '{}', Exit code: {:?}.\n---\nStdout:\n{}\n---\nStderr:\n{}",
+                            timed_out_msg,
+                            verify_res.command,
+                            verify_res.exit_code,
+                            verify_res.stdout,
+                            verify_res.stderr
+                        );
+                        let _ = transition(
+                            component_path,
+                            &task_id,
+                            TaskStatus::Blocked,
+                            Some(&blocker_reason),
+                        )?;
+                        Ok(format!(
+                            "task `{task_id}` failed test-command verification and transitioned to blocked.\nLogs written to: {}",
+                            run_result.log_path.display()
+                        ))
+                    }
+                }
+                Err(err) => {
+                    let blocker_reason = format!("test-command verification blocked: {err}");
+                    let _ = transition(
+                        component_path,
+                        &task_id,
+                        TaskStatus::Blocked,
+                        Some(&blocker_reason),
+                    )?;
+                    Ok(format!(
+                        "task `{task_id}` verification blocked and transitioned to blocked: {err}"
+                    ))
+                }
             }
-            _ => "".to_owned(),
-        };
-        Ok(format!(
-            "task `{task_id}` executed successfully and transitioned to completed.{}\nLogs written to: {}",
-            token_summary,
-            run_result.log_path.display()
-        ))
+        } else {
+            // Transition to Completed
+            let _ = transition(component_path, &task_id, TaskStatus::Completed, None)?;
+
+            let token_summary = match (run_result.tokens_input, run_result.tokens_output) {
+                (Some(in_tok), Some(out_tok)) => {
+                    format!(" [Tokens used - Input: {}, Output: {}]", in_tok, out_tok)
+                }
+                _ => "".to_owned(),
+            };
+            Ok(format!(
+                "task `{task_id}` executed successfully and transitioned to completed.{}\nLogs written to: {}",
+                token_summary,
+                run_result.log_path.display()
+            ))
+        }
     } else {
         // Transition to Blocked
         let blocker_reason = format!(
@@ -903,4 +964,387 @@ pub fn task_log(component_path: &Path, task_id: &str) -> Result<String> {
     })?;
 
     Ok(contents)
+}
+
+/// Approve the current test-command policy by recording its canonical hash locally.
+pub fn approve_policy(project_path: &Path) -> Result<String> {
+    let project_dir = if project_path == Path::new(".") {
+        std::env::current_dir().map_err(|source| KvistError::Io {
+            operation: "determine current project directory",
+            path: PathBuf::from("."),
+            source,
+        })?
+    } else {
+        project_path.to_path_buf()
+    };
+
+    let config = crate::config::load(&project_dir)?;
+    let Some(policy) = &config.test_policy else {
+        return Err(KvistError::InvalidProjectConfiguration {
+            path: project_dir.join("kvist.toml"),
+            reason: "no `[test_policy]` section found in project configuration".to_owned(),
+        });
+    };
+
+    let current_hash = crate::config::compute_policy_hash(policy);
+
+    let kvist_dir = project_dir.join(".kvist");
+    if !kvist_dir.exists() {
+        fs::create_dir_all(&kvist_dir).map_err(|source| KvistError::Io {
+            operation: "create .kvist directory",
+            path: kvist_dir.clone(),
+            source,
+        })?;
+    }
+
+    let approved_path = kvist_dir.join("approved_policy.sha256");
+    fs::write(&approved_path, &current_hash).map_err(|source| KvistError::Io {
+        operation: "write approved policy hash",
+        path: approved_path.clone(),
+        source,
+    })?;
+
+    Ok(format!(
+        "Successfully approved test-command policy with hash: {current_hash}"
+    ))
+}
+
+/// Verification run result
+#[derive(Debug, Clone)]
+pub struct VerificationResult {
+    /// True if the test command finished within the timeout and exited with code 0.
+    pub success: bool,
+    /// The template/command string that was executed.
+    pub command: String,
+    /// Subprocess exit status code, if any.
+    pub exit_code: Option<i32>,
+    /// True if the subprocess was killed due to exceeding the timeout limit.
+    pub timed_out: bool,
+    /// Captured stdout bytes up to max_output_bytes converted to string.
+    pub stdout: String,
+    /// Captured stderr bytes up to max_output_bytes converted to string.
+    pub stderr: String,
+}
+
+#[derive(Serialize)]
+struct VerificationRecord<'a> {
+    phase: &'a str,
+    task_id: &'a str,
+    timestamp: &'a Timestamp,
+    command: &'a str,
+    success: bool,
+    exit_code: Option<i32>,
+    timed_out: bool,
+    stdout: &'a str,
+    stderr: &'a str,
+}
+
+fn append_verification(path: &Path, record: VerificationRecord<'_>) -> Result<()> {
+    let existed = if let Ok(metadata) = fs::symlink_metadata(path) {
+        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
+            return Err(KvistError::Io {
+                operation: "append verification record",
+                path: path.to_path_buf(),
+                source: io::Error::other("attempt record must be a regular file"),
+            });
+        }
+        true
+    } else {
+        false
+    };
+    let encoded =
+        serde_json::to_string(&record).map_err(|error| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: format!("cannot serialize verification record: {error}"),
+        })?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|source| KvistError::Io {
+            operation: "open verification record",
+            path: path.to_path_buf(),
+            source,
+        })?;
+    file.write_all(encoded.as_bytes())
+        .and_then(|()| file.write_all(b"\n"))
+        .and_then(|()| file.sync_all())
+        .map_err(|source| KvistError::Io {
+            operation: "append verification record",
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if !existed {
+        let parent = path.parent().ok_or_else(|| KvistError::Io {
+            operation: "determine verification record parent",
+            path: path.to_path_buf(),
+            source: io::Error::other("verification record has no parent"),
+        })?;
+        sync_directory(parent)?;
+    }
+    Ok(())
+}
+
+/// Verifies whether the current test policy has been approved.
+pub fn check_policy_approved(
+    project_dir: &Path,
+    config: &crate::config::ProjectConfig,
+) -> Result<()> {
+    let Some(policy) = &config.test_policy else {
+        return Err(KvistError::UnapprovedTestPolicy {
+            current_hash: "none".to_owned(),
+            expected_hash: None,
+        });
+    };
+
+    let current_hash = crate::config::compute_policy_hash(policy);
+    let approved_path = project_dir.join(".kvist").join("approved_policy.sha256");
+    if !approved_path.exists() {
+        return Err(KvistError::UnapprovedTestPolicy {
+            current_hash,
+            expected_hash: None,
+        });
+    }
+
+    let approved_hash = fs::read_to_string(&approved_path)
+        .map_err(|source| KvistError::Io {
+            operation: "read approved policy hash",
+            path: approved_path.clone(),
+            source,
+        })?
+        .trim()
+        .to_owned();
+
+    if current_hash != approved_hash {
+        return Err(KvistError::UnapprovedTestPolicy {
+            current_hash,
+            expected_hash: Some(approved_hash),
+        });
+    }
+
+    Ok(())
+}
+
+/// Finds a matching test command for the given component utilizing component inheritance.
+pub fn find_test_command(
+    component_path: &Path,
+    policy: &crate::config::TestPolicy,
+) -> Option<String> {
+    let mut current = component_path.to_path_buf();
+    loop {
+        let current_str = current.to_str().unwrap_or("");
+        let normalized_str = if current_str.is_empty() {
+            "."
+        } else {
+            current_str
+        };
+
+        if let Some(entry) = policy.commands.iter().find(|entry| {
+            let entry_normalized = if entry.component.is_empty() {
+                "."
+            } else {
+                &entry.component
+            };
+            entry_normalized == normalized_str
+        }) {
+            return Some(entry.command.clone());
+        }
+
+        if normalized_str == "." {
+            break;
+        }
+
+        match current.parent() {
+            Some(parent) => current = parent.to_path_buf(),
+            None => break,
+        }
+    }
+    None
+}
+
+/// Runs verification on a component task using the approved test command.
+pub fn verify_task(
+    component_path: &Path,
+    task_id: &str,
+    project_dir: &Path,
+    config: &crate::config::ProjectConfig,
+) -> Result<VerificationResult> {
+    // 1. Verify policy is approved
+    check_policy_approved(project_dir, config)?;
+
+    let policy = config.test_policy.as_ref().unwrap();
+
+    // 2. Locate the command
+    let normalized_component = normalize_component_path(component_path)?;
+    let command_str = find_test_command(&normalized_component, policy).ok_or_else(|| {
+        KvistError::MissingTestCommand {
+            component: component_path.to_string_lossy().into_owned(),
+        }
+    })?;
+
+    // 3. Resolve working directory
+    let context = validate_context(component_path)?;
+    let working_dir = match policy.working_directory.as_str() {
+        "component" => context.component_dir.clone(),
+        _ => project_dir.to_path_buf(),
+    };
+
+    // 4. Split and prepare command
+    let parts: Vec<&str> = command_str.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err(KvistError::Io {
+            operation: "parse approved test command",
+            path: PathBuf::from("."),
+            source: io::Error::other("empty test command string"),
+        });
+    }
+    let program = parts[0];
+    let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+
+    use std::process::{Command, Stdio};
+    let mut cmd = Command::new(program);
+    cmd.args(&args);
+    cmd.current_dir(&working_dir);
+    cmd.env_clear();
+    for env_var in &policy.environment_allowlist {
+        if let Ok(val) = std::env::var(env_var) {
+            cmd.env(env_var, val);
+        }
+    }
+
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    // 5. Spawn test subprocess
+    let mut child = cmd.spawn().map_err(|source| KvistError::Io {
+        operation: "spawn approved test command",
+        path: PathBuf::from(program),
+        source,
+    })?;
+
+    let mut stdout_pipe = child.stdout.take().ok_or_else(|| KvistError::Io {
+        operation: "take test command stdout",
+        path: PathBuf::from(program),
+        source: io::Error::other("cannot take stdout pipe"),
+    })?;
+
+    let mut stderr_pipe = child.stderr.take().ok_or_else(|| KvistError::Io {
+        operation: "take test command stderr",
+        path: PathBuf::from(program),
+        source: io::Error::other("cannot take stderr pipe"),
+    })?;
+
+    let max_output_bytes = policy.max_output_bytes;
+
+    // Spawn reader threads
+    use std::io::Read;
+    use std::thread;
+
+    let stdout_handle = thread::spawn(move || -> io::Result<Vec<u8>> {
+        let mut buffer = [0u8; 1024];
+        let mut out = Vec::new();
+        loop {
+            if out.len() >= max_output_bytes {
+                break;
+            }
+            let chunk_size = std::cmp::min(buffer.len(), max_output_bytes - out.len());
+            let bytes_read = stdout_pipe.read(&mut buffer[..chunk_size])?;
+            if bytes_read == 0 {
+                break;
+            }
+            out.extend_from_slice(&buffer[..bytes_read]);
+        }
+        Ok(out)
+    });
+
+    let stderr_handle = thread::spawn(move || -> io::Result<Vec<u8>> {
+        let mut buffer = [0u8; 1024];
+        let mut err = Vec::new();
+        loop {
+            if err.len() >= max_output_bytes {
+                break;
+            }
+            let chunk_size = std::cmp::min(buffer.len(), max_output_bytes - err.len());
+            let bytes_read = stderr_pipe.read(&mut buffer[..chunk_size])?;
+            if bytes_read == 0 {
+                break;
+            }
+            err.extend_from_slice(&buffer[..bytes_read]);
+        }
+        Ok(err)
+    });
+
+    // Wait with timeout
+    let start_time = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(policy.timeout_seconds);
+    let mut exit_status = None;
+    let mut timed_out = false;
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                exit_status = Some(status);
+                break;
+            }
+            Ok(None) => {
+                if start_time.elapsed() >= timeout {
+                    let _ = child.kill();
+                    timed_out = true;
+                    break;
+                }
+                thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(source) => {
+                return Err(KvistError::Io {
+                    operation: "wait for test command",
+                    path: PathBuf::from(program),
+                    source,
+                });
+            }
+        }
+    }
+
+    // Join reader threads
+    let stdout_bytes = match stdout_handle.join() {
+        Ok(Ok(bytes)) => bytes,
+        _ => Vec::new(),
+    };
+
+    let stderr_bytes = match stderr_handle.join() {
+        Ok(Ok(bytes)) => bytes,
+        _ => Vec::new(),
+    };
+
+    let stdout_str = String::from_utf8_lossy(&stdout_bytes).into_owned();
+    let stderr_str = String::from_utf8_lossy(&stderr_bytes).into_owned();
+
+    let success = !timed_out && exit_status.is_some_and(|s| s.success());
+    let exit_code = exit_status.and_then(|s| s.code());
+
+    // 6. Record results against task attempt
+    let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+    let attempt_path = attempt_path(&context.component_dir, task_id)?;
+    append_verification(
+        &attempt_path,
+        VerificationRecord {
+            phase: "verification",
+            task_id,
+            timestamp: &timestamp,
+            command: &command_str,
+            success,
+            exit_code,
+            timed_out,
+            stdout: &stdout_str,
+            stderr: &stderr_str,
+        },
+    )?;
+
+    Ok(VerificationResult {
+        success,
+        command: command_str,
+        exit_code,
+        timed_out,
+        stdout: stdout_str,
+        stderr: stderr_str,
+    })
 }

@@ -86,6 +86,8 @@ pub struct ProjectConfig {
     pub vcs: VcsSelection,
     /// Configuration for external agent CLI execution.
     pub agent: AgentConfig,
+    /// Test command execution policy.
+    pub test_policy: Option<TestPolicy>,
 }
 
 /// Supported VCS selection for durable-artifact tracking inspection.
@@ -202,6 +204,7 @@ fn parse(config_path: &Path, project_root: &Path, contents: &str) -> Result<Proj
         discovery: parse_discovery_limits(config_path, table)?,
         vcs: parse_vcs_selection(config_path, table)?,
         agent: load_agent_config(project_root, table)?,
+        test_policy: parse_test_policy(config_path, table)?,
     })
 }
 
@@ -568,4 +571,185 @@ fn parse_agent_config_from_table(
     }
 
     Ok(default_config)
+}
+
+/// Bounded test command policy for explicit trust boundaries.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TestPolicy {
+    /// Schema version for the test policy.
+    pub schema_version: i64,
+    /// Working directory for executing tests ("component" or "project").
+    pub working_directory: String,
+    /// Allowlist of environment variables to preserve during test execution.
+    pub environment_allowlist: Vec<String>,
+    /// Subprocess execution timeout in seconds.
+    pub timeout_seconds: u64,
+    /// Output buffer byte limit cap for stdout/stderr capture.
+    pub max_output_bytes: usize,
+    /// Approved test-command entries mapped to components.
+    pub commands: Vec<TestCommandEntry>,
+}
+
+/// A single approved test command entry mapped to a component.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TestCommandEntry {
+    /// Target component relative path from component root.
+    pub component: String,
+    /// Command template to execute for verification.
+    pub command: String,
+}
+
+/// Computes the canonical SHA-256 hash of a test policy.
+pub fn compute_policy_hash(policy: &TestPolicy) -> String {
+    let serialized = serde_json::to_string(policy).unwrap_or_default();
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(serialized.as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+fn parse_test_policy(
+    config_path: &Path,
+    table: &toml::map::Map<String, toml::Value>,
+) -> Result<Option<TestPolicy>> {
+    let Some(policy_val) = table.get("test_policy") else {
+        return Ok(None);
+    };
+    let policy = policy_val
+        .as_table()
+        .ok_or_else(|| invalid_configuration(config_path, "`test_policy` must be a TOML table"))?;
+
+    let schema_version = policy
+        .get("schema_version")
+        .and_then(toml::Value::as_integer)
+        .ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`test_policy.schema_version` must be an integer",
+            )
+        })?;
+    if schema_version != 1 {
+        return Err(invalid_configuration(
+            config_path,
+            "`test_policy.schema_version` must be 1",
+        ));
+    }
+
+    let working_directory = policy
+        .get("working_directory")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`test_policy.working_directory` must be a string",
+            )
+        })?;
+    if working_directory != "component" && working_directory != "project" {
+        return Err(invalid_configuration(
+            config_path,
+            "`test_policy.working_directory` must be either 'component' or 'project'",
+        ));
+    }
+
+    let env_allowlist_val = policy
+        .get("environment_allowlist")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`test_policy.environment_allowlist` must be an array of strings",
+            )
+        })?;
+    let mut environment_allowlist = Vec::new();
+    for val in env_allowlist_val {
+        let s = val.as_str().ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`test_policy.environment_allowlist` must be an array of strings",
+            )
+        })?;
+        environment_allowlist.push(s.to_owned());
+    }
+
+    let timeout_seconds = policy
+        .get("timeout_seconds")
+        .and_then(toml::Value::as_integer)
+        .ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`test_policy.timeout_seconds` must be a positive integer",
+            )
+        })?;
+    let timeout_seconds = u64::try_from(timeout_seconds).map_err(|_| {
+        invalid_configuration(
+            config_path,
+            "`test_policy.timeout_seconds` must be a positive integer",
+        )
+    })?;
+
+    let max_output_bytes = policy
+        .get("max_output_bytes")
+        .and_then(toml::Value::as_integer)
+        .ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`test_policy.max_output_bytes` must be a positive integer",
+            )
+        })?;
+    let max_output_bytes = usize::try_from(max_output_bytes).map_err(|_| {
+        invalid_configuration(
+            config_path,
+            "`test_policy.max_output_bytes` must be a positive integer",
+        )
+    })?;
+
+    let commands_val = policy
+        .get("commands")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`test_policy.commands` must be an array of tables",
+            )
+        })?;
+    let mut commands = Vec::new();
+    for val in commands_val {
+        let cmd_table = val.as_table().ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`test_policy.commands` must be an array of tables",
+            )
+        })?;
+        let component = cmd_table
+            .get("component")
+            .and_then(toml::Value::as_str)
+            .ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`test_policy.commands.component` must be a string",
+                )
+            })?;
+        let command = cmd_table
+            .get("command")
+            .and_then(toml::Value::as_str)
+            .ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`test_policy.commands.command` must be a string",
+                )
+            })?;
+        commands.push(TestCommandEntry {
+            component: component.to_owned(),
+            command: command.to_owned(),
+        });
+    }
+
+    Ok(Some(TestPolicy {
+        schema_version,
+        working_directory: working_directory.to_owned(),
+        environment_allowlist,
+        timeout_seconds,
+        max_output_bytes,
+        commands,
+    }))
 }

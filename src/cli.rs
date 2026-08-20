@@ -131,6 +131,12 @@ pub enum TaskCommand {
         #[arg(value_name = "TASK_ID")]
         task_id: String,
     },
+    /// Approve the current test-command policy.
+    ApprovePolicy {
+        /// Project directory; defaults to the current working directory.
+        #[arg(value_name = "PROJECT_DIR", default_value = ".")]
+        path: PathBuf,
+    },
 }
 
 /// Command-line spelling of a queue task status.
@@ -211,6 +217,9 @@ pub fn execute(command: Command) -> Result<CommandOutput> {
                     task_id,
                 },
         } => task_commands::task_log(&component_dir, &task_id).map(CommandOutput::message),
+        Command::Task {
+            command: TaskCommand::ApprovePolicy { path },
+        } => task_commands::approve_policy(&path).map(CommandOutput::message),
         Command::Spec {
             command: SpecCommand::New { component_dir },
         } => specification::create(&component_dir).map(|generated| {

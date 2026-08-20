@@ -344,6 +344,24 @@ pub enum KvistError {
         /// Blocking condition.
         reason: String,
     },
+    /// A task requires verification but the test-command policy has changed or is not approved.
+    #[error(
+        "unapproved test-command policy has changed or has not been approved. Run `kvist task approve-policy` to approve it. Current hash: {current_hash}, expected: {expected_hash:?}"
+    )]
+    UnapprovedTestPolicy {
+        /// Canonical hash of the current test-command policy.
+        current_hash: String,
+        /// Canonical hash of the expected/previously approved test-command policy.
+        expected_hash: Option<String>,
+    },
+    /// A test command is missing for a component requiring verification.
+    #[error(
+        "missing test-command policy for component `{component}`. Please define a command for it in `kvist.toml` under `[test_policy]` and approve it"
+    )]
+    MissingTestCommand {
+        /// Component path requiring verification.
+        component: String,
+    },
     /// A state-machine transition or reason violates the task command contract.
     #[error("cannot transition task `{task_id}` from {from} to {to}: {reason}")]
     TaskTransitionInvalid {

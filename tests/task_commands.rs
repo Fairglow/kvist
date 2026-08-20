@@ -364,14 +364,28 @@ fn task_run_executes_successfully_and_transitions_completed() {
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
 
-    // Configure a mock echo command in kvist.toml for developer agent profile
+    // Configure a mock echo command in kvist.toml for developer agent profile and test policy
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
 command_template = "echo 'mocking execute' {context_files}"
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = ["PATH"]
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo 'mocking verify'"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
+
+    // Approve test policy
+    let approve_output = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(approve_output.status.success());
 
     // Run next task (implement-code)
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
@@ -382,7 +396,9 @@ command_template = "echo 'mocking execute' {context_files}"
     );
     assert_eq!(output.stderr, b"");
     let stdout_str = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout_str.contains("executed successfully and transitioned to completed"));
+    assert!(
+        stdout_str.contains("executed and verified successfully and transitioned to completed")
+    );
     assert!(stdout_str.contains("Logs written to"));
 
     // Verify task status is indeed Completed in TODOS.yaml
@@ -401,9 +417,23 @@ fn task_run_auto_selects_and_executes_next_ready_task() {
 component_root = "src"
 [agent.profiles.developer]
 command_template = "echo 'mock auto select'"
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = ["PATH"]
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo 'mocking verify'"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
+
+    // Approve test policy
+    let approve_output = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(approve_output.status.success());
 
     // Omit task id argument; should auto-select implement-code
     let output = run_kvist(&project, &["task", "run", "."]);
@@ -413,7 +443,7 @@ command_template = "echo 'mock auto select'"
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout_str = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout_str.contains("task `implement-code` executed successfully"));
+    assert!(stdout_str.contains("task `implement-code` executed and verified successfully"));
 }
 
 #[test]
@@ -456,13 +486,31 @@ fn task_log_reads_and_outputs_the_most_recent_log_file() {
 component_root = "src"
 [agent.profiles.developer]
 command_template = "echo 'my expected log output'"
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = ["PATH"]
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo 'mocking verify'"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
 
+    // Approve test policy
+    let approve_output = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(approve_output.status.success());
+
     // 1. Run the task to generate the execution log
     let run_output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
-    assert!(run_output.status.success());
+    assert!(
+        run_output.status.success(),
+        "Run failed: {}",
+        String::from_utf8_lossy(&run_output.stderr)
+    );
 
     // 2. Read the log via task log CLI and assert correct output
     let log_output = run_kvist(&project, &["task", "log", ".", "implement-code"]);
@@ -477,4 +525,225 @@ command_template = "echo 'my expected log output'"
         "Expected log contents not found in output: {}",
         stdout_str
     );
+}
+
+#[test]
+fn task_run_fails_with_unapproved_test_policy() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    // Configure test policy but do NOT approve it
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "echo 'mocking execute' {context_files}"
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = ["PATH"]
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo 'mocking verify'"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+
+    // Run task - should block due to unapproved policy
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(output.status.success());
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout_str.contains(
+        "verification blocked and transitioned to blocked: unapproved test-command policy"
+    ));
+
+    let queue_contents =
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(queue_contents.contains("status: blocked"));
+    assert!(queue_contents.contains("unapproved test-command policy"));
+}
+
+#[test]
+fn task_run_fails_with_missing_test_command() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    // Configure test policy but NO commands matching .
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "echo 'mocking execute' {context_files}"
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = ["PATH"]
+timeout_seconds = 5
+max_output_bytes = 1000
+commands = []
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+
+    // Approve the policy
+    let approve_output = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(approve_output.status.success());
+
+    // Run task - should block due to missing command for .
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(output.status.success());
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout_str.contains(
+        "verification blocked and transitioned to blocked: missing test-command policy for component `.`"
+    ));
+
+    let queue_contents =
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(queue_contents.contains("status: blocked"));
+    assert!(queue_contents.contains("missing test-command policy for component `.`"));
+}
+
+#[test]
+#[cfg(unix)]
+fn task_run_fails_when_test_command_fails() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    // Configure test policy with a failing test command (false/exit 1)
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "echo 'mocking execute' {context_files}"
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = ["PATH"]
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "false"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+
+    // Approve policy
+    let approve_output = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(approve_output.status.success());
+
+    // Run task - should run verification, fail, and block
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(output.status.success());
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout_str.contains("failed test-command verification and transitioned to blocked"));
+
+    let queue_contents =
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(queue_contents.contains("status: blocked"));
+    assert!(queue_contents.contains("test-command verification failed"));
+}
+
+#[test]
+#[cfg(unix)]
+fn task_run_handles_test_command_timeout() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    // Configure test policy with a 1 second timeout and a sleeping test command
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "echo 'mocking execute' {context_files}"
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = ["PATH"]
+timeout_seconds = 1
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "sleep 5"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+
+    // Approve policy
+    let approve_output = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(approve_output.status.success());
+
+    // Run task - should timeout, kill command, and block
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(output.status.success());
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout_str.contains("failed test-command verification and transitioned to blocked"));
+
+    let queue_contents =
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(queue_contents.contains("status: blocked"));
+    assert!(queue_contents.contains("(timed out)"));
+}
+
+#[test]
+#[cfg(unix)]
+fn task_run_caps_test_command_output_and_records_persistence() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    // Configure test policy with max_output_bytes = 10 and a command that outputs a long string
+    // we use a failing command so we can inspect stdout in the blocked reason
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "echo 'mocking execute' {context_files}"
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = ["PATH"]
+timeout_seconds = 5
+max_output_bytes = 10
+[[test_policy.commands]]
+component = "."
+command = "sh -c {printf,1234567890abcdef};false"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+
+    // Approve policy
+    let approve_output = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(approve_output.status.success());
+
+    // Run task
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(output.status.success());
+
+    // Verify task status is indeed Blocked in TODOS.yaml and the recorded reason is capped
+    let queue_contents =
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(queue_contents.contains("status: blocked"));
+
+    // The captured stdout in the blocker reason should be exactly 10 bytes: "1234567890" (ignoring any newline cap depending on shell)
+    assert!(queue_contents.contains("1234567890"));
+
+    // Check result-persistence: inspect task attempt JSONL file
+    let attempt_file = project
+        .path()
+        .join("src/.kvist-attempts/implement-code.jsonl");
+    assert!(attempt_file.exists());
+    let attempt_contents = fs::read_to_string(&attempt_file).expect("read attempts");
+    assert!(attempt_contents.contains(r#""phase":"verification""#));
+    if !(attempt_contents.contains(r#""stdout":"1234567890""#)
+        || attempt_contents.contains(r#""stdout":"1234567890\n""#))
+    {
+        panic!("Assertion failed! attempt_contents: \n{}", attempt_contents);
+    }
 }
