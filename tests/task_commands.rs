@@ -697,6 +697,11 @@ fn task_run_caps_test_command_output_and_records_persistence() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    fs::write(
+        project.path().join("src/emit-and-fail.sh"),
+        "printf 1234567890abcdef\nfalse\n",
+    )
+    .expect("write test command script");
 
     // Configure test policy with max_output_bytes = 10 and a command that outputs a long string
     // we use a failing command so we can inspect stdout in the blocked reason
@@ -713,7 +718,7 @@ timeout_seconds = 5
 max_output_bytes = 10
 [[test_policy.commands]]
 component = "."
-command = "sh -c {printf,1234567890abcdef};false"
+command = "sh ./emit-and-fail.sh"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
