@@ -34,7 +34,7 @@ fn track_project(project: &TempDir) {
 
 fn queue() -> String {
     format!(
-        r#"schema_version: 2
+        r#"schema_version: 1
 component:
   specification_revision: {GENERATED_SPECIFICATION_REVISION}
   parent_specification: null
@@ -237,14 +237,14 @@ fn spec_accept_rejects_invalid_specifications() {
     let output_child_spec = run_kvist(&project, &["spec", "new", "src/child"]);
     assert!(output_child_spec.status.success());
     fs::write(
-        child_dir.join("DOCS.md"),
-        "<!-- kvist-documentation-version: 1 -->\n# Root Component Compliance Documentation\n",
+        child_dir.join("IMPL.md"),
+        "<!-- kvist-implementation-record-version: 1 -->\n# Root Component Implementation Record\n",
     )
     .expect("write child docs");
 
     // Create a child TODOS.yaml with parent reference
     let child_queue = format!(
-        r#"schema_version: 2
+        r#"schema_version: 1
 component:
   specification_revision: sha256:d47faba18fc80961e3cf1872cbd0d74ccc114a9667dfbc6b84dbbfac2234a1bd
   parent_specification:
@@ -296,13 +296,13 @@ fn spec_accept_on_child_updates_parent_revision() {
         String::from_utf8_lossy(&output_child.stderr)
     );
     fs::write(
-        child_dir.join("DOCS.md"),
-        "<!-- kvist-documentation-version: 1 -->\n# Root Component Compliance Documentation\n",
+        child_dir.join("IMPL.md"),
+        "<!-- kvist-implementation-record-version: 1 -->\n# Root Component Implementation Record\n",
     )
     .expect("write child docs");
 
     // Create a child TODOS.yaml with parent reference
-    let child_queue = r#"schema_version: 2
+    let child_queue = r#"schema_version: 1
 component:
   specification_revision: sha256:d47faba18fc80961e3cf1872cbd0d74ccc114a9667dfbc6b84dbbfac2234a1bd
   parent_specification:

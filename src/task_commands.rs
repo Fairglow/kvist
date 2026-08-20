@@ -240,7 +240,7 @@ fn validate_transition(
         return Err(transition_error(
             task,
             target,
-            "the version-2 state machine does not allow this transition",
+            "the version-1 state machine does not allow this transition",
         ));
     }
     match target {

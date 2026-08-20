@@ -1,6 +1,6 @@
 use kvist::task_queue::{TaskStatus, parse, serialize};
 
-const VALID_QUEUE: &str = r#"schema_version: 2
+const VALID_QUEUE: &str = r#"schema_version: 1
 component:
   specification_revision: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
   parent_specification: null

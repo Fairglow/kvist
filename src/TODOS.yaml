@@ -1,16 +1,16 @@
-schema_version: 2
+schema_version: 1
 component:
-  specification_revision: "sha256:5896c5a2da393c457872109c6d6217aee7b7053b9829cf4a81890502f6da2b79"
+  specification_revision: "sha256:749e4cd579f3706c24143e9711c75a362d3e76d6486a981a8e5763fa04afe2d2"
   parent_specification: null
   revalidation:
     state: current
-    checked_at: "2026-08-20T19:49:39Z"
+    checked_at: "2026-08-20T21:54:02Z"
     stale_since: null
     causes: []
 tasks:
   - id: "p2-01-write-tests"
     title: "Define TODO queue schema tests"
-    description: "Write focused parser, serialization, dependency-graph, and task-state transition tests for the version-2 TODO queue contract before production implementation."
+    description: "Write focused parser, serialization, dependency-graph, and task-state transition tests for the version-1 TODO queue contract before production implementation."
     context: "Phase 1 accepted only an illustrative YAML list, so malformed task relationships and non-deterministic queue data could not be detected before future task execution."
     purpose: "Establish executable evidence for the durable task-plan contract before any executor relies on it, preventing a weak parser from becoming the authority for workflow state."
     expected_outcome: "The test suite expresses and initially fails for valid canonical queues, duplicate IDs, unknown dependencies, cycles, invalid transitions, malformed state metadata, and deterministic serialization."
@@ -27,7 +27,7 @@ tasks:
       completed_at: "2026-08-13T20:20:00Z"
     blocked_reason: null
   - id: "p2-01-implement-code"
-    title: "Implement the version-2 TODO queue schema"
+    title: "Implement the version-1 TODO queue schema"
     description: "Add typed serde and serde_yaml parsing, semantic validation, task transition rules, and canonical serialization, then integrate it with root project inspection."
     context: "Future task selection, locking, execution, and review must consume one validated, machine-readable source of workflow truth rather than independently interpreting YAML."
     purpose: "Make task state safe, deterministic, and inspectable so every later Phase 2 tool shares the same contract and diagnostics."

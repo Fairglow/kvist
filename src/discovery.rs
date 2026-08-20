@@ -1,14 +1,14 @@
 //! Read-only, deterministic discovery of Kvist component layouts.
 //!
 //! Content validation is deliberately outside this module: `SPEC.md`,
-//! `TODOS.yaml`, and `DOCS.md` formats are validated by their owning phases.
+//! `TODOS.yaml`, and `IMPL.md` formats are validated by their owning phases.
 
 use std::{
     fs, io,
     path::{Path, PathBuf},
 };
 
-use crate::{KvistError, Result};
+use crate::{KvistError, Result, artifacts::IMPLEMENTATION_RECORD_FILENAME};
 use crate::{config::DiscoveryLimits, filesystem::is_link_like};
 
 /// Maximum number of directory levels below the component root to traverse.
@@ -24,8 +24,8 @@ pub enum ComponentArtifact {
     Specification,
     /// The component's ordered implementation task queue.
     TaskQueue,
-    /// The component's reverse-engineered compliance documentation.
-    Documentation,
+    /// The component's reverse-engineered implementation record.
+    ImplementationRecord,
 }
 
 impl ComponentArtifact {
@@ -34,7 +34,7 @@ impl ComponentArtifact {
         match self {
             Self::Specification => "SPEC.md",
             Self::TaskQueue => "TODOS.yaml",
-            Self::Documentation => "DOCS.md",
+            Self::ImplementationRecord => IMPLEMENTATION_RECORD_FILENAME,
         }
     }
 }
@@ -42,7 +42,7 @@ impl ComponentArtifact {
 const REQUIRED_ARTIFACTS: [ComponentArtifact; 3] = [
     ComponentArtifact::Specification,
     ComponentArtifact::TaskQueue,
-    ComponentArtifact::Documentation,
+    ComponentArtifact::ImplementationRecord,
 ];
 
 /// The observed layout state of one adjacent component artifact.
@@ -355,7 +355,7 @@ fn inspect_component(directory: &Path, relative_path: &Path) -> Result<Component
     let artifact_statuses = [
         inspect_artifact(directory, ComponentArtifact::Specification)?,
         inspect_artifact(directory, ComponentArtifact::TaskQueue)?,
-        inspect_artifact(directory, ComponentArtifact::Documentation)?,
+        inspect_artifact(directory, ComponentArtifact::ImplementationRecord)?,
     ];
 
     Ok(Component {
@@ -404,6 +404,6 @@ const fn artifact_index(artifact: ComponentArtifact) -> usize {
     match artifact {
         ComponentArtifact::Specification => 0,
         ComponentArtifact::TaskQueue => 1,
-        ComponentArtifact::Documentation => 2,
+        ComponentArtifact::ImplementationRecord => 2,
     }
 }

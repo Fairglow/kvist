@@ -5,8 +5,8 @@ use std::{
 
 use kvist::{
     artifacts::{
-        CONFIGURATION_VERSION, DOCUMENTATION_VERSION, ROOT_CONTRACT_VERSION, SPECIFICATION_VERSION,
-        TODO_QUEUE_VERSION,
+        CONFIGURATION_VERSION, IMPLEMENTATION_RECORD_VERSION, ROOT_CONTRACT_VERSION,
+        SPECIFICATION_VERSION, TODO_QUEUE_VERSION,
     },
     init::initialize,
     project_state::{MAX_ROOT_TEXT_ARTIFACT_BYTES, ProjectState, inspect},
@@ -97,9 +97,12 @@ fn invalid_contents_and_artifact_types_are_classified_as_invalid() {
         ("src/SPEC.md", "<!-- kvist-specification-version: 1 -->\n"),
         (
             "src/TODOS.yaml",
-            "schema_version: 2\ncomponent: invalid\ntasks: []\n",
+            "schema_version: 1\ncomponent: invalid\ntasks: []\n",
         ),
-        ("src/DOCS.md", "<!-- kvist-documentation-version: 1 -->\n"),
+        (
+            "src/IMPL.md",
+            "<!-- kvist-implementation-record-version: 1 -->\n",
+        ),
     ];
 
     for (path, contents) in cases {
@@ -143,8 +146,8 @@ fn every_version_domain_can_report_an_unsupported_version() {
             "schema_version: 99\ntasks:\n  - id: task\n    status: pending\n    description: task\n",
         ),
         (
-            "src/DOCS.md",
-            "<!-- kvist-documentation-version: 99 -->\n# Root Component Compliance Documentation\n",
+            "src/IMPL.md",
+            "<!-- kvist-implementation-record-version: 99 -->\n# Root Component Implementation Record\n",
         ),
     ];
 
@@ -164,8 +167,8 @@ fn version_domains_are_independent_public_constants() {
     assert_eq!(CONFIGURATION_VERSION, 1);
     assert_eq!(ROOT_CONTRACT_VERSION, 1);
     assert_eq!(SPECIFICATION_VERSION, 1);
-    assert_eq!(TODO_QUEUE_VERSION, 2);
-    assert_eq!(DOCUMENTATION_VERSION, 1);
+    assert_eq!(TODO_QUEUE_VERSION, 1);
+    assert_eq!(IMPLEMENTATION_RECORD_VERSION, 1);
 }
 
 #[test]
@@ -174,7 +177,7 @@ fn oversized_or_invalid_utf8_root_artifacts_remain_inspectable_as_invalid() {
         "ROOT_CONTRACT.md",
         "src/SPEC.md",
         "src/TODOS.yaml",
-        "src/DOCS.md",
+        "src/IMPL.md",
     ] {
         let project = TempDir::new().expect("project");
         initialize(project.path()).expect("initialize");

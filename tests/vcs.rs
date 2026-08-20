@@ -31,7 +31,7 @@ fn command_exists(program: &str) -> bool {
 
 fn create_complete_component(path: &Path) {
     fs::create_dir_all(path).expect("create component");
-    for name in ["SPEC.md", "TODOS.yaml", "DOCS.md"] {
+    for name in ["SPEC.md", "TODOS.yaml", "IMPL.md"] {
         fs::write(path.join(name), "fixture").expect("write artifact");
     }
 }
@@ -41,7 +41,7 @@ fn doctor_reports_git_tracked_and_ignored_durable_artifacts_without_mutation() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     create_complete_component(&project.path().join("src/child"));
-    fs::write(project.path().join(".gitignore"), "/src/DOCS.md\n").expect("write ignore rule");
+    fs::write(project.path().join(".gitignore"), "/src/IMPL.md\n").expect("write ignore rule");
 
     assert!(
         run("git", &["init", "--quiet"], project.path())
@@ -65,7 +65,7 @@ fn doctor_reports_git_tracked_and_ignored_durable_artifacts_without_mutation() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("vcs: required durable artifacts need attention"));
     assert!(stdout.contains("vcs kvist.toml: tracked"));
-    let root_documentation = Path::new("src").join("DOCS.md");
+    let root_documentation = Path::new("src").join("IMPL.md");
     assert!(stdout.contains(&format!("vcs {}: ignored", root_documentation.display())));
     let nested_specification = Path::new("src").join("child").join("SPEC.md");
     assert!(stdout.contains(&format!("vcs {}: tracked", nested_specification.display())));

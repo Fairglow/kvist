@@ -166,7 +166,7 @@ The KVIST engine heavily relies on predictable, high-quality outputs from AI age
 
 ### TODO P3-04 — Clean-Slate Documenter Skill
 
-- **Reverse-Engineering Skill:** Define the prompt for the clean-slate agent that extracts `DOCS.md` from raw source code and docstrings _without_ seeing the original `SPEC.md`. Must capture contracts, constraints, and error handling accurately.
+- **Reverse-Engineering Skill:** Define the prompt for the clean-slate agent that extracts `IMPL.md` from raw source code and docstrings _without_ seeing the original `SPEC.md`. Must capture contracts, constraints, and error handling accurately.
 
 ### TODO P3-05 — Compliance & Review Skills (Triple-Blind Loop)
 
@@ -174,7 +174,7 @@ The KVIST engine heavily relies on predictable, high-quality outputs from AI age
 - **Security Review Skill:** Focuses explicitly on memory safety, thread-safety, boundaries, and input validation invariants defined in Layer 2.
 - **Test Coverage Review Skill:** Validates that tests comprehensively cover edge cases and failure paths defined in Layer 3.
 - **Error Handling & Logging Review Skill:** Ensures error states are safely propagated and observability requirements are met.
-- **Specification Drift / Contract Fulfillment Skill:** The final compliance prompt that compares the original `SPEC.md` against the generated `DOCS.md` to flag hallucinations or missed requirements.
+- **Specification Drift / Contract Fulfillment Skill:** The final compliance prompt that compares the original `SPEC.md` against the generated `IMPL.md` to flag hallucinations or missed requirements.
 
 ---
 

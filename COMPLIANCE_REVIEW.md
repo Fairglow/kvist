@@ -5,10 +5,10 @@
 ## Independent review process
 
 1. A clean-slate documenter inspected only Rust source and tests, then produced
-   [`DOCS.md`](DOCS.md) without access to the architecture specification.
+   [`IMPL.md`](IMPL.md) without access to the architecture specification.
 2. A separate compliance reviewer compared only
    [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
-   and `DOCS.md`, without access to source code.
+   and `IMPL.md`, without access to source code.
 
 **Result:** The Phase 1 roadmap requirements are compliant: project
 bootstrapping, deterministic component discovery/tree rendering, and layered
@@ -49,7 +49,7 @@ explicit user intervention is required.
 
 ## Root component dogfooding review
 
-**Scope:** `src/SPEC.md`, `src/DOCS.md`, and `ROOT_CONTRACT.md`.
+**Scope:** `src/SPEC.md`, `src/IMPL.md`, and `ROOT_CONTRACT.md`.
 
 The source-blind review was conducted under
 [`REVIEW_RUNBOOK.md`](REVIEW_RUNBOOK.md). The reviewer had access only to the
@@ -59,7 +59,7 @@ recorded responsibility of the clean-slate documentation pass.
 | Classification | Finding | Arbitration |
 | --- | --- | --- |
 | Compliant | The observed documentation describes bounded I/O, link rejection, deterministic discovery, atomic per-file writes, and root-state classification required by the root specification. | None. |
-| Mismatch resolved | `SPEC.md` previously implied that `init` refused a current project, while `DOCS.md` documented its idempotent no-op behavior. | The contract now explicitly permits a no-op only for `current`; all other existing states remain refused. |
+| Mismatch resolved | `SPEC.md` previously implied that `init` refused a current project, while `IMPL.md` documented its idempotent no-op behavior. | The contract now explicitly permits a no-op only for `current`; all other existing states remain refused. |
 | Mismatch resolved | `ROOT_CONTRACT.md` requires task ordering, while the observed YAML validator intentionally permits any non-empty task field values and order. | Ordering is an authoring and future execution rule, not a Phase 1 parser constraint. `SPEC.md` records that boundary; P2-01/P2-03 own schema and lifecycle enforcement. |
 | Underspecified | The documentation does not independently establish all line-aware diagnostic or future task-execution trust-boundary details stated in the specification. | Retain the requirement in `SPEC.md`; the Phase 2 trusted-workspace policy and its implementation review remain deferred. |
 
@@ -69,18 +69,18 @@ recorded responsibility of the clean-slate documentation pass.
 
 The clean-slate documenter reviewed source and tests without access to the
 contract. The source-blind reviewer then compared only `src/SPEC.md`,
-`src/DOCS.md`, and `ROOT_CONTRACT.md`.
+`src/IMPL.md`, and `ROOT_CONTRACT.md`.
 
 | Classification | Finding | Arbitration |
 | --- | --- | --- |
 | Compliant | The observed command set, root-state handling, deterministic discovery, bounded parsing, link rejection, and no-clobber writes match the root contract. | None. |
 | Compliant | VCS inspection is read-only; Git uses index and native ignore semantics, while jj uses an explicit selected saved snapshot. | None. |
-| Compliant | `DOCS.md` records observed behavior rather than reproducing the specification. | None. |
+| Compliant | `IMPL.md` records observed behavior rather than reproducing the specification. | None. |
 | Deferred | This comparison establishes documentation consistency, not independent proof of source behavior. Task execution must enforce complete tracking before Phase 2 runs user tasks. | P2 execution and its trusted-workspace policy own that enforcement. |
 
 ## Final root component VCS review
 
-**Scope:** Final root `SPEC.md`, source-derived `DOCS.md`, and
+**Scope:** Final root `SPEC.md`, source-derived `IMPL.md`, and
 `ROOT_CONTRACT.md`.
 
 | Classification | Finding | Arbitration |
@@ -92,7 +92,7 @@ contract. The source-blind reviewer then compared only `src/SPEC.md`,
 
 ## Phase 2 P2-01 TODO queue contract review
 
-**Scope:** Version-2 `TODOS.yaml` parsing, semantic validation, canonical
+**Scope:** Version-1 `TODOS.yaml` parsing, semantic validation, canonical
 serialization, root-artifact inspection integration, and their public contract
 documents.
 
@@ -101,8 +101,8 @@ documents.
 | Role | Permitted inputs | Result |
 | --- | --- | --- |
 | Security reviewer | P2-01 implementation, direct integration, dependency manifest, and focused tests | No security vulnerabilities found in the reviewed boundary. |
-| Clean-slate documenter | Rust source, tests, and manifests only | Rewrote `src/DOCS.md` from observed behavior without reading the queue specification, README, queue, root contract, or prior reviews. |
-| Source-blind reviewer | `src/SPEC.md`, `src/DOCS.md`, and `ROOT_CONTRACT.md` only | Identified documentation-contract ambiguities below; it did not inspect source or tests. |
+| Clean-slate documenter | Rust source, tests, and manifests only | Rewrote `src/IMPL.md` from observed behavior without reading the queue specification, README, queue, root contract, or prior reviews. |
+| Source-blind reviewer | `src/SPEC.md`, `src/IMPL.md`, and `ROOT_CONTRACT.md` only | Identified implementation-record contract ambiguities below; it did not inspect source or tests. |
 
 ### Security result
 
@@ -123,28 +123,28 @@ meaning of either artifact.
 | Classification | Finding | Arbitration decision |
 | --- | --- | --- |
 | Deferred, clarified | The observed queue parser accepts an in-memory string without a byte limit, while root artifact inspection bounds a filesystem queue to 1 MiB. | `src/SPEC.md` now assigns the 1 MiB bound to every filesystem loader before parsing and explicitly preserves the in-memory API boundary. Future loaders must apply that bound. |
-| Deferred, clarified | The observed implementation validates recorded SHA-256-shaped revisions but does not hash `SPEC.md` files or derive stale causes. | `src/SPEC.md` now assigns comparison and stale derivation explicitly to P2-02. Version-2 parsing remains responsible only for representing and validating stale evidence. |
+| Deferred, clarified | The observed implementation validates recorded SHA-256-shaped revisions but does not hash `SPEC.md` files or derive stale causes. | `src/SPEC.md` now assigns comparison and stale derivation explicitly to P2-02. Version-1 parsing remains responsible only for representing and validating stale evidence. |
 | Clarified | The observed parent path is exactly `../SPEC.md`; the prior contract described it only generally as a relative parent path. | The specification now makes the literal path explicit and ties it to the existing component-hierarchy rule. |
 | Clarified | The observed requirement locator is `SOURCE#LOCATOR`, and stale evidence requires ordered timestamps plus distinct revisions; these constraints were not fully stated in the specification. | The specification now defines each syntax and invariant so consumers need not infer it from source or observed documentation. |
-| Clarified | The observed lifecycle check is kind-based over a task's explicit transitive dependency chain. Version 2 has no separate deliverable-group field. | The specification defines a v2 deliverable as that explicit chain. Requirement references and dependency edges are the mandatory traceability proof of scope. Introducing a stronger grouping key would require a future versioned schema change and migration, not an undocumented extension. |
+| Clarified | The observed lifecycle check is kind-based over a task's explicit transitive dependency chain. The first queue schema has no separate deliverable-group field. | The specification defines a deliverable as that explicit chain. Requirement references and dependency edges are the mandatory traceability proof of scope. Introducing a stronger grouping key would require a future versioned schema change and migration, not an undocumented extension. |
 | Clarified | Human readers have no queue-content CLI yet. | The specification and observed documentation now state that durable YAML is the current human content surface and `doctor` reports root-artifact validity only. |
 | Clarified | Discovery reports missing and filesystem-malformed adjacent artifacts, not their content validity. | The specification now reserves non-root content validation for a future component-inspection surface. |
 
 ### Final source-blind compliance result
 
 After the documented arbitrations, a source-blind reviewer compared only
-`ROOT_CONTRACT.md`, `src/SPEC.md`, `src/DOCS.md`, `TODO.md`, and this review
+`ROOT_CONTRACT.md`, `src/SPEC.md`, `src/IMPL.md`, `TODO.md`, and this review
 record. It did not inspect Rust source, tests, manifests, diffs, or the queue
 artifact. The reviewer found the documentation contract **compliant**:
 
 | Classification | Finding | Arbitration |
 | --- | --- | --- |
-| Compliant | The specification and source-derived documentation agree on the version-2 structure, validation, lifecycle/dependency rules, timestamps, state metadata, deterministic serialization, and root inspection's sole 1 MiB pre-parse queue bound. | None. |
-| Compliant | The documented absence of unique/canonical revalidation causes and cause-kind/path correspondence checks does not conflict with a stated version-2 requirement. | None. |
+| Compliant | The specification and source-derived implementation record agree on the version-1 structure, validation, lifecycle/dependency rules, timestamps, state metadata, deterministic serialization, and root inspection's sole 1 MiB pre-parse queue bound. | None. |
+| Compliant | The documented absence of unique/canonical revalidation causes and cause-kind/path correspondence checks does not conflict with a stated version-1 requirement. | None. |
 | Deferred | General filesystem queue loaders, revision hashing and stale-cause derivation, task selection/transitions/persistence, queue CLI commands, and migration remain unimplemented future work. | P2-02 and P2-03 own their implementation and separate review. |
 
 The completed test suite and `kvist doctor .` independently verified that the
-current root `src/TODOS.yaml` is a valid version-2 queue. No implementation
+current root `src/TODOS.yaml` is a valid version-1 queue. No implementation
 requirement was removed, no queue state was silently rewritten, and no future
 execution behavior is claimed as implemented.
 
@@ -156,8 +156,8 @@ comparison, and version-1 `kvist status` text and JSON reports.
 | Role | Permitted inputs | Result |
 | --- | --- | --- |
 | Security reviewer | P2-02 source, tests, manifest, root contract, and specification | Found and remediated text control-character injection; no blocking finding remained. |
-| Clean-slate documenter | Source, tests, manifest, and generated configuration only | Derived the status command, component-state precedence, validation, hashing, escaping, and point-in-time limitations in `src/DOCS.md`. |
-| Source-blind reviewer | `ROOT_CONTRACT.md`, `src/SPEC.md`, `src/DOCS.md`, `README.md`, roadmap, and runbook only | Found the final documented status contract compliant; it correctly deferred execution integration to P2-03. |
+| Clean-slate documenter | Source, tests, manifest, and generated configuration only | Derived the status command, component-state precedence, validation, hashing, escaping, and point-in-time limitations in `src/IMPL.md`. |
+| Source-blind reviewer | `ROOT_CONTRACT.md`, `src/SPEC.md`, `src/IMPL.md`, `README.md`, roadmap, and runbook only | Found the final implementation-record status contract compliant; it correctly deferred execution integration to P2-03. |
 
 ### Security result and arbitration
 
@@ -187,7 +187,7 @@ its separate trusted-workspace boundary before running user-controlled work.
 
 The clean-slate documenter derived task selection, transition, locking, audit,
 and recovery behavior from source and tests only. The source-blind reviewer
-then compared `ROOT_CONTRACT.md`, `src/SPEC.md`, `src/DOCS.md`, README, roadmap,
+then compared `ROOT_CONTRACT.md`, `src/SPEC.md`, `src/IMPL.md`, README, roadmap,
 and runbook only.
 
 | Classification | Finding | Arbitration |
@@ -213,6 +213,6 @@ been satisfied.
 | Classification | Finding | Arbitration required |
 | --- | --- | --- |
 | Mismatch | `task run` executes host agent programs and implementation test commands. Agent execution has no sandbox, timeout, output cap, or effective-agent-configuration approval. | Preserve the specification's gate. P2-05b through P2-05d must either enforce the gate before execution or the architect must explicitly revise the product policy. |
-| Mismatch | The former README, GUIDE, and observed root documentation described deferred or automated behavior inconsistently with the implementation. | The public documents now distinguish observed commands from planned automation and state the host-execution limitation. A clean-slate documenter must independently replace or confirm the observed `src/DOCS.md` account. |
+| Mismatch | The former README, GUIDE, and observed root implementation record described deferred or automated behavior inconsistently with the implementation. | The public documents now distinguish observed commands from planned automation and state the host-execution limitation. A clean-slate documenter must independently replace or confirm the observed `src/IMPL.md` account. |
 | Deferred | The intended clean-slate documenter, source-blind reviewer, arbitration integration, and automated task-generation/interview flows are absent. | Phase 3 owns automation. Until then, follow `REVIEW_RUNBOOK.md` manually and retain review evidence. |
 | Deferred | The Phase 2 end-to-end security and compliance review has not yet covered the full agent/test execution surface. | P2-07 is the release gate for this surface; do not represent task execution as production-safe beforehand. |

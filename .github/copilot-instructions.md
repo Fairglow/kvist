@@ -12,14 +12,14 @@ these non-negotiable principles:
 - **Structure before syntax:** define and validate a component's requirements,
   public contract, constraints, and test strategy before implementing it.
 - **Filesystem-native, recursive components:** a component directory owns its
-  specification, task queue, compliance documentation, and implementation.
+  specification, task queue, implementation record, and implementation.
 - **Durable, inspectable state:** persist workflow state in version-controlled
   project files, never only in chat context or an opaque database.
 - **Strict context boundaries:** work from the target component, its immediate
   parent contract, and global constraints; do not couple a component to peer
   implementations without an explicit interface requirement.
 - **Independent compliance review:** an implementer must not certify its own
-  work. Compliance documentation is derived from code without the specification,
+  work. The implementation record is derived from code without the specification,
   then compared against the specification by a separate review context.
 
 ## Change workflow
@@ -40,7 +40,7 @@ these non-negotiable principles:
 5. Write failing tests from the specification before production code. Update
    tests, specs, and task state together when a deliberate contract change is
    approved.
-6. After implementation, produce or update `DOCS.md` from observed code
+6. After implementation, produce or update `IMPL.md` from observed code
    behavior, not by copying `SPEC.md`. Report any spec-to-implementation
    discrepancy for explicit arbitration; never conceal it by changing either
    artifact automatically.

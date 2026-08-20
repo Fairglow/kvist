@@ -96,11 +96,11 @@ accidental traversal only; they do not remove the TOCTOU limitation above.
 | `kvist.toml`       | configuration schema `1`; `component_root = "src"`; `vcs.kind = "auto"`; `llm.provider = "none"` | Project-local configuration with VCS and opt-in external LLM settings.      |
 | `ROOT_CONTRACT.md` | `<!-- kvist-root-contract-version: 1 -->`                                                        | Global architectural and compliance constraints for every component.        |
 | `src/SPEC.md`      | `<!-- kvist-specification-version: 1 -->`                                                        | Root component contract with the three progressive-disclosure layers.       |
-| `src/TODOS.yaml`   | `schema_version: 2`                                                                              | Versioned, traceable component execution plan with ordered lifecycle tasks. |
-| `src/DOCS.md`      | `<!-- kvist-documentation-version: 1 -->`                                                        | Independently reverse-engineered implementation documentation.              |
+| `src/TODOS.yaml`   | `schema_version: 1`                                                                              | Versioned, traceable component execution plan with ordered lifecycle tasks. |
+| `src/IMPL.md`      | `<!-- kvist-implementation-record-version: 1 -->`                                                | Independently reverse-engineered implementation record.                     |
 
-The configuration, root-contract, specification, TODO-queue, and documentation
-versions are independent positive-integer domains. Backward-incompatible
+The configuration, root-contract, specification, TODO-queue, and
+implementation-record versions are independent positive-integer domains. Backward-incompatible
 changes must increment only the relevant domain and include an explicit
 migration path; Kvist must never silently rewrite user-authored artifacts. The
 initial templates contain no credentials, configured external provider,
@@ -151,7 +151,7 @@ Text output begins with `status-format-version: 1`; JSON output is a compact
 object with `format_version`, `project_path`, `project_state`,
 `component_root`, `components`, and `discovery_error`. Both are deterministic
 and report the same configured component root, ordered components, and
-adjacent `SPEC.md`, `TODOS.yaml`, and `DOCS.md` states. Dynamic text fields
+adjacent `SPEC.md`, `TODOS.yaml`, and `IMPL.md` states. Dynamic text fields
 escape ASCII control characters. JSON path strings are lossy display text and
 are not persistent file identifiers. A completed inspection exits successfully
 regardless of the reported project state; I/O failures exit nonzero.
@@ -160,7 +160,7 @@ regardless of the reported project state; I/O failures exit nonzero.
 
 Before Phase 2 task execution, durable artifacts (`kvist.toml`,
 `ROOT_CONTRACT.md`, and each component's `SPEC.md`, `TODOS.yaml`, and
-`DOCS.md`) must be tracked in a supported VCS. `kvist doctor` inspects every
+`IMPL.md`) must be tracked in a supported VCS. `kvist doctor` inspects every
 root and discovered component artifact without staging or committing.
 
 `[vcs].kind` defaults to `"auto"`, which selects the one detected VCS. Set it
@@ -192,7 +192,7 @@ tracked-state semantics.
 The discovery model is read-only and accepts an explicit component-root
 directory (the initial configuration uses `src`). The root is always a
 component; a descendant is a component only when at least one of `SPEC.md`,
-`TODOS.yaml`, or `DOCS.md` exists beside it. This prevents ordinary source
+`TODOS.yaml`, or `IMPL.md` exists beside it. This prevents ordinary source
 directories from becoming components while retaining incomplete layouts for
 diagnosis.
 
@@ -246,7 +246,7 @@ user-authored and untouched.
 symbolic links before parsing.
 
 Root-state inspection applies the same 1 MiB bound to `ROOT_CONTRACT.md`,
-`src/TODOS.yaml`, and `src/DOCS.md` before reading or parsing them.
+`src/TODOS.yaml`, and `src/IMPL.md` before reading or parsing them.
 
 `kvist spec new <COMPONENT_DIR>` creates the missing directory when necessary,
 validates the deterministic template before writing, and persists `SPEC.md`
@@ -282,11 +282,11 @@ information in a validated, version-controlled file lets humans, CI, the
 future CLI executor, and future web/LSP views reach the same decision without
 depending on chat history.
 
-Schema version 2 is the current format. The whole document is a UTF-8 YAML
+Schema version 1 is the current format. The whole document is a UTF-8 YAML
 mapping with **only** these top-level fields:
 
 ```yaml
-schema_version: 2
+schema_version: 1
 component:
   specification_revision: sha256:<64-lowercase-hex-digits>
   parent_specification: null
@@ -318,7 +318,7 @@ tasks:
 
 | Field                              | Allowed values                                                                        | Purpose and tool use                                                                                                                                                                                                    |
 | ---------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`                   | Integer `2`                                                                           | Selects the parser contract independently of Kvist, specification, configuration, and documentation versions. An unsupported version is refused rather than guessed or rewritten.                                       |
+| `schema_version`                   | Integer `1`                                                                           | Selects the parser contract independently of Kvist, specification, configuration, and implementation-record versions. An unsupported version is refused rather than guessed or rewritten.                                 |
 | `component.specification_revision` | `sha256:` plus 64 lowercase hexadecimal digits                                        | Fingerprints the exact component `SPEC.md` reviewed when the queue was planned. `kvist status` compares it with the current specification to discover that local work needs revalidation. |
 | `component.parent_specification`   | `null` for the root, otherwise `{ path: "../SPEC.md", revision: "sha256:..." }`       | Records the only allowed upstream contract: the immediate parent. It lets tools detect an upstream change without loading peer implementations or violating the context boundary.                                       |
 | `parent_specification.path`        | Exactly `../SPEC.md`                                                                  | Prevents a queue from disguising peer or arbitrary-project inputs as a parent dependency.                                                                                                                               |
@@ -361,7 +361,7 @@ non-canonical dependency/reference lists are rejected.
 | `status`                  | `pending`, `in-progress`, `blocked`, or `completed`                                 | Is the authoritative workflow state used by later ready-task selection and status views.                                                                                                       |
 | `depends_on`              | Lexically sorted, duplicate-free list of earlier task IDs                           | Defines the component-local DAG. A task becomes ready only after every listed task is completed. Declared task order is the deterministic tie-breaker.                                         |
 | `requirements`            | Lexically sorted, duplicate-free `SOURCE#LOCATOR` strings                           | Links the task to the exact specification, root-contract, roadmap, or runbook requirement that justifies it. Review and execution surfaces retain these references as evidence.                |
-| `timestamps.created_at`   | UTC timestamp                                                                       | Records when this version-2 task record was created.                                                                                                                                           |
+| `timestamps.created_at`   | UTC timestamp                                                                       | Records when this version-1 task record was created.                                                                                                                                           |
 | `timestamps.updated_at`   | UTC timestamp not earlier than `created_at`                                         | Records the most recent durable task update.                                                                                                                                                   |
 | `timestamps.completed_at` | `null`, or UTC timestamp for a completed task                                       | Proves when a terminal task completion was recorded. It is required only for `completed` and may not predate `updated_at`.                                                                     |
 | `blocked_reason`          | `null`, or trimmed nonblank text for a blocked task                                 | Makes a blocked task actionable instead of allowing tools to silently skip it. It is required only for `blocked`.                                                                              |
@@ -377,7 +377,7 @@ overwriting history.
 ### Ordering, serialization, and migration
 
 Dependencies are local to one queue, must refer to earlier declared tasks, and
-must form a directed acyclic graph. In version 2, a deliverable is its explicit
+must form a directed acyclic graph. In the first queue format, a deliverable is its explicit
 transitive dependency chain; there is no implicit feature-grouping field. The
 required lifecycle is expressed in that chain as test, implementation, security
 audit, then compliance review. Requirement references and explicit dependency
@@ -391,14 +391,10 @@ form so punctuation, timestamps, and multiline text do not receive
 parser-dependent meanings. Deterministic output gives VCS a meaningful diff
 and lets automation compare semantically equal queues reproducibly.
 
-Version 1 was only an illustrative list and is intentionally unsupported by
-the version-2 parser. Migration is explicit: keep the version-1 file in VCS,
-create complete version-2 records from each legacy task, supply the missing
-title/context/purpose/expected outcome/requirements through human review,
-record the migration instant as the record creation time, and compute reviewed
-component and parent revisions. Kvist never fabricates older provenance or
-silently rewrites a user-owned queue. A future opt-in migration command will
-perform only this documented transformation and retain its evidence.
+This is the first supported queue format; there is no prior Kvist queue schema
+to migrate. Any future incompatible queue format must have its own explicit,
+opt-in migration and preserve user-authored provenance rather than silently
+rewriting workflow state.
 
 ## Task execution boundary
 
@@ -445,7 +441,7 @@ explicitly approves each result. A designer agent then iteratively drafts the
 specialized, traceable queue from an approved component specification; the
 architect may refine and must accept that queue. Implementation follows the
 accepted plan, and a clean-slate documenter and source-blind reviewer
-independently compare observed behavior with the specification. `DOCS.md` is
+independently compare observed behavior with the specification. `IMPL.md` is
 the component's implementation record, not user documentation; public
 integration material belongs under `docs/`.
 

@@ -14,7 +14,7 @@ const MAX_DETAIL_CHARS: usize = 4096;
 const SHA256_PREFIX: &str = "sha256:";
 const SHA256_HEX_LENGTH: usize = 64;
 
-/// A parsed version-2 component task queue.
+/// A parsed version-1 component task queue.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskQueue {
@@ -206,7 +206,7 @@ impl std::fmt::Display for Timestamp {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TaskTimestamps {
-    /// Creation time of this version-2 task record.
+    /// Creation time of this version-1 task record.
     pub created_at: Timestamp,
     /// Most recent durable task update.
     pub updated_at: Timestamp,
@@ -270,7 +270,7 @@ impl Timestamp {
 /// A parser, validation, or serialization error for `TODOS.yaml`.
 #[derive(Debug, Error)]
 pub enum TaskQueueError {
-    /// YAML does not conform to the typed version-2 shape.
+    /// YAML does not conform to the typed version-1 shape.
     #[error("invalid TODO queue YAML: {0}")]
     Yaml(#[from] serde_yaml::Error),
     /// A well-formed queue declares a version this binary cannot use.
@@ -292,7 +292,7 @@ impl TaskQueueError {
     }
 }
 
-/// Parses and fully validates a version-2 queue without reading the filesystem.
+/// Parses and fully validates a version-1 queue without reading the filesystem.
 pub fn parse(contents: &str) -> std::result::Result<TaskQueue, TaskQueueError> {
     let version: VersionProbe = serde_yaml::from_str(contents)?;
     if version.schema_version != TODO_QUEUE_VERSION {

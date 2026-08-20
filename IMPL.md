@@ -1,4 +1,4 @@
-# Kvist Phase 1 Observed Behavior
+# Kvist Phase 1 Implementation Record
 
 This document was reverse-engineered from the implemented Rust code and tests
 without using the architecture specification.
@@ -14,7 +14,7 @@ and help behavior use Clap's status handling.
 ## Persistent behavior
 
 `init` creates five deterministic files: `kvist.toml`, `ROOT_CONTRACT.md`, and
-`src/{SPEC.md,TODOS.yaml,DOCS.md}`. `init` writes only an uninitialized project
+`src/{SPEC.md,TODOS.yaml,IMPL.md}`. `init` writes only an uninitialized project
 and leaves a fully valid current project unchanged; it refuses partial,
 invalid, and unsupported-version projects. `doctor` is read-only and reports
 the five-state classification plus per-artifact diagnostics. Writes use
@@ -46,7 +46,7 @@ validation requires an exact first-line `kvist-specification-version` marker
 nonblank section content. Diagnostics are deterministic, line-aware, and use
 column 1.
 
-`tree` recursively reports `SPEC.md`, `TODOS.yaml`, and `DOCS.md` as complete,
+`tree` recursively reports `SPEC.md`, `TODOS.yaml`, and `IMPL.md` as complete,
 missing, or invalid. It ignores artifact contents, skips `.git`, `.hg`, `.jj`,
 `node_modules`, and `target`, sorts paths lexically, and renders stable ASCII.
 

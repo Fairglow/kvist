@@ -8,7 +8,7 @@
 
 Provide a local, headless Rust CLI that creates and inspects filesystem-native
 Kvist projects. The root component makes durable project state, component
-contracts, task queues, and compliance documentation visible to both humans and
+contracts, task queues, and implementation records visible to both humans and
 automation.
 
 ## Public contract
@@ -24,7 +24,7 @@ required root and discovered component artifact is tracked by the selected Git
 or jj repository. Commands use project-local configuration and produce
 deterministic, non-interactive output.
 
-The root component also owns the version-2 `TODOS.yaml` contract. A queue is a
+The root component also owns the version-1 `TODOS.yaml` contract. A queue is a
 durable, version-controlled execution plan for one component, not an informal
 checklist. Every task records its stable identity, actionable work, reason,
 expected result, source requirement references, dependencies, lifecycle role,
@@ -108,8 +108,8 @@ project owner selects one in `kvist.toml`.
 
 ## TODO queue schema and validation
 
-`TODOS.yaml` version 2 is a mapping with exactly `schema_version`, `component`,
-and `tasks`. `schema_version` is the integer `2`. The `component` mapping has
+`TODOS.yaml` version 1 is a mapping with exactly `schema_version`, `component`,
+and `tasks`. `schema_version` is the integer `1`. The `component` mapping has
 these fields:
 
 | Field | Value | Tool use |
@@ -151,9 +151,9 @@ are UTC RFC 3339 instants with whole seconds (`YYYY-MM-DDTHH:MM:SSZ`);
 `completed_at` is `null` unless status is `completed`, when it is a UTC instant
 not earlier than `created_at` or `updated_at`. `updated_at` must not precede
 `created_at`. Tools set these values on creation and every persisted state
-transition. A version-1 migration records the instant it created each
-version-2 task record and retains the original file in version control; it
-must not invent an earlier historical instant.
+transition. No migration exists for the first queue schema; a future
+incompatible schema must record its migration instant and retain the original
+file in version control without inventing earlier provenance.
 
 Task states transition only as follows: `pending` to `in-progress` or
 `blocked`; `in-progress` to `pending`, `blocked`, or `completed`; and
@@ -166,7 +166,8 @@ will reject all other transitions and write an append-only attempt record.
 Dependencies may point only to a different task in the same queue. All IDs
 must exist, the graph must be acyclic, and a task can depend only on an earlier
 declared task. Declared task order is the deterministic human and execution
-tie-breaker; it is not inferred from hash-map iteration. For version 2, a
+tie-breaker; it is not inferred from hash-map iteration. In the first queue
+schema, a
 "deliverable" is the explicit transitive dependency chain terminating at a
 later lifecycle task; there is deliberately no separate deliverable-grouping
 field. Lifecycle work in a chain is declared in this order: `test`,
@@ -185,14 +186,11 @@ tasks, updating their requirement references or task plan as needed, recording
 the new digests, and clearing causes with a new `checked_at`. This provides the
 upstream-change ripple signal while preserving the component context boundary.
 
-Version 1 is intentionally unsupported by the version-2 parser. Migration is
-explicit and no-clobber: preserve the original file in VCS, map each legacy
-`id`, `status`, and `description` into a new complete task record, add the
-human-reviewed title/context/purpose/expected outcome/requirements, compute
-the component and parent revisions, and record fresh timestamps. Kvist must
-not invent missing provenance or overwrite the legacy file automatically. A
-future `todo migrate` command will perform only this documented, opt-in
-transformation and retain migration evidence.
+This is the first supported queue schema. A future incompatible schema must
+provide an explicit, no-clobber migration that preserves user-authored
+provenance, computes any new reviewed revisions, and retains migration
+evidence. Kvist must never invent missing provenance or rewrite the old queue
+automatically.
 
 ## Project status inspection
 
@@ -207,11 +205,11 @@ top-level inspection failure record; they do not suppress the valid root
 result or mutate files.
 
 Each component record has its path relative to `component_root`, the states of
-`SPEC.md`, `TODOS.yaml`, and `DOCS.md`, a component state, and optional
+`SPEC.md`, `TODOS.yaml`, and `IMPL.md`, a component state, and optional
 revalidation causes. Artifact states are `valid`, `missing`, `invalid`, or
 `unsupported-version`. A complete component validates all three contents:
-specifications use the specification validator; queues use the version-2
-queue parser after the 1 MiB UTF-8 bound; and documentation uses its existing
+specifications use the specification validator; queues use the version-1
+queue parser after the 1 MiB UTF-8 bound; and implementation records use their
 version marker and heading validation. An incomplete or filesystem-invalid
 component retains its discovery artifact state without attempting content
 reads.
@@ -235,7 +233,7 @@ single UTF-8 object with `format_version`, `project_path`, `project_state`,
 `component_root`, `components`, and `discovery_error` keys in that order.
 Components contain
 `path`, `state`, `artifacts`, and `revalidation_causes` keys in that order;
-artifacts are ordered `SPEC.md`, `TODOS.yaml`, `DOCS.md`. JSON path strings
+artifacts are ordered `SPEC.md`, `TODOS.yaml`, `IMPL.md`. JSON path strings
 are lossy display representations and must not be used as persistent file
 identifiers. Text-format dynamic values escape backslashes, carriage returns,
 line feeds, tabs, and other ASCII control characters, so untrusted paths,
@@ -249,7 +247,7 @@ treat unknown future versions as unsupported rather than guessing semantics.
 task in declared queue order. `kvist task transition COMPONENT_DIR TASK_ID
 STATUS` is the only phase-2 writer; it changes one task status and records the
 attempt. Both commands require a current root project, a discovered complete
-component, a valid version-2 queue, current component revalidation, and
+component, a valid version-1 queue, current component revalidation, and
 complete VCS tracking. `COMPONENT_DIR` is a component-root-relative normal
 path; `.` names the configured component root. These commands do not invoke
 providers, tests, shells, or network services.
@@ -260,7 +258,7 @@ chain is `completed`. `next` prints the selected task ID or `no ready task`.
 Stale, blocked, incomplete, invalid, unsupported, untracked, or otherwise
 non-current components are rejected rather than treated as empty queues.
 
-Transitions use the version-2 state machine. Moving to `in-progress` requires
+Transitions use the version-1 state machine. Moving to `in-progress` requires
 that the task is ready; moving to `completed` requires `in-progress`; and
 moving to `pending` or `blocked` requires an active or blocked task as allowed
 by the state machine. The command supplies a nonblank `--reason` only for

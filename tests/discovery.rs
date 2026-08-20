@@ -31,7 +31,7 @@ fn discovers_complete_nested_components_in_lexical_order() {
         &[
             ComponentArtifact::Specification,
             ComponentArtifact::TaskQueue,
-            ComponentArtifact::Documentation,
+            ComponentArtifact::ImplementationRecord,
         ],
     );
     create_component(
@@ -39,7 +39,7 @@ fn discovers_complete_nested_components_in_lexical_order() {
         &[
             ComponentArtifact::Specification,
             ComponentArtifact::TaskQueue,
-            ComponentArtifact::Documentation,
+            ComponentArtifact::ImplementationRecord,
         ],
     );
     fs::create_dir(component_root.join("ordinary-source-directory"))
@@ -89,7 +89,7 @@ fn identifies_incomplete_components_without_treating_ordinary_directories_as_com
         ComponentStatus::Incomplete {
             missing: vec![
                 ComponentArtifact::TaskQueue,
-                ComponentArtifact::Documentation
+                ComponentArtifact::ImplementationRecord
             ]
         }
     );

@@ -41,7 +41,7 @@ fn component_diagnostic(component: &Component) -> String {
     let diagnostics = [
         ComponentArtifact::Specification,
         ComponentArtifact::TaskQueue,
-        ComponentArtifact::Documentation,
+        ComponentArtifact::ImplementationRecord,
     ]
     .into_iter()
     .filter_map(|artifact| match component.artifact_status(artifact) {

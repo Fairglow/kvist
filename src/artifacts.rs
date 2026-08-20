@@ -10,9 +10,17 @@ pub const ROOT_CONTRACT_VERSION: u32 = 1;
 /// Current document version for `SPEC.md`.
 pub const SPECIFICATION_VERSION: u32 = 1;
 /// Current schema version for `TODOS.yaml`.
-pub const TODO_QUEUE_VERSION: u32 = 2;
-/// Current document version for `DOCS.md`.
-pub const DOCUMENTATION_VERSION: u32 = 1;
+pub const TODO_QUEUE_VERSION: u32 = 1;
+/// Required filename for implementation records.
+pub const IMPLEMENTATION_RECORD_FILENAME: &str = "IMPL.md";
+/// Required root-relative path for the root implementation record.
+pub const ROOT_IMPLEMENTATION_RECORD_PATH: &str = "src/IMPL.md";
+/// Current document version for `IMPL.md`.
+pub const IMPLEMENTATION_RECORD_VERSION: u32 = 1;
+/// Version marker required on an implementation record.
+pub const IMPLEMENTATION_RECORD_VERSION_MARKER: &str = "kvist-implementation-record-version";
+/// Heading required in an implementation record.
+pub const IMPLEMENTATION_RECORD_HEADING: &str = "# Root Component Implementation Record";
 
 /// A file generated when initializing a Kvist project.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,7 +66,7 @@ constraint set injected into component work.
 
 - Define and validate a component's specification, public contract,
   constraints, and test strategy before implementation.
-- Keep each component's `SPEC.md`, `TODOS.yaml`, `DOCS.md`, and implementation
+- Keep each component's `SPEC.md`, `TODOS.yaml`, `IMPL.md`, and implementation
   adjacent in its directory.
 - Persist architecture and workflow state in version-controlled project files.
 - Keep component context limited to the component, its immediate parent
@@ -68,7 +76,7 @@ constraint set injected into component work.
 
 - `TODOS.yaml` orders work as tests, implementation, security audit, then
   compliance review.
-- `DOCS.md` describes observed implementation behavior and is not copied from
+- `IMPL.md` describes observed implementation behavior and is not copied from
   `SPEC.md`.
 - A clean-slate documenter and a separate compliance reviewer must verify
   implemented behavior before it is declared compliant.
@@ -113,7 +121,7 @@ cases.]
 </details>
 "#;
 
-const ROOT_TODOS: &str = r#"schema_version: 2
+const ROOT_TODOS: &str = r#"schema_version: 1
 component:
   specification_revision: sha256:d47faba18fc80961e3cf1872cbd0d74ccc114a9667dfbc6b84dbbfac2234a1bd
   parent_specification: null
@@ -125,8 +133,8 @@ component:
 tasks: []
 "#;
 
-const ROOT_DOCS: &str = r#"<!-- kvist-documentation-version: 1 -->
-# Root Component Compliance Documentation
+const ROOT_IMPLEMENTATION_RECORD: &str = r#"<!-- kvist-implementation-record-version: 1 -->
+# Root Component Implementation Record
 
 This document is produced by reverse-engineering implemented behavior without
 using the component specification. It must describe only behavior observable
@@ -163,8 +171,8 @@ const ROOT_ARTIFACTS: [ArtifactTemplate; 5] = [
         contents: ROOT_TODOS,
     },
     ArtifactTemplate {
-        relative_path: "src/DOCS.md",
-        contents: ROOT_DOCS,
+        relative_path: ROOT_IMPLEMENTATION_RECORD_PATH,
+        contents: ROOT_IMPLEMENTATION_RECORD,
     },
 ];
 
@@ -191,7 +199,7 @@ mod tests {
             BTreeSet::from([
                 "ROOT_CONTRACT.md",
                 "kvist.toml",
-                "src/DOCS.md",
+                ROOT_IMPLEMENTATION_RECORD_PATH,
                 "src/SPEC.md",
                 "src/TODOS.yaml",
             ])
@@ -220,17 +228,20 @@ mod tests {
     fn markdown_templates_are_versioned_and_follow_the_lifecycle() {
         assert!(ROOT_CONTRACT.starts_with("<!-- kvist-root-contract-version: 1 -->"));
         assert!(ROOT_SPEC.starts_with("<!-- kvist-specification-version: 1 -->"));
-        assert!(ROOT_DOCS.starts_with("<!-- kvist-documentation-version: 1 -->"));
+        assert!(
+            ROOT_IMPLEMENTATION_RECORD
+                .starts_with("<!-- kvist-implementation-record-version: 1 -->")
+        );
 
         assert!(ROOT_SPEC.contains("Layer 1: Executive summary and public contract"));
         assert!(ROOT_SPEC.contains("Layer 2: Architectural guarantees"));
         assert!(ROOT_SPEC.contains("Layer 3: Detailed strategy and algorithms"));
-        assert!(ROOT_DOCS.contains("without\nusing the component specification"));
+        assert!(ROOT_IMPLEMENTATION_RECORD.contains("without\nusing the component specification"));
     }
 
     #[test]
     fn todo_template_uses_the_current_schema_and_is_valid() {
-        assert!(ROOT_TODOS.starts_with("schema_version: 2\n"));
+        assert!(ROOT_TODOS.starts_with("schema_version: 1\n"));
         crate::task_queue::parse(ROOT_TODOS).expect("valid TODO queue template");
     }
 

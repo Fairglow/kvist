@@ -1,5 +1,5 @@
-<!-- kvist-documentation-version: 1 -->
-# Root Component Compliance Documentation
+<!-- kvist-implementation-record-version: 1 -->
+# Root Component Implementation Record
 
 This document records behavior observed from the Rust implementation and its
 tests. It describes the current executable surface; it does not establish
@@ -56,11 +56,11 @@ Initialization's fixed root artifact set, in inspection order, is:
 2. `ROOT_CONTRACT.md`
 3. `src/SPEC.md`
 4. `src/TODOS.yaml`
-5. `src/DOCS.md`
+5. `src/IMPL.md`
 
 Each generated artifact has independently versioned content: configuration
 version 1, root-contract version 1, specification version 1, TODO-queue
-version 2, and documentation version 1. The generated configuration selects
+version 1, and implementation-record version 1. The generated configuration selects
 `src` as component root, default discovery limits, automatic VCS selection,
 and an LLM provider value of `none`.
 
@@ -95,8 +95,8 @@ The `doctor` report starts with project path and state, then reports artifacts
 in the fixed order above, VCS information, and guidance. It does not repair or
 migrate files. For non-current roots VCS inspection is explicitly not checked.
 Text root artifacts other than configuration have a 1 MiB byte limit and must
-be UTF-8. Documentation is valid only when its first line is exactly a
-positive supported `kvist-documentation-version` marker and it contains this
+be UTF-8. An implementation record is valid only when its first line is exactly a
+positive supported `kvist-implementation-record-version` marker and it contains this
 document's title as a complete line.
 
 ## Configuration, discovery, tree, and VCS inspection
@@ -112,7 +112,7 @@ Optional `[discovery]` values are positive integers. Their defaults are
 an omitted table or value), `git`, or `jj`.
 
 Discovery always represents the component root and represents a descendant
-only when at least one of `SPEC.md`, `TODOS.yaml`, or `DOCS.md` exists there.
+only when at least one of `SPEC.md`, `TODOS.yaml`, or `IMPL.md` exists there.
 A component is complete only when all three are regular files. Missing,
 directory, symbolic-link, and other invalid artifact entries are distinguished.
 Traversal is lexical and deterministic, ignores directories named `.git`,
@@ -143,7 +143,7 @@ JSON has these top-level keys in order: `format_version`, `project_path`,
 `project_state`, `component_root`, `components`, and `discovery_error`. A
 component object has `path`, `state`, `artifacts`, and
 `revalidation_causes` keys in order; its artifact array is ordered `SPEC.md`,
-`TODOS.yaml`, `DOCS.md`, and each item has `path` then `state`. A current root
+`TODOS.yaml`, `IMPL.md`, and each item has `path` then `state`. A current root
 uses the configured component root and lexical, bounded discovery. If
 discovery fails, the report has no component records and carries the error;
 the already determined root state is retained. A root that is not current has
@@ -151,9 +151,9 @@ no component root or component records. Status omits root-artifact, VCS, and
 guidance details from its own output, although its root inspection invokes the
 existing read-only VCS inspection when the root is current.
 
-Every discovered component has `SPEC.md`, `TODOS.yaml`, and `DOCS.md` entries
+Every discovered component has `SPEC.md`, `TODOS.yaml`, and `IMPL.md` entries
 in that order. Each must be a regular non-link UTF-8 file of at most 1 MiB.
-Specification, queue, and documentation content use the corresponding
+Specification, queue, and implementation-record content use the corresponding
 existing validators. Component state precedence is
 `unsupported-version`, `invalid`, `missing`, `stale`, `blocked`, then
 `current`. A topology-inconsistent queue parent, or an unreadable immediate

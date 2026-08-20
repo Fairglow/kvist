@@ -14,8 +14,9 @@ use sha2::{Digest, Sha256};
 use crate::{
     KvistError, Result,
     artifacts::{
-        CONFIGURATION_VERSION, DOCUMENTATION_VERSION, ROOT_CONTRACT_VERSION, SPECIFICATION_VERSION,
-        TODO_QUEUE_VERSION,
+        CONFIGURATION_VERSION, IMPLEMENTATION_RECORD_HEADING, IMPLEMENTATION_RECORD_VERSION,
+        IMPLEMENTATION_RECORD_VERSION_MARKER, ROOT_CONTRACT_VERSION,
+        ROOT_IMPLEMENTATION_RECORD_PATH, SPECIFICATION_VERSION, TODO_QUEUE_VERSION,
     },
     config,
     discovery::{self, ComponentArtifact},
@@ -31,7 +32,7 @@ pub const REQUIRED_ROOT_ARTIFACT_PATHS: [&str; 5] = [
     "ROOT_CONTRACT.md",
     "src/SPEC.md",
     "src/TODOS.yaml",
-    "src/DOCS.md",
+    ROOT_IMPLEMENTATION_RECORD_PATH,
 ];
 
 const ARTIFACTS: [Artifact; 5] = [
@@ -53,11 +54,11 @@ const ARTIFACTS: [Artifact; 5] = [
     },
     Artifact {
         path: REQUIRED_ROOT_ARTIFACT_PATHS[4],
-        kind: ArtifactKind::Documentation,
+        kind: ArtifactKind::ImplementationRecord,
     },
 ];
 
-/// Maximum supported size for root contract, TODO queue, and documentation.
+/// Maximum supported size for root contract, TODO queue, and implementation records.
 pub const MAX_ROOT_TEXT_ARTIFACT_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Clone, Copy)]
@@ -72,7 +73,7 @@ enum ArtifactKind {
     RootContract,
     Specification,
     TodoQueue,
-    Documentation,
+    ImplementationRecord,
 }
 
 /// The safe Phase 1 state of a project root.
@@ -237,7 +238,7 @@ pub struct ComponentInspection {
     pub path: PathBuf,
     /// Aggregate state with stable precedence.
     pub state: ComponentState,
-    /// Adjacent artifact states in specification, queue, documentation order.
+    /// Adjacent artifact states in specification, queue, implementation-record order.
     pub artifacts: Vec<ComponentArtifactInspection>,
     /// Recorded and freshly derived evidence explaining stale state.
     pub revalidation_causes: Vec<RevalidationCause>,
@@ -388,12 +389,14 @@ fn inspect_component(
     let component_dir = component_root.join(&component.relative_path);
     let specification_path = component_dir.join(ComponentArtifact::Specification.filename());
     let queue_path = component_dir.join(ComponentArtifact::TaskQueue.filename());
-    let documentation_path = component_dir.join(ComponentArtifact::Documentation.filename());
+    let implementation_record_path =
+        component_dir.join(ComponentArtifact::ImplementationRecord.filename());
 
     let (specification_state, specification_contents) =
         inspect_component_specification(&specification_path)?;
     let (queue_state, queue) = inspect_component_queue(&queue_path)?;
-    let documentation_state = inspect_component_documentation(&documentation_path)?;
+    let implementation_record_state =
+        inspect_component_implementation_record(&implementation_record_path)?;
     let artifacts = vec![
         ComponentArtifactInspection {
             path: ComponentArtifact::Specification.filename(),
@@ -404,8 +407,8 @@ fn inspect_component(
             state: queue_state,
         },
         ComponentArtifactInspection {
-            path: ComponentArtifact::Documentation.filename(),
-            state: documentation_state,
+            path: ComponentArtifact::ImplementationRecord.filename(),
+            state: implementation_record_state,
         },
     ];
 
@@ -574,15 +577,15 @@ fn inspect_component_queue(path: &Path) -> Result<(ComponentArtifactState, Optio
     }
 }
 
-fn inspect_component_documentation(path: &Path) -> Result<ComponentArtifactState> {
+fn inspect_component_implementation_record(path: &Path) -> Result<ComponentArtifactState> {
     let Some(contents) = read_component_text_artifact(path)? else {
         return component_path_state(path);
     };
     Ok(markdown_component_state(
         &contents,
-        "kvist-documentation-version",
-        DOCUMENTATION_VERSION,
-        "# Root Component Compliance Documentation",
+        IMPLEMENTATION_RECORD_VERSION_MARKER,
+        IMPLEMENTATION_RECORD_VERSION,
+        IMPLEMENTATION_RECORD_HEADING,
     ))
 }
 
@@ -717,7 +720,7 @@ fn inspect_vcs(project_dir: &Path, state: ProjectState) -> VcsInspection {
         for artifact in [
             ComponentArtifact::Specification,
             ComponentArtifact::TaskQueue,
-            ComponentArtifact::Documentation,
+            ComponentArtifact::ImplementationRecord,
         ] {
             required_paths.push(component_dir.join(artifact.filename()));
         }
@@ -882,12 +885,12 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
             }
         }
         ArtifactKind::TodoQueue => validate_todo_queue(artifact.path, &path),
-        ArtifactKind::Documentation => validate_markdown_version(
+        ArtifactKind::ImplementationRecord => validate_markdown_version(
             artifact.path,
             &path,
-            "kvist-documentation-version",
-            DOCUMENTATION_VERSION,
-            "# Root Component Compliance Documentation",
+            IMPLEMENTATION_RECORD_VERSION_MARKER,
+            IMPLEMENTATION_RECORD_VERSION,
+            IMPLEMENTATION_RECORD_HEADING,
         ),
     }
 }
@@ -1083,8 +1086,8 @@ mod tests {
         assert_eq!(CONFIGURATION_VERSION, 1);
         assert_eq!(ROOT_CONTRACT_VERSION, 1);
         assert_eq!(SPECIFICATION_VERSION, 1);
-        assert_eq!(TODO_QUEUE_VERSION, 2);
-        assert_eq!(DOCUMENTATION_VERSION, 1);
+        assert_eq!(TODO_QUEUE_VERSION, 1);
+        assert_eq!(IMPLEMENTATION_RECORD_VERSION, 1);
     }
 
     #[test]

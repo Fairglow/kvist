@@ -4,7 +4,7 @@ Kvist is a local, filesystem-native tool for human-directed, spec-driven
 development. Its current interface is command-line based; future graphical and
 editor interfaces operate on the same durable project artifacts. A component
 directory contains a layered `SPEC.md`, a versioned `TODOS.yaml`, observed
-implementation record `DOCS.md`, and source. The architecture is recursive: a
+implementation record `IMPL.md`, and source. The architecture is recursive: a
 component works from its own contract, its immediate parent contract, and
 `ROOT_CONTRACT.md`, not from peer implementations.
 
@@ -28,14 +28,14 @@ today and labels the required but not-yet-automated stages explicitly.
    order with only the permitted component context. It can run uninterrupted
    and unsupervised; the human may choose to observe or run one task at a time,
    but does not need to intervene between tasks.
-4. A clean-slate documenter derives `DOCS.md` from code without the
+4. A clean-slate documenter derives `IMPL.md` from code without the
    specification. A separate, source-blind reviewer compares it with the
    specification. The architect arbitrates every discrepancy explicitly.
 
 The human remains the approval authority at every stage. Kvist validates
 specifications and queues, persists legal task transitions, and can invoke a
 configured external agent for one task. It does **not** yet automate the
-architect or designer agent roles, the interview, clean-slate documentation,
+architect or designer agent roles, the interview, clean-slate implementation-record creation,
 source-blind review, or arbitration loop. Do not claim a component is
 compliant until the independent review is actually recorded.
 
@@ -136,12 +136,12 @@ security backlog in [`TODO.md`](TODO.md) is complete.
 
 ## Documentation and review discipline
 
-`DOCS.md` is an observed implementation record, not user-facing documentation.
+`IMPL.md` is an observed implementation record, not user-facing documentation.
 Its documenter must examine source and tests without reading `SPEC.md` or the
-existing `DOCS.md`. The source-blind reviewer then examines only the
-specification, newly derived documentation, immediate parent contract, and
+existing `IMPL.md`. The source-blind reviewer then examines only the
+specification, newly derived implementation record, immediate parent contract, and
 root contract. Record compliance, mismatches, deferred work, and arbitration
-in version control; never edit the specification or observed documentation to
+in version control; never edit the specification or observed implementation record to
 hide a disagreement.
 
 The reusable procedure is in [`REVIEW_RUNBOOK.md`](REVIEW_RUNBOOK.md).

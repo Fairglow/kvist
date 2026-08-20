@@ -32,7 +32,7 @@ fn cli_renders_a_stable_ascii_tree_with_component_statuses() {
         &[
             ComponentArtifact::Specification,
             ComponentArtifact::TaskQueue,
-            ComponentArtifact::Documentation,
+            ComponentArtifact::ImplementationRecord,
         ],
     );
     create_component(
@@ -49,7 +49,7 @@ fn cli_renders_a_stable_ascii_tree_with_component_statuses() {
         concat!(
             "component root: src\n",
             ". [complete]\n",
-            "  alpha [incomplete: missing TODOS.yaml; missing DOCS.md]\n",
+            "  alpha [incomplete: missing TODOS.yaml; missing IMPL.md]\n",
             "  zebra [complete]\n",
         )
     );
@@ -65,7 +65,7 @@ fn tree_reports_invalid_component_artifacts() {
 
     let output = render_project(project.path()).expect("render tree");
 
-    assert!(output.contains("broken [invalid: TODOS.yaml is a directory; missing DOCS.md]"));
+    assert!(output.contains("broken [invalid: TODOS.yaml is a directory; missing IMPL.md]"));
 }
 
 #[test]
@@ -82,7 +82,7 @@ fn tree_uses_the_configured_component_root() {
         &[
             ComponentArtifact::Specification,
             ComponentArtifact::TaskQueue,
-            ComponentArtifact::Documentation,
+            ComponentArtifact::ImplementationRecord,
         ],
     );
 

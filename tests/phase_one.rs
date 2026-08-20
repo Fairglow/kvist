@@ -38,7 +38,7 @@ fn phase_one_cli_workflow_initializes_generates_validates_and_renders() {
     assert!(tree.stderr.is_empty());
     assert!(
         String::from_utf8_lossy(&tree.stdout)
-            .contains("network [incomplete: missing TODOS.yaml; missing DOCS.md]")
+            .contains("network [incomplete: missing TODOS.yaml; missing IMPL.md]")
     );
 
     assert!(Path::new(specification_path).is_file());

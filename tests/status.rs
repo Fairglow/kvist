@@ -24,7 +24,7 @@ fn valid_queue(specification_revision: &str, parent_revision: Option<&str>, task
         None => "  parent_specification: null\n".to_owned(),
     };
     format!(
-        "schema_version: 2\ncomponent:\n  specification_revision: {specification_revision}\n{parent}  revalidation:\n    state: current\n    checked_at: 2026-08-16T12:19:23Z\n    stale_since: null\n    causes: []\ntasks:{tasks}\n"
+        "schema_version: 1\ncomponent:\n  specification_revision: {specification_revision}\n{parent}  revalidation:\n    state: current\n    checked_at: 2026-08-16T12:19:23Z\n    stale_since: null\n    causes: []\ntasks:{tasks}\n"
     )
 }
 
@@ -37,8 +37,8 @@ fn copy_valid_component_artifacts(project: &TempDir, relative_path: &str) {
     )
     .expect("copy spec");
     fs::copy(
-        project.path().join("src/DOCS.md"),
-        component.join("DOCS.md"),
+        project.path().join("src/IMPL.md"),
+        component.join("IMPL.md"),
     )
     .expect("copy docs");
 }
@@ -59,7 +59,7 @@ fn status_reports_a_current_initialized_project_in_stable_text_and_json() {
     assert_eq!(
         String::from_utf8(text.stdout).expect("UTF-8 text output"),
         format!(
-            "status-format-version: 1\nproject: {project_path_escaped}\nproject-state: current\ncomponent-root: src\ncomponent: . state: current\n  SPEC.md: valid\n  TODOS.yaml: valid\n  DOCS.md: valid\n  revalidation-causes: []\n"
+            "status-format-version: 1\nproject: {project_path_escaped}\nproject-state: current\ncomponent-root: src\ncomponent: . state: current\n  SPEC.md: valid\n  TODOS.yaml: valid\n  IMPL.md: valid\n  revalidation-causes: []\n"
         )
     );
 
@@ -74,7 +74,7 @@ fn status_reports_a_current_initialized_project_in_stable_text_and_json() {
     let output = String::from_utf8(json.stdout).expect("UTF-8 JSON output");
     assert!(output.starts_with("{\"format_version\":1,\"project_path\":"));
     assert!(output.contains(
-        "\"project_state\":\"current\",\"component_root\":\"src\",\"components\":[{\"path\":\".\",\"state\":\"current\",\"artifacts\":[{\"path\":\"SPEC.md\",\"state\":\"valid\"},{\"path\":\"TODOS.yaml\",\"state\":\"valid\"},{\"path\":\"DOCS.md\",\"state\":\"valid\"}],\"revalidation_causes\":[]}],\"discovery_error\":null}"
+        "\"project_state\":\"current\",\"component_root\":\"src\",\"components\":[{\"path\":\".\",\"state\":\"current\",\"artifacts\":[{\"path\":\"SPEC.md\",\"state\":\"valid\"},{\"path\":\"TODOS.yaml\",\"state\":\"valid\"},{\"path\":\"IMPL.md\",\"state\":\"valid\"}],\"revalidation_causes\":[]}],\"discovery_error\":null}"
     ));
 }
 
@@ -158,7 +158,7 @@ fn status_surfaces_component_missing_unsupported_stale_and_blocked_states_withou
         "cause: component-specification-revision-changed SPEC.md expected sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     ));
     assert!(stdout.contains(
-        "component: parent-stale state: stale\n  SPEC.md: valid\n  TODOS.yaml: valid\n  DOCS.md: valid\n  cause: parent-specification-revision-changed ../SPEC.md expected sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        "component: parent-stale state: stale\n  SPEC.md: valid\n  TODOS.yaml: valid\n  IMPL.md: valid\n  cause: parent-specification-revision-changed ../SPEC.md expected sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     ));
     assert!(stdout.contains("component: unsupported state: unsupported-version"));
     assert_eq!(

@@ -43,17 +43,17 @@ repository-root/
 └── src/
     ├── SPEC.md                 <-- Root component specification
     ├── TODOS.yaml              <-- Execution task queue & progress tracker
-    ├── DOCS.md                 <-- Reverse-engineered compliance documentation
+    ├── IMPL.md                 <-- Reverse-engineered implementation record
     ├── lib.rs                  <-- Public interface & module root
     └── network/                <-- Sub-component directory
         ├── SPEC.md             <-- Sub-component specification
         ├── TODOS.yaml          <-- Sub-component task queue
-        ├── DOCS.md             <-- Sub-component compliance doc
+        ├── IMPL.md             <-- Sub-component implementation record
         ├── mod.rs              <-- Component interface
         └── protocol/           <-- Child sub-component (recursive)
             ├── SPEC.md
             ├── TODOS.yaml
-            ├── DOCS.md
+            ├── IMPL.md
             └── frame.rs
 ```
 
@@ -90,8 +90,8 @@ Every node in the component tree progresses through a structured 4-stage recursi
                                     ▼
 ┌────────────────────────────────────────────────────────────────────────┐
 │ Stage 4: TRIPLE-BLIND COMPLIANCE REVIEW                                │
-│ • Clean-Slate Agent extracts DOCS.md -> Compliance Agent compares      │
-│   SPEC.md against DOCS.md                                              │
+│ • Clean-Slate Agent extracts IMPL.md -> Compliance Agent compares      │
+│   SPEC.md against IMPL.md                                              │
 └───────────────────────────────────┬────────────────────────────────────┘
 ```
 
@@ -129,14 +129,14 @@ Implementation agents write executable code alongside language-native docstrings
 ### Stage 4: Triple-Blind Compliance Review
 To eliminate "hallucinated compliance":
 1. **Agent A (Implementor):** Writes code based on `SPEC.md`.
-2. **Agent B (Clean-Slate Documenter):** Receives **only** the generated code (no access to `SPEC.md`) and reverse-engineers `DOCS.md`.
-3. **Agent C (Compliance Checker):** Compares `SPEC.md` against `DOCS.md` (no access to raw source code). If discrepancies occur, an arbitration flag is raised.
+2. **Agent B (Clean-Slate Documenter):** Receives **only** the generated code (no access to `SPEC.md`) and reverse-engineers `IMPL.md`.
+3. **Agent C (Compliance Checker):** Compares `SPEC.md` against `IMPL.md` (no access to raw source code). If discrepancies occur, an arbitration flag is raised.
 
 ---
 
 ## 4. Conflict Arbitration Workflow
 
-When the Compliance Agent detects a mismatch between `SPEC.md` and the reverse-engineered `DOCS.md`, KVIST presents an interactive CLI/Web arbitration prompt:
+When the Compliance Agent detects a mismatch between `SPEC.md` and the reverse-engineered `IMPL.md`, KVIST presents an interactive CLI/Web arbitration prompt:
 
 ```text
 ⚠️ SPEC COMPLIANCE MISMATCH DETECTED in [src/network/protocol]
