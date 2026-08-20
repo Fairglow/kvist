@@ -114,8 +114,8 @@ these fields:
 
 | Field | Value | Tool use |
 | --- | --- | --- |
-| `specification_revision` | `sha256:` followed by 64 lowercase hexadecimal digits | The digest of this component's exact UTF-8 `SPEC.md` bytes when its queue was reviewed. P2-02 inspection will compare it with the current file to detect a local specification change. |
-| `parent_specification` | `null` for the root component, otherwise a mapping with `path: "../SPEC.md"` and `revision` | Limits dependency tracking to the immediate parent. Component hierarchy rules make that parent exactly one directory above the child, so the path is always `../SPEC.md`; its revision is the recorded SHA-256 digest. P2-02 inspection will compare it with the current parent file to detect the ripple effect without loading peer components. |
+| `specification_revision` | `sha256:` followed by 64 lowercase hexadecimal digits | The digest of this component's exact UTF-8 `SPEC.md` bytes when its queue was reviewed. `status` compares it with the current file to detect a local specification change. |
+| `parent_specification` | `null` for the root component, otherwise a mapping with `path: "../SPEC.md"` and `revision` | Limits dependency tracking to the immediate parent. Component hierarchy rules make that parent exactly one directory above the child, so the path is always `../SPEC.md`; its revision is the recorded SHA-256 digest. `status` compares it with the current parent file to detect the ripple effect without loading peer components. |
 | `revalidation` | mapping described below | Records whether the plan is safe to select and the evidence needed to explain or resolve stale state. |
 
 `revalidation` has `state`, `checked_at`, `stale_since`, and `causes`.
@@ -176,7 +176,7 @@ validates this kind-based ordering. Requirement references and explicit
 dependencies, rather than unstated grouping, are the traceability evidence
 that the chain addresses the same component change.
 
-P2-02 inspection will hash the target component's `SPEC.md` and, for a child,
+`status` hashes the target component's `SPEC.md` and, for a child,
 only its immediate parent's `SPEC.md`. A digest mismatch will create the
 corresponding revalidation cause and make the queue stale. The later atomic
 state-update command will persist that derived result; it will never silently

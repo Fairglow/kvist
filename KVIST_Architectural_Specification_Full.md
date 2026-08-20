@@ -4,7 +4,12 @@
 **Project Name:** KVIST (`kvist`)  
 **Target Engine Implementation:** Rust  
 **License:** Business Source License (BSL 1.1) / Dual-licensed for non-commercial open-use  
-**Version:** 0.1.0-draft  
+**Version:** 0.1.0
+
+**Status:** This is the authoritative product direction, not a claim that every
+described workflow is already automated. [`TODO.md`](TODO.md) tracks delivery
+status and execution-policy gaps; [`COMPLIANCE_REVIEW.md`](COMPLIANCE_REVIEW.md)
+records independent review evidence and discrepancies.
 
 ---
 
@@ -96,10 +101,23 @@ To allow reading at both high-level executive summaries and deep technical detai
 * **Layer 2 (Architectural Guarantees):** Performance bounds, concurrency invariants, memory constraints, and dependency policies.
 * **Layer 3 (Detailed Strategy & Algorithms):** Concrete algorithms, state machine transitions, and error-handling paths.
 
-*Interactive "Interview" Mode:* To eliminate specification friction, KVIST provides an interactive terminal mode where the AI asks structured questions based on the component type to help the user draft the initial spec.
+The human architect begins with a project-level vision, then iteratively
+decomposes it into one or more hierarchical components. The architect may
+draft specifications manually, collaborate with an agent, or ask an architect
+agent to propose the decomposition and component contracts. The human reviews,
+refines, and explicitly approves the resulting specification before its queue
+is designed.
+
+*Planned interactive "Interview" Mode:* To eliminate specification friction, a
+future terminal mode will ask structured questions based on the component type
+to help the architect and architect agent draft the initial spec. It is not a
+current command.
 
 ### Stage 2: Actionable TODO Queue (`TODOS.yaml`)
-Before implementation begins, KVIST analyzes the spec for logical gaps and breaks it into atomic tasks. Every component TODO list must include:
+After the human approves a component specification, a designer agent analyzes
+it for logical gaps and drafts its specialized atomic task queue. The human may
+review and improve the queue; designer and human iterate until the human
+accepts it. Every component TODO list must include:
 1. `write_tests`: Implement failing test cases corresponding to spec requirements.
 2. `implement_code`: Fulfill code logic until all tests pass.
 3. `security_audit`: Validate memory safety, boundaries, and thread-safety invariants.
@@ -151,7 +169,7 @@ Building KVIST in Rust delivers single-binary distribution, zero runtime depende
 
 | Risk / Edge Case | Architectural Solution in KVIST |
 | :--- | :--- |
-| **The "Ripple Effect" (Upstream Spec Changes)** | Dependency Graph: Modifying a parent spec automatically marks child specs as `STALE_REVALIDATION_REQUIRED` in `TODOS.yaml`. |
+| **The "Ripple Effect" (Upstream Spec Changes)** | `status` compares component and immediate-parent specification revisions and reports attributable stale evidence. Persisting revalidation remains an explicit human-reviewed write. |
 | **Global Architectural Drift** | Root Invariants: Every sub-component agent prompt automatically prepends `ROOT_CONTRACT.md`. |
 | **Context Window Overhead** | Strict Context Slicing: Agents only receive local files, parent contracts, and `ROOT_CONTRACT.md`. Peer code is excluded. |
 | **Specification Friction** | Template-driven interview mode where the AI asks guided questions to draft initial specs. |
@@ -170,20 +188,34 @@ Building KVIST in Rust delivers single-binary distribution, zero runtime depende
 
 ## 8. Implementation Roadmap (PoC in Rust)
 
-### Phase 1: Core CLI Engine (`kvist-cli`)
-- [ ] Initialize `kvist.toml` and `ROOT_CONTRACT.md` bootstrapping logic (`kvist init`).
-- [ ] Implement directory scanner and terminal tree visualizer (`kvist tree`).
-- [ ] Build layered `SPEC.md` parser and generator templates.
+### Phase 1: Core CLI Engine (`kvist-cli`) — completed
+- [x] Initialize `kvist.toml` and `ROOT_CONTRACT.md` bootstrapping logic
+  (`kvist init`).
+- [x] Implement directory scanning and terminal tree rendering (`kvist tree`).
+- [x] Build layered `SPEC.md` parser and generator templates.
 
-### Phase 2: Task Execution & LLM Runner
-- [ ] Implement `TODOS.yaml` schema with `serde_yaml`.
-- [ ] Build process runner for invoking external LLM CLIs (`claude`, `gemini`, `ollama`).
-- [ ] Implement atomic task execution loop with test verification.
+### Phase 2: Task Workflow and Controlled Execution — in progress
+- [x] Implement the versioned `TODOS.yaml` schema, deterministic
+  serialization, status inspection, revalidation, and atomic task transitions.
+- [x] Implement explicit local external-agent invocation and approved,
+  bounded test-command verification.
+- [ ] Complete the missing execution trust boundary: sandbox all executed
+  programs, bound agent resources, approve the resolved execution
+  configuration, and independently review the completed Phase 2 surface.
 
-### Phase 3: Triple-Blind Verification & Embedded Web UI
-- [ ] Implement Clean-Slate Documenter and Compliance Agent pipelines.
-- [ ] Embed `axum` web server and Monaco-based visualizer into the single Rust binary (`include_str!`/`rust-embed`).
-- [ ] Add `kvist serve` command for browser-based interactive project steering.
+### Phase 3: Independent compliance automation — planned
+- [ ] Implement clean-slate documenter and source-blind compliance-agent
+  pipelines.
+- [ ] Implement explicit human arbitration records and task-loop integration
+  without allowing an implementer to certify its own work.
+- [ ] Define reusable architecture, task-generation, execution, and review
+  skills that preserve the component context boundary.
+
+### Phase 4: Deferred visual and editor ecosystem — planned
+- [ ] Embed a local web view and component-state API only after the terminal
+  execution boundary is safe and independently reviewed.
+- [ ] Add a browser UI and editor/LSP integrations without making a daemon,
+  credentials, telemetry, or cloud service a requirement for core commands.
 
 ---
 *KVIST — Structured design for autonomous agents.*

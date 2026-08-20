@@ -181,7 +181,7 @@ its separate trusted-workspace boundary before running user-controlled work.
 | Compliant | `status` reports root and lexical component state without writing durable workflow data; version-1 text and JSON report shapes, ordering, output escaping, and exit behavior are documented. | None. |
 | Compliant | Valid component queues are compared only with their own and immediate parent's valid specification bytes. Missing, invalid, unsupported-version, stale, blocked, and current precedence is explicit. | None. |
 | Compliant | The initial text/JSON report-parity gap was resolved by adding `component_root` to the version-1 JSON object and its fixture. | None. |
-| Deferred | The source-blind pass cannot establish test fixture execution, and task execution/persistence does not exist. | Retain test-gate evidence separately; P2-03 owns executor integration. |
+| Deferred at the review boundary | The source-blind pass could not establish test fixture execution, and task execution/persistence had not been implemented. | Retain test-gate evidence separately; P2-03 owned executor integration. |
 
 ## Phase 2 P2-03 task workflow review
 
@@ -194,4 +194,25 @@ and runbook only.
 | --- | --- | --- |
 | Compliant | Ready-task selection, legal transitions, VCS/component gates, locking, prepared/committed records, and atomic replacement are consistently documented. | None. |
 | Compliant | The audit remediated text injection, attempt-directory durability on supported platforms, and recovery fencing for trailing prepared records. | None. |
-| Deferred | Provider/test execution and explicit prepared-record recovery remain later Phase 2 work. | P2-04 through P2-06 own those boundaries. |
+| Deferred at the review boundary | Provider/test execution and explicit prepared-record recovery remained later Phase 2 work. | P2-04 through P2-06 owned those boundaries. |
+
+## Phase 2 execution-policy discrepancy
+
+**Scope:** Documentation reconciliation after `task run`, agent configuration,
+test-policy approval, task logging, and `spec accept` were added.
+
+This is an explicit discrepancy record, not a replacement for the required
+clean-slate documentation pass and source-blind compliance comparison. The
+root specification's execution-policy decision gates require an approved
+trusted-workspace, subprocess, environment, credential, timeout, cancellation,
+output-limit, and durable-result policy before provider or repository-defined
+test execution. The current implementation launches configured agents and
+approved test commands directly on the host before those requirements have
+been satisfied.
+
+| Classification | Finding | Arbitration required |
+| --- | --- | --- |
+| Mismatch | `task run` executes host agent programs and implementation test commands. Agent execution has no sandbox, timeout, output cap, or effective-agent-configuration approval. | Preserve the specification's gate. P2-05b through P2-05d must either enforce the gate before execution or the architect must explicitly revise the product policy. |
+| Mismatch | The former README, GUIDE, and observed root documentation described deferred or automated behavior inconsistently with the implementation. | The public documents now distinguish observed commands from planned automation and state the host-execution limitation. A clean-slate documenter must independently replace or confirm the observed `src/DOCS.md` account. |
+| Deferred | The intended clean-slate documenter, source-blind reviewer, arbitration integration, and automated task-generation/interview flows are absent. | Phase 3 owns automation. Until then, follow `REVIEW_RUNBOOK.md` manually and retain review evidence. |
+| Deferred | The Phase 2 end-to-end security and compliance review has not yet covered the full agent/test execution surface. | P2-07 is the release gate for this surface; do not represent task execution as production-safe beforehand. |

@@ -23,8 +23,8 @@ Below is the record of completed Phase 1, Phase 2, and UX milestones.
 - **P2-01 — Specify independent TODO queue and dependency graph schemas** (Version-2 parsing, semantic validation, deterministic serialization, root-inspection integration, and contract tests are complete. Compliance review documented in `COMPLIANCE_REVIEW.md`).
 - **P2-02 — Implement project inspection and machine-readable status** (`kvist status` renders deterministic version-1 text and JSON reports from shared root/component model).
 - **P2-03 — Implement safe task selection and execution state updates** (Task selection and transition contract, lock and attempt-record recovery rules, and integration tests complete).
-- **P2-04 — Define User-Provided Agent Invocation Contract** (Implemented under `src/config.rs` and `src/agent.rs` with persistent loading, override chains, and safe program parameter tokenization).
-- **P2-04b — General CLI-Wrapper Template Engine for External Agents** (Interpolation templates, string substitution without shell injection risks, exit-code mapping, and JSON output parsing).
+- **P2-04 — Implement User-Provided Agent Invocation Mechanics** (Implemented under `src/config.rs` and `src/agent.rs` with configuration precedence, shell-free spawning, log capture, and optional token-record parsing. The safety policy remains incomplete.)
+- **P2-04b — Implement Basic CLI-Wrapper Templates** (The two configured profiles support `{prompt}`, `{context_files}`, and `{target_directory}` through whitespace-delimited, shell-free arguments. This is not a general shell or quoting language.)
 - **P2-05 — Implement test-command verification as an explicit trust boundary** (Configured, versioned, cryptographic SHA-256 policy approval with `kvist task approve-policy`, bounded execution, and result-persistence).
 - **P2-06 — Implement the atomic task execution loop** (`kvist task run <COMPONENT_DIR> [TASK_ID]` driver, concurrent locks, atomic progress/blocked state transitions).
 - **UX-01 — Implement a Revalidation / Accept CLI Interface** (`kvist spec accept <COMPONENT_DIR>` resolves staleness programmatically, computing SHA-256 and updating revisions).
@@ -48,19 +48,40 @@ This phase focuses on finalizing the security model and trust boundaries before 
   - Record arbitration items explicitly; do not silently rewrite requirements or observed behavior.
 - **Verification:** independent review artifacts and an end-to-end Phase 2 fixture.
 
-### TODO P2-05b — Implement Sandboxing for Test Executions
+### TODO P2-05b — Sandbox all external execution
 
-- **Context:** Running repository-defined test commands directly on the host machine is a severe security vulnerability against malicious LLM-generated code.
+- **Context:** `task run` launches both configured agents and repository-defined
+  test commands directly on the host. This violates the intended controlled
+  execution boundary for untrusted or machine-generated repository content.
 - **Acceptance criteria:**
-  - Implement secure sandboxing boundaries for test command executions (e.g., via Docker, gVisor, or WASM).
-  - Ensure only the local directory context is mounted and network access is restrictively controlled.
+  - Define and implement an opt-in, portable sandbox boundary for both agent
+    and test subprocesses, with explicit mount, network, environment, and
+    credential policy.
+  - Refuse `task run` when the required isolation is unavailable; do not
+    silently fall back to host execution.
+  - Ensure only the declared component context is available by default.
 
 ### TODO P2-05c — Expand Cryptographic Approval to Cover Agent Execution Command Templates (Security Gap)
 
-- **Context:** While the test-command policy (`[test_policy]`) is cryptographically protected by `kvist task approve-policy`, the external agent command template (`[agent]`) is not. A malicious pull request could alter the agent's runner template to execute arbitrary shell payloads during `kvist task run` without triggering policy warnings.
+- **Context:** While the test-command policy (`[test_policy]`) is
+  cryptographically protected by `kvist task approve-policy`, the resolved
+  external-agent configuration is not. A malicious project, local override, or
+  changed global configuration can alter what `kvist task run` executes
+  without triggering policy warnings.
 - **Acceptance criteria:**
-  - Expand the cryptographic verification and approval boundary to cover BOTH the `[test_policy]` and `[agent]` configuration blocks.
-  - Reject task execution if any part of the execution-sensitive config has changed since the last `kvist task approve-policy`.
+  - Expand the cryptographic verification and approval boundary to cover the
+    effective agent configuration, its source path, and `[test_policy]`.
+  - Reject task execution if any execution-sensitive configuration has changed
+    since explicit approval.
+
+### TODO P2-05d — Bound agent subprocess resources
+
+- **Context:** Test execution has a configured timeout and output cap, but
+  agent execution can run indefinitely and write unbounded logs.
+- **Acceptance criteria:**
+  - Define per-profile timeout, cancellation, and combined output limits.
+  - Persist bounded, redacted execution evidence and block a task on a limit
+    breach without losing the durable transition record.
 
 ---
 
@@ -70,7 +91,8 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
 
 ### TODO UX-02 — Add Missing Status Filters
 
-- **Context:** `TASKS.md` requires listing only specifications, implementations, and blocked/unfinished work, but `kvist status` currently outputs the entire tree state unconditionally.
+- **Context:** `TODO.md` calls for focused inspection views, but `kvist status`
+  currently outputs the entire tree state unconditionally.
 - **Acceptance criteria:**
   - Add `--only-specs` to list components and validate their `SPEC.md` without queue details.
   - Add `--only-impls` to list implementation statuses across components.
@@ -93,10 +115,13 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
 
 ### TODO UX-06 — Command-Line Actionable Guidance & Next-Step Prompts
 
-- **Context:** The user must always feel in control and understand the process. They must never be left in the dark about what state the system is in or what needs to be done next.
+- **Context:** Users need clear next actions without compromising deterministic,
+  script-friendly command output.
 - **Acceptance criteria:**
-  - Ensure all terminal output sequences end with a clear, actionable instruction for what command the user should run next (e.g., if status is stale, prompt "Run 'kvist spec accept <COMPONENT_DIR>' to revalidate").
-  - In `kvist task run`, output status markers that explain what the agent did, what files were edited, and suggest next verification runs.
+  - Provide actionable guidance in human-oriented failure and mutation results;
+    keep versioned machine-readable formats free of unsolicited prose.
+  - In `kvist task run`, report the durable task outcome, execution-log path,
+    and verification result without inferring what files an agent edited.
 
 ### TODO UX-07 — Uniform Structured JSON Output Support for All Commands
 
@@ -120,13 +145,18 @@ The KVIST engine heavily relies on predictable, high-quality outputs from AI age
 
 ### TODO P3-01 — Component Hierarchy & Feasibility Skills
 
-- **Hierarchy Creation Skill:** Prompting guidelines to recursively break down a complex system into self-contained sub-components.
+- **Architect Agent Skill:** Prompting guidelines to turn a human project vision
+  into an iteratively reviewed hierarchy of self-contained components and
+  layered specifications.
 - **Specification Generation & Review Skill:** Prompting guidelines for the interactive "Interview" mode to define purpose, constraints, and algorithms without writing code.
 - **Feasibility Analysis Skill:** A skill for reviewing a draft `SPEC.md` for logical gaps, contradictions, or missing edge cases before tasks are generated.
 
 ### TODO P3-02 — Task Generation & TODO Queue Skills
 
-- **Task Breakdown Skill:** Prompting guidelines to convert a validated `SPEC.md` into atomic tasks strictly following the required lifecycle ordering (Test -> Implementation -> Security -> Review).
+- **Designer Agent Skill:** Prompting guidelines to convert a human-approved
+  `SPEC.md` into an iteratively reviewed specialized queue strictly following
+  the required lifecycle ordering (Test -> Implementation -> Security ->
+  Review).
 
 ### TODO P3-03 — Execution Skills (Testing & Implementation)
 

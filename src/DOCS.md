@@ -25,22 +25,28 @@ The available commands are:
 * `kvist task next COMPONENT_DIR` selects one ready task without writing.
 * `kvist task transition COMPONENT_DIR TASK_ID STATUS [--reason REASON]`
   persists one audited task-state transition.
+* `kvist task run COMPONENT_DIR [TASK_ID] [--stream]` runs the configured
+  external agent for an explicit or first ready task.
+* `kvist task log COMPONENT_DIR TASK_ID` prints the most recent task log.
+* `kvist task approve-policy [PROJECT_DIR]` stores the current test-policy
+  hash in the project's `.kvist` directory.
 * `kvist tree [PROJECT_DIR]` loads configuration, discovers components, and
   renders a deterministic ASCII tree.
 * `kvist spec new COMPONENT_DIR` creates a new `SPEC.md`.
 * `kvist spec validate SPEC_FILE` validates an existing specification. A valid
   file reports `valid specification: <path>`; an invalid file is a command
   failure with line-aware diagnostics.
+* `kvist spec accept COMPONENT_DIR` updates the selected component queue's
+  recorded specification revisions and clears its stale evidence.
 
 Unknown commands are rejected by the argument parser. `main` owns output and
 exit handling; `kvist::run()` parses process arguments and `cli::execute`
 returns a displayable `CommandOutput` or `KvistError`.
 
-Task commands select and transition existing queue records but do not create
-queues, revise task definitions, revalidate specifications, migrate queues, or
-execute providers/tests. `status` loads queues only as read-only component
-inspection data. Humans otherwise inspect queue content directly in the
-durable YAML file; `doctor` reports only the root queue artifact's validity.
+Task commands do not create queues, revise task definitions, or migrate queues.
+`status` loads queues as read-only component-inspection data. Humans otherwise
+inspect queue content directly in the durable YAML file; `doctor` reports only
+the root queue artifact's validity.
 
 ## Root artifacts and project state
 
@@ -128,8 +134,7 @@ component root, lexical `ComponentInspection` records, and an optional
 discovery error. `init` uses its root state to gate writes, `doctor` displays
 its root diagnostics, and `status` renders its component records. `tree` uses
 the same configuration limits and `discovery::Component` layout model, while
-queue parsing is shared by root and component inspection. No task executor
-exists yet.
+queue parsing is shared by root and component inspection.
 
 `status` renders `status-format-version: 1` text in this order: project path,
 project state, component root or `unavailable`, optional discovery error, then
@@ -289,14 +294,44 @@ directory-synced on Unix; other platforms retain the records without a
 directory-entry durability guarantee. The commands do not invoke providers,
 tests, shells, networks, or task execution.
 
+## Agent execution and test verification
+
+`task run` validates the same current project, component, and complete-VCS
+tracking gates as task transitions. It runs `test` and `implementation` tasks
+through the `developer` profile, and `security-audit` and `compliance-review`
+tasks through the `architect` profile. The selected agent receives the local
+`SPEC.md`, `TODOS.yaml`, `ROOT_CONTRACT.md`, and, for a child component, its
+immediate parent's `SPEC.md`; peer implementation files are not passed as
+explicit context.
+
+Agent templates are split into a program and arguments without a shell. The
+supported substitutions are `{prompt}`, `{context_files}`, and
+`{target_directory}`. Standard output and error are copied to
+`.kvist/logs/TASK_ID_TIMESTAMP.log`; `--stream` also writes them to the
+console. A zero exit status completes the task except that an implementation
+also requires its configured test command to succeed. Agent failures,
+verification failures, and verification-policy failures block the task.
+
+The test policy selects inherited commands by component path, clears the
+environment except for the configured allowlist, applies the configured
+timeout, and captures each output stream up to the configured byte limit.
+`approve-policy` writes the SHA-256 hash of that policy to
+`.kvist/approved_policy.sha256`; an implementation task blocks if the current
+policy is absent or differs from that approval. Verification result records
+are appended to the task's attempt JSONL file.
+
+Agent execution is not sandboxed, has no agent timeout or agent-output cap,
+and does not require approval of the resolved agent template. The implementation
+therefore executes configured programs on the host and is not a safe boundary
+for untrusted repositories.
+
 ## Observable omissions and failure behavior
 
 The implementation contains no general-purpose queue-file loader or reusable
 queue-loader size-bound API; root inspection is the only queue-file reader and
 applies its 1 MiB root-artifact limit before parsing. Status separately reads
-component queues only for inspection. It contains no queue creation,
-specification revalidation, task execution, task-queue migration, or
-general-purpose queue persistence API. Queue validation verifies the shape and
+component queues only for inspection. It contains no queue creation, task-queue migration, or general-purpose queue
+persistence API. Queue validation verifies the shape and
 relationships described above;
 it does not compare recorded revisions with files, resolve requirement
 locators, verify that status history actually followed
@@ -304,8 +339,8 @@ locators, verify that status history actually followed
 require a cause kind and path to correspond.
 
 Failures are reported as typed `KvistError` or `TaskQueueError` values with
-path and operation context where applicable. Filesystem, decoding, parser,
-configuration, traversal, validation, VCS-tool, and safe-path failures do not
+path and operation context where applicable. Filesystem, decoding, parser, configuration, traversal, validation, VCS-tool,
+and safe-path failures do not
 fall back to destructive recovery. Link-like filesystem objects are rejected
-rather than followed. The current executable has no network behavior, daemon,
-or configured LLM invocation.
+rather than followed. The current executable has no network behavior or
+daemon, but it does invoke configured local agent and approved test programs.

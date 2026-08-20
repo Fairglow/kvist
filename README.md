@@ -2,31 +2,46 @@
 
 [![Rust](https://github.com/Fairglow/kvist/actions/workflows/rust.yml/badge.svg)](https://github.com/Fairglow/kvist/actions/workflows/rust.yml)
 
-Kvist is a Rust CLI for a filesystem-native, spec-driven architecture workflow
-for human-directed AI development. Its product architecture is defined in
+Kvist is a filesystem-native, spec-driven architecture tool for human-directed
+AI development. Its current interface is command-line based; graphical and
+editor integrations are planned without changing the durable project model.
+Its product architecture is defined in
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md).
 
-## Initial CLI contract
+## CLI contract
 
-| Command                                            | Contract                                                                                     |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `kvist init [PROJECT_DIR]`                         | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.   |
-| `kvist doctor [PROJECT_DIR]`                       | Read-only inspection of the root artifact state and recovery guidance.                       |
-| `kvist status [PROJECT_DIR] [--format text\|json]` | Read-only versioned inspection of project and component workflow state.                      |
-| `kvist tree [PROJECT_DIR]`                         | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory. |
-| `kvist spec new <COMPONENT_DIR>`                   | Create a layered `SPEC.md` for a component directory.                                        |
-| `kvist spec validate <SPEC_FILE>`                  | Validate a layered `SPEC.md` file.                                                           |
+| Command                                            | Contract                                                                                         |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `kvist init [PROJECT_DIR]`                         | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.       |
+| `kvist doctor [PROJECT_DIR]`                       | Read-only inspection of the root artifact state and recovery guidance.                           |
+| `kvist status [PROJECT_DIR] [--format text\|json]` | Read-only versioned inspection of project and component workflow state.                          |
+| `kvist tree [PROJECT_DIR]`                         | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory.     |
+| `kvist spec new <COMPONENT_DIR>`                   | Create a layered `SPEC.md` for a component directory.                                            |
+| `kvist spec validate <SPEC_FILE>`                  | Validate a layered `SPEC.md` file.                                                               |
+| `kvist spec accept <COMPONENT_DIR>`                | Record reviewed specification revisions and clear recorded stale evidence for one component.      |
+| `kvist task next <COMPONENT_DIR>`                  | Select the first ready task without changing durable state.                                      |
+| `kvist task transition <COMPONENT_DIR> ...`        | Persist one legal task-state transition with append-only attempt evidence.                       |
+| `kvist task run <COMPONENT_DIR> [TASK_ID]`         | Run the configured external agent for one ready task; see the execution boundary below.          |
+| `kvist task log <COMPONENT_DIR> <TASK_ID>`         | Print the most recent raw agent log for a task.                                                  |
+| `kvist task approve-policy [PROJECT_DIR]`          | Record approval of the current repository-defined test-command policy.                           |
 
-The Phase 1 commands are implemented: `kvist init`, `kvist doctor`, `kvist
-tree`, `kvist spec new`, and `kvist spec validate`. Phase 2 also provides the
-read-only `kvist status` inspection surface.
+Delivery is organized into phases. The completed, current, and planned phase
+scope is defined by the implementation roadmap in
+[`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
+and prioritized in [`TODO.md`](TODO.md). The Phase 1 foundation and Phase 2
+queue, status, task-transition, agent-runner, and test-verification mechanics
+are implemented. The independent compliance pipeline and execution-isolation
+controls required for production use are not yet implemented.
 
 ## Configuration and platform policy
 
-The initial configuration is project-local only: `kvist.toml` lives directly in
-the selected project root. Kvist does not read global configuration and does
-not search parent directories for a project. Relative command paths are
-resolved by the operating system from the current working directory.
+Core project configuration is read from `kvist.toml` in the selected project
+root; Kvist does not search parent directories for a project. Agent
+configuration is resolved in this order: `[agent]` in `kvist.toml`,
+`.kvist/config.toml` in the project, the per-user configuration path, then the
+system configuration path. The current implementation creates a default
+per-user agent configuration if none is available. This behavior is limited to
+agent settings; it does not select a project root.
 
 Kvist targets current stable Rust on Linux, macOS, and Windows for x86_64 and
 ARM64 systems. Filesystem behavior must be covered on every supported platform;
@@ -55,14 +70,15 @@ MSRV and stable CI.
 
 ### Filesystem threat model
 
-Phase 1 discovery supports ordinary local checkouts and malformed or untrusted
-**static** workspaces: it bounds reads, reports malformed layouts, and refuses
-link-like paths it directly inspects. It is not a sandbox, does not establish
-canonical containment, and makes no guarantee if another process changes the
-filesystem between metadata checks and use (TOCTOU). Do not treat `init`,
-`doctor`, `status`, `tree`, or specification validation as authorization to run
-repository code. Phase 2 execution requires a separately documented trusted
-workspace policy and explicit execution authorization.
+Read-only discovery supports ordinary local checkouts and malformed or
+untrusted **static** workspaces: it bounds reads, reports malformed layouts,
+and refuses link-like paths it directly inspects. It is not a sandbox, does not
+establish canonical containment, and makes no guarantee if another process
+changes the filesystem between metadata checks and use (TOCTOU). Do not treat
+`init`, `doctor`, `status`, `tree`, or specification validation as
+authorization to run repository code. The execution boundary still requires a
+separately documented trusted-workspace policy and explicit execution
+authorization.
 
 On Unix, symbolic links are link-like; on Windows, all reparse points,
 including junctions and symbolic links, are link-like. Link-like
@@ -116,9 +132,9 @@ classifies a project as `uninitialized`, `current`, `partial`, `invalid`, or
 diagnostic. `partial` means one or more, but not all, valid root artifacts are
 present. `invalid` covers malformed content, incorrect filesystem types, and
 symbolic links; `unsupported-version` has precedence when any artifact has a
-well-formed version this binary does not support. Phase 1 has no automatic
-repair or migration: preserve user content, use `doctor` to inspect it, then
-repair or migrate explicitly. Any future repair or migration command must
+well-formed version this binary does not support. Kvist has no automatic repair or migration: preserve user content, use
+`doctor` to inspect it, then repair or migrate explicitly. Any future repair
+or migration command must
 define every permitted rewrite and remain opt-in.
 
 ## Project status reports
@@ -158,8 +174,9 @@ snapshot; Kvist does not run a mutating jj command merely to distinguish those
 cases. Transient logs, locks, raw provider data, and credentials remain
 untracked.
 
-VCS tracking is advisory in Phase 1 because task execution does not exist yet.
-Phase 2 must make a complete tracking inspection a precondition for execution.
+VCS tracking is advisory for read-only commands. Task selection, transitions,
+specification acceptance, and task execution require a complete tracking
+inspection.
 Git and jj queries are batched below an 8 KiB argument budget; an individual
 durable path that cannot fit in that budget is reported with unavailable
 tracking status rather than causing the entire inspection to fail.
@@ -302,7 +319,7 @@ tasks:
 | Field                              | Allowed values                                                                        | Purpose and tool use                                                                                                                                                                                                    |
 | ---------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `schema_version`                   | Integer `2`                                                                           | Selects the parser contract independently of Kvist, specification, configuration, and documentation versions. An unsupported version is refused rather than guessed or rewritten.                                       |
-| `component.specification_revision` | `sha256:` plus 64 lowercase hexadecimal digits                                        | Fingerprints the exact component `SPEC.md` reviewed when the queue was planned. The forthcoming project-inspection layer will compare it with the current specification to discover that local work needs revalidation. |
+| `component.specification_revision` | `sha256:` plus 64 lowercase hexadecimal digits                                        | Fingerprints the exact component `SPEC.md` reviewed when the queue was planned. `kvist status` compares it with the current specification to discover that local work needs revalidation. |
 | `component.parent_specification`   | `null` for the root, otherwise `{ path: "../SPEC.md", revision: "sha256:..." }`       | Records the only allowed upstream contract: the immediate parent. It lets tools detect an upstream change without loading peer implementations or violating the context boundary.                                       |
 | `parent_specification.path`        | Exactly `../SPEC.md`                                                                  | Prevents a queue from disguising peer or arbitrary-project inputs as a parent dependency.                                                                                                                               |
 | `parent_specification.revision`    | SHA-256 revision format above                                                         | Is the parent specification the component plan was reviewed against; a later mismatch produces explicit stale evidence.                                                                                                 |
@@ -319,8 +336,8 @@ A current queue must have `stale_since: null` and `causes: []`. A stale queue
 must have both timestamps, with `stale_since` no later than `checked_at`, and
 at least one cause whose nonblank path has different valid expected and
 observed revisions. This means staleness is inspectable evidence, not a
-mutable boolean. The forthcoming project-inspection layer will derive the
-mismatch when a component or immediate parent `SPEC.md` changes; a human then reviews
+mutable boolean. `kvist status` derives the mismatch when a component or
+immediate parent `SPEC.md` changes; a human then reviews
 affected tasks, updates their requirement links and revisions as necessary,
 records a fresh `checked_at`, and clears the causes. No later task-selection
 tool may silently treat a stale plan as current.
@@ -383,91 +400,60 @@ component and parent revisions. Kvist never fabricates older provenance or
 silently rewrites a user-owned queue. A future opt-in migration command will
 perform only this documented transformation and retain its evidence.
 
-## User Vision and CLI-Centric Workflow
+## Task execution boundary
 
-Kvist is designed as a process enforcer and local orchestration wrapper for human-directed, spec-driven AI development. Instead of building a heavy proprietary agent framework, Kvist positions the human user as the Principal System Architect and delegates task execution, testing, and reviews to external AI agents supplied entirely by the user.
+The intended executor advances an accepted queue from task to task without
+requiring the human to select each one; the final independent review determines
+whether the resulting component can be declared compliant. Human
+task-by-task supervision remains an option, not a lifecycle requirement.
 
-### Standard Operating Workflow
+Today, `task run` is the one-task execution primitive that an unattended loop
+can compose. It requires a current project and component, complete VCS
+tracking, and a ready queue task. The task is transitioned atomically, and
+Kvist passes the component `SPEC.md`, `TODOS.yaml`, `ROOT_CONTRACT.md`, and,
+when applicable, the immediate parent `SPEC.md` to the configured agent. It
+does not add peer implementation files to that explicit context. See
+[`GUIDE.md`](GUIDE.md) for a current command-line loop.
 
-1. **Human Design (Stage 1):** The user writes or refines the layered `SPEC.md` for a component.
-2. **Task Breakdown (Stage 2):** The user or an advanced AI agent generates a structured `TODOS.yaml` containing the atomic implementation, testing, and review tasks in legal order.
-3. **Execution Handoff (Stage 3):** The user initiates task execution. Kvist slices the local directory context (providing _only_ the target component directory, its `SPEC.md`, its `TODOS.yaml`, and `ROOT_CONTRACT.md`, strictly excluding peer component implementations) and invokes the user's local agent.
-4. **Validation & Review (Stage 4):** The agent implements the task and runs tests. For compliance review, Kvist launches a clean-slate agent to reverse-engineer documentation (`DOCS.md`) and validates it against the spec.
-5. **Continuous Iteration:** Human users can jump around the codebase fluidly. Updating a spec at any level automatically propagates `Stale` states downstream. Work can be handed off asynchronously, allowing parallel development across different component branches.
+The current runner has two profiles: `developer` for test and implementation
+tasks, and `architect` for security-audit and compliance-review tasks. Agent
+templates support `{prompt}`, `{context_files}`, and `{target_directory}` and
+are spawned without a shell. They are whitespace-delimited argument templates,
+not shell scripts; pipelines, redirections, and shell quoting are unsupported.
 
-## External AI Agent Integration Guide
+An implementation task also runs the matching inherited test command after the
+agent exits successfully. Test commands require a versioned `[test_policy]`
+whose current SHA-256 hash was recorded by `kvist task approve-policy`. The
+policy controls working directory, inherited environment variables, timeout,
+output cap, and component-to-command mapping. Agent logs are written under
+`.kvist/logs`; attempt and verification records are durable JSONL files.
 
-Since the user supplies their own AI agent (which handles its own credentials, API keys, and environment), Kvist remains entirely credential-free. Kvist connects to external agents by executing them as CLI commands, using configurable string interpolation templates in `kvist.toml`.
+**Safety status:** agent and test programs execute on the host. Agent execution
+has no sandbox, no timeout or output cap, and no approval record for the
+resolved agent template. The approved test policy does not approve agent
+configuration. Do not use `task run` on an untrusted repository; the
+sandboxing, execution-configuration approval, and independent Phase 2 review
+in [`TODO.md`](TODO.md) remain required before this becomes a production-safe
+execution boundary.
 
-### Supported Placeholders
+## Intended lifecycle and current scope
 
-When Kvist triggers a task execution, it interpolates the following placeholders in the template:
+Kvist's direction remains structure before syntax. The human architect starts
+with the project vision, iteratively decomposes it into hierarchical component
+specifications (manually, with assistance, or through an architect agent), and
+explicitly approves each result. A designer agent then iteratively drafts the
+specialized, traceable queue from an approved component specification; the
+architect may refine and must accept that queue. Implementation follows the
+accepted plan, and a clean-slate documenter and source-blind reviewer
+independently compare observed behavior with the specification. `DOCS.md` is
+the component's implementation record, not user documentation; public
+integration material belongs under `docs/`.
 
-- `{prompt}`: The generated prompt containing process instructions and target task description.
-- `{context_files}`: Space-separated absolute paths of the sliced, allowed context files (e.g. `SPEC.md`, `TODOS.yaml`, local test files).
-- `{target_directory}`: The active component's subdirectory path.
-
-### Configuration Examples (`kvist.toml`)
-
-Users configure their active agent runners in `kvist.toml`. Because different tasks require different levels of reasoning, Kvist supports **Agent Model Tiering** (using advanced models for architecture and compliance, and cheaper/faster models for code writing):
-
-```toml
-[agent.profiles.architect]
-# Advanced model (e.g. Claude 3.5 Sonnet, Gemini 1.5 Pro) for Specs, TODO breakdowns, and Compliance Reviews
-command_template = "claude --non-interactive --dangerously-skip-permissions --message '{prompt}' {context_files}"
-
-[agent.profiles.developer]
-# Simple, fast model (e.g. Claude Haiku, Gemini 1.5 Flash) for test-writing and code implementation
-command_template = "gemini-cli --prompt '{prompt}' --files {context_files}"
-```
-
-#### Major Agent Integration Examples
-
-- **Claude Code (Anthropic CLI):**
-  ```toml
-  command_template = "claude --non-interactive --dangerously-skip-permissions --message '{prompt}' {context_files}"
-  ```
-- **Aider (Open-Source AI Pair Programmer):**
-  ```toml
-  command_template = "aider --yes-to-all --message '{prompt}' {context_files}"
-  ```
-- **Gemini CLI (`gemini-cli`):**
-  ```toml
-  command_template = "gemini-cli --prompt '{prompt}' --files {context_files}"
-  ```
-- **Ollama + Mods (Local Private Execution):**
-  ```toml
-  command_template = "cat {context_files} | mods --model llama3 '{prompt}'"
-  ```
-- **Cursor CLI (Editor-integrated Edits):**
-  ```toml
-  command_template = "cursor --raw-input '{prompt}' {context_files}"
-  ```
-
-## Text Editor Integration and BKMs
-
-Kvist's design principles prioritize keeping standard CLI outputs clean and streamlined while providing seamless hooks into the developer's favorite environment. When manual human intervention is required—such as editing a specification, reviewing a diff, or resolving an arbitration conflict—Kvist follows industry Best Known Methods (BKM) to integrate with text editors:
-
-### 1. The Unix Standard: `$EDITOR` and `$VISUAL`
-
-The primary BKM for opening file editors from a terminal-native tool is to read the standard `$EDITOR` (or `$VISUAL`) shell environment variables.
-
-- **How Kvist Uses It:** When Kvist needs to open a file for editing (e.g., resolving a discrepancy, editing a specification, or during an interactive `spec new` flow), it checks if `$EDITOR` is set (e.g., `vim`, `nano`, `code --wait`, `zed --wait`, `subl -w`, `nvim`).
-- **Subprocess Spawning:** Kvist spawns the configured editor as a blocking subprocess on the specific file path, pausing execution and cleanly passing control to the terminal or launching the editor. Once the user saves the file and closes the editor, the subprocess exits and Kvist resumes.
-
-### 2. Project-Local Fallbacks (`kvist.toml`)
-
-If the global shell environment variable is unset or needs to be overridden for a specific project, Kvist provides a project-level fallback setting in `kvist.toml`:
-
-```toml
-[editor]
-preferred = "zed --wait"  # Or "code --wait", "nvim", etc.
-```
-
-### 3. Native File/Folder Openers
-
-For commands designed to open the active component directory directly in the user's GUI editor (e.g. `kvist open <COMPONENT_DIR>`), Kvist falls back to platform-native launchers if no preferred editor is configured:
-
-- **macOS:** `open <path>`
-- **Linux:** `xdg-open <path>`
-- **Windows:** `start <path>`
+The CLI currently enforces queue ordering and durable transitions, but it does
+not yet automate architect/designer agents, the interview, clean-slate
+documentation, source-blind comparison, arbitration, editor integration,
+daemon, LSP, or web UI flows. Those are planned capabilities, not current
+commands. See
+[`GUIDE.md`](GUIDE.md) for the accurate manual workflow and
+[`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
+for the enduring architecture and phased direction.

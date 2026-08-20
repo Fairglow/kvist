@@ -1,334 +1,380 @@
 schema_version: 2
 component:
-  specification_revision: sha256:4094e9394033bc562971bcd107d54fbdbbaa1bada51f68a470cefa10ac267be5
+  specification_revision: "sha256:5896c5a2da393c457872109c6d6217aee7b7053b9829cf4a81890502f6da2b79"
   parent_specification: null
   revalidation:
     state: current
-    checked_at: 2026-08-16T14:00:52Z
+    checked_at: "2026-08-20T19:49:39Z"
     stale_since: null
     causes: []
 tasks:
-  - id: p2-01-write-tests
-    title: Define TODO queue schema tests
-    description: Write focused parser, serialization, dependency-graph, and task-state transition tests for the version-2 TODO queue contract before production implementation.
-    context: Phase 1 accepted only an illustrative YAML list, so malformed task relationships and non-deterministic queue data could not be detected before future task execution.
-    purpose: Establish executable evidence for the durable task-plan contract before any executor relies on it, preventing a weak parser from becoming the authority for workflow state.
-    expected_outcome: The test suite expresses and initially fails for valid canonical queues, duplicate IDs, unknown dependencies, cycles, invalid transitions, malformed state metadata, and deterministic serialization.
+  - id: "p2-01-write-tests"
+    title: "Define TODO queue schema tests"
+    description: "Write focused parser, serialization, dependency-graph, and task-state transition tests for the version-2 TODO queue contract before production implementation."
+    context: "Phase 1 accepted only an illustrative YAML list, so malformed task relationships and non-deterministic queue data could not be detected before future task execution."
+    purpose: "Establish executable evidence for the durable task-plan contract before any executor relies on it, preventing a weak parser from becoming the authority for workflow state."
+    expected_outcome: "The test suite expresses and initially fails for valid canonical queues, duplicate IDs, unknown dependencies, cycles, invalid transitions, malformed state metadata, and deterministic serialization."
     kind: test
     status: completed
     depends_on: []
     requirements:
-      - ROOT_CONTRACT.md#Change-and-compliance-rules
-      - SPEC.md#TODO-queue-schema-and-validation
-      - TODO.md#P2-01
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#TODO-queue-schema-and-validation"
+      - "TODO.md#P2-01"
     timestamps:
-      created_at: 2026-08-13T20:19:53Z
-      updated_at: 2026-08-13T20:20:00Z
-      completed_at: 2026-08-13T20:20:00Z
+      created_at: "2026-08-13T20:19:53Z"
+      updated_at: "2026-08-13T20:20:00Z"
+      completed_at: "2026-08-13T20:20:00Z"
     blocked_reason: null
-  - id: p2-01-implement-code
-    title: Implement the version-2 TODO queue schema
-    description: Add typed serde and serde_yaml parsing, semantic validation, task transition rules, and canonical serialization, then integrate it with root project inspection.
-    context: Future task selection, locking, execution, and review must consume one validated, machine-readable source of workflow truth rather than independently interpreting YAML.
-    purpose: Make task state safe, deterministic, and inspectable so every later Phase 2 tool shares the same contract and diagnostics.
-    expected_outcome: Version-2 queues validate through the reusable task-queue module and root inspection, while malformed or version-1 queues are rejected with actionable diagnostics and generated projects receive a valid template.
+  - id: "p2-01-implement-code"
+    title: "Implement the version-2 TODO queue schema"
+    description: "Add typed serde and serde_yaml parsing, semantic validation, task transition rules, and canonical serialization, then integrate it with root project inspection."
+    context: "Future task selection, locking, execution, and review must consume one validated, machine-readable source of workflow truth rather than independently interpreting YAML."
+    purpose: "Make task state safe, deterministic, and inspectable so every later Phase 2 tool shares the same contract and diagnostics."
+    expected_outcome: "Version-2 queues validate through the reusable task-queue module and root inspection, while malformed or version-1 queues are rejected with actionable diagnostics and generated projects receive a valid template."
     kind: implementation
     status: completed
     depends_on:
-      - p2-01-write-tests
+      - "p2-01-write-tests"
     requirements:
-      - ROOT_CONTRACT.md#Non-negotiable-architecture
-      - SPEC.md#TODO-queue-schema-and-validation
-      - TODO.md#P2-01
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#TODO-queue-schema-and-validation"
+      - "TODO.md#P2-01"
     timestamps:
-      created_at: 2026-08-13T20:19:53Z
-      updated_at: 2026-08-13T20:30:00Z
-      completed_at: 2026-08-13T20:30:00Z
+      created_at: "2026-08-13T20:19:53Z"
+      updated_at: "2026-08-13T20:30:00Z"
+      completed_at: "2026-08-13T20:30:00Z"
     blocked_reason: null
-  - id: p2-01-security-audit
-    title: Audit TODO queue trust boundaries
-    description: Review YAML parsing, input limits, identifier and timestamp validation, dependency traversal, digest handling, and serialization for unsafe acceptance or denial-of-service paths.
-    context: TODO files are version-controlled but user-authored input and will become execution-control data in subsequent Phase 2 work.
-    purpose: Confirm that untrusted queue content cannot bypass lifecycle gates, conceal stale dependencies, destabilize output, or cause unbounded graph processing.
-    expected_outcome: An independent security finding record either confirms the queue boundary and resource controls or identifies remediations before an executor can consume the schema.
+  - id: "p2-01-security-audit"
+    title: "Audit TODO queue trust boundaries"
+    description: "Review YAML parsing, input limits, identifier and timestamp validation, dependency traversal, digest handling, and serialization for unsafe acceptance or denial-of-service paths."
+    context: "TODO files are version-controlled but user-authored input and will become execution-control data in subsequent Phase 2 work."
+    purpose: "Confirm that untrusted queue content cannot bypass lifecycle gates, conceal stale dependencies, destabilize output, or cause unbounded graph processing."
+    expected_outcome: "An independent security finding record either confirms the queue boundary and resource controls or identifies remediations before an executor can consume the schema."
     kind: security-audit
     status: completed
     depends_on:
-      - p2-01-implement-code
+      - "p2-01-implement-code"
     requirements:
-      - ROOT_CONTRACT.md#Change-and-compliance-rules
-      - SPEC.md#TODO-queue-schema-and-validation
-      - TODO.md#P2-01
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#TODO-queue-schema-and-validation"
+      - "TODO.md#P2-01"
     timestamps:
-      created_at: 2026-08-13T20:19:53Z
-      updated_at: 2026-08-13T21:07:00Z
-      completed_at: 2026-08-13T21:07:00Z
+      created_at: "2026-08-13T20:19:53Z"
+      updated_at: "2026-08-13T21:07:00Z"
+      completed_at: "2026-08-13T21:07:00Z"
     blocked_reason: null
-  - id: p2-01-compliance-review
-    title: Independently review TODO queue compliance
-    description: Produce clean-slate observed documentation and compare it with the queue specification, recording each discrepancy for explicit architectural arbitration.
-    context: The implementer cannot certify their own workflow-control format; the product requires independent clean-slate and source-blind review.
-    purpose: Verify that documented requirements, implementation behavior, and future tool assumptions remain aligned before this format becomes the workflow system of record.
-    expected_outcome: Retained independent documentation and a source-blind comparison identify the queue schema as compliant, mismatched, deferred, or underspecified without silently changing requirements.
+  - id: "p2-01-compliance-review"
+    title: "Independently review TODO queue compliance"
+    description: "Produce clean-slate observed documentation and compare it with the queue specification, recording each discrepancy for explicit architectural arbitration."
+    context: "The implementer cannot certify their own workflow-control format; the product requires independent clean-slate and source-blind review."
+    purpose: "Verify that documented requirements, implementation behavior, and future tool assumptions remain aligned before this format becomes the workflow system of record."
+    expected_outcome: "Retained independent documentation and a source-blind comparison identify the queue schema as compliant, mismatched, deferred, or underspecified without silently changing requirements."
     kind: compliance-review
     status: completed
     depends_on:
-      - p2-01-security-audit
+      - "p2-01-security-audit"
     requirements:
-      - REVIEW_RUNBOOK.md#Clean-slate-documentation-pass
-      - REVIEW_RUNBOOK.md#Source-blind-compliance-pass
-      - ROOT_CONTRACT.md#Change-and-compliance-rules
-      - TODO.md#P2-01
+      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#P2-01"
     timestamps:
-      created_at: 2026-08-13T20:19:53Z
-      updated_at: 2026-08-16T12:10:01Z
-      completed_at: 2026-08-16T12:10:01Z
+      created_at: "2026-08-13T20:19:53Z"
+      updated_at: "2026-08-16T12:10:01Z"
+      completed_at: "2026-08-16T12:10:01Z"
     blocked_reason: null
-  - id: p2-02-write-tests
-    title: Define project status inspection tests
-    description: Write focused integration and unit tests for deterministic text and JSON status reports, artifact-state precedence, staleness causes, blocked queues, and read-only operation.
-    context: Root inspection validates only the root queue today, so scripts cannot determine whether a discovered component is missing, invalid, stale, blocked, or current.
-    purpose: Establish executable evidence for the project-wide inspection contract before the status implementation becomes the shared execution precondition.
-    expected_outcome: Focused tests initially fail for valid current components, malformed and unsupported component artifacts, local and parent revision mismatches, blocked tasks, stable report formats, and no-write inspection.
+  - id: "p2-02-write-tests"
+    title: "Define project status inspection tests"
+    description: "Write focused integration and unit tests for deterministic text and JSON status reports, artifact-state precedence, staleness causes, blocked queues, and read-only operation."
+    context: "Root inspection validates only the root queue today, so scripts cannot determine whether a discovered component is missing, invalid, stale, blocked, or current."
+    purpose: "Establish executable evidence for the project-wide inspection contract before the status implementation becomes the shared execution precondition."
+    expected_outcome: "Focused tests initially fail for valid current components, malformed and unsupported component artifacts, local and parent revision mismatches, blocked tasks, stable report formats, and no-write inspection."
     kind: test
     status: completed
     depends_on: []
     requirements:
-      - ROOT_CONTRACT.md#Change-and-compliance-rules
-      - SPEC.md#Project-status-inspection
-      - TODO.md#P2-02
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Project-status-inspection"
+      - "TODO.md#P2-02"
     timestamps:
-      created_at: 2026-08-16T12:19:23Z
-      updated_at: 2026-08-16T12:20:09Z
-      completed_at: 2026-08-16T12:20:09Z
+      created_at: "2026-08-16T12:19:23Z"
+      updated_at: "2026-08-16T12:20:09Z"
+      completed_at: "2026-08-16T12:20:09Z"
     blocked_reason: null
-  - id: p2-02-implement-code
-    title: Implement project status inspection
-    description: Add the shared read-only component inspection model, SHA-256 revalidation comparison, and versioned text and JSON status command.
-    context: Future task selection and automation need one validated component state model rather than independent filesystem and queue interpretations.
-    purpose: Make missing, invalid, unsupported, stale, blocked, and current component state deterministic and inspectable without mutating durable workflow state.
-    expected_outcome: The status command reports every discovered component in stable text and JSON formats with attributable stale causes and preserves all inspected files.
+  - id: "p2-02-implement-code"
+    title: "Implement project status inspection"
+    description: "Add the shared read-only component inspection model, SHA-256 revalidation comparison, and versioned text and JSON status command."
+    context: "Future task selection and automation need one validated component state model rather than independent filesystem and queue interpretations."
+    purpose: "Make missing, invalid, unsupported, stale, blocked, and current component state deterministic and inspectable without mutating durable workflow state."
+    expected_outcome: "The status command reports every discovered component in stable text and JSON formats with attributable stale causes and preserves all inspected files."
     kind: implementation
     status: completed
     depends_on:
-      - p2-02-write-tests
+      - "p2-02-write-tests"
     requirements:
-      - ROOT_CONTRACT.md#Non-negotiable-architecture
-      - SPEC.md#Project-status-inspection
-      - TODO.md#P2-02
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Project-status-inspection"
+      - "TODO.md#P2-02"
     timestamps:
-      created_at: 2026-08-16T12:19:23Z
-      updated_at: 2026-08-16T12:22:01Z
-      completed_at: 2026-08-16T12:22:01Z
+      created_at: "2026-08-16T12:19:23Z"
+      updated_at: "2026-08-16T12:22:01Z"
+      completed_at: "2026-08-16T12:22:01Z"
     blocked_reason: null
-  - id: p2-02-security-audit
-    title: Audit project status inspection boundaries
-    description: Review component discovery reuse, bounded artifact reads, digest comparison, JSON serialization, path handling, and no-write behavior for unsafe acceptance or denial-of-service paths.
-    context: Project status consumes untrusted filesystem and queue data that future execution will treat as an eligibility signal.
-    purpose: Confirm that inspection cannot hide invalid workflow evidence, follow links, exceed resource limits, or mutate state while diagnosing projects.
-    expected_outcome: An independent audit records findings or confirms the status inspection trust boundary before task selection consumes its result.
+  - id: "p2-02-security-audit"
+    title: "Audit project status inspection boundaries"
+    description: "Review component discovery reuse, bounded artifact reads, digest comparison, JSON serialization, path handling, and no-write behavior for unsafe acceptance or denial-of-service paths."
+    context: "Project status consumes untrusted filesystem and queue data that future execution will treat as an eligibility signal."
+    purpose: "Confirm that inspection cannot hide invalid workflow evidence, follow links, exceed resource limits, or mutate state while diagnosing projects."
+    expected_outcome: "An independent audit records findings or confirms the status inspection trust boundary before task selection consumes its result."
     kind: security-audit
     status: completed
     depends_on:
-      - p2-02-implement-code
+      - "p2-02-implement-code"
     requirements:
-      - ROOT_CONTRACT.md#Change-and-compliance-rules
-      - SPEC.md#Project-status-inspection
-      - TODO.md#P2-02
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Project-status-inspection"
+      - "TODO.md#P2-02"
     timestamps:
-      created_at: 2026-08-16T12:19:23Z
-      updated_at: 2026-08-16T12:24:05Z
-      completed_at: 2026-08-16T12:24:05Z
+      created_at: "2026-08-16T12:19:23Z"
+      updated_at: "2026-08-16T12:24:05Z"
+      completed_at: "2026-08-16T12:24:05Z"
     blocked_reason: null
-  - id: p2-02-compliance-review
-    title: Independently review project status compliance
-    description: Produce source-derived documentation and compare it with the status specification without exposing source code to the compliance reviewer.
-    context: The status model will be an execution and automation boundary, so its implementer cannot certify the observed behavior.
-    purpose: Verify that status output, component-state precedence, and deferred persistence behavior remain aligned with the component contract.
-    expected_outcome: Retained clean-slate documentation and a source-blind comparison classify the status implementation as compliant, mismatched, deferred, or underspecified.
+  - id: "p2-02-compliance-review"
+    title: "Independently review project status compliance"
+    description: "Produce source-derived documentation and compare it with the status specification without exposing source code to the compliance reviewer."
+    context: "The status model will be an execution and automation boundary, so its implementer cannot certify the observed behavior."
+    purpose: "Verify that status output, component-state precedence, and deferred persistence behavior remain aligned with the component contract."
+    expected_outcome: "Retained clean-slate documentation and a source-blind comparison classify the status implementation as compliant, mismatched, deferred, or underspecified."
     kind: compliance-review
     status: completed
     depends_on:
-      - p2-02-security-audit
+      - "p2-02-security-audit"
     requirements:
-      - REVIEW_RUNBOOK.md#Clean-slate-documentation-pass
-      - REVIEW_RUNBOOK.md#Source-blind-compliance-pass
-      - ROOT_CONTRACT.md#Change-and-compliance-rules
-      - TODO.md#P2-02
+      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#P2-02"
     timestamps:
-      created_at: 2026-08-16T12:19:23Z
-      updated_at: 2026-08-16T12:28:42Z
-      completed_at: 2026-08-16T12:28:42Z
+      created_at: "2026-08-16T12:19:23Z"
+      updated_at: "2026-08-16T12:28:42Z"
+      completed_at: "2026-08-16T12:28:42Z"
     blocked_reason: null
-  - id: p2-03-write-tests
-    title: Define task selection and transition tests
-    description: Write focused integration tests for ready-task selection, revalidation gates, lifecycle and dependency completion, lock contention, atomic queue replacement, prepared/committed audit records, and cancellation recovery evidence.
-    context: The validated queue has no executor, lock, writer, or durable attempt evidence, so later task automation could race or infer unsafe readiness.
-    purpose: Establish executable evidence for the workflow-control boundary before any state transition can mutate a user-authored queue.
-    expected_outcome: Focused tests initially fail for deterministic next-task output, stale and blocked refusal, illegal transitions, concurrent locks, preserved old queue on failed writes, and inspectable prepared records.
+  - id: "p2-03-write-tests"
+    title: "Define task selection and transition tests"
+    description: "Write focused integration tests for ready-task selection, revalidation gates, lifecycle and dependency completion, lock contention, atomic queue replacement, prepared/committed audit records, and cancellation recovery evidence."
+    context: "The validated queue has no executor, lock, writer, or durable attempt evidence, so later task automation could race or infer unsafe readiness."
+    purpose: "Establish executable evidence for the workflow-control boundary before any state transition can mutate a user-authored queue."
+    expected_outcome: "Focused tests initially fail for deterministic next-task output, stale and blocked refusal, illegal transitions, concurrent locks, preserved old queue on failed writes, and inspectable prepared records."
     kind: test
     status: completed
     depends_on: []
     requirements:
-      - ROOT_CONTRACT.md#Change-and-compliance-rules
-      - SPEC.md#Task-selection-and-state-updates
-      - TODO.md#P2-03
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Task-selection-and-state-updates"
+      - "TODO.md#P2-03"
     timestamps:
-      created_at: 2026-08-16T12:54:50Z
-      updated_at: 2026-08-16T12:55:20Z
-      completed_at: 2026-08-16T12:55:20Z
+      created_at: "2026-08-16T12:54:50Z"
+      updated_at: "2026-08-16T12:55:20Z"
+      completed_at: "2026-08-16T12:55:20Z"
     blocked_reason: null
-  - id: p2-03-implement-code
-    title: Implement task selection and atomic transitions
-    description: Add the task CLI, readiness checks, lock protocol, atomic queue update, and append-only prepared/committed attempt records.
-    context: Subsequent provider and test execution depends on one deterministic, auditable state mutation boundary.
-    purpose: Prevent concurrent corruption and false completion while preserving durable recovery evidence.
-    expected_outcome: A current tracked component can select one ready task and persist only legal transitions under the documented lock and audit protocol.
+  - id: "p2-03-implement-code"
+    title: "Implement task selection and atomic transitions"
+    description: "Add the task CLI, readiness checks, lock protocol, atomic queue update, and append-only prepared/committed attempt records."
+    context: "Subsequent provider and test execution depends on one deterministic, auditable state mutation boundary."
+    purpose: "Prevent concurrent corruption and false completion while preserving durable recovery evidence."
+    expected_outcome: "A current tracked component can select one ready task and persist only legal transitions under the documented lock and audit protocol."
     kind: implementation
     status: completed
     depends_on:
-      - p2-03-write-tests
+      - "p2-03-write-tests"
     requirements:
-      - ROOT_CONTRACT.md#Non-negotiable-architecture
-      - SPEC.md#Task-selection-and-state-updates
-      - TODO.md#P2-03
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Task-selection-and-state-updates"
+      - "TODO.md#P2-03"
     timestamps:
-      created_at: 2026-08-16T12:54:50Z
-      updated_at: 2026-08-16T13:04:51Z
-      completed_at: 2026-08-16T13:04:51Z
+      created_at: "2026-08-16T12:54:50Z"
+      updated_at: "2026-08-16T13:04:51Z"
+      completed_at: "2026-08-16T13:04:51Z"
     blocked_reason: null
-  - id: p2-03-security-audit
-    title: Audit task mutation boundaries
-    description: Review lock ownership, file replacement, audit sequencing, state eligibility, path handling, and crash behavior before execution can mutate workflow state.
-    context: Task transitions become durable execution-control data and must resist unsafe concurrent or malformed workspace input.
-    purpose: Confirm no transition bypasses readiness or lifecycle gates and that crashes leave actionable evidence instead of false success.
-    expected_outcome: An independent audit records findings or confirms the lock, atomic-write, and attempt-record boundary.
+  - id: "p2-03-security-audit"
+    title: "Audit task mutation boundaries"
+    description: "Review lock ownership, file replacement, audit sequencing, state eligibility, path handling, and crash behavior before execution can mutate workflow state."
+    context: "Task transitions become durable execution-control data and must resist unsafe concurrent or malformed workspace input."
+    purpose: "Confirm no transition bypasses readiness or lifecycle gates and that crashes leave actionable evidence instead of false success."
+    expected_outcome: "An independent audit records findings or confirms the lock, atomic-write, and attempt-record boundary."
     kind: security-audit
     status: completed
     depends_on:
-      - p2-03-implement-code
+      - "p2-03-implement-code"
     requirements:
-      - ROOT_CONTRACT.md#Change-and-compliance-rules
-      - SPEC.md#Task-selection-and-state-updates
-      - TODO.md#P2-03
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Task-selection-and-state-updates"
+      - "TODO.md#P2-03"
     timestamps:
-      created_at: 2026-08-16T12:54:50Z
-      updated_at: 2026-08-16T13:09:54Z
-      completed_at: 2026-08-16T13:09:54Z
+      created_at: "2026-08-16T12:54:50Z"
+      updated_at: "2026-08-16T13:09:54Z"
+      completed_at: "2026-08-16T13:09:54Z"
     blocked_reason: null
-  - id: p2-03-compliance-review
-    title: Independently review task mutation compliance
-    description: Produce source-derived documentation and source-blind comparison for task selection, transition, locking, and recovery behavior.
-    context: The implementer cannot certify an execution-control writer that later automation will trust.
-    purpose: Verify the durable workflow mutation contract and all deliberate recovery limits before provider integration.
-    expected_outcome: Retained independent documentation and review classify the transition boundary as compliant, mismatched, deferred, or underspecified.
+  - id: "p2-03-compliance-review"
+    title: "Independently review task mutation compliance"
+    description: "Produce source-derived documentation and source-blind comparison for task selection, transition, locking, and recovery behavior."
+    context: "The implementer cannot certify an execution-control writer that later automation will trust."
+    purpose: "Verify the durable workflow mutation contract and all deliberate recovery limits before provider integration."
+    expected_outcome: "Retained independent documentation and review classify the transition boundary as compliant, mismatched, deferred, or underspecified."
     kind: compliance-review
     status: completed
     depends_on:
-      - p2-03-security-audit
+      - "p2-03-security-audit"
     requirements:
-      - REVIEW_RUNBOOK.md#Clean-slate-documentation-pass
-      - REVIEW_RUNBOOK.md#Source-blind-compliance-pass
-      - ROOT_CONTRACT.md#Change-and-compliance-rules
-      - TODO.md#P2-03
+      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#P2-03"
     timestamps:
-      created_at: 2026-08-16T12:54:50Z
-      updated_at: 2026-08-16T13:15:52Z
-      completed_at: 2026-08-16T13:15:52Z
+      created_at: "2026-08-16T12:54:50Z"
+      updated_at: "2026-08-16T13:15:52Z"
+      completed_at: "2026-08-16T13:15:52Z"
     blocked_reason: null
-  - id: p2-04-write-tests
-    title: Define provider runner tests
-    description: Define fake-provider tests after the owner approves discovery, protocol, consent, credentials, context, and limits.
-    context: No provider policy exists.
-    purpose: Prevent an implicit subprocess or network contract.
-    expected_outcome: Approved policy yields failing success, timeout, cancellation, redaction, and output-limit fixtures.
+  - id: "p2-04-write-tests"
+    title: "Define provider runner tests"
+    description: "Define fake-provider tests after the owner approves discovery, protocol, consent, credentials, context, and limits."
+    context: "No provider policy exists."
+    purpose: "Prevent an implicit subprocess or network contract."
+    expected_outcome: "Approved policy yields failing success, timeout, cancellation, redaction, and output-limit fixtures."
     kind: test
     status: blocked
     depends_on: []
-    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-04]
-    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
-    blocked_reason: Owner must approve all P2-04 provider decision gates.
-  - id: p2-04-implement-code
-    title: Implement approved provider contract
-    description: Implement only the owner-approved provider protocol and policy.
-    context: Provider execution controls credentials and network exposure.
-    purpose: Preserve explicit execution trust boundaries.
-    expected_outcome: Provider runner conforms to approved policy and tests.
+    requirements:
+      - "SPEC.md#Execution-policy-decision-gates"
+      - "TODO.md#P2-04"
+    timestamps:
+      created_at: "2026-08-16T14:00:52Z"
+      updated_at: "2026-08-16T14:00:52Z"
+      completed_at: null
+    blocked_reason: "Owner must approve all P2-04 provider decision gates."
+  - id: "p2-04-implement-code"
+    title: "Implement approved provider contract"
+    description: "Implement only the owner-approved provider protocol and policy."
+    context: "Provider execution controls credentials and network exposure."
+    purpose: "Preserve explicit execution trust boundaries."
+    expected_outcome: "Provider runner conforms to approved policy and tests."
     kind: implementation
     status: blocked
-    depends_on: [p2-04-write-tests]
-    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-04]
-    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
-    blocked_reason: Provider policy is not approved.
-  - id: p2-04-security-audit
-    title: Audit provider boundary
-    description: Audit approved subprocess, credential, network, and context policy.
-    context: Provider invocation is security-sensitive.
-    purpose: Independently validate the trust boundary.
-    expected_outcome: Retained provider security findings.
+    depends_on:
+      - "p2-04-write-tests"
+    requirements:
+      - "SPEC.md#Execution-policy-decision-gates"
+      - "TODO.md#P2-04"
+    timestamps:
+      created_at: "2026-08-16T14:00:52Z"
+      updated_at: "2026-08-16T14:00:52Z"
+      completed_at: null
+    blocked_reason: "Provider policy is not approved."
+  - id: "p2-04-security-audit"
+    title: "Audit provider boundary"
+    description: "Audit approved subprocess, credential, network, and context policy."
+    context: "Provider invocation is security-sensitive."
+    purpose: "Independently validate the trust boundary."
+    expected_outcome: "Retained provider security findings."
     kind: security-audit
     status: blocked
-    depends_on: [p2-04-implement-code]
-    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-04]
-    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
-    blocked_reason: Provider implementation is blocked.
-  - id: p2-04-compliance-review
-    title: Review provider compliance
-    description: Compare observed provider behavior with approved policy.
-    context: Implementers cannot certify provider execution.
-    purpose: Retain independent compliance evidence.
-    expected_outcome: Source-blind provider review.
+    depends_on:
+      - "p2-04-implement-code"
+    requirements:
+      - "SPEC.md#Execution-policy-decision-gates"
+      - "TODO.md#P2-04"
+    timestamps:
+      created_at: "2026-08-16T14:00:52Z"
+      updated_at: "2026-08-16T14:00:52Z"
+      completed_at: null
+    blocked_reason: "Provider implementation is blocked."
+  - id: "p2-04-compliance-review"
+    title: "Review provider compliance"
+    description: "Compare observed provider behavior with approved policy."
+    context: "Implementers cannot certify provider execution."
+    purpose: "Retain independent compliance evidence."
+    expected_outcome: "Source-blind provider review."
     kind: compliance-review
     status: blocked
-    depends_on: [p2-04-security-audit]
-    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-04]
-    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
-    blocked_reason: Provider audit is blocked.
-  - id: p2-05-write-tests
-    title: Define verification command tests
-    description: Define policy, timeout, cancellation, output, and persistence fixtures after approval.
-    context: Repository text is not execution authority.
-    purpose: Prevent implicit arbitrary test execution.
-    expected_outcome: Approved policy yields failing verification fixtures.
+    depends_on:
+      - "p2-04-security-audit"
+    requirements:
+      - "SPEC.md#Execution-policy-decision-gates"
+      - "TODO.md#P2-04"
+    timestamps:
+      created_at: "2026-08-16T14:00:52Z"
+      updated_at: "2026-08-16T14:00:52Z"
+      completed_at: null
+    blocked_reason: "Provider audit is blocked."
+  - id: "p2-05-write-tests"
+    title: "Define verification command tests"
+    description: "Define policy, timeout, cancellation, output, and persistence fixtures after approval."
+    context: "Repository text is not execution authority."
+    purpose: "Prevent implicit arbitrary test execution."
+    expected_outcome: "Approved policy yields failing verification fixtures."
     kind: test
     status: blocked
     depends_on: []
-    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-05]
-    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
-    blocked_reason: Owner must approve all P2-05 test-command decision gates.
-  - id: p2-05-implement-code
-    title: Implement approved test verification
-    description: Execute only approved commands with captured redacted evidence.
-    context: Verification affects task completion trust.
-    purpose: Enforce explicit command authority.
-    expected_outcome: Approved verifier and fixtures pass.
+    requirements:
+      - "SPEC.md#Execution-policy-decision-gates"
+      - "TODO.md#P2-05"
+    timestamps:
+      created_at: "2026-08-16T14:00:52Z"
+      updated_at: "2026-08-16T14:00:52Z"
+      completed_at: null
+    blocked_reason: "Owner must approve all P2-05 test-command decision gates."
+  - id: "p2-05-implement-code"
+    title: "Implement approved test verification"
+    description: "Execute only approved commands with captured redacted evidence."
+    context: "Verification affects task completion trust."
+    purpose: "Enforce explicit command authority."
+    expected_outcome: "Approved verifier and fixtures pass."
     kind: implementation
     status: blocked
-    depends_on: [p2-05-write-tests]
-    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-05]
-    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
-    blocked_reason: Test-command policy is not approved.
-  - id: p2-05-security-audit
-    title: Audit verification boundary
-    description: Audit approved command authority and evidence handling.
-    context: Test execution can run untrusted code.
-    purpose: Independently validate execution controls.
-    expected_outcome: Retained verification security findings.
+    depends_on:
+      - "p2-05-write-tests"
+    requirements:
+      - "SPEC.md#Execution-policy-decision-gates"
+      - "TODO.md#P2-05"
+    timestamps:
+      created_at: "2026-08-16T14:00:52Z"
+      updated_at: "2026-08-16T14:00:52Z"
+      completed_at: null
+    blocked_reason: "Test-command policy is not approved."
+  - id: "p2-05-security-audit"
+    title: "Audit verification boundary"
+    description: "Audit approved command authority and evidence handling."
+    context: "Test execution can run untrusted code."
+    purpose: "Independently validate execution controls."
+    expected_outcome: "Retained verification security findings."
     kind: security-audit
     status: blocked
-    depends_on: [p2-05-implement-code]
-    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-05]
-    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
-    blocked_reason: Verification implementation is blocked.
-  - id: p2-05-compliance-review
-    title: Review verification compliance
-    description: Compare observed verification behavior with approved policy.
-    context: Implementers cannot certify execution controls.
-    purpose: Retain independent review evidence.
-    expected_outcome: Source-blind verification review.
+    depends_on:
+      - "p2-05-implement-code"
+    requirements:
+      - "SPEC.md#Execution-policy-decision-gates"
+      - "TODO.md#P2-05"
+    timestamps:
+      created_at: "2026-08-16T14:00:52Z"
+      updated_at: "2026-08-16T14:00:52Z"
+      completed_at: null
+    blocked_reason: "Verification implementation is blocked."
+  - id: "p2-05-compliance-review"
+    title: "Review verification compliance"
+    description: "Compare observed verification behavior with approved policy."
+    context: "Implementers cannot certify execution controls."
+    purpose: "Retain independent review evidence."
+    expected_outcome: "Source-blind verification review."
     kind: compliance-review
     status: blocked
-    depends_on: [p2-05-security-audit]
-    requirements: [SPEC.md#Execution-policy-decision-gates, TODO.md#P2-05]
-    timestamps: {created_at: 2026-08-16T14:00:52Z, updated_at: 2026-08-16T14:00:52Z, completed_at: null}
-    blocked_reason: Verification audit is blocked.
+    depends_on:
+      - "p2-05-security-audit"
+    requirements:
+      - "SPEC.md#Execution-policy-decision-gates"
+      - "TODO.md#P2-05"
+    timestamps:
+      created_at: "2026-08-16T14:00:52Z"
+      updated_at: "2026-08-16T14:00:52Z"
+      completed_at: null
+    blocked_reason: "Verification audit is blocked."
