@@ -216,3 +216,56 @@ been satisfied.
 | Mismatch | The former README, GUIDE, and observed root implementation record described deferred or automated behavior inconsistently with the implementation. | The public documents now distinguish observed commands from planned automation and state the host-execution limitation. A clean-slate documenter must independently replace or confirm the observed `src/IMPL.md` account. |
 | Deferred | The intended clean-slate documenter, source-blind reviewer, arbitration integration, and automated task-generation/interview flows are absent. | Phase 3 owns automation. Until then, follow `REVIEW_RUNBOOK.md` manually and retain review evidence. |
 | Deferred | The Phase 2 end-to-end security and compliance review has not yet covered the full agent/test execution surface. | P2-07 is the release gate for this surface; do not represent task execution as production-safe beforehand. |
+
+## Phase 2 P2-07 security and compliance review
+
+**Scope:** The implemented Phase 2 status, task-selection, transition,
+revalidation, agent-runner, test-verification, logging, and policy-approval
+surfaces. This review records observed behavior and discrepancies; it does not
+approve host execution for production use.
+
+| Review role | Permitted inputs | Result |
+| --- | --- | --- |
+| Security reviewer | Source, tests, manifests, and execution behavior | Identified the security findings and fixture gaps below. |
+| Clean-slate documenter | Rust source, tests, manifests, and generated non-Markdown configuration only | Derived the observed task, runner, verification, locking, logging, and resource-limit behavior without reading contracts or prior reviews. |
+| Source-blind reviewer | `ROOT_CONTRACT.md`, `src/SPEC.md`, `src/IMPL.md`, `TODO.md`, `README.md`, and `REVIEW_RUNBOOK.md` only | Compared intended and observed documentation without reading source or tests. |
+
+### Security findings and arbitration
+
+| Severity | Finding | Evidence | Arbitration owner and required disposition |
+| --- | --- | --- | --- |
+| Critical | `task run` launches the configured agent on the host with ambient environment, filesystem, credentials, and network access. It does not require a sandbox, approved effective agent configuration, timeout, cancellation rule, or output limit. | `src/agent.rs` spawns the configured program directly; `src/task_commands.rs` invokes it before test-policy verification. | Project architect: P2-05b, P2-05c, and P2-05d must define and enforce one approved execution boundary. Until then, task execution is not production-safe. |
+| High | The component lock protects individual transitions only. It is released before agent execution, while `task run` accepts an `in-progress` task, allowing concurrent runs of the same task. | `transition` releases its `TaskLock` before return; `run_task` permits `in-progress` tasks. | Project architect: define run-lifetime ownership and recovery in P2-05b/P2-05d; retain a single run lock through execution, verification, evidence persistence, and the terminal transition. |
+| High | Raw, unbounded agent stdout/stderr is stored and optionally streamed without a credential-redaction or access-control policy. `task log` returns the raw contents. | `src/agent.rs` writes both pipes verbatim to `.kvist/logs`; `task_log` reads that file verbatim. | Project architect: P2-05b/P2-05d must exclude credentials, redact persisted and streamed output, bound logs, and define retained evidence. |
+| High | Agent-log directory and file creation do not reject pre-existing link-like runtime paths or use no-follow/no-clobber creation. | `src/agent.rs` uses `create_dir_all` and `File::create` for `.kvist/logs`. | Project architect: P2-05b must require validated real runtime directories and safe file creation before executing untrusted workspace content. |
+| Medium | Test verification clears its environment and bounds each stream and elapsed time, but its configured values have no hard upper caps. Agent `token_limit` is parsed but not enforced. | `src/config.rs` and `src/task_commands.rs` parse and execute the test policy; `AgentProfile::token_limit` has no runtime use. | Project architect: P2-05d must impose hard maxima and either enforce or remove token-limit configuration. |
+
+### Source-blind compliance findings
+
+| Classification | Finding | Arbitration |
+| --- | --- | --- |
+| Mismatch | The execution-policy gates prohibit provider and repository-defined execution before explicit approval, while observed documentation records host-side agent/test execution without sandboxing, agent approval, agent timeout, or agent output bound. | Preserve the gate. P2-05b through P2-05d own remediation; this review does not authorize an exception. |
+| Mismatch | `src/SPEC.md` defines version-1 TODO queues, while `src/IMPL.md` states that the parser accepts only schema version 2. | Project architect must reconcile the source-derived record with the intended contract through a fresh documentation pass after checking the implementation; do not silently edit either document. |
+| Mismatch | The root contract assigns human-facing integration documentation to `/docs`, while the README carries a substantial public command contract at repository root. | Project architect must decide whether to move the integration documentation or revise the root contract. |
+| Underspecified | `spec accept` is described by observed documentation and tests but has no explicit public contract in `src/SPEC.md`. | Project architect must define its contract before a future compliance pass can certify it. |
+| Deferred | Portable sandbox isolation, agent-template approval, and agent resource limits remain listed as P2-05b, P2-05c, and P2-05d. | These items are release blockers, not resolved deferrals. |
+
+### End-to-end fixture and result
+
+`cargo test --locked` passed on 2026-08-21. Its 97 tests include the
+end-to-end `tests/task_commands.rs` workflow: initialize and track a project,
+select or name a ready task, invoke a configured agent, approve and execute a
+test policy, persist task and verification evidence, and retrieve an agent
+log. It also covers agent failure, absent or changed test policy, missing test
+command, verifier failure, verifier timeout, and bounded verifier output.
+
+The fixture establishes the observed Phase 2 workflow, not the absent security
+boundary. It does not exercise sandbox refusal, environment or credential
+exclusion for agents, agent cancellation/output limits, concurrent-run
+rejection, redaction, or link-like runtime-directory rejection. Those
+negative cases are required acceptance fixtures for P2-05b through P2-05d.
+
+**P2-07 result:** Review complete with unresolved release-blocking findings.
+Kvist must not be represented as safe to run against untrusted or
+machine-generated repositories until the named remediation work is complete
+and independently re-reviewed.
