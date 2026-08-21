@@ -3,12 +3,12 @@ use std::path::{Path, PathBuf};
 use kvist::agent::split_command;
 
 #[cfg(unix)]
-use std::fs;
-#[cfg(unix)]
 use kvist::{
     agent::execute_agent,
     config::{AgentProfile, SandboxConfig, VcsSelection},
 };
+#[cfg(unix)]
+use std::fs;
 #[cfg(unix)]
 use tempfile::TempDir;
 
