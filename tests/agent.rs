@@ -2,14 +2,14 @@ use std::path::{Path, PathBuf};
 
 use kvist::agent::split_command;
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use kvist::{
     agent::execute_agent,
     config::{AgentProfile, SandboxConfig, VcsSelection},
 };
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use std::fs;
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 use tempfile::TempDir;
 
 #[test]
@@ -42,7 +42,7 @@ fn split_command_interpolates_placeholders_and_trims_quotes_correctly() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn execute_agent_captures_stdout_and_stderr_in_log_file() {
     let workspace = TempDir::new().expect("workspace");
     let status = std::process::Command::new("git")

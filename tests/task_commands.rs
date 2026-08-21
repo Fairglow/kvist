@@ -33,7 +33,7 @@ fn track_project(project: &TempDir) {
     assert!(status.success());
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn fake_sandbox_runner_path(project: &TempDir) -> std::path::PathBuf {
     project
         .path()
@@ -49,7 +49,7 @@ fn fake_sandbox_runner_path(project: &TempDir) -> std::path::PathBuf {
         ))
 }
 
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn configure_fake_sandbox(project: &TempDir) {
     use std::os::unix::fs::PermissionsExt;
 
@@ -118,7 +118,7 @@ printf 'fake sandbox runner\n'
     }
 }
 
-#[cfg(not(unix))]
+#[cfg(not(target_os = "linux"))]
 fn configure_fake_sandbox(_project: &TempDir) {}
 
 fn queue() -> String {
@@ -447,6 +447,7 @@ tasks: []
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn task_run_executes_successfully_and_transitions_completed() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -506,7 +507,7 @@ command = "echo 'mocking verify'"
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn approval_record_is_deterministic_and_rejects_changed_agent_template_before_probe() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -566,7 +567,7 @@ command = "echo verify"
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn approval_rejects_changed_agent_source_and_runner_content_before_mutation() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -660,7 +661,7 @@ fn approval_records_absent_test_policy_but_task_run_refuses_it_before_mutation()
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn repository_forged_approval_record_cannot_probe_or_execute() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -729,7 +730,7 @@ command = "echo verify"
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn runner_changed_after_probe_is_not_spawned_for_request() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -814,7 +815,7 @@ printf 'approved request runner\n' > sandbox-request.json
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn approval_rejects_changed_agent_limit_before_sandbox_probe() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -904,7 +905,7 @@ fn task_run_refuses_missing_sandbox_before_transition() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn task_run_refuses_a_project_local_sandbox_runner_before_transition() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -956,7 +957,7 @@ fn task_run_refuses_a_project_local_sandbox_runner_before_transition() {
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn task_run_refuses_a_sibling_runner_in_the_selected_worktree() {
     use std::os::unix::fs::PermissionsExt;
 
@@ -1013,6 +1014,7 @@ fn task_run_refuses_a_sibling_runner_in_the_selected_worktree() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn task_run_auto_selects_and_executes_next_ready_task() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -1052,7 +1054,7 @@ command = "echo 'mocking verify'"
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn task_run_transitions_to_blocked_on_agent_failure() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -1096,7 +1098,7 @@ command = "echo verify"
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn task_run_cancels_agent_output_and_persists_redacted_bounded_evidence() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -1157,7 +1159,7 @@ command = "echo verify"
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn task_run_cancels_agent_timeout_with_durable_evidence() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -1203,7 +1205,7 @@ command = "echo verify"
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn task_run_redacts_a_secret_split_across_streams_before_log_and_streaming() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -1259,7 +1261,7 @@ command = "echo verify"
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn task_run_redacts_all_verification_evidence_blockers_and_cli_output() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -1339,7 +1341,7 @@ command = "verification-secret"
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn task_run_lifecycle_lock_survives_agent_component_lock_deletion() {
     use std::{thread, time::Duration};
 
@@ -1424,6 +1426,7 @@ command = "echo verify"
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn task_log_reads_and_outputs_the_most_recent_log_file() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -1552,7 +1555,7 @@ commands = []
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn task_run_fails_when_test_command_fails() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -1594,7 +1597,7 @@ command = "false"
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn task_run_handles_test_command_timeout() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -1636,7 +1639,7 @@ command = "sleep 5"
 }
 
 #[test]
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 fn task_run_caps_test_command_output_and_records_persistence() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
