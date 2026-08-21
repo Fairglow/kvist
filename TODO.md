@@ -64,6 +64,12 @@ This phase focuses on finalizing the security model and trust boundaries before 
   - Refuse `task run` when the required isolation is unavailable; do not
     silently fall back to host execution.
   - Ensure only the declared component context is available by default.
+- **Implementation status:** Complete. `task run` now requires an explicit
+  project-local version-1 sandbox runner for both agent and verification
+  subprocesses. The runner protocol denies network, limits the default mount
+  and agent context to the selected component, clears all but an explicit
+  environment allowlist, and refuses before task mutation when its capability
+  probe fails. P2-05c and P2-05d remain open.
 
 ### TODO P2-05c — Expand Cryptographic Approval to Cover Agent Execution Command Templates (Security Gap)
 

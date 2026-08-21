@@ -669,6 +669,20 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
 pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) -> Result<String> {
     let context = validate_context(component_path)?;
     let mut queue = read_queue(&context.component_dir)?;
+    let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+        operation: "determine current project directory",
+        path: PathBuf::from("."),
+        source,
+    })?;
+    let config = crate::config::load(&project_dir)?;
+    let sandbox_config = config
+        .sandbox
+        .as_ref()
+        .ok_or_else(|| KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: "task execution requires a project-local [sandbox] configuration".to_owned(),
+        })?;
+    crate::sandbox::ensure_available(sandbox_config, &project_dir, config.vcs)?;
 
     // 1. Determine the task to run
     let task_id = match task_id_opt {
@@ -723,35 +737,20 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
 
     let task = &queue.tasks[task_index];
 
-    // 3. Load agent profile matching task type
-    let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-        operation: "determine current project directory",
-        path: PathBuf::from("."),
-        source,
-    })?;
-    let config = crate::config::load(&project_dir)?;
+    // 3. Load agent profile matching task type.
     let agent_profile = match task.kind {
         TaskKind::Test | TaskKind::Implementation => &config.agent.developer,
         TaskKind::SecurityAudit | TaskKind::ComplianceReview => &config.agent.architect,
     };
 
     // 4. Sliced context files gathering
-    let spec_path = context
-        .component_dir
-        .join(ComponentArtifact::Specification.filename());
-    let queue_path = context
-        .component_dir
-        .join(ComponentArtifact::TaskQueue.filename());
-    let root_contract = project_dir.join("ROOT_CONTRACT.md");
-    let mut context_files = vec![spec_path, queue_path, root_contract];
-
-    // If there is a parent specification, add it to context too
-    if queue.component.parent_specification.is_some() {
-        let parent_spec = context.component_dir.join("../SPEC.md");
-        if parent_spec.exists() {
-            context_files.push(parent_spec);
-        }
-    }
+    // The sandbox receives only paths in its component mount. Root and parent
+    // files are described by task text, never exposed as host-path context.
+    let context_files = vec![
+        PathBuf::from("/workspace/component/SPEC.md"),
+        PathBuf::from("/workspace/component/TODOS.yaml"),
+        PathBuf::from("/workspace/component/IMPL.md"),
+    ];
 
     // 5. Build prompt
     let prompt = format!(
@@ -781,11 +780,16 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
     // 6. Execute agent
     let run_result = crate::agent::execute_agent(
         agent_profile,
-        &prompt,
-        &context_files,
-        &context.component_dir,
-        &task_id,
-        stream,
+        sandbox_config,
+        crate::agent::AgentExecutionRequest {
+            project_root: &project_dir,
+            vcs_selection: config.vcs,
+            prompt: &prompt,
+            context_paths: &context_files,
+            target_dir: &context.component_dir,
+            task_id: &task_id,
+            stream_output: stream,
+        },
     )?;
 
     // 7. Transition task status depending on outcome
@@ -1162,166 +1166,76 @@ pub fn find_test_command(
     None
 }
 
-/// Runs verification on a component task using the approved test command.
+/// Runs verification through the same required sandbox protocol as agents.
 pub fn verify_task(
     component_path: &Path,
     task_id: &str,
     project_dir: &Path,
     config: &crate::config::ProjectConfig,
 ) -> Result<VerificationResult> {
-    // 1. Verify policy is approved
     check_policy_approved(project_dir, config)?;
-
-    let policy = config.test_policy.as_ref().unwrap();
-
-    // 2. Locate the command
+    let policy = config
+        .test_policy
+        .as_ref()
+        .ok_or_else(|| KvistError::UnapprovedTestPolicy {
+            current_hash: "none".to_owned(),
+            expected_hash: None,
+        })?;
+    if policy.working_directory != "component" {
+        return Err(KvistError::SandboxUnavailable {
+            runner: config.sandbox.as_ref().map_or_else(|| "<unconfigured>".to_owned(), |value| value.runner.clone()),
+            reason: "the component-only sandbox mount cannot run a project working-directory test policy".to_owned(),
+        });
+    }
+    let sandbox_config = config
+        .sandbox
+        .as_ref()
+        .ok_or_else(|| KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: "task execution requires a project-local [sandbox] configuration".to_owned(),
+        })?;
     let normalized_component = normalize_component_path(component_path)?;
     let command_str = find_test_command(&normalized_component, policy).ok_or_else(|| {
         KvistError::MissingTestCommand {
             component: component_path.to_string_lossy().into_owned(),
         }
     })?;
-
-    // 3. Resolve working directory
-    let context = validate_context(component_path)?;
-    let working_dir = match policy.working_directory.as_str() {
-        "component" => context.component_dir.clone(),
-        _ => project_dir.to_path_buf(),
-    };
-
-    // 4. Split and prepare command
     let parts: Vec<&str> = command_str.split_whitespace().collect();
-    if parts.is_empty() {
+    let Some((program, arguments)) = parts.split_first() else {
         return Err(KvistError::Io {
             operation: "parse approved test command",
             path: PathBuf::from("."),
             source: io::Error::other("empty test command string"),
         });
-    }
-    let program = parts[0];
-    let args: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
-
-    use std::process::{Command, Stdio};
-    let mut cmd = Command::new(program);
-    cmd.args(&args);
-    cmd.current_dir(&working_dir);
-    cmd.env_clear();
-    for env_var in &policy.environment_allowlist {
-        if let Ok(val) = std::env::var(env_var) {
-            cmd.env(env_var, val);
-        }
-    }
-
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-
-    // 5. Spawn test subprocess
-    let mut child = cmd.spawn().map_err(|source| KvistError::Io {
-        operation: "spawn approved test command",
-        path: PathBuf::from(program),
-        source,
-    })?;
-
-    let mut stdout_pipe = child.stdout.take().ok_or_else(|| KvistError::Io {
-        operation: "take test command stdout",
-        path: PathBuf::from(program),
-        source: io::Error::other("cannot take stdout pipe"),
-    })?;
-
-    let mut stderr_pipe = child.stderr.take().ok_or_else(|| KvistError::Io {
-        operation: "take test command stderr",
-        path: PathBuf::from(program),
-        source: io::Error::other("cannot take stderr pipe"),
-    })?;
-
-    let max_output_bytes = policy.max_output_bytes;
-
-    // Spawn reader threads
-    use std::io::Read;
-    use std::thread;
-
-    let stdout_handle = thread::spawn(move || -> io::Result<Vec<u8>> {
-        let mut buffer = [0u8; 1024];
-        let mut out = Vec::new();
-        loop {
-            if out.len() >= max_output_bytes {
-                break;
-            }
-            let chunk_size = std::cmp::min(buffer.len(), max_output_bytes - out.len());
-            let bytes_read = stdout_pipe.read(&mut buffer[..chunk_size])?;
-            if bytes_read == 0 {
-                break;
-            }
-            out.extend_from_slice(&buffer[..bytes_read]);
-        }
-        Ok(out)
-    });
-
-    let stderr_handle = thread::spawn(move || -> io::Result<Vec<u8>> {
-        let mut buffer = [0u8; 1024];
-        let mut err = Vec::new();
-        loop {
-            if err.len() >= max_output_bytes {
-                break;
-            }
-            let chunk_size = std::cmp::min(buffer.len(), max_output_bytes - err.len());
-            let bytes_read = stderr_pipe.read(&mut buffer[..chunk_size])?;
-            if bytes_read == 0 {
-                break;
-            }
-            err.extend_from_slice(&buffer[..bytes_read]);
-        }
-        Ok(err)
-    });
-
-    // Wait with timeout
-    let start_time = std::time::Instant::now();
-    let timeout = std::time::Duration::from_secs(policy.timeout_seconds);
-    let mut exit_status = None;
-    let mut timed_out = false;
-
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                exit_status = Some(status);
-                break;
-            }
-            Ok(None) => {
-                if start_time.elapsed() >= timeout {
-                    let _ = child.kill();
-                    timed_out = true;
-                    break;
-                }
-                thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(source) => {
-                return Err(KvistError::Io {
-                    operation: "wait for test command",
-                    path: PathBuf::from(program),
-                    source,
-                });
-            }
-        }
-    }
-
-    // Join reader threads
-    let stdout_bytes = match stdout_handle.join() {
-        Ok(Ok(bytes)) => bytes,
-        _ => Vec::new(),
     };
-
-    let stderr_bytes = match stderr_handle.join() {
-        Ok(Ok(bytes)) => bytes,
-        _ => Vec::new(),
-    };
-
-    let stdout_str = String::from_utf8_lossy(&stdout_bytes).into_owned();
-    let stderr_str = String::from_utf8_lossy(&stderr_bytes).into_owned();
-
-    let success = !timed_out && exit_status.is_some_and(|s| s.success());
-    let exit_code = exit_status.and_then(|s| s.code());
-
-    // 6. Record results against task attempt
+    let context = validate_context(component_path)?;
+    let args = arguments
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect::<Vec<_>>();
+    let (output, timed_out) = crate::sandbox::execute_with_timeout(
+        sandbox_config,
+        crate::sandbox::ExecutionRequest {
+            project_root: project_dir,
+            vcs_selection: config.vcs,
+            component_dir: &context.component_dir,
+            program,
+            arguments: &args,
+            environment: crate::sandbox::allowed_environment(
+                sandbox_config,
+                Some(&policy.environment_allowlist),
+            ),
+            context_files: &[],
+        },
+        crate::sandbox::ExecutionOptions {
+            timeout: Some(std::time::Duration::from_secs(policy.timeout_seconds)),
+            output_limit: Some(policy.max_output_bytes),
+        },
+    )?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let success = !timed_out && output.status.success();
+    let exit_code = output.status.code();
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let attempt_path = attempt_path(&context.component_dir, task_id)?;
     append_verification(
@@ -1334,17 +1248,16 @@ pub fn verify_task(
             success,
             exit_code,
             timed_out,
-            stdout: &stdout_str,
-            stderr: &stderr_str,
+            stdout: &stdout,
+            stderr: &stderr,
         },
     )?;
-
     Ok(VerificationResult {
         success,
         command: command_str,
         exit_code,
         timed_out,
-        stdout: stdout_str,
-        stderr: stderr_str,
+        stdout,
+        stderr,
     })
 }

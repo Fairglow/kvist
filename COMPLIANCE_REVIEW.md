@@ -269,3 +269,23 @@ negative cases are required acceptance fixtures for P2-05b through P2-05d.
 Kvist must not be represented as safe to run against untrusted or
 machine-generated repositories until the named remediation work is complete
 and independently re-reviewed.
+
+## Phase 2 P2-05b sandbox security audit
+
+**Scope:** The version-1 external sandbox-runner protocol used by both agent
+and verification subprocesses.
+
+The independent audit initially found that a repository-controlled runner could
+print the required capability probe response and then execute arbitrary host
+code. The implementation now requires the runner to be an absolute, regular,
+non-link executable located outside both the project directory and the selected
+Git or jj worktree; failure to resolve that worktree refuses execution.
+Regression coverage includes a nested Kvist project whose sibling runner is
+inside its repository. The reviewer confirmed this containment rule closes the
+identified repository-supplied-runner bypass.
+
+The runner protocol remains an external trust boundary. P2-05c must bind the
+runner identity and effective execution configuration to explicit approval;
+P2-05d owns agent cancellation, output bounds, redaction, and runtime-log
+path hardening. Those residual items prevent this audit from certifying the
+overall task-execution surface.

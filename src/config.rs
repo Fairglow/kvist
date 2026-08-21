@@ -88,6 +88,17 @@ pub struct ProjectConfig {
     pub agent: AgentConfig,
     /// Test command execution policy.
     pub test_policy: Option<TestPolicy>,
+    /// Required project-local isolation boundary for task execution.
+    pub sandbox: Option<SandboxConfig>,
+}
+
+/// Project-selected version-1 external sandbox runner contract.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SandboxConfig {
+    /// Executable invoked directly, never through a shell.
+    pub runner: String,
+    /// Environment names inherited by the runner and declared for its child.
+    pub environment_allowlist: Vec<String>,
 }
 
 /// Supported VCS selection for durable-artifact tracking inspection.
@@ -205,7 +216,92 @@ fn parse(config_path: &Path, project_root: &Path, contents: &str) -> Result<Proj
         vcs: parse_vcs_selection(config_path, table)?,
         agent: load_agent_config(project_root, table)?,
         test_policy: parse_test_policy(config_path, table)?,
+        sandbox: parse_sandbox_config(config_path, table)?,
     })
+}
+
+fn parse_sandbox_config(
+    config_path: &Path,
+    table: &toml::map::Map<String, toml::Value>,
+) -> Result<Option<SandboxConfig>> {
+    let Some(value) = table.get("sandbox") else {
+        return Ok(None);
+    };
+    let sandbox = value
+        .as_table()
+        .ok_or_else(|| invalid_configuration(config_path, "`sandbox` must be a TOML table"))?;
+    let schema_version = sandbox
+        .get("schema_version")
+        .and_then(toml::Value::as_integer)
+        .ok_or_else(|| {
+            invalid_configuration(config_path, "`sandbox.schema_version` must be an integer")
+        })?;
+    if schema_version != 1 {
+        return Err(invalid_configuration(
+            config_path,
+            "`sandbox.schema_version` must be 1",
+        ));
+    }
+    let runner = sandbox
+        .get("runner")
+        .and_then(toml::Value::as_str)
+        .filter(|value| !value.trim().is_empty() && Path::new(value).is_absolute())
+        .ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`sandbox.runner` must be a nonblank absolute executable path",
+            )
+        })?;
+    let network = sandbox
+        .get("network")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| invalid_configuration(config_path, "`sandbox.network` must be `deny`"))?;
+    if network != "deny" {
+        return Err(invalid_configuration(
+            config_path,
+            "`sandbox.network` must be `deny`",
+        ));
+    }
+    let mount = sandbox
+        .get("mount")
+        .and_then(toml::Value::as_str)
+        .ok_or_else(|| invalid_configuration(config_path, "`sandbox.mount` must be `component`"))?;
+    if mount != "component" {
+        return Err(invalid_configuration(
+            config_path,
+            "`sandbox.mount` must be `component`",
+        ));
+    }
+    let values = sandbox
+        .get("environment_allowlist")
+        .and_then(toml::Value::as_array)
+        .ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`sandbox.environment_allowlist` must be an array of nonblank strings",
+            )
+        })?;
+    let mut environment_allowlist = Vec::with_capacity(values.len());
+    for value in values {
+        let name = value
+            .as_str()
+            .filter(|name| !name.is_empty() && name.bytes().all(|byte| byte == b'_' || byte.is_ascii_alphanumeric()))
+            .ok_or_else(|| invalid_configuration(config_path, "`sandbox.environment_allowlist` must contain only nonblank ASCII environment names"))?;
+        if environment_allowlist
+            .iter()
+            .any(|existing| existing == name)
+        {
+            return Err(invalid_configuration(
+                config_path,
+                "`sandbox.environment_allowlist` must not contain duplicates",
+            ));
+        }
+        environment_allowlist.push(name.to_owned());
+    }
+    Ok(Some(SandboxConfig {
+        runner: runner.to_owned(),
+        environment_allowlist,
+    }))
 }
 
 fn parse_vcs_selection(

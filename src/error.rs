@@ -9,6 +9,11 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum KvistError {
+    /// The required external isolation boundary is absent or did not attest its capability.
+    #[error(
+        "sandbox runner `{runner}` is unavailable or cannot provide required isolation: {reason}"
+    )]
+    SandboxUnavailable { runner: String, reason: String },
     /// A command-line syntax or help error produced by the parser.
     #[error(transparent)]
     ArgumentParsing(#[from] clap::Error),

@@ -16,6 +16,7 @@ mod file_io;
 mod filesystem;
 pub mod init;
 pub mod project_state;
+pub mod sandbox;
 pub mod specification;
 pub mod status;
 pub mod task_commands;

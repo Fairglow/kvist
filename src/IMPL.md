@@ -300,9 +300,29 @@ tests, shells, networks, or task execution.
 tracking gates as task transitions. It runs `test` and `implementation` tasks
 through the `developer` profile, and `security-audit` and `compliance-review`
 tasks through the `architect` profile. The selected agent receives the local
-`SPEC.md`, `TODOS.yaml`, `ROOT_CONTRACT.md`, and, for a child component, its
-immediate parent's `SPEC.md`; peer implementation files are not passed as
-explicit context.
+component `SPEC.md`, `TODOS.yaml`, and `IMPL.md` at sandbox paths; root,
+parent, and peer files are not passed as explicit context.
+
+Before selecting a transition, `task run` requires project-local
+`[sandbox]` configuration and starts its configured runner with
+`--kvist-sandbox-probe-v1`. It proceeds only when the runner exits successfully
+with the exact version-1 deny-network/component-mount acknowledgement.
+The configured runner path must be absolute, name a regular non-symlink file,
+and canonically resolve outside both the project root and the selected Git or
+jj worktree root; Kvist repeats that validation before each probe and execution.
+A repository-provided runner, including a sibling of a nested project, is
+refused even if it returns the expected acknowledgement. Failure to resolve
+the selected worktree root also refuses execution. The implementation does not yet
+bind or approve runner identity or effective execution configuration; P2-05c
+is retained for that decision.
+Kvist invokes the runner shell-free with `--kvist-sandbox-request-v1` and a
+JSON standard-input manifest containing the requested program and arguments,
+`/workspace/component` working directory, one read-write component mount,
+denied network, filtered environment, and context paths. The runner's output
+and exit status become the agent or test result. There is no host fallback.
+Missing configuration, runner spawn failures, or an invalid acknowledgement
+fail before a lock or task-state transition. A test policy using project
+working directory is rejected by the component-only protocol.
 
 Agent templates are split into a program and arguments without a shell. The
 supported substitutions are `{prompt}`, `{context_files}`, and
@@ -312,18 +332,19 @@ console. A zero exit status completes the task except that an implementation
 also requires its configured test command to succeed. Agent failures,
 verification failures, and verification-policy failures block the task.
 
-The test policy selects inherited commands by component path, clears the
-environment except for the configured allowlist, applies the configured
-timeout, and captures each output stream up to the configured byte limit.
+The test policy selects inherited commands by component path, intersects its
+allowlist with the sandbox allowlist, applies its configured timeout to the
+sandbox runner, and records each returned output stream up to the configured
+byte limit.
 `approve-policy` writes the SHA-256 hash of that policy to
 `.kvist/approved_policy.sha256`; an implementation task blocks if the current
 policy is absent or differs from that approval. Verification result records
 are appended to the task's attempt JSONL file.
 
-Agent execution is not sandboxed, has no agent timeout or agent-output cap,
-and does not require approval of the resolved agent template. The implementation
-therefore executes configured programs on the host and is not a safe boundary
-for untrusted repositories.
+Agent execution has no agent timeout or agent-output cap and does not require
+approval of the resolved agent template. Isolation enforcement is delegated to
+the configured external runner; Kvist verifies only its version-1 capability
+acknowledgement and cannot independently prove the runner's implementation.
 
 ## Observable omissions and failure behavior
 

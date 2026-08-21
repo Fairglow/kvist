@@ -30,8 +30,8 @@ scope is defined by the implementation roadmap in
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
 and prioritized in [`TODO.md`](TODO.md). The Phase 1 foundation and Phase 2
 queue, status, task-transition, agent-runner, and test-verification mechanics
-are implemented. The independent compliance pipeline and execution-isolation
-controls required for production use are not yet implemented.
+are implemented. `task run` now requires an external sandbox runner; provider
+approval and resource-boundary follow-up work remains.
 
 ## Configuration and platform policy
 
@@ -42,6 +42,40 @@ configuration is resolved in this order: `[agent]` in `kvist.toml`,
 system configuration path. The current implementation creates a default
 per-user agent configuration if none is available. This behavior is limited to
 agent settings; it does not select a project root.
+
+### Sandboxed task execution
+
+`task run` never executes an agent or verification command directly. Each
+project must opt in with this versioned, project-local configuration:
+
+```toml
+[sandbox]
+schema_version = 1
+runner = "/absolute/path/to/separately-installed-sandbox-runner"
+network = "deny"
+environment_allowlist = ["PATH"]
+mount = "component"
+```
+
+`runner` must be an absolute path to a regular, non-symlink executable outside
+both the project root and the selected Git/jj worktree root. Repository-
+controlled runners, including siblings of a nested Kvist project, are forbidden
+even when they self-attest. Kvist refuses execution if it cannot resolve the
+selected worktree root. The runner is spawned without a shell. It must acknowledge
+`--kvist-sandbox-probe-v1` by writing exactly
+`kvist-sandbox-probe-v1: network=deny; mount=component` and accept one JSON
+request on stdin when passed `--kvist-sandbox-request-v1`. Request version 1
+contains the target program/arguments, a `/workspace/component` working
+directory, a single component mount, denied network, allowed environment, and
+agent context paths. The runner must enforce those values and proxy its
+sandboxed child result. Missing configuration, an unavailable runner, or a
+failed probe refuses `task run` before any task transition; Kvist never falls
+back to host execution. A version-1 sandbox cannot run a `test_policy` with
+`working_directory = "project"`.
+
+P2-05c will cryptographically bind and approve the runner identity and the
+effective execution configuration; the outside-project location requirement is
+an origin boundary, not that future approval.
 
 Kvist targets current stable Rust on Linux, macOS, and Windows for x86_64 and
 ARM64 systems. Filesystem behavior must be covered on every supported platform;
@@ -424,13 +458,10 @@ policy controls working directory, inherited environment variables, timeout,
 output cap, and component-to-command mapping. Agent logs are written under
 `.kvist/logs`; attempt and verification records are durable JSONL files.
 
-**Safety status:** agent and test programs execute on the host. Agent execution
-has no sandbox, no timeout or output cap, and no approval record for the
-resolved agent template. The approved test policy does not approve agent
-configuration. Do not use `task run` on an untrusted repository; the
-sandboxing, execution-configuration approval, and independent Phase 2 review
-in [`TODO.md`](TODO.md) remain required before this becomes a production-safe
-execution boundary.
+**Safety status:** agent and test programs require an external sandbox runner
+that attests network denial and component-only mounting. Agent execution still
+has no timeout or output cap, and its resolved template has no approval
+record. The approved test policy does not approve agent configuration.
 
 ## Intended lifecycle and current scope
 

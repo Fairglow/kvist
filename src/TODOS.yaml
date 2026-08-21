@@ -1,6 +1,6 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:749e4cd579f3706c24143e9711c75a362d3e76d6486a981a8e5763fa04afe2d2"
+  specification_revision: "sha256:3b7c5f564a1684a9bb24964e2988bc861cc9f5c093bb423906bb152279337faf"
   parent_specification: null
   revalidation:
     state: current
@@ -378,3 +378,79 @@ tasks:
       updated_at: "2026-08-16T14:00:52Z"
       completed_at: null
     blocked_reason: "Verification audit is blocked."
+  - id: "p2-05b-write-tests"
+    title: "Define sandbox runner protocol tests"
+    description: "Write configuration, refusal, and fake-runner integration tests for isolated agent and verification execution."
+    context: "Task execution previously invoked configured programs directly on the host."
+    purpose: "Establish executable evidence that no task transition occurs without the required isolation boundary."
+    expected_outcome: "Tests cover missing configuration, failed isolation probe, and a version-1 component-only manifest for both subprocess classes."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Sandboxed-external-execution"
+      - "TODO.md#P2-05b"
+    timestamps:
+      created_at: "2026-08-21T06:10:05Z"
+      updated_at: "2026-08-21T06:20:40Z"
+      completed_at: "2026-08-21T06:20:40Z"
+    blocked_reason: null
+  - id: "p2-05b-implement-code"
+    title: "Implement sandbox runner execution"
+    description: "Route agent and verification subprocesses through the required shell-free sandbox runner protocol."
+    context: "External execution must not fall back to host processes when an isolation boundary is missing."
+    purpose: "Enforce explicit network, environment, and component-context controls for every task run."
+    expected_outcome: "Task execution probes the configured runner before state mutation and sends only versioned component-mount requests."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "p2-05b-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Sandboxed-external-execution"
+      - "TODO.md#P2-05b"
+    timestamps:
+      created_at: "2026-08-21T06:10:05Z"
+      updated_at: "2026-08-21T06:20:40Z"
+      completed_at: "2026-08-21T06:20:40Z"
+    blocked_reason: null
+  - id: "p2-05b-security-audit"
+    title: "Audit sandbox runner trust boundary"
+    description: "Review runner probing, manifest construction, environment clearing, mount scope, and host-fallback resistance."
+    context: "The runner protocol mediates untrusted repository-defined agents and test commands."
+    purpose: "Identify isolation bypasses before task execution relies on the new external boundary."
+    expected_outcome: "An independent finding record confirms or remediates sandbox configuration and protocol controls."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "p2-05b-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Sandboxed-external-execution"
+      - "TODO.md#P2-05b"
+    timestamps:
+      created_at: "2026-08-21T06:10:05Z"
+      updated_at: "2026-08-21T06:20:40Z"
+      completed_at: "2026-08-21T06:20:40Z"
+    blocked_reason: null
+  - id: "p2-05b-compliance-review"
+    title: "Independently review sandbox compliance"
+    description: "Compare source-derived sandbox behavior with the execution contract and retain any discrepancy for arbitration."
+    context: "An implementer cannot certify the boundary that controls external execution."
+    purpose: "Preserve independent evidence that task execution remains constrained to its declared context."
+    expected_outcome: "A clean-slate implementation record and source-blind review classify the sandbox behavior without silently changing its contract."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "p2-05b-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Sandboxed-external-execution"
+      - "TODO.md#P2-05b"
+    timestamps:
+      created_at: "2026-08-21T06:10:05Z"
+      updated_at: "2026-08-21T06:10:05Z"
+      completed_at: null
+    blocked_reason: null

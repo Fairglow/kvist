@@ -18,6 +18,7 @@ fn run_kvist(project: &TempDir, arguments: &[&str]) -> Output {
 }
 
 fn track_project(project: &TempDir) {
+    configure_fake_sandbox(project);
     let status = Command::new("git")
         .args(["init", "--quiet"])
         .current_dir(project.path())
@@ -31,6 +32,66 @@ fn track_project(project: &TempDir) {
         .expect("track project artifacts");
     assert!(status.success());
 }
+
+#[cfg(unix)]
+fn configure_fake_sandbox(project: &TempDir) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let runner = project
+        .path()
+        .parent()
+        .expect("temporary project parent")
+        .join(format!(
+            "fake-sandbox-runner-{}",
+            project
+                .path()
+                .file_name()
+                .expect("temporary project name")
+                .to_string_lossy()
+        ));
+    fs::write(
+        &runner,
+        r#"#!/bin/sh
+if [ "$1" = "--kvist-sandbox-probe-v1" ]; then
+  printf 'kvist-sandbox-probe-v1: network=deny; mount=component\n'
+  exit 0
+fi
+request=$(cat)
+printf '%s' "$request" > sandbox-request.json
+case "$request" in
+  *'"program":"false"'*) exit 1 ;;
+  *'emit-and-fail'*|*'fail-test'*)
+    i=0
+    while [ "$i" -lt 10000 ]; do
+      printf 1234567890abcdef
+      i=$((i + 1))
+    done
+    exit 1
+    ;;
+  *'sleep'*) sleep 2 ;;
+esac
+printf 'fake sandbox runner\n'
+"#,
+    )
+    .expect("write fake sandbox runner");
+    fs::set_permissions(&runner, fs::Permissions::from_mode(0o755))
+        .expect("make runner executable");
+    let config_path = project.path().join("kvist.toml");
+    let config = fs::read_to_string(&config_path).expect("read config");
+    if !config.contains("[sandbox]") {
+        fs::write(
+            config_path,
+            format!(
+                "{config}\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+                runner.display()
+            ),
+        )
+        .expect("configure sandbox");
+    }
+}
+
+#[cfg(not(unix))]
+fn configure_fake_sandbox(_project: &TempDir) {}
 
 fn queue() -> String {
     format!(
@@ -405,6 +466,151 @@ command = "echo 'mocking verify'"
     let queue_contents =
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
     assert!(queue_contents.contains("status: completed"));
+    let manifest = fs::read_to_string(project.path().join("sandbox-request.json"))
+        .expect("read sandbox manifest");
+    assert!(manifest.contains("\"protocol_version\":1"));
+    assert!(manifest.contains("\"network\":\"deny\""));
+    assert!(manifest.contains("\"destination\":\"/workspace/component\""));
+    assert!(manifest.contains("\"working_directory\":\"/workspace/component\""));
+}
+
+#[test]
+fn task_run_refuses_missing_sandbox_before_transition() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    let config = fs::read_to_string(project.path().join("kvist.toml")).expect("read config");
+    fs::write(
+        project.path().join("kvist.toml"),
+        format!("{config}\n[agent.profiles.developer]\ncommand_template = \"echo agent\"\n"),
+    )
+    .expect("write config");
+    let status = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(project.path())
+        .status()
+        .expect("initialize Git");
+    assert!(status.success());
+    let status = Command::new("git")
+        .args(["add", "."])
+        .current_dir(project.path())
+        .status()
+        .expect("track project");
+    assert!(status.success());
+    let before = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("project-local [sandbox]"));
+    assert_eq!(
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue"),
+        before
+    );
+    assert!(!project.path().join("src/.kvist-task.lock").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn task_run_refuses_a_project_local_sandbox_runner_before_transition() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    let runner = project.path().join("fake-sandbox-runner");
+    fs::write(
+        &runner,
+        "#!/bin/sh\nprintf 'kvist-sandbox-probe-v1: network=deny; mount=component\\n'\n",
+    )
+    .expect("write runner");
+    fs::set_permissions(&runner, fs::Permissions::from_mode(0o755))
+        .expect("make runner executable");
+    fs::write(
+        project.path().join("kvist.toml"),
+        format!(
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"echo agent\"\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+            runner.display()
+        ),
+    )
+    .expect("write config");
+    let status = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(project.path())
+        .status()
+        .expect("initialize Git");
+    assert!(status.success());
+    let status = Command::new("git")
+        .args(["add", "."])
+        .current_dir(project.path())
+        .status()
+        .expect("track project");
+    assert!(status.success());
+    let before = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("outside the project root"));
+    assert_eq!(
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue"),
+        before
+    );
+    assert!(!project.path().join("src/.kvist-task.lock").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn task_run_refuses_a_sibling_runner_in_the_selected_worktree() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let checkout = TempDir::new().expect("checkout");
+    let project = checkout.path().join("nested-project");
+    initialize(&project).expect("initialize nested project");
+    fs::write(project.join("src/TODOS.yaml"), queue()).expect("write queue");
+    let runner = checkout.path().join("sibling-sandbox-runner");
+    fs::write(
+        &runner,
+        "#!/bin/sh\nprintf 'kvist-sandbox-probe-v1: network=deny; mount=component\\n'\n",
+    )
+    .expect("write sibling runner");
+    fs::set_permissions(&runner, fs::Permissions::from_mode(0o755))
+        .expect("make runner executable");
+    fs::write(
+        project.join("kvist.toml"),
+        format!(
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"echo agent\"\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+            runner.display()
+        ),
+    )
+    .expect("write config");
+    let status = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(checkout.path())
+        .status()
+        .expect("initialize checkout Git");
+    assert!(status.success());
+    let status = Command::new("git")
+        .args(["add", "."])
+        .current_dir(checkout.path())
+        .status()
+        .expect("track checkout");
+    assert!(status.success());
+    let before = fs::read_to_string(project.join("src/TODOS.yaml")).expect("read queue");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args(["task", "run", ".", "implement-code"])
+        .current_dir(&project)
+        .output()
+        .expect("run kvist");
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("selected VCS worktree"));
+    assert_eq!(
+        fs::read_to_string(project.join("src/TODOS.yaml")).expect("read queue"),
+        before
+    );
+    assert!(!project.join("src/.kvist-task.lock").exists());
 }
 
 #[test]
@@ -521,7 +727,7 @@ command = "echo 'mocking verify'"
     );
     let stdout_str = String::from_utf8_lossy(&log_output.stdout);
     assert!(
-        stdout_str.contains("my expected log output"),
+        stdout_str.contains("fake sandbox runner"),
         "Expected log contents not found in output: {}",
         stdout_str
     );

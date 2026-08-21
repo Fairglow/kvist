@@ -290,6 +290,49 @@ that directory-entry durability guarantee.
 
 ## Execution-policy decision gates
 
+## Sandboxed external execution
+
+`kvist task run` is opt-in and refuses before changing task state or invoking
+an agent or test command unless project-local `kvist.toml` contains a complete
+`[sandbox]` table. Version 1 requires `schema_version = 1`, an absolute
+`runner` path to a separately installed regular non-symlink executable outside
+the project root, `network = "deny"`, an explicit
+`environment_allowlist`, and `mount = "component"`. No default runner,
+environment inheritance, network permission, broader mount, repository runner,
+or host fallback exists. Kvist validates that condition before every probe and
+execution; the project cannot make its own executable trusted by self-attesting.
+It also resolves the configured Git or jj worktree root read-only and rejects a
+runner anywhere within that canonical worktree, including a sibling of a nested
+Kvist project. If the selected worktree root cannot be resolved unambiguously,
+task execution refuses rather than weakening the origin check.
+
+Kvist invokes the runner directly, never through a shell. It first invokes
+`RUNNER --kvist-sandbox-probe-v1`; a runner is usable only when it exits zero
+and writes exactly `kvist-sandbox-probe-v1: network=deny; mount=component`.
+For each execution Kvist invokes `RUNNER --kvist-sandbox-request-v1`, writes
+one UTF-8 JSON request to standard input, and uses the runner's exit status,
+stdout, and stderr as the sandboxed command result. The request has
+`protocol_version: 1`, `program`, `arguments`, `working_directory`,
+`network`, one component read-write mount, `environment`, and
+`context_files`. The mount source is the selected component and destination
+and working directory are `/workspace/component`; agent context paths are
+limited to that mount's `SPEC.md`, `TODOS.yaml`, and `IMPL.md`. The runner
+must enforce the declared denial and mount rather than execute the requested
+program on the host.
+
+Both configured agent templates and approved test commands use this protocol.
+Test policies with `working_directory = "project"` are rejected because the
+version-1 component-only mount cannot provide that context. The sandbox
+allowlist is the upper bound for both subprocess classes; a test policy can
+further narrow it. Test timeouts terminate the runner, never retry a command
+outside it. Runner unavailability, a malformed/missing sandbox configuration,
+or an invalid probe is a task-run failure before lock acquisition, transition,
+agent execution, or test execution.
+
+P2-05c will bind and explicitly approve the runner identity and effective
+execution-sensitive configuration. Until then, the outside-project location is
+the minimum trust-origin boundary; it is not identity approval.
+
 P2-04 cannot implement a provider runner until the project owner records:
 first-class provider executable names and discovery rules; a versioned
 request/response protocol; the exact working directory, stdin, arguments, and

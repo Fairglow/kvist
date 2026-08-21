@@ -328,3 +328,37 @@ command_template = "local-override-developer"
         }
     }
 }
+
+#[test]
+fn sandbox_configuration_requires_explicit_deny_network_component_mount_and_environment() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    let base = "schema_version = 1\ncomponent_root = \"src\"\n";
+    let valid = r#"[sandbox]
+    schema_version = 1
+    runner = "/trusted/sandbox-runner"
+    network = "deny"
+    environment_allowlist = ["PATH"]
+    mount = "component"
+    "#;
+    fs::write(project.path().join("kvist.toml"), format!("{base}{valid}")).expect("write config");
+    let loaded = config::load(project.path()).expect("load sandbox");
+    assert_eq!(
+        loaded.sandbox.expect("sandbox").environment_allowlist,
+        vec!["PATH"]
+    );
+
+    for invalid in [
+        "[sandbox]\nschema_version = 1\nrunner = \"runner\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+        "[sandbox]\nschema_version = 1\nrunner = \"runner\"\nnetwork = \"allow\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+        "[sandbox]\nschema_version = 1\nrunner = \"runner\"\nnetwork = \"deny\"\nmount = \"component\"\n",
+        "[sandbox]\nschema_version = 1\nrunner = \"runner\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"project\"\n",
+    ] {
+        fs::write(
+            project.path().join("kvist.toml"),
+            format!("{base}{invalid}"),
+        )
+        .expect("write invalid config");
+        assert!(config::load(project.path()).is_err(), "{invalid}");
+    }
+}
