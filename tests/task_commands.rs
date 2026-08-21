@@ -870,6 +870,7 @@ command = "echo verify"
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn task_run_refuses_missing_sandbox_before_transition() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
