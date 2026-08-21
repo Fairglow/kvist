@@ -8,6 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tempfile::NamedTempFile;
 
 use crate::{
     KvistError, Result,
@@ -1598,26 +1599,42 @@ fn ensure_user_state_directory(path: &Path) -> Result<()> {
 }
 
 fn write_approval_secret(path: &Path, secret: &[u8]) -> Result<()> {
+    let parent = path.parent().ok_or_else(|| KvistError::Io {
+        operation: "determine approval secret parent",
+        path: path.to_path_buf(),
+        source: io::Error::other("approval secret has no parent directory"),
+    })?;
     #[cfg(unix)]
-    use std::os::unix::fs::OpenOptionsExt;
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
+    use std::os::unix::fs::PermissionsExt;
+    let mut temporary_file = NamedTempFile::new_in(parent).map_err(|source| KvistError::Io {
+        operation: "create temporary approval secret",
+        path: parent.to_path_buf(),
+        source,
+    })?;
     #[cfg(unix)]
-    options.mode(0o600);
-    match options.open(path) {
-        Ok(mut file) => file
-            .write_all(secret)
-            .and_then(|()| file.sync_all())
-            .map_err(|source| KvistError::Io {
-                operation: "write approval secret",
-                path: path.to_path_buf(),
-                source,
-            }),
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
-        Err(source) => Err(KvistError::Io {
-            operation: "create approval secret",
+    temporary_file
+        .as_file()
+        .set_permissions(fs::Permissions::from_mode(0o600))
+        .map_err(|source| KvistError::Io {
+            operation: "protect temporary approval secret",
             path: path.to_path_buf(),
             source,
+        })?;
+    temporary_file
+        .write_all(secret)
+        .and_then(|()| temporary_file.as_file().sync_all())
+        .map_err(|source| KvistError::Io {
+            operation: "write approval secret",
+            path: path.to_path_buf(),
+            source,
+        })?;
+    match temporary_file.persist_noclobber(path) {
+        Ok(_) => Ok(()),
+        Err(error) if error.error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(KvistError::Io {
+            operation: "publish approval secret",
+            path: path.to_path_buf(),
+            source: error.error,
         }),
     }
 }
