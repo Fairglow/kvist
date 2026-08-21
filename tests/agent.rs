@@ -73,10 +73,13 @@ fn execute_agent_captures_stdout_and_stderr_in_log_file() {
         runner: runner.to_string_lossy().into_owned(),
         environment_allowlist: vec![],
     };
+    let runner_identity = kvist::sandbox::runner_identity(&sandbox, target_dir, VcsSelection::Git)
+        .expect("runner identity");
 
     let result = execute_agent(
         &profile,
         &sandbox,
+        &runner_identity,
         kvist::agent::AgentExecutionRequest {
             project_root: target_dir,
             vcs_selection: VcsSelection::Git,

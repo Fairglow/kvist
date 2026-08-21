@@ -34,10 +34,8 @@ fn track_project(project: &TempDir) {
 }
 
 #[cfg(unix)]
-fn configure_fake_sandbox(project: &TempDir) {
-    use std::os::unix::fs::PermissionsExt;
-
-    let runner = project
+fn fake_sandbox_runner_path(project: &TempDir) -> std::path::PathBuf {
+    project
         .path()
         .parent()
         .expect("temporary project parent")
@@ -48,7 +46,14 @@ fn configure_fake_sandbox(project: &TempDir) {
                 .file_name()
                 .expect("temporary project name")
                 .to_string_lossy()
-        ));
+        ))
+}
+
+#[cfg(unix)]
+fn configure_fake_sandbox(project: &TempDir) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let runner = fake_sandbox_runner_path(project);
     fs::write(
         &runner,
         r#"#!/bin/sh
@@ -446,7 +451,11 @@ command = "echo 'mocking verify'"
 
     // Approve test policy
     let approve_output = run_kvist(&project, &["task", "approve-policy"]);
-    assert!(approve_output.status.success());
+    assert!(
+        approve_output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&approve_output.stderr)
+    );
 
     // Run next task (implement-code)
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
@@ -472,6 +481,365 @@ command = "echo 'mocking verify'"
     assert!(manifest.contains("\"network\":\"deny\""));
     assert!(manifest.contains("\"destination\":\"/workspace/component\""));
     assert!(manifest.contains("\"working_directory\":\"/workspace/component\""));
+}
+
+#[test]
+#[cfg(unix)]
+fn approval_record_is_deterministic_and_rejects_changed_agent_template_before_probe() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    fs::write(
+        project.path().join("kvist.toml"),
+        r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "echo approved-agent"
+token_limit = 42
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo verify"
+"#,
+    )
+    .expect("write config");
+    track_project(&project);
+
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+    let first = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(first.status.success());
+    let second = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(second.status.success());
+    assert_eq!(first.stdout, second.stdout);
+
+    let changed = fs::read_to_string(project.path().join("kvist.toml"))
+        .expect("read config")
+        .replace("approved-agent", "substituted-agent");
+    fs::write(project.path().join("kvist.toml"), changed).expect("change template");
+    Command::new("git")
+        .args(["add", "kvist.toml"])
+        .current_dir(project.path())
+        .status()
+        .expect("stage changed config");
+    let before = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("agent configuration source"));
+    assert_eq!(
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue"),
+        before
+    );
+    assert!(!project.path().join("sandbox-request.json").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn approval_rejects_changed_agent_source_and_runner_content_before_mutation() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    fs::create_dir_all(project.path().join(".kvist")).expect("create local config directory");
+    fs::write(
+        project.path().join(".kvist/config.toml"),
+        "[agent.profiles.developer]\ncommand_template = \"echo local-agent\"\n",
+    )
+    .expect("write local agent config");
+    fs::write(
+        project.path().join("kvist.toml"),
+        r#"schema_version = 1
+component_root = "src"
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo verify"
+"#,
+    )
+    .expect("write project config");
+    track_project(&project);
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+
+    fs::write(
+        project.path().join(".kvist/config.toml"),
+        "[agent.profiles.developer]\ncommand_template = \"echo changed-local-agent\"\n",
+    )
+    .expect("change local agent config");
+    let before = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("agent configuration source"));
+    assert_eq!(
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue"),
+        before
+    );
+
+    fs::write(
+        project.path().join(".kvist/config.toml"),
+        "[agent.profiles.developer]\ncommand_template = \"echo local-agent\"\n",
+    )
+    .expect("restore local agent config");
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+    fs::write(fake_sandbox_runner_path(&project), "#!/bin/sh\nexit 0\n").expect("change runner");
+
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("sandbox runner"));
+    assert_eq!(
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue"),
+        before
+    );
+}
+
+#[test]
+fn approval_records_absent_test_policy_but_task_run_refuses_it_before_mutation() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    let config = "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"echo agent\"\n";
+    fs::write(project.path().join("kvist.toml"), config).expect("write config");
+    track_project(&project);
+
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+    let before = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("test policy is absent"));
+    assert_eq!(
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue"),
+        before
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn repository_forged_approval_record_cannot_probe_or_execute() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    fs::write(
+        project.path().join("kvist.toml"),
+        r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "echo forged"
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo verify"
+"#,
+    )
+    .expect("write forged config");
+    track_project(&project);
+    fs::create_dir_all(project.path().join(".kvist")).expect("create legacy record directory");
+    fs::write(
+        project.path().join(".kvist/approved_execution_policy.json"),
+        r#"{
+  "schema_version": 1,
+  "canonical_project": "/forged/project",
+  "canonical_worktree": "/forged/worktree",
+  "material": {
+    "configuration_schema_version": 1,
+    "approval_schema_version": 1,
+    "sandbox_protocol_version": 1,
+    "sandbox_schema_version": 1,
+    "agent_source": "/forged/config.toml",
+    "agent_source_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "architect_template_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "architect_token_limit": null,
+    "developer_template_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "developer_token_limit": null,
+    "sandbox_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "runner_path": "/forged/runner",
+    "runner_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "test_policy_schema_version": 1,
+    "test_policy_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "approval_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "authentication_tag": "hmac-sha256:forged"
+}"#,
+    )
+    .expect("forge every project-controlled approval value");
+    let before = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("repository-contained approval record")
+    );
+    assert_eq!(
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue"),
+        before
+    );
+    assert!(!project.path().join("sandbox-request.json").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn runner_changed_after_probe_is_not_spawned_for_request() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    fs::write(
+        project.path().join("kvist.toml"),
+        r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "echo agent"
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo verify"
+"#,
+    )
+    .expect("write config");
+    let runner = fake_sandbox_runner_path(&project);
+    fs::write(
+        &runner,
+        format!(
+            r#"#!/bin/sh
+if [ "$1" = "--kvist-sandbox-probe-v1" ]; then
+  cat > "{}" <<'EOF'
+#!/bin/sh
+printf 'untrusted request runner\n' > sandbox-request.json
+exit 1
+EOF
+  chmod 755 "{}"
+  printf 'kvist-sandbox-probe-v1: network=deny; mount=component\n'
+  exit 0
+fi
+printf 'approved request runner\n' > sandbox-request.json
+"#,
+            runner.display(),
+            runner.display()
+        ),
+    )
+    .expect("write self-mutating runner");
+    fs::set_permissions(&runner, fs::Permissions::from_mode(0o755))
+        .expect("make runner executable");
+    let config_path = project.path().join("kvist.toml");
+    let config = fs::read_to_string(&config_path).expect("read config");
+    fs::write(
+        config_path,
+        format!(
+            "{config}\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+            runner.display()
+        ),
+    )
+    .expect("configure runner");
+    let status = Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(project.path())
+        .status()
+        .expect("initialize Git");
+    assert!(status.success());
+    let status = Command::new("git")
+        .args(["add", "."])
+        .current_dir(project.path())
+        .status()
+        .expect("track project");
+    assert!(status.success());
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("runner identity or content changed"));
+    assert!(!project.path().join("sandbox-request.json").exists());
+}
+
+#[test]
+#[cfg(unix)]
+fn approval_rejects_changed_test_policy_before_sandbox_probe() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    fs::create_dir_all(project.path().join(".kvist")).expect("create local config directory");
+    fs::write(
+        project.path().join(".kvist/config.toml"),
+        "[agent.profiles.developer]\ncommand_template = \"echo local-agent\"\n",
+    )
+    .expect("write local agent config");
+    fs::write(
+        project.path().join("kvist.toml"),
+        r#"schema_version = 1
+component_root = "src"
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo verify"
+"#,
+    )
+    .expect("write config");
+    track_project(&project);
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+    let changed = fs::read_to_string(project.path().join("kvist.toml"))
+        .expect("read config")
+        .replace("max_output_bytes = 1000", "max_output_bytes = 999");
+    fs::write(project.path().join("kvist.toml"), changed).expect("change test policy");
+    let before = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("test policy has changed"));
+    assert_eq!(
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue"),
+        before
+    );
+    assert!(!project.path().join("sandbox-request.json").exists());
 }
 
 #[test]
@@ -502,7 +870,7 @@ fn task_run_refuses_missing_sandbox_before_transition() {
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
 
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("project-local [sandbox]"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("sandbox configuration is absent"));
     assert_eq!(
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue"),
         before
@@ -551,7 +919,10 @@ fn task_run_refuses_a_project_local_sandbox_runner_before_transition() {
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
 
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("outside the project root"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("approval record")
+            || String::from_utf8_lossy(&output.stderr).contains("outside the project root")
+    );
     assert_eq!(
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue"),
         before
@@ -605,7 +976,10 @@ fn task_run_refuses_a_sibling_runner_in_the_selected_worktree() {
         .expect("run kvist");
 
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("selected VCS worktree"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("approval record")
+            || String::from_utf8_lossy(&output.stderr).contains("selected VCS worktree")
+    );
     assert_eq!(
         fs::read_to_string(project.join("src/TODOS.yaml")).expect("read queue"),
         before
@@ -664,9 +1038,24 @@ fn task_run_transitions_to_blocked_on_agent_failure() {
 component_root = "src"
 [agent.profiles.developer]
 command_template = "false"
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo verify"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
 
     // Run task and verify failure
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
@@ -758,18 +1147,14 @@ command = "echo 'mocking verify'"
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
 
-    // Run task - should block due to unapproved policy
+    // Run task - it must refuse before sandbox probing or task mutation.
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
-    assert!(output.status.success());
-    let stdout_str = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout_str.contains(
-        "verification blocked and transitioned to blocked: unapproved test-command policy"
-    ));
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("approval record"));
 
     let queue_contents =
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
-    assert!(queue_contents.contains("status: blocked"));
-    assert!(queue_contents.contains("unapproved test-command policy"));
+    assert!(queue_contents.contains("status: pending"));
 }
 
 #[test]

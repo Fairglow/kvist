@@ -359,6 +359,14 @@ pub enum KvistError {
         /// Canonical hash of the expected/previously approved test-command policy.
         expected_hash: Option<String>,
     },
+    /// The complete execution policy has not been explicitly approved.
+    #[error(
+        "unapproved execution policy: {reason}. Run `kvist task approve-policy` after reviewing the effective agent, sandbox, runner, and test configuration"
+    )]
+    UnapprovedExecutionPolicy {
+        /// Specific missing, malformed, or changed execution input.
+        reason: String,
+    },
     /// A test command is missing for a component requiring verification.
     #[error(
         "missing test-command policy for component `{component}`. Please define a command for it in `kvist.toml` under `[test_policy]` and approve it"

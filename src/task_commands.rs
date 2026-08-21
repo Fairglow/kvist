@@ -6,7 +6,8 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{
     KvistError, Result,
@@ -667,14 +668,23 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
 /// Launches the external agent to execute a task, transitions the task to InProgress,
 /// captures logs, parses token usage, and transitions the task to Completed/Blocked based on exit.
 pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) -> Result<String> {
-    let context = validate_context(component_path)?;
-    let mut queue = read_queue(&context.component_dir)?;
     let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
         operation: "determine current project directory",
         path: PathBuf::from("."),
         source,
     })?;
     let config = crate::config::load(&project_dir)?;
+    if config.sandbox.is_none() {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: "sandbox configuration is absent".to_owned(),
+        });
+    }
+    let approved_runner = check_execution_approved(&project_dir, &config)?;
+    if config.test_policy.is_none() {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: "test policy is absent".to_owned(),
+        });
+    }
     let sandbox_config = config
         .sandbox
         .as_ref()
@@ -682,7 +692,9 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
             runner: "<unconfigured>".to_owned(),
             reason: "task execution requires a project-local [sandbox] configuration".to_owned(),
         })?;
-    crate::sandbox::ensure_available(sandbox_config, &project_dir, config.vcs)?;
+    crate::sandbox::ensure_available(sandbox_config, &project_dir, config.vcs, &approved_runner)?;
+    let context = validate_context(component_path)?;
+    let mut queue = read_queue(&context.component_dir)?;
 
     // 1. Determine the task to run
     let task_id = match task_id_opt {
@@ -781,6 +793,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
     let run_result = crate::agent::execute_agent(
         agent_profile,
         sandbox_config,
+        &approved_runner,
         crate::agent::AgentExecutionRequest {
             project_root: &project_dir,
             vcs_selection: config.vcs,
@@ -970,7 +983,41 @@ pub fn task_log(component_path: &Path, task_id: &str) -> Result<String> {
     Ok(contents)
 }
 
-/// Approve the current test-command policy by recording its canonical hash locally.
+const EXECUTION_APPROVAL_VERSION: u32 = 1;
+const APPROVAL_STATE_DIRECTORY: &str = "approval-v1";
+const APPROVAL_SECRET_FILE: &str = "approval-secret";
+
+/// Versioned, non-secret execution inputs bound by an explicit approval.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ExecutionApprovalMaterial {
+    configuration_schema_version: u32,
+    approval_schema_version: u32,
+    sandbox_protocol_version: u32,
+    sandbox_schema_version: u32,
+    agent_source: String,
+    agent_source_digest: String,
+    architect_template_digest: String,
+    architect_token_limit: Option<usize>,
+    developer_template_digest: String,
+    developer_token_limit: Option<usize>,
+    sandbox_digest: String,
+    runner_path: String,
+    runner_digest: String,
+    test_policy_schema_version: Option<i64>,
+    test_policy_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct ExecutionApproval {
+    schema_version: u32,
+    canonical_project: String,
+    canonical_worktree: String,
+    material: ExecutionApprovalMaterial,
+    approval_digest: String,
+    authentication_tag: String,
+}
+
+/// Approve the complete effective execution policy with a deterministic record.
 pub fn approve_policy(project_path: &Path) -> Result<String> {
     let project_dir = if project_path == Path::new(".") {
         std::env::current_dir().map_err(|source| KvistError::Io {
@@ -983,34 +1030,317 @@ pub fn approve_policy(project_path: &Path) -> Result<String> {
     };
 
     let config = crate::config::load(&project_dir)?;
-    let Some(policy) = &config.test_policy else {
-        return Err(KvistError::InvalidProjectConfiguration {
-            path: project_dir.join("kvist.toml"),
-            reason: "no `[test_policy]` section found in project configuration".to_owned(),
-        });
+    reject_project_approval_record(&project_dir)?;
+    let (mut approval, _) = build_execution_approval(&project_dir, &config)?;
+    let (state_root, approved_path) = approval_state_paths(
+        &project_dir,
+        config.vcs,
+        &approval.canonical_project,
+        &approval.canonical_worktree,
+    )?;
+    let secret = load_or_create_approval_secret(&state_root)?;
+    approval.authentication_tag = approval_tag(&secret, &approval)?;
+    let record_directory = approved_path.parent().ok_or_else(|| KvistError::Io {
+        operation: "determine approval record directory",
+        path: approved_path.clone(),
+        source: io::Error::other("approval record path has no parent"),
+    })?;
+    ensure_user_state_directory(record_directory)?;
+    let encoded = serde_json::to_string(&approval).map_err(|error| {
+        KvistError::UnapprovedExecutionPolicy {
+            reason: format!("cannot serialize execution approval: {error}"),
+        }
+    })?;
+    replace_file_atomically(&approved_path, &encoded)?;
+    Ok(format!(
+        "Successfully approved execution policy with hash: {}",
+        approval.approval_digest
+    ))
+}
+
+fn build_execution_approval(
+    project_dir: &Path,
+    config: &crate::config::ProjectConfig,
+) -> Result<(ExecutionApproval, crate::sandbox::RunnerIdentity)> {
+    let sandbox = config
+        .sandbox
+        .as_ref()
+        .ok_or_else(|| KvistError::UnapprovedExecutionPolicy {
+            reason: "sandbox configuration is absent".to_owned(),
+        })?;
+    let runner = crate::sandbox::runner_identity(sandbox, project_dir, config.vcs)?;
+    let (canonical_project, canonical_worktree) =
+        project_worktree_identity(project_dir, config.vcs)?;
+    let material = ExecutionApprovalMaterial {
+        configuration_schema_version: crate::artifacts::CONFIGURATION_VERSION,
+        approval_schema_version: EXECUTION_APPROVAL_VERSION,
+        sandbox_protocol_version: crate::sandbox::PROTOCOL_VERSION,
+        sandbox_schema_version: 1,
+        agent_source: config.agent.source.identity.clone(),
+        agent_source_digest: config.agent.source.digest.clone(),
+        architect_template_digest: digest(config.agent.architect.command_template.as_bytes()),
+        architect_token_limit: config.agent.architect.token_limit,
+        developer_template_digest: digest(config.agent.developer.command_template.as_bytes()),
+        developer_token_limit: config.agent.developer.token_limit,
+        sandbox_digest: digest(&serde_json::to_vec(sandbox).map_err(|error| {
+            KvistError::UnapprovedExecutionPolicy {
+                reason: format!("cannot serialize sandbox configuration: {error}"),
+            }
+        })?),
+        runner_path: runner.canonical_path.clone(),
+        runner_digest: runner.digest.clone(),
+        test_policy_schema_version: config
+            .test_policy
+            .as_ref()
+            .map(|policy| policy.schema_version),
+        test_policy_digest: config
+            .test_policy
+            .as_ref()
+            .map(crate::config::compute_policy_hash),
     };
+    let approval_digest = digest(&serde_json::to_vec(&material).map_err(|error| {
+        KvistError::UnapprovedExecutionPolicy {
+            reason: format!("cannot serialize execution approval inputs: {error}"),
+        }
+    })?);
+    Ok((
+        ExecutionApproval {
+            schema_version: EXECUTION_APPROVAL_VERSION,
+            canonical_project,
+            canonical_worktree,
+            material,
+            approval_digest,
+            authentication_tag: String::new(),
+        },
+        runner,
+    ))
+}
 
-    let current_hash = crate::config::compute_policy_hash(policy);
+fn digest(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
+}
 
-    let kvist_dir = project_dir.join(".kvist");
-    if !kvist_dir.exists() {
-        fs::create_dir_all(&kvist_dir).map_err(|source| KvistError::Io {
-            operation: "create .kvist directory",
-            path: kvist_dir.clone(),
+fn reject_project_approval_record(project_dir: &Path) -> Result<()> {
+    let path = project_dir
+        .join(".kvist")
+        .join("approved_execution_policy.json");
+    match fs::symlink_metadata(&path) {
+        Ok(_) => Err(KvistError::UnapprovedExecutionPolicy {
+            reason: format!(
+                "legacy repository-contained approval record `{}` must be removed; approvals are user-owned state",
+                path.display()
+            ),
+        }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(KvistError::Io {
+            operation: "inspect legacy approval record",
+            path,
+            source,
+        }),
+    }
+}
+
+fn project_worktree_identity(
+    project_dir: &Path,
+    vcs_selection: crate::config::VcsSelection,
+) -> Result<(String, String)> {
+    let project = project_dir
+        .canonicalize()
+        .map_err(|source| KvistError::Io {
+            operation: "canonicalize approval project root",
+            path: project_dir.to_path_buf(),
             source,
         })?;
-    }
-
-    let approved_path = kvist_dir.join("approved_policy.sha256");
-    fs::write(&approved_path, &current_hash).map_err(|source| KvistError::Io {
-        operation: "write approved policy hash",
-        path: approved_path.clone(),
+    let inspection = crate::vcs::inspect(project_dir, vcs_selection, Vec::new());
+    let worktree =
+        inspection
+            .repository_root
+            .ok_or_else(|| KvistError::UnapprovedExecutionPolicy {
+                reason: format!(
+                    "cannot resolve selected VCS worktree for approval: {}",
+                    inspection.diagnostic.unwrap_or(inspection.summary)
+                ),
+            })?;
+    let worktree = worktree.canonicalize().map_err(|source| KvistError::Io {
+        operation: "canonicalize approval worktree root",
+        path: worktree,
         source,
     })?;
-
-    Ok(format!(
-        "Successfully approved test-command policy with hash: {current_hash}"
+    Ok((
+        project.to_string_lossy().into_owned(),
+        worktree.to_string_lossy().into_owned(),
     ))
+}
+
+fn approval_state_paths(
+    project_dir: &Path,
+    vcs_selection: crate::config::VcsSelection,
+    canonical_project: &str,
+    canonical_worktree: &str,
+) -> Result<(PathBuf, PathBuf)> {
+    let state_base = user_state_base().ok_or_else(|| KvistError::UnapprovedExecutionPolicy {
+        reason: "cannot determine user-owned approval state directory".to_owned(),
+    })?;
+    let state_root = state_base.join("kvist").join(APPROVAL_STATE_DIRECTORY);
+    let (project, worktree) = project_worktree_identity(project_dir, vcs_selection)?;
+    if project != canonical_project || worktree != canonical_worktree {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: "canonical project or worktree identity changed during approval".to_owned(),
+        });
+    }
+    if state_root.starts_with(Path::new(&project)) || state_root.starts_with(Path::new(&worktree)) {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: "user-owned approval state must not be inside the project or worktree"
+                .to_owned(),
+        });
+    }
+    let name = digest(format!("{canonical_project}\n{canonical_worktree}").as_bytes())
+        .trim_start_matches("sha256:")
+        .to_owned();
+    Ok((
+        state_root.clone(),
+        state_root.join("records").join(format!("{name}.json")),
+    ))
+}
+
+fn user_state_base() -> Option<PathBuf> {
+    if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA").map(PathBuf::from)
+    } else {
+        std::env::var_os("XDG_STATE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state"))
+            })
+    }
+}
+
+fn load_or_create_approval_secret(state_root: &Path) -> Result<Vec<u8>> {
+    ensure_user_state_directory(state_root)?;
+    let path = state_root.join(APPROVAL_SECRET_FILE);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) => read_approval_secret(&path, &metadata),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let mut secret = [0_u8; 32];
+            getrandom::fill(&mut secret).map_err(|error| {
+                KvistError::UnapprovedExecutionPolicy {
+                    reason: format!("cannot generate approval secret: {error}"),
+                }
+            })?;
+            write_approval_secret(&path, &secret)?;
+            let metadata = fs::symlink_metadata(&path).map_err(|source| KvistError::Io {
+                operation: "inspect created approval secret",
+                path: path.clone(),
+                source,
+            })?;
+            read_approval_secret(&path, &metadata)
+        }
+        Err(source) => Err(KvistError::Io {
+            operation: "inspect approval secret",
+            path,
+            source,
+        }),
+    }
+}
+
+fn ensure_user_state_directory(path: &Path) -> Result<()> {
+    fs::create_dir_all(path).map_err(|source| KvistError::Io {
+        operation: "create user approval state directory",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let metadata = fs::symlink_metadata(path).map_err(|source| KvistError::Io {
+        operation: "inspect user approval state directory",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if is_link_like(&metadata) || !metadata.file_type().is_dir() {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: format!(
+                "user approval state `{}` must be a real directory",
+                path.display()
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn write_approval_secret(path: &Path, secret: &[u8]) -> Result<()> {
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    match options.open(path) {
+        Ok(mut file) => file
+            .write_all(secret)
+            .and_then(|()| file.sync_all())
+            .map_err(|source| KvistError::Io {
+                operation: "write approval secret",
+                path: path.to_path_buf(),
+                source,
+            }),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(source) => Err(KvistError::Io {
+            operation: "create approval secret",
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn read_approval_secret(path: &Path, metadata: &fs::Metadata) -> Result<Vec<u8>> {
+    if is_link_like(metadata) || !metadata.file_type().is_file() || metadata.len() != 32 {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: format!("approval secret `{}` is malformed", path.display()),
+        });
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return Err(KvistError::UnapprovedExecutionPolicy {
+                reason: format!("approval secret `{}` is not user-private", path.display()),
+            });
+        }
+    }
+    fs::read(path).map_err(|source| KvistError::Io {
+        operation: "read approval secret",
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn approval_tag(secret: &[u8], approval: &ExecutionApproval) -> Result<String> {
+    let payload = serde_json::to_vec(&(
+        approval.schema_version,
+        &approval.canonical_project,
+        &approval.canonical_worktree,
+        &approval.material,
+        &approval.approval_digest,
+    ))
+    .map_err(|error| KvistError::UnapprovedExecutionPolicy {
+        reason: format!("cannot serialize authenticated approval record: {error}"),
+    })?;
+    Ok(format!("hmac-sha256:{}", hmac_sha256(secret, &payload)))
+}
+
+fn hmac_sha256(secret: &[u8], message: &[u8]) -> String {
+    let mut key = [0_u8; 64];
+    if secret.len() > key.len() {
+        key[..32].copy_from_slice(&Sha256::digest(secret));
+    } else {
+        key[..secret.len()].copy_from_slice(secret);
+    }
+    let mut inner = Sha256::new();
+    inner.update(key.map(|byte| byte ^ 0x36));
+    inner.update(message);
+    let inner = inner.finalize();
+    let mut outer = Sha256::new();
+    outer.update(key.map(|byte| byte ^ 0x5c));
+    outer.update(inner);
+    format!("{:x}", outer.finalize())
 }
 
 /// Verification run result
@@ -1089,44 +1419,117 @@ fn append_verification(path: &Path, record: VerificationRecord<'_>) -> Result<()
     Ok(())
 }
 
-/// Verifies whether the current test policy has been approved.
+/// Verifies the complete effective execution policy before external execution.
+pub fn check_execution_approved(
+    project_dir: &Path,
+    config: &crate::config::ProjectConfig,
+) -> Result<crate::sandbox::RunnerIdentity> {
+    reject_project_approval_record(project_dir)?;
+    let (current, runner) = build_execution_approval(project_dir, config)?;
+    let (state_root, approved_path) = approval_state_paths(
+        project_dir,
+        config.vcs,
+        &current.canonical_project,
+        &current.canonical_worktree,
+    )?;
+    let secret = load_or_create_approval_secret(&state_root)?;
+    let metadata = fs::symlink_metadata(&approved_path).map_err(|error| {
+        KvistError::UnapprovedExecutionPolicy {
+            reason: if error.kind() == io::ErrorKind::NotFound {
+                format!("approval record `{}` is missing", approved_path.display())
+            } else {
+                format!(
+                    "cannot inspect approval record `{}`: {error}",
+                    approved_path.display()
+                )
+            },
+        }
+    })?;
+    if is_link_like(&metadata) || !metadata.file_type().is_file() {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: format!(
+                "approval record `{}` must be a regular non-link file",
+                approved_path.display()
+            ),
+        });
+    }
+    let contents = fs::read_to_string(&approved_path).map_err(|source| KvistError::Io {
+        operation: "read execution approval record",
+        path: approved_path.clone(),
+        source,
+    })?;
+    let approved: ExecutionApproval =
+        serde_json::from_str(&contents).map_err(|error| KvistError::UnapprovedExecutionPolicy {
+            reason: format!("approval record is malformed: {error}"),
+        })?;
+    if approved.schema_version != EXECUTION_APPROVAL_VERSION
+        || approved.material.approval_schema_version != EXECUTION_APPROVAL_VERSION
+    {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: "approval record has an unsupported schema version".to_owned(),
+        });
+    }
+    let recorded_digest = digest(&serde_json::to_vec(&approved.material).map_err(|error| {
+        KvistError::UnapprovedExecutionPolicy {
+            reason: format!("approval record cannot be canonicalized: {error}"),
+        }
+    })?);
+    if recorded_digest != approved.approval_digest {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: "approval record digest is malformed or does not match its contents".to_owned(),
+        });
+    }
+    if approval_tag(&secret, &approved)? != approved.authentication_tag {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: "approval record authentication failed".to_owned(),
+        });
+    }
+    if approved.canonical_project != current.canonical_project
+        || approved.canonical_worktree != current.canonical_worktree
+        || approved.material != current.material
+    {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: execution_approval_difference(&approved.material, &current.material),
+        });
+    }
+    Ok(runner)
+}
+
+fn execution_approval_difference(
+    approved: &ExecutionApprovalMaterial,
+    current: &ExecutionApprovalMaterial,
+) -> String {
+    if approved.agent_source != current.agent_source
+        || approved.agent_source_digest != current.agent_source_digest
+    {
+        "agent configuration source identity or digest has changed".to_owned()
+    } else if approved.architect_template_digest != current.architect_template_digest
+        || approved.architect_token_limit != current.architect_token_limit
+        || approved.developer_template_digest != current.developer_template_digest
+        || approved.developer_token_limit != current.developer_token_limit
+    {
+        "agent execution configuration has changed".to_owned()
+    } else if approved.runner_path != current.runner_path
+        || approved.runner_digest != current.runner_digest
+    {
+        "sandbox runner identity or content has changed".to_owned()
+    } else if approved.sandbox_digest != current.sandbox_digest {
+        "sandbox configuration has changed".to_owned()
+    } else if approved.test_policy_digest != current.test_policy_digest
+        || approved.test_policy_schema_version != current.test_policy_schema_version
+    {
+        "test policy has changed or is absent".to_owned()
+    } else {
+        "execution protocol or schema versions have changed".to_owned()
+    }
+}
+
+/// Legacy compatibility wrapper for callers that previously checked only tests.
 pub fn check_policy_approved(
     project_dir: &Path,
     config: &crate::config::ProjectConfig,
 ) -> Result<()> {
-    let Some(policy) = &config.test_policy else {
-        return Err(KvistError::UnapprovedTestPolicy {
-            current_hash: "none".to_owned(),
-            expected_hash: None,
-        });
-    };
-
-    let current_hash = crate::config::compute_policy_hash(policy);
-    let approved_path = project_dir.join(".kvist").join("approved_policy.sha256");
-    if !approved_path.exists() {
-        return Err(KvistError::UnapprovedTestPolicy {
-            current_hash,
-            expected_hash: None,
-        });
-    }
-
-    let approved_hash = fs::read_to_string(&approved_path)
-        .map_err(|source| KvistError::Io {
-            operation: "read approved policy hash",
-            path: approved_path.clone(),
-            source,
-        })?
-        .trim()
-        .to_owned();
-
-    if current_hash != approved_hash {
-        return Err(KvistError::UnapprovedTestPolicy {
-            current_hash,
-            expected_hash: Some(approved_hash),
-        });
-    }
-
-    Ok(())
+    check_execution_approved(project_dir, config).map(|_| ())
 }
 
 /// Finds a matching test command for the given component utilizing component inheritance.
@@ -1173,14 +1576,14 @@ pub fn verify_task(
     project_dir: &Path,
     config: &crate::config::ProjectConfig,
 ) -> Result<VerificationResult> {
-    check_policy_approved(project_dir, config)?;
-    let policy = config
-        .test_policy
-        .as_ref()
-        .ok_or_else(|| KvistError::UnapprovedTestPolicy {
-            current_hash: "none".to_owned(),
-            expected_hash: None,
-        })?;
+    let approved_runner = check_execution_approved(project_dir, config)?;
+    let policy =
+        config
+            .test_policy
+            .as_ref()
+            .ok_or_else(|| KvistError::UnapprovedExecutionPolicy {
+                reason: "test policy is absent".to_owned(),
+            })?;
     if policy.working_directory != "component" {
         return Err(KvistError::SandboxUnavailable {
             runner: config.sandbox.as_ref().map_or_else(|| "<unconfigured>".to_owned(), |value| value.runner.clone()),
@@ -1231,6 +1634,7 @@ pub fn verify_task(
             timeout: Some(std::time::Duration::from_secs(policy.timeout_seconds)),
             output_limit: Some(policy.max_output_bytes),
         },
+        &approved_runner,
     )?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();

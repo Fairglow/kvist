@@ -79,10 +79,20 @@ This phase focuses on finalizing the security model and trust boundaries before 
   changed global configuration can alter what `kvist task run` executes
   without triggering policy warnings.
 - **Acceptance criteria:**
-  - Expand the cryptographic verification and approval boundary to cover the
-    effective agent configuration, its source path, and `[test_policy]`.
-  - Reject task execution if any execution-sensitive configuration has changed
-    since explicit approval.
+  - Expand the cryptographic verification and approval boundary to cover both
+    effective agent command templates and token limits, the resolved source
+    identity and digest, parsed sandbox configuration, canonical runner path
+    and digest, `[test_policy]` including absence, and schema/protocol versions.
+  - Persist a deterministic, versioned, non-secret approval record atomically
+    in user-owned state, authenticated by a persistent secret unavailable to
+    project files and bound to canonical project/worktree identity.
+  - Reject missing, malformed, or changed execution inputs before any sandbox
+    probe or task mutation, with no host fallback.
+  - Reject repository-contained legacy approval records and launch a
+    descriptor-bound verified runner copy for each probe and request; platforms
+    without that mechanism must fail closed.
+- **Implementation status:** Complete; retained independent security and
+  compliance review queue items remain pending.
 
 ### TODO P2-05d — Bound agent subprocess resources
 

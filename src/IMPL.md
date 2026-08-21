@@ -28,8 +28,9 @@ The available commands are:
 * `kvist task run COMPONENT_DIR [TASK_ID] [--stream]` runs the configured
   external agent for an explicit or first ready task.
 * `kvist task log COMPONENT_DIR TASK_ID` prints the most recent task log.
-* `kvist task approve-policy [PROJECT_DIR]` stores the current test-policy
-  hash in the project's `.kvist` directory.
+* `kvist task approve-policy [PROJECT_DIR]` atomically stores a versioned
+  complete execution-policy approval record in user-owned state outside the
+  project.
 * `kvist tree [PROJECT_DIR]` loads configuration, discovers components, and
   renders a deterministic ASCII tree.
 * `kvist spec new COMPONENT_DIR` creates a new `SPEC.md`.
@@ -303,19 +304,38 @@ tasks through the `architect` profile. The selected agent receives the local
 component `SPEC.md`, `TODOS.yaml`, and `IMPL.md` at sandbox paths; root,
 parent, and peer files are not passed as explicit context.
 
-Before selecting a transition, `task run` requires project-local
+Before a sandbox probe or selecting a transition, `task run` verifies a
+user-state approval record. A 32-byte cryptographically random secret is
+created once in the user state directory and is required to authenticate the
+record; on Unix its file must be user-private. The record is stored below that
+state directory under a digest of canonical project and selected-worktree
+identities, which are also authenticated in its payload. A project-contained
+`.kvist/approved_execution_policy.json` is a rejected legacy/forgery signal.
+The record contains no command templates or policy content. Instead, its
+SHA-256-protected deterministic material records digests for the effective
+architect and developer templates, their token limits, the selected agent
+configuration source identity and digest, parsed sandbox configuration,
+canonical runner path and digest, the test-policy digest or explicit absence,
+and configuration, approval, sandbox, and protocol versions. The resolver
+retains source provenance while selecting project, project-local, user, system,
+or built-in defaults and no longer creates a user configuration. A missing,
+malformed, unauthenticated, changed, or unsupported approval record/input is a
+command error before runner probing, locking, or task mutation.
+
+After that approval gate, `task run` requires project-local
 `[sandbox]` configuration and starts its configured runner with
 `--kvist-sandbox-probe-v1`. It proceeds only when the runner exits successfully
 with the exact version-1 deny-network/component-mount acknowledgement.
 The configured runner path must be absolute, name a regular non-symlink file,
 and canonically resolve outside both the project root and the selected Git or
-jj worktree root; Kvist repeats that validation before each probe and execution.
+jj worktree root. On Linux, Kvist re-hashes the runner immediately before every
+probe and request spawn, copies matching bytes to a private user-state file,
+and executes its retained `/proc/self/fd` descriptor. The source path can
+therefore be replaced after validation without changing launched bytes.
+Platforms without this descriptor-bound mechanism fail closed.
 A repository-provided runner, including a sibling of a nested project, is
 refused even if it returns the expected acknowledgement. Failure to resolve
-the selected worktree root also refuses execution. The implementation does not yet
-bind or approve runner identity or effective execution configuration; P2-05c
-is retained for that decision.
-Kvist invokes the runner shell-free with `--kvist-sandbox-request-v1` and a
+the selected worktree root also refuses execution. Kvist invokes the runner shell-free with `--kvist-sandbox-request-v1` and a
 JSON standard-input manifest containing the requested program and arguments,
 `/workspace/component` working directory, one read-write component mount,
 denied network, filtered environment, and context paths. The runner's output
@@ -336,15 +356,15 @@ The test policy selects inherited commands by component path, intersects its
 allowlist with the sandbox allowlist, applies its configured timeout to the
 sandbox runner, and records each returned output stream up to the configured
 byte limit.
-`approve-policy` writes the SHA-256 hash of that policy to
-`.kvist/approved_policy.sha256`; an implementation task blocks if the current
-policy is absent or differs from that approval. Verification result records
-are appended to the task's attempt JSONL file.
+`approve-policy` writes the authenticated complete approval record atomically
+in user state. A task run refuses if its policy is absent, any approved
+execution input differs, or a repository-contained legacy record is present.
+Verification result records are appended to the task's attempt JSONL file.
 
-Agent execution has no agent timeout or agent-output cap and does not require
-approval of the resolved agent template. Isolation enforcement is delegated to
-the configured external runner; Kvist verifies only its version-1 capability
-acknowledgement and cannot independently prove the runner's implementation.
+Agent execution has no agent timeout or agent-output cap. Isolation enforcement
+is delegated to the configured external runner; Kvist verifies its identity and
+version-1 capability acknowledgement but cannot independently prove its
+implementation.
 
 ## Observable omissions and failure behavior
 

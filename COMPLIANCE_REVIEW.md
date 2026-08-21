@@ -289,3 +289,27 @@ runner identity and effective execution configuration to explicit approval;
 P2-05d owns agent cancellation, output bounds, redaction, and runtime-log
 path hardening. Those residual items prevent this audit from certifying the
 overall task-execution surface.
+
+## Phase 2 P2-05c execution-approval security audit
+
+**Scope:** The complete execution-policy approval record, resolver provenance,
+runner identity, and pre-mutation gate.
+
+The independent audit found that a project-contained, unkeyed SHA-256 approval
+record could be forged along with changed inputs. Approval evidence now resides
+in authenticated user-owned state, uses a persistent random secret unavailable
+to project files, and is keyed to canonical project and worktree identity.
+The reviewer confirmed that this closes the repository-record forgery under
+the trusted-user-state assumption.
+
+The audit also found that hashing a runner before path-based launch left a
+replacement race. Linux now copies verified bytes into private user state and
+executes the retained descriptor through `/proc/self/fd`; unsupported platforms
+refuse execution. Regression tests cover forged repository evidence, a runner
+change after approval, a probe-to-request change, and source replacement after
+verification. The reviewer confirmed the descriptor-bound launch closes the
+reported race.
+
+P2-05d remains responsible for agent timeout, cancellation, output bounds,
+redaction, and log-path hardening. The P2-05c compliance-review task remains
+pending for its required source-blind comparison.

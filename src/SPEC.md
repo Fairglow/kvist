@@ -329,9 +329,37 @@ outside it. Runner unavailability, a malformed/missing sandbox configuration,
 or an invalid probe is a task-run failure before lock acquisition, transition,
 agent execution, or test execution.
 
-P2-05c will bind and explicitly approve the runner identity and effective
-execution-sensitive configuration. Until then, the outside-project location is
-the minimum trust-origin boundary; it is not identity approval.
+Before any sandbox probe, lock acquisition, task transition, agent execution,
+or verification execution, `task run` must verify a versioned approval record
+created by `task approve-policy`. The compatibility command name denotes
+approval of the complete execution policy, not only tests. The deterministic,
+non-secret record is atomically written in user-owned state outside the
+repository and authenticated with a persistent cryptographically random secret
+that project files cannot read or replace. It is bound to canonical project and
+selected-worktree identities. Repository-contained or legacy approval records
+are rejected. SHA-256 binds:
+
+* both effective architect and developer command templates and token limits;
+* the resolved agent-configuration source identity and exact source digest;
+* the parsed sandbox configuration, canonical runner path, and runner-content
+  digest;
+* the test policy, including an explicit absent-policy value; and
+* the configuration, sandbox, test-policy, approval-record, and sandbox
+  protocol schema versions.
+
+The agent resolver records the selected project, project-local, user, system,
+or built-in-default source as it resolves it; approval never reconstructs or
+guesses that source. Missing, malformed, non-regular/link-like, changed, or
+unapproved execution inputs reject the run with an explicit approval error and
+without host fallback or task mutation. Approval reads only the established
+resolver candidates and never creates a user configuration as a side effect.
+
+The approved runner identity is re-derived immediately before every probe and
+sandbox-request spawn. On Linux, Kvist copies the freshly verified bytes into a
+private user-state file and launches that retained descriptor through
+`/proc/self/fd`; replacing or modifying the configured path after validation
+cannot change launched bytes. Platforms without descriptor-bound verified
+execution fail closed rather than launching a path after validation.
 
 P2-04 cannot implement a provider runner until the project owner records:
 first-class provider executable names and discovery rules; a versioned

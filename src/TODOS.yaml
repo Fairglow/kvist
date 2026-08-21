@@ -1,6 +1,6 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:3b7c5f564a1684a9bb24964e2988bc861cc9f5c093bb423906bb152279337faf"
+  specification_revision: "sha256:8e72dc39de33660ee6dce40bc40dd7497f91010fedd3718f98e289475b71215d"
   parent_specification: null
   revalidation:
     state: current
@@ -452,5 +452,81 @@ tasks:
     timestamps:
       created_at: "2026-08-21T06:10:05Z"
       updated_at: "2026-08-21T06:10:05Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "p2-05c-write-tests"
+    title: "Define full execution approval tests"
+    description: "Write focused approval-record and refusal tests for agent sources, templates, limits, sandbox identity, runner content, test policy, absent inputs, forged repository records, runner changes, and descriptor-bound replacement races."
+    context: "The existing approval record covers only test commands while task execution also trusts resolved agent and sandbox configuration."
+    purpose: "Establish executable evidence that every execution-sensitive input is cryptographically approved before a probe or task mutation."
+    expected_outcome: "Tests demonstrate authenticated user-state records, descriptor-bound verified runner bytes, and refusal without probe/request for forged repository records, changed agent configuration/source, runner content, sandbox configuration, policy, and missing inputs."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Sandboxed-external-execution"
+      - "TODO.md#P2-05c"
+    timestamps:
+      created_at: "2026-08-21T18:07:16Z"
+      updated_at: "2026-08-21T18:07:16Z"
+      completed_at: "2026-08-21T18:07:16Z"
+    blocked_reason: null
+  - id: "p2-05c-implement-code"
+    title: "Implement full execution approval record"
+    description: "Persist and verify an authenticated user-state approval record and execute descriptor-bound verified runner copies."
+    context: "Repository files can forge self-hashes, and runner paths can change between validation and spawn."
+    purpose: "Prevent repository approval forgery and runner replacement from changing the executed program after explicit approval."
+    expected_outcome: "All execution-sensitive inputs are authenticated outside the repository and probe/request launches use verified bytes or fail closed."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "p2-05c-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Sandboxed-external-execution"
+      - "TODO.md#P2-05c"
+    timestamps:
+      created_at: "2026-08-21T18:07:16Z"
+      updated_at: "2026-08-21T18:07:16Z"
+      completed_at: "2026-08-21T18:07:16Z"
+    blocked_reason: null
+  - id: "p2-05c-security-audit"
+    title: "Audit execution approval boundary"
+    description: "Review source provenance, hashing, record parsing, atomic persistence, and pre-mutation refusal behavior."
+    context: "The approval record controls external process selection and must not accept substituted inputs."
+    purpose: "Identify bypasses in the cryptographic execution-policy boundary."
+    expected_outcome: "An independent security finding record confirms or remediates the full approval surface."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "p2-05c-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Sandboxed-external-execution"
+      - "TODO.md#P2-05c"
+    timestamps:
+      created_at: "2026-08-21T18:07:16Z"
+      updated_at: "2026-08-21T18:22:44Z"
+      completed_at: "2026-08-21T18:22:44Z"
+    blocked_reason: null
+  - id: "p2-05c-compliance-review"
+    title: "Independently review execution approval compliance"
+    description: "Compare source-derived approval behavior with the execution-policy contract and retain discrepancies."
+    context: "The implementer cannot certify the boundary controlling external execution."
+    purpose: "Preserve independent compliance evidence for the approval record."
+    expected_outcome: "A clean-slate implementation record and source-blind review classify the behavior without silently changing its contract."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "p2-05c-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Sandboxed-external-execution"
+      - "TODO.md#P2-05c"
+    timestamps:
+      created_at: "2026-08-21T18:07:16Z"
+      updated_at: "2026-08-21T18:07:16Z"
       completed_at: null
     blocked_reason: null

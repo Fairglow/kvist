@@ -23,7 +23,7 @@ Its product architecture is defined in
 | `kvist task transition <COMPONENT_DIR> ...`        | Persist one legal task-state transition with append-only attempt evidence.                       |
 | `kvist task run <COMPONENT_DIR> [TASK_ID]`         | Run the configured external agent for one ready task; see the execution boundary below.          |
 | `kvist task log <COMPONENT_DIR> <TASK_ID>`         | Print the most recent raw agent log for a task.                                                  |
-| `kvist task approve-policy [PROJECT_DIR]`          | Record approval of the current repository-defined test-command policy.                           |
+| `kvist task approve-policy [PROJECT_DIR]`          | Record approval of the complete effective execution policy.                                       |
 
 Delivery is organized into phases. The completed, current, and planned phase
 scope is defined by the implementation roadmap in
@@ -39,9 +39,10 @@ Core project configuration is read from `kvist.toml` in the selected project
 root; Kvist does not search parent directories for a project. Agent
 configuration is resolved in this order: `[agent]` in `kvist.toml`,
 `.kvist/config.toml` in the project, the per-user configuration path, then the
-system configuration path. The current implementation creates a default
-per-user agent configuration if none is available. This behavior is limited to
-agent settings; it does not select a project root.
+system configuration path, then a built-in default. This behavior is limited
+to agent settings; it does not select a project root. The resolver records the
+selected source identity and SHA-256 digest. It never creates a user
+configuration as a side effect.
 
 ### Sandboxed task execution
 
@@ -73,9 +74,22 @@ failed probe refuses `task run` before any task transition; Kvist never falls
 back to host execution. A version-1 sandbox cannot run a `test_policy` with
 `working_directory = "project"`.
 
-P2-05c will cryptographically bind and approve the runner identity and the
-effective execution configuration; the outside-project location requirement is
-an origin boundary, not that future approval.
+Before `task run` probes a runner or changes a task, run
+`kvist task approve-policy`. Despite its retained compatibility name, it
+atomically writes a versioned, deterministic, non-secret record in
+user-owned state outside the repository. A persistent cryptographically random
+user secret authenticates that record and binds it to canonical project and
+worktree identities, so a repository cannot forge approval by replacing its
+configuration and hashes. Repository-contained and legacy approval records are
+rejected. The record covers both effective agent templates and token limits,
+the selected agent-config source path and digest, parsed sandbox configuration,
+canonical runner path and digest, test policy (including absence), and relevant
+schema/protocol versions. Any missing, malformed, or changed input causes
+`task run` to refuse without probing, host fallback, or task mutation. On
+Linux, each probe and request launches a private descriptor-bound copy of
+freshly verified runner bytes, so replacement after validation cannot alter
+what executes. Platforms without a descriptor-bound launch mechanism fail
+closed.
 
 Kvist targets current stable Rust on Linux, macOS, and Windows for x86_64 and
 ARM64 systems. Filesystem behavior must be covered on every supported platform;
@@ -453,15 +467,15 @@ not shell scripts; pipelines, redirections, and shell quoting are unsupported.
 
 An implementation task also runs the matching inherited test command after the
 agent exits successfully. Test commands require a versioned `[test_policy]`
-whose current SHA-256 hash was recorded by `kvist task approve-policy`. The
-policy controls working directory, inherited environment variables, timeout,
-output cap, and component-to-command mapping. Agent logs are written under
-`.kvist/logs`; attempt and verification records are durable JSONL files.
+included in the full execution approval. The policy controls working directory,
+inherited environment variables, timeout, output cap, and component-to-command
+mapping. Agent logs are written under `.kvist/logs`; attempt and verification
+records are durable JSONL files.
 
 **Safety status:** agent and test programs require an external sandbox runner
-that attests network denial and component-only mounting. Agent execution still
-has no timeout or output cap, and its resolved template has no approval
-record. The approved test policy does not approve agent configuration.
+that attests network denial and component-only mounting, and every
+execution-sensitive input must match the explicit approval record. Agent
+execution still has no timeout or output cap.
 
 ## Intended lifecycle and current scope
 

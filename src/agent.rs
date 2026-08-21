@@ -11,7 +11,7 @@ use serde::Deserialize;
 use crate::{
     KvistError, Result,
     config::{AgentProfile, SandboxConfig, VcsSelection},
-    sandbox,
+    sandbox::{self, RunnerIdentity},
     task_queue::Timestamp,
 };
 
@@ -108,6 +108,7 @@ fn raw_arg_trim(s: &str) -> String {
 pub fn execute_agent(
     profile: &AgentProfile,
     sandbox_config: &SandboxConfig,
+    expected_runner: &RunnerIdentity,
     request: AgentExecutionRequest<'_>,
 ) -> Result<AgentRunResult> {
     let (program, args) = split_command(
@@ -154,6 +155,7 @@ pub fn execute_agent(
             environment: sandbox::allowed_environment(sandbox_config, None),
             context_files: &context_files,
         },
+        expected_runner,
     )?;
     log_file
         .write_all(&output.stdout)

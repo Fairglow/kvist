@@ -5,6 +5,9 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+
 use crate::{KvistError, Result, artifacts::CONFIGURATION_VERSION, filesystem::is_link_like};
 
 /// Maximum supported size of `kvist.toml`.
@@ -48,16 +51,25 @@ pub const MAX_DISCOVERY_LIMITS: DiscoveryLimits = DiscoveryLimits {
 };
 
 /// Configuration for the external agent execution runners.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AgentConfig {
     pub architect: AgentProfile,
     pub developer: AgentProfile,
+    /// Identity and content digest of the resolver input that selected this config.
+    pub source: AgentConfigSource,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AgentProfile {
     pub command_template: String,
     pub token_limit: Option<usize>,
+}
+
+/// The resolved agent configuration input, retained for execution approval.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AgentConfigSource {
+    pub identity: String,
+    pub digest: String,
 }
 
 impl Default for AgentConfig {
@@ -70,6 +82,10 @@ impl Default for AgentConfig {
             developer: AgentProfile {
                 command_template: "gemini-cli --prompt '{prompt}' --files {context_files}".to_owned(),
                 token_limit: None,
+            },
+            source: AgentConfigSource {
+                identity: "built-in:agent-default-v1".to_owned(),
+                digest: sha256(DEFAULT_GLOBAL_CONFIG_TEMPLATE.as_bytes()),
             },
         }
     }
@@ -93,7 +109,7 @@ pub struct ProjectConfig {
 }
 
 /// Project-selected version-1 external sandbox runner contract.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SandboxConfig {
     /// Executable invoked directly, never through a shell.
     pub runner: String,
@@ -214,7 +230,7 @@ fn parse(config_path: &Path, project_root: &Path, contents: &str) -> Result<Proj
         component_root: normalize_component_root(config_path, component_root)?,
         discovery: parse_discovery_limits(config_path, table)?,
         vcs: parse_vcs_selection(config_path, table)?,
-        agent: load_agent_config(project_root, table)?,
+        agent: load_agent_config(project_root, config_path, contents, table)?,
         test_policy: parse_test_policy(config_path, table)?,
         sandbox: parse_sandbox_config(config_path, table)?,
     })
@@ -510,72 +526,71 @@ fn toml_table_from_str(path: &Path, contents: &str) -> Result<toml::map::Map<Str
 
 fn load_agent_config(
     project_root: &Path,
+    project_config_path: &Path,
+    project_contents: &str,
     table: &toml::map::Map<String, toml::Value>,
 ) -> Result<AgentConfig> {
     // Priority 1: Check if `agent` table exists directly in the project-root `kvist.toml`
     if table.contains_key("agent") {
-        return parse_agent_config_from_table(Path::new("kvist.toml"), table);
+        return parse_agent_config_from_table(
+            project_config_path,
+            project_contents,
+            project_config_path,
+            table,
+        );
     }
 
     // Priority 2: Check if project-local `.kvist/config.toml` exists
     let local_path = project_root.join(".kvist").join("config.toml");
-    if local_path.is_file() {
-        let contents = fs::read_to_string(&local_path).map_err(|source| KvistError::Io {
-            operation: "read project-local agent configuration",
-            path: local_path.clone(),
-            source,
-        })?;
+    if let Some(contents) = read_agent_config_candidate(&local_path, "project-local")? {
         let parsed_table = toml_table_from_str(&local_path, &contents)?;
-        return parse_agent_config_from_table(&local_path, &parsed_table);
+        return parse_agent_config_from_table(&local_path, &contents, &local_path, &parsed_table);
     }
 
     // Priority 3: Check global user-specific configuration path
     if let Some(user_path) = global_user_config_path() {
-        if user_path.is_file() {
-            let contents = fs::read_to_string(&user_path).map_err(|source| KvistError::Io {
-                operation: "read global user configuration",
-                path: user_path.clone(),
-                source,
-            })?;
+        if let Some(contents) = read_agent_config_candidate(&user_path, "user")? {
             let parsed_table = toml_table_from_str(&user_path, &contents)?;
-            return parse_agent_config_from_table(&user_path, &parsed_table);
+            return parse_agent_config_from_table(&user_path, &contents, &user_path, &parsed_table);
         }
     }
 
     // Priority 4: Check global system-wide configuration path
     if let Some(system_path) = global_system_config_path() {
-        if system_path.is_file() {
-            let contents = fs::read_to_string(&system_path).map_err(|source| KvistError::Io {
-                operation: "read global system configuration",
-                path: system_path.clone(),
-                source,
-            })?;
+        if let Some(contents) = read_agent_config_candidate(&system_path, "system")? {
             let parsed_table = toml_table_from_str(&system_path, &contents)?;
-            return parse_agent_config_from_table(&system_path, &parsed_table);
+            return parse_agent_config_from_table(
+                &system_path,
+                &contents,
+                &system_path,
+                &parsed_table,
+            );
         }
     }
 
-    // Priority 5: Fallback - Attempt to initialize the global config file on disk
-    if let Some(user_path) = global_user_config_path() {
-        if let Some(parent) = user_path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        if fs::write(&user_path, DEFAULT_GLOBAL_CONFIG_TEMPLATE).is_ok() {
-            let parsed_table = toml_table_from_str(&user_path, DEFAULT_GLOBAL_CONFIG_TEMPLATE)?;
-            return parse_agent_config_from_table(&user_path, &parsed_table);
-        }
-    }
-
-    // Ultima ratio: parse default template from memory if writing file fails
+    // The built-in default is a source identity, not an implicit filesystem write.
     let parsed_table = toml_table_from_str(Path::new("default"), DEFAULT_GLOBAL_CONFIG_TEMPLATE)?;
-    parse_agent_config_from_table(Path::new("default"), &parsed_table)
+    parse_agent_config_from_table(
+        Path::new("default"),
+        DEFAULT_GLOBAL_CONFIG_TEMPLATE,
+        Path::new("built-in:agent-default-v1"),
+        &parsed_table,
+    )
 }
 
 fn parse_agent_config_from_table(
     config_path: &Path,
+    contents: &str,
+    source_path: &Path,
     table: &toml::map::Map<String, toml::Value>,
 ) -> Result<AgentConfig> {
-    let mut default_config = AgentConfig::default();
+    let mut default_config = AgentConfig {
+        source: AgentConfigSource {
+            identity: agent_source_identity(source_path)?,
+            digest: sha256(contents.as_bytes()),
+        },
+        ..AgentConfig::default()
+    };
     let Some(agent) = table.get("agent") else {
         return Ok(default_config);
     };
@@ -667,6 +682,55 @@ fn parse_agent_config_from_table(
     }
 
     Ok(default_config)
+}
+
+fn agent_source_identity(path: &Path) -> Result<String> {
+    if path == Path::new("built-in:agent-default-v1") {
+        return Ok(path.to_string_lossy().into_owned());
+    }
+    path.canonicalize()
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|source| KvistError::Io {
+            operation: "canonicalize agent configuration source",
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+fn read_agent_config_candidate(path: &Path, source_name: &'static str) -> Result<Option<String>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "inspect agent configuration source",
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if is_link_like(&metadata)
+        || !metadata.file_type().is_file()
+        || metadata.len() > MAX_CONFIGURATION_BYTES
+    {
+        return Err(invalid_configuration(
+            path,
+            &format!(
+                "{source_name} agent configuration must be a regular non-link file no larger than {MAX_CONFIGURATION_BYTES} bytes"
+            ),
+        ));
+    }
+    fs::read_to_string(path)
+        .map(Some)
+        .map_err(|source| KvistError::Io {
+            operation: "read agent configuration source",
+            path: path.to_path_buf(),
+            source,
+        })
+}
+
+fn sha256(bytes: &[u8]) -> String {
+    format!("sha256:{:x}", Sha256::digest(bytes))
 }
 
 /// Bounded test command policy for explicit trust boundaries.
