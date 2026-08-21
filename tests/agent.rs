@@ -53,6 +53,9 @@ fn execute_agent_captures_stdout_and_stderr_in_log_file() {
     let profile = AgentProfile {
         command_template: "echo '{prompt}'".to_owned(),
         token_limit: None,
+        timeout_seconds: 5,
+        max_output_bytes: 1_024,
+        redaction_values: vec![],
     };
 
     let prompt = "hello external agent";

@@ -6,6 +6,10 @@ use std::{
     io::{self, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -28,6 +32,13 @@ const PROBE_RESPONSE: &str = "kvist-sandbox-probe-v1: network=deny; mount=compon
 pub struct ExecutionOptions {
     pub timeout: Option<Duration>,
     pub output_limit: Option<usize>,
+}
+
+/// Bounded result returned by a sandbox runner request.
+pub struct ExecutionResult {
+    pub output: std::process::Output,
+    pub timed_out: bool,
+    pub output_limit_exceeded: bool,
 }
 
 /// Canonical, content-addressed identity of the trusted runner.
@@ -122,7 +133,7 @@ pub fn execute(
         ExecutionOptions::default(),
         expected_runner,
     )
-    .map(|result| result.0)
+    .map(|result| result.output)
 }
 
 /// Executes a request with an optional runner deadline. A timeout terminates
@@ -132,7 +143,7 @@ pub fn execute_with_timeout(
     request: ExecutionRequest<'_>,
     options: ExecutionOptions,
     expected_runner: &RunnerIdentity,
-) -> Result<(std::process::Output, bool)> {
+) -> Result<ExecutionResult> {
     let project_root = request.project_root;
     let vcs_selection = request.vcs_selection;
     let source = request
@@ -198,13 +209,25 @@ pub fn execute_with_timeout(
             runner: config.runner.clone(),
             reason: "sandbox runner did not provide standard error".to_owned(),
         })?;
-    let stdout_reader = std::thread::spawn(move || capture_stream(stdout, options.output_limit));
-    let stderr_reader = std::thread::spawn(move || capture_stream(stderr, options.output_limit));
+    let capture = Arc::new(CaptureState::new(options.output_limit));
+    let stdout_capture = Arc::clone(&capture);
+    let stderr_capture = Arc::clone(&capture);
+    let stdout_reader = std::thread::spawn(move || capture_stream_bounded(stdout, stdout_capture));
+    let stderr_reader = std::thread::spawn(move || capture_stream_bounded(stderr, stderr_capture));
 
     let started = Instant::now();
-    let (status, timed_out) = loop {
+    let (status, timed_out, output_limit_exceeded) = loop {
         match child.try_wait() {
-            Ok(Some(status)) => break (status, false),
+            Ok(Some(status)) => break (status, false, capture.exceeded.load(Ordering::Acquire)),
+            Ok(None) if capture.exceeded.load(Ordering::Acquire) => {
+                child.kill().map_err(|source| {
+                    sandbox_error(config, "terminate output-limited sandbox runner", source)
+                })?;
+                let status = child.wait().map_err(|source| {
+                    sandbox_error(config, "wait for output-limited sandbox runner", source)
+                })?;
+                break (status, false, true);
+            }
             Ok(None)
                 if options
                     .timeout
@@ -216,7 +239,7 @@ pub fn execute_with_timeout(
                 let status = child.wait().map_err(|source| {
                     sandbox_error(config, "wait for timed-out sandbox runner", source)
                 })?;
-                break (status, true);
+                break (status, true, false);
             }
 
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
@@ -225,14 +248,15 @@ pub fn execute_with_timeout(
     };
     let stdout = join_capture(stdout_reader, config, "read sandbox runner stdout")?;
     let stderr = join_capture(stderr_reader, config, "read sandbox runner stderr")?;
-    Ok((
-        std::process::Output {
+    Ok(ExecutionResult {
+        output: std::process::Output {
             status,
             stdout,
             stderr,
         },
         timed_out,
-    ))
+        output_limit_exceeded,
+    })
 }
 
 fn validate_runner(
@@ -290,7 +314,31 @@ fn validate_runner(
     Ok(())
 }
 
-fn capture_stream<R: Read>(mut stream: R, limit: Option<usize>) -> io::Result<Vec<u8>> {
+struct CaptureState {
+    limit: Option<usize>,
+    captured: AtomicUsize,
+    exceeded: AtomicBool,
+}
+
+impl CaptureState {
+    fn new(limit: Option<usize>) -> Self {
+        Self {
+            limit,
+            captured: AtomicUsize::new(0),
+            exceeded: AtomicBool::new(false),
+        }
+    }
+}
+
+#[cfg(test)]
+fn capture_stream<R: Read>(stream: R, limit: Option<usize>) -> io::Result<Vec<u8>> {
+    capture_stream_bounded(stream, Arc::new(CaptureState::new(limit)))
+}
+
+fn capture_stream_bounded<R: Read>(
+    mut stream: R,
+    capture: Arc<CaptureState>,
+) -> io::Result<Vec<u8>> {
     let mut captured = Vec::new();
     let mut buffer = [0_u8; 8_192];
     loop {
@@ -298,8 +346,21 @@ fn capture_stream<R: Read>(mut stream: R, limit: Option<usize>) -> io::Result<Ve
         if count == 0 {
             return Ok(captured);
         }
-        let remaining = limit.map_or(usize::MAX, |limit| limit.saturating_sub(captured.len()));
-        captured.extend_from_slice(&buffer[..count.min(remaining)]);
+        let accepted = match capture.limit {
+            None => count,
+            Some(limit) => {
+                let position = capture.captured.fetch_add(count, Ordering::AcqRel);
+                let remaining = limit.saturating_sub(position);
+                if count > remaining {
+                    capture.exceeded.store(true, Ordering::Release);
+                }
+                count.min(remaining)
+            }
+        };
+        captured.extend_from_slice(&buffer[..accepted]);
+        if accepted < count {
+            return Ok(captured);
+        }
     }
 }
 

@@ -65,6 +65,20 @@ request=$(cat)
 printf '%s' "$request" > sandbox-request.json
 case "$request" in
   *'"program":"false"'*) exit 1 ;;
+  *'agent-overflow'*)
+    i=0
+    while [ "$i" -lt 10000 ]; do
+      printf 'secret-agent-output'
+      printf 'secret-agent-output' >&2
+      i=$((i + 1))
+    done
+    ;;
+  *'agent-sleep'*) sleep 2 ;;
+  *'split-secret'*)
+    printf 'cross-stream-'
+    printf 'secret' >&2
+    exit 0
+    ;;
   *'emit-and-fail'*|*'fail-test'*)
     i=0
     while [ "$i" -lt 10000 ]; do
@@ -552,7 +566,7 @@ fn approval_rejects_changed_agent_source_and_runner_content_before_mutation() {
     fs::create_dir_all(project.path().join(".kvist")).expect("create local config directory");
     fs::write(
         project.path().join(".kvist/config.toml"),
-        "[agent.profiles.developer]\ncommand_template = \"echo local-agent\"\n",
+        "[agent.profiles.developer]\ncommand_template = \"echo local-agent\"\ntimeout_seconds = 5\nmax_output_bytes = 1000\n",
     )
     .expect("write local agent config");
     fs::write(
@@ -594,7 +608,7 @@ command = "echo verify"
 
     fs::write(
         project.path().join(".kvist/config.toml"),
-        "[agent.profiles.developer]\ncommand_template = \"echo local-agent\"\n",
+        "[agent.profiles.developer]\ncommand_template = \"echo local-agent\"\ntimeout_seconds = 5\nmax_output_bytes = 1000\n",
     )
     .expect("restore local agent config");
     assert!(
@@ -793,14 +807,14 @@ printf 'approved request runner\n' > sandbox-request.json
 
 #[test]
 #[cfg(unix)]
-fn approval_rejects_changed_test_policy_before_sandbox_probe() {
+fn approval_rejects_changed_agent_limit_before_sandbox_probe() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
     fs::create_dir_all(project.path().join(".kvist")).expect("create local config directory");
     fs::write(
         project.path().join(".kvist/config.toml"),
-        "[agent.profiles.developer]\ncommand_template = \"echo local-agent\"\n",
+        "[agent.profiles.developer]\ncommand_template = \"echo local-agent\"\ntimeout_seconds = 5\nmax_output_bytes = 1000\n",
     )
     .expect("write local agent config");
     fs::write(
@@ -825,16 +839,19 @@ command = "echo verify"
             .status
             .success()
     );
-    let changed = fs::read_to_string(project.path().join("kvist.toml"))
+    let changed = fs::read_to_string(project.path().join(".kvist/config.toml"))
         .expect("read config")
-        .replace("max_output_bytes = 1000", "max_output_bytes = 999");
-    fs::write(project.path().join("kvist.toml"), changed).expect("change test policy");
+        .replace("timeout_seconds = 5", "timeout_seconds = 6");
+    fs::write(project.path().join(".kvist/config.toml"), changed).expect("change agent limit");
     let before = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
 
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
 
     assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("test policy has changed"));
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("agent configuration source identity or digest has changed")
+    );
     assert_eq!(
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue"),
         before
@@ -1068,6 +1085,169 @@ command = "echo verify"
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
     assert!(queue_contents.contains("status: blocked"));
     assert!(queue_contents.contains("agent failed during task execution"));
+}
+
+#[test]
+#[cfg(unix)]
+fn task_run_cancels_agent_output_and_persists_redacted_bounded_evidence() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "agent-overflow"
+timeout_seconds = 5
+max_output_bytes = 64
+[agent.profiles.developer.redaction]
+values = ["secret-agent-output"]
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo verify"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("output limit"));
+    let queue_contents =
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(queue_contents.contains("status: blocked"));
+    assert!(queue_contents.contains("combined output limit"));
+    assert!(!queue_contents.contains("secret-agent-output"));
+    let logs = fs::read_dir(project.path().join("src/.kvist/logs"))
+        .expect("read logs")
+        .next()
+        .expect("log")
+        .expect("log entry")
+        .path();
+    let log_contents = fs::read_to_string(logs).expect("read log");
+    assert!(log_contents.len() <= 64);
+    assert!(!log_contents.contains("secret-agent-output"));
+    let attempts = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist-attempts/implement-code.jsonl"),
+    )
+    .expect("read attempts");
+    assert!(attempts.contains("combined output limit"));
+    assert!(!attempts.contains("secret-agent-output"));
+}
+
+#[test]
+#[cfg(unix)]
+fn task_run_cancels_agent_timeout_with_durable_evidence() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "agent-sleep"
+timeout_seconds = 1
+max_output_bytes = 1024
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo verify"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("timed out"));
+    let queue_contents =
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(queue_contents.contains("agent execution timed out"));
+    assert!(
+        project
+            .path()
+            .join("src/.kvist-attempts/implement-code.jsonl")
+            .exists()
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn task_run_redacts_a_secret_split_across_streams_before_log_and_streaming() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "split-secret"
+timeout_seconds = 5
+max_output_bytes = 1024
+[agent.profiles.developer.redaction]
+values = ["cross-stream-secret"]
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo verify"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+
+    let output = run_kvist(
+        &project,
+        &["task", "run", ".", "implement-code", "--stream"],
+    );
+
+    assert!(output.status.success());
+    let streamed = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!streamed.contains("cross-stream-secret"));
+    let logs = fs::read_dir(project.path().join("src/.kvist/logs"))
+        .expect("read logs")
+        .next()
+        .expect("log")
+        .expect("log entry")
+        .path();
+    let log = fs::read_to_string(logs).expect("read log");
+    assert!(!log.contains("cross-stream-secret"), "log: {log}");
+    assert!(log.contains("[REDACTED]"), "log: {log}");
 }
 
 #[test]

@@ -81,7 +81,8 @@ user-owned state outside the repository. A persistent cryptographically random
 user secret authenticates that record and binds it to canonical project and
 worktree identities, so a repository cannot forge approval by replacing its
 configuration and hashes. Repository-contained and legacy approval records are
-rejected. The record covers both effective agent templates and token limits,
+rejected. The record covers both effective agent templates, token limits,
+timeouts, combined-output caps, and redaction policies,
 the selected agent-config source path and digest, parsed sandbox configuration,
 canonical runner path and digest, test policy (including absence), and relevant
 schema/protocol versions. Any missing, malformed, or changed input causes
@@ -464,6 +465,20 @@ tasks, and `architect` for security-audit and compliance-review tasks. Agent
 templates support `{prompt}`, `{context_files}`, and `{target_directory}` and
 are spawned without a shell. They are whitespace-delimited argument templates,
 not shell scripts; pipelines, redirections, and shell quoting are unsupported.
+
+Each resolved agent profile has a mandatory timeout and combined stdout/stderr
+byte cap. Defaults are 300 seconds and 65,536 bytes; configuration may lower
+or raise them only to positive values within hard maxima of 3,600 seconds and
+1,048,576 bytes. A timeout or combined-output breach terminates the sandbox
+runner and blocks the task with bounded attempt evidence. Optional
+`[agent.profiles.<name>.redaction] values = ["..."]` lists nonblank literal
+values to replace with `[REDACTED]`; values inherited through the sandbox
+environment allowlist are automatically redacted too. Kvist normalizes agent
+output as stdout followed by stderr and redacts that combined value before
+logs, streams, attempt records, blocker reasons, and terminal output.
+`--stream` writes that one redacted value to stdout, so original inter-stream
+ordering is not preserved. Runtime log directories and files must be real,
+non-link filesystem objects.
 
 An implementation task also runs the matching inherited test command after the
 agent exits successfully. Test commands require a versioned `[test_policy]`

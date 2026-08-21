@@ -17,7 +17,7 @@
 Below is the record of completed Phase 1, Phase 2, and UX milestones.
 
 <details>
-<summary><b>Click to expand completed milestones (11 items)</b></summary>
+<summary><b>Click to expand completed milestones (14 items)</b></summary>
 
 - **P1-Core** — Core CLI engine features (`init`, `tree`, `spec new`, `spec validate`, bounded directory traversal, direct symlink safety checks, and read-only VCS tracking diagnostics).
 - **P2-01 — Specify independent TODO queue and dependency graph schemas** (Version-2 parsing, semantic validation, deterministic serialization, root-inspection integration, and contract tests are complete. Compliance review documented in `COMPLIANCE_REVIEW.md`).
@@ -29,7 +29,10 @@ Below is the record of completed Phase 1, Phase 2, and UX milestones.
 - **P2-06 — Implement the atomic task execution loop** (`kvist task run <COMPONENT_DIR> [TASK_ID]` driver, concurrent locks, atomic progress/blocked state transitions).
 - **UX-01 — Implement a Revalidation / Accept CLI Interface** (`kvist spec accept <COMPONENT_DIR>` resolves staleness programmatically, computing SHA-256 and updating revisions).
 - **UX-04 — Agent Output Redirection, Logging, and Streamlining** (Redirected agent logs to local untracked logs, implemented `kvist task log`, and added real-time stdout/stderr redirection).
-- **P2-07 — Perform Phase 2 security and compliance review** (Independent security, clean-slate documentation, and source-blind compliance passes completed. The retained review records release-blocking host-execution, locking, logging, and documentation discrepancies for P2-05b through P2-05d; it does not approve production execution.)
+- **P2-07 — Perform Phase 2 security and compliance review** (Independent security, clean-slate documentation, and source-blind compliance passes completed. Retained review items remain for the external-execution boundary; this record does not approve production execution.)
+- **P2-05b — Sandbox all external execution** (Agents and verifiers require a component-only, deny-network external sandbox runner; unavailable isolation fails before task mutation.)
+- **P2-05c — Bind cryptographic approval to execution configuration** (Authenticated user-state approval binds effective agents, sandbox runner, test policy, and versions; changed or forged inputs fail before execution.)
+- **P2-05d — Bound agent subprocess resources** (Per-profile timeouts, combined-output limits, cancellation, and redacted bounded evidence block unsafe agent runs.)
 
 </details>
 
@@ -50,9 +53,9 @@ This phase focuses on finalizing the security model and trust boundaries before 
 - **Verification:** retained in `COMPLIANCE_REVIEW.md`; `cargo test --locked`
   passed the Phase 2 end-to-end workflow fixture on 2026-08-21. The fixture
   establishes current behavior but does not resolve the explicitly retained
-  P2-05b through P2-05d security blockers.
+  external-execution security blockers.
 
-### TODO P2-05b — Sandbox all external execution
+### COMPLETE P2-05b — Sandbox all external execution
 
 - **Context:** `task run` launches both configured agents and repository-defined
   test commands directly on the host. This violates the intended controlled
@@ -69,9 +72,9 @@ This phase focuses on finalizing the security model and trust boundaries before 
   subprocesses. The runner protocol denies network, limits the default mount
   and agent context to the selected component, clears all but an explicit
   environment allowlist, and refuses before task mutation when its capability
-  probe fails. P2-05c and P2-05d remain open.
+  probe fails. Retained P2-05c compliance work remains open.
 
-### TODO P2-05c — Expand Cryptographic Approval to Cover Agent Execution Command Templates (Security Gap)
+### COMPLETE P2-05c — Expand Cryptographic Approval to Cover Agent Execution Command Templates (Security Gap)
 
 - **Context:** While the test-command policy (`[test_policy]`) is
   cryptographically protected by `kvist task approve-policy`, the resolved
@@ -94,7 +97,7 @@ This phase focuses on finalizing the security model and trust boundaries before 
 - **Implementation status:** Complete; retained independent security and
   compliance review queue items remain pending.
 
-### TODO P2-05d — Bound agent subprocess resources
+### COMPLETE P2-05d — Bound agent subprocess resources
 
 - **Context:** Test execution has a configured timeout and output cap, but
   agent execution can run indefinitely and write unbounded logs.
@@ -102,6 +105,12 @@ This phase focuses on finalizing the security model and trust boundaries before 
   - Define per-profile timeout, cancellation, and combined output limits.
   - Persist bounded, redacted execution evidence and block a task on a limit
     breach without losing the durable transition record.
+- **Implementation status:** Complete. Resolved agent profiles enforce bounded
+  timeout and combined stdout/stderr capture through the sandbox runner.
+  Timeout or output-limit cancellation blocks the task with redacted bounded
+  log and attempt evidence. Explicit redaction values plus values inherited
+  through the sandbox allowlist are removed before every output sink. Agent
+  resource/redaction configuration is part of full execution approval.
 
 ---
 

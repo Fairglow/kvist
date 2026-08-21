@@ -313,7 +313,8 @@ identities, which are also authenticated in its payload. A project-contained
 `.kvist/approved_execution_policy.json` is a rejected legacy/forgery signal.
 The record contains no command templates or policy content. Instead, its
 SHA-256-protected deterministic material records digests for the effective
-architect and developer templates, their token limits, the selected agent
+architect and developer templates, their token limits, timeouts, combined-output
+caps, redaction-policy digests, the selected agent
 configuration source identity and digest, parsed sandbox configuration,
 canonical runner path and digest, the test-policy digest or explicit absence,
 and configuration, approval, sandbox, and protocol versions. The resolver
@@ -346,11 +347,17 @@ working directory is rejected by the component-only protocol.
 
 Agent templates are split into a program and arguments without a shell. The
 supported substitutions are `{prompt}`, `{context_files}`, and
-`{target_directory}`. Standard output and error are copied to
-`.kvist/logs/TASK_ID_TIMESTAMP.log`; `--stream` also writes them to the
-console. A zero exit status completes the task except that an implementation
-also requires its configured test command to succeed. Agent failures,
-verification failures, and verification-policy failures block the task.
+`{target_directory}`. Resolved profiles supply a timeout and combined-output
+cap, bounded by hard maxima. A timeout or output-limit breach terminates the
+runner and blocks the task. Kvist concatenates captured stdout followed by
+stderr, then replaces explicit redaction values and inherited sandbox-allowed
+environment values in that one value. The combined redacted result is copied
+to a real, non-link `.kvist/logs/TASK_ID_TIMESTAMP.log`, written once to stdout
+for `--stream`, displayed, and appended to agent-attempt evidence; original
+inter-stream ordering is therefore not preserved. A zero exit status completes
+the task except that an implementation also requires its configured test
+command to succeed. Agent failures, verification failures, and
+verification-policy failures block the task.
 
 The test policy selects inherited commands by component path, intersects its
 allowlist with the sandbox allowlist, applies its configured timeout to the
@@ -361,8 +368,7 @@ in user state. A task run refuses if its policy is absent, any approved
 execution input differs, or a repository-contained legacy record is present.
 Verification result records are appended to the task's attempt JSONL file.
 
-Agent execution has no agent timeout or agent-output cap. Isolation enforcement
-is delegated to the configured external runner; Kvist verifies its identity and
+Isolation enforcement is delegated to the configured external runner; Kvist verifies its identity and
 version-1 capability acknowledgement but cannot independently prove its
 implementation.
 

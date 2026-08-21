@@ -370,6 +370,27 @@ struct AttemptRecord<'a> {
     reason: Option<&'a str>,
 }
 
+#[derive(Serialize)]
+struct AgentExecutionRecord<'a> {
+    phase: &'a str,
+    task_id: &'a str,
+    timestamp: &'a Timestamp,
+    success: bool,
+    timed_out: bool,
+    output_limit_exceeded: bool,
+    stdout: &'a str,
+    stderr: &'a str,
+}
+
+fn append_agent_execution(path: &Path, record: AgentExecutionRecord<'_>) -> Result<()> {
+    let encoded =
+        serde_json::to_string(&record).map_err(|error| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: format!("cannot serialize agent execution record: {error}"),
+        })?;
+    append_encoded_attempt(path, &encoded, "append agent execution record")
+}
+
 impl<'a> AttemptRecord<'a> {
     fn new(
         phase: &'a str,
@@ -391,10 +412,19 @@ impl<'a> AttemptRecord<'a> {
 }
 
 fn append_attempt(path: &Path, record: AttemptRecord<'_>) -> Result<()> {
+    let encoded =
+        serde_json::to_string(&record).map_err(|error| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: format!("cannot serialize attempt record: {error}"),
+        })?;
+    append_encoded_attempt(path, &encoded, "append attempt record")
+}
+
+fn append_encoded_attempt(path: &Path, encoded: &str, operation: &'static str) -> Result<()> {
     let existed = if let Ok(metadata) = fs::symlink_metadata(path) {
         if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
             return Err(KvistError::Io {
-                operation: "append attempt record",
+                operation,
                 path: path.to_path_buf(),
                 source: io::Error::other("attempt record must be a regular file"),
             });
@@ -403,11 +433,6 @@ fn append_attempt(path: &Path, record: AttemptRecord<'_>) -> Result<()> {
     } else {
         false
     };
-    let encoded =
-        serde_json::to_string(&record).map_err(|error| KvistError::TaskQueueUnavailable {
-            path: path.to_path_buf(),
-            reason: format!("cannot serialize attempt record: {error}"),
-        })?;
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
@@ -421,7 +446,7 @@ fn append_attempt(path: &Path, record: AttemptRecord<'_>) -> Result<()> {
         .and_then(|()| file.write_all(b"\n"))
         .and_then(|()| file.sync_all())
         .map_err(|source| KvistError::Io {
-            operation: "append attempt record",
+            operation,
             path: path.to_path_buf(),
             source,
         })?;
@@ -804,6 +829,21 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
             stream_output: stream,
         },
     )?;
+    let agent_timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+    let agent_attempt_path = attempt_path(&context.component_dir, &task_id)?;
+    append_agent_execution(
+        &agent_attempt_path,
+        AgentExecutionRecord {
+            phase: "agent-execution",
+            task_id: &task_id,
+            timestamp: &agent_timestamp,
+            success: run_result.success,
+            timed_out: run_result.timed_out,
+            output_limit_exceeded: run_result.output_limit_exceeded,
+            stdout: &run_result.stdout,
+            stderr: &run_result.stderr,
+        },
+    )?;
 
     // 7. Transition task status depending on outcome
     if run_result.success {
@@ -885,10 +925,22 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
         }
     } else {
         // Transition to Blocked
-        let blocker_reason = format!(
-            "agent failed during task execution. Raw execution logs are written to: {}",
-            run_result.log_path.display()
-        );
+        let blocker_reason = if run_result.timed_out {
+            format!(
+                "agent execution timed out and the sandbox runner was terminated. Bounded redacted logs are written to: {}",
+                run_result.log_path.display()
+            )
+        } else if run_result.output_limit_exceeded {
+            format!(
+                "agent execution exceeded the combined output limit and the sandbox runner was terminated. Bounded redacted logs are written to: {}",
+                run_result.log_path.display()
+            )
+        } else {
+            format!(
+                "agent failed during task execution. Bounded redacted logs are written to: {}",
+                run_result.log_path.display()
+            )
+        };
         let _ = transition(
             component_path,
             &task_id,
@@ -896,8 +948,15 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
             Some(&blocker_reason),
         )?;
         Ok(format!(
-            "task `{task_id}` failed during execution and has been transitioned to blocked.\nLogs written to: {}",
-            run_result.log_path.display()
+            "task `{task_id}` {} and has been transitioned to blocked.\nLogs written to: {}",
+            if run_result.timed_out {
+                "timed out"
+            } else if run_result.output_limit_exceeded {
+                "exceeded the combined output limit"
+            } else {
+                "failed during execution"
+            },
+            run_result.log_path.display(),
         ))
     }
 }
@@ -933,7 +992,10 @@ pub fn task_log(component_path: &Path, task_id: &str) -> Result<String> {
     let context = validate_context(component_path)?;
     let logs_dir = context.component_dir.join(".kvist").join("logs");
 
-    if !logs_dir.is_dir() {
+    let logs_metadata = fs::symlink_metadata(&logs_dir).ok();
+    if !logs_metadata
+        .is_some_and(|metadata| metadata.file_type().is_dir() && !is_link_like(&metadata))
+    {
         return Err(KvistError::TaskQueueUnavailable {
             path: context
                 .component_dir
@@ -959,7 +1021,15 @@ pub fn task_log(component_path: &Path, task_id: &str) -> Result<String> {
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
         if name_str.starts_with(&prefix) && name_str.ends_with(".log") {
-            log_files.push(entry.path());
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path).map_err(|source| KvistError::Io {
+                operation: "inspect agent log file",
+                path: path.clone(),
+                source,
+            })?;
+            if metadata.file_type().is_file() && !is_link_like(&metadata) {
+                log_files.push(path);
+            }
         }
     }
 
@@ -998,8 +1068,14 @@ struct ExecutionApprovalMaterial {
     agent_source_digest: String,
     architect_template_digest: String,
     architect_token_limit: Option<usize>,
+    architect_timeout_seconds: u64,
+    architect_max_output_bytes: usize,
+    architect_redaction_digest: String,
     developer_template_digest: String,
     developer_token_limit: Option<usize>,
+    developer_timeout_seconds: u64,
+    developer_max_output_bytes: usize,
+    developer_redaction_digest: String,
     sandbox_digest: String,
     runner_path: String,
     runner_digest: String,
@@ -1080,8 +1156,26 @@ fn build_execution_approval(
         agent_source_digest: config.agent.source.digest.clone(),
         architect_template_digest: digest(config.agent.architect.command_template.as_bytes()),
         architect_token_limit: config.agent.architect.token_limit,
+        architect_timeout_seconds: config.agent.architect.timeout_seconds,
+        architect_max_output_bytes: config.agent.architect.max_output_bytes,
+        architect_redaction_digest: digest(
+            &serde_json::to_vec(&config.agent.architect.redaction_values).map_err(|error| {
+                KvistError::UnapprovedExecutionPolicy {
+                    reason: format!("cannot serialize architect redaction policy: {error}"),
+                }
+            })?,
+        ),
         developer_template_digest: digest(config.agent.developer.command_template.as_bytes()),
         developer_token_limit: config.agent.developer.token_limit,
+        developer_timeout_seconds: config.agent.developer.timeout_seconds,
+        developer_max_output_bytes: config.agent.developer.max_output_bytes,
+        developer_redaction_digest: digest(
+            &serde_json::to_vec(&config.agent.developer.redaction_values).map_err(|error| {
+                KvistError::UnapprovedExecutionPolicy {
+                    reason: format!("cannot serialize developer redaction policy: {error}"),
+                }
+            })?,
+        ),
         sandbox_digest: digest(&serde_json::to_vec(sandbox).map_err(|error| {
             KvistError::UnapprovedExecutionPolicy {
                 reason: format!("cannot serialize sandbox configuration: {error}"),
@@ -1505,8 +1599,14 @@ fn execution_approval_difference(
         "agent configuration source identity or digest has changed".to_owned()
     } else if approved.architect_template_digest != current.architect_template_digest
         || approved.architect_token_limit != current.architect_token_limit
+        || approved.architect_timeout_seconds != current.architect_timeout_seconds
+        || approved.architect_max_output_bytes != current.architect_max_output_bytes
+        || approved.architect_redaction_digest != current.architect_redaction_digest
         || approved.developer_template_digest != current.developer_template_digest
         || approved.developer_token_limit != current.developer_token_limit
+        || approved.developer_timeout_seconds != current.developer_timeout_seconds
+        || approved.developer_max_output_bytes != current.developer_max_output_bytes
+        || approved.developer_redaction_digest != current.developer_redaction_digest
     {
         "agent execution configuration has changed".to_owned()
     } else if approved.runner_path != current.runner_path
@@ -1616,7 +1716,11 @@ pub fn verify_task(
         .iter()
         .map(|value| (*value).to_owned())
         .collect::<Vec<_>>();
-    let (output, timed_out) = crate::sandbox::execute_with_timeout(
+    let crate::sandbox::ExecutionResult {
+        output,
+        timed_out,
+        output_limit_exceeded,
+    } = crate::sandbox::execute_with_timeout(
         sandbox_config,
         crate::sandbox::ExecutionRequest {
             project_root: project_dir,
@@ -1638,7 +1742,7 @@ pub fn verify_task(
     )?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    let success = !timed_out && output.status.success();
+    let success = !timed_out && !output_limit_exceeded && output.status.success();
     let exit_code = output.status.code();
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let attempt_path = attempt_path(&context.component_dir, task_id)?;

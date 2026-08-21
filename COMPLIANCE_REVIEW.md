@@ -313,3 +313,20 @@ reported race.
 P2-05d remains responsible for agent timeout, cancellation, output bounds,
 redaction, and log-path hardening. The P2-05c compliance-review task remains
 pending for its required source-blind comparison.
+
+## Phase 2 P2-05d bounded-agent security audit
+
+**Scope:** Per-profile timeout and combined-output limits, cancellation,
+redaction, and durable agent evidence.
+
+The independent audit found that redacting stdout and stderr separately allowed
+a secret split across the two streams to reappear when they were concatenated
+in the execution log. Agent output is now normalized and redacted once before
+it reaches the log, `--stream`, or attempt evidence. The reviewer confirmed
+the split-secret regression closes that leak.
+
+The audit otherwise found the mandatory bounded profile configuration,
+combined capture budget, runner termination on timeout or budget exhaustion,
+blocked transition, approval invalidation, and link-safe runtime log handling
+consistent with the documented boundary. P2-05d's source-blind
+compliance-review task remains pending.

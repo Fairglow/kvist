@@ -329,6 +329,28 @@ outside it. Runner unavailability, a malformed/missing sandbox configuration,
 or an invalid probe is a task-run failure before lock acquisition, transition,
 agent execution, or test execution.
 
+Each agent profile must declare positive `timeout_seconds` and
+`max_output_bytes` values. `timeout_seconds` is limited to 3,600 seconds and
+`max_output_bytes` to 1,048,576 bytes; these hard maxima prevent an approved
+configuration from removing Kvist's resource boundary. The output limit is a
+single combined budget for stdout and stderr. A timeout or exhausted combined
+budget terminates the sandbox runner, waits for it, and retains only the
+already bounded bytes. Cancellation is the mandatory action for either breach:
+Kvist never resumes, retries, or falls back to a host process.
+
+Agent output is evidence, not a secret channel. Agent profiles may declare a
+`redaction` table with a nonempty, unique list of literal `values` to suppress.
+Kvist also suppresses every value inherited through the sandbox environment
+allowlist. Values are validated as nonempty UTF-8 strings no longer than 4,096
+bytes; replacement is the fixed `[REDACTED]` marker. Kvist concatenates the
+captured stdout bytes followed by stderr bytes, redacts that single value, then
+uses the result for log persistence, terminal streaming, attempt records,
+blocker reasons, and other user-facing output. Streaming uses one stdout write
+of this combined redacted value; original cross-stream ordering is not
+preserved. The policy itself and secret values are never rendered in
+diagnostics. Logs, attempt evidence, and blocker reasons remain bounded to the
+profile's combined output limit.
+
 Before any sandbox probe, lock acquisition, task transition, agent execution,
 or verification execution, `task run` must verify a versioned approval record
 created by `task approve-policy`. The compatibility command name denotes
@@ -339,7 +361,8 @@ that project files cannot read or replace. It is bound to canonical project and
 selected-worktree identities. Repository-contained or legacy approval records
 are rejected. SHA-256 binds:
 
-* both effective architect and developer command templates and token limits;
+* both effective architect and developer command templates, token limits,
+  timeout/cancellation/output limits, and redaction-policy digest;
 * the resolved agent-configuration source identity and exact source digest;
 * the parsed sandbox configuration, canonical runner path, and runner-content
   digest;

@@ -1,6 +1,6 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:8e72dc39de33660ee6dce40bc40dd7497f91010fedd3718f98e289475b71215d"
+  specification_revision: "sha256:e294058bdcbde239b985bff7e26c7bfbfd4b74880b9448a32c6fe93260b9efc3"
   parent_specification: null
   revalidation:
     state: current
@@ -528,5 +528,81 @@ tasks:
     timestamps:
       created_at: "2026-08-21T18:07:16Z"
       updated_at: "2026-08-21T18:07:16Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "p2-05d-write-tests"
+    title: "Define bounded agent execution tests"
+    description: "Write focused failing tests for profile limit validation, combined output cancellation, timeout cancellation, redaction, bounded durable evidence, and approval invalidation."
+    context: "Sandboxed agent execution currently has no mandatory resource bounds or redacted evidence boundary."
+    purpose: "Establish executable evidence before changing execution controls."
+    expected_outcome: "Tests demonstrate bounded combined output, runner termination, redaction before every sink, durable blocking evidence, and full execution approval invalidation."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Sandboxed-external-execution"
+      - "TODO.md#P2-05d"
+    timestamps:
+      created_at: "2026-08-21T20:35:03Z"
+      updated_at: "2026-08-21T20:35:03Z"
+      completed_at: "2026-08-21T20:35:03Z"
+    blocked_reason: null
+  - id: "p2-05d-implement-code"
+    title: "Bound agent subprocess execution"
+    description: "Route mandatory per-profile resource limits and redacted evidence through the sandbox runner."
+    context: "Unbounded agent execution can exhaust time and storage or disclose inherited credentials."
+    purpose: "Make limit breaches durably blocked and safely inspectable."
+    expected_outcome: "Agents time out or cancel on combined-output breach with bounded redacted logs and attempt evidence."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "p2-05d-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Sandboxed-external-execution"
+      - "TODO.md#P2-05d"
+    timestamps:
+      created_at: "2026-08-21T20:35:03Z"
+      updated_at: "2026-08-21T20:35:03Z"
+      completed_at: "2026-08-21T20:35:03Z"
+    blocked_reason: null
+  - id: "p2-05d-security-audit"
+    title: "Audit bounded agent execution"
+    description: "Review cancellation, capture, redaction, evidence persistence, and link-safe runtime log paths."
+    context: "Resource and secret boundaries must be independently reviewed."
+    purpose: "Find bypasses before bounded execution is trusted."
+    expected_outcome: "An independent finding record confirms or remediates the resource and redaction boundary."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "p2-05d-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Sandboxed-external-execution"
+      - "TODO.md#P2-05d"
+    timestamps:
+      created_at: "2026-08-21T20:35:03Z"
+      updated_at: "2026-08-21T18:42:57Z"
+      completed_at: "2026-08-21T18:42:57Z"
+    blocked_reason: null
+  - id: "p2-05d-compliance-review"
+    title: "Independently review bounded execution compliance"
+    description: "Compare source-derived resource and redaction behavior with the execution contract."
+    context: "The implementer cannot certify its own execution boundary."
+    purpose: "Preserve independent compliance evidence."
+    expected_outcome: "A clean-slate implementation record identifies any discrepancy for arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "p2-05d-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Sandboxed-external-execution"
+      - "TODO.md#P2-05d"
+    timestamps:
+      created_at: "2026-08-21T20:35:03Z"
+      updated_at: "2026-08-21T20:35:03Z"
       completed_at: null
     blocked_reason: null

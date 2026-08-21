@@ -63,7 +63,18 @@ pub struct AgentConfig {
 pub struct AgentProfile {
     pub command_template: String,
     pub token_limit: Option<usize>,
+    /// Maximum duration for one sandbox runner request.
+    pub timeout_seconds: u64,
+    /// Combined stdout/stderr capture budget for one request.
+    pub max_output_bytes: usize,
+    /// Literal values replaced before agent evidence reaches any sink.
+    pub redaction_values: Vec<String>,
 }
+
+pub const DEFAULT_AGENT_TIMEOUT_SECONDS: u64 = 300;
+pub const MAX_AGENT_TIMEOUT_SECONDS: u64 = 3_600;
+pub const DEFAULT_AGENT_MAX_OUTPUT_BYTES: usize = 65_536;
+pub const MAX_AGENT_OUTPUT_BYTES: usize = 1_048_576;
 
 /// The resolved agent configuration input, retained for execution approval.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -78,10 +89,16 @@ impl Default for AgentConfig {
             architect: AgentProfile {
                 command_template: "claude --non-interactive --dangerously-skip-permissions --message '{prompt}' {context_files}".to_owned(),
                 token_limit: None,
+                timeout_seconds: DEFAULT_AGENT_TIMEOUT_SECONDS,
+                max_output_bytes: DEFAULT_AGENT_MAX_OUTPUT_BYTES,
+                redaction_values: Vec::new(),
             },
             developer: AgentProfile {
                 command_template: "gemini-cli --prompt '{prompt}' --files {context_files}".to_owned(),
                 token_limit: None,
+                timeout_seconds: DEFAULT_AGENT_TIMEOUT_SECONDS,
+                max_output_bytes: DEFAULT_AGENT_MAX_OUTPUT_BYTES,
+                redaction_values: Vec::new(),
             },
             source: AgentConfigSource {
                 identity: "built-in:agent-default-v1".to_owned(),
@@ -641,6 +658,7 @@ fn parse_agent_config_from_table(
                 })?;
             default_config.architect.token_limit = Some(limit);
         }
+        parse_agent_resource_policy(config_path, architect, &mut default_config.architect)?;
     }
 
     if let Some(developer) = profiles.get("developer") {
@@ -679,6 +697,96 @@ fn parse_agent_config_from_table(
                 })?;
             default_config.developer.token_limit = Some(limit);
         }
+        parse_agent_resource_policy(config_path, developer, &mut default_config.developer)?;
+    }
+
+    fn parse_agent_resource_policy(
+        config_path: &Path,
+        table: &toml::map::Map<String, toml::Value>,
+        profile: &mut AgentProfile,
+    ) -> Result<()> {
+        profile.timeout_seconds = parse_agent_limit(
+            config_path,
+            table,
+            "timeout_seconds",
+            profile.timeout_seconds as usize,
+            MAX_AGENT_TIMEOUT_SECONDS as usize,
+        )? as u64;
+        profile.max_output_bytes = parse_agent_limit(
+            config_path,
+            table,
+            "max_output_bytes",
+            profile.max_output_bytes,
+            MAX_AGENT_OUTPUT_BYTES,
+        )?;
+        let Some(redaction) = table.get("redaction") else {
+            return Ok(());
+        };
+        let redaction = redaction.as_table().ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`agent profile redaction` must be a TOML table",
+            )
+        })?;
+        let values = redaction
+            .get("values")
+            .and_then(toml::Value::as_array)
+            .ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`agent profile redaction.values` must be an array of nonblank strings",
+                )
+            })?;
+        let mut parsed = Vec::with_capacity(values.len());
+        for value in values {
+            let value = value.as_str().filter(|value| {
+                !value.is_empty() && value.len() <= 4_096
+            }).ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`agent profile redaction.values` must contain nonblank strings no longer than 4096 bytes",
+                )
+            })?;
+            if parsed.iter().any(|existing| existing == value) {
+                return Err(invalid_configuration(
+                    config_path,
+                    "`agent profile redaction.values` must not contain duplicates",
+                ));
+            }
+            parsed.push(value.to_owned());
+        }
+        if parsed.is_empty() {
+            return Err(invalid_configuration(
+                config_path,
+                "`agent profile redaction.values` must not be empty",
+            ));
+        }
+        profile.redaction_values = parsed;
+        Ok(())
+    }
+
+    fn parse_agent_limit(
+        config_path: &Path,
+        table: &toml::map::Map<String, toml::Value>,
+        name: &str,
+        default: usize,
+        maximum: usize,
+    ) -> Result<usize> {
+        let Some(value) = table.get(name) else {
+            return Ok(default);
+        };
+        let value = value
+            .as_integer()
+            .and_then(|value| usize::try_from(value).ok());
+        let Some(value) = value.filter(|value| *value > 0 && *value <= maximum) else {
+            return Err(invalid_configuration(
+                config_path,
+                &format!(
+                    "`agent profile {name}` must be a positive integer no greater than {maximum}"
+                ),
+            ));
+        };
+        Ok(value)
     }
 
     Ok(default_config)

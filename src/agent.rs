@@ -1,9 +1,10 @@
 //! External agent execution and response capture.
 
 use std::{
-    fs::{self, File},
+    fs::{self, OpenOptions},
     io::{self, Write},
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use serde::Deserialize;
@@ -26,6 +27,12 @@ pub struct AgentRunResult {
     pub tokens_output: Option<usize>,
     /// Path to the raw execution log file.
     pub log_path: PathBuf,
+    /// Bounded redacted combined output retained as execution evidence.
+    pub stdout: String,
+    /// Empty because evidence is normalized into the combined output field.
+    pub stderr: String,
+    pub timed_out: bool,
+    pub output_limit_exceeded: bool,
 }
 
 /// Inputs for one sandboxed agent task.
@@ -118,13 +125,7 @@ pub fn execute_agent(
         request.target_dir,
     )?;
 
-    // Ensure logs directory exists
-    let logs_dir = request.target_dir.join(".kvist").join("logs");
-    fs::create_dir_all(&logs_dir).map_err(|source| KvistError::Io {
-        operation: "create agent logs directory",
-        path: logs_dir.clone(),
-        source,
-    })?;
+    let logs_dir = ensure_logs_directory(request.target_dir)?;
 
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let log_file_name = format!(
@@ -133,18 +134,26 @@ pub fn execute_agent(
         timestamp.to_string().replace(':', "-")
     );
     let log_path = logs_dir.join(log_file_name);
-    let mut log_file = File::create(&log_path).map_err(|source| KvistError::Io {
-        operation: "create agent log file",
-        path: log_path.clone(),
-        source,
-    })?;
+    let mut log_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&log_path)
+        .map_err(|source| KvistError::Io {
+            operation: "create agent log file",
+            path: log_path.clone(),
+            source,
+        })?;
 
     let context_files = request
         .context_paths
         .iter()
         .map(|path| path.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
-    let output = sandbox::execute(
+    let sandbox::ExecutionResult {
+        output,
+        timed_out,
+        output_limit_exceeded,
+    } = sandbox::execute_with_timeout(
         sandbox_config,
         sandbox::ExecutionRequest {
             project_root: request.project_root,
@@ -155,21 +164,30 @@ pub fn execute_agent(
             environment: sandbox::allowed_environment(sandbox_config, None),
             context_files: &context_files,
         },
+        sandbox::ExecutionOptions {
+            timeout: Some(Duration::from_secs(profile.timeout_seconds)),
+            output_limit: Some(profile.max_output_bytes),
+        },
         expected_runner,
     )?;
+    let redactions = redaction_values(profile, sandbox_config);
+    let success = output.status.success() && !timed_out && !output_limit_exceeded;
+    let stdout = redact_combined_output(
+        output.stdout,
+        output.stderr,
+        &redactions,
+        profile.max_output_bytes,
+    );
     log_file
-        .write_all(&output.stdout)
-        .and_then(|()| log_file.write_all(&output.stderr))
+        .write_all(stdout.as_bytes())
         .map_err(|source| KvistError::Io {
             operation: "write agent log",
             path: log_path.clone(),
             source,
         })?;
     if request.stream_output {
-        io::stdout().write_all(&output.stdout).ok();
-        io::stderr().write_all(&output.stderr).ok();
+        io::stdout().write_all(stdout.as_bytes()).ok();
     }
-    let success = output.status.success();
 
     // 4. Try parsing the JSON Run Record for token feedback
     // The run record should be written by the agent at .kvist/runs/<task_id>_<timestamp>.json
@@ -198,5 +216,78 @@ pub fn execute_agent(
         tokens_input,
         tokens_output,
         log_path,
+        stdout,
+        stderr: String::new(),
+        timed_out,
+        output_limit_exceeded,
     })
+}
+
+fn ensure_logs_directory(target_dir: &Path) -> Result<PathBuf> {
+    let kvist_dir = target_dir.join(".kvist");
+    ensure_real_directory(&kvist_dir, "create agent state directory")?;
+    let logs_dir = kvist_dir.join("logs");
+    ensure_real_directory(&logs_dir, "create agent logs directory")?;
+    Ok(logs_dir)
+}
+
+fn ensure_real_directory(path: &Path, operation: &'static str) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+            Ok(())
+        }
+        Ok(_) => Err(KvistError::Io {
+            operation,
+            path: path.to_path_buf(),
+            source: io::Error::other("directory must be a real directory"),
+        }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            fs::create_dir(path).map_err(|source| KvistError::Io {
+                operation,
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+        Err(source) => Err(KvistError::Io {
+            operation,
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn redaction_values(profile: &AgentProfile, sandbox_config: &SandboxConfig) -> Vec<String> {
+    let mut values = profile.redaction_values.clone();
+    for value in sandbox::allowed_environment(sandbox_config, None).into_values() {
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+    values
+}
+
+fn redact_combined_output(
+    mut stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    redactions: &[String],
+    limit: usize,
+) -> String {
+    stdout.extend_from_slice(&stderr);
+    let mut text = String::from_utf8_lossy(&stdout).into_owned();
+    for value in redactions {
+        text = text.replace(value, "[REDACTED]");
+    }
+    truncate_utf8(&mut text, limit);
+    text
+}
+
+fn truncate_utf8(value: &mut String, limit: usize) {
+    if value.len() <= limit {
+        return;
+    }
+    let mut boundary = limit;
+    while !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    value.truncate(boundary);
 }
