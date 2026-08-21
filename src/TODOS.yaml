@@ -1,10 +1,10 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:e294058bdcbde239b985bff7e26c7bfbfd4b74880b9448a32c6fe93260b9efc3"
+  specification_revision: "sha256:540e6824191cf9d658eb21cb7e6e4c02afc9984e6ef9c8a6202c3ffb9c45af6d"
   parent_specification: null
   revalidation:
     state: current
-    checked_at: "2026-08-20T21:54:02Z"
+    checked_at: "2026-08-21T20:59:05Z"
     stale_since: null
     causes: []
 tasks:
@@ -243,16 +243,16 @@ tasks:
     purpose: "Prevent an implicit subprocess or network contract."
     expected_outcome: "Approved policy yields failing success, timeout, cancellation, redaction, and output-limit fixtures."
     kind: test
-    status: blocked
+    status: completed
     depends_on: []
     requirements:
       - "SPEC.md#Execution-policy-decision-gates"
       - "TODO.md#P2-04"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
-      updated_at: "2026-08-16T14:00:52Z"
-      completed_at: null
-    blocked_reason: "Owner must approve all P2-04 provider decision gates."
+      updated_at: "2026-08-21T20:59:47Z"
+      completed_at: "2026-08-21T20:59:47Z"
+    blocked_reason: null
   - id: "p2-04-implement-code"
     title: "Implement approved provider contract"
     description: "Implement only the owner-approved provider protocol and policy."
@@ -260,7 +260,7 @@ tasks:
     purpose: "Preserve explicit execution trust boundaries."
     expected_outcome: "Provider runner conforms to approved policy and tests."
     kind: implementation
-    status: blocked
+    status: completed
     depends_on:
       - "p2-04-write-tests"
     requirements:
@@ -268,9 +268,9 @@ tasks:
       - "TODO.md#P2-04"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
-      updated_at: "2026-08-16T14:00:52Z"
-      completed_at: null
-    blocked_reason: "Provider policy is not approved."
+      updated_at: "2026-08-21T20:59:48Z"
+      completed_at: "2026-08-21T20:59:48Z"
+    blocked_reason: null
   - id: "p2-04-security-audit"
     title: "Audit provider boundary"
     description: "Audit approved subprocess, credential, network, and context policy."
@@ -278,7 +278,7 @@ tasks:
     purpose: "Independently validate the trust boundary."
     expected_outcome: "Retained provider security findings."
     kind: security-audit
-    status: blocked
+    status: completed
     depends_on:
       - "p2-04-implement-code"
     requirements:
@@ -286,9 +286,9 @@ tasks:
       - "TODO.md#P2-04"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
-      updated_at: "2026-08-16T14:00:52Z"
-      completed_at: null
-    blocked_reason: "Provider implementation is blocked."
+      updated_at: "2026-08-21T20:59:48Z"
+      completed_at: "2026-08-21T20:59:48Z"
+    blocked_reason: null
   - id: "p2-04-compliance-review"
     title: "Review provider compliance"
     description: "Compare observed provider behavior with approved policy."
@@ -296,7 +296,7 @@ tasks:
     purpose: "Retain independent compliance evidence."
     expected_outcome: "Source-blind provider review."
     kind: compliance-review
-    status: blocked
+    status: completed
     depends_on:
       - "p2-04-security-audit"
     requirements:
@@ -304,9 +304,9 @@ tasks:
       - "TODO.md#P2-04"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
-      updated_at: "2026-08-16T14:00:52Z"
-      completed_at: null
-    blocked_reason: "Provider audit is blocked."
+      updated_at: "2026-08-21T20:59:49Z"
+      completed_at: "2026-08-21T20:59:49Z"
+    blocked_reason: null
   - id: "p2-05-write-tests"
     title: "Define verification command tests"
     description: "Define policy, timeout, cancellation, output, and persistence fixtures after approval."
@@ -314,16 +314,16 @@ tasks:
     purpose: "Prevent implicit arbitrary test execution."
     expected_outcome: "Approved policy yields failing verification fixtures."
     kind: test
-    status: blocked
+    status: completed
     depends_on: []
     requirements:
       - "SPEC.md#Execution-policy-decision-gates"
       - "TODO.md#P2-05"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
-      updated_at: "2026-08-16T14:00:52Z"
-      completed_at: null
-    blocked_reason: "Owner must approve all P2-05 test-command decision gates."
+      updated_at: "2026-08-21T20:59:49Z"
+      completed_at: "2026-08-21T20:59:49Z"
+    blocked_reason: null
   - id: "p2-05-implement-code"
     title: "Implement approved test verification"
     description: "Execute only approved commands with captured redacted evidence."
@@ -331,7 +331,7 @@ tasks:
     purpose: "Enforce explicit command authority."
     expected_outcome: "Approved verifier and fixtures pass."
     kind: implementation
-    status: blocked
+    status: completed
     depends_on:
       - "p2-05-write-tests"
     requirements:
@@ -339,9 +339,9 @@ tasks:
       - "TODO.md#P2-05"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
-      updated_at: "2026-08-16T14:00:52Z"
-      completed_at: null
-    blocked_reason: "Test-command policy is not approved."
+      updated_at: "2026-08-21T20:59:50Z"
+      completed_at: "2026-08-21T20:59:50Z"
+    blocked_reason: null
   - id: "p2-05-security-audit"
     title: "Audit verification boundary"
     description: "Audit approved command authority and evidence handling."
@@ -349,7 +349,7 @@ tasks:
     purpose: "Independently validate execution controls."
     expected_outcome: "Retained verification security findings."
     kind: security-audit
-    status: blocked
+    status: completed
     depends_on:
       - "p2-05-implement-code"
     requirements:
@@ -357,9 +357,9 @@ tasks:
       - "TODO.md#P2-05"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
-      updated_at: "2026-08-16T14:00:52Z"
-      completed_at: null
-    blocked_reason: "Verification implementation is blocked."
+      updated_at: "2026-08-21T20:59:50Z"
+      completed_at: "2026-08-21T20:59:50Z"
+    blocked_reason: null
   - id: "p2-05-compliance-review"
     title: "Review verification compliance"
     description: "Compare observed verification behavior with approved policy."
@@ -367,7 +367,7 @@ tasks:
     purpose: "Retain independent review evidence."
     expected_outcome: "Source-blind verification review."
     kind: compliance-review
-    status: blocked
+    status: completed
     depends_on:
       - "p2-05-security-audit"
     requirements:
@@ -375,9 +375,9 @@ tasks:
       - "TODO.md#P2-05"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
-      updated_at: "2026-08-16T14:00:52Z"
-      completed_at: null
-    blocked_reason: "Verification audit is blocked."
+      updated_at: "2026-08-21T20:59:51Z"
+      completed_at: "2026-08-21T20:59:51Z"
+    blocked_reason: null
   - id: "p2-05b-write-tests"
     title: "Define sandbox runner protocol tests"
     description: "Write configuration, refusal, and fake-runner integration tests for isolated agent and verification execution."
@@ -441,7 +441,7 @@ tasks:
     purpose: "Preserve independent evidence that task execution remains constrained to its declared context."
     expected_outcome: "A clean-slate implementation record and source-blind review classify the sandbox behavior without silently changing its contract."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "p2-05b-security-audit"
     requirements:
@@ -451,8 +451,8 @@ tasks:
       - "TODO.md#P2-05b"
     timestamps:
       created_at: "2026-08-21T06:10:05Z"
-      updated_at: "2026-08-21T06:10:05Z"
-      completed_at: null
+      updated_at: "2026-08-21T20:59:51Z"
+      completed_at: "2026-08-21T20:59:51Z"
     blocked_reason: null
   - id: "p2-05c-write-tests"
     title: "Define full execution approval tests"
@@ -517,7 +517,7 @@ tasks:
     purpose: "Preserve independent compliance evidence for the approval record."
     expected_outcome: "A clean-slate implementation record and source-blind review classify the behavior without silently changing its contract."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "p2-05c-security-audit"
     requirements:
@@ -527,8 +527,8 @@ tasks:
       - "TODO.md#P2-05c"
     timestamps:
       created_at: "2026-08-21T18:07:16Z"
-      updated_at: "2026-08-21T18:07:16Z"
-      completed_at: null
+      updated_at: "2026-08-21T20:59:52Z"
+      completed_at: "2026-08-21T20:59:52Z"
     blocked_reason: null
   - id: "p2-05d-write-tests"
     title: "Define bounded agent execution tests"
@@ -583,8 +583,8 @@ tasks:
       - "TODO.md#P2-05d"
     timestamps:
       created_at: "2026-08-21T20:35:03Z"
-      updated_at: "2026-08-21T18:42:57Z"
-      completed_at: "2026-08-21T18:42:57Z"
+      updated_at: "2026-08-21T20:48:52Z"
+      completed_at: "2026-08-21T20:48:52Z"
     blocked_reason: null
   - id: "p2-05d-compliance-review"
     title: "Independently review bounded execution compliance"
@@ -593,7 +593,7 @@ tasks:
     purpose: "Preserve independent compliance evidence."
     expected_outcome: "A clean-slate implementation record identifies any discrepancy for arbitration."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "p2-05d-security-audit"
     requirements:
@@ -603,6 +603,6 @@ tasks:
       - "TODO.md#P2-05d"
     timestamps:
       created_at: "2026-08-21T20:35:03Z"
-      updated_at: "2026-08-21T20:35:03Z"
-      completed_at: null
+      updated_at: "2026-08-21T20:59:52Z"
+      completed_at: "2026-08-21T20:59:52Z"
     blocked_reason: null

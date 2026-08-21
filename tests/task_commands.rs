@@ -74,10 +74,19 @@ case "$request" in
     done
     ;;
   *'agent-sleep'*) sleep 2 ;;
+  *'delete-lock'*)
+    rm -f src/.kvist-task.lock
+    sleep 2
+    ;;
   *'split-secret'*)
     printf 'cross-stream-'
     printf 'secret' >&2
     exit 0
+    ;;
+  *'verification-secret'*)
+    printf 'agent-redaction-secret'
+    printf '%s' "$KVIST_TEST_SECRET" >&2
+    exit 1
     ;;
   *'emit-and-fail'*|*'fail-test'*)
     i=0
@@ -224,7 +233,7 @@ fn task_transition_writes_auditable_atomic_state_change() {
 }
 
 #[test]
-fn task_transition_refuses_an_existing_component_lock() {
+fn task_transition_ignores_an_agent_visible_component_lock() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
@@ -240,10 +249,9 @@ fn task_transition_refuses_an_existing_component_lock() {
         &["task", "transition", ".", "implement-code", "in-progress"],
     );
 
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("lock"));
+    assert!(output.status.success());
     assert!(
-        !project
+        project
             .path()
             .join("src/.kvist-attempts/implement-code.jsonl")
             .exists()
@@ -1248,6 +1256,171 @@ command = "echo verify"
     let log = fs::read_to_string(logs).expect("read log");
     assert!(!log.contains("cross-stream-secret"), "log: {log}");
     assert!(log.contains("[REDACTED]"), "log: {log}");
+}
+
+#[test]
+#[cfg(unix)]
+fn task_run_redacts_all_verification_evidence_blockers_and_cli_output() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    fs::write(
+        project.path().join("kvist.toml"),
+        r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "echo agent"
+[agent.profiles.developer.redaction]
+values = ["agent-redaction-secret"]
+
+[sandbox]
+schema_version = 1
+runner = "REPLACED_BY_TEST"
+network = "deny"
+environment_allowlist = ["KVIST_TEST_SECRET"]
+mount = "component"
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = ["KVIST_TEST_SECRET"]
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "verification-secret"
+"#,
+    )
+    .expect("write config");
+    configure_fake_sandbox(&project);
+    let config_path = project.path().join("kvist.toml");
+    let config = fs::read_to_string(&config_path)
+        .expect("read config")
+        .replace(
+            "REPLACED_BY_TEST",
+            &fake_sandbox_runner_path(&project).display().to_string(),
+        );
+    fs::write(config_path, config).expect("configure runner");
+    track_project(&project);
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args(["task", "run", ".", "implement-code"])
+        .env("KVIST_TEST_SECRET", "sandbox-environment-secret")
+        .current_dir(project.path())
+        .output()
+        .expect("run task");
+    assert!(output.status.success());
+    let cli_output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let queue = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    let attempts = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist-attempts/implement-code.jsonl"),
+    )
+    .expect("read attempts");
+    for evidence in [&cli_output, &queue, &attempts] {
+        assert!(!evidence.contains("agent-redaction-secret"), "{evidence}");
+        assert!(
+            !evidence.contains("sandbox-environment-secret"),
+            "{evidence}"
+        );
+    }
+    assert!(attempts.contains("\"phase\":\"verification\""));
+    assert!(queue.contains("status: blocked"));
+}
+
+#[test]
+#[cfg(unix)]
+fn task_run_lifecycle_lock_survives_agent_component_lock_deletion() {
+    use std::{thread, time::Duration};
+
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    fs::write(
+        project.path().join("kvist.toml"),
+        r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "delete-lock"
+timeout_seconds = 5
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo verify"
+"#,
+    )
+    .expect("write config");
+    track_project(&project);
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+
+    let mut first = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args(["task", "run", ".", "implement-code"])
+        .current_dir(project.path())
+        .spawn()
+        .expect("start first run");
+    let request = project.path().join("sandbox-request.json");
+    for _ in 0..100 {
+        if fs::read_to_string(&request).is_ok_and(|contents| contents.contains("delete-lock")) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        fs::read_to_string(&request).is_ok_and(|contents| contents.contains("delete-lock")),
+        "first run did not reach sandboxed execution"
+    );
+    assert!(!project.path().join("src/.kvist-task.lock").exists());
+
+    let second = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(!second.status.success());
+    assert!(String::from_utf8_lossy(&second.stderr).contains("lock"));
+    let transition = run_kvist(
+        &project,
+        &[
+            "task",
+            "transition",
+            ".",
+            "implement-code",
+            "blocked",
+            "--reason",
+            "manual",
+        ],
+    );
+    assert!(!transition.status.success());
+    assert!(String::from_utf8_lossy(&transition.stderr).contains("lock"));
+    let intermediate =
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(intermediate.contains("status: in-progress"));
+
+    assert!(first.wait().expect("wait first").success());
+    let queue = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(queue.contains("status: completed"));
+    let attempts = fs::read_to_string(
+        project
+            .path()
+            .join("src/.kvist-attempts/implement-code.jsonl"),
+    )
+    .expect("read attempts");
+    assert_eq!(attempts.matches("\"phase\":\"agent-execution\"").count(), 1);
 }
 
 #[test]

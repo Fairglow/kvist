@@ -22,7 +22,7 @@ Its product architecture is defined in
 | `kvist task next <COMPONENT_DIR>`                  | Select the first ready task without changing durable state.                                      |
 | `kvist task transition <COMPONENT_DIR> ...`        | Persist one legal task-state transition with append-only attempt evidence.                       |
 | `kvist task run <COMPONENT_DIR> [TASK_ID]`         | Run the configured external agent for one ready task; see the execution boundary below.          |
-| `kvist task log <COMPONENT_DIR> <TASK_ID>`         | Print the most recent raw agent log for a task.                                                  |
+| `kvist task log <COMPONENT_DIR> <TASK_ID>`         | Print the most recent bounded, redacted agent log for a task.                                    |
 | `kvist task approve-policy [PROJECT_DIR]`          | Record approval of the complete effective execution policy.                                       |
 
 Delivery is organized into phases. The completed, current, and planned phase
@@ -30,8 +30,8 @@ scope is defined by the implementation roadmap in
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
 and prioritized in [`TODO.md`](TODO.md). The Phase 1 foundation and Phase 2
 queue, status, task-transition, agent-runner, and test-verification mechanics
-are implemented. `task run` now requires an external sandbox runner; provider
-approval and resource-boundary follow-up work remains.
+are implemented. `task run` requires an approved external sandbox runner and
+enforces the documented timeout, output, redaction, and lifecycle-lock bounds.
 
 ## Configuration and platform policy
 
@@ -454,10 +454,13 @@ task-by-task supervision remains an option, not a lifecycle requirement.
 
 Today, `task run` is the one-task execution primitive that an unattended loop
 can compose. It requires a current project and component, complete VCS
-tracking, and a ready queue task. The task is transitioned atomically, and
-Kvist passes the component `SPEC.md`, `TODOS.yaml`, `ROOT_CONTRACT.md`, and,
-when applicable, the immediate parent `SPEC.md` to the configured agent. It
-does not add peer implementation files to that explicit context. See
+tracking, and a ready queue task. One user-owned, sandbox-inaccessible lock,
+keyed by canonical project and component identity, is retained from selection
+through agent execution, verification, durable evidence, and its terminal
+transition. Kvist revalidates its ownership before durable transitions. Kvist
+passes only the component `SPEC.md`, `TODOS.yaml`, and
+`IMPL.md` to the configured agent. It does not add root, parent, or peer
+implementation files to that explicit context. See
 [`GUIDE.md`](GUIDE.md) for a current command-line loop.
 
 The current runner has two profiles: `developer` for test and implementation
@@ -484,13 +487,17 @@ An implementation task also runs the matching inherited test command after the
 agent exits successfully. Test commands require a versioned `[test_policy]`
 included in the full execution approval. The policy controls working directory,
 inherited environment variables, timeout, output cap, and component-to-command
-mapping. Agent logs are written under `.kvist/logs`; attempt and verification
+mapping. Verification output, command evidence, and blocked reasons use the
+same approval-bound redaction set (both profiles' explicit values plus sandbox
+allowlisted environment values) and are capped at 65,536 bytes per retained
+field. Agent logs are written under `.kvist/logs`; attempt and verification
 records are durable JSONL files.
 
 **Safety status:** agent and test programs require an external sandbox runner
 that attests network denial and component-only mounting, and every
 execution-sensitive input must match the explicit approval record. Agent
-execution still has no timeout or output cap.
+profiles enforce approved timeouts and combined-output caps; bounded,
+redacted evidence is retained when a limit breach blocks a task.
 
 ## Intended lifecycle and current scope
 

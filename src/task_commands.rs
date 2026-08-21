@@ -37,55 +37,11 @@ pub fn transition(
     target: TaskStatus,
     reason: Option<&str>,
 ) -> Result<String> {
-    let context = validate_context(component_path)?;
+    let context = validate_transition_context(component_path)?;
     let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-    let lock_path = context.component_dir.join(".kvist-task.lock");
-    let lock = TaskLock::create(&lock_path, task_id, &started_at)?;
+    let lock = TaskLock::for_context(&context, task_id, &started_at)?;
 
-    let result = (|| {
-        let context = validate_context(component_path)?;
-        let mut queue = read_queue(&context.component_dir)?;
-        ensure_attempt_recovered(&context.component_dir, task_id)?;
-        let task_index = queue
-            .tasks
-            .iter()
-            .position(|task| task.id == task_id)
-            .ok_or_else(|| KvistError::TaskNotFound {
-                component: context.component_path.clone(),
-                task_id: task_id.to_owned(),
-            })?;
-        validate_transition(&queue.tasks[task_index], &queue.tasks, target, reason)?;
-        let task = &mut queue.tasks[task_index];
-        let from = task.status;
-        task.status = target;
-        task.timestamps.updated_at = started_at.clone();
-        task.timestamps.completed_at =
-            (target == TaskStatus::Completed).then(|| started_at.clone());
-        task.blocked_reason = (target == TaskStatus::Blocked).then(|| reason.unwrap().to_owned());
-
-        let serialized = serialize(&queue).map_err(|error| KvistError::TaskQueueUnavailable {
-            path: context
-                .component_dir
-                .join(ComponentArtifact::TaskQueue.filename()),
-            reason: error.to_string(),
-        })?;
-        let attempt_path = attempt_path(&context.component_dir, task_id)?;
-        append_attempt(
-            &attempt_path,
-            AttemptRecord::new("prepared", task_id, from, target, &started_at, reason),
-        )?;
-        replace_file_atomically(
-            &context
-                .component_dir
-                .join(ComponentArtifact::TaskQueue.filename()),
-            &serialized,
-        )?;
-        append_attempt(
-            &attempt_path,
-            AttemptRecord::new("committed", task_id, from, target, &started_at, reason),
-        )?;
-        Ok(format!("transitioned {task_id} to {}", status_name(target)))
-    })();
+    let result = transition_locked(&context, &lock, task_id, target, reason, &started_at);
 
     let release = lock.release();
     match (result, release) {
@@ -95,12 +51,76 @@ pub fn transition(
     }
 }
 
+fn transition_locked(
+    context: &TaskContext,
+    lock: &TaskLock,
+    task_id: &str,
+    target: TaskStatus,
+    reason: Option<&str>,
+    timestamp: &Timestamp,
+) -> Result<String> {
+    let mut queue = read_queue(&context.component_dir)?;
+    ensure_attempt_recovered(&context.component_dir, task_id)?;
+    let task_index = queue
+        .tasks
+        .iter()
+        .position(|task| task.id == task_id)
+        .ok_or_else(|| KvistError::TaskNotFound {
+            component: context.component_path.clone(),
+            task_id: task_id.to_owned(),
+        })?;
+    validate_transition(&queue.tasks[task_index], &queue.tasks, target, reason)?;
+    let task = &mut queue.tasks[task_index];
+    let from = task.status;
+    task.status = target;
+    task.timestamps.updated_at = timestamp.clone();
+    task.timestamps.completed_at = (target == TaskStatus::Completed).then(|| timestamp.clone());
+    task.blocked_reason = (target == TaskStatus::Blocked).then(|| reason.unwrap().to_owned());
+
+    let serialized = serialize(&queue).map_err(|error| KvistError::TaskQueueUnavailable {
+        path: context
+            .component_dir
+            .join(ComponentArtifact::TaskQueue.filename()),
+        reason: error.to_string(),
+    })?;
+    lock.revalidate()?;
+    let attempt_path = attempt_path(&context.component_dir, task_id)?;
+    append_attempt(
+        &attempt_path,
+        AttemptRecord::new("prepared", task_id, from, target, timestamp, reason),
+    )?;
+    lock.revalidate()?;
+    replace_file_atomically(
+        &context
+            .component_dir
+            .join(ComponentArtifact::TaskQueue.filename()),
+        &serialized,
+    )?;
+    append_attempt(
+        &attempt_path,
+        AttemptRecord::new("committed", task_id, from, target, timestamp, reason),
+    )?;
+    Ok(format!("transitioned {task_id} to {}", status_name(target)))
+}
+
 struct TaskContext {
+    project_dir: PathBuf,
     component_path: PathBuf,
     component_dir: PathBuf,
 }
 
 fn validate_context(component_path: &Path) -> Result<TaskContext> {
+    validate_context_with_blocked(component_path, false)
+}
+
+fn validate_transition_context(component_path: &Path) -> Result<TaskContext> {
+    validate_context_with_blocked(component_path, true)
+}
+
+fn validate_context_with_blocked(
+    component_path: &Path,
+    allow_blocked_component: bool,
+) -> Result<TaskContext> {
     let component_path = normalize_component_path(component_path)?;
     let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
         operation: "determine current project directory",
@@ -133,7 +153,9 @@ fn validate_context(component_path: &Path) -> Result<TaskContext> {
             component: component_path.clone(),
             state: "not a discovered component".to_owned(),
         })?;
-    if component.state != ComponentState::Current {
+    if component.state != ComponentState::Current
+        && !(allow_blocked_component && component.state == ComponentState::Blocked)
+    {
         return Err(KvistError::TaskComponentNotCurrent {
             component: component_path.clone(),
             state: component.state.name().to_owned(),
@@ -147,6 +169,7 @@ fn validate_context(component_path: &Path) -> Result<TaskContext> {
                 state: "component root is unavailable".to_owned(),
             })?;
     Ok(TaskContext {
+        project_dir: project_dir.clone(),
         component_dir: project_dir.join(component_root).join(&component_path),
         component_path,
     })
@@ -245,10 +268,18 @@ fn validate_transition(
         ));
     }
     match target {
-        TaskStatus::InProgress if !task_is_ready(task, tasks) => {
+        TaskStatus::InProgress
+            if !(matches!(task.status, TaskStatus::Pending | TaskStatus::Blocked)
+                && task.depends_on.iter().all(|dependency| {
+                    task_by_id(tasks, dependency)
+                        .is_some_and(|dependency| dependency.status == TaskStatus::Completed)
+                })
+                && transitive_dependencies_completed(task, tasks)) =>
+        {
             return Err(KvistError::TaskNotReady {
                 task_id: task.id.clone(),
-                reason: "it must be pending with all dependency-chain tasks completed".to_owned(),
+                reason: "it must be pending or blocked with all dependency-chain tasks completed"
+                    .to_owned(),
             });
         }
         TaskStatus::Completed if task.status != TaskStatus::InProgress => {
@@ -291,15 +322,21 @@ fn transition_error(task: &Task, target: TaskStatus, reason: &str) -> KvistError
 
 struct TaskLock {
     path: PathBuf,
+    contents: String,
     released: bool,
 }
 
 impl TaskLock {
+    fn for_context(context: &TaskContext, task_id: &str, started_at: &Timestamp) -> Result<Self> {
+        Self::create(&Self::task_lock_path(context)?, task_id, started_at)
+    }
+
     fn create(path: &Path, task_id: &str, started_at: &Timestamp) -> Result<Self> {
         let contents = format!("started_at: {started_at}\ntask_id: {task_id:?}\n");
         match write_new_file_atomically(path, &contents) {
             Ok(()) => Ok(Self {
                 path: path.to_path_buf(),
+                contents,
                 released: false,
             }),
             Err(KvistError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists => {
@@ -312,13 +349,113 @@ impl TaskLock {
         }
     }
 
+    fn revalidate(&self) -> Result<()> {
+        let metadata = fs::symlink_metadata(&self.path).map_err(|source| {
+            KvistError::TaskQueueUnavailable {
+                path: self.path.clone(),
+                reason: format!("cannot revalidate task lock ownership: {source}"),
+            }
+        })?;
+        if is_link_like(&metadata) || !metadata.file_type().is_file() {
+            return Err(KvistError::TaskQueueUnavailable {
+                path: self.path.clone(),
+                reason: "task lock ownership was replaced".to_owned(),
+            });
+        }
+        let contents =
+            fs::read_to_string(&self.path).map_err(|source| KvistError::TaskQueueUnavailable {
+                path: self.path.clone(),
+                reason: format!("cannot read task lock ownership: {source}"),
+            })?;
+        if contents != self.contents {
+            return Err(KvistError::TaskQueueUnavailable {
+                path: self.path.clone(),
+                reason: "task lock ownership changed".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
     fn release(mut self) -> Result<()> {
         self.released = true;
         fs::remove_file(&self.path).map_err(|source| KvistError::Io {
-            operation: "remove component task lock",
+            operation: "remove user-owned task lock",
             path: self.path.clone(),
             source,
         })
+    }
+
+    fn task_lock_path(context: &TaskContext) -> Result<PathBuf> {
+        let project = context.project_dir.canonicalize().map_err(|source| {
+            KvistError::TaskQueueUnavailable {
+                path: context.project_dir.clone(),
+                reason: format!("canonicalize project for task lock: {source}"),
+            }
+        })?;
+        let component = context.component_dir.canonicalize().map_err(|source| {
+            KvistError::TaskQueueUnavailable {
+                path: context.component_dir.clone(),
+                reason: format!("canonicalize component for task lock: {source}"),
+            }
+        })?;
+        let state_base = user_state_base()
+            .filter(|path| path.is_absolute())
+            .ok_or_else(|| KvistError::TaskQueueUnavailable {
+                path: context.project_dir.clone(),
+                reason: "cannot determine an absolute user-owned task-lock state directory"
+                    .to_owned(),
+            })?;
+        let directory = state_base.join("kvist").join("task-locks-v1");
+        fs::create_dir_all(&directory).map_err(|source| KvistError::TaskQueueUnavailable {
+            path: directory.clone(),
+            reason: format!("create user-owned task-lock directory: {source}"),
+        })?;
+        let directory =
+            directory
+                .canonicalize()
+                .map_err(|source| KvistError::TaskQueueUnavailable {
+                    path: directory.clone(),
+                    reason: format!("canonicalize user-owned task-lock directory: {source}"),
+                })?;
+        if directory.starts_with(&project) {
+            return Err(KvistError::TaskQueueUnavailable {
+                path: directory,
+                reason: "user-owned task-lock state must not be inside the project".to_owned(),
+            });
+        }
+        let metadata = fs::symlink_metadata(&directory).map_err(|source| {
+            KvistError::TaskQueueUnavailable {
+                path: directory.clone(),
+                reason: format!("inspect user-owned task-lock directory: {source}"),
+            }
+        })?;
+        if is_link_like(&metadata) || !metadata.file_type().is_dir() {
+            return Err(KvistError::TaskQueueUnavailable {
+                path: directory,
+                reason: "user-owned task-lock state must be a real directory".to_owned(),
+            });
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).map_err(
+                |source| KvistError::TaskQueueUnavailable {
+                    path: directory.clone(),
+                    reason: format!("protect user-owned task-lock directory: {source}"),
+                },
+            )?;
+        }
+        let identity = digest(
+            format!(
+                "{}\n{}",
+                project.to_string_lossy(),
+                component.to_string_lossy()
+            )
+            .as_bytes(),
+        )
+        .trim_start_matches("sha256:")
+        .to_owned();
+        Ok(directory.join(format!("{identity}.lock")))
     }
 }
 
@@ -505,8 +642,7 @@ fn status_name(status: TaskStatus) -> &'static str {
 pub fn accept(component_path: &Path) -> Result<String> {
     let context = validate_accept_context(component_path)?;
     let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-    let lock_path = context.component_dir.join(".kvist-task.lock");
-    let lock = TaskLock::create(&lock_path, "accept", &started_at)?;
+    let lock = TaskLock::for_context(&context, "accept", &started_at)?;
 
     let result = (|| {
         let context = validate_accept_context(component_path)?;
@@ -611,6 +747,7 @@ pub fn accept(component_path: &Path) -> Result<String> {
                 .join(ComponentArtifact::TaskQueue.filename()),
             reason: error.to_string(),
         })?;
+        lock.revalidate()?;
         replace_file_atomically(
             &context
                 .component_dir
@@ -685,6 +822,7 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
                 state: "component root is unavailable".to_owned(),
             })?;
     Ok(TaskContext {
+        project_dir: project_dir.clone(),
         component_dir: project_dir.join(component_root).join(&component_path),
         component_path,
     })
@@ -719,79 +857,94 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
         })?;
     crate::sandbox::ensure_available(sandbox_config, &project_dir, config.vcs, &approved_runner)?;
     let context = validate_context(component_path)?;
-    let mut queue = read_queue(&context.component_dir)?;
+    let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+    // This single lock covers selection, execution, evidence, and the terminal
+    // transition. Its provisional task ID deliberately prevents a second runner
+    // from selecting the same ready task.
+    let lock = TaskLock::for_context(&context, task_id_opt.unwrap_or("run"), &started_at)?;
+    let result = (|| {
+        let context = validate_context(component_path)?;
+        let mut queue = read_queue(&context.component_dir)?;
 
-    // 1. Determine the task to run
-    let task_id = match task_id_opt {
-        Some(id) => id.to_owned(),
-        None => {
-            // Pick next ready task
-            let ready_tasks = get_ready_tasks(&queue);
-            let Some(first_ready) = ready_tasks.first() else {
-                return Err(KvistError::TaskQueueUnavailable {
-                    path: context
-                        .component_dir
-                        .join(ComponentArtifact::TaskQueue.filename()),
-                    reason: "no ready tasks available in the queue".to_owned(),
-                });
-            };
-            first_ready.id.clone()
+        // 1. Determine the task to run
+        let task_id = match task_id_opt {
+            Some(id) => id.to_owned(),
+            None => {
+                // Pick next ready task
+                let ready_tasks = get_ready_tasks(&queue);
+                let Some(first_ready) = ready_tasks.first() else {
+                    return Err(KvistError::TaskQueueUnavailable {
+                        path: context
+                            .component_dir
+                            .join(ComponentArtifact::TaskQueue.filename()),
+                        reason: "no ready tasks available in the queue".to_owned(),
+                    });
+                };
+                first_ready.id.clone()
+            }
+        };
+
+        // Verify task is ready/valid to run
+        let task_index = queue
+            .tasks
+            .iter()
+            .position(|t| t.id == task_id)
+            .ok_or_else(|| KvistError::TaskQueueUnavailable {
+                path: context
+                    .component_dir
+                    .join(ComponentArtifact::TaskQueue.filename()),
+                reason: format!("task `{task_id}` not found in the queue"),
+            })?;
+
+        let task = &queue.tasks[task_index];
+
+        // Ensure task is ready or in-progress
+        let ready_ids: Vec<String> = get_ready_tasks(&queue).into_iter().map(|t| t.id).collect();
+        if task.status != TaskStatus::InProgress && !ready_ids.contains(&task_id) {
+            return Err(KvistError::TaskQueueUnavailable {
+                path: context
+                    .component_dir
+                    .join(ComponentArtifact::TaskQueue.filename()),
+                reason: format!("task `{task_id}` is not ready for execution"),
+            });
         }
-    };
 
-    // Verify task is ready/valid to run
-    let task_index = queue
-        .tasks
-        .iter()
-        .position(|t| t.id == task_id)
-        .ok_or_else(|| KvistError::TaskQueueUnavailable {
-            path: context
-                .component_dir
-                .join(ComponentArtifact::TaskQueue.filename()),
-            reason: format!("task `{task_id}` not found in the queue"),
-        })?;
+        // 2. Transition task status to InProgress atomically (if not already InProgress)
+        if task.status != TaskStatus::InProgress {
+            let transition_at =
+                Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+            let _ = transition_locked(
+                &context,
+                &lock,
+                &task_id,
+                TaskStatus::InProgress,
+                None,
+                &transition_at,
+            )?;
+            // Re-read queue to reflect transition
+            queue = read_queue(&context.component_dir)?;
+        }
 
-    let task = &queue.tasks[task_index];
+        let task = &queue.tasks[task_index];
 
-    // Ensure task is ready or in-progress
-    let ready_ids: Vec<String> = get_ready_tasks(&queue).into_iter().map(|t| t.id).collect();
-    if task.status != TaskStatus::InProgress && !ready_ids.contains(&task_id) {
-        return Err(KvistError::TaskQueueUnavailable {
-            path: context
-                .component_dir
-                .join(ComponentArtifact::TaskQueue.filename()),
-            reason: format!("task `{task_id}` is not ready for execution"),
-        });
-    }
+        // 3. Load agent profile matching task type.
+        let agent_profile = match task.kind {
+            TaskKind::Test | TaskKind::Implementation => &config.agent.developer,
+            TaskKind::SecurityAudit | TaskKind::ComplianceReview => &config.agent.architect,
+        };
 
-    // 2. Transition task status to InProgress atomically (if not already InProgress)
-    if task.status != TaskStatus::InProgress {
-        // Transition to InProgress
-        let _ = transition(component_path, &task_id, TaskStatus::InProgress, None)?;
-        // Re-read queue to reflect transition
-        queue = read_queue(&context.component_dir)?;
-    }
+        // 4. Sliced context files gathering
+        // The sandbox receives only paths in its component mount. Root and parent
+        // files are described by task text, never exposed as host-path context.
+        let context_files = vec![
+            PathBuf::from("/workspace/component/SPEC.md"),
+            PathBuf::from("/workspace/component/TODOS.yaml"),
+            PathBuf::from("/workspace/component/IMPL.md"),
+        ];
 
-    let task = &queue.tasks[task_index];
-
-    // 3. Load agent profile matching task type.
-    let agent_profile = match task.kind {
-        TaskKind::Test | TaskKind::Implementation => &config.agent.developer,
-        TaskKind::SecurityAudit | TaskKind::ComplianceReview => &config.agent.architect,
-    };
-
-    // 4. Sliced context files gathering
-    // The sandbox receives only paths in its component mount. Root and parent
-    // files are described by task text, never exposed as host-path context.
-    let context_files = vec![
-        PathBuf::from("/workspace/component/SPEC.md"),
-        PathBuf::from("/workspace/component/TODOS.yaml"),
-        PathBuf::from("/workspace/component/IMPL.md"),
-    ];
-
-    // 5. Build prompt
-    let prompt = format!(
-        "Task Details:\n\
+        // 5. Build prompt
+        let prompt = format!(
+            "Task Details:\n\
          - ID: {}\n\
          - Title: {}\n\
          - Role/Kind: {:?}\n\
@@ -803,161 +956,209 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
          You are the developer agent tasked with executing the task above. \n\
          Ensure all invariants defined in SPEC.md are maintained. \n\
          Fulfill all task requirements. When finished, write your results.",
-        task.id,
-        task.title,
-        task.kind,
-        task.description,
-        task.context,
-        task.purpose,
-        task.expected_outcome
-    );
+            task.id,
+            task.title,
+            task.kind,
+            task.description,
+            task.context,
+            task.purpose,
+            task.expected_outcome
+        );
 
-    println!("Running task `{task_id}` via external agent...");
+        println!("Running task `{task_id}` via external agent...");
 
-    // 6. Execute agent
-    let run_result = crate::agent::execute_agent(
-        agent_profile,
-        sandbox_config,
-        &approved_runner,
-        crate::agent::AgentExecutionRequest {
-            project_root: &project_dir,
-            vcs_selection: config.vcs,
-            prompt: &prompt,
-            context_paths: &context_files,
-            target_dir: &context.component_dir,
-            task_id: &task_id,
-            stream_output: stream,
-        },
-    )?;
-    let agent_timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-    let agent_attempt_path = attempt_path(&context.component_dir, &task_id)?;
-    append_agent_execution(
-        &agent_attempt_path,
-        AgentExecutionRecord {
-            phase: "agent-execution",
-            task_id: &task_id,
-            timestamp: &agent_timestamp,
-            success: run_result.success,
-            timed_out: run_result.timed_out,
-            output_limit_exceeded: run_result.output_limit_exceeded,
-            stdout: &run_result.stdout,
-            stderr: &run_result.stderr,
-        },
-    )?;
+        // 6. Execute agent
+        let run_result = crate::agent::execute_agent(
+            agent_profile,
+            sandbox_config,
+            &approved_runner,
+            crate::agent::AgentExecutionRequest {
+                project_root: &project_dir,
+                vcs_selection: config.vcs,
+                prompt: &prompt,
+                context_paths: &context_files,
+                target_dir: &context.component_dir,
+                task_id: &task_id,
+                stream_output: stream,
+            },
+        )?;
+        let agent_timestamp =
+            Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+        let agent_attempt_path = attempt_path(&context.component_dir, &task_id)?;
+        append_agent_execution(
+            &agent_attempt_path,
+            AgentExecutionRecord {
+                phase: "agent-execution",
+                task_id: &task_id,
+                timestamp: &agent_timestamp,
+                success: run_result.success,
+                timed_out: run_result.timed_out,
+                output_limit_exceeded: run_result.output_limit_exceeded,
+                stdout: &run_result.stdout,
+                stderr: &run_result.stderr,
+            },
+        )?;
 
-    // 7. Transition task status depending on outcome
-    if run_result.success {
-        if task.kind == TaskKind::Implementation {
-            println!("Running test-command verification...");
-            match verify_task(component_path, &task_id, &project_dir, &config) {
-                Ok(verify_res) => {
-                    if verify_res.success {
-                        let _ = transition(component_path, &task_id, TaskStatus::Completed, None)?;
-                        let token_summary =
-                            match (run_result.tokens_input, run_result.tokens_output) {
-                                (Some(in_tok), Some(out_tok)) => {
-                                    format!(
-                                        " [Tokens used - Input: {}, Output: {}]",
-                                        in_tok, out_tok
-                                    )
-                                }
-                                _ => "".to_owned(),
-                            };
-                        Ok(format!(
-                            "task `{task_id}` executed and verified successfully and transitioned to completed.{}\nLogs written to: {}",
-                            token_summary,
-                            run_result.log_path.display()
-                        ))
-                    } else {
-                        let timed_out_msg = if verify_res.timed_out {
-                            " (timed out)"
+        // 7. Transition task status depending on outcome
+        if run_result.success {
+            if task.kind == TaskKind::Implementation {
+                println!("Running test-command verification...");
+                match verify_task(component_path, &task_id, &project_dir, &config) {
+                    Ok(verify_res) => {
+                        if verify_res.success {
+                            let transition_at = Timestamp::now()
+                                .map_err(|source| KvistError::TaskClock { source })?;
+                            let _ = transition_locked(
+                                &context,
+                                &lock,
+                                &task_id,
+                                TaskStatus::Completed,
+                                None,
+                                &transition_at,
+                            )?;
+                            let token_summary =
+                                match (run_result.tokens_input, run_result.tokens_output) {
+                                    (Some(in_tok), Some(out_tok)) => {
+                                        format!(
+                                            " [Tokens used - Input: {}, Output: {}]",
+                                            in_tok, out_tok
+                                        )
+                                    }
+                                    _ => "".to_owned(),
+                                };
+                            Ok(format!(
+                                "task `{task_id}` executed and verified successfully and transitioned to completed.{}\nLogs written to: {}",
+                                token_summary,
+                                run_result.log_path.display()
+                            ))
                         } else {
-                            ""
-                        };
-                        let blocker_reason = format!(
-                            "test-command verification failed{}. Command: '{}', Exit code: {:?}.\n---\nStdout:\n{}\n---\nStderr:\n{}",
-                            timed_out_msg,
-                            verify_res.command,
-                            verify_res.exit_code,
-                            verify_res.stdout,
-                            verify_res.stderr
+                            let timed_out_msg = if verify_res.timed_out {
+                                " (timed out)"
+                            } else {
+                                ""
+                            };
+                            let blocker_reason = redact_bounded(
+                                format!(
+                                    "test-command verification failed{}. Command: '{}', Exit code: {:?}.\n---\nStdout:\n{}\n---\nStderr:\n{}",
+                                    timed_out_msg,
+                                    verify_res.command,
+                                    verify_res.exit_code,
+                                    verify_res.stdout,
+                                    verify_res.stderr
+                                ),
+                                &evidence_redactions(&config),
+                                MAX_VERIFICATION_EVIDENCE_BYTES,
+                            );
+                            let transition_at = Timestamp::now()
+                                .map_err(|source| KvistError::TaskClock { source })?;
+                            let _ = transition_locked(
+                                &context,
+                                &lock,
+                                &task_id,
+                                TaskStatus::Blocked,
+                                Some(&blocker_reason),
+                                &transition_at,
+                            )?;
+                            Ok(format!(
+                                "task `{task_id}` failed test-command verification and transitioned to blocked.\nLogs written to: {}",
+                                run_result.log_path.display()
+                            ))
+                        }
+                    }
+                    Err(err) => {
+                        let verification_error = redact_bounded(
+                            err.to_string(),
+                            &evidence_redactions(&config),
+                            MAX_VERIFICATION_EVIDENCE_BYTES,
                         );
-                        let _ = transition(
-                            component_path,
+                        let blocker_reason =
+                            format!("test-command verification blocked: {verification_error}");
+                        let transition_at =
+                            Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+                        let _ = transition_locked(
+                            &context,
+                            &lock,
                             &task_id,
                             TaskStatus::Blocked,
                             Some(&blocker_reason),
+                            &transition_at,
                         )?;
                         Ok(format!(
-                            "task `{task_id}` failed test-command verification and transitioned to blocked.\nLogs written to: {}",
-                            run_result.log_path.display()
+                            "task `{task_id}` verification blocked and transitioned to blocked: {verification_error}"
                         ))
                     }
                 }
-                Err(err) => {
-                    let blocker_reason = format!("test-command verification blocked: {err}");
-                    let _ = transition(
-                        component_path,
-                        &task_id,
-                        TaskStatus::Blocked,
-                        Some(&blocker_reason),
-                    )?;
-                    Ok(format!(
-                        "task `{task_id}` verification blocked and transitioned to blocked: {err}"
-                    ))
-                }
+            } else {
+                let transition_at =
+                    Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+                let _ = transition_locked(
+                    &context,
+                    &lock,
+                    &task_id,
+                    TaskStatus::Completed,
+                    None,
+                    &transition_at,
+                )?;
+
+                let token_summary = match (run_result.tokens_input, run_result.tokens_output) {
+                    (Some(in_tok), Some(out_tok)) => {
+                        format!(" [Tokens used - Input: {}, Output: {}]", in_tok, out_tok)
+                    }
+                    _ => "".to_owned(),
+                };
+                Ok(format!(
+                    "task `{task_id}` executed successfully and transitioned to completed.{}\nLogs written to: {}",
+                    token_summary,
+                    run_result.log_path.display()
+                ))
             }
         } else {
-            // Transition to Completed
-            let _ = transition(component_path, &task_id, TaskStatus::Completed, None)?;
-
-            let token_summary = match (run_result.tokens_input, run_result.tokens_output) {
-                (Some(in_tok), Some(out_tok)) => {
-                    format!(" [Tokens used - Input: {}, Output: {}]", in_tok, out_tok)
-                }
-                _ => "".to_owned(),
+            // Transition to Blocked
+            let blocker_reason = if run_result.timed_out {
+                format!(
+                    "agent execution timed out and the sandbox runner was terminated. Bounded redacted logs are written to: {}",
+                    run_result.log_path.display()
+                )
+            } else if run_result.output_limit_exceeded {
+                format!(
+                    "agent execution exceeded the combined output limit and the sandbox runner was terminated. Bounded redacted logs are written to: {}",
+                    run_result.log_path.display()
+                )
+            } else {
+                format!(
+                    "agent failed during task execution. Bounded redacted logs are written to: {}",
+                    run_result.log_path.display()
+                )
             };
+            let transition_at =
+                Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+            let _ = transition_locked(
+                &context,
+                &lock,
+                &task_id,
+                TaskStatus::Blocked,
+                Some(&blocker_reason),
+                &transition_at,
+            )?;
             Ok(format!(
-                "task `{task_id}` executed successfully and transitioned to completed.{}\nLogs written to: {}",
-                token_summary,
-                run_result.log_path.display()
+                "task `{task_id}` {} and has been transitioned to blocked.\nLogs written to: {}",
+                if run_result.timed_out {
+                    "timed out"
+                } else if run_result.output_limit_exceeded {
+                    "exceeded the combined output limit"
+                } else {
+                    "failed during execution"
+                },
+                run_result.log_path.display(),
             ))
         }
-    } else {
-        // Transition to Blocked
-        let blocker_reason = if run_result.timed_out {
-            format!(
-                "agent execution timed out and the sandbox runner was terminated. Bounded redacted logs are written to: {}",
-                run_result.log_path.display()
-            )
-        } else if run_result.output_limit_exceeded {
-            format!(
-                "agent execution exceeded the combined output limit and the sandbox runner was terminated. Bounded redacted logs are written to: {}",
-                run_result.log_path.display()
-            )
-        } else {
-            format!(
-                "agent failed during task execution. Bounded redacted logs are written to: {}",
-                run_result.log_path.display()
-            )
-        };
-        let _ = transition(
-            component_path,
-            &task_id,
-            TaskStatus::Blocked,
-            Some(&blocker_reason),
-        )?;
-        Ok(format!(
-            "task `{task_id}` {} and has been transitioned to blocked.\nLogs written to: {}",
-            if run_result.timed_out {
-                "timed out"
-            } else if run_result.output_limit_exceeded {
-                "exceeded the combined output limit"
-            } else {
-                "failed during execution"
-            },
-            run_result.log_path.display(),
-        ))
+    })();
+
+    let release = lock.release();
+    match (result, release) {
+        (Ok(output), Ok(())) => Ok(output),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), _) => Err(error),
     }
 }
 
@@ -1056,6 +1257,43 @@ pub fn task_log(component_path: &Path, task_id: &str) -> Result<String> {
 const EXECUTION_APPROVAL_VERSION: u32 = 1;
 const APPROVAL_STATE_DIRECTORY: &str = "approval-v1";
 const APPROVAL_SECRET_FILE: &str = "approval-secret";
+const MAX_VERIFICATION_EVIDENCE_BYTES: usize = 65_536;
+
+fn evidence_redactions(config: &crate::config::ProjectConfig) -> Vec<String> {
+    let mut values = config.agent.architect.redaction_values.clone();
+    for value in &config.agent.developer.redaction_values {
+        if !values.contains(value) {
+            values.push(value.clone());
+        }
+    }
+    if let Some(sandbox) = &config.sandbox {
+        for value in crate::sandbox::allowed_environment(sandbox, None).into_values() {
+            if !values.contains(&value) {
+                values.push(value);
+            }
+        }
+    }
+    values
+}
+
+fn redact_bounded(mut value: String, redactions: &[String], limit: usize) -> String {
+    for redaction in redactions {
+        value = value.replace(redaction, "[REDACTED]");
+    }
+    truncate_utf8(&mut value, limit);
+    value
+}
+
+fn truncate_utf8(value: &mut String, limit: usize) {
+    if value.len() <= limit {
+        return;
+    }
+    let mut boundary = limit;
+    while !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    value.truncate(boundary);
+}
 
 /// Versioned, non-secret execution inputs bound by an explicit approval.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1740,8 +1978,18 @@ pub fn verify_task(
         },
         &approved_runner,
     )?;
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let redactions = evidence_redactions(config);
+    let command = redact_bounded(command_str, &redactions, MAX_VERIFICATION_EVIDENCE_BYTES);
+    let stdout = redact_bounded(
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        &redactions,
+        policy.max_output_bytes.min(MAX_VERIFICATION_EVIDENCE_BYTES),
+    );
+    let stderr = redact_bounded(
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+        &redactions,
+        policy.max_output_bytes.min(MAX_VERIFICATION_EVIDENCE_BYTES),
+    );
     let success = !timed_out && !output_limit_exceeded && output.status.success();
     let exit_code = output.status.code();
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
@@ -1752,7 +2000,7 @@ pub fn verify_task(
             phase: "verification",
             task_id,
             timestamp: &timestamp,
-            command: &command_str,
+            command: &command,
             success,
             exit_code,
             timed_out,
@@ -1762,7 +2010,7 @@ pub fn verify_task(
     )?;
     Ok(VerificationResult {
         success,
-        command: command_str,
+        command,
         exit_code,
         timed_out,
         stdout,

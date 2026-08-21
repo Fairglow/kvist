@@ -17,15 +17,15 @@
 Below is the record of completed Phase 1, Phase 2, and UX milestones.
 
 <details>
-<summary><b>Click to expand completed milestones (14 items)</b></summary>
+<summary><b>Click to expand completed milestones (15 items)</b></summary>
 
 - **P1-Core** — Core CLI engine features (`init`, `tree`, `spec new`, `spec validate`, bounded directory traversal, direct symlink safety checks, and read-only VCS tracking diagnostics).
 - **P2-01 — Specify independent TODO queue and dependency graph schemas** (Version-2 parsing, semantic validation, deterministic serialization, root-inspection integration, and contract tests are complete. Compliance review documented in `COMPLIANCE_REVIEW.md`).
 - **P2-02 — Implement project inspection and machine-readable status** (`kvist status` renders deterministic version-1 text and JSON reports from shared root/component model).
 - **P2-03 — Implement safe task selection and execution state updates** (Task selection and transition contract, lock and attempt-record recovery rules, and integration tests complete).
-- **P2-04 — Implement User-Provided Agent Invocation Mechanics** (Implemented under `src/config.rs` and `src/agent.rs` with configuration precedence, shell-free spawning, log capture, and optional token-record parsing. The safety policy remains incomplete.)
+- **P2-04 — Implement User-Provided Agent Invocation Mechanics** (Implemented under `src/config.rs` and `src/agent.rs` with configuration precedence, shell-free spawning, log capture, and optional token-record parsing.)
 - **P2-04b — Implement Basic CLI-Wrapper Templates** (The two configured profiles support `{prompt}`, `{context_files}`, and `{target_directory}` through whitespace-delimited, shell-free arguments. This is not a general shell or quoting language.)
-- **P2-05 — Implement test-command verification as an explicit trust boundary** (Configured, versioned, cryptographic SHA-256 policy approval with `kvist task approve-policy`, bounded execution, and result-persistence).
+- **P2-05 — Implement test-command verification as an explicit trust boundary** (Configured test-policy verification with bounded execution and durable result persistence; later P2-05b through P2-05d complete its isolation, approval, and resource controls.)
 - **P2-06 — Implement the atomic task execution loop** (`kvist task run <COMPONENT_DIR> [TASK_ID]` driver, concurrent locks, atomic progress/blocked state transitions).
 - **UX-01 — Implement a Revalidation / Accept CLI Interface** (`kvist spec accept <COMPONENT_DIR>` resolves staleness programmatically, computing SHA-256 and updating revisions).
 - **UX-04 — Agent Output Redirection, Logging, and Streamlining** (Redirected agent logs to local untracked logs, implemented `kvist task log`, and added real-time stdout/stderr redirection).
@@ -33,86 +33,13 @@ Below is the record of completed Phase 1, Phase 2, and UX milestones.
 - **P2-05b — Sandbox all external execution** (Agents and verifiers require a component-only, deny-network external sandbox runner; unavailable isolation fails before task mutation.)
 - **P2-05c — Bind cryptographic approval to execution configuration** (Authenticated user-state approval binds effective agents, sandbox runner, test policy, and versions; changed or forged inputs fail before execution.)
 - **P2-05d — Bound agent subprocess resources** (Per-profile timeouts, combined-output limits, cancellation, and redacted bounded evidence block unsafe agent runs.)
+- **P2-08 — Complete execution-boundary compliance reconciliation** (Fresh clean-slate and source-blind reviews, explicit documentation arbitration, and legal durable queue transitions close the final Phase 2 lifecycle work.)
 
 </details>
 
 ---
 
 # Remaining Prioritized Backlog
-
-## Phase 2 — Post-Execution, Security & Remediation
-
-This phase focuses on finalizing the security model and trust boundaries before Kvist is deployed to execute unverified, machine-generated repository files in production environments.
-
-### COMPLETE P2-07 — Perform Phase 2 security and compliance review
-
-- **Acceptance criteria:**
-  - Perform a clean-slate documentation pass and source-blind compliance comparison for the Phase 2 contract.
-  - Review subprocess, environment, credentials, filesystem writes, locking, cancellation, and resource-boundary behavior.
-  - Record arbitration items explicitly; do not silently rewrite requirements or observed behavior.
-- **Verification:** retained in `COMPLIANCE_REVIEW.md`; `cargo test --locked`
-  passed the Phase 2 end-to-end workflow fixture on 2026-08-21. The fixture
-  establishes current behavior but does not resolve the explicitly retained
-  external-execution security blockers.
-
-### COMPLETE P2-05b — Sandbox all external execution
-
-- **Context:** `task run` launches both configured agents and repository-defined
-  test commands directly on the host. This violates the intended controlled
-  execution boundary for untrusted or machine-generated repository content.
-- **Acceptance criteria:**
-  - Define and implement an opt-in, portable sandbox boundary for both agent
-    and test subprocesses, with explicit mount, network, environment, and
-    credential policy.
-  - Refuse `task run` when the required isolation is unavailable; do not
-    silently fall back to host execution.
-  - Ensure only the declared component context is available by default.
-- **Implementation status:** Complete. `task run` now requires an explicit
-  project-local version-1 sandbox runner for both agent and verification
-  subprocesses. The runner protocol denies network, limits the default mount
-  and agent context to the selected component, clears all but an explicit
-  environment allowlist, and refuses before task mutation when its capability
-  probe fails. Retained P2-05c compliance work remains open.
-
-### COMPLETE P2-05c — Expand Cryptographic Approval to Cover Agent Execution Command Templates (Security Gap)
-
-- **Context:** While the test-command policy (`[test_policy]`) is
-  cryptographically protected by `kvist task approve-policy`, the resolved
-  external-agent configuration is not. A malicious project, local override, or
-  changed global configuration can alter what `kvist task run` executes
-  without triggering policy warnings.
-- **Acceptance criteria:**
-  - Expand the cryptographic verification and approval boundary to cover both
-    effective agent command templates and token limits, the resolved source
-    identity and digest, parsed sandbox configuration, canonical runner path
-    and digest, `[test_policy]` including absence, and schema/protocol versions.
-  - Persist a deterministic, versioned, non-secret approval record atomically
-    in user-owned state, authenticated by a persistent secret unavailable to
-    project files and bound to canonical project/worktree identity.
-  - Reject missing, malformed, or changed execution inputs before any sandbox
-    probe or task mutation, with no host fallback.
-  - Reject repository-contained legacy approval records and launch a
-    descriptor-bound verified runner copy for each probe and request; platforms
-    without that mechanism must fail closed.
-- **Implementation status:** Complete; retained independent security and
-  compliance review queue items remain pending.
-
-### COMPLETE P2-05d — Bound agent subprocess resources
-
-- **Context:** Test execution has a configured timeout and output cap, but
-  agent execution can run indefinitely and write unbounded logs.
-- **Acceptance criteria:**
-  - Define per-profile timeout, cancellation, and combined output limits.
-  - Persist bounded, redacted execution evidence and block a task on a limit
-    breach without losing the durable transition record.
-- **Implementation status:** Complete. Resolved agent profiles enforce bounded
-  timeout and combined stdout/stderr capture through the sandbox runner.
-  Timeout or output-limit cancellation blocks the task with redacted bounded
-  log and attempt evidence. Explicit redaction values plus values inherited
-  through the sandbox allowlist are removed before every output sink. Agent
-  resource/redaction configuration is part of full execution approval.
-
----
 
 ## UX and Developer Experience Improvements (Terminal Focus)
 
@@ -161,7 +88,7 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
 
 ### TODO UX-08 — Add Lock Management and Manual Unlock Commands (Operational Gap)
 
-- **Context:** If a task execution is forcefully aborted, crashed, or canceled, the component-level `.kvist-task.lock` file may be orphaned, blocking subsequent `kvist task run` commands.
+- **Context:** If a task execution is forcefully aborted, crashed, or canceled, the user-owned lifecycle lock may be orphaned, blocking subsequent `kvist task run` commands.
 - **Acceptance criteria:**
   - Implement `kvist task unlock <COMPONENT_DIR>` to allow manual unlock of stuck directories.
   - Print clear, actionable instructions when lock acquisition fails (e.g., "Component is locked. If this is a stale lock from a previous crash, run `kvist task unlock <COMPONENT_DIR>` to clear it").

@@ -210,7 +210,7 @@ interpreted by this validator.
 
 `task_queue::parse(contents)` parses YAML into `TaskQueue` and then performs
 semantic validation. It returns `TaskQueueError::Yaml` for typed-YAML shape
-failures, `UnsupportedVersion` unless `schema_version` is 2, or `Invalid` for
+failures, `UnsupportedVersion` unless `schema_version` is 1, or `Invalid` for
 semantic failures. Unknown fields are rejected for every typed mapping.
 `validate(&TaskQueue)` applies the same semantic checks to an in-memory queue.
 Neither function reads or writes the filesystem.
@@ -285,15 +285,17 @@ STATUS [--reason REASON]` applies only legal queue state transitions, requires
 readiness for `in-progress`, requires a nonblank reason only for `blocked`,
 and updates UTC task timestamps.
 
-Transitions create a no-clobber component lock, append a `prepared` JSONL
-attempt, atomically replace `TODOS.yaml`, then append `committed`. A trailing
-prepared record fences another transition for that task until explicit future
-recovery. The writer rejects invalid queues, stale or non-current components,
-incomplete VCS tracking, unknown task IDs, illegal transitions, locks, clock,
-and filesystem failures. Attempt directories and new attempt files are
-directory-synced on Unix; other platforms retain the records without a
-directory-entry durability guarantee. The commands do not invoke providers,
-tests, shells, networks, or task execution.
+Transitions create a no-clobber lock in a user-owned state directory, keyed by
+canonical project and component identities, append a `prepared` JSONL attempt,
+atomically replace `TODOS.yaml`, then append `committed`. They revalidate the
+retained lock before durable queue writes. A trailing prepared record fences
+another transition for that task until explicit future recovery. The writer
+rejects invalid queues, stale or non-current components, incomplete VCS
+tracking, unknown task IDs, illegal transitions, locks, clock, and filesystem
+failures. Attempt directories and new attempt files are directory-synced on
+Unix; other platforms retain the records without a directory-entry durability
+guarantee. The commands do not invoke providers, tests, shells, networks, or
+task execution.
 
 ## Agent execution and test verification
 

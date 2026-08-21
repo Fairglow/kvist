@@ -267,13 +267,15 @@ by the state machine. The command supplies a nonblank `--reason` only for
 only when entering `completed`. It never changes queue revisions,
 revalidation evidence, task definitions, dependencies, or requirements.
 
-Before reading the queue, a transition atomically creates
-`COMPONENT_DIR/.kvist-task.lock` with no replacement. Its contents identify
-the command start time and task ID; another transition fails while the lock
-exists. Stale locks are never removed automatically: the owner must inspect
-the component, confirm no writer is active, and remove the named lock
-explicitly. The lock is removed only after the queue and audit sequence
-finishes or an in-process failure is handled.
+Before reading the queue, a transition atomically creates a no-replacement
+lock in a user-owned, sandbox-inaccessible state directory. Its filename is
+derived from canonical project and component identities; its contents identify
+the command start time and task ID. Another transition or task run for that
+component fails while the lock exists. Kvist revalidates lock ownership before
+each durable queue transition. Stale locks are never removed automatically:
+the owner must inspect the user-owned state and confirm no writer is active.
+The lock is removed only after the queue and audit sequence finishes or an
+in-process failure is handled.
 
 Each transition appends an attempt record to
 `COMPONENT_DIR/.kvist-attempts/TASK_ID.jsonl`. The record sequence is
@@ -287,6 +289,20 @@ guesses or silently repairs the record. Attempt-directory and newly created
 attempt-file entries are directory-synced where the platform supports durable
 directory synchronization. Other platforms retain the record but do not claim
 that directory-entry durability guarantee.
+
+`kvist spec accept COMPONENT_DIR` is the explicit revalidation writer. It
+accepts a current, stale, or blocked discovered component with complete VCS
+tracking, validates the component specification (and immediate parent when
+present), updates only the recorded specification revisions and revalidation
+fields, and atomically replaces `TODOS.yaml`. It does not alter task state,
+task definitions, or attempt evidence. It uses the same user-owned exclusive
+lock and rejects a conflicting or retained lock.
+
+`kvist task log COMPONENT_DIR TASK_ID` reads and prints only the
+lexicographically most recent regular non-link agent log for that task. It is
+read-only, fails when no matching log exists, and returns the already bounded,
+redacted evidence retained by `task run`; it must not expose raw subprocess
+output.
 
 ## Execution-policy decision gates
 
@@ -353,7 +369,11 @@ profile's combined output limit.
 
 Before any sandbox probe, lock acquisition, task transition, agent execution,
 or verification execution, `task run` must verify a versioned approval record
-created by `task approve-policy`. The compatibility command name denotes
+created by `kvist task approve-policy [PROJECT_DIR]`. That command resolves the
+effective configuration for the selected project, refuses absent or invalid
+sandbox inputs, and writes or replaces only its authenticated user-owned
+approval record; it does not run an agent, verification command, or alter a
+component queue. The compatibility command name denotes
 approval of the complete execution policy, not only tests. The deterministic,
 non-secret record is atomically written in user-owned state outside the
 repository and authenticated with a persistent cryptographically random secret

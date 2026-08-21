@@ -1,0 +1,4 @@
+{"phase":"prepared","task_id":"p2-05c-compliance-review","from_status":"pending","to_status":"in-progress","timestamp":"2026-08-21T20:59:51Z","reason":null}
+{"phase":"committed","task_id":"p2-05c-compliance-review","from_status":"pending","to_status":"in-progress","timestamp":"2026-08-21T20:59:51Z","reason":null}
+{"phase":"prepared","task_id":"p2-05c-compliance-review","from_status":"in-progress","to_status":"completed","timestamp":"2026-08-21T20:59:52Z","reason":null}
+{"phase":"committed","task_id":"p2-05c-compliance-review","from_status":"in-progress","to_status":"completed","timestamp":"2026-08-21T20:59:52Z","reason":null}

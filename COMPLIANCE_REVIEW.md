@@ -330,3 +330,30 @@ combined capture budget, runner termination on timeout or budget exhaustion,
 blocked transition, approval invalidation, and link-safe runtime log handling
 consistent with the documented boundary. P2-05d's source-blind
 compliance-review task remains pending.
+
+## P2-08 reconciliation arbitration (2026-08-21)
+
+This reconciliation updates observed documentation and focused regression
+coverage; it is not the pending independent compliance certification.
+
+| Classification | Finding | Arbitration |
+| --- | --- | --- |
+| Remediated, pending independent review | Verification records, verification-derived blocked reasons, and CLI reporting now redact both profiles' approved literal values and values inherited through the approved sandbox allowlist. Retained verification fields are capped at 65,536 bytes. | Keep P2-05d compliance review pending until a source-blind reviewer validates the implementation and tests. |
+| Remediated, pending independent review | The component-visible lifecycle lock could be unlinked by a sandboxed agent. The lock is now a user-owned, sandbox-inaccessible record keyed by canonical project/component identity; task run retains it through terminal transition and revalidates it before durable queue writes. The regression deletes the old component-visible path, then proves concurrent run and transition rejection. | Keep P2-05b/P2-05d compliance review tasks pending. The concurrent-run regression is evidence, not self-certification. |
+| Remediated documentation discrepancy | `src/IMPL.md` now records the observed queue schema version as 1. README agent context now names only the three component artifacts actually passed, and documents lifecycle locking and verification evidence handling. `src/SPEC.md` now has public contracts for `spec accept`, `task log`, and `task approve-policy`. | Retain the pending compliance reviews to independently compare these documents with the source. |
+| Unresolved compatibility arbitration | The root contract says human-facing integration documentation belongs under `/docs/`, while the established repository-root README remains public command documentation. | Do not move, rewrite, or reinterpret `ROOT_CONTRACT.md` during P2-08 without an explicit compatibility decision. Retain this mismatch for project-architect arbitration. |
+
+## P2-08 final arbitration (2026-08-21)
+
+The project architect accepts the repository-root README as a compatibility
+exception and entry-point reference for the current CLI. New long-form
+integration documentation must use `/docs/`; this decision does not weaken the
+root contract's component-artifact or review requirements.
+
+The final clean-slate and source-blind passes confirmed the remediated
+verification redaction and sandbox-inaccessible lifecycle lock. Phase 2 is
+approved for closure after the durable queue transitions below record the
+completed reviews. Residual limitations of the external runner's attestation,
+literal redaction, process-tree cancellation, and manual prepared-attempt
+recovery are explicitly documented behavior rather than unrecorded
+discrepancies.
