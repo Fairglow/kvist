@@ -637,6 +637,7 @@ command = "echo verify"
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn approval_records_absent_test_policy_but_task_run_refuses_it_before_mutation() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -1479,6 +1480,7 @@ command = "echo 'mocking verify'"
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn task_run_fails_with_unapproved_test_policy() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -1514,6 +1516,7 @@ command = "echo 'mocking verify'"
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn task_run_fails_with_missing_test_command() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
