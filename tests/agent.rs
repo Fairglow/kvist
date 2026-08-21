@@ -1,12 +1,15 @@
-use std::{
-    fs,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
+use kvist::agent::split_command;
+
+#[cfg(unix)]
+use std::fs;
+#[cfg(unix)]
 use kvist::{
-    agent::{execute_agent, split_command},
+    agent::execute_agent,
     config::{AgentProfile, SandboxConfig, VcsSelection},
 };
+#[cfg(unix)]
 use tempfile::TempDir;
 
 #[test]

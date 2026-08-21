@@ -2,15 +2,21 @@
 
 use std::{
     collections::BTreeMap,
-    fs::{self, File, OpenOptions},
+    fs,
     io::{self, Read, Write},
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Stdio},
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
+};
+
+#[cfg(target_os = "linux")]
+use std::{
+    fs::{File, OpenOptions},
+    path::PathBuf,
 };
 
 use serde::Serialize;
