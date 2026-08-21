@@ -334,13 +334,20 @@ fn sandbox_configuration_requires_explicit_deny_network_component_mount_and_envi
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     let base = "schema_version = 1\ncomponent_root = \"src\"\n";
-    let valid = r#"[sandbox]
+    let runner = project
+        .path()
+        .join("trusted-sandbox-runner")
+        .to_string_lossy()
+        .replace('\\', "\\\\");
+    let valid = format!(
+        r#"[sandbox]
     schema_version = 1
-    runner = "/trusted/sandbox-runner"
+    runner = "{runner}"
     network = "deny"
     environment_allowlist = ["PATH"]
     mount = "component"
-    "#;
+    "#
+    );
     fs::write(project.path().join("kvist.toml"), format!("{base}{valid}")).expect("write config");
     let loaded = config::load(project.path()).expect("load sandbox");
     assert_eq!(
