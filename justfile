@@ -31,3 +31,8 @@ test:
 wine:
     cargo build --locked --target x86_64-pc-windows-gnu
     cargo test --target x86_64-pc-windows-gnu
+
+completions:
+    cargo run --locked -- completions bash > /dev/null
+    cargo run --locked -- completions zsh > /dev/null
+    cargo run --locked -- completions fish > /dev/null

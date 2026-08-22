@@ -62,6 +62,12 @@ pub enum Command {
         #[command(subcommand)]
         command: SpecCommand,
     },
+    /// Generate shell completion scripts on stdout.
+    Completions {
+        /// Target shell for completion.
+        #[arg(value_name = "SHELL", value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 /// An explicit project directory argument shared by project-scoped commands.
@@ -269,6 +275,14 @@ pub fn execute(command: Command) -> Result<CommandOutput> {
         Command::Spec {
             command: SpecCommand::Accept { component_dir },
         } => task_commands::accept(&component_dir).map(CommandOutput::message),
+        Command::Completions { shell } => {
+            use clap::CommandFactory;
+            let mut cmd = Cli::command();
+            let mut buffer = Vec::new();
+            clap_complete::generate(shell, &mut cmd, "kvist", &mut buffer);
+            let script = String::from_utf8(buffer).expect("valid UTF-8 completion script");
+            Ok(CommandOutput::message(script))
+        }
     }
 }
 
@@ -366,5 +380,28 @@ mod tests {
         let error = Cli::try_parse_from(["kvist", "unknown"]).expect_err("invalid command");
 
         assert_eq!(error.kind(), ErrorKind::InvalidSubcommand);
+    }
+
+    #[test]
+    fn parses_completions() {
+        let cli = Cli::try_parse_from(["kvist", "completions", "bash"])
+            .expect("valid completions command");
+
+        let Command::Completions { shell } = cli.command else {
+            panic!("expected completions command");
+        };
+
+        assert_eq!(shell, clap_complete::Shell::Bash);
+    }
+
+    #[test]
+    fn generates_bash_completions() {
+        let outcome = execute(Command::Completions {
+            shell: clap_complete::Shell::Bash,
+        })
+        .expect("generates completions");
+
+        let output = outcome.to_string();
+        assert!(output.contains("_kvist") || output.contains("kvist"));
     }
 }

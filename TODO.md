@@ -64,7 +64,7 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
   - Ensure the parent/child component hierarchy remains semantically intact (e.g., the parent of `http` is the next ancestor component higher up, skipping the transparent `protocols` directory).
   - Write regression tests verifying traversal through multiple layers of non-component folders.
 
-### TODO UX-05 — Multi-Platform Shell Tab-Completions
+### DONE UX-05 — Multi-Platform Shell Tab-Completions
 
 - **Context:** Full tab-completion on all major platforms (Bash, Zsh, Fish, PowerShell) is crucial for ease of use and speed.
 - **Acceptance criteria:**
