@@ -3,7 +3,7 @@ use std::process::Command;
 #[test]
 fn completions_subcommand_generates_script() {
     let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
-        .args(&["completions", "bash"])
+        .args(["completions", "bash"])
         .output()
         .expect("run completions command");
 
