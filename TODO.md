@@ -90,7 +90,7 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
   - Document these JSON schemas under `/docs/` to prevent wrapping integrations from breaking.
   - Verify JSON output compliance across all CLI commands using automated tests.
 
-### TODO UX-08 — Add Lock Management and Manual Unlock Commands (Operational Gap)
+### DONE UX-08 — Add Lock Management and Manual Unlock Commands (Operational Gap)
 
 - **Context:** If a task execution is forcefully aborted, crashed, or canceled, the user-owned lifecycle lock may be orphaned. Because the lock resides in a sandbox-inaccessible location (remediated in P2-08), it cannot be cleared by external agents, blocking subsequent execution runs.
 - **Acceptance criteria:**

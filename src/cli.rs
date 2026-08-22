@@ -156,6 +156,15 @@ pub enum TaskCommand {
         #[arg(value_name = "PROJECT_DIR", default_value = ".")]
         path: PathBuf,
     },
+    /// Unlock a locked component directory.
+    Unlock {
+        /// Component-root-relative component directory; `.` selects the root component.
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: PathBuf,
+        /// Force unlocking without prompting for confirmation.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// Command-line spelling of a queue task status.
@@ -337,6 +346,20 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     message.replace('\n', "\\n").replace('"', "\\\"")
                 )))
             }
+            Command::Task {
+                command:
+                    TaskCommand::Unlock {
+                        component_dir,
+                        force,
+                    },
+            } => {
+                let message = task_commands::unlock(&component_dir, force)?;
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"task-unlock\",\"component_dir\":\"{}\",\"message\":\"{}\"}}",
+                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    message.replace('\n', "\\n").replace('"', "\\\"")
+                )))
+            }
             Command::Spec {
                 command: SpecCommand::New { component_dir },
             } => {
@@ -458,6 +481,13 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Task {
                 command: TaskCommand::ApprovePolicy { path },
             } => task_commands::approve_policy(&path).map(CommandOutput::message),
+            Command::Task {
+                command:
+                    TaskCommand::Unlock {
+                        component_dir,
+                        force,
+                    },
+            } => task_commands::unlock(&component_dir, force).map(CommandOutput::message),
             Command::Spec {
                 command: SpecCommand::New { component_dir },
             } => specification::create(&component_dir).map(|generated| {

@@ -1703,3 +1703,60 @@ command = "sh ./emit-and-fail.sh"
         panic!("Assertion failed! attempt_contents: \n{}", attempt_contents);
     }
 }
+
+#[test]
+#[cfg(target_os = "linux")]
+fn task_unlock_removes_orphaned_locks() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "sleep 10"
+timeout_seconds = 10
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 10
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo verify"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+
+    let mut bg_process = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args(["task", "run", ".", "implement-code"])
+        .current_dir(project.path())
+        .spawn()
+        .expect("start bg run");
+
+    std::thread::sleep(std::time::Duration::from_millis(250));
+
+    bg_process.kill().expect("kill bg process");
+    let _ = bg_process.wait();
+
+    let second_run = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    assert!(!second_run.status.success());
+    let stderr_str = String::from_utf8_lossy(&second_run.stderr);
+    assert!(stderr_str.contains("component is locked"));
+
+    let unlock_run = run_kvist(&project, &["task", "unlock", ".", "--force"]);
+    assert!(unlock_run.status.success());
+    assert!(
+        String::from_utf8_lossy(&unlock_run.stdout).contains("successfully unlocked component")
+    );
+
+    let third_run = run_kvist(&project, &["task", "run", ".", "implement-code"]);
+    let stderr_str_3 = String::from_utf8_lossy(&third_run.stderr);
+    assert!(!stderr_str_3.contains("component is locked"));
+}

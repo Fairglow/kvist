@@ -325,7 +325,7 @@ pub enum KvistError {
     },
     /// Another writer or an explicitly retained stale lock owns the component.
     #[error(
-        "cannot transition task `{task_id}` because component lock `{path}` already exists; inspect the owner and remove it explicitly only when no writer is active"
+        "cannot transition task `{task_id}` because component lock `{path}` already exists; the component is locked. If this is a stale lock from a previous crash, run `kvist task unlock <COMPONENT_DIR>` to clear it. Inspect the owner and remove it explicitly only when no writer is active"
     )]
     TaskLockExists {
         /// Existing lock path.

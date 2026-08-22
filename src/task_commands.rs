@@ -785,6 +785,72 @@ pub fn accept(component_path: &Path) -> Result<String> {
     }
 }
 
+/// Unlocks a locked component directory, optionally asking for confirmation.
+pub fn unlock(component_path: &Path, force: bool) -> Result<String> {
+    let context = validate_context(component_path)?;
+    let lock_path = TaskLock::task_lock_path(&context)?;
+
+    // Check if the lock file exists
+    match fs::symlink_metadata(&lock_path) {
+        Ok(metadata) => {
+            if is_link_like(&metadata) || !metadata.file_type().is_file() {
+                return Err(KvistError::TaskQueueUnavailable {
+                    path: lock_path,
+                    reason: "stale lock state is not a regular file".to_owned(),
+                });
+            }
+
+            // Prompt user for confirmation unless --force is active
+            if !force {
+                eprint!(
+                    "Component at '{}' is locked. Do you really want to unlock it? (y/N): ",
+                    component_path.display()
+                );
+                std::io::stderr().flush().map_err(|source| KvistError::Io {
+                    operation: "flush stderr",
+                    path: PathBuf::from("stderr"),
+                    source,
+                })?;
+
+                let mut input = String::new();
+                std::io::stdin()
+                    .read_line(&mut input)
+                    .map_err(|source| KvistError::Io {
+                        operation: "read confirmation input",
+                        path: PathBuf::from("stdin"),
+                        source,
+                    })?;
+
+                let trimmed = input.trim().to_lowercase();
+                if trimmed != "y" && trimmed != "yes" {
+                    return Ok("unlock cancelled by user".to_owned());
+                }
+            }
+
+            // Remove lock file
+            fs::remove_file(&lock_path).map_err(|source| KvistError::Io {
+                operation: "remove manual task lock",
+                path: lock_path.clone(),
+                source,
+            })?;
+
+            Ok(format!(
+                "successfully unlocked component {}",
+                component_path.display()
+            ))
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(format!(
+            "component {} is not locked",
+            component_path.display()
+        )),
+        Err(source) => Err(KvistError::Io {
+            operation: "inspect component lock for unlock",
+            path: lock_path,
+            source,
+        }),
+    }
+}
+
 fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
     let component_path = normalize_component_path(component_path)?;
     let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
