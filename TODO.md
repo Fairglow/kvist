@@ -81,7 +81,7 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
   - For example, when a task fails, suggest running `kvist task log`; when a component specification is modified, suggest `kvist spec accept`; and when no tasks are ready but some are blocked, prompt the user to resolve the blocked task or manual gate.
   - Keep the versioned machine-readable JSON formats completely free of unsolicited human prose to preserve parsing stability.
 
-### TODO UX-07 — Uniform Structured JSON Output Support for All Commands
+### DONE UX-07 — Uniform Structured JSON Output Support for All Commands
 
 - **Context:** Users must be able to easily wrap Kvist inside their own scripts, IDE extensions, or custom GUIs/UIs. All CLI commands must support structured, machine-readable output.
 - **Acceptance criteria:**

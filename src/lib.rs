@@ -31,5 +31,5 @@ pub use error::{KvistError, Result};
 /// Parses process arguments and dispatches the requested command.
 pub fn run() -> Result<cli::CommandOutput> {
     let cli = cli::Cli::try_parse()?;
-    cli::execute(cli.command)
+    cli::execute(cli.command, cli.json)
 }

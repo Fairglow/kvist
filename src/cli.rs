@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::{
-    KvistError, Result, init, project_state, specification, status, task_commands,
+    KvistError, Result, discovery, init, project_state, specification, status, task_commands,
     task_queue::TaskStatus, tree,
 };
 
@@ -18,6 +18,10 @@ use crate::{
     long_about = "Kvist manages filesystem-native component specifications, task queues, and compliance documentation."
 )]
 pub struct Cli {
+    /// Output structured JSON instead of plain text.
+    #[arg(long, global = true)]
+    pub json: bool,
+
     /// Command to execute.
     #[command(subcommand)]
     pub command: Command,
@@ -194,96 +198,334 @@ impl std::fmt::Display for CommandOutput {
 ///
 /// This dispatch layer deliberately contains no process handling; callers can
 /// test command behavior and choose how errors are presented.
-pub fn execute(command: Command) -> Result<CommandOutput> {
-    match command {
-        Command::Init(project) => init::initialize(&project.path)
-            .map(|outcome| CommandOutput::message(outcome.to_string())),
-        Command::Tree(project) => tree::render_project(&project.path).map(CommandOutput::message),
-        Command::Doctor(project) => project_state::inspect(&project.path)
-            .map(|inspection| CommandOutput::message(inspection.to_string())),
-        Command::Status {
-            path,
-            format,
-            only_specs,
-            only_impls,
-            unfinished,
-        } => project_state::inspect(&path).map(|inspection| {
-            CommandOutput::message(status::render(
-                &inspection,
+pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
+    if json {
+        match command {
+            Command::Init(project) => {
+                let outcome = init::initialize(&project.path)?;
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"init\",\"project_path\":\"{}\",\"message\":\"{}\"}}",
+                    project.path.to_string_lossy().replace('\\', "\\\\"),
+                    outcome
+                        .to_string()
+                        .replace('\n', "\\n")
+                        .replace('"', "\\\"")
+                )))
+            }
+            Command::Tree(project) => {
+                let discovery = discovery::discover(&project.path)?;
+                let mut components_json = String::from("[");
+                for (i, comp) in discovery.components.iter().enumerate() {
+                    if i > 0 {
+                        components_json.push(',');
+                    }
+                    components_json.push_str(&format!(
+                        "{{\"path\":\"{}\",\"state\":\"{:?}\"}}",
+                        comp.relative_path.to_string_lossy().replace('\\', "\\\\"),
+                        comp.status()
+                    ));
+                }
+                components_json.push(']');
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"tree\",\"component_root\":\"src\",\"components\":{}}}",
+                    components_json
+                )))
+            }
+            Command::Doctor(project) => {
+                let inspection = project_state::inspect(&project.path)?;
+                let status_json =
+                    status::render(&inspection, status::StatusFormat::Json, false, false, false);
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"doctor\",\"inspection\":{}}}",
+                    status_json
+                )))
+            }
+            Command::Status {
+                path,
+                format: _,
+                only_specs,
+                only_impls,
+                unfinished,
+            } => {
+                let inspection = project_state::inspect(&path)?;
+                let status_json = status::render(
+                    &inspection,
+                    status::StatusFormat::Json,
+                    only_specs,
+                    only_impls,
+                    unfinished,
+                );
+                Ok(CommandOutput::message(status_json))
+            }
+            Command::Task {
+                command: TaskCommand::Next { component_dir },
+            } => {
+                let ready_task = task_commands::next(&component_dir)?;
+                let ready_task_val = if ready_task == "no ready task" {
+                    "null".to_owned()
+                } else {
+                    format!("\"{}\"", ready_task)
+                };
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"task-next\",\"component_dir\":\"{}\",\"ready_task_id\":{}}}",
+                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    ready_task_val
+                )))
+            }
+            Command::Task {
+                command:
+                    TaskCommand::Transition {
+                        component_dir,
+                        task_id,
+                        status,
+                        reason,
+                    },
+            } => {
+                let message = task_commands::transition(
+                    &component_dir,
+                    &task_id,
+                    status.into(),
+                    reason.as_deref(),
+                )?;
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"task-transition\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"target_status\":\"{}\",\"message\":\"{}\"}}",
+                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    task_id,
+                    status_name(status.into()),
+                    message.replace('\n', "\\n").replace('"', "\\\"")
+                )))
+            }
+            Command::Task {
+                command:
+                    TaskCommand::Run {
+                        component_dir,
+                        task_id,
+                        stream,
+                    },
+            } => {
+                let message = task_commands::run_task(&component_dir, task_id.as_deref(), stream)?;
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"task-run\",\"component_dir\":\"{}\",\"message\":\"{}\"}}",
+                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    message.replace('\n', "\\n").replace('"', "\\\"")
+                )))
+            }
+            Command::Task {
+                command:
+                    TaskCommand::Log {
+                        component_dir,
+                        task_id,
+                    },
+            } => {
+                let log_content = task_commands::task_log(&component_dir, &task_id)?;
+                let mut escaped_log = String::new();
+                json_string_escape(&mut escaped_log, &log_content);
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"task-log\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"log_content\":{}}}",
+                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    task_id,
+                    escaped_log
+                )))
+            }
+            Command::Task {
+                command: TaskCommand::ApprovePolicy { path },
+            } => {
+                let message = task_commands::approve_policy(&path)?;
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"task-approve-policy\",\"policy_path\":\"{}\",\"message\":\"{}\"}}",
+                    path.to_string_lossy().replace('\\', "\\\\"),
+                    message.replace('\n', "\\n").replace('"', "\\\"")
+                )))
+            }
+            Command::Spec {
+                command: SpecCommand::New { component_dir },
+            } => {
+                let generated = specification::create(&component_dir)?;
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"spec-new\",\"spec_path\":\"{}\",\"message\":\"created specification at {}\"}}",
+                    generated.path.to_string_lossy().replace('\\', "\\\\"),
+                    generated.path.display()
+                )))
+            }
+            Command::Spec {
+                command: SpecCommand::Validate { spec_file },
+            } => {
+                let validation = specification::validate_file(&spec_file)?;
+                let mut diagnostics_json = String::from("[");
+                for (i, diag) in validation.diagnostics.iter().enumerate() {
+                    if i > 0 {
+                        diagnostics_json.push(',');
+                    }
+                    let message = specification::format_diagnostics(std::slice::from_ref(diag));
+                    diagnostics_json.push_str(&format!(
+                        "{{\"kind\":\"{:?}\",\"line\":{},\"column\":{},\"message\":\"{}\"}}",
+                        diag.kind,
+                        diag.line,
+                        diag.column,
+                        message.replace('"', "\\\"")
+                    ));
+                }
+                diagnostics_json.push(']');
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"spec-validate\",\"valid\":{},\"spec_path\":\"{}\",\"diagnostics\":{}}}",
+                    validation.is_valid(),
+                    spec_file.to_string_lossy().replace('\\', "\\\\"),
+                    diagnostics_json
+                )))
+            }
+            Command::Spec {
+                command: SpecCommand::Accept { component_dir },
+            } => {
+                let message = task_commands::accept(&component_dir)?;
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"spec-accept\",\"component_dir\":\"{}\",\"message\":\"{}\"}}",
+                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    message.replace('\n', "\\n").replace('"', "\\\"")
+                )))
+            }
+            Command::Completions { shell } => {
+                use clap::CommandFactory;
+                let mut cmd = Cli::command();
+                let mut buffer = Vec::new();
+                clap_complete::generate(shell, &mut cmd, "kvist", &mut buffer);
+                let script = String::from_utf8(buffer).expect("valid UTF-8 completion script");
+                let mut escaped_script = String::new();
+                json_string_escape(&mut escaped_script, &script);
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"completions\",\"shell\":\"{:?}\",\"script\":{}}}",
+                    shell, escaped_script
+                )))
+            }
+        }
+    } else {
+        match command {
+            Command::Init(project) => init::initialize(&project.path)
+                .map(|outcome| CommandOutput::message(outcome.to_string())),
+            Command::Tree(project) => {
+                tree::render_project(&project.path).map(CommandOutput::message)
+            }
+            Command::Doctor(project) => project_state::inspect(&project.path)
+                .map(|inspection| CommandOutput::message(inspection.to_string())),
+            Command::Status {
+                path,
                 format,
                 only_specs,
                 only_impls,
                 unfinished,
-            ))
-        }),
-        Command::Task {
-            command: TaskCommand::Next { component_dir },
-        } => task_commands::next(&component_dir).map(CommandOutput::message),
-        Command::Task {
-            command:
-                TaskCommand::Transition {
-                    component_dir,
-                    task_id,
-                    status,
-                    reason,
-                },
-        } => task_commands::transition(&component_dir, &task_id, status.into(), reason.as_deref())
+            } => project_state::inspect(&path).map(|inspection| {
+                CommandOutput::message(status::render(
+                    &inspection,
+                    format,
+                    only_specs,
+                    only_impls,
+                    unfinished,
+                ))
+            }),
+            Command::Task {
+                command: TaskCommand::Next { component_dir },
+            } => task_commands::next(&component_dir).map(CommandOutput::message),
+            Command::Task {
+                command:
+                    TaskCommand::Transition {
+                        component_dir,
+                        task_id,
+                        status,
+                        reason,
+                    },
+            } => task_commands::transition(
+                &component_dir,
+                &task_id,
+                status.into(),
+                reason.as_deref(),
+            )
             .map(CommandOutput::message),
-        Command::Task {
-            command:
-                TaskCommand::Run {
-                    component_dir,
-                    task_id,
-                    stream,
-                },
-        } => task_commands::run_task(&component_dir, task_id.as_deref(), stream)
-            .map(CommandOutput::message),
-        Command::Task {
-            command:
-                TaskCommand::Log {
-                    component_dir,
-                    task_id,
-                },
-        } => task_commands::task_log(&component_dir, &task_id).map(CommandOutput::message),
-        Command::Task {
-            command: TaskCommand::ApprovePolicy { path },
-        } => task_commands::approve_policy(&path).map(CommandOutput::message),
-        Command::Spec {
-            command: SpecCommand::New { component_dir },
-        } => specification::create(&component_dir).map(|generated| {
-            CommandOutput::message(format!(
-                "created specification at {}",
-                generated.path.display()
-            ))
-        }),
-        Command::Spec {
-            command: SpecCommand::Validate { spec_file },
-        } => {
-            let validation = specification::validate_file(&spec_file)?;
-            if validation.is_valid() {
-                Ok(CommandOutput::message(format!(
-                    "valid specification: {}",
-                    spec_file.display()
-                )))
-            } else {
-                Err(KvistError::SpecificationValidationFailed {
-                    path: spec_file,
-                    diagnostics: specification::format_diagnostics(&validation.diagnostics),
-                })
+            Command::Task {
+                command:
+                    TaskCommand::Run {
+                        component_dir,
+                        task_id,
+                        stream,
+                    },
+            } => task_commands::run_task(&component_dir, task_id.as_deref(), stream)
+                .map(CommandOutput::message),
+            Command::Task {
+                command:
+                    TaskCommand::Log {
+                        component_dir,
+                        task_id,
+                    },
+            } => task_commands::task_log(&component_dir, &task_id).map(CommandOutput::message),
+            Command::Task {
+                command: TaskCommand::ApprovePolicy { path },
+            } => task_commands::approve_policy(&path).map(CommandOutput::message),
+            Command::Spec {
+                command: SpecCommand::New { component_dir },
+            } => specification::create(&component_dir).map(|generated| {
+                CommandOutput::message(format!(
+                    "created specification at {}",
+                    generated.path.display()
+                ))
+            }),
+            Command::Spec {
+                command: SpecCommand::Validate { spec_file },
+            } => {
+                let validation = specification::validate_file(&spec_file)?;
+                if validation.is_valid() {
+                    Ok(CommandOutput::message(format!(
+                        "valid specification: {}",
+                        spec_file.display()
+                    )))
+                } else {
+                    Err(KvistError::SpecificationValidationFailed {
+                        path: spec_file,
+                        diagnostics: specification::format_diagnostics(&validation.diagnostics),
+                    })
+                }
+            }
+            Command::Spec {
+                command: SpecCommand::Accept { component_dir },
+            } => task_commands::accept(&component_dir).map(CommandOutput::message),
+            Command::Completions { shell } => {
+                use clap::CommandFactory;
+                let mut cmd = Cli::command();
+                let mut buffer = Vec::new();
+                clap_complete::generate(shell, &mut cmd, "kvist", &mut buffer);
+                let script = String::from_utf8(buffer).expect("valid UTF-8 completion script");
+                Ok(CommandOutput::message(script))
             }
         }
-        Command::Spec {
-            command: SpecCommand::Accept { component_dir },
-        } => task_commands::accept(&component_dir).map(CommandOutput::message),
-        Command::Completions { shell } => {
-            use clap::CommandFactory;
-            let mut cmd = Cli::command();
-            let mut buffer = Vec::new();
-            clap_complete::generate(shell, &mut cmd, "kvist", &mut buffer);
-            let script = String::from_utf8(buffer).expect("valid UTF-8 completion script");
-            Ok(CommandOutput::message(script))
+    }
+}
+
+fn status_name(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Pending => "pending",
+        TaskStatus::InProgress => "in-progress",
+        TaskStatus::Blocked => "blocked",
+        TaskStatus::Completed => "completed",
+    }
+}
+
+fn json_string_escape(output: &mut String, value: &str) {
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            '\u{08}' => output.push_str("\\b"),
+            '\u{0c}' => output.push_str("\\f"),
+            '\0'..='\u{1f}' => {
+                use std::fmt::Write;
+
+                let _ = write!(output, "\\u{:04x}", character as u32);
+            }
+            _ => output.push(character),
         }
     }
+    output.push('"');
 }
 
 #[cfg(test)]
@@ -396,9 +638,12 @@ mod tests {
 
     #[test]
     fn generates_bash_completions() {
-        let outcome = execute(Command::Completions {
-            shell: clap_complete::Shell::Bash,
-        })
+        let outcome = execute(
+            Command::Completions {
+                shell: clap_complete::Shell::Bash,
+            },
+            false,
+        )
         .expect("generates completions");
 
         let output = outcome.to_string();
