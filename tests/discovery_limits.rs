@@ -112,17 +112,18 @@ fn discovery_reports_each_resource_limit_specifically() {
 }
 
 #[test]
-fn discovery_rejects_components_below_ordinary_directories() {
+fn discovery_allows_components_below_ordinary_directories() {
     let workspace = TempDir::new().expect("workspace");
     let root = workspace.path().join("src");
     create_component(&root.join("ordinary/component"));
 
-    let error = discover_with_limits(&root, limits()).expect_err("hierarchy violation");
+    let discovery = discover_with_limits(&root, limits()).expect("discover through transparent");
 
-    assert!(
-        error
-            .to_string()
-            .contains("below ordinary directory `ordinary`")
+    assert_eq!(discovery.components.len(), 2);
+    assert_eq!(discovery.components[0].relative_path, Path::new("."));
+    assert_eq!(
+        discovery.components[1].relative_path,
+        Path::new("ordinary/component")
     );
 }
 

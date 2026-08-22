@@ -285,3 +285,62 @@ fn status_filters_components_and_artifacts() {
     assert!(!json_stdout.contains("\"path\":\"SPEC.md\""));
     assert!(!json_stdout.contains("\"path\":\"TODOS.yaml\""));
 }
+
+#[test]
+fn status_transparent_namespace_parent_specification() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+
+    // Let's create a transparent layout: ordinary/component
+    let component_dir = project.path().join("src/ordinary/component");
+    fs::create_dir_all(&component_dir).expect("create component");
+    fs::copy(
+        project.path().join("src/SPEC.md"),
+        component_dir.join("SPEC.md"),
+    )
+    .expect("copy spec");
+    fs::copy(
+        project.path().join("src/IMPL.md"),
+        component_dir.join("IMPL.md"),
+    )
+    .expect("copy docs");
+
+    // Write a child queue that expects the parent specification at the root (since ordinary is transparent)
+    fs::write(
+        component_dir.join("TODOS.yaml"),
+        valid_queue(
+            GENERATED_SPECIFICATION_REVISION,
+            Some(GENERATED_SPECIFICATION_REVISION),
+            " []",
+        ),
+    )
+    .expect("write queue");
+
+    // Let's run status
+    let output = run_kvist(&[
+        "status",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 text output");
+    // Ensure both . and ordinary/component are discovered and current
+    assert!(stdout.contains("component: . state: current"));
+    assert!(stdout.contains("component: ordinary/component state: current"));
+    assert!(!stdout.contains("cause:"));
+
+    // Let's modify the root SPEC.md by appending a line to trigger a parent-specification-revision-changed cause
+    let root_spec_path = project.path().join("src/SPEC.md");
+    let mut contents = fs::read_to_string(&root_spec_path).expect("read root spec");
+    contents.push_str("\n\n<!-- dynamic change -->\n");
+    fs::write(&root_spec_path, contents).expect("modify root spec");
+
+    let output_stale = run_kvist(&[
+        "status",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(output_stale.status.success());
+    let stdout_stale = String::from_utf8(output_stale.stdout).expect("UTF-8 text output");
+    // Under transparent directories, the relative path from ordinary/component to root SPEC.md is "../../SPEC.md"
+    assert!(stdout_stale.contains("component: ordinary/component state: stale"));
+    assert!(stdout_stale.contains("cause: parent-specification-revision-changed ../../SPEC.md"));
+}

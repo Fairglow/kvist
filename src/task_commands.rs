@@ -12,7 +12,7 @@ use tempfile::NamedTempFile;
 
 use crate::{
     KvistError, Result,
-    discovery::ComponentArtifact,
+    discovery::{self, ComponentArtifact},
     file_io::{replace_file_atomically, sync_directory, write_new_file_atomically},
     filesystem::is_link_like,
     project_state::{self, ComponentState, MAX_ROOT_TEXT_ARTIFACT_BYTES, ProjectState},
@@ -693,7 +693,22 @@ pub fn accept(component_path: &Path) -> Result<String> {
 
         // 3. If there is an immediate parent, update its revision to current parent's revision
         if let Some(ref mut parent) = queue.component.parent_specification {
-            let parent_spec_path = context.component_dir.join("../SPEC.md");
+            let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                operation: "determine current project directory",
+                path: PathBuf::from("."),
+                source,
+            })?;
+            let inspection = project_state::inspect(&project_dir)?;
+            let component_root = project_dir.join(
+                inspection
+                    .component_root
+                    .clone()
+                    .unwrap_or_else(|| PathBuf::from("src")),
+            );
+            let (parent_component_dir, _) =
+                discovery::find_parent_component_dir(&component_root, &context.component_path)?;
+            let parent_spec_path =
+                parent_component_dir.join(ComponentArtifact::Specification.filename());
             let parent_metadata =
                 fs::symlink_metadata(&parent_spec_path).map_err(|source| KvistError::Io {
                     operation: "inspect parent specification",

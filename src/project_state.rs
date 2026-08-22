@@ -446,17 +446,20 @@ fn inspect_component(
             (None, true) => {}
             (Some(_), true) | (None, false) => context_is_invalid = true,
             (Some(parent), false) => {
-                let parent_specification = component_dir
-                    .join("..")
-                    .join(ComponentArtifact::Specification.filename());
+                let (parent_component_dir, parent_relative_path) =
+                    discovery::find_parent_component_dir(component_root, &component.relative_path)?;
+                let parent_specification =
+                    parent_component_dir.join(ComponentArtifact::Specification.filename());
                 let (state, contents) = inspect_component_specification(&parent_specification)?;
                 if state != ComponentArtifactState::Valid {
                     context_is_invalid = true;
                 } else if let Some(contents) = contents {
+                    let relative_parent_path =
+                        relative_parent_spec_path(&component.relative_path, &parent_relative_path);
                     add_revision_cause(
                         &mut revalidation_causes,
                         StalenessCauseKind::ParentSpecificationRevisionChanged,
-                        "../SPEC.md",
+                        &relative_parent_path,
                         &parent.revision,
                         sha256_revision(&contents),
                     );
@@ -507,6 +510,27 @@ fn inspect_component(
 
 fn is_component_root(path: &Path) -> bool {
     path.as_os_str().is_empty() || path == Path::new(".")
+}
+
+fn relative_parent_spec_path(relative_path: &Path, parent_relative_path: &Path) -> String {
+    if parent_relative_path.as_os_str().is_empty() || parent_relative_path == Path::new(".") {
+        let depth = relative_path.components().count();
+        let mut path = String::new();
+        for _ in 0..depth {
+            path.push_str("../");
+        }
+        path.push_str("SPEC.md");
+        path
+    } else {
+        let child_depth = relative_path.components().count();
+        let parent_depth = parent_relative_path.components().count();
+        let mut path = String::new();
+        for _ in 0..(child_depth - parent_depth) {
+            path.push_str("../");
+        }
+        path.push_str("SPEC.md");
+        path
+    }
 }
 
 fn revalidation_cause(cause: &StalenessCause) -> RevalidationCause {

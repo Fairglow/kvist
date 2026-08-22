@@ -55,7 +55,7 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
   - Ensure these status filters are fully compatible with both the default plain-text reporter and the machine-readable versioned JSON report.
   - Write integration tests in `tests/status.rs` to verify correct filtering behavior.
 
-### TODO UX-03 — Support "Transparent" Namespace Directories
+### DONE UX-03 — Support "Transparent" Namespace Directories
 
 - **Context:** The current discovery engine in `src/discovery.rs` enforces a strict, unbroken hierarchical component chain. If a folder acts as a pure namespace or container (e.g., `src/network/protocols/http/` where `protocols/` is just an empty namespace directory with no Kvist metadata), discovery currently rejects or fails to resolve the nested component unless the user initializes meaningless "ghost components" at every layer.
 - **Acceptance criteria:**

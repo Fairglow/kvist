@@ -167,8 +167,6 @@ pub fn discover_with_limits(component_root: &Path, limits: DiscoveryLimits) -> R
         ScanPosition {
             depth: 0,
             is_root: true,
-            parent_is_component: true,
-            ordinary_intermediate: None,
         },
         &mut context,
     )?;
@@ -222,8 +220,6 @@ struct ScanContext {
 struct ScanPosition {
     depth: usize,
     is_root: bool,
-    parent_is_component: bool,
-    ordinary_intermediate: Option<PathBuf>,
 }
 
 fn scan_directory(
@@ -242,14 +238,6 @@ fn scan_directory(
 
     let component = inspect_component(directory, relative_path)?;
     let is_component = position.is_root || component.is_candidate();
-    if !position.is_root && is_component && !position.parent_is_component {
-        return Err(KvistError::ComponentDiscoveryHierarchyViolation {
-            path: relative_path.to_path_buf(),
-            intermediate: position
-                .ordinary_intermediate
-                .expect("ordinary intermediate is known for non-component parent"),
-        });
-    }
     if is_component {
         if context.components.len() == context.limits.max_components {
             return Err(KvistError::ComponentDiscoveryComponentLimitExceeded {
@@ -324,25 +312,12 @@ fn scan_directory(
     }
 
     for (child_directory, child_relative_path) in children {
-        let child_ordinary_intermediate = if is_component {
-            None
-        } else {
-            Some(
-                position
-                    .ordinary_intermediate
-                    .as_deref()
-                    .unwrap_or(relative_path)
-                    .to_path_buf(),
-            )
-        };
         scan_directory(
             &child_directory,
             &child_relative_path,
             ScanPosition {
                 depth: position.depth + 1,
                 is_root: false,
-                parent_is_component: is_component,
-                ordinary_intermediate: child_ordinary_intermediate,
             },
             context,
         )?;
@@ -406,4 +381,43 @@ const fn artifact_index(artifact: ComponentArtifact) -> usize {
         ComponentArtifact::TaskQueue => 1,
         ComponentArtifact::ImplementationRecord => 2,
     }
+}
+
+/// Finds the first ancestor directory of a component that is itself a Kvist component.
+pub fn find_parent_component_dir(
+    component_root: &Path,
+    relative_path: &Path,
+) -> Result<(PathBuf, PathBuf)> {
+    let mut current = relative_path.to_path_buf();
+    while let Some(parent) = current.parent() {
+        if parent.as_os_str().is_empty() {
+            break;
+        }
+        let parent_dir = component_root.join(parent);
+        // Is it a component?
+        if is_component_dir(&parent_dir)? {
+            return Ok((parent_dir, parent.to_path_buf()));
+        }
+        current = parent.to_path_buf();
+    }
+    // Root is the fallback
+    Ok((component_root.to_path_buf(), PathBuf::from(".")))
+}
+
+fn is_component_dir(path: &Path) -> Result<bool> {
+    for artifact in &REQUIRED_ARTIFACTS {
+        let artifact_path = path.join(artifact.filename());
+        match fs::symlink_metadata(&artifact_path) {
+            Ok(_) => return Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(source) => {
+                return Err(KvistError::Io {
+                    operation: "inspect component artifact",
+                    path: artifact_path,
+                    source,
+                });
+            }
+        }
+    }
+    Ok(false)
 }
