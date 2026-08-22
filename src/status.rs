@@ -88,6 +88,27 @@ fn render_text(
                 }
             }
         }
+        if component.state == ComponentState::Stale {
+            output.push_str(&format!(
+                "\n  Next Step: The component specification has been modified. Run 'kvist spec accept {}' to revalidate and update the specification digest.",
+                escape_text(&component.path.to_string_lossy())
+            ));
+        } else if component.state == ComponentState::Blocked {
+            output.push_str(&format!(
+                "\n  Next Step: Component tasks are blocked or need manual intervention. Resolve the blocked tasks or manual gates in {}/TODOS.yaml.",
+                escape_text(&component.path.to_string_lossy())
+            ));
+        } else if component.state == ComponentState::Invalid {
+            output.push_str(&format!(
+                "\n  Next Step: The component contains invalid or malformed artifacts. Re-run 'kvist spec validate {}/SPEC.md' or check the schema of YAML/Markdown files.",
+                escape_text(&component.path.to_string_lossy())
+            ));
+        } else if component.state == ComponentState::Missing {
+            output.push_str(&format!(
+                "\n  Next Step: The component is is missing required adjacent Kvist artifacts. Run 'kvist spec new {}' to initialize them.",
+                escape_text(&component.path.to_string_lossy())
+            ));
+        }
     }
     output
 }

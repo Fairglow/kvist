@@ -1076,8 +1076,10 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                                 &transition_at,
                             )?;
                             Ok(format!(
-                                "task `{task_id}` failed test-command verification and transitioned to blocked.\nLogs written to: {}",
-                                run_result.log_path.display()
+                                "task `{task_id}` failed test-command verification and transitioned to blocked.\nLogs written to: {}\nNext Step: Run 'kvist task log {} {}' to inspect the detailed verification and execution logs.",
+                                run_result.log_path.display(),
+                                component_path.display(),
+                                task_id
                             ))
                         }
                     }
@@ -1100,7 +1102,10 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                             &transition_at,
                         )?;
                         Ok(format!(
-                            "task `{task_id}` verification blocked and transitioned to blocked: {verification_error}"
+                            "task `{task_id}` verification blocked and transitioned to blocked: {}\nNext Step: Run 'kvist task log {} {}' to inspect the logs and check the test command configuration.",
+                            verification_error,
+                            component_path.display(),
+                            task_id
                         ))
                     }
                 }
@@ -1157,7 +1162,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                 &transition_at,
             )?;
             Ok(format!(
-                "task `{task_id}` {} and has been transitioned to blocked.\nLogs written to: {}",
+                "task `{task_id}` {} and has been transitioned to blocked.\nLogs written to: {}\nNext Step: Run 'kvist task log {} {}' to inspect the execution error and failure logs.",
                 if run_result.timed_out {
                     "timed out"
                 } else if run_result.output_limit_exceeded {
@@ -1166,6 +1171,8 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                     "failed during execution"
                 },
                 run_result.log_path.display(),
+                component_path.display(),
+                task_id
             ))
         }
     })();

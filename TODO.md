@@ -73,7 +73,7 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
   - Ensure all subcommands, arguments, and value-enums are dynamically completion-discoverable across platforms.
   - Add a workspace validation or standard `justfile` recipe to generate and verify these completion scripts.
 
-### TODO UX-06 — Command-Line Actionable Guidance & Next-Step Prompts
+### DONE UX-06 — Command-Line Actionable Guidance & Next-Step Prompts
 
 - **Context:** Users need clear, helpful next actions printed to the console based on their command output, without compromising deterministic, script-friendly command output.
 - **Acceptance criteria:**
