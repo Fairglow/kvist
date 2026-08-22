@@ -45,86 +45,109 @@ Below is the record of completed Phase 1, Phase 2, and UX milestones.
 
 These items focus on polishing Kvist for daily terminal usage, wrapping, and developer experience.
 
-### TODO UX-02 — Add Missing Status Filters
+### DONE UX-02 — Add Missing Status Filters
 
-- **Context:** `TODO.md` calls for focused inspection views, but `kvist status`
-  currently outputs the entire tree state unconditionally.
+- **Context:** Currently `kvist status` outputs the entire project's component tree unconditionally. While useful for high-level overviews, automated scripts or terminal developers working on a specific component require filtered views to isolate components in specific states.
 - **Acceptance criteria:**
-  - Add `--only-specs` to list components and validate their `SPEC.md` without queue details.
-  - Add `--only-impls` to list implementation statuses across components.
-  - Add `--unfinished` to show only blocked, stale, or incomplete components.
+  - Add `--only-specs` to print only the status of specifications (`SPEC.md` validity, digest state) without queue details.
+  - Add `--only-impls` to list and focus on implementation statuses across components (`IMPL.md` validity).
+  - Add `--unfinished` to show only components that are blocked, stale, or incomplete (omitting `current` components).
+  - Ensure these status filters are fully compatible with both the default plain-text reporter and the machine-readable versioned JSON report.
+  - Write integration tests in `tests/status.rs` to verify correct filtering behavior.
 
 ### TODO UX-03 — Support "Transparent" Namespace Directories
 
-- **Context:** Discovery rejects components that live below ordinary directories, forcing developers to initialize meaningless "ghost components" just for namespacing (e.g., `src/network/protocols/http` forces `protocols` to be a Kvist component).
+- **Context:** The current discovery engine in `src/discovery.rs` enforces a strict, unbroken hierarchical component chain. If a folder acts as a pure namespace or container (e.g., `src/network/protocols/http/` where `protocols/` is just an empty namespace directory with no Kvist metadata), discovery currently rejects or fails to resolve the nested component unless the user initializes meaningless "ghost components" at every layer.
 - **Acceptance criteria:**
-  - Refactor the discovery engine in `src/discovery.rs` to allow pass-through / transparent directories.
-  - Ensure that only directories containing Kvist artifacts are treated as components, without strict hierarchical unbroken chain requirements.
+  - Refactor the discovery engine traversal loop in `src/discovery.rs` to allow pass-through/transparent directories that do not contain Kvist metadata (`SPEC.md`, `TODOS.yaml`, `IMPL.md`).
+  - Directories containing no Kvist artifacts must not be reported as "incomplete components" or cause validation failures; instead, discovery must traverse through them to locate nested child components further down.
+  - Ensure the parent/child component hierarchy remains semantically intact (e.g., the parent of `http` is the next ancestor component higher up, skipping the transparent `protocols` directory).
+  - Write regression tests verifying traversal through multiple layers of non-component folders.
 
 ### TODO UX-05 — Multi-Platform Shell Tab-Completions
 
 - **Context:** Full tab-completion on all major platforms (Bash, Zsh, Fish, PowerShell) is crucial for ease of use and speed.
 - **Acceptance criteria:**
-  - Add `clap_complete` to dependencies.
+  - Add `clap_complete` to dependencies in `Cargo.toml`.
   - Implement a `kvist completions <SHELL>` subcommand that generates shell completion scripts for all major shells on stdout.
   - Ensure all subcommands, arguments, and value-enums are dynamically completion-discoverable across platforms.
+  - Add a workspace validation or standard `justfile` recipe to generate and verify these completion scripts.
 
 ### TODO UX-06 — Command-Line Actionable Guidance & Next-Step Prompts
 
-- **Context:** Users need clear next actions without compromising deterministic,
-  script-friendly command output.
+- **Context:** Users need clear, helpful next actions printed to the console based on their command output, without compromising deterministic, script-friendly command output.
 - **Acceptance criteria:**
-  - Provide actionable guidance in human-oriented failure and mutation results;
-    keep versioned machine-readable formats free of unsolicited prose.
-  - In `kvist task run`, report the durable task outcome, execution-log path,
-    and verification result without inferring what files an agent edited.
+  - Provide actionable, proactive guidance in human-oriented failure and mutation results (plain-text reporter).
+  - For example, when a task fails, suggest running `kvist task log`; when a component specification is modified, suggest `kvist spec accept`; and when no tasks are ready but some are blocked, prompt the user to resolve the blocked task or manual gate.
+  - Keep the versioned machine-readable JSON formats completely free of unsolicited human prose to preserve parsing stability.
 
 ### TODO UX-07 — Uniform Structured JSON Output Support for All Commands
 
 - **Context:** Users must be able to easily wrap Kvist inside their own scripts, IDE extensions, or custom GUIs/UIs. All CLI commands must support structured, machine-readable output.
 - **Acceptance criteria:**
   - Support a uniform `--json` or `--format json` flag across every single Kvist command (including `init`, `spec new`, `spec accept`, `task run`, and `task log`).
-  - Document stable, versioned JSON output schemas for all commands to prevent wrapping integrations from breaking.
+  - Define and serialize stable, versioned JSON schemas for all command outputs.
+  - Document these JSON schemas under `/docs/` to prevent wrapping integrations from breaking.
+  - Verify JSON output compliance across all CLI commands using automated tests.
 
 ### TODO UX-08 — Add Lock Management and Manual Unlock Commands (Operational Gap)
 
-- **Context:** If a task execution is forcefully aborted, crashed, or canceled, the user-owned lifecycle lock may be orphaned, blocking subsequent `kvist task run` commands.
+- **Context:** If a task execution is forcefully aborted, crashed, or canceled, the user-owned lifecycle lock may be orphaned. Because the lock resides in a sandbox-inaccessible location (remediated in P2-08), it cannot be cleared by external agents, blocking subsequent execution runs.
 - **Acceptance criteria:**
-  - Implement `kvist task unlock <COMPONENT_DIR>` to allow manual unlock of stuck directories.
+  - Implement `kvist task unlock <COMPONENT_DIR>` to allow manual unlocking of stuck directories.
+  - Prompt the user for explicit confirmation before removing an active lock, unless `--force` is supplied.
   - Print clear, actionable instructions when lock acquisition fails (e.g., "Component is locked. If this is a stale lock from a previous crash, run `kvist task unlock <COMPONENT_DIR>` to clear it").
+  - Validate with integration tests that `unlock` successfully resolves locked contention states.
+
+### TODO UX-09 — Task Attempt Recovery and Reconciliation Tooling (Operational Gap)
+
+- **Context:** As highlighted in `COMPLIANCE_REVIEW.md` (under residual limitations of Phase 2 reconciliation), a prepared task attempt that is aborted, timed out, or interrupted leaves a "prepared" record in the attempt history. This fences off the queue and blocks future transitions for that task. Currently, there is no CLI way to reconcile this, requiring manual file editing.
+- **Acceptance criteria:**
+  - Implement a `kvist task recover <COMPONENT_DIR> [TASK_ID]` command.
+  - Provide interactive, safe recovery choices to the user:
+    1. **Rollback:** Delete the trailing prepared attempt record and restore the task to its previous state (e.g., `todo` or `in-progress`).
+    2. **Force-Commit:** Manually supply the final outcome state (e.g., `complete` or `blocked`) along with the required verification log path.
+  - Ensure the command validates the queue structure and integrity before writing.
+  - Write integration tests reproducing crashed runs and verifying success of both rollback and commit recovery paths.
+
+### TODO UX-10 — Robust Process-Tree Cancellation & Cleanup (Robustness Gap)
+
+- **Context:** The resource limits implemented in P2-05d terminate timed-out or canceled external processes. However, if an agent or test-policy runner spawns children (e.g., compile daemons, child subprocesses), terminating only the immediate child can leave orphan background processes running on the host.
+- **Acceptance criteria:**
+  - Refactor subprocess execution in `src/sandbox.rs` to launch processes inside a new Process Group (PGID).
+  - Upon timeout or cancellation, send the termination signal to the entire process group (e.g., `kill -- -PGID` on POSIX hosts) to ensure complete cleanup.
+  - Provide a safe fallback for unsupported platforms and document the platform-specific limitations.
+  - Add integration tests verifying that child processes of timed-out runs are fully terminated.
 
 ---
 
-## Phase 3 — AI Skill Definitions & Standard Prompts
+## Phase 3 — AI Skill Definitions, Prompt Engineering & Engine Orchestration
 
-The KVIST engine heavily relies on predictable, high-quality outputs from AI agents executing the lifecycle. Standardized "Skills" (system prompts, context rules, and structured output formats) must be rigorously defined for the terminal-UX agent.
+Phase 3 transitions Kvist from a manual task-tracking CLI into an automated agent execution platform. It requires defining standardized prompts ("Skills") and implementing the Rust orchestration pipelines that execute the independent Triple-Blind compliance lifecycle.
 
-### TODO P3-01 — Component Hierarchy & Feasibility Skills
+### AI Skill & Prompt Definitions
 
-- **Architect Agent Skill:** Prompting guidelines to turn a human project vision
-  into an iteratively reviewed hierarchy of self-contained components and
-  layered specifications.
+#### TODO P3-01 — Component Hierarchy & Feasibility Skills
+
+- **Architect Agent Skill:** Prompting guidelines to turn a human project vision into an iteratively reviewed hierarchy of self-contained components and layered specifications.
 - **Specification Generation & Review Skill:** Prompting guidelines for the interactive "Interview" mode to define purpose, constraints, and algorithms without writing code.
 - **Feasibility Analysis Skill:** A skill for reviewing a draft `SPEC.md` for logical gaps, contradictions, or missing edge cases before tasks are generated.
 
-### TODO P3-02 — Task Generation & TODO Queue Skills
+#### TODO P3-02 — Task Generation & TODO Queue Skills
 
-- **Designer Agent Skill:** Prompting guidelines to convert a human-approved
-  `SPEC.md` into an iteratively reviewed specialized queue strictly following
-  the required lifecycle ordering (Test -> Implementation -> Security ->
-  Review).
+- **Designer Agent Skill:** Prompting guidelines to convert a human-approved `SPEC.md` into an iteratively reviewed specialized queue strictly following the required lifecycle ordering (Test -> Implementation -> Security -> Review).
 
-### TODO P3-03 — Execution Skills (Testing & Implementation)
+#### TODO P3-03 — Execution Skills (Testing & Implementation)
 
 - **Unit Test Generation Skill:** Directives for writing tests that explicitly verify Layer 1 and Layer 2 invariants from `SPEC.md`.
 - **Implementation Skill:** Guidelines for fulfilling the tests.
 - **Source Code Documentation Skill:** Instructions for writing language-native docstrings (e.g., `///` in Rust) that cleanly map implementation details to spec requirements, enabling easier reverse-engineering.
 
-### TODO P3-04 — Clean-Slate Documenter Skill
+#### TODO P3-04 — Clean-Slate Documenter Skill
 
 - **Reverse-Engineering Skill:** Define the prompt for the clean-slate agent that extracts `IMPL.md` from raw source code and docstrings _without_ seeing the original `SPEC.md`. Must capture contracts, constraints, and error handling accurately.
 
-### TODO P3-05 — Compliance & Review Skills (Triple-Blind Loop)
+#### TODO P3-05 — Compliance & Review Skills (Triple-Blind Loop)
 
 - **Code Review Skill:** General structural, stylistic, and idiomatic code review.
 - **Security Review Skill:** Focuses explicitly on memory safety, thread-safety, boundaries, and input validation invariants defined in Layer 2.
@@ -132,25 +155,87 @@ The KVIST engine heavily relies on predictable, high-quality outputs from AI age
 - **Error Handling & Logging Review Skill:** Ensures error states are safely propagated and observability requirements are met.
 - **Specification Drift / Contract Fulfillment Skill:** The final compliance prompt that compares the original `SPEC.md` against the generated `IMPL.md` to flag hallucinations or missed requirements.
 
+### Rust Engine & Orchestration Implementation (Engine Gaps)
+
+#### TODO P3-06 — Implement Clean-Slate Documenter & Source-Blind Review Engine Pipelines
+
+- **Context:** The core Rust CLI engine must automate the execution of the clean-slate and source-blind reviewer agent pipelines defined in `REVIEW_RUNBOOK.md` and the Architectural Specification.
+- **Acceptance criteria:**
+  - Implement a pipeline that invokes the "Clean-Slate Documenter" agent using the configured `architect` profile.
+  - Ensure the pipeline's sandbox strictly isolates the agent, mounting _only_ implementation source code, tests, and manifests. The component's `SPEC.md` and prior `IMPL.md` must be completely excluded from the agent's workspace.
+  - Save the agent's output as the new `IMPL.md`.
+  - Implement a second pipeline that invokes the "Compliance Checker" agent, mounting _only_ `SPEC.md`, the newly generated `IMPL.md`, the parent spec, and `ROOT_CONTRACT.md` (no source files or tests).
+  - Parse the checker's output. If compliance is certified, record it and update task status to `complete`. If mismatches are found, raise a compliance mismatch and set the task state to `blocked`.
+
+#### TODO P3-07 — Implement Interactive CLI Arbitration Workflow
+
+- **Context:** When the compliance checker agent detects a mismatch, the engine must halt automated queue execution and trigger the conflict arbitration workflow defined in Section 4 of the architectural specification.
+- **Acceptance criteria:**
+  - Implement an interactive terminal prompt presented when a compliance mismatch occurs.
+  - Display the specific mismatch details (e.g., "Spec requires non-blocking I/O, but frame.rs uses blocking connect").
+  - Provide four actionable choices:
+    1. **Trigger Agent Redesign:** Feed the mismatch details back to the implementation agent and reset the implementation/testing tasks.
+    2. **Accept Implementation Changes:** Automatically update `SPEC.md` with the new observed behavior and recompute revisions.
+    3. **Manually Arbitrate:** Launch the user's `$EDITOR` to let them manually reconcile the files.
+    4. **AI Trade-off Analysis:** Query an AI assistant to weigh the pros/cons of the discrepancy before choosing an action.
+  - Persist the selected arbitration decision as a signed, durable record under the component's VCS metadata.
+
+#### TODO P3-08 — Implement CLI Interactive "Interview" Mode for Specification Drafting
+
+- **Context:** The "Interview" mode (Section 3, Stage 1 of the specification) is essential to reduce specification friction, helping human architects draft valid three-layered specifications through interactive guided dialogue.
+- **Acceptance criteria:**
+  - Implement `kvist spec interview <COMPONENT_DIR>`.
+  - Load the `architect` profile and run a specialized interactive shell session.
+  - The agent asks structured questions regarding component purpose, external boundaries, concurrency requirements, algorithms, and error handling.
+  - Once the user is satisfied, the agent writes the formal three-layered `SPEC.md` and exits.
+  - Integrate command options to resume an interrupted interview.
+
+#### TODO P3-09 — Implement Automated TODO Queue Generation Engine
+
+- **Context:** Once a specification is approved, a designer agent must draft the initial `TODOS.yaml` from it. This process needs to be orchestrated by the Rust engine.
+- **Acceptance criteria:**
+  - Implement `kvist spec plan <COMPONENT_DIR>` or integrate queue generation.
+  - Call the `architect` profile, passing the newly validated `SPEC.md` and root/parent contracts.
+  - The designer agent generates a complete, valid `TODOS.yaml` that enforces all schema invariants (version, tasks, dependency graphs, kind-based order).
+  - The engine validates the generated YAML. If valid, writes it to disk; otherwise, reports details and retry/re-prompt options.
+
 ---
 
 ## Phase 4 — Deferred Visual Web UI & Graphical Ecosystem
 
-Phase 4 prioritizes an interactive graphical interface. All UI features are deferred until the terminal and CLI core features are completely finalized and secure.
+Phase 4 prioritizes an interactive graphical interface and editor integration. All UI features are deferred until the terminal and CLI core features are completely finalized, secure, and audited.
 
 ### TODO P4-01 — Embedded Web Server & API
 
+- **Context:** An interactive UI needs a local service to query and mutate component states.
 - **Acceptance criteria:**
-  - Add `kvist serve` command that spawns a lightweight `axum` server.
-  - Implement API routes for reading component states, specs, and queues.
+  - Add `kvist serve` command that spawns a lightweight, local-only `axum` web server.
+  - Implement REST/WebSocket API routes for reading component states, specs, attempt logs, and triggering transitions.
+  - Strictly bind the server to `127.0.0.1` and randomize ports (or use a secure local token) to prevent unauthorized access.
 
 ### TODO P4-02 — Interactive Tree & Monaco Editor UI
 
 - **Acceptance criteria:**
-  - Embed a SPA (e.g., React or similar) into the Rust binary.
-  - Integrate Monaco Editor to display and edit `SPEC.md` and source files.
+  - Embed a SPA (e.g., React or similar) into the Rust binary using `rust-embed`.
+  - Integrate Monaco Editor to display and edit `SPEC.md`, `IMPL.md`, and source files.
+  - Provide a clean visual layout showcasing the recursive component tree with live visual state indicators (current, stale, blocked).
 
 ### TODO P4-03 — Conflict Arbitration UI
 
+- **Context:** Mismatch resolution is highly visual. Users need side-by-side diff views to compare intended specification logic against reverse-engineered implementation records.
 - **Acceptance criteria:**
-  - Implement Web-based interactive arbitration prompts (Redesign, Accept, Manual Edit, AI Trade-off Analysis).
+  - Implement a visual conflict arbitration screen in the web UI.
+  - Display side-by-side rich diffs comparing the mismatched sections of `SPEC.md` and `IMPL.md`.
+  - Provide interactive buttons mapped to the four arbitration options (Redesign, Accept, Manual, Trade-off Analysis) with smooth modal windows.
+
+### TODO P4-04 — Lightweight Editor LSP Sidecar & Watch Daemon (Editor Gap)
+
+- **Context:** Developers want real-time feedback on specification staleness or validation errors directly in their local IDE (VS Code, Neovim, Zed, etc.) without requiring full UI launches.
+- **Acceptance criteria:**
+  - Implement `kvist watch [DIR]`, spawning a lightweight file watcher that monitors changes to component artifacts and revalidates specs/queues on the fly.
+  - Build a lightweight Language Server Protocol (LSP) sidecar mode within the CLI (`kvist lsp`).
+  - Support standard LSP diagnostics (`publishDiagnostics`) to flag spec-mismatches, missing artifacts, or broken dependency cycles directly inside standard IDE editors.
+
+---
+
+_KVIST — Structured design for autonomous agents._

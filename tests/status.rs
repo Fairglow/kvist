@@ -192,3 +192,96 @@ fn status_escapes_control_characters_in_text_component_paths() {
     assert!(stdout.contains("component: stale\\nforged state: stale"));
     assert!(!stdout.contains("component: stale\nforged state: stale"));
 }
+
+#[test]
+fn status_filters_components_and_artifacts() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+
+    // Let's create an unfinished (stale) component
+    copy_valid_component_artifacts(&project, "stale-comp");
+    fs::write(
+        project.path().join("src/stale-comp/TODOS.yaml"),
+        valid_queue(
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            Some(GENERATED_SPECIFICATION_REVISION),
+            " []",
+        ),
+    )
+    .expect("write stale queue");
+
+    // 1. Test default status output first (shows current root, stale-comp, and all artifacts)
+    let default_output = run_kvist(&[
+        "status",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(default_output.status.success());
+    let default_stdout = String::from_utf8(default_output.stdout).expect("UTF-8 text output");
+    assert!(default_stdout.contains("component: . state: current"));
+    assert!(default_stdout.contains("component: stale-comp state: stale"));
+    assert!(default_stdout.contains("  SPEC.md: valid"));
+    assert!(default_stdout.contains("  TODOS.yaml: valid"));
+    assert!(default_stdout.contains("  IMPL.md: valid"));
+    assert!(default_stdout.contains("  revalidation-causes: []"));
+
+    // 2. Test --only-specs
+    let specs_output = run_kvist(&[
+        "status",
+        "--only-specs",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(specs_output.status.success());
+    let specs_stdout = String::from_utf8(specs_output.stdout).expect("UTF-8 text output");
+    assert!(specs_stdout.contains("component: . state: current"));
+    assert!(specs_stdout.contains("  SPEC.md: valid"));
+    assert!(!specs_stdout.contains("  TODOS.yaml: valid"));
+    assert!(!specs_stdout.contains("  IMPL.md: valid"));
+    // Revalidation causes are spec-centric, so they should be present
+    assert!(
+        specs_stdout.contains("revalidation-causes: []")
+            || specs_stdout.contains("cause: component-specification-revision-changed")
+    );
+
+    // 3. Test --only-impls
+    let impls_output = run_kvist(&[
+        "status",
+        "--only-impls",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(impls_output.status.success());
+    let impls_stdout = String::from_utf8(impls_output.stdout).expect("UTF-8 text output");
+    assert!(impls_stdout.contains("component: . state: current"));
+    assert!(!impls_stdout.contains("  SPEC.md: valid"));
+    assert!(!impls_stdout.contains("  TODOS.yaml: valid"));
+    assert!(impls_stdout.contains("  IMPL.md: valid"));
+    // Revalidation causes are excluded from --only-impls
+    assert!(!impls_stdout.contains("revalidation-causes"));
+
+    // 4. Test --unfinished (omits current, shows stale-comp)
+    let unfinished_output = run_kvist(&[
+        "status",
+        "--unfinished",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(unfinished_output.status.success());
+    let unfinished_stdout = String::from_utf8(unfinished_output.stdout).expect("UTF-8 text output");
+    assert!(!unfinished_stdout.contains("component: . state: current"));
+    assert!(unfinished_stdout.contains("component: stale-comp state: stale"));
+
+    // 5. Test JSON with --unfinished and --only-impls
+    let json_output = run_kvist(&[
+        "status",
+        "--format",
+        "json",
+        "--unfinished",
+        "--only-impls",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(json_output.status.success());
+    let json_stdout = String::from_utf8(json_output.stdout).expect("UTF-8 JSON output");
+    assert!(!json_stdout.contains("\"path\":\".\""));
+    assert!(json_stdout.contains("\"path\":\"stale-comp\""));
+    assert!(json_stdout.contains("\"path\":\"IMPL.md\""));
+    assert!(!json_stdout.contains("\"path\":\"SPEC.md\""));
+    assert!(!json_stdout.contains("\"path\":\"TODOS.yaml\""));
+}

@@ -3,7 +3,7 @@
 use clap::ValueEnum;
 
 use crate::{
-    project_state::{ComponentInspection, ProjectInspection, RevalidationCause},
+    project_state::{ComponentInspection, ComponentState, ProjectInspection, RevalidationCause},
     task_queue::StalenessCauseKind,
 };
 
@@ -17,14 +17,25 @@ pub enum StatusFormat {
 }
 
 /// Renders a completed project inspection without performing any filesystem I/O.
-pub fn render(inspection: &ProjectInspection, format: StatusFormat) -> String {
+pub fn render(
+    inspection: &ProjectInspection,
+    format: StatusFormat,
+    only_specs: bool,
+    only_impls: bool,
+    unfinished: bool,
+) -> String {
     match format {
-        StatusFormat::Text => render_text(inspection),
-        StatusFormat::Json => render_json(inspection),
+        StatusFormat::Text => render_text(inspection, only_specs, only_impls, unfinished),
+        StatusFormat::Json => render_json(inspection, only_specs, only_impls, unfinished),
     }
 }
 
-fn render_text(inspection: &ProjectInspection) -> String {
+fn render_text(
+    inspection: &ProjectInspection,
+    only_specs: bool,
+    only_impls: bool,
+    unfinished: bool,
+) -> String {
     let mut output = format!(
         "status-format-version: 1\nproject: {}\nproject-state: {}",
         escape_text(&inspection.project_dir.to_string_lossy()),
@@ -42,35 +53,51 @@ fn render_text(inspection: &ProjectInspection) -> String {
         output.push_str(&escape_text(error));
     }
     for component in &inspection.components {
+        if unfinished && component.state == ComponentState::Current {
+            continue;
+        }
         output.push_str("\ncomponent: ");
         output.push_str(&escape_text(&component.path.to_string_lossy()));
         output.push_str(" state: ");
         output.push_str(component.state.name());
         for artifact in &component.artifacts {
+            if only_specs && artifact.path != "SPEC.md" {
+                continue;
+            }
+            if only_impls && artifact.path != "IMPL.md" {
+                continue;
+            }
             output.push_str("\n  ");
             output.push_str(artifact.path);
             output.push_str(": ");
             output.push_str(artifact.state.name());
         }
-        if component.revalidation_causes.is_empty() {
-            output.push_str("\n  revalidation-causes: []");
-        } else {
-            for cause in &component.revalidation_causes {
-                output.push_str("\n  cause: ");
-                output.push_str(staleness_kind_name(cause.kind));
-                output.push(' ');
-                output.push_str(&escape_text(&cause.path));
-                output.push_str(" expected ");
-                output.push_str(&escape_text(&cause.expected_revision));
-                output.push_str(" observed ");
-                output.push_str(&escape_text(&cause.observed_revision));
+        if !only_impls {
+            if component.revalidation_causes.is_empty() {
+                output.push_str("\n  revalidation-causes: []");
+            } else {
+                for cause in &component.revalidation_causes {
+                    output.push_str("\n  cause: ");
+                    output.push_str(staleness_kind_name(cause.kind));
+                    output.push(' ');
+                    output.push_str(&escape_text(&cause.path));
+                    output.push_str(" expected ");
+                    output.push_str(&escape_text(&cause.expected_revision));
+                    output.push_str(" observed ");
+                    output.push_str(&escape_text(&cause.observed_revision));
+                }
             }
         }
     }
     output
 }
 
-fn render_json(inspection: &ProjectInspection) -> String {
+fn render_json(
+    inspection: &ProjectInspection,
+    only_specs: bool,
+    only_impls: bool,
+    unfinished: bool,
+) -> String {
     let mut output = String::from("{\"format_version\":1,\"project_path\":");
     json_string(&mut output, &inspection.project_dir.to_string_lossy());
     output.push_str(",\"project_state\":");
@@ -81,11 +108,16 @@ fn render_json(inspection: &ProjectInspection) -> String {
         None => output.push_str("null"),
     }
     output.push_str(",\"components\":[");
-    for (index, component) in inspection.components.iter().enumerate() {
-        if index > 0 {
+    let mut rendered_any = false;
+    for component in &inspection.components {
+        if unfinished && component.state == ComponentState::Current {
+            continue;
+        }
+        if rendered_any {
             output.push(',');
         }
-        append_component_json(&mut output, component);
+        append_component_json(&mut output, component, only_specs, only_impls);
+        rendered_any = true;
     }
     output.push_str("],\"discovery_error\":");
     match &inspection.discovery_error {
@@ -96,14 +128,26 @@ fn render_json(inspection: &ProjectInspection) -> String {
     output
 }
 
-fn append_component_json(output: &mut String, component: &ComponentInspection) {
+fn append_component_json(
+    output: &mut String,
+    component: &ComponentInspection,
+    only_specs: bool,
+    only_impls: bool,
+) {
     output.push_str("{\"path\":");
     json_string(output, &component.path.to_string_lossy());
     output.push_str(",\"state\":");
     json_string(output, component.state.name());
     output.push_str(",\"artifacts\":[");
-    for (index, artifact) in component.artifacts.iter().enumerate() {
-        if index > 0 {
+    let mut rendered_any_artifact = false;
+    for artifact in &component.artifacts {
+        if only_specs && artifact.path != "SPEC.md" {
+            continue;
+        }
+        if only_impls && artifact.path != "IMPL.md" {
+            continue;
+        }
+        if rendered_any_artifact {
             output.push(',');
         }
         output.push_str("{\"path\":");
@@ -111,13 +155,16 @@ fn append_component_json(output: &mut String, component: &ComponentInspection) {
         output.push_str(",\"state\":");
         json_string(output, artifact.state.name());
         output.push('}');
+        rendered_any_artifact = true;
     }
     output.push_str("],\"revalidation_causes\":[");
-    for (index, cause) in component.revalidation_causes.iter().enumerate() {
-        if index > 0 {
-            output.push(',');
+    if !only_impls {
+        for (index, cause) in component.revalidation_causes.iter().enumerate() {
+            if index > 0 {
+                output.push(',');
+            }
+            append_cause_json(output, cause);
         }
-        append_cause_json(output, cause);
     }
     output.push_str("]}");
 }

@@ -40,6 +40,15 @@ pub enum Command {
         /// Stable report representation for scripts and tools.
         #[arg(long, value_enum, default_value_t = status::StatusFormat::Text)]
         format: status::StatusFormat,
+        /// Filter report to show only specification artifacts (SPEC.md) and their revalidation details.
+        #[arg(long)]
+        only_specs: bool,
+        /// Filter report to show only implementation artifacts (IMPL.md).
+        #[arg(long)]
+        only_impls: bool,
+        /// Filter report to show only blocked, stale, or incomplete components (omitting finished ones).
+        #[arg(long)]
+        unfinished: bool,
     },
     /// Select or transition component tasks.
     Task {
@@ -186,8 +195,21 @@ pub fn execute(command: Command) -> Result<CommandOutput> {
         Command::Tree(project) => tree::render_project(&project.path).map(CommandOutput::message),
         Command::Doctor(project) => project_state::inspect(&project.path)
             .map(|inspection| CommandOutput::message(inspection.to_string())),
-        Command::Status { path, format } => project_state::inspect(&path)
-            .map(|inspection| CommandOutput::message(status::render(&inspection, format))),
+        Command::Status {
+            path,
+            format,
+            only_specs,
+            only_impls,
+            unfinished,
+        } => project_state::inspect(&path).map(|inspection| {
+            CommandOutput::message(status::render(
+                &inspection,
+                format,
+                only_specs,
+                only_impls,
+                unfinished,
+            ))
+        }),
         Command::Task {
             command: TaskCommand::Next { component_dir },
         } => task_commands::next(&component_dir).map(CommandOutput::message),
