@@ -26,9 +26,8 @@ Its product architecture is defined in
 | `kvist task approve-policy [PROJECT_DIR]`          | Record approval of the complete effective execution policy.                                       |
 
 Delivery is organized into phases. The completed, current, and planned phase
-scope is defined by the implementation roadmap in
-[`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
-and prioritized in [`TODO.md`](TODO.md). The Phase 1 foundation and Phase 2
+scope, context, and acceptance criteria are maintained in
+[`TODO.md`](TODO.md). The Phase 1 foundation and Phase 2
 queue, status, task-transition, agent-runner, and test-verification mechanics
 are implemented. `task run` requires an approved external sandbox runner and
 enforces the documented timeout, output, redaction, and lifecycle-lock bounds.

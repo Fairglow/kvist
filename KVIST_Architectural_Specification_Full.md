@@ -152,10 +152,15 @@ Implemented Code: "Blocking socket connection detected in frame.rs:42."
 
 Select Arbitration Action:
   [1] Trigger Agent Redesign (Re-prompt implementation agent with feedback)
-  [2] Accept Implementation Changes (Update SPEC.md to reflect new behavior)
+  [2] Propose Implementation Changes (Prepare a reviewed SPEC.md update)
   [3] Manually Arbitrate (Open diff in user's default editor)
   [4] AI Trade-off Analysis (Ask assistant to evaluate pros/cons before deciding)
 ```
+
+Every option must preserve the original discrepancy and decision rationale in
+version-controlled component artifacts. No option may overwrite `SPEC.md` or
+`IMPL.md` implicitly: an architect must review and explicitly accept any
+proposed contract or implementation change before task execution can resume.
 
 ---
 
@@ -194,40 +199,12 @@ editor integrations remain deferred.
 
 ---
 
-## 8. Implementation Roadmap (PoC in Rust)
+## 8. Delivery Planning
 
-### Phase 1: Core CLI Engine (`kvist-cli`) — completed
-- [x] Initialize `kvist.toml` and `ROOT_CONTRACT.md` bootstrapping logic
-  (`kvist init`).
-- [x] Implement directory scanning and terminal tree rendering (`kvist tree`).
-- [x] Build layered `SPEC.md` parser and generator templates.
-
-### Phase 2: Task Workflow and Controlled Execution — in progress
-- [x] Implement the versioned `TODOS.yaml` schema, deterministic
-  serialization, status inspection, revalidation, and atomic task transitions.
-- [x] Implement explicit local external-agent invocation and approved,
-  bounded test-command verification.
-- [x] Require an approved external sandbox runner, bind execution-sensitive
-  configuration to that approval, and bound agent time and captured output.
-- [x] Resolve named, per-role agent models without invoking a shell. Normal
-  models may prefix a system prompt; the selected `none` model intentionally
-  bypasses placeholder interpolation.
-- [ ] Add focused model-resolution and portability coverage before declaring
-  model selection complete.
-
-### Phase 3: Independent compliance automation — planned
-- [ ] Implement clean-slate documenter and source-blind compliance-agent
-  pipelines.
-- [ ] Implement explicit human arbitration records and task-loop integration
-  without allowing an implementer to certify its own work.
-- [ ] Define reusable architecture, task-generation, execution, and review
-  skills that preserve the component context boundary.
-
-### Phase 4: Deferred visual and editor ecosystem — planned
-- [ ] Embed a local web view and component-state API only after the terminal
-  execution boundary is safe and independently reviewed.
-- [ ] Add a browser UI and editor/LSP integrations without making a daemon,
-  credentials, telemetry, or cloud service a requirement for core commands.
+The implementation roadmap, task contexts, acceptance criteria, and status
+live in [`TODO.md`](TODO.md). This specification defines the target
+architecture and constraints; the tracker is the authoritative, versioned
+execution plan and must be updated when this document changes planned scope.
 
 ---
 *KVIST — Structured design for autonomous agents.*
