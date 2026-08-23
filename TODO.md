@@ -39,6 +39,37 @@ Below is the record of completed Phase 1, Phase 2, and UX milestones.
 
 ---
 
+# Current: P2-09 — Per-role model-selection hardening
+
+**Status:** IN PROGRESS
+
+The agent profiles now resolve a named model per role. `model` overrides
+`default_model`; the `default` and `default-model` aliases select the first
+listed model. A normal selected model uses the existing shell-free argument
+interpolation and may prefix `system_prompt`. An entry named `none` bypasses
+both interpolation and prompt prefixing, but still runs as a sandboxed external
+program under the approved execution policy.
+
+The selected source and complete profiles are approval-bound, so changing model
+selection or its command requires `kvist task approve-policy` again before
+`kvist task run`.
+
+Remaining acceptance work:
+
+- **TODO P2-09a — Model-resolution tests:** Cover explicit selection, default
+  fallback, first-entry aliases, unknown-name diagnostics, raw `none`, and
+  system-prompt prefixing without relying on an installed provider.
+- **TODO P2-09b — Template-contract tests:** Exercise the documented
+  whitespace-delimited interpolation semantics, including repeated context-path
+  expansion and non-shell behavior. Decide whether unsupported placeholders,
+  including the built-in Ollama template's literal `{model}`, are rejected or
+  resolved before they reach an external program.
+- **TODO P2-09c — Portability decision:** Define and test the supported
+  non-Linux behavior for approved sandbox-runner execution. The current
+  descriptor-bound runner launch fails closed where that mechanism is absent.
+
+---
+
 # Remaining Prioritized Backlog
 
 ## UX and Developer Experience Improvements (Terminal Focus)

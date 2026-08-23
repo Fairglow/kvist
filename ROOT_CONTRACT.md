@@ -14,6 +14,9 @@ constraint set injected into component work.
 - Persist architecture and workflow state in version-controlled project files.
 - Keep component context limited to the component, its immediate parent
   contract, and this root contract.
+- Treat agent configuration, prompts, and output as untrusted input. External
+  commands must be resolved without a shell and covered by an explicit,
+  human-approved execution policy before they run.
 
 ## Change and compliance rules
 

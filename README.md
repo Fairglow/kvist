@@ -44,6 +44,59 @@ to agent settings; it does not select a project root. The resolver records the
 selected source identity and SHA-256 digest. It never creates a user
 configuration as a side effect.
 
+### Per-role model selection
+
+Each `architect` and `developer` profile can choose a named entry from its
+`models` list:
+
+```toml
+[agent.profiles.developer]
+model = "local"
+default_model = "default"
+models = [
+  { name = "default", command = "example-agent --message '{prompt}' {context_files}" },
+  { name = "local", command = "local-agent --prompt '{prompt}' {context_files}", system_prompt = "Follow the component contract." },
+]
+```
+
+`model` takes precedence over `default_model`. If neither names a concrete
+entry, the aliases `default` and `default-model` select the first listed
+model. Names are case-sensitive. An unknown selected name fails before the
+agent program is invoked and lists the available names.
+
+Agent settings come from one selected source; they are not merged across the
+paths above. `[agent]` in the project `kvist.toml` wins when present. Otherwise
+the first existing project-local, user, or system agent configuration is used,
+then the built-in defaults. Omitted fields in the selected configuration retain
+their built-in values. `command_template` remains compatible with older
+profiles and updates the built-in `default` model when that model list has not
+been replaced.
+
+On Unix-like systems, the user path is
+`$XDG_CONFIG_HOME/kvist/config.toml`, falling back to
+`$HOME/.config/kvist/config.toml`, and the system path is
+`/etc/kvist/config.toml`. On Windows they are
+`%APPDATA%\kvist\config.toml` and `%ProgramData%\kvist\config.toml`,
+respectively.
+
+Model commands use a deliberately limited, whitespace-delimited argument
+template, not shell parsing. For normal models, `{prompt}` and
+`{target_directory}` are substituted in an argument and an argument containing
+`{context_files}` is emitted once for each declared context path. Shell
+operators, redirections, pipelines, and shell quoting are not supported.
+`system_prompt`, when nonempty, is prefixed to the task prompt with a blank
+line; it is not passed as a provider-specific system-message option.
+
+Selecting the model whose **entry name** is `none` takes a separate raw path:
+its command is only split into a program and whitespace-delimited arguments.
+Kvist does not interpolate placeholders or add `system_prompt` in this mode.
+It still executes an external program through the approved sandbox runner;
+`none` is not a no-op, a manual-execution mode, or a way to bypass approval.
+
+Model selection is part of the effective agent profile covered by
+`kvist task approve-policy`. Changing the selected source, profile, model
+list, command, or prompt requires a fresh approval before `task run`.
+
 ### Sandboxed task execution
 
 `task run` never executes an agent or verification command directly. Each
@@ -482,6 +535,12 @@ logs, streams, attempt records, blocker reasons, and terminal output.
 `--stream` writes that one redacted value to stdout, so original inter-stream
 ordering is not preserved. Runtime log directories and files must be real,
 non-link filesystem objects.
+
+The current automated coverage exercises general command interpolation and
+sandboxed agent execution. Focused regression coverage for explicit and
+fallback model selection, `none` raw handling, and system-prompt prefixing is
+still required; model availability is checked only when the selected command
+is run by the sandbox runner.
 
 An implementation task also runs the matching inherited test command after the
 agent exits successfully. Test commands require a versioned `[test_policy]`

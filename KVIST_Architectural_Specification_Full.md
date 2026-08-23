@@ -28,7 +28,10 @@ In the current landscape of AI-driven software engineering, the industry heavily
 * **Fractal & Recursive Modularization:** Every application is built as a hierarchical tree of self-contained sub-components ("kvistar" / branches). The exact same design loop applies recursively at every level of depth.
 * **Clean-Slate Compliance Verification:** AI agents must never audit their own work in the same session. Compliance is verified by reverse-engineering documentation from code using an isolated, clean-slate agent context.
 * **Durable, File-System Native State:** Architecture, specifications, and task queues live directly in the codebase alongside source files—not in ephemeral chat windows or proprietary databases.
-* **Tool-Agnostic Engine in Rust:** Built as a headless, single-binary CLI engine in Rust, prioritizing performance, local privacy, zero external runtime dependencies, and compatibility with any LLM client (Claude Code, Gemini CLI, Ollama, etc.).
+* **Tool-Agnostic Engine in Rust:** Built as a headless, single-binary CLI
+  engine in Rust. Core workflow commands require neither a cloud service nor a
+  runtime daemon; external agent programs are optional, explicitly configured
+  subprocess integrations.
 
 ---
 
@@ -134,9 +137,12 @@ To eliminate "hallucinated compliance":
 
 ---
 
-## 4. Conflict Arbitration Workflow
+## 4. Conflict Arbitration Workflow (Planned)
 
-When the Compliance Agent detects a mismatch between `SPEC.md` and the reverse-engineered `IMPL.md`, KVIST presents an interactive CLI/Web arbitration prompt:
+When the planned compliance workflow detects a mismatch between `SPEC.md` and
+the reverse-engineered `IMPL.md`, it must stop automated progress and retain
+the discrepancy for explicit human arbitration. The following illustrates the
+intended decision surface; it is not a current CLI or web command:
 
 ```text
 ⚠️ SPEC COMPLIANCE MISMATCH DETECTED in [src/network/protocol]
@@ -153,10 +159,12 @@ Select Arbitration Action:
 
 ---
 
-## 5. UI, Editor & Ecosystem Strategy
+## 5. UI, Editor & Ecosystem Strategy (Planned)
 
 ### Why Rust for Implementation?
-Building KVIST in Rust delivers single-binary distribution, zero runtime dependencies, high-performance local file watching, and strict memory safety.
+Rust supports the intended single-binary, portable core and strong memory-safety
+guarantees. The current product surface is headless; file watching, web, and
+editor integrations remain deferred.
 
 ### Triple-Tier Integration Strategy
 1. **Headless Engine Core (`kvist-cli` in Rust):** Manages tree state, `TODOS.yaml` parsing, process spawning for local LLMs (`claude`, `gemini-cli`, `ollama`), and context slicing.
@@ -170,9 +178,9 @@ Building KVIST in Rust delivers single-binary distribution, zero runtime depende
 | Risk / Edge Case | Architectural Solution in KVIST |
 | :--- | :--- |
 | **The "Ripple Effect" (Upstream Spec Changes)** | `status` compares component and immediate-parent specification revisions and reports attributable stale evidence. Persisting revalidation remains an explicit human-reviewed write. |
-| **Global Architectural Drift** | Root Invariants: Every sub-component agent prompt automatically prepends `ROOT_CONTRACT.md`. |
-| **Context Window Overhead** | Strict Context Slicing: Agents only receive local files, parent contracts, and `ROOT_CONTRACT.md`. Peer code is excluded. |
-| **Specification Friction** | Template-driven interview mode where the AI asks guided questions to draft initial specs. |
+| **Global Architectural Drift** | Root and immediate-parent contracts define the intended boundary. The current task runner explicitly supplies only component artifacts; future role-specific context must be documented rather than inferred. |
+| **Context Window Overhead** | `task run` declares the component's `SPEC.md`, `TODOS.yaml`, and `IMPL.md` as agent context. It does not add parent or peer implementations. |
+| **Specification Friction** | A template-driven interview mode is planned; it is not a current command. |
 
 ---
 
@@ -199,9 +207,13 @@ Building KVIST in Rust delivers single-binary distribution, zero runtime depende
   serialization, status inspection, revalidation, and atomic task transitions.
 - [x] Implement explicit local external-agent invocation and approved,
   bounded test-command verification.
-- [ ] Complete the missing execution trust boundary: sandbox all executed
-  programs, bound agent resources, approve the resolved execution
-  configuration, and independently review the completed Phase 2 surface.
+- [x] Require an approved external sandbox runner, bind execution-sensitive
+  configuration to that approval, and bound agent time and captured output.
+- [x] Resolve named, per-role agent models without invoking a shell. Normal
+  models may prefix a system prompt; the selected `none` model intentionally
+  bypasses placeholder interpolation.
+- [ ] Add focused model-resolution and portability coverage before declaring
+  model selection complete.
 
 ### Phase 3: Independent compliance automation — planned
 - [ ] Implement clean-slate documenter and source-blind compliance-agent
