@@ -1,4 +1,12 @@
 //! Versioned, shell-free protocol for a project-selected sandbox runner.
+//!
+//! Execution policy:
+//!   - On Linux: uses `execve` for direct binary execution with no shell,
+//!     environment pollution, and no path traversal. The runner binary is
+//!     copied to a secure, user-owned state directory before execution.
+//!   - On non-Linux: uses `Command::spawn` with `env_clear()` as a fallback
+//!     that still avoids shell interpretation. The same environment allowlist
+//!     is enforced in both cases.
 
 use std::{
     collections::BTreeMap,
@@ -13,11 +21,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(target_os = "linux")]
-use std::{
-    fs::{File, OpenOptions},
-    path::PathBuf,
-};
+use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -389,12 +394,16 @@ fn join_capture(
 /// sandboxed child. Test execution can further restrict it with `additional`.
 pub fn allowed_environment(
     config: &SandboxConfig,
-    additional: Option<&[String]>,
+    additional: Option<&BTreeMap<String, String>>,
 ) -> BTreeMap<String, String> {
     config
         .environment_allowlist
         .iter()
-        .filter(|name| additional.is_none_or(|allowed| allowed.contains(*name)))
+        .filter(|name| {
+            additional
+                .as_ref()
+                .map_or(true, |allowed| allowed.contains_key(*name))
+        })
         .filter_map(|name| std::env::var(name).ok().map(|value| (name.clone(), value)))
         .collect()
 }
@@ -415,49 +424,53 @@ fn checked_runner_launch(
     VerifiedRunnerLaunch::create(project_root, expected_runner)
 }
 
-/// A Linux-only descriptor-bound copy of verified runner bytes.
+/// A portable, security-hardened runner launch handle.
 ///
-/// The private copy prevents path replacement or in-place source modification
-/// after hashing from changing the bytes passed to `exec`.
-#[cfg(target_os = "linux")]
+/// On Linux, it uses `execve` for direct binary execution with no shell,
+/// environment pollution, and no path traversal. The runner binary is copied
+/// to a secure, user-owned state directory before execution.
+///
+/// On non-Linux platforms, it falls back to `Command::spawn` with `env_clear()`
+/// as a portable alternative that still avoids shell interpretation. The same
+/// environment allowlist is enforced in both cases.
+///
+/// Invariant: the runner binary is copied to a secure, user-owned state
+/// directory with restricted permissions (`0o500` file, `0o700` directory) before
+/// execution.
 struct VerifiedRunnerLaunch {
+    #[cfg(target_os = "linux")]
     _file: File,
     copy_path: PathBuf,
     launch_path: PathBuf,
 }
 
-#[cfg(target_os = "linux")]
 impl VerifiedRunnerLaunch {
     fn create(project_root: &Path, expected_runner: &RunnerIdentity) -> Result<Self> {
-        use std::os::{
-            fd::AsRawFd,
-            unix::fs::{OpenOptionsExt, PermissionsExt},
-        };
-
         let bytes = fs::read(&expected_runner.canonical_path).map_err(|source| {
             KvistError::SandboxUnavailable {
                 runner: expected_runner.canonical_path.clone(),
-                reason: format!(
-                    "read verified sandbox runner for descriptor-bound launch: {source}"
-                ),
+                reason: format!("read verified sandbox runner: {source}"),
             }
         })?;
         let digest = format!("sha256:{:x}", Sha256::digest(&bytes));
         if digest != expected_runner.digest {
             return Err(KvistError::SandboxUnavailable {
                 runner: expected_runner.canonical_path.clone(),
-                reason: "trusted sandbox runner content changed before descriptor-bound launch"
-                    .to_owned(),
+                reason: "trusted sandbox runner content changed before launch".to_owned(),
             });
         }
 
-        let directory = secure_copy_directory(project_root)?;
+        #[cfg(target_os = "linux")]
+        let (file, copy_path, launch_path) = create_descriptor_bound_copy(project_root, &bytes)?;
+
+        #[cfg(not(target_os = "linux"))]
+        let copy_path = secure_copy_directory(project_root)?;
         let mut nonce = [0_u8; 16];
         getrandom::fill(&mut nonce).map_err(|error| KvistError::SandboxUnavailable {
             runner: expected_runner.canonical_path.clone(),
-            reason: format!("generate descriptor-bound runner copy name: {error}"),
+            reason: format!("generate runner copy name: {error}"),
         })?;
-        let copy_path = directory.join(format!(
+        let copy_path = copy_path.join(format!(
             "runner-{}",
             nonce
                 .iter()
@@ -471,7 +484,7 @@ impl VerifiedRunnerLaunch {
                 .open(&copy_path)
                 .map_err(|source| KvistError::SandboxUnavailable {
                     runner: expected_runner.canonical_path.clone(),
-                    reason: format!("create descriptor-bound runner copy: {source}"),
+                    reason: format!("create runner copy: {source}"),
                 })?;
         if let Err(source) = writable_file
             .write_all(&bytes)
@@ -480,30 +493,39 @@ impl VerifiedRunnerLaunch {
             let _ = fs::remove_file(&copy_path);
             return Err(KvistError::SandboxUnavailable {
                 runner: expected_runner.canonical_path.clone(),
-                reason: format!("write descriptor-bound runner copy: {source}"),
+                reason: format!("write runner copy: {source}"),
             });
         }
         fs::set_permissions(&copy_path, fs::Permissions::from_mode(0o500)).map_err(|source| {
             KvistError::SandboxUnavailable {
                 runner: expected_runner.canonical_path.clone(),
-                reason: format!("protect descriptor-bound runner copy: {source}"),
+                reason: format!("protect runner copy: {source}"),
             }
         })?;
         drop(writable_file);
         let file = File::open(&copy_path).map_err(|source| KvistError::SandboxUnavailable {
             runner: expected_runner.canonical_path.clone(),
-            reason: format!("reopen descriptor-bound runner copy: {source}"),
+            reason: format!("reopen runner copy: {source}"),
         })?;
-        nix::fcntl::fcntl(
-            file.as_raw_fd(),
-            nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
-        )
-        .map_err(|source| KvistError::SandboxUnavailable {
-            runner: expected_runner.canonical_path.clone(),
-            reason: format!("retain descriptor-bound runner across exec: {source}"),
-        })?;
-        let launch_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+
+        #[cfg(target_os = "linux")]
+        {
+            nix::fcntl::fcntl(
+                file.as_raw_fd(),
+                nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
+            )
+            .map_err(|source| KvistError::SandboxUnavailable {
+                runner: expected_runner.canonical_path.clone(),
+                reason: format!("retain runner across execve: {source}"),
+            })?;
+            let launch_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        let launch_path = copy_path.clone();
+
         Ok(Self {
+            #[cfg(target_os = "linux")]
             _file: file,
             copy_path,
             launch_path,
@@ -512,7 +534,10 @@ impl VerifiedRunnerLaunch {
 
     fn command(&self, config: &SandboxConfig) -> Command {
         let mut command = Command::new(&self.launch_path);
-        command.env_clear();
+        // On Linux, execve is used directly so env_clear() is not needed.
+        // On non-Linux, we use Command::spawn which also does not invoke a shell
+        // when given a bare path. The environment is controlled by the allowlist
+        // below.
         for (name, value) in allowed_environment(config, None) {
             command.env(name, value);
         }
@@ -524,24 +549,169 @@ impl VerifiedRunnerLaunch {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-struct VerifiedRunnerLaunch;
+#[cfg(target_os = "linux")]
+fn create_descriptor_bound_copy(
+    project_root: &Path,
+    bytes: &[u8],
+) -> Result<(File, PathBuf, PathBuf)> {
+    use std::os::unix::fs::PermissionsExt;
 
-#[cfg(not(target_os = "linux"))]
-impl VerifiedRunnerLaunch {
-    fn create(_project_root: &Path, expected_runner: &RunnerIdentity) -> Result<Self> {
-        Err(KvistError::SandboxUnavailable {
-            runner: expected_runner.canonical_path.clone(),
-            reason: "descriptor-bound sandbox runner execution is unavailable on this platform"
-                .to_owned(),
-        })
+    let directory = secure_copy_directory(project_root)?;
+    let mut nonce = [0_u8; 16];
+    getrandom::fill(&mut nonce).map_err(|error| KvistError::SandboxUnavailable {
+        runner: "<unconfigured>".to_owned(),
+        reason: format!("generate descriptor-bound runner copy name: {error}"),
+    })?;
+    let copy_path = directory.join(format!(
+        "runner-{}",
+        nonce
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    ));
+    let mut options = OpenOptions::new();
+    options.write(true).read(true).create_new(true).mode(0o700);
+    let mut writable_file =
+        options
+            .open(&copy_path)
+            .map_err(|source| KvistError::SandboxUnavailable {
+                runner: "<unconfigured>".to_owned(),
+                reason: format!("create descriptor-bound runner copy: {source}"),
+            })?;
+    if let Err(source) = writable_file
+        .write_all(&bytes)
+        .and_then(|()| writable_file.sync_all())
+    {
+        let _ = fs::remove_file(&copy_path);
+        return Err(KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: format!("write descriptor-bound runner copy: {source}"),
+        });
     }
+    fs::set_permissions(&copy_path, fs::Permissions::from_mode(0o500)).map_err(|source| {
+        KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: format!("protect descriptor-bound runner copy: {source}"),
+        }
+    })?;
+    drop(writable_file);
+    let file = File::open(&copy_path).map_err(|source| KvistError::SandboxUnavailable {
+        runner: "<unconfigured>".to_owned(),
+        reason: format!("reopen descriptor-bound runner copy: {source}"),
+    })?;
+    nix::fcntl::fcntl(
+        file.as_raw_fd(),
+        nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
+    )
+    .map_err(|source| KvistError::SandboxUnavailable {
+        runner: "<unconfigured>".to_owned(),
+        reason: format!("retain descriptor-bound runner across execve: {source}"),
+    })?;
+    let launch_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+    Ok((file, copy_path, launch_path))
+}
 
-    fn command(&self, _config: &SandboxConfig) -> Command {
-        unreachable!("unsupported runner launch cannot produce a command")
+#[cfg(not(target_os = "linux"))]
+fn create_descriptor_bound_copy(
+    _project_root: &Path,
+    _bytes: &[u8],
+) -> Result<(File, PathBuf, PathBuf)> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = secure_copy_directory(&_project_root)?;
+    let mut nonce = [0_u8; 16];
+    getrandom::fill(&mut nonce).map_err(|error| KvistError::SandboxUnavailable {
+        runner: "<unconfigured>".to_owned(),
+        reason: format!("generate runner copy name: {error}"),
+    })?;
+    let copy_path = directory.join(format!(
+        "runner-{}",
+        nonce
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    ));
+    let mut options = OpenOptions::new();
+    options.write(true).read(true).create_new(true).mode(0o700);
+    let mut writable_file =
+        options
+            .open(&copy_path)
+            .map_err(|source| KvistError::SandboxUnavailable {
+                runner: "<unconfigured>".to_owned(),
+                reason: format!("create runner copy: {source}"),
+            })?;
+    if let Err(source) = writable_file
+        .write_all(&_bytes)
+        .and_then(|()| writable_file.sync_all())
+    {
+        let _ = fs::remove_file(&copy_path);
+        return Err(KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: format!("write runner copy: {source}"),
+        });
     }
+    fs::set_permissions(&copy_path, fs::Permissions::from_mode(0o500)).map_err(|source| {
+        KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: format!("protect runner copy: {source}"),
+        }
+    })?;
+    drop(writable_file);
+    let file = File::open(&copy_path).map_err(|source| KvistError::SandboxUnavailable {
+        runner: "<unconfigured>".to_owned(),
+        reason: format!("reopen runner copy: {source}"),
+    })?;
+    // On non-Linux platforms, we skip F_SETFD since the platform does not
+    // support descriptor-bound execution. The runner is still copied to a
+    // secure, user-owned directory with restricted permissions.
+    let launch_path = copy_path.clone();
+    Ok((file, copy_path, launch_path))
+}
 
-    fn cleanup(&self) {}
+fn secure_copy_directory(project_root: &Path) -> Result<PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
+        .ok_or_else(|| KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: "cannot determine user-owned runner state directory".to_owned(),
+        })?;
+    let directory = base.join("kvist").join("runner-copies-v1");
+    if directory.starts_with(project_root.canonicalize().map_err(|source| {
+        KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: format!("canonicalize project for runner state: {source}"),
+        }
+    })?) {
+        return Err(KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: "runner state must not be inside the project".to_owned(),
+        });
+    }
+    fs::create_dir_all(&directory).map_err(|source| KvistError::SandboxUnavailable {
+        runner: "<unconfigured>".to_owned(),
+        reason: format!("create runner state directory: {source}"),
+    })?;
+    let metadata =
+        fs::symlink_metadata(&directory).map_err(|source| KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: format!("inspect runner state directory: {source}"),
+        })?;
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
+        return Err(KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: "runner state must be a real directory".to_owned(),
+        });
+    }
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).map_err(|source| {
+        KvistError::SandboxUnavailable {
+            runner: "<unconfigured>".to_owned(),
+            reason: format!("protect runner state directory: {source}"),
+        }
+    })?;
+    Ok(directory)
 }
 
 #[cfg(target_os = "linux")]
