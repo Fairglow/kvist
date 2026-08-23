@@ -44,6 +44,8 @@ pub struct AgentExecutionRequest<'a> {
     pub target_dir: &'a Path,
     pub task_id: &'a str,
     pub stream_output: bool,
+    /// The agent role (architect or developer) for which the model was selected.
+    pub role: super::config::Role,
 }
 
 /// Run-record schema parsed from the agent's run metadata file.
@@ -103,6 +105,59 @@ pub fn split_command(
     Ok((program, args))
 }
 
+/// Gets the effective command for a given agent profile and model selection.
+pub fn get_effective_command(
+    profile: &AgentProfile,
+    role: crate::config::Role,
+    prompt: &str,
+    context_paths: &[PathBuf],
+    target_dir: &Path,
+) -> Result<(String, Vec<String>)> {
+    let model_name = profile.model.as_deref().unwrap_or(&profile.default_model);
+    let selected_model = if matches!(model_name, "default" | "default-model") {
+        profile.models.first()
+    } else {
+        profile.models.iter().find(|model| model.name == model_name)
+    }
+    .ok_or_else(|| KvistError::InvalidModelSelection {
+        model_name: model_name.to_owned(),
+        role,
+        available: profile
+            .models
+            .iter()
+            .map(|m| m.name.clone())
+            .collect::<Vec<_>>()
+            .join(", "),
+    })?;
+
+    if selected_model.name == "none" {
+        return split_raw_command(&selected_model.command);
+    }
+
+    let prompt = match &selected_model.system_prompt {
+        Some(system_prompt) if !system_prompt.is_empty() => {
+            format!("{system_prompt}\n\n{prompt}")
+        }
+        _ => prompt.to_owned(),
+    };
+    split_command(&selected_model.command, &prompt, context_paths, target_dir)
+}
+
+fn split_raw_command(template: &str) -> Result<(String, Vec<String>)> {
+    let raw_args: Vec<&str> = template.split_whitespace().collect();
+    if raw_args.is_empty() {
+        return Err(KvistError::Io {
+            operation: "split agent command template",
+            path: PathBuf::from("."),
+            source: io::Error::other("empty agent command template"),
+        });
+    }
+
+    let program = raw_arg_trim(raw_args[0]).to_owned();
+    let args = raw_args[1..].iter().map(|arg| raw_arg_trim(arg)).collect();
+    Ok((program, args))
+}
+
 fn raw_arg_trim(s: &str) -> String {
     if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
         s[1..s.len() - 1].to_owned()
@@ -118,8 +173,9 @@ pub fn execute_agent(
     expected_runner: &RunnerIdentity,
     request: AgentExecutionRequest<'_>,
 ) -> Result<AgentRunResult> {
-    let (program, args) = split_command(
-        &profile.command_template,
+    let (program, args) = get_effective_command(
+        profile,
+        request.role,
         request.prompt,
         request.context_paths,
         request.target_dir,

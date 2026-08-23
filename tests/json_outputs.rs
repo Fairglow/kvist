@@ -7,7 +7,7 @@ fn global_json_flag_generates_structured_outputs() {
 
     // 1. Test init --json
     let init_output = Command::new(env!("CARGO_BIN_EXE_kvist"))
-        .args(&[
+        .args([
             "--json",
             "init",
             project.path().to_str().expect("UTF-8 project path"),
@@ -22,7 +22,7 @@ fn global_json_flag_generates_structured_outputs() {
 
     // 2. Test status --json
     let status_output = Command::new(env!("CARGO_BIN_EXE_kvist"))
-        .args(&[
+        .args([
             "--json",
             "status",
             project.path().to_str().expect("UTF-8 project path"),
@@ -36,7 +36,7 @@ fn global_json_flag_generates_structured_outputs() {
 
     // 3. Test tree --json
     let tree_output = Command::new(env!("CARGO_BIN_EXE_kvist"))
-        .args(&[
+        .args([
             "--json",
             "tree",
             project.path().to_str().expect("UTF-8 project path"),
@@ -52,7 +52,7 @@ fn global_json_flag_generates_structured_outputs() {
     // 4. Test spec validate --json
     let spec_path = project.path().join("src/SPEC.md");
     let validate_output = Command::new(env!("CARGO_BIN_EXE_kvist"))
-        .args(&[
+        .args([
             "--json",
             "spec",
             "validate",

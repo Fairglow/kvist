@@ -50,6 +50,37 @@ pub const MAX_DISCOVERY_LIMITS: DiscoveryLimits = DiscoveryLimits {
     max_relative_path_bytes: 32_768,
 };
 
+/// An agent role (e.g., "architect", "developer").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[repr(u8)]
+pub enum Role {
+    /// The architect role handles compliance review, architecture decisions,
+    /// and security audits.
+    Architect,
+    /// The developer role handles test generation, implementation, and refactoring.
+    Developer,
+}
+
+impl Role {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Role::Architect => "architect",
+            Role::Developer => "developer",
+        }
+    }
+}
+
+/// A model configuration for a role.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Model {
+    /// A model identifier string (e.g., "llama-cli", "ollama", "mcp", "none").
+    pub name: String,
+    /// The command template for this model, with `{prompt}`, `{context_files}`, etc.
+    pub command: String,
+    /// A system prompt injected at the start of the message.
+    pub system_prompt: Option<String>,
+}
+
 /// Configuration for the external agent execution runners.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AgentConfig {
@@ -59,9 +90,31 @@ pub struct AgentConfig {
     pub source: AgentConfigSource,
 }
 
+/// The resolved agent configuration input, retained for execution approval.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AgentConfigResolved {
+    pub architect: AgentProfile,
+    pub developer: AgentProfile,
+    /// Identity and content digest of the resolver input that selected this config.
+    pub source: AgentConfigSource,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AgentProfile {
+    /// Legacy command template retained for backwards-compatible configuration.
     pub command_template: String,
+    /// Maps model identifiers (e.g. "llama-cli", "ollama", "mcp", "none")
+    /// to their command templates. Use "default" or "default-model" for the
+    /// fallback template.
+    pub models: Vec<Model>,
+    /// The default model name to use when no explicit model is selected.
+    /// Defaults to "none" (no model, uses `command` directly as the template).
+    pub default_model: String,
+    /// Which model name to use for this role. Set to `None` to use `default_model`.
+    /// Use "default" or "default-model" to select the first model in the `models` list.
+    /// Use "none" to use the raw `command` field without interpolation.
+    pub model: Option<String>,
+    /// Maximum number of tokens per request. `None` means unlimited.
     pub token_limit: Option<usize>,
     /// Maximum duration for one sandbox runner request.
     pub timeout_seconds: u64,
@@ -88,6 +141,35 @@ impl Default for AgentConfig {
         Self {
             architect: AgentProfile {
                 command_template: "claude --non-interactive --dangerously-skip-permissions --message '{prompt}' {context_files}".to_owned(),
+                models: vec![
+                    Model {
+                        name: "default".to_owned(),
+                        command: "claude --non-interactive --dangerously-skip-permissions --message '{prompt}' {context_files}".to_owned(),
+                        system_prompt: None,
+                    },
+                    Model {
+                        name: "llama-cli".to_owned(),
+                        command: "llama-cli --prompt '{prompt}' --context '{context_files}' --format json".to_owned(),
+                        system_prompt: None,
+                    },
+                    Model {
+                        name: "ollama".to_owned(),
+                        command: "ollama run --stream=false '{model}' --prompt '{prompt}' --context '{context_files}'".to_owned(),
+                        system_prompt: None,
+                    },
+                    Model {
+                        name: "none".to_owned(),
+                        command: "{prompt} {context_files}".to_owned(),
+                        system_prompt: None,
+                    },
+                    Model {
+                        name: "mcp".to_owned(),
+                        command: "mcp run --prompt '{prompt}' --context '{context_files}'".to_owned(),
+                        system_prompt: None,
+                    },
+                ],
+                default_model: "default".to_owned(),
+                model: None,
                 token_limit: None,
                 timeout_seconds: DEFAULT_AGENT_TIMEOUT_SECONDS,
                 max_output_bytes: DEFAULT_AGENT_MAX_OUTPUT_BYTES,
@@ -95,6 +177,35 @@ impl Default for AgentConfig {
             },
             developer: AgentProfile {
                 command_template: "gemini-cli --prompt '{prompt}' --files {context_files}".to_owned(),
+                models: vec![
+                    Model {
+                        name: "default".to_owned(),
+                        command: "gemini-cli --prompt '{prompt}' --files {context_files}".to_owned(),
+                        system_prompt: None,
+                    },
+                    Model {
+                        name: "llama-cli".to_owned(),
+                        command: "llama-cli --prompt '{prompt}' --context '{context_files}' --format json".to_owned(),
+                        system_prompt: None,
+                    },
+                    Model {
+                        name: "ollama".to_owned(),
+                        command: "ollama run --stream=false '{model}' --prompt '{prompt}' --context '{context_files}'".to_owned(),
+                        system_prompt: None,
+                    },
+                    Model {
+                        name: "none".to_owned(),
+                        command: "{prompt} {context_files}".to_owned(),
+                        system_prompt: None,
+                    },
+                    Model {
+                        name: "mcp".to_owned(),
+                        command: "mcp run --prompt '{prompt}' --context '{context_files}'".to_owned(),
+                        system_prompt: None,
+                    },
+                ],
+                default_model: "default".to_owned(),
+                model: None,
                 token_limit: None,
                 timeout_seconds: DEFAULT_AGENT_TIMEOUT_SECONDS,
                 max_output_bytes: DEFAULT_AGENT_MAX_OUTPUT_BYTES,
@@ -630,12 +741,45 @@ fn parse_agent_config_from_table(
             )
         })?;
         if let Some(template) = architect.get("command_template") {
-            default_config.architect.command_template = template
+            let template = template.as_str().ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`agent.profiles.architect.command_template` must be a string",
+                )
+            })?;
+            default_config.architect.command_template = template.to_owned();
+            if let Some(model) = default_config
+                .architect
+                .models
+                .iter_mut()
+                .find(|model| model.name == "default")
+            {
+                model.command = template.to_owned();
+            }
+        }
+        if let Some(model) = architect.get("model") {
+            default_config.architect.model = Some(
+                model
+                    .as_str()
+                    .ok_or_else(|| {
+                        invalid_configuration(
+                            config_path,
+                            "`agent.profiles.architect.model` must be a string",
+                        )
+                    })?
+                    .to_owned(),
+            );
+        }
+        if let Some(models) = architect.get("models") {
+            default_config.architect.models = parse_agent_models(config_path, models)?;
+        }
+        if let Some(default_model) = architect.get("default_model") {
+            default_config.architect.default_model = default_model
                 .as_str()
                 .ok_or_else(|| {
                     invalid_configuration(
                         config_path,
-                        "`agent.profiles.architect.command_template` must be a string",
+                        "`agent.profiles.architect.default_model` must be a string",
                     )
                 })?
                 .to_owned();
@@ -669,12 +813,45 @@ fn parse_agent_config_from_table(
             )
         })?;
         if let Some(template) = developer.get("command_template") {
-            default_config.developer.command_template = template
+            let template = template.as_str().ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`agent.profiles.developer.command_template` must be a string",
+                )
+            })?;
+            default_config.developer.command_template = template.to_owned();
+            if let Some(model) = default_config
+                .developer
+                .models
+                .iter_mut()
+                .find(|model| model.name == "default")
+            {
+                model.command = template.to_owned();
+            }
+        }
+        if let Some(model) = developer.get("model") {
+            default_config.developer.model = Some(
+                model
+                    .as_str()
+                    .ok_or_else(|| {
+                        invalid_configuration(
+                            config_path,
+                            "`agent.profiles.developer.model` must be a string",
+                        )
+                    })?
+                    .to_owned(),
+            );
+        }
+        if let Some(models) = developer.get("models") {
+            default_config.developer.models = parse_agent_models(config_path, models)?;
+        }
+        if let Some(default_model) = developer.get("default_model") {
+            default_config.developer.default_model = default_model
                 .as_str()
                 .ok_or_else(|| {
                     invalid_configuration(
                         config_path,
-                        "`agent.profiles.developer.command_template` must be a string",
+                        "`agent.profiles.developer.default_model` must be a string",
                     )
                 })?
                 .to_owned();
@@ -753,6 +930,7 @@ fn parse_agent_config_from_table(
                     "`agent profile redaction.values` must not contain duplicates",
                 ));
             }
+
             parsed.push(value.to_owned());
         }
         if parsed.is_empty() {
@@ -763,6 +941,73 @@ fn parse_agent_config_from_table(
         }
         profile.redaction_values = parsed;
         Ok(())
+    }
+
+    fn parse_agent_models(config_path: &Path, value: &toml::Value) -> Result<Vec<Model>> {
+        let models = value
+            .as_array()
+            .filter(|models| !models.is_empty())
+            .ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`agent profile models` must be a nonempty array of tables",
+                )
+            })?;
+        let mut parsed = Vec::with_capacity(models.len());
+        for value in models {
+            let model = value.as_table().ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`agent profile models` must contain only tables",
+                )
+            })?;
+            let name = model
+                .get("name")
+                .and_then(toml::Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| {
+                    invalid_configuration(
+                        config_path,
+                        "`agent profile models[].name` must be a nonblank string",
+                    )
+                })?;
+            let command = model
+                .get("command")
+                .and_then(toml::Value::as_str)
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| {
+                    invalid_configuration(
+                        config_path,
+                        "`agent profile models[].command` must be a nonblank string",
+                    )
+                })?;
+            if parsed.iter().any(|existing: &Model| existing.name == name) {
+                return Err(invalid_configuration(
+                    config_path,
+                    "`agent profile models` must not contain duplicate names",
+                ));
+            }
+            let system_prompt = match model.get("system_prompt") {
+                Some(value) => Some(
+                    value
+                        .as_str()
+                        .ok_or_else(|| {
+                            invalid_configuration(
+                                config_path,
+                                "`agent profile models[].system_prompt` must be a string",
+                            )
+                        })?
+                        .to_owned(),
+                ),
+                None => None,
+            };
+            parsed.push(Model {
+                name: name.to_owned(),
+                command: command.to_owned(),
+                system_prompt,
+            });
+        }
+        Ok(parsed)
     }
 
     fn parse_agent_limit(

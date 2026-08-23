@@ -5,6 +5,8 @@ use std::{
 
 use thiserror::Error;
 
+use crate::config::Role;
+
 /// Errors that Kvist can report independently of its presentation layer.
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -209,6 +211,18 @@ pub enum KvistError {
         path: PathBuf,
         /// Actionable schema or parsing diagnostic.
         reason: String,
+    },
+    /// The model name for a role is not defined in the model list.
+    #[error(
+        "invalid {role:?} model selection: `{model_name}` is not valid.\n\nAvailable models:\n{available}"
+    )]
+    InvalidModelSelection {
+        /// The model name that was selected.
+        model_name: String,
+        /// The role (architect or developer) for which the model was selected.
+        role: Role,
+        /// Available model names for this role.
+        available: String,
     },
     /// The configuration schema version is unsupported.
     #[error(

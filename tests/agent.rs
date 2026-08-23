@@ -1,11 +1,14 @@
 use std::path::{Path, PathBuf};
 
-use kvist::agent::split_command;
+use kvist::{
+    agent::split_command,
+    config::{AgentProfile, Model, Role},
+};
 
 #[cfg(target_os = "linux")]
 use kvist::{
     agent::execute_agent,
-    config::{AgentProfile, SandboxConfig, VcsSelection},
+    config::{SandboxConfig, VcsSelection},
 };
 #[cfg(target_os = "linux")]
 use std::fs;
@@ -55,6 +58,13 @@ fn execute_agent_captures_stdout_and_stderr_in_log_file() {
     // We use a basic command available on standard platforms like 'echo'
     let profile = AgentProfile {
         command_template: "echo '{prompt}'".to_owned(),
+        models: vec![Model {
+            name: "default".to_owned(),
+            command: "echo '{prompt}'".to_owned(),
+            system_prompt: None,
+        }],
+        default_model: "default".to_owned(),
+        model: None,
         token_limit: None,
         timeout_seconds: 5,
         max_output_bytes: 1_024,
@@ -94,6 +104,7 @@ fn execute_agent_captures_stdout_and_stderr_in_log_file() {
             target_dir,
             task_id,
             stream_output: false,
+            role: Role::Developer,
         },
     )
     .expect("agent execution success");

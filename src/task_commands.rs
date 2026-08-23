@@ -1010,9 +1010,13 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
         let task = &queue.tasks[task_index];
 
         // 3. Load agent profile matching task type.
-        let agent_profile = match task.kind {
-            TaskKind::Test | TaskKind::Implementation => &config.agent.developer,
-            TaskKind::SecurityAudit | TaskKind::ComplianceReview => &config.agent.architect,
+        let (agent_profile, role) = match task.kind {
+            TaskKind::Test | TaskKind::Implementation => {
+                (&config.agent.developer, crate::config::Role::Developer)
+            }
+            TaskKind::SecurityAudit | TaskKind::ComplianceReview => {
+                (&config.agent.architect, crate::config::Role::Architect)
+            }
         };
 
         // 4. Sliced context files gathering
@@ -1062,6 +1066,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                 target_dir: &context.component_dir,
                 task_id: &task_id,
                 stream_output: stream,
+                role,
             },
         )?;
         let agent_timestamp =
@@ -1481,7 +1486,7 @@ fn build_execution_approval(
         sandbox_schema_version: 1,
         agent_source: config.agent.source.identity.clone(),
         agent_source_digest: config.agent.source.digest.clone(),
-        architect_template_digest: digest(config.agent.architect.command_template.as_bytes()),
+        architect_template_digest: agent_profile_digest(&config.agent.architect, "architect")?,
         architect_token_limit: config.agent.architect.token_limit,
         architect_timeout_seconds: config.agent.architect.timeout_seconds,
         architect_max_output_bytes: config.agent.architect.max_output_bytes,
@@ -1492,7 +1497,7 @@ fn build_execution_approval(
                 }
             })?,
         ),
-        developer_template_digest: digest(config.agent.developer.command_template.as_bytes()),
+        developer_template_digest: agent_profile_digest(&config.agent.developer, "developer")?,
         developer_token_limit: config.agent.developer.token_limit,
         developer_timeout_seconds: config.agent.developer.timeout_seconds,
         developer_max_output_bytes: config.agent.developer.max_output_bytes,
@@ -1535,6 +1540,17 @@ fn build_execution_approval(
         },
         runner,
     ))
+}
+
+fn agent_profile_digest(
+    profile: &crate::config::AgentProfile,
+    role: &'static str,
+) -> Result<String> {
+    serde_json::to_vec(profile)
+        .map(|bytes| digest(&bytes))
+        .map_err(|error| KvistError::UnapprovedExecutionPolicy {
+            reason: format!("cannot serialize {role} agent profile: {error}"),
+        })
 }
 
 fn digest(bytes: &[u8]) -> String {
