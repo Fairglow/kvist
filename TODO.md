@@ -79,7 +79,7 @@ selection or its command requires `kvist task approve-policy` again before
   - In particular, resolve or remove the built-in Ollama template's literal
     `{model}` placeholder; until then, document it as unsupported.
 
-### TODO P2-09c — Execution portability decision
+### DONE P2-09c — Execution portability decision
 
 - **Context:** The descriptor-bound sandbox-runner launch currently fails
   closed on platforms without that mechanism. The supported behavior must be
@@ -158,11 +158,11 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
 - **Acceptance criteria:**
   - Implement a `kvist task recover <COMPONENT_DIR> [TASK_ID]` command.
   - Provide interactive, safe recovery choices to the user:
-      1. **Rollback:** Append an auditable recovery record that restores the task
-         to its prior state (for example, `todo` or `in-progress`) without
-         deleting the prepared attempt.
-      2. **Resolve:** Record a human-supplied final outcome (for example,
-         `completed` or `blocked`) with its required evidence reference.
+    1. **Rollback:** Append an auditable recovery record that restores the task
+       to its prior state (for example, `todo` or `in-progress`) without
+       deleting the prepared attempt.
+    2. **Resolve:** Record a human-supplied final outcome (for example,
+       `completed` or `blocked`) with its required evidence reference.
   - Ensure the command validates the queue structure and integrity before writing.
   - Write integration tests reproducing crashed runs and verifying both
     rollback and recorded-resolution paths.
