@@ -21,8 +21,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use serde::Serialize;
-use sha2::{Digest, Sha256};
+use std::fs::File;
+use std::fs::OpenOptions;
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::PathBuf;
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -394,17 +397,19 @@ fn join_capture(
 /// sandboxed child. Test execution can further restrict it with `additional`.
 pub fn allowed_environment(
     config: &SandboxConfig,
-    additional: Option<&BTreeMap<String, String>>,
+    additional: Option<&[String]>,
 ) -> BTreeMap<String, String> {
     config
         .environment_allowlist
         .iter()
-        .filter(|name| {
-            additional
-                .as_ref()
-                .map_or(true, |allowed| allowed.contains_key(*name))
+        .filter_map(|name| {
+            if let Some(allowed) = additional.as_ref() {
+                if !allowed.contains(name) {
+                    return None;
+                }
+            }
+            std::env::var(name).ok().map(|value| (name.clone(), value))
         })
-        .filter_map(|name| std::env::var(name).ok().map(|value| (name.clone(), value)))
         .collect()
 }
 
@@ -461,7 +466,7 @@ impl VerifiedRunnerLaunch {
         }
 
         #[cfg(target_os = "linux")]
-        let (file, copy_path, launch_path) = create_descriptor_bound_copy(project_root, &bytes)?;
+        let (_file, copy_path, launch_path) = create_descriptor_bound_copy(project_root, &bytes)?;
 
         #[cfg(not(target_os = "linux"))]
         let copy_path = secure_copy_directory(project_root)?;
@@ -518,7 +523,7 @@ impl VerifiedRunnerLaunch {
                 runner: expected_runner.canonical_path.clone(),
                 reason: format!("retain runner across execve: {source}"),
             })?;
-            let launch_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+            let _launch_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
         }
 
         #[cfg(not(target_os = "linux"))]
@@ -579,7 +584,7 @@ fn create_descriptor_bound_copy(
                 reason: format!("create descriptor-bound runner copy: {source}"),
             })?;
     if let Err(source) = writable_file
-        .write_all(&bytes)
+        .write_all(bytes)
         .and_then(|()| writable_file.sync_all())
     {
         let _ = fs::remove_file(&copy_path);
@@ -668,53 +673,6 @@ fn create_descriptor_bound_copy(
     Ok((file, copy_path, launch_path))
 }
 
-fn secure_copy_directory(project_root: &Path) -> Result<PathBuf> {
-    use std::os::unix::fs::PermissionsExt;
-
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/state")))
-        .ok_or_else(|| KvistError::SandboxUnavailable {
-            runner: "<unconfigured>".to_owned(),
-            reason: "cannot determine user-owned runner state directory".to_owned(),
-        })?;
-    let directory = base.join("kvist").join("runner-copies-v1");
-    if directory.starts_with(project_root.canonicalize().map_err(|source| {
-        KvistError::SandboxUnavailable {
-            runner: "<unconfigured>".to_owned(),
-            reason: format!("canonicalize project for runner state: {source}"),
-        }
-    })?) {
-        return Err(KvistError::SandboxUnavailable {
-            runner: "<unconfigured>".to_owned(),
-            reason: "runner state must not be inside the project".to_owned(),
-        });
-    }
-    fs::create_dir_all(&directory).map_err(|source| KvistError::SandboxUnavailable {
-        runner: "<unconfigured>".to_owned(),
-        reason: format!("create runner state directory: {source}"),
-    })?;
-    let metadata =
-        fs::symlink_metadata(&directory).map_err(|source| KvistError::SandboxUnavailable {
-            runner: "<unconfigured>".to_owned(),
-            reason: format!("inspect runner state directory: {source}"),
-        })?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
-        return Err(KvistError::SandboxUnavailable {
-            runner: "<unconfigured>".to_owned(),
-            reason: "runner state must be a real directory".to_owned(),
-        });
-    }
-    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).map_err(|source| {
-        KvistError::SandboxUnavailable {
-            runner: "<unconfigured>".to_owned(),
-            reason: format!("protect runner state directory: {source}"),
-        }
-    })?;
-    Ok(directory)
-}
-
-#[cfg(target_os = "linux")]
 fn secure_copy_directory(project_root: &Path) -> Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
 
