@@ -2,7 +2,7 @@
 
 **Authority:** [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
 **Reviewed:** Phase 1 & Phase 2 implementation audits
-**Reviewed by:** Stefan Lindblad | 2026-08-24
+**Reviewed by:** Stefan Kvist | 2026-08-24
 
 ## Status conventions
 
@@ -18,7 +18,7 @@
 Below is the record of completed Phase 1, Phase 2, and UX milestones.
 
 <details>
-<summary><b>Click to expand completed milestones (15 items)</b></summary>
+<summary><b>Click to expand completed milestones (16 items)</b></summary>
 
 - **P1-Core** — Core CLI engine features (`init`, `tree`, `spec new`, `spec validate`, bounded directory traversal, direct symlink safety checks, and read-only VCS tracking diagnostics).
 - **P2-01 — Specify independent TODO queue and dependency graph schemas** (Version-2 parsing, semantic validation, deterministic serialization, root-inspection integration, and contract tests are complete. Compliance review documented in `COMPLIANCE_REVIEW.md`).
@@ -27,69 +27,17 @@ Below is the record of completed Phase 1, Phase 2, and UX milestones.
 - **P2-04 — Implement User-Provided Agent Invocation Mechanics** (Implemented under `src/config.rs` and `src/agent.rs` with configuration precedence, shell-free spawning, log capture, and optional token-record parsing.)
 - **P2-04b — Implement Basic CLI-Wrapper Templates** (The two configured profiles support `{prompt}`, `{context_files}`, and `{target_directory}` through whitespace-delimited, shell-free arguments. This is not a general shell or quoting language.)
 - **P2-05 — Implement test-command verification as an explicit trust boundary** (Configured test-policy verification with bounded execution and durable result persistence; later P2-05b through P2-05d complete its isolation, approval, and resource controls.)
-- **P2-06 — Implement the atomic task execution loop** (`kvist task run <COMPONENT_DIR> [TASK_ID]` driver, concurrent locks, atomic progress/blocked state transitions).
-- **UX-01 — Implement a Revalidation / Accept CLI Interface** (`kvist spec accept <COMPONENT_DIR>` resolves staleness programmatically, computing SHA-256 and updating revisions).
-- **UX-04 — Agent Output Redirection, Logging, and Streamlining** (Redirected agent logs to local untracked logs, implemented `kvist task log`, and added real-time stdout/stderr redirection).
-- **P2-07 — Perform Phase 2 security and compliance review** (Independent security, clean-slate documentation, and source-blind compliance passes completed. Retained review items remain for the external-execution boundary; this record does not approve production execution.)
 - **P2-05b — Sandbox all external execution** (Agents and verifiers require a component-only, deny-network external sandbox runner; unavailable isolation fails before task mutation.)
 - **P2-05c — Bind cryptographic approval to execution configuration** (Authenticated user-state approval binds effective agents, sandbox runner, test policy, and versions; changed or forged inputs fail before execution.)
 - **P2-05d — Bound agent subprocess resources** (Per-profile timeouts, combined-output limits, cancellation, and redacted bounded evidence block unsafe agent runs.)
+- **P2-06 — Implement the atomic task execution loop** (`kvist task run <COMPONENT_DIR> [TASK_ID]` driver, concurrent locks, atomic progress/blocked state transitions).
+- **P2-07 — Perform Phase 2 security and compliance review** (Independent security, clean-slate documentation, and source-blind compliance passes completed. Retained review items remain for the external-execution boundary; this record does not approve production execution.)
 - **P2-08 — Complete execution-boundary compliance reconciliation** (Fresh clean-slate and source-blind reviews, explicit documentation arbitration, and legal durable queue transitions close the final Phase 2 lifecycle work.)
+- **P2-09a — Model-resolution coverage** (The agent profiles now resolve a named model per role. `model` overrides `default_model`; the `default` and `default-model` aliases select the first listed model. A normal selected model uses the existing shell-free argument interpolation and may prefix `system_prompt`. An entry named `none` bypasses both interpolation and prompt prefixing, but still runs as a sandboxed external program under the approved execution policy. The selected source and complete profiles are approval-bound, so changing model selection or its command requires `kvist task approve-policy` again before `kvist task run`. Context: the resolver now selects a named model before command execution, but its behavior is security-sensitive: an incorrect fallback could invoke a different external program than the human approved. Acceptance criteria: cover explicit selection, `default_model` fallback, first-entry aliases, unknown-name diagnostics, raw `none`, and system-prompt prefixing without requiring an installed provider. Verify that a selection failure happens before sandbox probing or task mutation and lists the available names deterministically.)
+- **P2-09b — Template-contract validation** (The model command uses a deliberately narrow, shell-free argument template. Unsupported or unresolved placeholders must never be presented as a supported provider integration. Context: model commands use a deliberately narrow, shell-free argument template. Unsupported or unresolved placeholders must never be presented as a supported provider integration. Acceptance criteria: exercise repeated context-path expansion, prompt and target substitution, quoting limitations, and non-shell behavior. Decide whether unsupported placeholders are rejected at configuration load time or resolved by a documented mechanism before execution. In particular, resolve or remove the built-in Ollama template's literal `{model}` placeholder; until then, document it as unsupported.)
+- **P2-09c — Execution portability decision** (The descriptor-bound sandbox-runner launch currently fails closed on platforms without that mechanism. The supported behavior must be explicit rather than inferred from the portable CLI surface. Context: the descriptor-bound sandbox-runner launch currently fails closed on platforms without that mechanism. The supported behavior must be explicit rather than inferred from the portable CLI surface. Acceptance criteria: define the supported non-Linux execution behavior and its security invariant, or retain fail-closed refusal with an actionable diagnostic. Add platform-gated tests for every supported execution path and document the result in the user-facing execution policy.)
 
 </details>
-
----
-
-# Current: P2-09 — Per-role model-selection hardening
-
-**Status:** IN PROGRESS
-
-The agent profiles now resolve a named model per role. `model` overrides
-`default_model`; the `default` and `default-model` aliases select the first
-listed model. A normal selected model uses the existing shell-free argument
-interpolation and may prefix `system_prompt`. An entry named `none` bypasses
-both interpolation and prompt prefixing, but still runs as a sandboxed external
-program under the approved execution policy.
-
-The selected source and complete profiles are approval-bound, so changing model
-selection or its command requires `kvist task approve-policy` again before
-`kvist task run`.
-
-### TODO P2-09a — Model-resolution coverage
-
-- **Context:** The resolver now selects a named model before command execution,
-  but its behavior is security-sensitive: an incorrect fallback could invoke a
-  different external program than the human approved.
-- **Acceptance criteria:**
-  - Cover explicit selection, `default_model` fallback, first-entry aliases,
-    unknown-name diagnostics, raw `none`, and system-prompt prefixing without
-    requiring an installed provider.
-  - Verify that a selection failure happens before sandbox probing or task
-    mutation and lists the available names deterministically.
-
-### TODO P2-09b — Template-contract validation
-
-- **Context:** Model commands use a deliberately narrow, shell-free argument
-  template. Unsupported or unresolved placeholders must never be presented as
-  a supported provider integration.
-- **Acceptance criteria:**
-  - Exercise repeated context-path expansion, prompt and target substitution,
-    quoting limitations, and non-shell behavior.
-  - Decide whether unsupported placeholders are rejected at configuration load
-    time or resolved by a documented mechanism before execution.
-  - In particular, resolve or remove the built-in Ollama template's literal
-    `{model}` placeholder; until then, document it as unsupported.
-
-### DONE P2-09c — Execution portability decision
-
-- **Context:** The descriptor-bound sandbox-runner launch currently fails
-  closed on platforms without that mechanism. The supported behavior must be
-  explicit rather than inferred from the portable CLI surface.
-- **Acceptance criteria:**
-  - Define the supported non-Linux execution behavior and its security
-    invariant, or retain fail-closed refusal with an actionable diagnostic.
-  - Add platform-gated tests for every supported execution path and document
-    the result in the user-facing execution policy.
 
 ---
 
@@ -159,199 +107,129 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
 - **Acceptance criteria:**
   - Implement a `kvist task recover <COMPONENT_DIR> [TASK_ID]` command.
   - Provide interactive, safe recovery choices to the user:
-    1. **Rollback:** Append an auditable recovery record that restores the task
-       to its prior state (for example, `todo` or `in-progress`) without
-       deleting the prepared attempt.
-    2. **Resolve:** Record a human-supplied final outcome (for example,
-       `completed` or `blocked`) with its required evidence reference.
+    1. **Rollback:** Append an auditable recovery record that restores the task to its prior state (for example, `todo` or `in-progress`) without deleting the prepared attempt.
+    2. **Resolve:** Record a human-supplied final outcome (for example, `completed` or `blocked`) with its required evidence reference.
   - Ensure the command validates the queue structure and integrity before writing.
-  - Write integration tests reproducing crashed runs and verifying both
-    rollback and recorded-resolution paths.
+  - Write integration tests reproducing crashed runs and verifying both rollback and recorded-resolution paths.
 
 ### IN PROGRESS UX-10 — Robust Process-Tree Cancellation & Cleanup (Robustness Gap)
 
 - **Context:** The resource limits implemented in P2-05d terminate timed-out or canceled external processes. However, if an agent or test-policy runner spawns children (e.g., compile daemons, child subprocesses), terminating only the immediate child can leave orphan background processes running on the host.
 - **Acceptance criteria:**
-  - Refactor subprocess execution in `src/sandbox.rs` to launch processes
-    inside a new process group or platform-equivalent containment boundary.
-  - On timeout or cancellation, use platform APIs rather than a shell command
-    to terminate the whole contained process tree.
-  - Provide a fail-closed or explicitly documented fallback for unsupported
-    platforms and test the platform-specific behavior.
+  - Refactor subprocess execution in `src/sandbox.rs` to launch processes inside a new process group or platform-equivalent containment boundary.
+  - On timeout or cancellation, use platform APIs rather than a shell command to terminate the whole contained process tree.
+  - Provide a fail-closed or explicitly documented fallback for unsupported platforms and test the platform-specific behavior.
   - Add integration tests verifying that child processes of timed-out runs are fully terminated.
 
 ---
 
 ## Phase 3 — Independent Compliance Automation
 
-Phase 3 is deferred until P2-09 closes. It may automate the existing
-human-directed lifecycle, but must preserve durable artifacts, strict component
-context boundaries, required sandbox approval, and independent certification.
+Phase 3 is deferred until P2-09 closes. It may automate the existing human-directed lifecycle, but must preserve durable artifacts, strict component context boundaries, required sandbox approval, and independent certification.
 
-### TODO P3-01 — Define component-design and feasibility skills
+### DONE P3-01 — Define component-design and feasibility skills
 
-- **Context:** Architects need repeatable, reviewable guidance for turning a
-  project vision into bounded components and layered specifications without
-  letting an agent silently choose product behavior.
+- **Context:** Architects need repeatable, reviewable guidance for turning a project vision into bounded components and layered specifications without letting an agent silently choose product behavior.
 - **Acceptance criteria:**
-  - Define versioned architect, specification-interview, and feasibility-review
-    skill contracts with required inputs, permitted context, outputs, and human
-    approval gates.
-  - Require feasibility output to identify unresolved decisions, contradictions,
-    bounds, and failure paths before a queue is drafted.
+  - Define versioned architect, specification-interview, and feasibility-review skill contracts with required inputs, permitted context, outputs, and human approval gates.
+  - Require feasibility output to identify unresolved decisions, contradictions, bounds, and failure paths before a queue is drafted.
 
 ### TODO P3-02 — Define queue-design skills
 
-- **Context:** A generated plan is only useful if it remains a valid,
-  component-local `TODOS.yaml` that traces back to an accepted specification.
+- **Context:** A generated plan is only useful if it remains a valid, component-local `TODOS.yaml` that traces back to an accepted specification.
 - **Acceptance criteria:**
-  - Define a designer skill that produces atomic tasks with requirement
-    traceability and the required test, implementation, security, and
-    compliance ordering.
-  - Specify human review, schema validation, and refusal behavior for
-    ambiguous or incomplete specifications.
+  - Define a designer skill that produces atomic tasks with requirement traceability and the required test, implementation, security, and compliance ordering.
+  - Specify human review, schema validation, and refusal behavior for ambiguous or incomplete specifications.
 
 ### TODO P3-03 — Define implementation and test skills
 
-- **Context:** Automated implementation must remain constrained by the
-  component contract rather than by peer implementation details or chat state.
+- **Context:** Automated implementation must remain constrained by the component contract rather than by peer implementation details or chat state.
 - **Acceptance criteria:**
-  - Define test-generation, implementation, and native-documentation skills
-    with only the component, immediate-parent contract, and root contract as
-    required context.
-  - Require tests for public behavior, boundaries, malformed input, and
-    failure paths before implementation is certified.
+  - Define test-generation, implementation, and native-documentation skills with only the component, immediate-parent contract, and root contract as required context.
+  - Require tests for public behavior, boundaries, malformed input, and failure paths before implementation is certified.
 
 ### TODO P3-04 — Define the clean-slate documentation skill
 
-- **Context:** `IMPL.md` is credible only when observed from implementation
-  without access to the specification it will later be compared against.
+- **Context:** `IMPL.md` is credible only when observed from implementation without access to the specification it will later be compared against.
 - **Acceptance criteria:**
-  - Define a source-only documenter skill that receives implementation source,
-    tests, and manifests, but excludes `SPEC.md` and prior `IMPL.md`.
-  - Require an observed-contract record that reports uncertainty and never
-    copies planned requirements into implementation evidence.
+  - Define a source-only documenter skill that receives implementation source, tests, and manifests, but excludes `SPEC.md` and prior `IMPL.md`.
+  - Require an observed-contract record that reports uncertainty and never copies planned requirements into implementation evidence.
 
 ### TODO P3-05 — Define independent review skills
 
-- **Context:** No implementer may certify its own work; compliance needs
-  separate structural, security, test-coverage, error-handling, and
-  spec-to-implementation review evidence.
+- **Context:** No implementer may certify its own work; compliance needs separate structural, security, test-coverage, error-handling, and spec-to-implementation review evidence.
 - **Acceptance criteria:**
-  - Define reviewer inputs, independence boundaries, structured findings, and
-    evidence retention for each review type.
-  - Require the final compliance skill to compare `SPEC.md` with independently
-    produced `IMPL.md`, not with source code or implementer claims.
+  - Define reviewer inputs, independence boundaries, structured findings, and evidence retention for each review type.
+  - Require the final compliance skill to compare `SPEC.md` with independently produced `IMPL.md`, not with source code or implementer claims.
 
 ### TODO P3-06 — Implement clean-slate and source-blind pipelines
 
-- **Context:** The defined skills must be enforced by the Rust engine, not only
-  by prompts, before automated compliance claims are allowed.
+- **Context:** The defined skills must be enforced by the Rust engine, not only by prompts, before automated compliance claims are allowed.
 - **Acceptance criteria:**
-  - Run the clean-slate documenter through the approved sandbox with only
-    source, tests, and manifests mounted; write a candidate `IMPL.md` only
-    through an explicit reviewed artifact update.
-  - Run a separate compliance checker with only `SPEC.md`, candidate `IMPL.md`,
-    the immediate-parent specification, and `ROOT_CONTRACT.md`; exclude source
-    files and tests.
-  - Persist review evidence, mark mismatches blocked, and permit completion
-    only after the independent compliance record is present.
+  - Run the clean-slate documenter through the approved sandbox with only source, tests, and manifests mounted; write a candidate `IMPL.md` only through an explicit reviewed artifact update.
+  - Run a separate compliance checker with only `SPEC.md`, candidate `IMPL.md`, the immediate-parent specification, and `ROOT_CONTRACT.md`; exclude source files and tests.
+  - Persist review evidence, mark mismatches blocked, and permit completion only after the independent compliance record is present.
 
 ### TODO P3-07 — Implement durable human arbitration
 
-- **Context:** A compliance mismatch must stop automated progress and retain
-  enough evidence for a human to resolve it without losing the original
-  specification or observed implementation record.
+- **Context:** A compliance mismatch must stop automated progress and retain enough evidence for a human to resolve it without losing the original specification or observed implementation record.
 - **Acceptance criteria:**
-  - Present redesign, proposed contract change, manual arbitration, and
-    optional trade-off analysis as explicit human choices.
-  - Preserve the discrepancy, rationale, selected action, and resulting task
-    state in a version-controlled component artifact.
-  - Never automatically rewrite `SPEC.md` or `IMPL.md`; proposed changes
-    require review and explicit acceptance before revalidation or task reset.
+  - Present redesign, proposed contract change, manual arbitration, and optional trade-off analysis as explicit human choices.
+  - Preserve the discrepancy, rationale, selected action, and resulting task state in a version-controlled component artifact.
+  - Never automatically rewrite `SPEC.md` or `IMPL.md`; proposed changes require review and explicit acceptance before revalidation or task reset.
 
 ### TODO P3-08 — Implement specification interview mode
 
-- **Context:** A guided terminal workflow can reduce specification friction
-  without weakening the architect’s authority over externally visible behavior.
+- **Context:** A guided terminal workflow can reduce specification friction without weakening the architect's authority over externally visible behavior.
 - **Acceptance criteria:**
-  - Implement a resumable `kvist spec interview <COMPONENT_DIR>` workflow that
-    asks about purpose, interfaces, constraints, algorithms, and failures.
-  - If an agent is used, route it through the approved execution boundary; do
-    not launch an interactive shell or overwrite an existing specification.
-  - Produce a draft that passes normal specification validation and still
-    requires explicit human acceptance.
+  - Implement a resumable `kvist spec interview <COMPONENT_DIR>` workflow that asks about purpose, interfaces, constraints, algorithms, and failures.
+  - If an agent is used, route it through the approved execution boundary; do not launch an interactive shell or overwrite an existing specification.
+  - Produce a draft that passes normal specification validation and still requires explicit human acceptance.
 
 ### TODO P3-09 — Implement reviewed queue generation
 
-- **Context:** Once a specification is accepted, a designer can draft a
-  component-local queue, but the engine must not replace human-authored work
-  implicitly.
+- **Context:** Once a specification is accepted, a designer can draft a component-local queue, but the engine must not replace human-authored work implicitly.
 - **Acceptance criteria:**
-  - Implement a planning command that passes only the accepted component
-    specification, immediate-parent contract, and root contract to the
-    approved architect profile.
-  - Validate the generated queue schema, dependency graph, task ordering, and
-    requirement traceability before presenting a draft.
-  - Refuse to overwrite an existing queue; require explicit human review and
-    acceptance of any replacement.
+  - Implement a planning command that passes only the accepted component specification, immediate-parent contract, and root contract to the approved architect profile.
+  - Validate the generated queue schema, dependency graph, task ordering, and requirement traceability before presenting a draft.
+  - Refuse to overwrite an existing queue; require explicit human review and acceptance of any replacement.
 
 ---
 
 ## Phase 4 — Deferred Visual and Editor Ecosystem
 
-Phase 4 begins only after the terminal execution boundary and Phase 3 review
-workflow are independently reviewed. Every integration remains optional: core
-commands must stay headless, portable, credential-free, and daemon-free.
+Phase 4 begins only after the terminal execution boundary and Phase 3 review workflow are independently reviewed. Every integration remains optional: core commands must stay headless, portable, credential-free, and daemon-free.
 
 ### TODO P4-01 — Provide a local component-state API
 
-- **Context:** A visual client needs a stable read and mutation boundary rather
-  than direct access to internal files or opaque process state.
+- **Context:** A visual client needs a stable read and mutation boundary rather than direct access to internal files or opaque process state.
 - **Acceptance criteria:**
-  - Define a versioned, authenticated local API for component state, validated
-    artifact views, attempt evidence, and approved transitions.
-  - If `kvist serve` is introduced, bind it to loopback, make startup explicit,
-    define shutdown and token/port handling, and add a justified dependency
-    review before adopting a web framework.
-  - Preserve the same validation, approval, and atomic-write rules used by the
-    terminal commands.
+  - Define a versioned, authenticated local API for component state, validated artifact views, attempt evidence, and approved transitions.
+  - If `kvist serve` is introduced, bind it to loopback, make startup explicit, define shutdown and token/port handling, and add a justified dependency review before adopting a web framework.
+  - Preserve the same validation, approval, and atomic-write rules used by the terminal commands.
 
 ### TODO P4-02 — Build an optional local visual client
 
-- **Context:** A browser-based tree and editor can improve navigation, but it
-  must not become a required runtime or alter the filesystem-native model.
+- **Context:** A browser-based tree and editor can improve navigation, but it must not become a required runtime or alter the filesystem-native model.
 - **Acceptance criteria:**
-  - Render the recursive component tree and current, stale, blocked, and
-    invalid states from the versioned API.
-  - Make editing an explicit, validated artifact workflow; do not bypass
-    specification, queue, approval, or review checks.
-  - Assess embedded assets and editor dependencies for size, maintenance,
-    licensing, offline operation, and security before inclusion.
+  - Render the recursive component tree and current, stale, blocked, and invalid states from the versioned API.
+  - Make editing an explicit, validated artifact workflow; do not bypass specification, queue, approval, or review checks.
+  - Assess embedded assets and editor dependencies for size, maintenance, licensing, offline operation, and security before inclusion.
 
 ### TODO P4-03 — Add visual arbitration support
 
-- **Context:** Side-by-side comparison may help humans resolve a retained
-  mismatch, but the UI must enforce the same explicit decision record as the
-  terminal flow.
+- **Context:** Side-by-side comparison may help humans resolve a retained mismatch, but the UI must enforce the same explicit decision record as the terminal flow.
 - **Acceptance criteria:**
-  - Show `SPEC.md`, independently generated `IMPL.md`, findings, and the
-    durable arbitration history without exposing excluded review context.
-  - Require an explicit human confirmation for redesign, a proposed contract
-    update, or any manual resolution; never write either artifact implicitly.
+  - Show `SPEC.md`, independently generated `IMPL.md`, findings, and the durable arbitration history without exposing excluded review context.
+  - Require an explicit human confirmation for redesign, a proposed contract update, or any manual resolution; never write either artifact implicitly.
 
 ### TODO P4-04 — Add opt-in editor diagnostics
 
-- **Context:** Editors can surface stale or invalid artifacts early, but
-  continuous background work must not become a core requirement.
+- **Context:** Editors can surface stale or invalid artifacts early, but continuous background work must not become a core requirement.
 - **Acceptance criteria:**
-  - Define `kvist lsp` and any optional watch mode as foreground,
-    user-started processes with explicit lifecycle, resource, and
-    cross-platform behavior.
-  - Publish standard diagnostics for specification validity, queue validity,
-    stale revisions, and dependency cycles without mutating project files.
-  - Test shutdown, filesystem races, and unsupported-platform behavior; do not
-    require telemetry, credentials, cloud services, or a persistent daemon.
+  - Define `kvist lsp` and any optional watch mode as foreground, user-started processes with explicit lifecycle, resource, and cross-platform behavior.
+  - Publish standard diagnostics for specification validity, queue validity, stale revisions, and dependency cycles without mutating project files.
+  - Test shutdown, filesystem races, and unsupported-platform behavior; do not require telemetry, credentials, cloud services, or a persistent daemon.
 
 ---
 
