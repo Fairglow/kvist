@@ -97,6 +97,9 @@ pub enum StalenessCauseKind {
 }
 
 /// One actionable, traceable unit of component work.
+///
+/// `recovery_state` records the prior lifecycle state before the failed attempt,
+/// enabling rollback to that state when an attempt is interrupted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Task {
@@ -124,6 +127,8 @@ pub struct Task {
     pub timestamps: TaskTimestamps,
     /// Actionable blocker explanation when the task is blocked.
     pub blocked_reason: Option<String>,
+    /// The prior lifecycle state before this attempt, for recovery rollback.
+    pub recovery_state: Option<String>,
 }
 
 /// Mandatory lifecycle roles for an executable task.

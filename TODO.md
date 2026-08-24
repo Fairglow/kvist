@@ -2,6 +2,7 @@
 
 **Authority:** [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
 **Reviewed:** Phase 1 & Phase 2 implementation audits
+**Reviewed by:** Stefan Lindblad | 2026-08-24
 
 ## Status conventions
 
@@ -152,7 +153,7 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
   - Print clear, actionable instructions when lock acquisition fails (e.g., "Component is locked. If this is a stale lock from a previous crash, run `kvist task unlock <COMPONENT_DIR>` to clear it").
   - Validate with integration tests that `unlock` successfully resolves locked contention states.
 
-### TODO UX-09 — Task Attempt Recovery and Reconciliation Tooling (Operational Gap)
+### DONE UX-09 — Task Attempt Recovery and Reconciliation Tooling (Operational Gap)
 
 - **Context:** As highlighted in `COMPLIANCE_REVIEW.md` (under residual limitations of Phase 2 reconciliation), a prepared task attempt that is aborted, timed out, or interrupted leaves a "prepared" record in the attempt history. This fences off the queue and blocks future transitions for that task. Currently, there is no CLI way to reconcile this, requiring manual file editing.
 - **Acceptance criteria:**
@@ -167,7 +168,7 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
   - Write integration tests reproducing crashed runs and verifying both
     rollback and recorded-resolution paths.
 
-### TODO UX-10 — Robust Process-Tree Cancellation & Cleanup (Robustness Gap)
+### IN PROGRESS UX-10 — Robust Process-Tree Cancellation & Cleanup (Robustness Gap)
 
 - **Context:** The resource limits implemented in P2-05d terminate timed-out or canceled external processes. However, if an agent or test-policy runner spawns children (e.g., compile daemons, child subprocesses), terminating only the immediate child can leave orphan background processes running on the host.
 - **Acceptance criteria:**
