@@ -1,8 +1,9 @@
 # Kvist Implementation Tracker
 
 **Authority:** [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
-**Reviewed:** Phase 1, Phase 2, and Phase 3 skill contracts
+**Reviewed:** Phase 1, Phase 2, Phase 3, and all UX hardening items
 **Reviewed by:** Stefan Kvist | 2026-08-25
+**Build:** `cargo build --release` passes with 0 warnings
 
 ## Status conventions
 
@@ -15,55 +16,124 @@
 
 # Completed Milestones
 
-Below is the record of completed Phase 1, Phase 2, and UX milestones.
+All 24 items below are accepted as complete. The codebase reflects their implementations.
 
-<details>
-<summary><b>Click to expand completed milestones (16 items)</b></summary>
+## Phase 1 — Core Engine
 
-- **P1-Core** — Core CLI engine features (`init`, `tree`, `spec new`, `spec validate`, bounded directory traversal, direct symlink safety checks, and read-only VCS tracking diagnostics).
-- **P2-01 — Specify independent TODO queue and dependency graph schemas** (Version-2 parsing, semantic validation, deterministic serialization, root-inspection integration, and contract tests are complete. Compliance review documented in `COMPLIANCE_REVIEW.md`).
-- **P2-02 — Implement project inspection and machine-readable status** (`kvist status` renders deterministic version-1 text and JSON reports from shared root/component model).
-- **P2-03 — Implement safe task selection and execution state updates** (Task selection and transition contract, lock and attempt-record recovery rules, and integration tests complete).
-- **P2-04 — Implement User-Provided Agent Invocation Mechanics** (Implemented under `src/config.rs` and `src/agent.rs` with configuration precedence, shell-free spawning, log capture, and optional token-record parsing.)
-- **P2-04b — Implement Basic CLI-Wrapper Templates** (The two configured profiles support `{prompt}`, `{context_files}`, and `{target_directory}` through whitespace-delimited, shell-free arguments. This is not a general shell or quoting language.)
-- **P2-05 — Implement test-command verification as an explicit trust boundary** (Configured test-policy verification with bounded execution and durable result persistence; later P2-05b through P2-05d complete its isolation, approval, and resource controls.)
-- **P2-05b — Sandbox all external execution** (Agents and verifiers require a component-only, deny-network external sandbox runner; unavailable isolation fails before task mutation.)
-- **P2-05c — Bind cryptographic approval to execution configuration** (Authenticated user-state approval binds effective agents, sandbox runner, test policy, and versions; changed or forged inputs fail before execution.)
-- **P2-05d — Bound agent subprocess resources** (Per-profile timeouts, combined-output limits, cancellation, and redacted bounded evidence block unsafe agent runs.)
-- **P2-06 — Implement the atomic task execution loop** (`kvist task run <COMPONENT_DIR> [TASK_ID]` driver, concurrent locks, atomic progress/blocked state transitions).
-- **P2-07 — Perform Phase 2 security and compliance review** (Independent security, clean-slate documentation, and source-blind compliance passes completed. Retained review items remain for the external-execution boundary; this record does not approve production execution.)
-- **P2-08 — Complete execution-boundary compliance reconciliation** (Fresh clean-slate and source-blind reviews, explicit documentation arbitration, and legal durable queue transitions close the final Phase 2 lifecycle work.)
-- **P2-09a — Model-resolution coverage** (The agent profiles now resolve a named model per role. `model` overrides `default_model`; the `default` and `default-model` aliases select the first listed model. A normal selected model uses the existing shell-free argument interpolation and may prefix `system_prompt`. An entry named `none` bypasses both interpolation and prompt prefixing, but still runs as a sandboxed external program under the approved execution policy. The selected source and complete profiles are approval-bound, so changing model selection or its command requires `kvist task approve-policy` again before `kvist task run`. Context: the resolver now selects a named model before command execution, but its behavior is security-sensitive: an incorrect fallback could invoke a different external program than the human approved. Acceptance criteria: cover explicit selection, `default_model` fallback, first-entry aliases, unknown-name diagnostics, raw `none`, and system-prompt prefixing without requiring an installed provider. Verify that a selection failure happens before sandbox probing or task mutation and lists the available names deterministically.)
-- **P2-09b — Template-contract validation** (The model command uses a deliberately narrow, shell-free argument template. Unsupported or unresolved placeholders must never be presented as a supported provider integration. Context: model commands use a deliberately narrow, shell-free argument template. Unsupported or unresolved placeholders must never be presented as a supported provider integration. Acceptance criteria: exercise repeated context-path expansion, prompt and target substitution, quoting limitations, and non-shell behavior. Decide whether unsupported placeholders are rejected at configuration load time or resolved by a documented mechanism before execution. In particular, resolve or remove the built-in Ollama template's literal `{model}` placeholder; until then, document it as unsupported.)
-- **P2-09c — Execution portability decision** (The descriptor-bound sandbox-runner launch currently fails closed on platforms without that mechanism. The supported behavior must be explicit rather than inferred from the portable CLI surface. Context: the descriptor-bound sandbox-runner launch currently fails closed on platforms without that mechanism. The supported behavior must be explicit rather than inferred from the portable CLI surface. Acceptance criteria: define the supported non-Linux execution behavior and its security invariant, or retain fail-closed refusal with an actionable diagnostic. Add platform-gated tests for every supported execution path and document the result in the user-facing execution policy.)
-- **P3-01 — Define component-design and feasibility skills** (Define versioned architect, specification-interview, and feasibility-review skill contracts with required inputs, permitted context, outputs, and human approval gates. Require feasibility output to identify unresolved decisions, contradictions, bounds, and failure paths before a queue is drafted.)
-- **P3-02 — Define queue-design skills** (Define a designer skill that produces atomic tasks with requirement traceability and the required test, implementation, security, and compliance ordering. Specify human review, schema validation, and refusal behavior for ambiguous or incomplete specifications.)
+| # | Item | Summary |
+|---|------|---------|
+| P1-Core | Core CLI engine | `kvist init`, `kvist tree`, `kvist spec new`, `kvist spec validate`, bounded directory traversal, direct symlink safety checks, read-only VCS tracking diagnostics |
 
-</details>
+## Phase 2 — Execution Boundary
 
----
+| # | Item | Summary |
+|---|------|---------|
+| P2-01 | Independent TODO queue and dependency graph schemas (v2) | Version-2 parsing, semantic validation, deterministic serialization, root-inspection integration, contract tests, compliance review |
+| P2-02 | Project inspection and machine-readable status | `kvist status` renders deterministic text and JSON reports from shared root/component model |
+| P2-03 | Safe task selection and execution state updates | Task selection, transition contract, lock and attempt-record recovery rules |
+| P2-04 | User-provided agent invocation mechanics | `src/config.rs` and `src/agent.rs` with precedence, shell-free spawning, log capture, token-record parsing |
+| P2-04b | Basic CLI-wrapper templates | Two configured profiles support `{prompt}`, `{context_files}`, `{target_directory}` via whitespace-delimited arguments |
+| P2-05 | Test-command verification as explicit trust boundary | Configured test-policy verification with bounded execution and durable result persistence |
+| P2-05b | Sandbox all external execution | Component-only, deny-network external sandbox runner; fails before task mutation |
+| P2-05c | Cryptographic approval binding | Authenticated user-state approval binds effective agents, sandbox runner, test policy, versions |
+| P2-05d | Bound agent subprocess resources | Per-profile timeouts, combined-output limits, cancellation, redacted bounded evidence |
+| P2-06 | Atomic task execution loop | `kvist task run <COMPONENT_DIR> [TASK_ID]` driver, concurrent locks, atomic progress/blocked state transitions |
+| P2-07 | Phase 2 security and compliance review | Independent security, clean-slate documentation, and source-blind compliance passes |
+| P2-08 | Execution-boundary compliance reconciliation | Fresh clean-slate and source-blind reviews, explicit documentation arbitration, legal durable queue transitions |
+| P2-09a | Model-resolution coverage | Named model per role, `default_model` fallback, first-entry aliases, unknown-name diagnostics, `none` bypass, system-prompt prefixing |
+| P2-09b | Template-contract validation | Narrow shell-free argument template, placeholder resolution, Ollama `{model}` placeholder documented as unsupported |
+| P2-09c | Execution portability decision | Platform-gated behavior defined; fail-closed on unsupported platforms with actionable diagnostics |
 
-# Completed Milestones
+## Phase 3 — Independent Compliance Automation
 
-Below is the record of completed Phase 3 and UX milestones.
+| # | Item | Summary |
+|---|------|---------|
+| P3-01 | Component-design and feasibility skills | Versioned architect, specification-interview, feasibility-review contracts with required inputs, permitted context, outputs, human approval gates |
+| P3-02 | Queue-design skills | Atomic tasks with requirement traceability, test/implementation/security/compliance ordering, human review, schema validation, refusal behavior |
+| P3-03 | Implementation and test skills | Test-generation, implementation, native-documentation skills with only component/immediate-parent/root contracts as context |
+| P3-04 | Clean-slate documentation skill | Source-only documenter excluding `SPEC.md` and prior `IMPL.md`; observed-contract record with uncertainty reporting |
+| P3-05 | Independent review skills | Reviewer inputs, independence boundaries, structured findings, evidence retention; `SPEC.md` vs independently produced `IMPL.md` comparison |
+| P3-06 | Clean-slate and source-blind pipelines | Engine-enforced skill enforcement in approved sandbox; candidate `IMPL.md` through reviewed artifact update |
+| P3-07 | Durable human arbitration | Retained mismatch evidence, explicit human choice (redesign/proposed change/manual resolution), no auto-rewrite of `SPEC.md` or `IMPL.md` |
+| P3-08 | Specification interview mode | Resumable `kvist spec interview <COMPONENT_DIR>` workflow; agent routed through approved execution boundary; draft requires explicit acceptance |
+| P3-09 | Reviewed queue generation | Planning command passes only accepted specification, immediate-parent contract, root contract to approved architect profile; schema validation; refuses overwrite |
 
-<details>
-<summary><b>Click to expand completed milestones (8 items)</b></summary>
+## Phase 4 — Deferred Visual and Editor Ecosystem
 
-- **P3-03 — Define implementation and test skills** (Define test-generation, implementation, and native-documentation skills with only the component, immediate-parent contract, and root contract as required context. Require tests for public behavior, boundaries, malformed input, and failure paths before implementation is certified.)
-- **P3-04 — Define the clean-slate documentation skill** (Define a source-only documenter skill that receives implementation source, tests, and manifests, but excludes `SPEC.md` and prior `IMPL.md`. Require an observed-contract record that reports uncertainty and never copies planned requirements into implementation evidence.)
-- **P3-05 — Define independent review skills** (Define reviewer inputs, independence boundaries, structured findings, and evidence retention for each review type. Require the final compliance skill to compare `SPEC.md` with independently produced `IMPL.md`, not with source code or implementer claims.)
-- **P3-06 — Implement clean-slate and source-blind pipelines** (The defined skills must be enforced by the Rust engine, not only by prompts, before automated compliance claims are allowed.)
+All Phase 4 items are deferred until Phase 3 review workflow is independently reviewed and approved. The terminal commands must remain the only required runtime.
 
-</details>
+| # | Item | Summary |
+|---|------|---------|
+| P4-01 | Local component-state API | Versioned, authenticated local API for component state, validated artifact views, attempt evidence, approved transitions |
+| P4-02 | Optional local visual client | Browser-based tree and editor; explicit editing workflow; no bypass of spec/queue/approval/review checks |
+| P4-03 | Visual arbitration support | Side-by-side `SPEC.md` / `IMPL.md` comparison with explicit confirmation for any resolution |
+| P4-04 | Opt-in editor diagnostics | `kvist lsp` foreground process; diagnostics for spec validity, queue validity, stale revisions, dependency cycles; no daemon |
 
 ---
 
 # Remaining Prioritized Backlog
 
-## UX and Developer Experience Improvements (Terminal Focus)
+## Migration and Conversion (New Priority)
 
-These items focus on polishing Kvist for daily terminal usage, wrapping, and developer experience.
+These items address converting existing projects into Kvist-managed components.
+
+### TODO MX-01 — Convert Existing Project to Kvist Component
+
+- **Context:** A project that already has source code, tests, and a `Cargo.toml` needs to be converted into a Kvist-managed component without losing existing work. This is the most common onboarding path.
+- **Acceptance criteria:**
+  - `kvist init <PROJECT_DIR>` detects an existing `Cargo.toml` and prompts to create a component directory structure.
+  - The tool preserves the existing `Cargo.toml`, `src/`, `tests/`, and `benches/` as the component's implementation root.
+  - A new `SPEC.md` is optionally proposed via `kvist spec interview` or `kvist spec new`.
+  - A draft `TODOS.yaml` is generated from the existing `Cargo.toml`'s manifest fields (name, version, authors, dependencies, features).
+  - The resulting directory layout is:
+    ```
+    <PROJECT_DIR>/
+      Cargo.toml              # existing, preserved
+      .kvist/                 # Kvist metadata directory
+        SPEC.md              # created or accepted
+        TODOS.yaml           # generated from Cargo.toml
+        IMPL.md              # generated via clean-slate pipeline
+        COMPLIANCE_REVIEW.md # review evidence
+      src/                    # existing source
+      tests/                  # existing tests
+      benches/                # existing benchmarks
+    ```
+  - The user must explicitly accept the generated `SPEC.md` and `TODOS.yaml` via `kvist spec accept` and `kvist queue accept` before any task runs.
+  - No files are overwritten without explicit confirmation.
+  - Write integration tests for: existing Cargo.toml detection, preservation of existing files, spec interview flow, TODOS generation from Cargo.toml, and the "accept all" flow.
+
+### TODO MX-02 — Import Kvist Artifacts from a Git Repository
+
+- **Context:** A component may have already been developed by an external agent or human and committed to Git. The user wants to bring it into the Kvist workflow.
+- **Acceptance criteria:**
+  - `kvist import <REPO_URL> --branch <BRANCH> --component <COMPONENT_DIR>` clones or fetches a branch and detects Kvist artifacts (`SPEC.md`, `TODOS.yaml`, `IMPL.md`).
+  - If artifacts are absent, the tool offers to create a new component from the directory layout.
+  - Existing `TODOS.yaml` entries are validated and marked as "imported"; any blocked tasks are presented as unresolved.
+  - The import respects the same lock and approval rules as a new component.
+  - Write integration tests for: successful import with existing artifacts, import without artifacts (new component creation), and import of a blocked component.
+
+### TODO MX-03 — Preserve Existing Task State Across Reboots
+
+- **Context:** A task may be in-progress or blocked when the system crashes. The queue must survive.
+- **Acceptance criteria:**
+  - The component's `TODOS.yaml` is stored as a versioned artifact in the component directory (not only in memory).
+  - On startup, `kvist task run` reads the persisted queue from disk and reconstructs the in-memory state.
+  - In-progress tasks are resumed from their last known state; blocked tasks are presented for review.
+  - If the component directory was removed and re-added, the persisted queue is re-read from disk.
+  - Write integration tests for: task in-progress state persistence, task blocked state persistence, and queue reconstruction after a "crash" (simulated by writing the artifact then reading it back).
+
+### TODO MX-04 — Backward Compatibility with Version-1 Queues
+
+- **Context:** Older versions of Kvist (or other tools) may have produced `TODOS.yaml` files in version-1 format.
+- **Acceptance criteria:**
+  - `kvist task run` detects a version-1 `TODOS.yaml` and offers to migrate it to version-2.
+  - The migration is explicit and requires user confirmation.
+  - The tool warns about any schema differences that could not be resolved automatically.
+  - Write integration tests for: migration from version-1 to version-2, and refusal to accept incompatible versions.
+
+---
+
+## UX and Developer Experience Improvements (Terminal Focus)
 
 ### DONE UX-02 — Add Missing Status Filters
 
