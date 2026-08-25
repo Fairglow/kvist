@@ -8,8 +8,6 @@
 //!     that still avoids shell interpretation. The same environment allowlist
 //!     is enforced in both cases.
 
-use std::os::unix::process::ExitStatusExt;
-use std::process::ExitStatus;
 use std::{
     collections::BTreeMap,
     fs,
@@ -279,32 +277,6 @@ pub fn execute_with_timeout(
         timed_out,
         output_limit_exceeded,
     })
-}
-
-/// Terminates a child process and its entire process group on Unix.
-fn terminate_process_group(child: std::process::Child, config: &SandboxConfig) -> Result<()> {
-    #[cfg(target_os = "linux")]
-    {
-        let pid = child.id();
-        // On Linux, we can send SIGKILL to the whole process group.
-        let result = std::process::Command::new("kill")
-            .arg("-9")
-            .arg(pid.to_string())
-            .spawn();
-        result
-            .map_err(|source| sandbox_error(config, "terminate timed-out sandbox runner", source))?
-            .wait()
-            .map_err(|source| sandbox_error(config, "wait for timed-out sandbox runner", source))?;
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    {
-        child.kill().map_err(|source| {
-            sandbox_error(config, "terminate timed-out sandbox runner", source)
-        })?;
-    }
-
-    Ok(())
 }
 
 fn validate_runner(

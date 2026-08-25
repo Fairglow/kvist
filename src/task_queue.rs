@@ -473,10 +473,10 @@ fn append_task(output: &mut String, task: &Task) {
         None => line(output, 4, "blocked_reason: null"),
     }
     match &task.recovery_state {
-        Some(state) => line(
+        Some(recovery) => line(
             output,
             4,
-            &format!("recovery_state: {}", yaml_string(state)),
+            &format!("recovery_state: {}", yaml_string(recovery)),
         ),
         None => line(output, 4, "recovery_state: null"),
     }

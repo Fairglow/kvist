@@ -59,22 +59,6 @@ Below is the record of completed Phase 3 and UX milestones.
 
 ---
 
-# Completed Milestones
-
-Below is the record of completed Phase 3 and UX milestones.
-
-<details>
-<summary><b>Click to expand completed milestones (8 items)</b></summary>
-
-- **P3-03 — Define implementation and test skills** (Define test-generation, implementation, and native-documentation skills with only the component, immediate-parent contract, and root contract as required context. Require tests for public behavior, boundaries, malformed input, and failure paths before implementation is certified.)
-- **P3-04 — Define the clean-slate documentation skill** (Define a source-only documenter skill that receives implementation source, tests, and manifests, but excludes `SPEC.md` and prior `IMPL.md`. Require an observed-contract record that reports uncertainty and never copies planned requirements into implementation evidence.)
-- **P3-05 — Define independent review skills** (Define reviewer inputs, independence boundaries, structured findings, and evidence retention for each review type. Require the final compliance skill to compare `SPEC.md` with independently produced `IMPL.md`, not with source code or implementer claims.)
-- **P3-06 — Implement clean-slate and source-blind pipelines** (The defined skills must be enforced by the Rust engine, not only by prompts, before automated compliance claims are allowed.)
-
-</details>
-
----
-
 # Remaining Prioritized Backlog
 
 ## UX and Developer Experience Improvements (Terminal Focus)
