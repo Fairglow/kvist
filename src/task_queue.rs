@@ -472,6 +472,14 @@ fn append_task(output: &mut String, task: &Task) {
         ),
         None => line(output, 4, "blocked_reason: null"),
     }
+    match &task.recovery_state {
+        Some(state) => line(
+            output,
+            4,
+            &format!("recovery_state: {}", yaml_string(state)),
+        ),
+        None => line(output, 4, "recovery_state: null"),
+    }
 }
 
 fn append_string_list(output: &mut String, indentation: usize, field: &str, values: &[String]) {
@@ -717,6 +725,36 @@ fn validate_task(task: &Task) -> std::result::Result<(), TaskQueueError> {
                 task.id
             )));
         }
+    }
+    match (task.status, &task.recovery_state) {
+        (TaskStatus::InProgress, Some(state)) => {
+            return Err(TaskQueueError::invalid(format!(
+                "in-progress task `{}` requires recovery_state: null",
+                task.id
+            )));
+        }
+        (TaskStatus::InProgress, None) => {}
+        (TaskStatus::Pending, Some(state)) => {
+            return Err(TaskQueueError::invalid(format!(
+                "pending task `{}` requires recovery_state: null",
+                task.id
+            )));
+        }
+        (TaskStatus::Pending, None) => {}
+        (TaskStatus::Completed, Some(_)) => {
+            return Err(TaskQueueError::invalid(format!(
+                "completed task `{}` requires recovery_state: null",
+                task.id
+            )));
+        }
+        (TaskStatus::Completed, None) => {}
+        (TaskStatus::Blocked, Some(state)) => {
+            return Err(TaskQueueError::invalid(format!(
+                "blocked task `{}` requires recovery_state: null",
+                task.id
+            )));
+        }
+        (TaskStatus::Blocked, None) => {}
     }
     Ok(())
 }
