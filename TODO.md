@@ -174,7 +174,7 @@ Phase 3 is deferred until P2-09 closes. It may automate the existing human-direc
   - Run a separate compliance checker with only `SPEC.md`, candidate `IMPL.md`, the immediate-parent specification, and `ROOT_CONTRACT.md`; exclude source files and tests.
   - Persist review evidence, mark mismatches blocked, and permit completion only after the independent compliance record is present.
 
-### IN PROGRESS P3-07 — Implement durable human arbitration
+### DONE P3-07 — Implement durable human arbitration
 
 - **Context:** A compliance mismatch must stop automated progress and retain enough evidence for a human to resolve it without losing the original specification or observed implementation record.
 - **Acceptance criteria:**
@@ -182,7 +182,7 @@ Phase 3 is deferred until P2-09 closes. It may automate the existing human-direc
   - Preserve the discrepancy, rationale, selected action, and resulting task state in a version-controlled component artifact.
   - Never automatically rewrite `SPEC.md` or `IMPL.md`; proposed changes require review and explicit acceptance before revalidation or task reset.
 
-### IN PROGRESS P3-08 — Implement specification interview mode
+### DONE P3-08 — Implement specification interview mode
 
 - **Context:** A guided terminal workflow can reduce specification friction without weakening the architect's authority over externally visible behavior.
 - **Acceptance criteria:**
@@ -190,7 +190,7 @@ Phase 3 is deferred until P2-09 closes. It may automate the existing human-direc
   - If an agent is used, route it through the approved execution boundary; do not launch an interactive shell or overwrite an existing specification.
   - Produce a draft that passes normal specification validation and still requires explicit human acceptance.
 
-### IN PROGRESS P3-09 — Implement reviewed queue generation
+### DONE P3-09 — Implement reviewed queue generation
 
 - **Context:** Once a specification is accepted, a designer can draft a component-local queue, but the engine must not replace human-authored work implicitly.
 - **Acceptance criteria:**
@@ -204,7 +204,7 @@ Phase 3 is deferred until P2-09 closes. It may automate the existing human-direc
 
 Phase 4 begins only after the terminal execution boundary and Phase 3 review workflow are independently reviewed. Every integration remains optional: core commands must stay headless, portable, credential-free, and daemon-free.
 
-### IN PROGRESS P4-01 — Provide a local component-state API
+### DONE P4-01 — Provide a local component-state API
 
 - **Context:** A visual client needs a stable read and mutation boundary rather than direct access to internal files or opaque process state.
 - **Acceptance criteria:**
@@ -212,7 +212,7 @@ Phase 4 begins only after the terminal execution boundary and Phase 3 review wor
   - If `kvist serve` is introduced, bind it to loopback, make startup explicit, define shutdown and token/port handling, and add a justified dependency review before adopting a web framework.
   - Preserve the same validation, approval, and atomic-write rules used by the terminal commands.
 
-### IN PROGRESS P4-02 — Build an optional local visual client
+### DONE P4-02 — Build an optional local visual client
 
 - **Context:** A browser-based tree and editor can improve navigation, but it must not become a required runtime or alter the filesystem-native model.
 - **Acceptance criteria:**
@@ -220,14 +220,14 @@ Phase 4 begins only after the terminal execution boundary and Phase 3 review wor
   - Make editing an explicit, validated artifact workflow; do not bypass specification, queue, approval, or review checks.
   - Assess embedded assets and editor dependencies for size, maintenance, licensing, offline operation, and security before inclusion.
 
-### IN PROGRESS P4-03 — Add visual arbitration support
+### DONE P4-03 — Add visual arbitration support
 
 - **Context:** Side-by-side comparison may help humans resolve a retained mismatch, but the UI must enforce the same explicit decision record as the terminal flow.
 - **Acceptance criteria:**
   - Show `SPEC.md`, independently generated `IMPL.md`, findings, and the durable arbitration history without exposing excluded review context.
   - Require an explicit human confirmation for redesign, a proposed contract update, or any manual resolution; never write either artifact implicitly.
 
-### IN PROGRESS P4-04 — Add opt-in editor diagnostics
+### DONE P4-04 — Add opt-in editor diagnostics
 
 - **Context:** Editors can surface stale or invalid artifacts early, but continuous background work must not become a core requirement.
 - **Acceptance criteria:**
