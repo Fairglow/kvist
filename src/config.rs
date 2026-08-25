@@ -1083,7 +1083,7 @@ fn read_agent_config_candidate(path: &Path, source_name: &'static str) -> Result
 }
 
 fn sha256(bytes: &[u8]) -> String {
-    format!("sha256:{:x}", Sha256::digest(bytes))
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
 /// Bounded test command policy for explicit trust boundaries.
@@ -1118,7 +1118,7 @@ pub fn compute_policy_hash(policy: &TestPolicy) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(serialized.as_bytes());
-    format!("sha256:{:x}", hasher.finalize())
+    format!("sha256:{}", hex::encode(hasher.finalize()))
 }
 
 fn parse_test_policy(

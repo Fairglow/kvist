@@ -306,7 +306,10 @@ fn spec_accept_resolves_staleness_and_updates_queue_revisions() {
 
     // Verify TODOS.yaml has been updated with the correct SHA-256 hash
     use sha2::{Digest, Sha256};
-    let expected_hash = format!("sha256:{:x}", Sha256::digest(updated_spec.as_bytes()));
+    let expected_hash = format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(updated_spec.as_bytes()))
+    );
     let queue_contents =
         fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
     assert!(queue_contents.contains(&expected_hash));
@@ -436,8 +439,8 @@ tasks: []
         fs::read_to_string(project.path().join("src/SPEC.md")).expect("read parent spec");
     use sha2::{Digest, Sha256};
     let parent_hash = format!(
-        "sha256:{:x}",
-        Sha256::digest(parent_spec_contents.as_bytes())
+        "sha256:{}",
+        hex::encode(Sha256::digest(parent_spec_contents.as_bytes()))
     );
 
     let updated_child_contents =

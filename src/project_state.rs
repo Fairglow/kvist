@@ -564,7 +564,10 @@ fn add_revision_cause(
 }
 
 fn sha256_revision(contents: &str) -> String {
-    format!("sha256:{:x}", Sha256::digest(contents.as_bytes()))
+    format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(contents.as_bytes()))
+    )
 }
 
 fn inspect_component_specification(

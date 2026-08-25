@@ -102,7 +102,7 @@ pub fn runner_identity(
     };
     Ok(RunnerIdentity {
         canonical_path: canonical_path.to_string_lossy().into_owned(),
-        digest: format!("sha256:{:x}", Sha256::digest(bytes)),
+        digest: format!("sha256:{}", hex::encode(Sha256::digest(bytes))),
     })
 }
 
@@ -525,7 +525,7 @@ impl VerifiedRunnerLaunch {
             })?
         };
 
-        let digest = format!("sha256:{:x}", Sha256::digest(&bytes));
+        let digest = format!("sha256:{}", hex::encode(Sha256::digest(&bytes)));
         if digest != expected_runner.digest {
             return Err(KvistError::SandboxUnavailable {
                 runner: expected_runner.canonical_path.clone(),
@@ -620,7 +620,7 @@ fn create_descriptor_bound_copy(
         reason: "reopen descriptor-bound runner copy: permission denied".to_owned(),
     })?;
     nix::fcntl::fcntl(
-        file.as_raw_fd(),
+        &file,
         nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
     )
     .map_err(|_source| KvistError::SandboxUnavailable {

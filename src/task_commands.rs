@@ -689,7 +689,10 @@ pub fn accept(component_path: &Path) -> Result<String> {
 
         // 2. Compute the new specification SHA-256 revision
         use sha2::{Digest, Sha256};
-        let new_hash = format!("sha256:{:x}", Sha256::digest(spec_contents.as_bytes()));
+        let new_hash = format!(
+            "sha256:{}",
+            hex::encode(Sha256::digest(spec_contents.as_bytes()))
+        );
 
         // 3. If there is an immediate parent, update its revision to current parent's revision
         if let Some(ref mut parent) = queue.component.parent_specification {
@@ -745,7 +748,10 @@ pub fn accept(component_path: &Path) -> Result<String> {
                     ),
                 });
             }
-            let parent_hash = format!("sha256:{:x}", Sha256::digest(parent_contents.as_bytes()));
+            let parent_hash = format!(
+                "sha256:{}",
+                hex::encode(Sha256::digest(parent_contents.as_bytes()))
+            );
             parent.revision = parent_hash;
         }
 
@@ -1554,7 +1560,7 @@ fn agent_profile_digest(
 }
 
 fn digest(bytes: &[u8]) -> String {
-    format!("sha256:{:x}", Sha256::digest(bytes))
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
 fn reject_project_approval_record(project_dir: &Path) -> Result<()> {
@@ -1793,7 +1799,7 @@ fn hmac_sha256(secret: &[u8], message: &[u8]) -> String {
     let mut outer = Sha256::new();
     outer.update(key.map(|byte| byte ^ 0x5c));
     outer.update(inner);
-    format!("{:x}", outer.finalize())
+    format!("sha256:{}", hex::encode(outer.finalize()))
 }
 
 /// Verification run result
