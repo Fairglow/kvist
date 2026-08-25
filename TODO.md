@@ -2,7 +2,7 @@
 
 **Authority:** [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
 **Reviewed:** Phase 1 & Phase 2 implementation audits
-**Reviewed by:** Stefan Kvist | 2026-08-24
+**Reviewed by:** Stefan Kvist | 2026-08-25
 
 ## Status conventions
 
@@ -36,6 +36,8 @@ Below is the record of completed Phase 1, Phase 2, and UX milestones.
 - **P2-09a — Model-resolution coverage** (The agent profiles now resolve a named model per role. `model` overrides `default_model`; the `default` and `default-model` aliases select the first listed model. A normal selected model uses the existing shell-free argument interpolation and may prefix `system_prompt`. An entry named `none` bypasses both interpolation and prompt prefixing, but still runs as a sandboxed external program under the approved execution policy. The selected source and complete profiles are approval-bound, so changing model selection or its command requires `kvist task approve-policy` again before `kvist task run`. Context: the resolver now selects a named model before command execution, but its behavior is security-sensitive: an incorrect fallback could invoke a different external program than the human approved. Acceptance criteria: cover explicit selection, `default_model` fallback, first-entry aliases, unknown-name diagnostics, raw `none`, and system-prompt prefixing without requiring an installed provider. Verify that a selection failure happens before sandbox probing or task mutation and lists the available names deterministically.)
 - **P2-09b — Template-contract validation** (The model command uses a deliberately narrow, shell-free argument template. Unsupported or unresolved placeholders must never be presented as a supported provider integration. Context: model commands use a deliberately narrow, shell-free argument template. Unsupported or unresolved placeholders must never be presented as a supported provider integration. Acceptance criteria: exercise repeated context-path expansion, prompt and target substitution, quoting limitations, and non-shell behavior. Decide whether unsupported placeholders are rejected at configuration load time or resolved by a documented mechanism before execution. In particular, resolve or remove the built-in Ollama template's literal `{model}` placeholder; until then, document it as unsupported.)
 - **P2-09c — Execution portability decision** (The descriptor-bound sandbox-runner launch currently fails closed on platforms without that mechanism. The supported behavior must be explicit rather than inferred from the portable CLI surface. Context: the descriptor-bound sandbox-runner launch currently fails closed on platforms without that mechanism. The supported behavior must be explicit rather than inferred from the portable CLI surface. Acceptance criteria: define the supported non-Linux execution behavior and its security invariant, or retain fail-closed refusal with an actionable diagnostic. Add platform-gated tests for every supported execution path and document the result in the user-facing execution policy.)
+- **P3-01 — Define component-design and feasibility skills** (Define versioned architect, specification-interview, and feasibility-review skill contracts with required inputs, permitted context, outputs, and human approval gates. Require feasibility output to identify unresolved decisions, contradictions, bounds, and failure paths before a queue is drafted.)
+- **P3-02 — Define queue-design skills** (Define a designer skill that produces atomic tasks with requirement traceability and the required test, implementation, security, and compliance ordering. Specify human review, schema validation, and refusal behavior for ambiguous or incomplete specifications.)
 
 </details>
 
@@ -134,7 +136,7 @@ Phase 3 is deferred until P2-09 closes. It may automate the existing human-direc
   - Define versioned architect, specification-interview, and feasibility-review skill contracts with required inputs, permitted context, outputs, and human approval gates.
   - Require feasibility output to identify unresolved decisions, contradictions, bounds, and failure paths before a queue is drafted.
 
-### TODO P3-02 — Define queue-design skills
+### DONE P3-02 — Define queue-design skills
 
 - **Context:** A generated plan is only useful if it remains a valid, component-local `TODOS.yaml` that traces back to an accepted specification.
 - **Acceptance criteria:**
