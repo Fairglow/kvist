@@ -24,7 +24,7 @@ use std::{
 use std::fs::File;
 use std::fs::OpenOptions;
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -72,8 +72,34 @@ pub fn runner_identity(
     let canonical_path = Path::new(&config.runner)
         .canonicalize()
         .map_err(|source| sandbox_error(config, "canonicalize trusted sandbox runner", source))?;
-    let bytes = fs::read(&canonical_path)
-        .map_err(|source| sandbox_error(config, "read trusted sandbox runner", source))?;
+    // The runner can be a directory (containing probe/execute handlers) or a file.
+    // If it is a directory, we compute the digest over the concatenation of its
+    // handler scripts in a deterministic order. If it is a file, we read that file.
+    let bytes = if canonical_path.is_dir() {
+        // Directory runner: collect handler scripts in sorted order.
+        let mut bytes = Vec::new();
+        let entries = fs::read_dir(&canonical_path).map_err(|source| {
+            sandbox_error(config, "read trusted sandbox runner directory", source)
+        })?;
+        let mut sorted_entries: Vec<_> = entries
+            .filter_map(|entry| {
+                entry.ok().and_then(|e| {
+                    let path = e.path();
+                    if path.is_file() { Some(path) } else { None }
+                })
+            })
+            .collect();
+        sorted_entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        for path in sorted_entries {
+            if let Ok(contents) = fs::read(&path) {
+                bytes.extend_from_slice(&contents);
+            }
+        }
+        bytes
+    } else {
+        fs::read(&canonical_path)
+            .map_err(|source| sandbox_error(config, "read trusted sandbox runner", source))?
+    };
     Ok(RunnerIdentity {
         canonical_path: canonical_path.to_string_lossy().into_owned(),
         digest: format!("sha256:{:x}", Sha256::digest(bytes)),
@@ -293,10 +319,18 @@ fn validate_runner(
     }
     let metadata = fs::symlink_metadata(runner)
         .map_err(|source| sandbox_error(config, "inspect trusted sandbox runner", source))?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+    // The runner can be a regular non-symlink file or a directory containing
+    // handler scripts. Symlinks are rejected for security reasons.
+    if metadata.file_type().is_symlink() {
         return Err(KvistError::SandboxUnavailable {
             runner: config.runner.clone(),
-            reason: "the runner must be a regular non-symlink file".to_owned(),
+            reason: "the runner must be a regular non-symlink file or directory".to_owned(),
+        });
+    }
+    if !metadata.file_type().is_file() && !metadata.file_type().is_dir() {
+        return Err(KvistError::SandboxUnavailable {
+            runner: config.runner.clone(),
+            reason: "the runner must be a regular file or directory".to_owned(),
         });
     }
     let canonical_project = project_root
@@ -457,12 +491,40 @@ struct VerifiedRunnerLaunch {
 
 impl VerifiedRunnerLaunch {
     fn create(project_root: &Path, expected_runner: &RunnerIdentity) -> Result<Self> {
-        let bytes = fs::read(&expected_runner.canonical_path).map_err(|source| {
-            KvistError::SandboxUnavailable {
-                runner: expected_runner.canonical_path.clone(),
-                reason: format!("read verified sandbox runner: {source}"),
+        let canonical_path = Path::new(&expected_runner.canonical_path);
+        let is_directory_runner = canonical_path.is_dir();
+
+        // Collect the bytes from the runner (file or directory).
+        let bytes = if is_directory_runner {
+            // Directory runner: collect handler scripts in sorted order.
+            let mut bytes = Vec::new();
+            let entries =
+                fs::read_dir(canonical_path).map_err(|_source| KvistError::SandboxUnavailable {
+                    runner: expected_runner.canonical_path.clone(),
+                    reason: "read trusted sandbox runner directory: IO error".to_owned(),
+                })?;
+            let mut sorted_entries: Vec<_> = entries
+                .filter_map(|entry| {
+                    entry.ok().and_then(|e| {
+                        let path = e.path();
+                        if path.is_file() { Some(path) } else { None }
+                    })
+                })
+                .collect();
+            sorted_entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+            for path in sorted_entries {
+                if let Ok(contents) = fs::read(&path) {
+                    bytes.extend_from_slice(&contents);
+                }
             }
-        })?;
+            bytes
+        } else {
+            fs::read(canonical_path).map_err(|_source| KvistError::SandboxUnavailable {
+                runner: expected_runner.canonical_path.clone(),
+                reason: "read verified sandbox runner: IO error".to_owned(),
+            })?
+        };
+
         let digest = format!("sha256:{:x}", Sha256::digest(&bytes));
         if digest != expected_runner.digest {
             return Err(KvistError::SandboxUnavailable {
@@ -472,72 +534,16 @@ impl VerifiedRunnerLaunch {
         }
 
         #[cfg(target_os = "linux")]
-        let (_file, copy_path, launch_path) = create_descriptor_bound_copy(project_root, &bytes)?;
+        let (_file, copy_path, launch_path) =
+            create_descriptor_bound_copy(project_root, &bytes, is_directory_runner)?;
 
         #[cfg(not(target_os = "linux"))]
-        let copy_path = secure_copy_directory(project_root)?;
-        let mut nonce = [0_u8; 16];
-        getrandom::fill(&mut nonce).map_err(|error| KvistError::SandboxUnavailable {
-            runner: expected_runner.canonical_path.clone(),
-            reason: format!("generate runner copy name: {error}"),
-        })?;
-        let copy_path = copy_path.join(format!(
-            "runner-{}",
-            nonce
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>()
-        ));
-        let mut options = OpenOptions::new();
-        options.write(true).read(true).create_new(true).mode(0o700);
-        let mut writable_file =
-            options
-                .open(&copy_path)
-                .map_err(|source| KvistError::SandboxUnavailable {
-                    runner: expected_runner.canonical_path.clone(),
-                    reason: format!("create runner copy: {source}"),
-                })?;
-        if let Err(source) = writable_file
-            .write_all(&bytes)
-            .and_then(|()| writable_file.sync_all())
-        {
-            let _ = fs::remove_file(&copy_path);
-            return Err(KvistError::SandboxUnavailable {
-                runner: expected_runner.canonical_path.clone(),
-                reason: format!("write runner copy: {source}"),
-            });
-        }
-        fs::set_permissions(&copy_path, fs::Permissions::from_mode(0o500)).map_err(|source| {
-            KvistError::SandboxUnavailable {
-                runner: expected_runner.canonical_path.clone(),
-                reason: format!("protect runner copy: {source}"),
-            }
-        })?;
-        drop(writable_file);
-        let file = File::open(&copy_path).map_err(|source| KvistError::SandboxUnavailable {
-            runner: expected_runner.canonical_path.clone(),
-            reason: format!("reopen runner copy: {source}"),
-        })?;
-
-        #[cfg(target_os = "linux")]
-        {
-            nix::fcntl::fcntl(
-                file.as_raw_fd(),
-                nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
-            )
-            .map_err(|source| KvistError::SandboxUnavailable {
-                runner: expected_runner.canonical_path.clone(),
-                reason: format!("retain runner across execve: {source}"),
-            })?;
-            let _launch_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
-        }
-
-        #[cfg(not(target_os = "linux"))]
-        let launch_path = copy_path.clone();
+        let (_file, copy_path, launch_path) =
+            create_descriptor_bound_copy(project_root, &bytes, is_directory_runner)?;
 
         Ok(Self {
             #[cfg(target_os = "linux")]
-            _file: file,
+            _file,
             copy_path,
             launch_path,
         })
@@ -564,14 +570,16 @@ impl VerifiedRunnerLaunch {
 fn create_descriptor_bound_copy(
     project_root: &Path,
     bytes: &[u8],
+    _is_directory_runner: bool,
 ) -> Result<(File, PathBuf, PathBuf)> {
     use std::os::unix::fs::PermissionsExt;
 
-    let directory = secure_copy_directory(project_root)?;
+    let directory = secure_copy_directory_or_file(project_root, _is_directory_runner)?;
     let mut nonce = [0_u8; 16];
-    getrandom::fill(&mut nonce).map_err(|error| KvistError::SandboxUnavailable {
+    getrandom::fill(&mut nonce).map_err(|_error| KvistError::SandboxUnavailable {
         runner: "<unconfigured>".to_owned(),
-        reason: format!("generate descriptor-bound runner copy name: {error}"),
+        reason: "generate descriptor-bound runner copy name: random number generation failed"
+            .to_owned(),
     })?;
     let copy_path = directory.join(format!(
         "runner-{}",
@@ -585,38 +593,39 @@ fn create_descriptor_bound_copy(
     let mut writable_file =
         options
             .open(&copy_path)
-            .map_err(|source| KvistError::SandboxUnavailable {
+            .map_err(|_source| KvistError::SandboxUnavailable {
                 runner: "<unconfigured>".to_owned(),
-                reason: format!("create descriptor-bound runner copy: {source}"),
+                reason: "create descriptor-bound runner copy: permission denied or file exists"
+                    .to_owned(),
             })?;
-    if let Err(source) = writable_file
+    if let Err(_source) = writable_file
         .write_all(bytes)
         .and_then(|()| writable_file.sync_all())
     {
         let _ = fs::remove_file(&copy_path);
         return Err(KvistError::SandboxUnavailable {
             runner: "<unconfigured>".to_owned(),
-            reason: format!("write descriptor-bound runner copy: {source}"),
+            reason: "write descriptor-bound runner copy: write error".to_owned(),
         });
     }
-    fs::set_permissions(&copy_path, fs::Permissions::from_mode(0o500)).map_err(|source| {
+    fs::set_permissions(&copy_path, fs::Permissions::from_mode(0o500)).map_err(|_source| {
         KvistError::SandboxUnavailable {
             runner: "<unconfigured>".to_owned(),
-            reason: format!("protect descriptor-bound runner copy: {source}"),
+            reason: "protect descriptor-bound runner copy: permission denied".to_owned(),
         }
     })?;
     drop(writable_file);
-    let file = File::open(&copy_path).map_err(|source| KvistError::SandboxUnavailable {
+    let file = File::open(&copy_path).map_err(|_source| KvistError::SandboxUnavailable {
         runner: "<unconfigured>".to_owned(),
-        reason: format!("reopen descriptor-bound runner copy: {source}"),
+        reason: "reopen descriptor-bound runner copy: permission denied".to_owned(),
     })?;
     nix::fcntl::fcntl(
         file.as_raw_fd(),
         nix::fcntl::FcntlArg::F_SETFD(nix::fcntl::FdFlag::empty()),
     )
-    .map_err(|source| KvistError::SandboxUnavailable {
+    .map_err(|_source| KvistError::SandboxUnavailable {
         runner: "<unconfigured>".to_owned(),
-        reason: format!("retain descriptor-bound runner across execve: {source}"),
+        reason: "retain descriptor-bound runner across execve: syscall failed".to_owned(),
     })?;
     let launch_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
     Ok((file, copy_path, launch_path))
@@ -626,14 +635,15 @@ fn create_descriptor_bound_copy(
 fn create_descriptor_bound_copy(
     _project_root: &Path,
     _bytes: &[u8],
+    _is_directory_runner: bool,
 ) -> Result<(File, PathBuf, PathBuf)> {
     use std::os::unix::fs::PermissionsExt;
 
-    let directory = secure_copy_directory(&_project_root)?;
+    let directory = secure_copy_directory_or_file(project_root, _is_directory_runner)?;
     let mut nonce = [0_u8; 16];
-    getrandom::fill(&mut nonce).map_err(|error| KvistError::SandboxUnavailable {
+    getrandom::fill(&mut nonce).map_err(|_error| KvistError::SandboxUnavailable {
         runner: "<unconfigured>".to_owned(),
-        reason: format!("generate runner copy name: {error}"),
+        reason: "generate runner copy name: random number generation failed".to_owned(),
     })?;
     let copy_path = directory.join(format!(
         "runner-{}",
@@ -649,28 +659,28 @@ fn create_descriptor_bound_copy(
             .open(&copy_path)
             .map_err(|source| KvistError::SandboxUnavailable {
                 runner: "<unconfigured>".to_owned(),
-                reason: format!("create runner copy: {source}"),
+                reason: format!("create runner copy: {{source}}"),
             })?;
     if let Err(source) = writable_file
-        .write_all(&_bytes)
+        .write_all(bytes)
         .and_then(|()| writable_file.sync_all())
     {
         let _ = fs::remove_file(&copy_path);
         return Err(KvistError::SandboxUnavailable {
             runner: "<unconfigured>".to_owned(),
-            reason: format!("write runner copy: {source}"),
+            reason: format!("write runner copy: {{source}}"),
         });
     }
     fs::set_permissions(&copy_path, fs::Permissions::from_mode(0o500)).map_err(|source| {
         KvistError::SandboxUnavailable {
             runner: "<unconfigured>".to_owned(),
-            reason: format!("protect runner copy: {source}"),
+            reason: format!("protect runner copy: {{source}}"),
         }
     })?;
     drop(writable_file);
     let file = File::open(&copy_path).map_err(|source| KvistError::SandboxUnavailable {
         runner: "<unconfigured>".to_owned(),
-        reason: format!("reopen runner copy: {source}"),
+        reason: format!("reopen runner copy: {{source}}"),
     })?;
     // On non-Linux platforms, we skip F_SETFD since the platform does not
     // support descriptor-bound execution. The runner is still copied to a
@@ -679,7 +689,10 @@ fn create_descriptor_bound_copy(
     Ok((file, copy_path, launch_path))
 }
 
-fn secure_copy_directory(project_root: &Path) -> Result<PathBuf> {
+fn secure_copy_directory_or_file(
+    project_root: &Path,
+    _is_directory_runner: bool,
+) -> Result<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
 
     let base = std::env::var_os("XDG_STATE_HOME")
@@ -691,10 +704,10 @@ fn secure_copy_directory(project_root: &Path) -> Result<PathBuf> {
                 .to_owned(),
         })?;
     let directory = base.join("kvist").join("runner-copies-v1");
-    if directory.starts_with(project_root.canonicalize().map_err(|source| {
+    if directory.starts_with(project_root.canonicalize().map_err(|_source| {
         KvistError::SandboxUnavailable {
             runner: "<unconfigured>".to_owned(),
-            reason: format!("canonicalize project for descriptor-bound runner state: {source}"),
+            reason: "canonicalize project for descriptor-bound runner state: IO error".to_owned(),
         }
     })?) {
         return Err(KvistError::SandboxUnavailable {
@@ -702,14 +715,16 @@ fn secure_copy_directory(project_root: &Path) -> Result<PathBuf> {
             reason: "descriptor-bound runner state must not be inside the project".to_owned(),
         });
     }
-    fs::create_dir_all(&directory).map_err(|source| KvistError::SandboxUnavailable {
+    fs::create_dir_all(&directory).map_err(|_source| KvistError::SandboxUnavailable {
         runner: "<unconfigured>".to_owned(),
-        reason: format!("create descriptor-bound runner state directory: {source}"),
+        reason:
+            "create descriptor-bound runner state directory: permission denied or already exists"
+                .to_owned(),
     })?;
     let metadata =
-        fs::symlink_metadata(&directory).map_err(|source| KvistError::SandboxUnavailable {
+        fs::symlink_metadata(&directory).map_err(|_source| KvistError::SandboxUnavailable {
             runner: "<unconfigured>".to_owned(),
-            reason: format!("inspect descriptor-bound runner state directory: {source}"),
+            reason: "inspect descriptor-bound runner state directory: permission denied or not a directory".to_owned(),
         })?;
     if metadata.file_type().is_symlink() || !metadata.file_type().is_dir() {
         return Err(KvistError::SandboxUnavailable {
@@ -717,10 +732,10 @@ fn secure_copy_directory(project_root: &Path) -> Result<PathBuf> {
             reason: "descriptor-bound runner state must be a real directory".to_owned(),
         });
     }
-    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).map_err(|source| {
+    fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).map_err(|_source| {
         KvistError::SandboxUnavailable {
             runner: "<unconfigured>".to_owned(),
-            reason: format!("protect descriptor-bound runner state directory: {source}"),
+            reason: "protect descriptor-bound runner state directory: permission denied".to_owned(),
         }
     })?;
     Ok(directory)

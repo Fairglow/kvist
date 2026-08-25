@@ -727,14 +727,14 @@ fn validate_task(task: &Task) -> std::result::Result<(), TaskQueueError> {
         }
     }
     match (task.status, &task.recovery_state) {
-        (TaskStatus::InProgress, Some(state)) => {
+        (TaskStatus::InProgress, Some(_state)) => {
             return Err(TaskQueueError::invalid(format!(
                 "in-progress task `{}` requires recovery_state: null",
                 task.id
             )));
         }
         (TaskStatus::InProgress, None) => {}
-        (TaskStatus::Pending, Some(state)) => {
+        (TaskStatus::Pending, Some(_state)) => {
             return Err(TaskQueueError::invalid(format!(
                 "pending task `{}` requires recovery_state: null",
                 task.id
@@ -748,7 +748,7 @@ fn validate_task(task: &Task) -> std::result::Result<(), TaskQueueError> {
             )));
         }
         (TaskStatus::Completed, None) => {}
-        (TaskStatus::Blocked, Some(state)) => {
+        (TaskStatus::Blocked, Some(_state)) => {
             return Err(TaskQueueError::invalid(format!(
                 "blocked task `{}` requires recovery_state: null",
                 task.id

@@ -77,14 +77,29 @@ fn execute_agent_captures_stdout_and_stderr_in_log_file() {
     let task_id = "test-task";
     let runner_workspace = TempDir::new().expect("external runner workspace");
     let runner = runner_workspace.path().join("fake-sandbox-runner");
+    fs::create_dir_all(&runner).expect("create runner directory");
+    // Probe handler: returns network=deny; mount=component isolation confirmation
     fs::write(
-        &runner,
-        "#!/bin/sh\nif [ \"$1\" = --kvist-sandbox-probe-v1 ]; then\n  printf 'kvist-sandbox-probe-v1: network=deny; mount=component\\n'\nelse\n  cat >/dev/null\n  printf 'sandboxed agent output\\n'\nfi\n",
+        runner.join("probe.sh"),
+        r#"#!/bin/sh
+printf 'kvist-sandbox-probe-v1: network=deny; mount=component\n'"#,
     )
-    .expect("write runner");
+    .expect("write probe handler");
+    // Execute handler: discards all input and writes a deterministic response
+    fs::write(
+        runner.join("execute.sh"),
+        r#"#!/bin/sh
+cat >/dev/null
+printf 'sandboxed agent output\n'"#,
+    )
+    .expect("write execute handler");
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(&runner, fs::Permissions::from_mode(0o755))
-        .expect("make runner executable");
+        .expect("make runner directory executable");
+    fs::set_permissions(runner.join("probe.sh"), fs::Permissions::from_mode(0o755))
+        .expect("make probe handler executable");
+    fs::set_permissions(runner.join("execute.sh"), fs::Permissions::from_mode(0o755))
+        .expect("make execute handler executable");
     let sandbox = SandboxConfig {
         runner: runner.to_string_lossy().into_owned(),
         environment_allowlist: vec![],

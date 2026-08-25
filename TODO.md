@@ -20,54 +20,54 @@ All 24 items below are accepted as complete. The codebase reflects their impleme
 
 ## Phase 1 — Core Engine
 
-| # | Item | Summary |
-|---|------|---------|
+| #       | Item            | Summary                                                                                                                                                            |
+| ------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | P1-Core | Core CLI engine | `kvist init`, `kvist tree`, `kvist spec new`, `kvist spec validate`, bounded directory traversal, direct symlink safety checks, read-only VCS tracking diagnostics |
 
 ## Phase 2 — Execution Boundary
 
-| # | Item | Summary |
-|---|------|---------|
-| P2-01 | Independent TODO queue and dependency graph schemas | Versioned parsing, semantic validation, deterministic serialization, root-inspection integration, contract tests, compliance review |
-| P2-02 | Project inspection and machine-readable status | `kvist status` renders deterministic text and JSON reports from shared root/component model |
-| P2-03 | Safe task selection and execution state updates | Task selection, transition contract, lock and attempt-record recovery rules |
-| P2-04 | User-provided agent invocation mechanics | `src/config.rs` and `src/agent.rs` with precedence, shell-free spawning, log capture, token-record parsing |
-| P2-04b | Basic CLI-wrapper templates | Two configured profiles support `{prompt}`, `{context_files}`, `{target_directory}` via whitespace-delimited arguments |
-| P2-05 | Test-command verification as explicit trust boundary | Configured test-policy verification with bounded execution and durable result persistence |
-| P2-05b | Sandbox all external execution | Component-only, deny-network external sandbox runner; fails before task mutation |
-| P2-05c | Cryptographic approval binding | Authenticated user-state approval binds effective agents, sandbox runner, test policy, versions |
-| P2-05d | Bound agent subprocess resources | Per-profile timeouts, combined-output limits, cancellation, redacted bounded evidence |
-| P2-06 | Atomic task execution loop | `kvist task run <COMPONENT_DIR> [TASK_ID]` driver, concurrent locks, atomic progress/blocked state transitions |
-| P2-07 | Phase 2 security and compliance review | Independent security, clean-slate documentation, and source-blind compliance passes |
-| P2-08 | Execution-boundary compliance reconciliation | Fresh clean-slate and source-blind reviews, explicit documentation arbitration, legal durable queue transitions |
-| P2-09a | Model-resolution coverage | Named model per role, `default_model` fallback, first-entry aliases, unknown-name diagnostics, `none` bypass, system-prompt prefixing |
-| P2-09b | Template-contract validation | Narrow shell-free argument template, placeholder resolution, Ollama `{model}` placeholder documented as unsupported |
-| P2-09c | Execution portability decision | Platform-gated behavior defined; fail-closed on unsupported platforms with actionable diagnostics |
+| #      | Item                                                 | Summary                                                                                                                               |
+| ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| P2-01  | Independent TODO queue and dependency graph schemas  | Versioned parsing, semantic validation, deterministic serialization, root-inspection integration, contract tests, compliance review   |
+| P2-02  | Project inspection and machine-readable status       | `kvist status` renders deterministic text and JSON reports from shared root/component model                                           |
+| P2-03  | Safe task selection and execution state updates      | Task selection, transition contract, lock and attempt-record recovery rules                                                           |
+| P2-04  | User-provided agent invocation mechanics             | `src/config.rs` and `src/agent.rs` with precedence, shell-free spawning, log capture, token-record parsing                            |
+| P2-04b | Basic CLI-wrapper templates                          | Two configured profiles support `{prompt}`, `{context_files}`, `{target_directory}` via whitespace-delimited arguments                |
+| P2-05  | Test-command verification as explicit trust boundary | Configured test-policy verification with bounded execution and durable result persistence                                             |
+| P2-05b | Sandbox all external execution                       | Component-only, deny-network external sandbox runner; fails before task mutation                                                      |
+| P2-05c | Cryptographic approval binding                       | Authenticated user-state approval binds effective agents, sandbox runner, test policy, versions                                       |
+| P2-05d | Bound agent subprocess resources                     | Per-profile timeouts, combined-output limits, cancellation, redacted bounded evidence                                                 |
+| P2-06  | Atomic task execution loop                           | `kvist task run <COMPONENT_DIR> [TASK_ID]` driver, concurrent locks, atomic progress/blocked state transitions                        |
+| P2-07  | Phase 2 security and compliance review               | Independent security, clean-slate documentation, and source-blind compliance passes                                                   |
+| P2-08  | Execution-boundary compliance reconciliation         | Fresh clean-slate and source-blind reviews, explicit documentation arbitration, legal durable queue transitions                       |
+| P2-09a | Model-resolution coverage                            | Named model per role, `default_model` fallback, first-entry aliases, unknown-name diagnostics, `none` bypass, system-prompt prefixing |
+| P2-09b | Template-contract validation                         | Narrow shell-free argument template, placeholder resolution, Ollama `{model}` placeholder documented as unsupported                   |
+| P2-09c | Execution portability decision                       | Platform-gated behavior defined; fail-closed on unsupported platforms with actionable diagnostics                                     |
 
 ## Phase 3 — Independent Compliance Automation
 
-| # | Item | Summary |
-|---|------|---------|
-| P3-01 | Component-design and feasibility skills | Versioned architect, specification-interview, feasibility-review contracts with required inputs, permitted context, outputs, human approval gates |
-| P3-02 | Queue-design skills | Atomic tasks with requirement traceability, test/implementation/security/compliance ordering, human review, schema validation, refusal behavior |
-| P3-03 | Implementation and test skills | Test-generation, implementation, native-documentation skills with only component/immediate-parent/root contracts as context |
-| P3-04 | Clean-slate documentation skill | Source-only documenter excluding `SPEC.md` and prior `IMPL.md`; observed-contract record with uncertainty reporting |
-| P3-05 | Independent review skills | Reviewer inputs, independence boundaries, structured findings, evidence retention; `SPEC.md` vs independently produced `IMPL.md` comparison |
-| P3-06 | Clean-slate and source-blind pipelines | Engine-enforced skill enforcement in approved sandbox; candidate `IMPL.md` through reviewed artifact update |
-| P3-07 | Durable human arbitration | Retained mismatch evidence, explicit human choice (redesign/proposed change/manual resolution), no auto-rewrite of `SPEC.md` or `IMPL.md` |
-| P3-08 | Specification interview mode | Resumable `kvist spec interview <COMPONENT_DIR>` workflow; agent routed through approved execution boundary; draft requires explicit acceptance |
-| P3-09 | Reviewed queue generation | Planning command passes only accepted specification, immediate-parent contract, root contract to approved architect profile; schema validation; refuses overwrite |
+| #     | Item                                    | Summary                                                                                                                                                           |
+| ----- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P3-01 | Component-design and feasibility skills | Versioned architect, specification-interview, feasibility-review contracts with required inputs, permitted context, outputs, human approval gates                 |
+| P3-02 | Queue-design skills                     | Atomic tasks with requirement traceability, test/implementation/security/compliance ordering, human review, schema validation, refusal behavior                   |
+| P3-03 | Implementation and test skills          | Test-generation, implementation, native-documentation skills with only component/immediate-parent/root contracts as context                                       |
+| P3-04 | Clean-slate documentation skill         | Source-only documenter excluding `SPEC.md` and prior `IMPL.md`; observed-contract record with uncertainty reporting                                               |
+| P3-05 | Independent review skills               | Reviewer inputs, independence boundaries, structured findings, evidence retention; `SPEC.md` vs independently produced `IMPL.md` comparison                       |
+| P3-06 | Clean-slate and source-blind pipelines  | Engine-enforced skill enforcement in approved sandbox; candidate `IMPL.md` through reviewed artifact update                                                       |
+| P3-07 | Durable human arbitration               | Retained mismatch evidence, explicit human choice (redesign/proposed change/manual resolution), no auto-rewrite of `SPEC.md` or `IMPL.md`                         |
+| P3-08 | Specification interview mode            | Resumable `kvist spec interview <COMPONENT_DIR>` workflow; agent routed through approved execution boundary; draft requires explicit acceptance                   |
+| P3-09 | Reviewed queue generation               | Planning command passes only accepted specification, immediate-parent contract, root contract to approved architect profile; schema validation; refuses overwrite |
 
 ## Phase 4 — Deferred Visual and Editor Ecosystem
 
 All Phase 4 items are deferred until Phase 3 review workflow is independently reviewed and approved. The terminal commands must remain the only required runtime.
 
-| # | Item | Summary |
-|---|------|---------|
-| P4-01 | Local component-state API | Versioned, authenticated local API for component state, validated artifact views, attempt evidence, approved transitions |
-| P4-02 | Optional local visual client | Browser-based tree and editor; explicit editing workflow; no bypass of spec/queue/approval/review checks |
-| P4-03 | Visual arbitration support | Side-by-side `SPEC.md` / `IMPL.md` comparison with explicit confirmation for any resolution |
-| P4-04 | Opt-in editor diagnostics | `kvist status --json` foreground process; diagnostics for spec validity, queue validity, stale revisions, dependency cycles; no daemon |
+| #     | Item                         | Summary                                                                                                                                |
+| ----- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| P4-01 | Local component-state API    | Versioned, authenticated local API for component state, validated artifact views, attempt evidence, approved transitions               |
+| P4-02 | Optional local visual client | Browser-based tree and editor; explicit editing workflow; no bypass of spec/queue/approval/review checks                               |
+| P4-03 | Visual arbitration support   | Side-by-side `SPEC.md` / `IMPL.md` comparison with explicit confirmation for any resolution                                            |
+| P4-04 | Opt-in editor diagnostics    | `kvist status --json` foreground process; diagnostics for spec validity, queue validity, stale revisions, dependency cycles; no daemon |
 
 ---
 
