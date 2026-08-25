@@ -28,7 +28,7 @@ All 24 items below are accepted as complete. The codebase reflects their impleme
 
 | # | Item | Summary |
 |---|------|---------|
-| P2-01 | Independent TODO queue and dependency graph schemas (v2) | Version-2 parsing, semantic validation, deterministic serialization, root-inspection integration, contract tests, compliance review |
+| P2-01 | Independent TODO queue and dependency graph schemas | Versioned parsing, semantic validation, deterministic serialization, root-inspection integration, contract tests, compliance review |
 | P2-02 | Project inspection and machine-readable status | `kvist status` renders deterministic text and JSON reports from shared root/component model |
 | P2-03 | Safe task selection and execution state updates | Task selection, transition contract, lock and attempt-record recovery rules |
 | P2-04 | User-provided agent invocation mechanics | `src/config.rs` and `src/agent.rs` with precedence, shell-free spawning, log capture, token-record parsing |
@@ -67,17 +67,15 @@ All Phase 4 items are deferred until Phase 3 review workflow is independently re
 | P4-01 | Local component-state API | Versioned, authenticated local API for component state, validated artifact views, attempt evidence, approved transitions |
 | P4-02 | Optional local visual client | Browser-based tree and editor; explicit editing workflow; no bypass of spec/queue/approval/review checks |
 | P4-03 | Visual arbitration support | Side-by-side `SPEC.md` / `IMPL.md` comparison with explicit confirmation for any resolution |
-| P4-04 | Opt-in editor diagnostics | `kvist lsp` foreground process; diagnostics for spec validity, queue validity, stale revisions, dependency cycles; no daemon |
+| P4-04 | Opt-in editor diagnostics | `kvist status --json` foreground process; diagnostics for spec validity, queue validity, stale revisions, dependency cycles; no daemon |
 
 ---
 
 # Remaining Prioritized Backlog
 
-## Migration and Conversion (New Priority)
+## Onboarding and Integration
 
-These items address converting existing projects into Kvist-managed components.
-
-### TODO MX-01 — Convert Existing Project to Kvist Component
+### TODO ONB-01 — Convert Existing Project to Kvist Component
 
 - **Context:** A project that already has source code, tests, and a `Cargo.toml` needs to be converted into a Kvist-managed component without losing existing work. This is the most common onboarding path.
 - **Acceptance criteria:**
@@ -100,9 +98,9 @@ These items address converting existing projects into Kvist-managed components.
     ```
   - The user must explicitly accept the generated `SPEC.md` and `TODOS.yaml` via `kvist spec accept` and `kvist queue accept` before any task runs.
   - No files are overwritten without explicit confirmation.
-  - Write integration tests for: existing Cargo.toml detection, preservation of existing files, spec interview flow, TODOS generation from Cargo.toml, and the "accept all" flow.
+  - Write integration tests for: existing `Cargo.toml` detection, preservation of existing files, spec interview flow, TODOS generation from `Cargo.toml`, and the "accept all" flow.
 
-### TODO MX-02 — Import Kvist Artifacts from a Git Repository
+### TODO ONB-02 — Import Kvist Artifacts from a Git Repository
 
 - **Context:** A component may have already been developed by an external agent or human and committed to Git. The user wants to bring it into the Kvist workflow.
 - **Acceptance criteria:**
@@ -112,24 +110,15 @@ These items address converting existing projects into Kvist-managed components.
   - The import respects the same lock and approval rules as a new component.
   - Write integration tests for: successful import with existing artifacts, import without artifacts (new component creation), and import of a blocked component.
 
-### TODO MX-03 — Preserve Existing Task State Across Reboots
+### TODO ONB-03 — Persist Task State to Disk
 
-- **Context:** A task may be in-progress or blocked when the system crashes. The queue must survive.
+- **Context:** A task may be in-progress or blocked when the system crashes or the process exits unexpectedly. The queue must survive so that work is not lost.
 - **Acceptance criteria:**
-  - The component's `TODOS.yaml` is stored as a versioned artifact in the component directory (not only in memory).
+  - The component's `TODOS.yaml` is stored as a versioned artifact in the component directory (`.kvist/TODOS.yaml`) at every state transition.
   - On startup, `kvist task run` reads the persisted queue from disk and reconstructs the in-memory state.
   - In-progress tasks are resumed from their last known state; blocked tasks are presented for review.
   - If the component directory was removed and re-added, the persisted queue is re-read from disk.
   - Write integration tests for: task in-progress state persistence, task blocked state persistence, and queue reconstruction after a "crash" (simulated by writing the artifact then reading it back).
-
-### TODO MX-04 — Backward Compatibility with Version-1 Queues
-
-- **Context:** Older versions of Kvist (or other tools) may have produced `TODOS.yaml` files in version-1 format.
-- **Acceptance criteria:**
-  - `kvist task run` detects a version-1 `TODOS.yaml` and offers to migrate it to version-2.
-  - The migration is explicit and requires user confirmation.
-  - The tool warns about any schema differences that could not be resolved automatically.
-  - Write integration tests for: migration from version-1 to version-2, and refusal to accept incompatible versions.
 
 ---
 
@@ -142,7 +131,7 @@ These items address converting existing projects into Kvist-managed components.
   - Add `--only-specs` to print only the status of specifications (`SPEC.md` validity, digest state) without queue details.
   - Add `--only-impls` to list and focus on implementation statuses across components (`IMPL.md` validity).
   - Add `--unfinished` to show only components that are blocked, stale, or incomplete (omitting `current` components).
-  - Ensure these status filters are fully compatible with both the default plain-text reporter and the machine-readable versioned JSON report.
+  - Ensure these status filters are fully compatible with both the default plain-text reporter and the machine-readable JSON report.
   - Write integration tests in `tests/status.rs` to verify correct filtering behavior.
 
 ### DONE UX-03 — Support "Transparent" Namespace Directories
@@ -175,8 +164,8 @@ These items address converting existing projects into Kvist-managed components.
 
 - **Context:** Users must be able to easily wrap Kvist inside their own scripts, IDE extensions, or custom GUIs/UIs. All CLI commands must support structured, machine-readable output.
 - **Acceptance criteria:**
-  - Support a uniform `--json` or `--format json` flag across every single Kvist command (including `init`, `spec new`, `spec accept`, `task run`, and `task log`).
-  - Define and serialize stable, versioned JSON schemas for all command outputs.
+  - Support a uniform `--json` flag across every single Kvist command (including `init`, `spec new`, `spec accept`, `task run`, and `task log`).
+  - Define and serialize stable JSON schemas for all command outputs.
   - Document these JSON schemas under `/docs/` to prevent wrapping integrations from breaking.
   - Verify JSON output compliance across all CLI commands using automated tests.
 
@@ -301,7 +290,7 @@ Phase 4 begins only after the terminal execution boundary and Phase 3 review wor
 
 - **Context:** Editors can surface stale or invalid artifacts early, but continuous background work must not become a core requirement.
 - **Acceptance criteria:**
-  - Define `kvist lsp` and any optional watch mode as foreground, user-started processes with explicit lifecycle, resource, and cross-platform behavior.
+  - Define `kvist status --json` as a foreground, user-started process with explicit lifecycle, resource, and cross-platform behavior.
   - Publish standard diagnostics for specification validity, queue validity, stale revisions, and dependency cycles without mutating project files.
   - Test shutdown, filesystem races, and unsupported-platform behavior; do not require telemetry, credentials, cloud services, or a persistent daemon.
 
