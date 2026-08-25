@@ -59,42 +59,17 @@ Below is the record of completed Phase 3 and UX milestones.
 
 ---
 
-# Remaining Prioritized Backlog
-
-## Status conventions
-
-- `TODO` — scoped and ready once its dependencies are done.
-- `IN PROGRESS` — actively being implemented.
-- `BLOCKED` — needs an explicit product or security decision.
-- `DONE` / `COMPLETE` — acceptance criteria and listed verification are complete.
-
----
-
 # Completed Milestones
 
-Below is the record of completed Phase 1, Phase 2, and UX milestones.
+Below is the record of completed Phase 3 and UX milestones.
 
 <details>
-<summary><b>Click to expand completed milestones (16 items)</b></summary>
+<summary><b>Click to expand completed milestones (8 items)</b></summary>
 
-- **P1-Core** — Core CLI engine features (`init`, `tree`, `spec new`, `spec validate`, bounded directory traversal, direct symlink safety checks, and read-only VCS tracking diagnostics).
-- **P2-01 — Specify independent TODO queue and dependency graph schemas** (Version-2 parsing, semantic validation, deterministic serialization, root-inspection integration, and contract tests are complete. Compliance review documented in `COMPLIANCE_REVIEW.md`).
-- **P2-02 — Implement project inspection and machine-readable status** (`kvist status` renders deterministic version-1 text and JSON reports from shared root/component model).
-- **P2-03 — Implement safe task selection and execution state updates** (Task selection and transition contract, lock and attempt-record recovery rules, and integration tests complete).
-- **P2-04 — Implement User-Provided Agent Invocation Mechanics** (Implemented under `src/config.rs` and `src/agent.rs` with configuration precedence, shell-free spawning, log capture, and optional token-record parsing.)
-- **P2-04b — Implement Basic CLI-Wrapper Templates** (The two configured profiles support `{prompt}`, `{context_files}`, and `{target_directory}` through whitespace-delimited, shell-free arguments. This is not a general shell or quoting language.)
-- **P2-05 — Implement test-command verification as an explicit trust boundary** (Configured test-policy verification with bounded execution and durable result persistence; later P2-05b through P2-05d complete its isolation, approval, and resource controls.)
-- **P2-05b — Sandbox all external execution** (Agents and verifiers require a component-only, deny-network external sandbox runner; unavailable isolation fails before task mutation.)
-- **P2-05c — Bind cryptographic approval to execution configuration** (Authenticated user-state approval binds effective agents, sandbox runner, test policy, and versions; changed or forged inputs fail before execution.)
-- **P2-05d — Bound agent subprocess resources** (Per-profile timeouts, combined-output limits, cancellation, and redacted bounded evidence block unsafe agent runs.)
-- **P2-06 — Implement the atomic task execution loop** (`kvist task run <COMPONENT_DIR> [TASK_ID]` driver, concurrent locks, atomic progress/blocked state transitions).
-- **P2-07 — Perform Phase 2 security and compliance review** (Independent security, clean-slate documentation, and source-blind compliance passes completed. Retained review items remain for the external-execution boundary; this record does not approve production execution.)
-- **P2-08 — Complete execution-boundary compliance reconciliation** (Fresh clean-slate and source-blind reviews, explicit documentation arbitration, and legal durable queue transitions close the final Phase 2 lifecycle work.)
-- **P2-09a — Model-resolution coverage** (The agent profiles now resolve a named model per role. `model` overrides `default_model`; the `default` and `default-model` aliases select the first listed model. A normal selected model uses the existing shell-free argument interpolation and may prefix `system_prompt`. An entry named `none` bypasses both interpolation and prompt prefixing, but still runs as a sandboxed external program under the approved execution policy. The selected source and complete profiles are approval-bound, so changing model selection or its command requires `kvist task approve-policy` again before `kvist task run`. Context: the resolver now selects a named model before command execution, but its behavior is security-sensitive: an incorrect fallback could invoke a different external program than the human approved. Acceptance criteria: cover explicit selection, `default_model` fallback, first-entry aliases, unknown-name diagnostics, raw `none`, and system-prompt prefixing without requiring an installed provider. Verify that a selection failure happens before sandbox probing or task mutation and lists the available names deterministically.)
-- **P2-09b — Template-contract validation** (The model command uses a deliberately narrow, shell-free argument template. Unsupported or unresolved placeholders must never be presented as a supported provider integration. Context: model commands use a deliberately narrow, shell-free argument template. Unsupported or unresolved placeholders must never be presented as a supported provider integration. Acceptance criteria: exercise repeated context-path expansion, prompt and target substitution, quoting limitations, and non-shell behavior. Decide whether unsupported placeholders are rejected at configuration load time or resolved by a documented mechanism before execution. In particular, resolve or remove the built-in Ollama template's literal `{model}` placeholder; until then, document it as unsupported.)
-- **P2-09c — Execution portability decision** (The descriptor-bound sandbox-runner launch currently fails closed on platforms without that mechanism. The supported behavior must be explicit rather than inferred from the portable CLI surface. Context: the descriptor-bound sandbox-runner launch currently fails closed on platforms without that mechanism. The supported behavior must be explicit rather than inferred from the portable CLI surface. Acceptance criteria: define the supported non-Linux execution behavior and its security invariant, or retain fail-closed refusal with an actionable diagnostic. Add platform-gated tests for every supported execution path and document the result in the user-facing execution policy.)
-- **P3-01 — Define component-design and feasibility skills** (Define versioned architect, specification-interview, and feasibility-review skill contracts with required inputs, permitted context, outputs, and human approval gates. Require feasibility output to identify unresolved decisions, contradictions, bounds, and failure paths before a queue is drafted.)
-- **P3-02 — Define queue-design skills** (Define a designer skill that produces atomic tasks with requirement traceability and the required test, implementation, security, and compliance ordering. Specify human review, schema validation, and refusal behavior for ambiguous or incomplete specifications.)
+- **P3-03 — Define implementation and test skills** (Define test-generation, implementation, and native-documentation skills with only the component, immediate-parent contract, and root contract as required context. Require tests for public behavior, boundaries, malformed input, and failure paths before implementation is certified.)
+- **P3-04 — Define the clean-slate documentation skill** (Define a source-only documenter skill that receives implementation source, tests, and manifests, but excludes `SPEC.md` and prior `IMPL.md`. Require an observed-contract record that reports uncertainty and never copies planned requirements into implementation evidence.)
+- **P3-05 — Define independent review skills** (Define reviewer inputs, independence boundaries, structured findings, and evidence retention for each review type. Require the final compliance skill to compare `SPEC.md` with independently produced `IMPL.md`, not with source code or implementer claims.)
+- **P3-06 — Implement clean-slate and source-blind pipelines** (The defined skills must be enforced by the Rust engine, not only by prompts, before automated compliance claims are allowed.)
 
 </details>
 
