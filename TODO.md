@@ -112,7 +112,7 @@ These items focus on polishing Kvist for daily terminal usage, wrapping, and dev
   - Ensure the command validates the queue structure and integrity before writing.
   - Write integration tests reproducing crashed runs and verifying both rollback and recorded-resolution paths.
 
-### IN PROGRESS UX-10 — Robust Process-Tree Cancellation & Cleanup (Robustness Gap)
+### DONE UX-10 — Robust Process-Tree Cancellation & Cleanup (Robustness Gap)
 
 - **Context:** The resource limits implemented in P2-05d terminate timed-out or canceled external processes. However, if an agent or test-policy runner spawns children (e.g., compile daemons, child subprocesses), terminating only the immediate child can leave orphan background processes running on the host.
 - **Acceptance criteria:**
