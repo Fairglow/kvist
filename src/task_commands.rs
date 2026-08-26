@@ -143,7 +143,11 @@ fn validate_context_with_blocked(
             .any(|artifact| artifact.state != VcsArtifactState::Tracked)
     {
         return Err(KvistError::TaskVcsNotCurrent {
-            summary: inspection.vcs.summary,
+            summary: inspection
+                .vcs
+                .diagnostic
+                .clone()
+                .unwrap_or(inspection.vcs.summary),
         });
     }
     let component = inspection
@@ -879,7 +883,11 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
             .any(|artifact| artifact.state != VcsArtifactState::Tracked)
     {
         return Err(KvistError::TaskVcsNotCurrent {
-            summary: inspection.vcs.summary,
+            summary: inspection
+                .vcs
+                .diagnostic
+                .clone()
+                .unwrap_or(inspection.vcs.summary),
         });
     }
     let component = inspection

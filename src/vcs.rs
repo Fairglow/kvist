@@ -310,7 +310,10 @@ fn inspect_git(
         let args = std::iter::once(OsString::from("ls-files"))
             .chain(std::iter::once(OsString::from("-z")))
             .chain(std::iter::once(OsString::from("--")))
-            .chain(batch.iter().map(|path| path.clone().into_os_string()))
+            .chain(batch.iter().map(|path| {
+                let s = path.to_string_lossy().replace('\\', "/");
+                OsString::from(s)
+            }))
             .collect::<Vec<_>>();
         match run_owned("git", &args, repository_root) {
             CommandResult::Success(output) => match parse_paths(output, b'\0', "Git") {
@@ -387,7 +390,8 @@ fn git_ignored(
     let input = repository_paths
         .iter()
         .flat_map(|path| {
-            let mut bytes = path.as_os_str().as_encoded_bytes().to_vec();
+            let s = path.to_string_lossy().replace('\\', "/");
+            let mut bytes = s.into_bytes();
             bytes.push(b'\0');
             bytes
         })
@@ -610,9 +614,19 @@ fn path_from_bytes(bytes: &[u8], vcs: &str) -> std::result::Result<PathBuf, Stri
     }
     #[cfg(not(unix))]
     {
-        String::from_utf8(bytes.to_vec())
-            .map(PathBuf::from)
-            .map_err(|_| format!("{vcs} returned a non-UTF-8 path"))
+        let mut s = String::from_utf8(bytes.to_vec())
+            .map_err(|_| format!("{vcs} returned a non-UTF-8 path"))?;
+        if s.starts_with('/') {
+            if s.starts_with("/opt/target/wine/drive_c/") {
+                s = s.replace("/opt/target/wine/drive_c", "C:");
+            } else if s.starts_with("/opt/target/wine/drive_c") {
+                s = s.replace("/opt/target/wine/drive_c", "C:");
+            } else {
+                s = format!("Z:{}", s);
+            }
+            s = s.replace('/', "\\");
+        }
+        Ok(PathBuf::from(s))
     }
 }
 

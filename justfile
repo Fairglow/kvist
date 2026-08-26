@@ -25,12 +25,18 @@ release:
     cargo build --locked --release
 
 test:
-    #cargo test --locked
     cargo nextest run --locked --test-threads num-cpus
 
 wine:
     cargo build --locked --target x86_64-pc-windows-gnu
-    cargo test --target x86_64-pc-windows-gnu
+    @mkdir -p /opt/target/wine/drive_c/windows
+    @echo "@echo off" > /opt/target/wine/drive_c/windows/git.bat
+    @echo "Z:\\usr\\bin\\git %*" >> /opt/target/wine/drive_c/windows/git.bat
+    @if which jj >/dev/null 2>&1; then \
+        echo "@echo off" > /opt/target/wine/drive_c/windows/jj.bat; \
+        echo "Z:\\home\\stefan\\.cargo\\bin\\jj %*" >> /opt/target/wine/drive_c/windows/jj.bat; \
+    fi
+    WINEARCH=win64 WINEPREFIX=/opt/target/wine WINEDEBUG=-all cargo test --target x86_64-pc-windows-gnu
 
 completions:
     cargo run --locked -- completions bash > /dev/null

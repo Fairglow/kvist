@@ -1,5 +1,6 @@
 use std::{
     fs,
+    path::Path,
     process::{Command, Output},
 };
 
@@ -325,7 +326,12 @@ fn status_transparent_namespace_parent_specification() {
     let stdout = String::from_utf8(output.stdout).expect("UTF-8 text output");
     // Ensure both . and ordinary/component are discovered and current
     assert!(stdout.contains("component: . state: current"));
-    assert!(stdout.contains("component: ordinary/component state: current"));
+    let ordinary_component = Path::new("ordinary")
+        .join("component")
+        .to_string_lossy()
+        .into_owned()
+        .replace('\\', "\\\\");
+    assert!(stdout.contains(&format!("component: {ordinary_component} state: current")));
     assert!(!stdout.contains("cause:"));
 
     // Let's modify the root SPEC.md by appending a line to trigger a parent-specification-revision-changed cause
@@ -341,6 +347,9 @@ fn status_transparent_namespace_parent_specification() {
     assert!(output_stale.status.success());
     let stdout_stale = String::from_utf8(output_stale.stdout).expect("UTF-8 text output");
     // Under transparent directories, the relative path from ordinary/component to root SPEC.md is "../../SPEC.md"
-    assert!(stdout_stale.contains("component: ordinary/component state: stale"));
-    assert!(stdout_stale.contains("cause: parent-specification-revision-changed ../../SPEC.md"));
+    assert!(stdout_stale.contains(&format!("component: {ordinary_component} state: stale")));
+    let relative_spec = "../../SPEC.md";
+    assert!(stdout_stale.contains(&format!(
+        "cause: parent-specification-revision-changed {relative_spec}"
+    )));
 }

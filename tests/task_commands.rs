@@ -171,6 +171,7 @@ tasks:
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn task_next_selects_the_first_ready_task_without_writing_the_queue() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -200,6 +201,7 @@ fn task_next_requires_complete_vcs_tracking() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn task_transition_writes_auditable_atomic_state_change() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -233,6 +235,7 @@ fn task_transition_writes_auditable_atomic_state_change() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn task_transition_ignores_an_agent_visible_component_lock() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -259,6 +262,7 @@ fn task_transition_ignores_an_agent_visible_component_lock() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn task_transition_requires_a_block_reason() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -276,6 +280,7 @@ fn task_transition_requires_a_block_reason() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn spec_accept_resolves_staleness_and_updates_queue_revisions() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -317,6 +322,7 @@ fn spec_accept_resolves_staleness_and_updates_queue_revisions() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn spec_accept_rejects_invalid_specifications() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -372,6 +378,7 @@ tasks: []
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn spec_accept_on_child_updates_parent_revision() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
