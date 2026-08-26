@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use kvist::{
-    agent::split_command,
-    config::{AgentProfile, Model, Role},
-};
+use kvist::agent::split_command;
+
+#[cfg(target_os = "linux")]
+use kvist::config::{AgentProfile, Model, Role};
 
 #[cfg(target_os = "linux")]
 use kvist::{
