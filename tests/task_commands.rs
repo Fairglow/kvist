@@ -17,6 +17,7 @@ fn run_kvist(project: &TempDir, arguments: &[&str]) -> Output {
         .expect("run kvist command")
 }
 
+#[cfg(target_os = "linux")]
 fn track_project(project: &TempDir) {
     configure_fake_sandbox(project);
     let status = Command::new("git")
@@ -117,9 +118,6 @@ printf 'fake sandbox runner\n'
         .expect("configure sandbox");
     }
 }
-
-#[cfg(not(target_os = "linux"))]
-fn configure_fake_sandbox(_project: &TempDir) {}
 
 fn queue() -> String {
     format!(

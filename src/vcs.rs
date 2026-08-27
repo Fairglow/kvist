@@ -310,10 +310,7 @@ fn inspect_git(
         let args = std::iter::once(OsString::from("ls-files"))
             .chain(std::iter::once(OsString::from("-z")))
             .chain(std::iter::once(OsString::from("--")))
-            .chain(batch.iter().map(|path| {
-                let s = path.to_string_lossy().replace('\\', "/");
-                OsString::from(s)
-            }))
+            .chain(batch.iter().map(|path| git_pathspec(path)))
             .collect::<Vec<_>>();
         match run_owned("git", &args, repository_root) {
             CommandResult::Success(output) => match parse_paths(output, b'\0', "Git") {
@@ -390,8 +387,11 @@ fn git_ignored(
     let input = repository_paths
         .iter()
         .flat_map(|path| {
-            let s = path.to_string_lossy().replace('\\', "/");
-            let mut bytes = s.into_bytes();
+            let pathspec = git_pathspec(path);
+            #[cfg(unix)]
+            let mut bytes: Vec<u8> = pathspec.as_encoded_bytes().to_vec();
+            #[cfg(not(unix))]
+            let mut bytes: Vec<u8> = pathspec.to_string_lossy().into_owned().into_bytes();
             bytes.push(b'\0');
             bytes
         })
@@ -541,6 +541,22 @@ fn batch_paths(paths: Vec<PathBuf>) -> (Vec<Vec<PathBuf>>, BTreeSet<PathBuf>) {
     (batches, unqueryable)
 }
 
+/// Encodes a repository-relative path as Git pathspec input.
+///
+/// Git pathspec matching is byte-oriented and non-UTF-8 names are legal on
+/// Unix, so Unix paths keep their exact encoded bytes. Other platforms render
+/// the path with Git's canonical forward-slash separator.
+fn git_pathspec(path: &Path) -> OsString {
+    #[cfg(unix)]
+    {
+        OsString::from_vec(path.as_os_str().as_encoded_bytes().to_vec())
+    }
+    #[cfg(not(unix))]
+    {
+        OsString::from(path.to_string_lossy().replace('\\', "/"))
+    }
+}
+
 fn batch_jj_queries(queries: Vec<JjQuery>) -> Vec<Vec<JjQuery>> {
     let mut batches = Vec::new();
     let mut batch = Vec::new();
@@ -617,9 +633,7 @@ fn path_from_bytes(bytes: &[u8], vcs: &str) -> std::result::Result<PathBuf, Stri
         let mut s = String::from_utf8(bytes.to_vec())
             .map_err(|_| format!("{vcs} returned a non-UTF-8 path"))?;
         if s.starts_with('/') {
-            if s.starts_with("/opt/target/wine/drive_c/") {
-                s = s.replace("/opt/target/wine/drive_c", "C:");
-            } else if s.starts_with("/opt/target/wine/drive_c") {
+            if s.starts_with("/opt/target/wine/drive_c") {
                 s = s.replace("/opt/target/wine/drive_c", "C:");
             } else {
                 s = format!("Z:{}", s);
