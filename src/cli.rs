@@ -927,7 +927,8 @@ mod tests {
 
         let output = outcome.to_string();
         assert!(output.contains(r#""command":"init""#));
-        assert!(output.contains(&format!(r#""project_path":"{}""#, project.path().display())));
+        let expected_path = project.path().to_string_lossy().replace('\\', "\\\\");
+        assert!(output.contains(&format!(r#""project_path":"{expected_path}""#)));
     }
 
     #[test]
