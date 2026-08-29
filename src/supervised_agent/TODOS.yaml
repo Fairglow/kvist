@@ -1,0 +1,442 @@
+schema_version: 1
+component:
+  specification_revision: "sha256:75f8bfa5b884d158875c659d79dfb25a9ebf3654d896f5f867e058279b98fc84"
+  parent_specification:
+    path: "../SPEC.md"
+    revision: "sha256:c036c7e3d772c9e54d0ce137ba670bf3f30f8b14d1a2125ad3d2d297c6505349"
+  revalidation:
+    state: current
+    checked_at: "2026-08-29T21:58:11Z"
+    stale_since: null
+    causes: []
+tasks:
+  - id: "sa-01-write-tests"
+    title: "Define standalone supervision tests"
+    description: "Write failing library and CLI tests for shell-free rendering, explicit host acknowledgement, prompt files, retry context, terminal process failures, loop detection, and idle termination."
+    context: "Generic prompt supervision is embedded in Kvist and has no independently consumable contract or executable."
+    purpose: "Establish the reusable Linux-first behavior before moving implementation out of the root crate."
+    expected_outcome: "Focused tests fail until the standalone crate provides its documented public API and command."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Public-contract"
+      - "TODO.md#AGN-07"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T21:14:41Z"
+      completed_at: "2026-08-29T21:14:41Z"
+    blocked_reason: null
+  - id: "sa-01-implement-code"
+    title: "Extract supervised agent runtime"
+    description: "Implement the reusable library and standalone CLI, move prompt acquisition and command rendering, add typed retry context, and integrate Kvist through the path dependency."
+    context: "The failing tests define a provider-neutral host-execution surface while Kvist retains workflow-specific policy and state."
+    purpose: "Make supervision independently useful without duplicating or coupling it to Kvist task semantics."
+    expected_outcome: "Kvist and the standalone command use one tested implementation and unsupported platforms fail explicitly."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-01-write-tests"
+    requirements:
+      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Supervision-and-retry-algorithm"
+      - "TODO.md#AGN-07"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T21:14:41Z"
+      completed_at: "2026-08-29T21:14:41Z"
+    blocked_reason: null
+  - id: "sa-01-security-audit"
+    title: "Audit extracted host execution"
+    description: "Independently inspect process-group termination, stream handling, prompt file opening, command parsing, retry classification, acknowledgement boundaries, and unsupported-platform gates."
+    context: "Moving process execution into a reusable crate increases the number of callers that can rely on its limits and diagnostics."
+    purpose: "Identify authority, lifecycle, and denial-of-service defects before representing the component as robust."
+    expected_outcome: "A security review records or remediates every high-confidence finding without overstating host-mode isolation."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-01-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Constraints-and-invariants"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-01-compliance-review"
+    title: "Review standalone runtime compliance"
+    description: "Derive the implementation record from code and tests without the specification, then compare the record with this component contract in a separate review context."
+    context: "The implementer cannot certify that the extracted API and CLI satisfy their own contract."
+    purpose: "Preserve independent evidence and surface discrepancies for explicit arbitration."
+    expected_outcome: "The implementation record and source-blind review classify every contract difference without silently revising either artifact."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-01-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Public-contract"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-02-write-tests"
+    title: "Define transactional workspace tests"
+    description: "Specify failing tests for bounded immutable input snapshots, private writable overlays, link and special-file rejection, deterministic diffs, conflict detection, and explicit promotion."
+    context: "Retry notices and archived copies can aid recovery but cannot safely undo partial edits or concurrent user changes."
+    purpose: "Define transactional file behavior before any supervisor attempts rollback or output promotion."
+    expected_outcome: "Tests prove failed attempts leave live inputs unchanged and successful output is applied only after validated conflict-free approval."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-01-compliance-review"
+    requirements:
+      - "SPEC.md#Deferred-workspace-recovery"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-02-implement-code"
+    title: "Implement transactional workspaces"
+    description: "Create bounded content-addressed input snapshots and attempt-local writable overlays that emit reviewed patches or artifacts without destructive source-control reset."
+    context: "A disposable attempt workspace makes retries predictable and avoids overwriting live user edits after failure."
+    purpose: "Provide reliable local side-effect containment before stronger operating-system isolation."
+    expected_outcome: "Attempts operate on private state and promotion detects every changed live precondition before writing."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-02-write-tests"
+    requirements:
+      - "SPEC.md#Deferred-workspace-recovery"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-02-security-audit"
+    title: "Audit transactional workspaces"
+    description: "Review snapshot traversal, hard links, symbolic links, metadata, races, resource bounds, patch application, concurrent mutation, and cleanup."
+    context: "A flawed recovery layer can destroy user work or expose files that were not granted."
+    purpose: "Find path and transaction vulnerabilities before workspace promotion is trusted."
+    expected_outcome: "Independent findings are remediated or retained as explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-02-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Deferred-workspace-recovery"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-02-compliance-review"
+    title: "Review transactional workspace compliance"
+    description: "Compare source-derived workspace behavior with the snapshot, overlay, conflict, and promotion contract."
+    context: "Recovery guarantees must be independently verified before retries can rely on them."
+    purpose: "Prevent archive or reset behavior from being described as transactional without evidence."
+    expected_outcome: "A source-blind review records compliance or an explicit discrepancy."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-02-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Deferred-workspace-recovery"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-03-write-tests"
+    title: "Define strict Linux isolation tests"
+    description: "Write negative tests for ungranted reads and writes, inherited descriptors, credentials, process escape, network access, executable substitution, resource exhaustion, and unavailable backends."
+    context: "Host mode, restricted users, and fakeroot do not independently provide complete mediation."
+    purpose: "Make the exact Linux assurance tier executable before choosing or integrating isolation primitives."
+    expected_outcome: "Tests fail closed unless every declared filesystem, process, environment, network, and resource restriction is enforced."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-02-compliance-review"
+    requirements:
+      - "SPEC.md#Deferred-Linux-isolation"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-03-implement-code"
+    title: "Implement strict Linux backend"
+    description: "Add a replaceable Linux backend using a dedicated identity and Bubblewrap namespaces with explicit mounts, environment, network, process, and resource policy; evaluate Landlock as defense in depth."
+    context: "The standalone runtime needs a real reference monitor before strict mode can replace explicit host execution."
+    purpose: "Enforce least authority with no silent fallback when required kernel or backend features are unavailable."
+    expected_outcome: "Strict Linux runs expose only approved resources and tools, report backend capabilities, and fail before launch on incomplete enforcement."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-03-write-tests"
+    requirements:
+      - "SPEC.md#Deferred-Linux-isolation"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-03-security-audit"
+    title: "Audit strict Linux backend"
+    description: "Review namespace construction, mount topology, uid and gid mapping, seccomp, Landlock compatibility, cgroups, terminal isolation, sockets, procfs, TOCTOU, and cleanup."
+    context: "Sandbox construction errors can turn a strict-mode claim into ambient host execution."
+    purpose: "Independently challenge every claimed Linux isolation guarantee."
+    expected_outcome: "No strict mode ships with an unresolved high-confidence escape or silent degradation."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-03-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Deferred-Linux-isolation"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-03-compliance-review"
+    title: "Review Linux isolation compliance"
+    description: "Compare observed backend behavior and capability reporting with the strict Linux contract without inspecting implementation during the comparison."
+    context: "A sandbox implementer cannot certify the boundary that contains agent-controlled code."
+    purpose: "Retain independent assurance evidence and explicit limitations."
+    expected_outcome: "The review either confirms the documented assurance tier or blocks release with precise discrepancies."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-03-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Deferred-Linux-isolation"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-04-write-tests"
+    title: "Define brokered tool and provider tests"
+    description: "Write tests for typed tool grants, canonical arguments, MCP exposure, provider-only network paths, credential isolation, idempotency evidence, retry budgets, and audit events."
+    context: "Provider permission prompts and unrestricted agent CLIs cannot prove that only pre-approved tools and destinations were used."
+    purpose: "Specify complete mediation and side-effect-aware retry behavior independently of a provider."
+    expected_outcome: "Tests reject unknown tools, schemas, destinations, credentials, ambiguous outcomes, and unsafe retries."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-03-compliance-review"
+    requirements:
+      - "SPEC.md#Deferred-Linux-isolation"
+      - "SPEC.md#Supervision-and-retry-algorithm"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-04-implement-code"
+    title: "Implement capability and provider brokers"
+    description: "Add typed capability evaluation, a restricted MCP tool broker, mediated provider networking, protected credentials, typed outcomes, idempotency-aware retries, budgets, and append-only redacted audit events."
+    context: "Strict filesystem isolation alone cannot constrain in-process tools or distinguish model traffic from arbitrary egress."
+    purpose: "Give callers a provider-neutral pre-approved action contract with deterministic enforcement evidence."
+    expected_outcome: "Every tool and provider action is authorized by canonical policy before execution and every retry has machine-verifiable rationale."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-04-write-tests"
+    requirements:
+      - "SPEC.md#Deferred-Linux-isolation"
+      - "SPEC.md#Supervision-and-retry-algorithm"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-04-security-audit"
+    title: "Audit capability and provider brokers"
+    description: "Review policy canonicalization, confused-deputy paths, MCP server trust, schema validation, provider connectors, credential handling, network mediation, idempotency, and audit integrity."
+    context: "The broker becomes the reference monitor for tools and hosted-provider authority."
+    purpose: "Find authorization or data-exfiltration bypasses before strict contracts expose brokered capabilities."
+    expected_outcome: "Independent review leaves no unresolved high-confidence authorization bypass."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-04-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Deferred-Linux-isolation"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-04-compliance-review"
+    title: "Review brokered execution compliance"
+    description: "Compare source-derived capability, provider, retry, and audit behavior with the provider-neutral contract."
+    context: "Tool and network mediation claims require an independent comparison."
+    purpose: "Prevent provider-specific behavior from weakening the common contract unnoticed."
+    expected_outcome: "The review records compliance by capability and provider or blocks unsupported combinations."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-04-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Deferred-Linux-isolation"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-05-write-tests"
+    title: "Define deferred platform conformance tests"
+    description: "Design a backend conformance suite and native CI prerequisites for macOS process containment and Windows AppContainer, restricted-token, and Job Object behavior."
+    context: "The Linux-only maintainer cannot responsibly enable platforms whose authority and termination semantics are not tested natively."
+    purpose: "Keep portable contracts explicit while preventing nominal support from outrunning evidence."
+    expected_outcome: "A common suite defines required behavior and each platform has a documented native test and maintenance owner."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-04-compliance-review"
+    requirements:
+      - "SPEC.md#Deferred-platforms"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-05-implement-code"
+    title: "Restore independently tested platforms"
+    description: "Implement platform backends only after selecting maintainable native macOS and Windows isolation mechanisms and provisioning their required native test matrices."
+    context: "Conditional compilation alone cannot establish equivalent filesystem, process-tree, credential, or network guarantees."
+    purpose: "Restore platforms without contaminating provider-neutral policy or silently weakening strict execution."
+    expected_outcome: "Each enabled platform advertises a tested assurance tier and fails closed for unsupported contract dimensions."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-05-write-tests"
+    requirements:
+      - "SPEC.md#Deferred-platforms"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-05-security-audit"
+    title: "Audit restored platform backends"
+    description: "Run platform-native security reviews covering containment, process trees, links and reparse points, credentials, environment, network, resources, and backend failure."
+    context: "Platform restoration changes the trusted computing base and cannot inherit Linux review evidence."
+    purpose: "Require native independent scrutiny before a platform is represented as supported."
+    expected_outcome: "Every enabled backend has platform-specific findings resolved or explicitly blocking release."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-05-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Deferred-platforms"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-05-compliance-review"
+    title: "Review restored platform compliance"
+    description: "Compare source-derived native behavior with the common contract and each platform assurance statement."
+    context: "Cross-platform labels must not imply guarantees that differ silently by operating system."
+    purpose: "Preserve an explicit evidence boundary for every supported platform."
+    expected_outcome: "A separate review certifies or rejects each platform and records non-equivalent behavior."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-05-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Deferred-platforms"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-06-write-tests"
+    title: "Define reusable model setup tests"
+    description: "Write failing library and CLI tests for generic named profiles, provider defaults, command verification, formatting-preserving profile persistence, host-execution acknowledgement, and Kvist role binding."
+    context: "Provider and model setup remains embedded in Kvist even though profile creation and verification are useful to every supervised-agent caller."
+    purpose: "Establish the standalone setup contract before moving wizard and configuration behavior across the component boundary."
+    expected_outcome: "Tests distinguish reusable provider profiles from Kvist-specific role mappings and fail until both standalone setup and compatibility integration exist."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Public-contract"
+    timestamps:
+      created_at: "2026-08-29T21:30:04Z"
+      updated_at: "2026-08-29T21:43:45Z"
+      completed_at: "2026-08-29T21:43:45Z"
+    blocked_reason: null
+  - id: "sa-06-implement-code"
+    title: "Extract model profiles and setup"
+    description: "Move generic provider defaults, profile validation and verification, formatting-preserving global persistence, and terminal setup into supervised-agent; keep Kvist role bindings and project policy in Kvist."
+    context: "The reusable crate already owns prompting and supervision but standalone users must still configure commands manually."
+    purpose: "Make the library and CLI self-contained for discovering, testing, saving, and running named model profiles."
+    expected_outcome: "supervised-agent setup manages reusable profiles, Kvist can bind those profiles to roles, and kvist agent setup remains a compatibility surface without duplicated setup logic."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-06-write-tests"
+    requirements:
+      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Public-contract"
+    timestamps:
+      created_at: "2026-08-29T21:30:04Z"
+      updated_at: "2026-08-29T21:43:45Z"
+      completed_at: "2026-08-29T21:43:45Z"
+    blocked_reason: null
+  - id: "sa-06-security-audit"
+    title: "Audit reusable model setup"
+    description: "Independently review profile parsing, provider probes, command verification, host acknowledgement, configuration path selection, link handling, size bounds, and atomic persistence."
+    context: "Reusable model configuration controls executable selection and may contain provider endpoints or credential-bearing environment decisions."
+    purpose: "Find command, filesystem, and authority-boundary defects before other applications trust stored profiles."
+    expected_outcome: "High-confidence setup vulnerabilities are remediated or retained as explicit blockers without treating provider verification as sandbox evidence."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-06-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Constraints-and-invariants"
+    timestamps:
+      created_at: "2026-08-29T21:30:04Z"
+      updated_at: "2026-08-29T21:30:04Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-06-compliance-review"
+    title: "Review model setup compliance"
+    description: "Derive setup behavior from source and tests without the specification, then compare the observed record with the generic-profile and Kvist-binding contracts."
+    context: "The implementer cannot certify that model setup is reusable without leaking Kvist workflow semantics into the standalone component."
+    purpose: "Preserve independent evidence for the extracted configuration boundary."
+    expected_outcome: "The review classifies every setup and integration requirement and records discrepancies for explicit arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-06-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Public-contract"
+    timestamps:
+      created_at: "2026-08-29T21:30:04Z"
+      updated_at: "2026-08-29T21:30:04Z"
+      completed_at: null
+    blocked_reason: null

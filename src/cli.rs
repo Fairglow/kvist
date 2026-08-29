@@ -71,7 +71,7 @@ pub enum Command {
         /// Read the prompt from a UTF-8 file; use `-` for standard input.
         #[arg(short, long, value_name = "PROMPT_FILE", conflicts_with_all = ["prompt", "editor"])]
         file: Option<PathBuf>,
-        /// Author the prompt in VISUAL, EDITOR, or the platform default editor.
+        /// Author the prompt in VISUAL, EDITOR, or vi.
         #[arg(long, conflicts_with_all = ["prompt", "file"])]
         editor: bool,
         /// The role profile context to use (developer, architect, security-reviewer).
@@ -86,6 +86,9 @@ pub enum Command {
         /// Maximum number of automatic restarts allowed.
         #[arg(long, default_value_t = 3)]
         max_restarts: u32,
+        /// Acknowledge that this command runs the provider with your host permissions.
+        #[arg(long)]
+        allow_host_execution: bool,
     },
     /// Render a versioned project and component status report.
     Status {
@@ -337,7 +340,11 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 idle_timeout,
                 detect_loops,
                 max_restarts,
+                allow_host_execution,
             } => {
+                if !allow_host_execution {
+                    return Err(supervised_agent::Error::HostExecutionNotAcknowledged.into());
+                }
                 let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
                 execute_prompt(&resolved_prompt, &role, idle_timeout, detect_loops, max_restarts)?;
                 Ok(CommandOutput::message(
@@ -580,7 +587,11 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 idle_timeout,
                 detect_loops,
                 max_restarts,
+                allow_host_execution,
             } => {
+                if !allow_host_execution {
+                    return Err(supervised_agent::Error::HostExecutionNotAcknowledged.into());
+                }
                 let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
                 execute_prompt(
                     &resolved_prompt,
@@ -772,16 +783,27 @@ fn execute_prompt(
         }
     };
 
-    let (program, args) =
-        crate::agent::get_effective_command(profile, role, prompt, &[], &current_dir)?;
-
-    crate::prompt_supervisor::run_supervised_prompt(
-        &program,
-        &args,
-        idle_timeout,
+    let policy = supervised_agent::SupervisionPolicy {
+        idle_timeout: std::time::Duration::from_secs(idle_timeout),
         detect_loops,
-        max_restarts,
-    )?;
+        max_retries: max_restarts,
+        max_output_bytes: profile.max_output_bytes,
+    };
+    supervised_agent::run_supervised(&policy, |context| {
+        let prompt = match context.retry_notice() {
+            Some(notice) => format!("{prompt}\n\n{notice}"),
+            None => prompt.to_owned(),
+        };
+        let (program, arguments) =
+            crate::agent::get_effective_command(profile, role, &prompt, &[], &current_dir)
+                .map_err(|error| supervised_agent::Error::InvalidCommandTemplate {
+                    reason: error.to_string(),
+                })?;
+        Ok(
+            supervised_agent::CommandSpec::new(program, arguments)
+                .in_directory(current_dir.clone()),
+        )
+    })?;
 
     Ok(())
 }

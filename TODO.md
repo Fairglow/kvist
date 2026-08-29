@@ -201,6 +201,54 @@
 - For Python: Enforce type annotations, PEP-8 formatting, Pydantic or standard data structures, and standard `unittest` / `pytest` suites.
 - Read and inject the corresponding template during `task run` execution based on detected files or explicit configuration.
 
+### TODO AGN-07 — Extract Linux-First Supervised Agent Runtime
+
+**Context:** Prompt acquisition, provider command rendering, and process
+supervision are useful outside Kvist, while Kvist-specific task state and
+architectural context should not be embedded in a generic runtime. Nominal
+Windows and macOS support consumes maintenance effort without native test
+access and cannot currently support trustworthy execution guarantees.
+
+**Acceptance criteria:**
+
+- Create a standalone `supervised-agent` Rust library and CLI in its own
+  component directory, consumed by Kvist as a path dependency.
+- Move bounded prompt acquisition, shell-free command rendering, idle
+  supervision, loop detection, and retry context into the reusable component.
+- Require explicit acknowledgement for direct host execution and document that
+  retry notices, backups, `fakeroot`, and source-control reset are not security
+  boundaries.
+- Keep Kvist role/model selection, task lifecycle, approval records, and
+  component context construction in the root crate.
+- Support Linux only; reject unsupported targets at build time, remove them
+  from CI, and retain platform restoration as explicit future work.
+- Specify and queue future snapshot/overlay workspaces, restricted identities,
+  Bubblewrap/Landlock or stronger Linux isolation, brokered tools and provider
+  networking, and independently tested macOS/Windows backends.
+
+### TODO AGN-08 — Extract Reusable Provider Profile Setup
+
+**Context:** The standalone runtime can execute an explicit command but provider
+defaults, model verification, and formatting-preserving setup remain embedded
+in Kvist. Those operations are provider concerns useful to other callers,
+whereas Kvist roles and execution-policy approval are workflow concerns.
+
+**Acceptance criteria:**
+
+- Define a versioned, bounded standalone profile configuration containing
+  generic names, provider kinds, and command templates without Kvist roles.
+- Move provider-specific collection, custom-wrapper validation, endpoint
+  probing, host-acknowledged verification, and profile persistence into
+  reusable library APIs.
+- Add `supervised-agent setup` and allow `supervised-agent run --profile NAME`
+  to use the Linux user profile store.
+- Make `kvist agent setup` reuse profile collection or load an existing
+  standalone profile, then materialize the exact selected command into Kvist
+  role configuration.
+- Preserve existing Kvist configuration merge behavior and execution approval
+  over exact command bytes; do not dynamically import mutable profile content
+  during task execution.
+
 ### TODO AGN-05 — Configurable Log Retention & Monotonic Naming
 
 **Context:** Agent execution outputs accumulate quickly. Kvist should support log file cleanup according to a retention policy and use descriptive, monotonic file names to simplify tracing.

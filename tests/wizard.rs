@@ -5,7 +5,8 @@ use std::os::unix::fs::PermissionsExt;
 use tempfile::TempDir;
 
 use kvist::config;
-use kvist::wizard::run_wizard;
+use kvist::wizard::{run_wizard, run_wizard_with_profile_config};
+use supervised_agent::{ModelProfile, upsert_profile};
 
 #[test]
 fn test_wizard_ollama_local_config() {
@@ -19,7 +20,7 @@ fn test_wizard_ollama_local_config() {
     // 4. Skip the optional model test
     // 5. Choose All Roles (Option 4)
     // 6. Choose Project-local configuration (Option 1)
-    let mock_input = "3\n\nllama3.1:8b\n\nn\n4\n1\n";
+    let mock_input = "1\n3\n\nllama3.1:8b\n\nn\n4\n1\n";
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -38,7 +39,9 @@ fn test_wizard_ollama_local_config() {
     assert!(toml_content.contains("[agent.profiles.developer]"));
     assert!(toml_content.contains("[agent.profiles.architect]"));
     assert!(toml_content.contains("[agent.profiles.security-reviewer]"));
-    assert!(toml_content.contains("ollama run llama3.1:8b"));
+    assert!(toml_content.contains("OLLAMA_HOST=http://localhost:11434"));
+    assert!(toml_content.contains("ollama run"));
+    assert!(toml_content.contains("llama3.1:8b"));
 }
 
 #[test]
@@ -61,7 +64,10 @@ fn test_wizard_custom_script_local_config() {
     // 5. Skip the optional model test
     // 6. Choose Developer Role (Option 1 / default)
     // 7. Choose Project-local configuration (Option 1)
-    let mock_input = format!("6\n{}\nlocal-wrapper\n\nn\n1\n1\n", script_path.display());
+    let mock_input = format!(
+        "1\n6\n{}\nlocal-wrapper\n\nn\n1\n1\n",
+        script_path.display()
+    );
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -99,7 +105,7 @@ profiles = { developer = { model = "existing", default_model = "existing", model
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mock_input = format!("6\n{}\nnew-model\n\nn\n1\n1\n", script_path.display());
+    let mock_input = format!("1\n6\n{}\nnew-model\n\nn\n1\n1\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -135,7 +141,7 @@ fn wizard_tests_a_model_before_persisting_it() {
         .expect("make provider executable");
 
     let mock_input = format!(
-        "6\n{}\nverified\n\ny\nConnection test\n1\n1\n",
+        "1\n6\n{}\nverified\n\ny\nConnection test\ny\n1\n1\n",
         script_path.display()
     );
     let mut reader = Cursor::new(mock_input);
@@ -158,7 +164,7 @@ fn wizard_does_not_persist_a_failed_model_test_without_confirmation() {
         .expect("make provider executable");
 
     let mock_input = format!(
-        "6\n{}\nfailing\n\ny\nConnection test\nn\n",
+        "1\n6\n{}\nfailing\n\ny\nConnection test\ny\nn\n",
         script_path.display()
     );
     let mut reader = Cursor::new(mock_input);
@@ -167,6 +173,39 @@ fn wizard_does_not_persist_a_failed_model_test_without_confirmation() {
     let error = run_wizard(&mut reader, &mut writer, project.path())
         .expect_err("failed model test must stop setup");
     assert!(error.to_string().contains("model verification failed"));
+    assert!(!project.path().join("kvist.toml").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn wizard_does_not_execute_or_persist_without_host_acknowledgement() {
+    let project = TempDir::new().expect("create temp dir");
+    let marker = project.path().join("executed");
+    let script_path = project.path().join("provider.sh");
+    fs::write(
+        &script_path,
+        format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+    )
+    .expect("write provider");
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    let mock_input = format!(
+        "1\n6\n{}\nunacknowledged\n\ny\nConnection test\nn\n",
+        script_path.display()
+    );
+    let mut reader = Cursor::new(mock_input);
+    let mut writer = Vec::new();
+
+    let error = run_wizard(&mut reader, &mut writer, project.path())
+        .expect_err("host execution acknowledgement is required");
+
+    assert!(
+        error
+            .to_string()
+            .contains("host execution was not acknowledged")
+    );
+    assert!(!marker.exists());
     assert!(!project.path().join("kvist.toml").exists());
 }
 
@@ -187,7 +226,7 @@ models = []
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mock_input = format!("6\n{}\nnew-model\n\nn\n1\n1\n", script_path.display());
+    let mock_input = format!("1\n6\n{}\nnew-model\n\nn\n1\n1\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -196,5 +235,35 @@ models = []
     assert_eq!(
         fs::read_to_string(config_path).expect("read unchanged configuration"),
         original
+    );
+}
+
+#[test]
+fn wizard_materializes_a_standalone_profile_into_kvist_roles() {
+    let project = TempDir::new().expect("create project");
+    let profile_config = project.path().join("profiles.toml");
+    upsert_profile(
+        &profile_config,
+        &ModelProfile {
+            name: "shared".to_owned(),
+            provider: "custom-script".to_owned(),
+            command: "/bin/echo '{prompt}'".to_owned(),
+        },
+    )
+    .expect("write reusable profile");
+    let mut reader = Cursor::new("2\nshared\n4\n1\n");
+    let mut writer = Vec::new();
+
+    run_wizard_with_profile_config(&mut reader, &mut writer, project.path(), &profile_config)
+        .expect("bind standalone profile");
+
+    let contents =
+        fs::read_to_string(project.path().join("kvist.toml")).expect("read Kvist config");
+    assert_eq!(contents.matches("name = \"shared\"").count(), 3);
+    assert_eq!(
+        contents
+            .matches("command = \"/bin/echo '{prompt}'\"")
+            .count(),
+        3
     );
 }

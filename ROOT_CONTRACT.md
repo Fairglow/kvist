@@ -17,6 +17,10 @@ constraint set injected into component work.
 - Treat agent configuration, prompts, and output as untrusted input. External
   commands must be resolved without a shell and covered by an explicit,
   human-approved execution policy before they run.
+- Support executable agent workflows on Linux only until independently tested
+  platform backends exist. Keep operating-system enforcement behind explicit
+  interfaces so deferred platforms do not leak conditional behavior through
+  provider, policy, or workflow code.
 
 ## Change and compliance rules
 

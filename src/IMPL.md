@@ -39,13 +39,15 @@ The available commands are:
   failure with line-aware diagnostics.
 * `kvist spec accept COMPONENT_DIR` updates the selected component queue's
   recorded specification revisions and clears its stale evidence.
-* `kvist prompt [PROMPT]` runs one prompt through a selected agent profile.
-  `--file` reads a regular bounded UTF-8 file, `--editor` invokes a configured
-  editor on a temporary Markdown file, and omitted input reads redirected
-  standard input or offers an editor at a terminal.
-* `kvist agent setup` collects a provider command and model name, optionally
-  executes a test prompt, assigns the model to selected roles, and creates or
-  updates project-local or user-global TOML.
+* `kvist prompt [PROMPT] --allow-host-execution` runs one prompt through a
+  selected agent profile. `--file` reads a regular bounded UTF-8 file,
+  `--editor` invokes a configured editor on a temporary Markdown file, and
+  omitted input reads redirected standard input or offers an editor at a
+  terminal. Missing host acknowledgement refuses before prompt acquisition.
+* `kvist agent setup` collects a provider profile through `supervised_agent` or
+  loads one from an explicit/default standalone profile store, assigns its
+  exact name and command to selected roles, and creates or updates project-local
+  or user-global Kvist TOML.
 
 Unknown commands are rejected by the argument parser. `main` owns output and
 exit handling; `kvist::run()` parses process arguments and `cli::execute`
@@ -55,6 +57,10 @@ Task commands do not create queues, revise task definitions, or migrate queues.
 `status` loads queues as read-only component-inspection data. Humans otherwise
 inspect queue content directly in the durable YAML file; `doctor` reports only
 the root queue artifact's validity.
+
+The crate emits a compile-time error on non-Linux targets. The repository
+workspace includes a separate `supervised-agent` package, while the root
+package remains the default for unqualified Cargo commands.
 
 ## Root artifacts and project state
 
@@ -81,8 +87,8 @@ existing destination. Artifact parent directories are created before writes.
 This means a filesystem failure after a prior artifact write can leave a
 partial project, which later initialization refuses rather than repairs.
 
-Project and artifact parents must be real directories. Initialization and
-inspection reject symbolic links (and Windows reparse points), regular files
+Project and artifact parents must be real directories. On the supported Linux
+target, initialization and inspection reject symbolic links, regular files
 where directories are required, and non-regular artifacts. A current project
 is determined by validating all five artifact paths; it is not determined by
 mere file presence.
@@ -342,7 +348,7 @@ jj worktree root. On Linux, Kvist re-hashes the runner immediately before every
 probe and request spawn, copies matching bytes to a private user-state file,
 and executes its retained `/proc/self/fd` descriptor. The source path can
 therefore be replaced after validation without changing launched bytes.
-Platforms without this descriptor-bound mechanism fail closed.
+Non-Linux builds are disabled.
 A repository-provided runner, including a sibling of a nested project, is
 refused even if it returns the expected acknowledgement. Failure to resolve
 the selected worktree root also refuses execution. Kvist invokes the runner shell-free with `--kvist-sandbox-request-v1` and a
@@ -354,21 +360,22 @@ Missing configuration, runner spawn failures, or an invalid acknowledgement
 fail before a lock or task-state transition. A test policy using project
 working directory is rejected by the component-only protocol.
 
-Agent templates are parsed into a program and arguments without a shell.
-Single and double quotes group arguments. The supported substitutions are
-`{prompt}`, `{context_files}`, and `{target_directory}`; an empty context list
-also removes an immediately preceding option paired with the standalone
-context placeholder. Resolved profiles supply a timeout and combined-output
-cap, bounded by hard maxima. A timeout or output-limit breach terminates the
-runner and blocks the task. Kvist concatenates captured stdout followed by
-stderr, then replaces explicit redaction values and inherited sandbox-allowed
-environment values in that one value. The combined redacted result is copied
-to a real, non-link `.kvist/logs/TASK_ID_TIMESTAMP.log`, written once to stdout
-for `--stream`, displayed, and appended to agent-attempt evidence; original
-inter-stream ordering is therefore not preserved. A zero exit status completes
-the task except that an implementation also requires its configured test
-command to succeed. Agent failures, verification failures, and
-verification-policy failures block the task.
+Agent templates are delegated to the `supervised_agent` library and parsed into
+a program and arguments without a shell. Single and double quotes group
+arguments. The supported substitutions are `{prompt}`, `{context_files}`, and
+`{target_directory}`; an empty context list also removes an immediately
+preceding option paired with the standalone context placeholder. Resolved
+profiles supply a timeout and combined-output cap, bounded by hard maxima. A
+timeout or output-limit breach terminates the runner and blocks the task. Kvist
+concatenates captured stdout followed by stderr, then replaces explicit
+redaction values and inherited sandbox-allowed environment values in that one
+value. The combined redacted result is copied to a real, non-link
+`.kvist/logs/TASK_ID_TIMESTAMP.log`, written once to stdout for `--stream`,
+displayed, and appended to agent-attempt evidence; original inter-stream
+ordering is therefore not preserved. A zero exit status completes the task
+except that an implementation also requires its configured test command to
+succeed. Agent failures, verification failures, and verification-policy
+failures block the task.
 
 The test policy selects inherited commands by component path, intersects its
 allowlist with the sandbox allowlist, applies its configured timeout to the
@@ -379,16 +386,23 @@ in user state. A task run refuses if its policy is absent, any approved
 execution input differs, or a repository-contained legacy record is present.
 Verification result records are appended to the task's attempt JSONL file.
 
-Custom prompt input is limited to 1 MiB and rejects empty or non-UTF-8 text.
-File input checks for a regular non-link file before reading. Editor input uses
-`VISUAL`, then `EDITOR`, then a platform default and invokes the parsed editor
-command directly. Agent setup checks custom wrappers as regular non-link
-executables, tests the generated command only after interactive confirmation,
-and defaults to abandoning persistence after a failed test. Configuration
-updates use `toml_edit` to retain unrelated values and comments, update or
-append the named model in inline or array-of-table model lists, validate the
-result with the normal configuration parser, and atomically create or replace
-the selected file.
+Custom prompt acquisition is delegated to `supervised_agent`, limited to 1 MiB,
+and rejects empty or non-UTF-8 text. File input checks for a regular non-link
+file before reading. Editor input uses `VISUAL`, then `EDITOR`, then `vi` and
+invokes the parsed editor command directly. Custom prompt execution requires
+the CLI host acknowledgement and uses the selected profile's output bound.
+Idle and repetition retries rebuild the model command with a notice that prior
+side effects may remain; other failures are terminal. SIGINT and SIGTERM cancel
+the supervised command and terminate its Linux process group before returning.
+Generic profile setup, provider defaults, endpoint probes, wrapper validation,
+host-acknowledged verification, and standalone profile persistence are
+delegated to `supervised_agent`. Kvist setup either calls that collection API
+or loads a named standalone profile, then copies its exact name and command
+into selected role model lists. It does not dynamically read standalone
+profiles during execution. Kvist configuration updates use `toml_edit` to
+retain unrelated values and comments, update or append the named model in
+inline or array-of-table model lists, validate the result with the normal
+configuration parser, and atomically create or replace the selected file.
 
 Isolation enforcement is delegated to the configured external runner; Kvist verifies its identity and
 version-1 capability acknowledgement but cannot independently prove its

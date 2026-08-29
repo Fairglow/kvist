@@ -28,10 +28,18 @@ In the current landscape of AI-driven software engineering, the industry heavily
 * **Fractal & Recursive Modularization:** Every application is built as a hierarchical tree of self-contained sub-components ("kvistar" / branches). The exact same design loop applies recursively at every level of depth.
 * **Clean-Slate Compliance Verification:** AI agents must never audit their own work in the same session. Compliance is verified by reverse-engineering documentation from code using an isolated, clean-slate agent context.
 * **Durable, File-System Native State:** Architecture, specifications, and task queues live directly in the codebase alongside source files—not in ephemeral chat windows or proprietary databases.
-* **Tool-Agnostic Engine in Rust:** Built as a headless, single-binary CLI
-  engine in Rust. Core workflow commands require neither a cloud service nor a
-  runtime daemon; external agent programs are optional, explicitly configured
-  subprocess integrations.
+* **Tool-Agnostic Engine in Rust:** Built as a headless Rust CLI engine. Core
+  workflow commands require neither a cloud service nor a runtime daemon;
+  external agent programs are optional, explicitly configured subprocess
+  integrations. Generic provider profiles, interactive setup, prompt
+  acquisition, command rendering, and process supervision live in a standalone
+  library and application that Kvist consumes. Kvist retains role assignment,
+  architectural context, execution approval, and task lifecycle.
+* **Linux-First Execution:** Linux is the only supported executable platform
+  while the project is maintained and tested by a Linux-only development team.
+  Platform-specific execution is isolated behind replaceable boundaries;
+  macOS and Windows remain planned rather than nominally supported without
+  native testing.
 
 ---
 
@@ -168,11 +176,16 @@ proposed contract or implementation change before task execution can resume.
 
 ### Why Rust for Implementation?
 Rust supports the intended single-binary, portable core and strong memory-safety
-guarantees. The current product surface is headless; file watching, web, and
-editor integrations remain deferred.
+guarantees. The current product surface is headless and Linux-only. Source and
+protocol design should remain portable, but a platform is enabled only after
+its process, filesystem, and sandbox behavior has a maintained native test
+matrix. File watching, web, and editor integrations remain deferred.
 
 ### Triple-Tier Integration Strategy
-1. **Headless Engine Core (`kvist-cli` in Rust):** Manages tree state, `TODOS.yaml` parsing, process spawning for local LLMs (`claude`, `gemini-cli`, `ollama`), and context slicing.
+1. **Headless Engine Core (`kvist-cli` in Rust):** Manages tree state,
+   `TODOS.yaml` parsing, context slicing, and Kvist-specific execution policy.
+   It delegates provider-neutral prompt acquisition and process supervision to
+   the standalone `supervised-agent` component.
 2. **Built-in Local Web View (`kvist serve`):** Spins up an embedded lightweight web server (`axum`) serving a single-page web app. Utilizes **Monaco Editor** (VS Code's open-source editor core) to render the interactive collapsible component tree, live progress bars, and compliance diffs.
 3. **Native IDE Alignment (LSP / Watcher):** Since specifications and code are plain Markdown, YAML, and Rust files, users continue using their preferred IDE (VS Code + `rust-analyzer`, Neovim, Zed, RustRover). A lightweight `kvist watch` daemon or LSP sidecar surface spec-staleness diagnostics directly inside the user's editor.
 

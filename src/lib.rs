@@ -6,6 +6,9 @@
 //! owns command parsing, dispatch, and domain errors so those behaviors remain
 //! testable without spawning a process.
 
+#[cfg(not(target_os = "linux"))]
+compile_error!("Kvist currently supports Linux only");
+
 pub mod agent;
 pub mod artifacts;
 pub mod cli;
@@ -19,7 +22,6 @@ pub mod import;
 pub mod init;
 pub mod project_state;
 pub mod prompt_input;
-pub mod prompt_supervisor;
 pub mod reverse_discovery;
 pub mod sandbox;
 pub mod specification;

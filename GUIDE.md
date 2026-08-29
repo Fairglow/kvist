@@ -8,6 +8,10 @@ implementation record `IMPL.md`, and source. The architecture is recursive: a
 component works from its own contract, its immediate parent contract, and
 `ROOT_CONTRACT.md`, not from peer implementations.
 
+Executable releases currently support Linux only. macOS and Windows remain
+disabled until native test environments and independently reviewed execution
+backends are available.
+
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
 defines the target architecture. This guide describes the commands that exist
 today and labels the required but not-yet-automated stages explicitly.
@@ -91,10 +95,10 @@ complete VCS tracking.
 
 ## External agents and verification
 
-`task run COMPONENT_DIR [TASK_ID]` is an optional local subprocess integration.
-It uses the `developer` profile for `test` and `implementation` tasks, and the
-`architect` profile for `security-audit` and `compliance-review` tasks. The
-only supported profiles are `architect` and `developer`.
+`task run COMPONENT_DIR [TASK_ID]` is an optional sandbox-runner integration.
+It uses the `developer` profile for `test` and `implementation` tasks, the
+`security-reviewer` profile for security audits, and the `architect` profile
+for compliance reviews.
 
 The target executor runs the accepted queue uninterrupted and lets the final
 independent review decide compliance. The current command-line surface exposes
@@ -117,9 +121,25 @@ until Phase 3 automation is implemented.
 Agent configuration is selected from `[agent]` in `kvist.toml`,
 `.kvist/config.toml`, the user configuration path, then the system
 configuration path. Template arguments are passed without a shell and may use
-`{prompt}`, `{context_files}`, and `{target_directory}`. Keep every intended
+`{prompt}`, `{prompt_json}`, `{context_files}`, and `{target_directory}`;
+`{prompt_json}` emits a complete escaped JSON string. Keep every intended
 argument whitespace-free or use a wrapper executable; shell pipelines,
 redirection, and shell quoting are not supported.
+
+Generic provider profiles can be configured independently of Kvist:
+
+```bash
+supervised-agent setup
+supervised-agent run --allow-host-execution \
+  --profile local-coder \
+  --file prompt.md
+```
+
+`kvist agent setup` either collects a profile through that same library setup
+flow or loads a saved standalone profile. Kvist then materializes the selected
+name and command into its role configuration. It does not resolve a mutable
+standalone profile during task execution, so `task approve-policy` continues
+to cover the exact effective command.
 
 For implementation tasks, configure and approve the repository test policy
 before running:
@@ -130,12 +150,24 @@ kvist task run . implement-code
 kvist task log . implement-code
 ```
 
-The policy approval covers only `[test_policy]`, not agent configuration. Test
-programs receive only the configured environment allowlist, time limit, and
-output cap. Agent and test programs currently run directly on the host. They
-are not sandboxed, agent execution has no resource cap, and the resolved agent
-template is not approved. Run them only in a repository you trust until the
-security backlog in [`TODO.md`](TODO.md) is complete.
+The approval record covers agent configuration, sandbox runner identity,
+resource limits, redaction policy, and `[test_policy]`. Agent and test programs
+are sent to the separately installed sandbox runner; Kvist never falls back to
+executing them directly on the host.
+
+`kvist prompt`, in contrast, is an explicitly acknowledged host operation:
+
+```bash
+kvist prompt --allow-host-execution --file prompt.md
+```
+
+Its bounded prompt input, command rendering, idle supervision, loop detection,
+and retry notices come from the standalone `supervised-agent` library. The
+standalone CLI can be invoked with `cargo run -p supervised-agent -- run ...`.
+Host-mode retry notices warn that an earlier attempt may have left side effects;
+they do not provide rollback or isolation. Snapshot workspaces, restricted
+identities, Linux sandboxing, brokered tools, and future platforms are planned
+in `src/supervised_agent/SPEC.md` and `TODOS.yaml`.
 
 ## Documentation and review discipline
 

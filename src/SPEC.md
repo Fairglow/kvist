@@ -9,7 +9,7 @@
 Provide a local, headless Rust CLI that creates and inspects filesystem-native
 Kvist projects. The root component makes durable project state, component
 contracts, task queues, and implementation records visible to both humans and
-automation.
+automation. Executable releases currently support Linux only.
 
 ## Public contract
 
@@ -28,10 +28,15 @@ deterministic, non-interactive output.
 It accepts exactly one explicit source: positional text, `--file`, or
 `--editor`. With no explicit source it reads redirected standard input, while
 an interactive terminal offers to open the configured editor before falling
-back to terminal input. `kvist agent setup` interactively defines a named model,
-can verify its command before persistence, assigns it to selected roles, and
-creates or updates project-local or user-global configuration without
-discarding unrelated settings.
+back to terminal input. Direct prompt execution is an explicitly acknowledged
+Linux host operation delegated to the standalone `supervised-agent` library;
+it is not represented as sandboxed. `kvist agent setup` uses the standalone
+component's provider-profile setup or loads an existing standalone profile,
+assigns its exact name and command to selected Kvist roles, and creates or
+updates project-local or user-global Kvist configuration without discarding
+unrelated settings. Kvist materializes the selected profile rather than
+resolving it dynamically, preserving execution approval over exact command
+bytes.
 
 The root component also owns the version-1 `TODOS.yaml` contract. A queue is a
 durable, version-controlled execution plan for one component, not an informal
@@ -62,6 +67,11 @@ interaction surface; `doctor` reports only its root-artifact validity.
   invoke the user-selected program directly without a shell. Other commands do
   not follow link-like paths and require a trusted workspace before task
   execution.
+- Linux is the only supported target. Builds for macOS, Windows, and other
+  targets fail explicitly until their process, filesystem, and execution
+  boundaries have independent native tests. Platform-specific implementation
+  remains isolated so support can be restored without changing provider-neutral
+  contracts.
 - Prompt text from arguments, files, standard input, or an editor is nonblank
   UTF-8 no larger than 1 MiB. Prompt files must be regular non-link files.
   Positional text, `--file`, and `--editor` are mutually exclusive.
@@ -131,27 +141,51 @@ project owner selects one in `kvist.toml`.
 loads a bounded UTF-8 file, and `--file -` explicitly reads standard input.
 `--editor` creates a temporary Markdown file and invokes the first configured
 editor from `VISUAL`, then `EDITOR`, falling back to `vi` on Unix and
-`notepad` on Windows. Editor commands are split into a program and arguments
-and invoked directly without a shell. When none of these sources is supplied,
+invoked directly without a shell. When none of these sources is supplied,
 redirected standard input is consumed automatically. At a terminal Kvist asks
 whether to open the editor; declining allows multiline terminal input through
 end-of-file. Empty, oversized, non-UTF-8, non-regular, and link-like prompt
 inputs fail before an agent process starts.
 
-`kvist agent setup` collects a nonblank model name and command template for the
-selected provider. Provider probes are advisory; the wizard separately offers
-to execute a non-destructive prompt through the exact generated command before
-any configuration write. A failed model test defaults to refusing persistence
-and requires an explicit user override to continue.
+`kvist prompt` requires `--allow-host-execution`. This acknowledgement records
+that the configured provider inherits the invoking user's host authority and
+that neither retry notices nor supervision roll back filesystem or external
+side effects. Kvist renders a new provider command for every attempt through
+the standalone `supervised-agent` library. After an idle timeout or detected
+output loop, a retry appends a deterministic notice to the prompt stating the
+attempt number, prior failure, and possibility of prior side effects. Nonzero
+process exits, spawn failures, output failures, and policy/configuration errors
+are not automatically retried. Prompt supervision uses the selected profile's
+bounded combined-output limit.
+
+Prompt acquisition, shell-free command-template rendering, loop detection,
+idle supervision, process termination, retry context, and the standalone
+`supervised-agent run` command are owned by the child component at
+`supervised_agent/`. Kvist retains role/model resolution, architectural context
+selection, task lifecycle, sandbox approval, and durable component evidence.
+The child component's host-execution mode is a recovery and reliability aid,
+not an isolation boundary.
+
+`kvist agent setup` first selects between collecting a provider profile through
+the reusable `supervised_agent` setup API and loading a named profile from the
+standalone user store. Collection obtains a nonblank profile name and command
+template. Provider probes are advisory; the reusable interaction separately
+offers to execute a prompt through the exact generated command before any
+configuration write. Before execution it warns that the command receives the
+user's full host filesystem, credential, executable, and network permissions
+and requires a separate acknowledgement that defaults to refusal. A failed
+model test defaults to refusing persistence and requires an explicit user
+override to continue.
 
 For project-local setup, a missing file begins with the current
 `schema_version` and `component_root` fields. User-global setup creates only
-agent configuration. Existing configuration must parse and satisfy its
-applicable schema before editing. For every selected role the wizard retains
-all unrelated profile fields and models, updates or appends the named model,
-and selects it as both `model` and `default_model`. It preserves unrelated
-document values and comments, validates the edited result, enforces the
-configuration size bound, and atomically creates or replaces the selected
+agent configuration. A loaded standalone profile is copied into this Kvist
+configuration rather than referenced by path. Existing configuration must
+parse and satisfy its applicable schema before editing. For every selected role
+the wizard retains all unrelated profile fields and models, updates or appends
+the named model, and selects it as both `model` and `default_model`. It preserves
+unrelated document values and comments, validates the edited result, enforces
+the configuration size bound, and atomically creates or replaces the selected
 file. A malformed, oversized, or link-like configuration is reported rather
 than repaired or truncated. As with other direct filesystem checks, concurrent
 external mutation remains outside the static-workspace guarantee.

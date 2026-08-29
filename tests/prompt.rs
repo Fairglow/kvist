@@ -36,7 +36,7 @@ fn prompt_reads_text_from_a_file() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
         .current_dir(project.path())
-        .args(["prompt", "--file"])
+        .args(["prompt", "--allow-host-execution", "--file"])
         .arg(&prompt_path)
         .output()
         .expect("run prompt command");
@@ -54,7 +54,7 @@ fn prompt_reads_redirected_standard_input() {
     let project = configured_project();
     let mut child = Command::new(env!("CARGO_BIN_EXE_kvist"))
         .current_dir(project.path())
-        .arg("prompt")
+        .args(["prompt", "--allow-host-execution"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -89,7 +89,7 @@ fn prompt_can_be_authored_with_an_editor() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
         .current_dir(project.path())
-        .args(["prompt", "--editor"])
+        .args(["prompt", "--allow-host-execution", "--editor"])
         .env("VISUAL", &editor)
         .env_remove("EDITOR")
         .output()
@@ -133,7 +133,7 @@ fn prompt_rejects_oversized_files_before_agent_execution() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
         .current_dir(project.path())
-        .args(["prompt", "--file"])
+        .args(["prompt", "--allow-host-execution", "--file"])
         .arg(prompt_path)
         .output()
         .expect("run oversized prompt command");
@@ -156,7 +156,7 @@ fn prompt_rejects_linked_files_before_agent_execution() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
         .current_dir(project.path())
-        .args(["prompt", "--file"])
+        .args(["prompt", "--allow-host-execution", "--file"])
         .arg(prompt_path)
         .output()
         .expect("run linked prompt command");
@@ -166,5 +166,23 @@ fn prompt_rejects_linked_files_before_agent_execution() {
         String::from_utf8(output.stderr)
             .expect("UTF-8 error")
             .contains("regular non-link file")
+    );
+}
+
+#[test]
+fn prompt_requires_explicit_host_execution_acknowledgement() {
+    let project = configured_project();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .current_dir(project.path())
+        .args(["prompt", "host prompt"])
+        .output()
+        .expect("run prompt command");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("UTF-8 error")
+            .contains("--allow-host-execution")
     );
 }

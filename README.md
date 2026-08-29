@@ -5,6 +5,9 @@
 Kvist is a filesystem-native, spec-driven architecture tool for human-directed
 AI development. Its current interface is command-line based; graphical and
 editor integrations are planned without changing the durable project model.
+Kvist currently builds and runs on Linux only. macOS and Windows support is
+intentionally deferred until native maintainers and test environments can
+validate their execution boundaries.
 The product vision is defined in [`VISION.md`](VISION.md) and its architecture in
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md).
 
@@ -25,8 +28,8 @@ The product vision is defined in [`VISION.md`](VISION.md) and its architecture i
 | `kvist task run <COMPONENT_DIR> [TASK_ID]`         | Run the configured external agent for one ready task; see the execution boundary below.      |
 | `kvist task log <COMPONENT_DIR> <TASK_ID>`         | Print the most recent bounded, redacted agent log for a task.                                |
 | `kvist task approve-policy [PROJECT_DIR]`          | Record approval of the complete effective execution policy.                                  |
-| `kvist prompt [PROMPT]`                            | Run a positional, file, piped, or editor-authored prompt under supervision.                   |
-| `kvist agent setup`                                | Test and merge a named model into project or user agent configuration.                        |
+| `kvist prompt [PROMPT] --allow-host-execution`     | Run a positional, file, piped, or editor-authored prompt under acknowledged host supervision. |
+| `kvist agent setup`                                | Collect or load a reusable profile and bind it to project or user Kvist roles.                |
 
 Delivery is organized into phases. The completed, current, and planned phase
 scope, context, and acceptance criteria are maintained in
@@ -74,17 +77,16 @@ their built-in values. `command_template` remains compatible with older
 profiles and updates the built-in `default` model when that model list has not
 been replaced.
 
-On Unix-like systems, the user path is
+On Linux, the user path is
 `$XDG_CONFIG_HOME/kvist/config.toml`, falling back to
 `$HOME/.config/kvist/config.toml`, and the system path is
-`/etc/kvist/config.toml`. On Windows they are
-`%APPDATA%\kvist\config.toml` and `%ProgramData%\kvist\config.toml`,
-respectively.
+`/etc/kvist/config.toml`.
 
 Model commands use a deliberately limited shell-free argument template.
 Single and double quotes group arguments and may quote executable paths, but
 no shell is started. For normal models, `{prompt}` and
-`{target_directory}` are substituted in an argument and an argument containing
+`{target_directory}` are substituted in an argument, `{prompt_json}` emits a
+complete escaped JSON string value, and an argument containing
 `{context_files}` is emitted once for each declared context path. Shell
 operators, redirections, and pipelines are not supported.
 `system_prompt`, when nonempty, is prefixed to the task prompt with a blank
@@ -106,24 +108,68 @@ list, command, or prompt requires a fresh approval before `task run`.
 UTF-8 file with `--file PATH`, or from standard input:
 
 ```bash
-kvist prompt "Review this component contract"
-kvist prompt --file review-prompt.md
-printf '%s\n' "Review this component contract" | kvist prompt
+kvist prompt --allow-host-execution "Review this component contract"
+kvist prompt --allow-host-execution --file review-prompt.md
+printf '%s\n' "Review this component contract" |
+  kvist prompt --allow-host-execution
 ```
 
 Use `--file -` to select standard input explicitly. Use `--editor` to author a
-multiline prompt with `$VISUAL`, `$EDITOR`, or the platform default editor. If
+multiline prompt with `$VISUAL`, `$EDITOR`, or `vi`. If
 no source is supplied, redirected standard input is read automatically; at an
 interactive terminal Kvist offers to open the editor. These input modes are
 mutually exclusive, limited to 1 MiB, and must produce nonblank UTF-8 text.
+The acknowledgement is mandatory because this custom prompt path runs the
+configured provider with the invoking user's host permissions. Idle and loop
+retries append a warning that an earlier attempt may already have changed
+files or external systems; the warning does not roll those effects back.
 
-`kvist agent setup` asks for a provider, model configuration name, and command
-template. It offers to execute a test prompt through that exact command before
-asking where to save it. A failed test does not change configuration unless
-the user explicitly chooses to save anyway. Existing project-local and
-user-global TOML is updated atomically: unrelated settings, models, and
-comments are retained, while a model with the same name is updated for each
-selected role.
+Prompt acquisition, command rendering, and host-process supervision are
+provided by the independently usable `supervised-agent` workspace package:
+
+```bash
+cargo run --locked -p supervised-agent -- run \
+  --allow-host-execution \
+  --command "local-agent --prompt '{prompt}' {context_files}" \
+  --file review-prompt.md
+```
+
+Create a reusable provider profile interactively, then use it by name:
+
+```bash
+cargo run --locked -p supervised-agent -- setup
+cargo run --locked -p supervised-agent -- run \
+  --allow-host-execution \
+  --profile local-coder \
+  "Review this change"
+```
+
+Standalone profiles are stored at
+`$XDG_CONFIG_HOME/supervised-agent/config.toml`, falling back to
+`$HOME/.config/supervised-agent/config.toml`. Version 1 stores generic profile
+names, provider kinds, and command templates:
+
+```toml
+schema_version = 1
+
+[[profiles]]
+name = "local-coder"
+provider = "ollama"
+command = "ollama run qwen3-coder '{prompt}'"
+```
+
+The library crate is named `supervised_agent`. Its specification and deferred
+isolation plan live in [`src/supervised_agent/SPEC.md`](src/supervised_agent/SPEC.md).
+The current host mode is a reliability aid, not a sandbox. `fakeroot`, retry
+notices, and backups likewise do not restrict an agent's authority.
+
+`kvist agent setup` can call the same reusable provider-profile collection or
+load an existing standalone profile. It then asks which Kvist roles should use
+the profile and where the Kvist binding should be stored. The exact profile
+name and command are copied into Kvist configuration rather than dynamically
+referenced, so execution approval remains bound to reviewed command bytes.
+Existing project-local and user-global Kvist TOML is updated atomically:
+unrelated settings, models, and comments are retained.
 
 ### Sandboxed task execution
 
@@ -173,23 +219,23 @@ freshly verified runner bytes, so replacement after validation cannot alter
 what executes. Platforms without a descriptor-bound launch mechanism fail
 closed.
 
-Kvist targets current stable Rust on Linux, macOS, and Windows for x86_64 and
-ARM64 systems. Filesystem behavior must be covered on every supported platform;
-platform-specific differences must be explicit in the relevant command
-documentation and tests.
+Kvist targets current stable Rust on Linux. Non-Linux builds fail explicitly.
+Portable contracts remain free of Linux-specific policy assumptions, while
+platform process and isolation implementations are kept behind replaceable
+boundaries for possible future restoration.
 
 ## Toolchain and quality gates
 
-Kvist's MSRV is Rust **1.85**, the first stable release supporting edition 2024. CI tests the MSRV on Linux and current stable Rust on Linux, macOS, and
-Windows. `Cargo.lock` is committed and every CI build/test command uses
-`--locked`.
+Kvist's MSRV is Rust **1.85**, the first stable release supporting edition
+2024. CI tests the MSRV and current stable Rust on Linux. `Cargo.lock` is
+committed and every CI build/test command uses `--locked`.
 
 The portable default quality gate uses only Cargo:
 
 ```bash
 cargo fmt --check
 cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked
+cargo test --locked --workspace
 cargo build --locked --release
 ```
 
@@ -210,12 +256,11 @@ authorization to run repository code. The execution boundary still requires a
 separately documented trusted-workspace policy and explicit execution
 authorization.
 
-On Unix, symbolic links are link-like; on Windows, all reparse points,
-including junctions and symbolic links, are link-like. Link-like
-project/configuration/component paths are refused, while a link-like required
-artifact is invalid. Discovery refuses link-like non-artifact descendants
-rather than following or silently traversing them. These direct checks reduce
-accidental traversal only; they do not remove the TOCTOU limitation above.
+On Linux, symbolic links are link-like. Link-like project, configuration, and
+component paths are refused, while a link-like required artifact is invalid.
+Discovery refuses link-like non-artifact descendants rather than following or
+silently traversing them. These direct checks reduce accidental traversal only;
+they do not remove the TOCTOU limitation above.
 
 ## Root artifact templates
 
@@ -554,9 +599,10 @@ implementation files to that explicit context. See
 
 The current runner has two profiles: `developer` for test and implementation
 tasks, and `architect` for security-audit and compliance-review tasks. Agent
-templates support `{prompt}`, `{context_files}`, and `{target_directory}` and
-are spawned without a shell. They are whitespace-delimited argument templates,
-not shell scripts; pipelines, redirections, and shell quoting are unsupported.
+templates support `{prompt}`, `{prompt_json}`, `{context_files}`, and
+`{target_directory}` and are spawned without a shell. `{prompt_json}` includes
+the JSON quotes and escaping. Templates are whitespace-delimited arguments, not
+shell scripts; pipelines, redirections, and shell quoting are unsupported.
 
 Each resolved agent profile has a mandatory timeout and combined stdout/stderr
 byte cap. Defaults are 300 seconds and 65,536 bytes; configuration may lower

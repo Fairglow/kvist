@@ -4,21 +4,15 @@ use std::{
     fs,
     io::{BufRead, Write},
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value, value};
 
 use crate::{
-    KvistError, Result, agent, config,
+    KvistError, Result, config,
     file_io::{replace_file_atomically, write_new_file_atomically},
     filesystem::is_link_like,
 };
-
-struct ModelSetup {
-    name: String,
-    command: String,
-}
 
 fn write_output<W: Write>(writer: &mut W, data: &str) -> Result<()> {
     writer
@@ -47,21 +41,6 @@ fn read_input<R: BufRead>(reader: &mut R) -> Result<String> {
     Ok(buffer.trim().to_owned())
 }
 
-fn prompt_with_default<R: BufRead, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
-    prompt: &str,
-    default: &str,
-) -> Result<String> {
-    write_output(writer, &format!("{prompt} [{default}]: "))?;
-    let value = read_input(reader)?;
-    Ok(if value.is_empty() {
-        default.to_owned()
-    } else {
-        value
-    })
-}
-
 fn prompt_required<R: BufRead, W: Write>(
     reader: &mut R,
     writer: &mut W,
@@ -77,34 +56,31 @@ fn prompt_required<R: BufRead, W: Write>(
     Ok(value)
 }
 
-fn confirm<R: BufRead, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
-    prompt: &str,
-    default: bool,
-) -> Result<bool> {
-    write_output(
-        writer,
-        &format!("{prompt} [{}]: ", if default { "Y/n" } else { "y/N" }),
-    )?;
-    let answer = read_input(reader)?.to_ascii_lowercase();
-    if answer.is_empty() {
-        return Ok(default);
-    }
-    match answer.as_str() {
-        "y" | "yes" => Ok(true),
-        "n" | "no" => Ok(false),
-        _ => Err(KvistError::AgentSetupFailed {
-            reason: format!("expected yes or no, received `{answer}`"),
-        }),
-    }
-}
-
 /// Runs the interactive CLI wizard and safely creates or updates agent models.
 pub fn run_wizard<R: BufRead, W: Write>(
     reader: &mut R,
     writer: &mut W,
     project_dir: &Path,
+) -> Result<()> {
+    let profile_config = supervised_agent::default_profile_config_path();
+    run_wizard_inner(reader, writer, project_dir, profile_config.as_deref())
+}
+
+/// Runs setup with an explicit standalone profile store.
+pub fn run_wizard_with_profile_config<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    project_dir: &Path,
+    profile_config: &Path,
+) -> Result<()> {
+    run_wizard_inner(reader, writer, project_dir, Some(profile_config))
+}
+
+fn run_wizard_inner<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    project_dir: &Path,
+    profile_config: Option<&Path>,
 ) -> Result<()> {
     write_output(
         writer,
@@ -116,46 +92,45 @@ pub fn run_wizard<R: BufRead, W: Write>(
     )?;
     write_output(
         writer,
-        "Select model provider:\n\
-           1) Local llama-cli (direct binary execution)\n\
-           2) Local llama-server (HTTP API - default localhost:8080)\n\
-           3) Ollama (HTTP API - default localhost:11434)\n\
-           4) Copilot (CLI wrapper)\n\
-           5) Gemini (CLI wrapper)\n\
-           6) Custom Wrapper Script (e.g., ~/bin/llama-cli.sh)\n\
-         Choose (1-6) [3]: ",
+        "Select profile source:\n\
+           1) Configure a provider profile now\n\
+           2) Use a saved supervised-agent profile\n\
+         Choose (1-2) [1]: ",
     )?;
-    let provider = match read_input(reader)?.as_str() {
-        "1" => "llama-cli",
-        "2" => "llama-server",
-        "4" => "copilot",
-        "5" => "gemini-cli",
-        "6" => "custom-script",
-        _ => "ollama",
-    };
-    write_output(writer, &format!("\nConfiguring provider: {provider}\n"))?;
-
-    let model = configure_model(provider, reader, writer)?;
-    if confirm(reader, writer, "\nTest this model before saving?", true)? {
-        let test_prompt = prompt_with_default(
-            reader,
-            writer,
-            "Test prompt",
-            "Reply with: Kvist model ready",
-        )?;
-        match verify_model(&model, &test_prompt, project_dir, writer) {
-            Ok(()) => write_output(writer, "Model test succeeded.\n")?,
-            Err(error) => {
-                write_output(writer, &format!("Model test failed: {error}\n"))?;
-                if !confirm(reader, writer, "Save configuration anyway?", false)? {
-                    return Err(KvistError::AgentSetupFailed {
-                        reason: "model verification failed; configuration was not changed"
-                            .to_owned(),
-                    });
-                }
-            }
+    let model = if read_input(reader)? == "2" {
+        let profile_config = profile_config.ok_or_else(|| KvistError::AgentSetupFailed {
+            reason: "cannot resolve standalone profile configuration; set HOME or XDG_CONFIG_HOME"
+                .to_owned(),
+        })?;
+        let profiles = supervised_agent::load_profiles(profile_config)?;
+        if profiles.is_empty() {
+            return Err(KvistError::AgentSetupFailed {
+                reason: format!(
+                    "no standalone profiles exist in `{}`; run `supervised-agent setup` first",
+                    profile_config.display()
+                ),
+            });
         }
-    }
+        write_output(writer, "\nAvailable standalone profiles:\n")?;
+        for profile in &profiles {
+            write_output(
+                writer,
+                &format!("  {} ({})\n", profile.name, profile.provider),
+            )?;
+        }
+        let name = prompt_required(reader, writer, "Profile name: ")?;
+        profiles
+            .into_iter()
+            .find(|profile| profile.name == name)
+            .ok_or_else(|| KvistError::AgentSetupFailed {
+                reason: format!(
+                    "profile `{name}` does not exist in `{}`",
+                    profile_config.display()
+                ),
+            })?
+    } else {
+        supervised_agent::collect_profile(reader, writer, project_dir)?
+    };
 
     write_output(writer, "\nWhich roles should use this model?\n")?;
     write_output(writer, "  1) Developer (test writing & implementation)\n")?;
@@ -198,161 +173,12 @@ pub fn run_wizard<R: BufRead, W: Write>(
     )
 }
 
-fn configure_model<R: BufRead, W: Write>(
-    provider: &str,
-    reader: &mut R,
-    writer: &mut W,
-) -> Result<ModelSetup> {
-    match provider {
-        "llama-cli" => {
-            let binary =
-                prompt_with_default(reader, writer, "Path to llama-cli executable", "llama-cli")?;
-            let model_path = prompt_required(reader, writer, "Path to GGUF model file: ")?;
-            let name =
-                prompt_with_default(reader, writer, "Model configuration name", "llama-cli")?;
-            let default = format!(
-                "{} --model {} --prompt '{{prompt}}' --context '{{context_files}}' --format json",
-                command_argument(&binary),
-                command_argument(&expand_home_path(&model_path).to_string_lossy())
-            );
-            let command = prompt_with_default(reader, writer, "Command template", &default)?;
-            Ok(ModelSetup { name, command })
-        }
-        "llama-server" => {
-            let url = prompt_with_default(
-                reader,
-                writer,
-                "llama-server base URL",
-                "http://localhost:8080",
-            )?;
-            probe_and_report(&url, writer)?;
-            let name = prompt_with_default(reader, writer, "Model name", "default")?;
-            let default = format!(
-                "curl --silent --fail --request POST {url}/v1/chat/completions --json \
-                 '{{\"model\":\"{name}\",\"messages\":[{{\"role\":\"user\",\"content\":\"{{prompt}}\"}}]}}'"
-            );
-            let command = prompt_with_default(reader, writer, "Command template", &default)?;
-            Ok(ModelSetup { name, command })
-        }
-        "ollama" => {
-            let url =
-                prompt_with_default(reader, writer, "Ollama base URL", "http://localhost:11434")?;
-            probe_and_report(&format!("{url}/api/tags"), writer)?;
-            let name = prompt_with_default(reader, writer, "Ollama model name", "llama3.1:8b")?;
-            let default = format!("ollama run {name} '{{prompt}}'");
-            let command = prompt_with_default(reader, writer, "Command template", &default)?;
-            Ok(ModelSetup { name, command })
-        }
-        "copilot" => {
-            let name = prompt_with_default(reader, writer, "Model configuration name", "copilot")?;
-            let command = prompt_with_default(
-                reader,
-                writer,
-                "Command template",
-                "copilot chat '{prompt}'",
-            )?;
-            Ok(ModelSetup { name, command })
-        }
-        "gemini-cli" => {
-            let name = prompt_with_default(reader, writer, "Model configuration name", "gemini")?;
-            let command = prompt_with_default(
-                reader,
-                writer,
-                "Command template",
-                "gemini-cli --prompt '{prompt}' --files {context_files}",
-            )?;
-            Ok(ModelSetup { name, command })
-        }
-        _ => {
-            let script = prompt_required(
-                reader,
-                writer,
-                "Path to custom wrapper executable (e.g., ~/bin/llama-cli.sh): ",
-            )?;
-            let script_path = expand_home_path(&script);
-            validate_custom_executable(&script_path)?;
-            write_output(writer, "Custom wrapper found and executable.\n")?;
-            let name =
-                prompt_with_default(reader, writer, "Model configuration name", "custom-wrapper")?;
-            let default = format!(
-                "{} --prompt '{{prompt}}' --context '{{context_files}}'",
-                command_argument(&script_path.to_string_lossy())
-            );
-            let command = prompt_with_default(reader, writer, "Command template", &default)?;
-            Ok(ModelSetup { name, command })
-        }
-    }
-}
-
-fn command_argument(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-fn validate_custom_executable(path: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(path).map_err(|source| KvistError::Io {
-        operation: "inspect custom wrapper executable",
-        path: path.to_path_buf(),
-        source,
-    })?;
-    if is_link_like(&metadata) || !metadata.file_type().is_file() {
-        return Err(KvistError::AgentSetupFailed {
-            reason: format!(
-                "custom wrapper `{}` must be a regular non-link file",
-                path.display()
-            ),
-        });
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if metadata.permissions().mode() & 0o111 == 0 {
-            return Err(KvistError::AgentSetupFailed {
-                reason: format!("custom wrapper `{}` is not executable", path.display()),
-            });
-        }
-    }
-    Ok(())
-}
-
-fn probe_and_report<W: Write>(url: &str, writer: &mut W) -> Result<()> {
-    write_output(writer, &format!("Probing `{url}`...\n"))?;
-    let responsive = Command::new("curl")
-        .args(["--silent", "--fail", "--max-time", "2", url])
-        .status()
-        .is_ok_and(|status| status.success());
-    write_output(
-        writer,
-        if responsive {
-            "Endpoint is responsive.\n"
-        } else {
-            "Warning: endpoint probe failed; the model test can verify the full command.\n"
-        },
-    )
-}
-
-fn verify_model<W: Write>(
-    model: &ModelSetup,
-    prompt: &str,
-    project_dir: &Path,
-    writer: &mut W,
-) -> Result<()> {
-    write_output(
-        writer,
-        &format!(
-            "Executing model `{}` with the generated command...\n",
-            model.name
-        ),
-    )?;
-    let (program, arguments) = agent::split_command(&model.command, prompt, &[], project_dir)?;
-    crate::prompt_supervisor::run_supervised_prompt(&program, &arguments, 30, true, 0)
-}
-
 fn persist_model(
     config_path: &Path,
     project_dir: &Path,
     project_local: bool,
     roles: &[&str],
-    model: &ModelSetup,
+    model: &supervised_agent::ModelProfile,
 ) -> Result<()> {
     let (mut document, existing_contents) = load_document(config_path, project_local)?;
     if let Some(contents) = existing_contents.as_deref() {
@@ -463,7 +289,11 @@ fn ensure_table<'a>(item: &'a mut Item, config_path: &str) -> Result<&'a mut Tab
         })
 }
 
-fn upsert_role_model(document: &mut DocumentMut, role: &str, model: &ModelSetup) -> Result<()> {
+fn upsert_role_model(
+    document: &mut DocumentMut,
+    role: &str,
+    model: &supervised_agent::ModelProfile,
+) -> Result<()> {
     let agent = ensure_table(&mut document["agent"], "agent")?;
     let profiles = ensure_table(&mut agent["profiles"], "agent.profiles")?;
     let role_key = if role == "security-reviewer"
@@ -483,7 +313,7 @@ fn upsert_role_model(document: &mut DocumentMut, role: &str, model: &ModelSetup)
     upsert_model_item(&mut profile["models"], model)
 }
 
-fn upsert_model_item(item: &mut Item, model: &ModelSetup) -> Result<()> {
+fn upsert_model_item(item: &mut Item, model: &supervised_agent::ModelProfile) -> Result<()> {
     if item.is_none() {
         *item = Item::ArrayOfTables(ArrayOfTables::new());
     }
@@ -512,7 +342,7 @@ fn upsert_model_item(item: &mut Item, model: &ModelSetup) -> Result<()> {
     }
 }
 
-fn upsert_inline_model(models: &mut Array, model: &ModelSetup) -> Result<()> {
+fn upsert_inline_model(models: &mut Array, model: &supervised_agent::ModelProfile) -> Result<()> {
     let existing_index = models.iter().position(|value| {
         value
             .as_inline_table()
@@ -540,16 +370,4 @@ fn upsert_inline_model(models: &mut Array, model: &ModelSetup) -> Result<()> {
         models.push(table);
     }
     Ok(())
-}
-
-fn expand_home_path(path: &str) -> PathBuf {
-    if let Some(home) = std::env::var_os("HOME") {
-        if let Some(remainder) = path.strip_prefix("~/") {
-            return PathBuf::from(home).join(remainder);
-        }
-        if path == "~" {
-            return PathBuf::from(home);
-        }
-    }
-    PathBuf::from(path)
 }
