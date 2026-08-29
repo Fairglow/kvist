@@ -64,6 +64,12 @@ pub enum KvistError {
         /// Existing generated artifact paths.
         artifacts: Vec<PathBuf>,
     },
+    /// An error occurred during repository import.
+    #[error("import failed: {reason}")]
+    ImportFailed {
+        /// Explanation of the import failure.
+        reason: String,
+    },
     /// A project is not safe for `init` to modify.
     #[error(
         "cannot initialize `{project_dir}` because its Kvist project state is {state}; \

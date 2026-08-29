@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::{
-    KvistError, Result, convert, discovery, init, project_state, specification, status,
+    KvistError, Result, convert, discovery, import, init, project_state, specification, status,
     task_commands, task_queue::TaskStatus, tree,
 };
 
@@ -37,6 +37,21 @@ pub enum Command {
         /// Existing Rust project directory.
         #[arg(value_name = "PROJECT_DIR")]
         project_dir: PathBuf,
+    },
+    /// Import Kvist artifacts from a Git repository.
+    Import {
+        /// Git repository URL to clone.
+        #[arg(value_name = "REPO_URL")]
+        repo_url: String,
+        /// Git branch to use; defaults to the main branch.
+        #[arg(long, default_value = "main")]
+        branch: String,
+        /// Component directory inside the cloned repository; if omitted, the root is used.
+        #[arg(long)]
+        component: Option<PathBuf>,
+        /// Local destination directory; defaults to the current directory.
+        #[arg(value_name = "DEST_DIR", default_value = ".")]
+        dest_dir: PathBuf,
     },
     /// Render the component tree for a Kvist project.
     Tree(ProjectDirectory),
@@ -246,6 +261,21 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     r#"{{"status":"success","command":"convert","project_dir":{project_dir_json},"message":{message_json}}}"#
                 ))
             }),
+            Command::Import {
+                repo_url,
+                branch,
+                component,
+                dest_dir,
+            } => {
+                let outcome = import::import(&repo_url, &branch, component.as_deref(), &dest_dir)?;
+                let mut dest_dir_json = String::new();
+                let mut message_json = String::new();
+                json_string_escape(&mut dest_dir_json, &dest_dir.to_string_lossy());
+                json_string_escape(&mut message_json, &outcome.to_string());
+                Ok(CommandOutput::message(format!(
+                    r#"{{"status":"success","command":"import","dest_dir":{dest_dir_json},"message":{message_json}}}"#
+                )))
+            },
             Command::Init(project) => {
                 let outcome = init::initialize(&project.path)?;
                 Ok(CommandOutput::message(format!(
@@ -449,6 +479,13 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
     } else {
         match command {
             Command::Convert { project_dir } => convert::convert(&project_dir)
+                .map(|outcome| CommandOutput::message(outcome.to_string())),
+            Command::Import {
+                repo_url,
+                branch,
+                component,
+                dest_dir,
+            } => import::import(&repo_url, &branch, component.as_deref(), &dest_dir)
                 .map(|outcome| CommandOutput::message(outcome.to_string())),
             Command::Init(project) => init::initialize(&project.path)
                 .map(|outcome| CommandOutput::message(outcome.to_string())),
