@@ -83,6 +83,13 @@ pub fn import(
     }
 
     // 2. Spawn git clone
+    let repo_url = repo_url.replace('\\', "/");
+    let destination = dest_dir
+        .to_str()
+        .ok_or_else(|| KvistError::ImportFailed {
+            reason: "destination directory is invalid UTF-8".to_owned(),
+        })?
+        .replace('\\', "/");
     let output = std::process::Command::new("git")
         .args([
             "clone",
@@ -90,10 +97,8 @@ pub fn import(
             branch,
             "--depth",
             "1",
-            repo_url,
-            dest_dir.to_str().ok_or_else(|| KvistError::ImportFailed {
-                reason: "destination directory is invalid UTF-8".to_owned(),
-            })?,
+            &repo_url,
+            &destination,
         ])
         .output()
         .map_err(|source| KvistError::Io {
