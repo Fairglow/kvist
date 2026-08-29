@@ -13,6 +13,7 @@ Its product architecture is defined in
 | Command                                            | Contract                                                                                         |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `kvist init [PROJECT_DIR]`                         | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.       |
+| `kvist convert <PROJECT_DIR>`                      | Generate no-clobber draft onboarding artifacts for an existing Rust project.                       |
 | `kvist doctor [PROJECT_DIR]`                       | Read-only inspection of the root artifact state and recovery guidance.                           |
 | `kvist status [PROJECT_DIR] [--format text\|json]` | Read-only versioned inspection of project and component workflow state.                          |
 | `kvist tree [PROJECT_DIR]`                         | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory.     |
@@ -220,7 +221,15 @@ refuse it.
 | `max_entries_per_directory` |  10,000 |      100,000 | Entries read from one directory.                               |
 | `max_relative_path_bytes`   |   4,096 |       32,768 | Platform-encoded bytes in a path relative to `component_root`. |
 
-`kvist init` creates a missing target directory, rejects a link-like root or
+`kvist init` detects an uninitialized Rust project containing `Cargo.toml` and
+`src/`, then creates draft onboarding artifacts under `.kvist/` without changing
+the manifest, source, tests, or benchmarks. `kvist convert <PROJECT_DIR>` exposes
+that same conversion explicitly. Conversion validates the generated specification
+and queue before writing either, refuses link-like paths, and never overwrites an
+existing `.kvist/` directory. The drafts must be reviewed before they are used for
+task execution.
+
+Otherwise, `kvist init` creates a missing target directory, rejects a link-like root or
 artifact parent, and writes each artifact through a same-directory temporary
 file with no-clobber persistence. It writes only an **uninitialized** project
 and reports **already initialized** only after every required artifact validates

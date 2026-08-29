@@ -10,6 +10,7 @@ pub mod agent;
 pub mod artifacts;
 pub mod cli;
 pub mod config;
+pub mod convert;
 pub mod discovery;
 mod error;
 mod file_io;

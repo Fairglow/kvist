@@ -9,6 +9,7 @@ use std::{
 use crate::{
     KvistError, Result,
     artifacts::{ArtifactTemplate, root_artifacts},
+    convert,
     file_io::write_new_file_atomically,
     filesystem::is_link_like,
     project_state::{self, ProjectState},
@@ -25,6 +26,16 @@ pub enum InitOutcome {
     /// The complete root artifact set already existed and was not changed.
     AlreadyInitialized {
         /// Directory containing the existing artifacts.
+        project_dir: PathBuf,
+    },
+    /// An existing Rust project received draft conversion artifacts.
+    ConvertedExistingRustProject {
+        /// Directory containing the converted Rust project.
+        project_dir: PathBuf,
+    },
+    /// An existing Rust project already has conversion metadata.
+    AlreadyConvertedExistingRustProject {
+        /// Directory containing the converted Rust project.
         project_dir: PathBuf,
     },
 }
@@ -46,6 +57,17 @@ impl fmt::Display for InitOutcome {
                     project_dir.display()
                 )
             }
+            Self::ConvertedExistingRustProject { project_dir } => write!(
+                formatter,
+                "created draft Kvist artifacts for existing project at {}; review and accept \
+                 .kvist/SPEC.md and .kvist/TODOS.yaml before task execution",
+                project_dir.display()
+            ),
+            Self::AlreadyConvertedExistingRustProject { project_dir } => write!(
+                formatter,
+                "existing-project conversion metadata already exists at {}",
+                project_dir.join(".kvist").display()
+            ),
         }
     }
 }
@@ -57,6 +79,20 @@ impl fmt::Display for InitOutcome {
 pub fn initialize(project_dir: &Path) -> Result<InitOutcome> {
     ensure_project_directory(project_dir)?;
     match project_state::inspect(project_dir)?.state {
+        ProjectState::Uninitialized
+            if project_dir.join("Cargo.toml").exists()
+                && fs::symlink_metadata(project_dir.join("src"))
+                    .is_ok_and(|metadata| metadata.file_type().is_dir()) =>
+        {
+            return convert::convert(project_dir).map(|outcome| match outcome {
+                convert::ConvertOutcome::Converted { project_dir } => {
+                    InitOutcome::ConvertedExistingRustProject { project_dir }
+                }
+                convert::ConvertOutcome::AlreadyConverted { project_dir } => {
+                    InitOutcome::AlreadyConvertedExistingRustProject { project_dir }
+                }
+            });
+        }
         ProjectState::Uninitialized => {}
         ProjectState::Current => {
             return Ok(InitOutcome::AlreadyInitialized {

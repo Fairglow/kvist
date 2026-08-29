@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::{
-    KvistError, Result, discovery, init, project_state, specification, status, task_commands,
-    task_queue::TaskStatus, tree,
+    KvistError, Result, convert, discovery, init, project_state, specification, status,
+    task_commands, task_queue::TaskStatus, tree,
 };
 
 /// Kvist's top-level command-line interface.
@@ -27,11 +27,17 @@ pub struct Cli {
     pub command: Command,
 }
 
-/// Commands that form Kvist's initial public CLI contract.
+/// Commands that form Kvist's public CLI contract.
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Initialize a project with Kvist's root artifacts.
     Init(ProjectDirectory),
+    /// Convert an existing Rust project into a Kvist-managed component.
+    Convert {
+        /// Existing Rust project directory.
+        #[arg(value_name = "PROJECT_DIR")]
+        project_dir: PathBuf,
+    },
     /// Render the component tree for a Kvist project.
     Tree(ProjectDirectory),
     /// Inspect root artifacts without changing the project.
@@ -70,8 +76,29 @@ pub enum Command {
     Completions {
         /// Target shell for completion.
         #[arg(value_name = "SHELL", value_enum)]
-        shell: clap_complete::Shell,
+        shell: SupportedShell,
     },
+}
+
+/// Supported shells for shell completion generation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "lower")]
+pub enum SupportedShell {
+    Bash,
+    Zsh,
+    Fish,
+    Powershell,
+}
+
+impl From<SupportedShell> for clap_complete::Shell {
+    fn from(shell: SupportedShell) -> Self {
+        match shell {
+            SupportedShell::Bash => Self::Bash,
+            SupportedShell::Zsh => Self::Zsh,
+            SupportedShell::Fish => Self::Fish,
+            SupportedShell::Powershell => Self::PowerShell,
+        }
+    }
 }
 
 /// An explicit project directory argument shared by project-scoped commands.
@@ -82,7 +109,7 @@ pub struct ProjectDirectory {
     pub path: PathBuf,
 }
 
-/// Specification-specific commands.
+/// Specification operations.
 #[derive(Debug, Subcommand)]
 pub enum SpecCommand {
     /// Create a layered SPEC.md in a component directory.
@@ -97,9 +124,9 @@ pub enum SpecCommand {
         #[arg(value_name = "SPEC_FILE")]
         spec_file: PathBuf,
     },
-    /// Revalidate a component specification, resetting the stale state back to Current.
+    /// Accept a modified SPEC.md and revalidate.
     Accept {
-        /// Component-root-relative component directory; `.` selects the root component.
+        /// Component directory containing the SPEC.md to revalidate.
         #[arg(value_name = "COMPONENT_DIR")]
         component_dir: PathBuf,
     },
@@ -168,7 +195,7 @@ pub enum TaskCommand {
 }
 
 /// Command-line spelling of a queue task status.
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum TaskStatusArgument {
     Pending,
     InProgress,
@@ -210,6 +237,15 @@ impl std::fmt::Display for CommandOutput {
 pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
     if json {
         match command {
+            Command::Convert { project_dir } => convert::convert(&project_dir).map(|outcome| {
+                let mut project_dir_json = String::new();
+                let mut message_json = String::new();
+                json_string_escape(&mut project_dir_json, &project_dir.to_string_lossy());
+                json_string_escape(&mut message_json, &outcome.to_string());
+                CommandOutput::message(format!(
+                    r#"{{"status":"success","command":"convert","project_dir":{project_dir_json},"message":{message_json}}}"#
+                ))
+            }),
             Command::Init(project) => {
                 let outcome = init::initialize(&project.path)?;
                 Ok(CommandOutput::message(format!(
@@ -224,20 +260,19 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Tree(project) => {
                 let discovery = discovery::discover(&project.path)?;
                 let mut components_json = String::from("[");
-                for (i, comp) in discovery.components.iter().enumerate() {
-                    if i > 0 {
+                for (index, component) in discovery.components.iter().enumerate() {
+                    if index > 0 {
                         components_json.push(',');
                     }
                     components_json.push_str(&format!(
                         "{{\"path\":\"{}\",\"state\":\"{:?}\"}}",
-                        comp.relative_path.to_string_lossy().replace('\\', "\\\\"),
-                        comp.status()
+                        component.relative_path.to_string_lossy().replace('\\', "\\\\"),
+                        component.status()
                     ));
                 }
                 components_json.push(']');
                 Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"tree\",\"component_root\":\"src\",\"components\":{}}}",
-                    components_json
+                    "{{\"status\":\"success\",\"command\":\"tree\",\"component_root\":\"src\",\"components\":{components_json}}}"
                 )))
             }
             Command::Doctor(project) => {
@@ -245,8 +280,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 let status_json =
                     status::render(&inspection, status::StatusFormat::Json, false, false, false);
                 Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"doctor\",\"inspection\":{}}}",
-                    status_json
+                    "{{\"status\":\"success\",\"command\":\"doctor\",\"inspection\":{status_json}}}"
                 )))
             }
             Command::Status {
@@ -257,38 +291,35 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 unfinished,
             } => {
                 let inspection = project_state::inspect(&path)?;
-                let status_json = status::render(
+                Ok(CommandOutput::message(status::render(
                     &inspection,
                     status::StatusFormat::Json,
                     only_specs,
                     only_impls,
                     unfinished,
-                );
-                Ok(CommandOutput::message(status_json))
+                )))
             }
             Command::Task {
                 command: TaskCommand::Next { component_dir },
             } => {
                 let ready_task = task_commands::next(&component_dir)?;
-                let ready_task_val = if ready_task == "no ready task" {
+                let ready_task = if ready_task == "no ready task" {
                     "null".to_owned()
                 } else {
-                    format!("\"{}\"", ready_task)
+                    format!("\"{ready_task}\"")
                 };
                 Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"task-next\",\"component_dir\":\"{}\",\"ready_task_id\":{}}}",
+                    "{{\"status\":\"success\",\"command\":\"task-next\",\"component_dir\":\"{}\",\"ready_task_id\":{ready_task}}}",
                     component_dir.to_string_lossy().replace('\\', "\\\\"),
-                    ready_task_val
                 )))
             }
             Command::Task {
-                command:
-                    TaskCommand::Transition {
-                        component_dir,
-                        task_id,
-                        status,
-                        reason,
-                    },
+                command: TaskCommand::Transition {
+                    component_dir,
+                    task_id,
+                    status,
+                    reason,
+                },
             } => {
                 let message = task_commands::transition(
                     &component_dir,
@@ -300,17 +331,16 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     "{{\"status\":\"success\",\"command\":\"task-transition\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"target_status\":\"{}\",\"message\":\"{}\"}}",
                     component_dir.to_string_lossy().replace('\\', "\\\\"),
                     task_id,
-                    status_name(status.into()),
+                    task_status_name(status.into()),
                     message.replace('\n', "\\n").replace('"', "\\\"")
                 )))
             }
             Command::Task {
-                command:
-                    TaskCommand::Run {
-                        component_dir,
-                        task_id,
-                        stream,
-                    },
+                command: TaskCommand::Run {
+                    component_dir,
+                    task_id,
+                    stream,
+                },
             } => {
                 let message = task_commands::run_task(&component_dir, task_id.as_deref(), stream)?;
                 Ok(CommandOutput::message(format!(
@@ -320,20 +350,18 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 )))
             }
             Command::Task {
-                command:
-                    TaskCommand::Log {
-                        component_dir,
-                        task_id,
-                    },
+                command: TaskCommand::Log {
+                    component_dir,
+                    task_id,
+                },
             } => {
                 let log_content = task_commands::task_log(&component_dir, &task_id)?;
                 let mut escaped_log = String::new();
                 json_string_escape(&mut escaped_log, &log_content);
                 Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"task-log\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"log_content\":{}}}",
+                    "{{\"status\":\"success\",\"command\":\"task-log\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"log_content\":{escaped_log}}}",
                     component_dir.to_string_lossy().replace('\\', "\\\\"),
                     task_id,
-                    escaped_log
                 )))
             }
             Command::Task {
@@ -347,11 +375,10 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 )))
             }
             Command::Task {
-                command:
-                    TaskCommand::Unlock {
-                        component_dir,
-                        force,
-                    },
+                command: TaskCommand::Unlock {
+                    component_dir,
+                    force,
+                },
             } => {
                 let message = task_commands::unlock(&component_dir, force)?;
                 Ok(CommandOutput::message(format!(
@@ -375,25 +402,24 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             } => {
                 let validation = specification::validate_file(&spec_file)?;
                 let mut diagnostics_json = String::from("[");
-                for (i, diag) in validation.diagnostics.iter().enumerate() {
-                    if i > 0 {
+                for (index, diagnostic) in validation.diagnostics.iter().enumerate() {
+                    if index > 0 {
                         diagnostics_json.push(',');
                     }
-                    let message = specification::format_diagnostics(std::slice::from_ref(diag));
+                    let message = specification::format_diagnostics(std::slice::from_ref(diagnostic));
                     diagnostics_json.push_str(&format!(
                         "{{\"kind\":\"{:?}\",\"line\":{},\"column\":{},\"message\":\"{}\"}}",
-                        diag.kind,
-                        diag.line,
-                        diag.column,
+                        diagnostic.kind,
+                        diagnostic.line,
+                        diagnostic.column,
                         message.replace('"', "\\\"")
                     ));
                 }
                 diagnostics_json.push(']');
                 Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"spec-validate\",\"valid\":{},\"spec_path\":\"{}\",\"diagnostics\":{}}}",
+                    "{{\"status\":\"success\",\"command\":\"spec-validate\",\"valid\":{},\"spec_path\":\"{}\",\"diagnostics\":{diagnostics_json}}}",
                     validation.is_valid(),
                     spec_file.to_string_lossy().replace('\\', "\\\\"),
-                    diagnostics_json
                 )))
             }
             Command::Spec {
@@ -410,18 +436,20 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 use clap::CommandFactory;
                 let mut cmd = Cli::command();
                 let mut buffer = Vec::new();
-                clap_complete::generate(shell, &mut cmd, "kvist", &mut buffer);
+                let generator: clap_complete::Shell = shell.into();
+                clap_complete::generate(generator, &mut cmd, "kvist", &mut buffer);
                 let script = String::from_utf8(buffer).expect("valid UTF-8 completion script");
                 let mut escaped_script = String::new();
                 json_string_escape(&mut escaped_script, &script);
                 Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"completions\",\"shell\":\"{:?}\",\"script\":{}}}",
-                    shell, escaped_script
+                    "{{\"status\":\"success\",\"command\":\"completions\",\"shell\":\"{shell:?}\",\"script\":{escaped_script}}}"
                 )))
             }
         }
     } else {
         match command {
+            Command::Convert { project_dir } => convert::convert(&project_dir)
+                .map(|outcome| CommandOutput::message(outcome.to_string())),
             Command::Init(project) => init::initialize(&project.path)
                 .map(|outcome| CommandOutput::message(outcome.to_string())),
             Command::Tree(project) => {
@@ -519,7 +547,8 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 use clap::CommandFactory;
                 let mut cmd = Cli::command();
                 let mut buffer = Vec::new();
-                clap_complete::generate(shell, &mut cmd, "kvist", &mut buffer);
+                let generator: clap_complete::Shell = shell.into();
+                clap_complete::generate(generator, &mut cmd, "kvist", &mut buffer);
                 let script = String::from_utf8(buffer).expect("valid UTF-8 completion script");
                 Ok(CommandOutput::message(script))
             }
@@ -527,12 +556,12 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
     }
 }
 
-fn status_name(status: TaskStatus) -> &'static str {
+fn task_status_name(status: crate::task_queue::TaskStatus) -> &'static str {
     match status {
-        TaskStatus::Pending => "pending",
-        TaskStatus::InProgress => "in-progress",
-        TaskStatus::Blocked => "blocked",
-        TaskStatus::Completed => "completed",
+        crate::task_queue::TaskStatus::Pending => "pending",
+        crate::task_queue::TaskStatus::InProgress => "in-progress",
+        crate::task_queue::TaskStatus::Blocked => "blocked",
+        crate::task_queue::TaskStatus::Completed => "completed",
     }
 }
 
@@ -549,7 +578,6 @@ fn json_string_escape(output: &mut String, value: &str) {
             '\u{0c}' => output.push_str("\\f"),
             '\0'..='\u{1f}' => {
                 use std::fmt::Write;
-
                 let _ = write!(output, "\\u{:04x}", character as u32);
             }
             _ => output.push(character),
@@ -628,6 +656,196 @@ mod tests {
     }
 
     #[test]
+    fn parses_convert_command() {
+        let cli = Cli::try_parse_from(["kvist", "convert", "/path/to/project"])
+            .expect("valid convert command");
+
+        let Command::Convert { project_dir } = cli.command else {
+            panic!("expected convert command");
+        };
+
+        assert_eq!(project_dir, PathBuf::from("/path/to/project"));
+    }
+
+    #[test]
+    fn parses_task_next_command() {
+        let cli =
+            Cli::try_parse_from(["kvist", "task", "next", "src"]).expect("valid task next command");
+
+        let Command::Task {
+            command: TaskCommand::Next { component_dir },
+        } = cli.command
+        else {
+            panic!("expected task next command");
+        };
+
+        assert_eq!(component_dir, PathBuf::from("src"));
+    }
+
+    #[test]
+    fn parses_task_transition_command() {
+        let cli = Cli::try_parse_from([
+            "kvist",
+            "task",
+            "transition",
+            "src",
+            "task-1",
+            "in-progress",
+        ])
+        .expect("valid task transition command");
+
+        let Command::Task {
+            command:
+                TaskCommand::Transition {
+                    component_dir,
+                    task_id,
+                    status,
+                    reason,
+                },
+        } = cli.command
+        else {
+            panic!("expected task transition command");
+        };
+
+        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(task_id, "task-1");
+        assert_eq!(status, TaskStatusArgument::InProgress);
+        assert_eq!(reason, None);
+    }
+
+    #[test]
+    fn parses_task_transition_command_with_reason() {
+        let cli = Cli::try_parse_from([
+            "kvist",
+            "task",
+            "transition",
+            "src",
+            "task-1",
+            "blocked",
+            "--reason",
+            "waiting on PR",
+        ])
+        .expect("valid task transition with reason command");
+
+        let Command::Task {
+            command:
+                TaskCommand::Transition {
+                    component_dir,
+                    task_id,
+                    status,
+                    reason,
+                },
+        } = cli.command
+        else {
+            panic!("expected task transition command");
+        };
+
+        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(task_id, "task-1");
+        assert_eq!(status, TaskStatusArgument::Blocked);
+        assert_eq!(reason, Some("waiting on PR".to_string()));
+    }
+
+    #[test]
+    fn parses_task_run_command() {
+        let cli =
+            Cli::try_parse_from(["kvist", "task", "run", "src"]).expect("valid task run command");
+
+        let Command::Task {
+            command:
+                TaskCommand::Run {
+                    component_dir,
+                    task_id,
+                    stream,
+                },
+        } = cli.command
+        else {
+            panic!("expected task run command");
+        };
+
+        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(task_id, None);
+        assert!(!stream);
+    }
+
+    #[test]
+    fn parses_task_run_command_with_task_id() {
+        let cli = Cli::try_parse_from(["kvist", "task", "run", "src", "task-1", "--stream"])
+            .expect("valid task run command with task id");
+
+        let Command::Task {
+            command:
+                TaskCommand::Run {
+                    component_dir,
+                    task_id,
+                    stream,
+                },
+        } = cli.command
+        else {
+            panic!("expected task run command");
+        };
+
+        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(task_id, Some("task-1".to_string()));
+        assert!(stream);
+    }
+
+    #[test]
+    fn parses_task_log_command() {
+        let cli = Cli::try_parse_from(["kvist", "task", "log", "src", "task-1"])
+            .expect("valid task log command");
+
+        let Command::Task {
+            command:
+                TaskCommand::Log {
+                    component_dir,
+                    task_id,
+                },
+        } = cli.command
+        else {
+            panic!("expected task log command");
+        };
+
+        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(task_id, "task-1".to_string());
+    }
+
+    #[test]
+    fn parses_task_approve_policy_command() {
+        let cli = Cli::try_parse_from(["kvist", "task", "approve-policy", "/path/to/project"])
+            .expect("valid task approve-policy command");
+
+        let Command::Task {
+            command: TaskCommand::ApprovePolicy { path },
+        } = cli.command
+        else {
+            panic!("expected task approve-policy command");
+        };
+
+        assert_eq!(path, PathBuf::from("/path/to/project"));
+    }
+
+    #[test]
+    fn parses_task_unlock_command() {
+        let cli = Cli::try_parse_from(["kvist", "task", "unlock", "src", "--force"])
+            .expect("valid task unlock command");
+
+        let Command::Task {
+            command:
+                TaskCommand::Unlock {
+                    component_dir,
+                    force,
+                },
+        } = cli.command
+        else {
+            panic!("expected task unlock command");
+        };
+
+        assert_eq!(component_dir, PathBuf::from("src"));
+        assert!(force);
+    }
+
+    #[test]
     fn help_exits_successfully() {
         let error = Cli::try_parse_from(["kvist", "--help"]).expect_err("help exits successfully");
 
@@ -641,10 +859,26 @@ mod tests {
 
         assert_eq!(error.kind(), ErrorKind::DisplayHelp);
         let help = error.to_string();
-        assert!(help.contains("init"));
-        assert!(help.contains("tree"));
-        assert!(help.contains("doctor"));
-        assert!(help.contains("spec"));
+        assert!(
+            help.contains("convert"),
+            "help should mention convert command"
+        );
+        assert!(help.contains("init"), "help should mention init command");
+        assert!(help.contains("tree"), "help should mention tree command");
+        assert!(
+            help.contains("doctor"),
+            "help should mention doctor command"
+        );
+        assert!(
+            help.contains("status"),
+            "help should mention status command"
+        );
+        assert!(help.contains("spec"), "help should mention spec command");
+        assert!(help.contains("task"), "help should mention task command");
+        assert!(
+            help.contains("completions"),
+            "help should mention completions command"
+        );
     }
 
     #[test]
@@ -663,14 +897,14 @@ mod tests {
             panic!("expected completions command");
         };
 
-        assert_eq!(shell, clap_complete::Shell::Bash);
+        assert_eq!(shell, SupportedShell::Bash);
     }
 
     #[test]
     fn generates_bash_completions() {
         let outcome = execute(
             Command::Completions {
-                shell: clap_complete::Shell::Bash,
+                shell: SupportedShell::Bash,
             },
             false,
         )
@@ -678,5 +912,44 @@ mod tests {
 
         let output = outcome.to_string();
         assert!(output.contains("_kvist") || output.contains("kvist"));
+    }
+
+    #[test]
+    fn generates_json_output() {
+        let project = tempfile::TempDir::new().expect("create project");
+        let outcome = execute(
+            Command::Init(ProjectDirectory {
+                path: project.path().to_path_buf(),
+            }),
+            true,
+        )
+        .expect("generates JSON output");
+
+        let output = outcome.to_string();
+        assert!(output.contains(r#""command":"init""#));
+        assert!(output.contains(&format!(r#""project_path":"{}""#, project.path().display())));
+    }
+
+    #[test]
+    fn task_status_argument_from_impl_works() {
+        let pending: crate::task_queue::TaskStatus = TaskStatusArgument::Pending.into();
+        let in_progress: crate::task_queue::TaskStatus = TaskStatusArgument::InProgress.into();
+        let blocked: crate::task_queue::TaskStatus = TaskStatusArgument::Blocked.into();
+        let completed: crate::task_queue::TaskStatus = TaskStatusArgument::Completed.into();
+
+        assert_eq!(pending, crate::task_queue::TaskStatus::Pending);
+        assert_eq!(in_progress, crate::task_queue::TaskStatus::InProgress);
+        assert_eq!(blocked, crate::task_queue::TaskStatus::Blocked);
+        assert_eq!(completed, crate::task_queue::TaskStatus::Completed);
+    }
+
+    #[test]
+    fn json_string_escape_handles_special_characters() {
+        let mut output = String::new();
+        json_string_escape(
+            &mut output,
+            r#"He said "Hello\nWorld"\t#);
+        assert_eq!(output, r#""He said \"Hello\nWorld\"\t"#,
+        );
     }
 }

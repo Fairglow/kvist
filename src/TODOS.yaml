@@ -1,6 +1,6 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:540e6824191cf9d658eb21cb7e6e4c02afc9984e6ef9c8a6202c3ffb9c45af6d"
+  specification_revision: "sha256:82d5147ab47ac76dc94e56a15a116dd0418aca8334a7b8a4da9d5453470ed35d"
   parent_specification: null
   revalidation:
     state: current
@@ -26,6 +26,146 @@ tasks:
       updated_at: "2026-08-13T20:20:00Z"
       completed_at: "2026-08-13T20:20:00Z"
     blocked_reason: null
+  - id: "onb-01-write-tests"
+    title: "Define conversion lifecycle tests"
+    description: "Write failing integration tests for converted-project inspection, draft acceptance, acceptance invalidation, task gating, VCS checks, logs, locks, and recovery."
+    context: "Conversion artifacts currently live in .kvist while existing inspection and task commands only understand adjacent src artifacts."
+    purpose: "Establish executable evidence for safely integrating existing projects before implementation changes."
+    expected_outcome: "Tests cover normal conversion, malformed and link-like metadata, every acceptance transition, changed drafts, and task execution refusal before acceptance."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Existing-project-conversion-lifecycle"
+      - "TODO.md#ONB-01"
+    timestamps:
+      created_at: "2026-08-28T13:20:32Z"
+      updated_at: "2026-08-28T13:20:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "onb-01-integrate-project-state"
+    title: "Inspect converted project state"
+    description: "Add a typed conversion component context and read-only inspection of .kvist artifacts, their approval state, and the existing project implementation root."
+    context: "Project inspection currently reports conversion projects as uninitialized and discovers only configured src components."
+    purpose: "Give every later command one bounded, link-safe source of conversion state."
+    expected_outcome: "Status and doctor report deterministic draft, partial, invalid, stale, and accepted conversion states without modifying user files."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "onb-01-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Existing-project-conversion-lifecycle"
+      - "TODO.md#ONB-01"
+    timestamps:
+      created_at: "2026-08-28T13:20:32Z"
+      updated_at: "2026-08-28T13:20:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "onb-01-implement-acceptance"
+    title: "Implement conversion acceptance"
+    description: "Add explicit spec and queue acceptance commands with versioned atomic approval evidence and invalidation after a reviewed artifact changes."
+    context: "A converted draft has no durable acceptance state and kvist queue accept does not exist."
+    purpose: "Prevent imported work from being selected or executed before human review."
+    expected_outcome: "Only a valid current accepted specification can precede queue acceptance; malformed, stale, partial, and link-like metadata is rejected."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "onb-01-integrate-project-state"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Existing-project-conversion-lifecycle"
+      - "TODO.md#ONB-01"
+    timestamps:
+      created_at: "2026-08-28T13:20:32Z"
+      updated_at: "2026-08-28T13:20:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "onb-01-connect-task-workflow"
+    title: "Connect converted task workflow"
+    description: "Route converted components through task selection, transitions, execution, logs, VCS tracking, policy approval, locks, and crash recovery."
+    context: "The existing task context requires a current root configuration and an adjacent discovered component."
+    purpose: "Make accepted conversion artifacts executable without weakening existing task security boundaries."
+    expected_outcome: "Task commands use one conversion context, reject drafts, and preserve existing lock, audit, sandbox, and verification behavior."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "onb-01-implement-acceptance"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Existing-project-conversion-lifecycle"
+      - "TODO.md#ONB-01"
+    timestamps:
+      created_at: "2026-08-28T13:20:32Z"
+      updated_at: "2026-08-28T13:20:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "onb-01-harden-draft-generation"
+    title: "Harden conversion draft generation"
+    description: "Bound and deterministically render manifest and source evidence, recursively inventory implementation files, and replace fixed generated timestamps."
+    context: "The initial generator reads only top-level source files and records a fixed timestamp."
+    purpose: "Keep generated drafts trustworthy, reproducible, and useful for independent review."
+    expected_outcome: "Draft metadata is bounded, safely escaped, stable for identical inputs, and records recursively observed implementation evidence without reading SPEC.md."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "onb-01-connect-task-workflow"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Existing-project-conversion-lifecycle"
+      - "TODO.md#ONB-01"
+    timestamps:
+      created_at: "2026-08-28T13:20:32Z"
+      updated_at: "2026-08-28T13:20:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "onb-01-security-audit"
+    title: "Audit converted-project boundaries"
+    description: "Independently review draft discovery, approval invalidation, filesystem and manifest input validation, VCS scope, task context, and persistence."
+    context: "Conversion introduces a metadata location outside the existing adjacent-component trust boundary."
+    purpose: "Find approval bypasses, path traversal, link following, unsafe writes, and execution-context confusion."
+    expected_outcome: "Security findings are remediated or retained as explicit human-approved risks before conversion is certified."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "onb-01-harden-draft-generation"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Existing-project-conversion-lifecycle"
+      - "TODO.md#ONB-01"
+    timestamps:
+      created_at: "2026-08-28T13:20:32Z"
+      updated_at: "2026-08-28T13:20:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "onb-01-compliance-review"
+    title: "Independently review project conversion"
+    description: "Generate source-derived conversion documentation and compare it against the lifecycle specification without exposing implementation source to the comparer."
+    context: "The conversion implementer cannot certify its own acceptance and execution integration."
+    purpose: "Retain independent evidence that the implemented conversion lifecycle matches its approved contract."
+    expected_outcome: "Clean-slate and source-blind review records every discrepancy for human arbitration before ONB-01 is completed."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "onb-01-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Existing-project-conversion-lifecycle"
+      - "TODO.md#ONB-01"
+    timestamps:
+      created_at: "2026-08-28T13:20:32Z"
+      updated_at: "2026-08-28T13:20:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "p2-01-implement-code"
     title: "Implement the version-1 TODO queue schema"
     description: "Add typed serde and serde_yaml parsing, semantic validation, task transition rules, and canonical serialization, then integrate it with root project inspection."

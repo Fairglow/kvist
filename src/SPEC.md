@@ -423,4 +423,25 @@ rules; which task transitions require successful verification; and the durable
 redacted result record. Kvist must reject absent, malformed, unapproved, or
 changed command policy rather than execute repository text by default.
 
+## Existing project conversion lifecycle
+
+An existing Rust project is represented as a conversion component whose durable
+workflow artifacts live in `<project>/.kvist` and whose implementation root is
+the project directory. Conversion creates only a `draft` component: it
+preserves `Cargo.toml`, `src/`, `tests/`, and `benches/`; validates the generated
+specification and queue before persistence; and never overwrites existing
+metadata. The shared inspection model must report draft, partial, invalid,
+stale, and accepted conversion states using the same bounded, link-safe
+artifact readers as ordinary components.
+
+`kvist spec accept` and `kvist queue accept` are separate, explicit, durable
+approval transitions. Queue acceptance requires a current accepted
+specification; any change to either draft invalidates the corresponding
+approval. `task next`, `transition`, `run`, `log`, lock handling, VCS tracking,
+and execution-policy approval must resolve the conversion metadata directory
+and implementation root through one typed context. They must refuse selection
+or execution until both conversion approvals are current, and must retain the
+same atomic-write, resource-bound, and no-host-fallback guarantees as ordinary
+components.
+
 </details>

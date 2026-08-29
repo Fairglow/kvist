@@ -49,8 +49,11 @@ kvist status .
 ```
 
 `init` writes the root contract and root component artifacts only into an
-uninitialized directory. `doctor` provides read-only diagnostics, and `status`
-reports component state without persisting derived stale evidence.
+uninitialized directory. When the directory is an existing Rust package with
+`Cargo.toml` and `src/`, it instead writes validated draft onboarding artifacts
+to `.kvist/` and preserves the package implementation. `doctor` provides
+read-only diagnostics, and `status` reports component state without persisting
+derived stale evidence.
 
 After the architect approves a child component boundary, create and validate
 its specification:
