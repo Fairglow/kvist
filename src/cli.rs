@@ -6,7 +6,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::{
     KvistError, Result, convert, discovery, import, init, project_state, reverse_discovery,
-    specification, status, task_commands, task_queue::TaskStatus, tree,
+    specification, status, task_commands, task_queue::TaskStatus, tree, wizard,
 };
 
 /// Kvist's top-level command-line interface.
@@ -111,6 +111,12 @@ pub enum Command {
         #[command(subcommand)]
         command: SpecCommand,
     },
+    /// Manage AI agent profiles, models, and configurations.
+    Agent {
+        /// Agent setup/management operation to execute.
+        #[command(subcommand)]
+        command: AgentCommand,
+    },
     /// Generate shell completion scripts on stdout.
     Completions {
         /// Target shell for completion.
@@ -169,6 +175,13 @@ pub enum SpecCommand {
         #[arg(value_name = "COMPONENT_DIR")]
         component_dir: PathBuf,
     },
+}
+
+/// Agent setup operations.
+#[derive(Debug, Subcommand)]
+pub enum AgentCommand {
+    /// Launch the interactive setup wizard to configure and test new models.
+    Setup,
 }
 
 /// Task selection and state-transition operations.
@@ -321,6 +334,21 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 execute_prompt(&resolved_prompt, &role, idle_timeout, detect_loops, max_restarts)?;
                 Ok(CommandOutput::message(
                     r#"{"status":"success","command":"prompt","message":"prompt execution complete"}"#.to_owned()
+                ))
+            },
+            Command::Agent {
+                command: AgentCommand::Setup,
+            } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                let mut reader = std::io::BufReader::new(std::io::stdin());
+                let mut writer = std::io::BufWriter::new(std::io::stdout());
+                wizard::run_wizard(&mut reader, &mut writer, &current_dir)?;
+                Ok(CommandOutput::message(
+                    r#"{"status":"success","command":"agent-setup","message":"agent setup wizard complete"}"#.to_owned()
                 ))
             },
             Command::Init(project) => {
@@ -553,6 +581,21 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 )?;
                 Ok(CommandOutput::message(
                     "prompt execution complete".to_owned(),
+                ))
+            }
+            Command::Agent {
+                command: AgentCommand::Setup,
+            } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                let mut reader = std::io::BufReader::new(std::io::stdin());
+                let mut writer = std::io::BufWriter::new(std::io::stdout());
+                wizard::run_wizard(&mut reader, &mut writer, &current_dir)?;
+                Ok(CommandOutput::message(
+                    "agent setup wizard complete".to_owned(),
                 ))
             }
             Command::Init(project) => init::initialize(&project.path)

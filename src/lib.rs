@@ -27,6 +27,7 @@ pub mod task_commands;
 pub mod task_queue;
 pub mod tree;
 pub mod vcs;
+pub mod wizard;
 
 use clap::Parser;
 
