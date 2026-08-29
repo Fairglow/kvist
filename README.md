@@ -163,6 +163,42 @@ isolation plan live in [`src/supervised_agent/SPEC.md`](src/supervised_agent/SPE
 The current host mode is a reliability aid, not a sandbox. `fakeroot`, retry
 notices, and backups likewise do not restrict an agent's authority.
 
+Setup probes the conventional `llama-cli`, `gemini`, or `copilot` executable
+with `--version`. If that fails, it asks for a direct executable or compatible
+wrapper while retaining the selected provider. It then offers to run the exact
+generated command before saving. Maintained Linux templates are:
+
+```text
+llama-cli --model /path/model.gguf --prompt '{prompt}' --single-turn \
+  --simple-io --no-display-prompt --predict 4096
+gemini --prompt '{prompt}' --output-format text --approval-mode yolo \
+  --skip-trust --model MODEL
+copilot --prompt '{prompt}' --silent --allow-all-tools --no-ask-user \
+  --model MODEL
+```
+
+The Gemini `yolo` and Copilot `--allow-all-tools` options make noninteractive
+agent work possible; they are not sandbox controls. For a response-only Gemini
+check, use `--approval-mode plan`. For a response-only Copilot check, restrict
+the available tool set, for example with `--available-tools=`, while retaining
+`--allow-all-tools` to satisfy noninteractive permission handling.
+
+`llama-cli` itself is an inference process, not a coding agent: it cannot read
+declared context files, edit a workspace, or invoke tools. A wrapper may prepare
+its runtime environment, but must preserve argument boundaries:
+
+```sh
+#!/bin/sh
+# Set provider-specific environment here.
+exec /path/to/llama-cli "$@"
+```
+
+Do not forward with unquoted `$*`; that splits a prompt containing spaces into
+multiple CLI arguments. The model path remains part of the generated
+llama-cli profile, unless the editable wrapper intentionally owns model
+selection. Explicit wrapper and GGUF paths are stored as canonical absolute
+paths so later working-directory choices cannot change what is executed.
+
 `kvist agent setup` can call the same reusable provider-profile collection or
 load an existing standalone profile. It then asks which Kvist roles should use
 the profile and where the Kvist binding should be stored. The exact profile

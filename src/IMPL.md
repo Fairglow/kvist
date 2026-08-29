@@ -394,10 +394,11 @@ the CLI host acknowledgement and uses the selected profile's output bound.
 Idle and repetition retries rebuild the model command with a notice that prior
 side effects may remain; other failures are terminal. SIGINT and SIGTERM cancel
 the supervised command and terminate its Linux process group before returning.
-Generic profile setup, provider defaults, endpoint probes, wrapper validation,
-host-acknowledged verification, and standalone profile persistence are
-delegated to `supervised_agent`. Kvist setup either calls that collection API
-or loads a named standalone profile, then copies its exact name and command
+Generic profile setup, conventional CLI version probes, provider-preserving
+wrapper fallback, maintained provider templates, endpoint probes, wrapper
+validation, host-acknowledged verification, and standalone profile persistence
+are delegated to `supervised_agent`. Kvist setup either calls that collection
+API or loads a named standalone profile, then copies its exact name and command
 into selected role model lists. It does not dynamically read standalone
 profiles during execution. Kvist configuration updates use `toml_edit` to
 retain unrelated values and comments, update or append the named model in

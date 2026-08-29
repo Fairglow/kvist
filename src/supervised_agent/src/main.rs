@@ -115,6 +115,7 @@ fn run(arguments: RunArguments) -> supervised_agent::Result<()> {
     )?;
     let policy = SupervisionPolicy {
         idle_timeout: Duration::from_secs(arguments.idle_timeout),
+        attempt_timeout: None,
         detect_loops: arguments.detect_loops,
         max_retries: arguments.max_retries,
         max_output_bytes: arguments.max_output_bytes,

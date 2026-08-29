@@ -141,6 +141,15 @@ name and command into its role configuration. It does not resolve a mutable
 standalone profile during task execution, so `task approve-policy` continues
 to cover the exact effective command.
 
+For llama-cli, Gemini, and Copilot, setup first verifies the conventional
+executable with `--version`; an inaccessible command triggers a compatible
+executable/wrapper path prompt without changing the provider kind. The
+subsequent live model test is what qualifies the complete command, model,
+credentials, and arguments. A llama wrapper must forward with `"$@"`, never
+unquoted `$*`. llama-cli is inference-only, whereas the generated Gemini and
+Copilot templates enable noninteractive agent tools under the explicit host
+execution warning.
+
 For implementation tasks, configure and approve the repository test policy
 before running:
 

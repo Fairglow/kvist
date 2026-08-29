@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:75f8bfa5b884d158875c659d79dfb25a9ebf3654d896f5f867e058279b98fc84"
+  specification_revision: "sha256:fae42e82b883dc6a21ef5af339bc3b3f634a3c05f112704c0a1bfc7da1da3292"
   parent_specification:
     path: "../SPEC.md"
-    revision: "sha256:c036c7e3d772c9e54d0ce137ba670bf3f30f8b14d1a2125ad3d2d297c6505349"
+    revision: "sha256:44232637f37d38db02d846ba36053468e1a8a38c16858374192e075af7647c26"
   revalidation:
     state: current
-    checked_at: "2026-08-29T21:58:11Z"
+    checked_at: "2026-08-29T22:56:15Z"
     stale_since: null
     causes: []
 tasks:
@@ -438,5 +438,78 @@ tasks:
     timestamps:
       created_at: "2026-08-29T21:30:04Z"
       updated_at: "2026-08-29T21:30:04Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-07-write-tests"
+    title: "Define provider CLI qualification tests"
+    description: "Write failing tests for conventional executable discovery, provider-preserving fallback paths, bounded version probes, maintained llama-cli/Gemini/Copilot templates, null provider stdin, and actionable pre-save failures."
+    context: "The initial setup defaults guessed several unsupported commands and changed users with llama-cli wrappers into a generic custom-script provider."
+    purpose: "Establish executable evidence that saved profiles match real noninteractive provider interfaces and are qualified before adoption."
+    expected_outcome: "Tests distinguish executable accessibility from exact model qualification and reject profiles whose selected CLI or wrapper cannot pass the provider probe."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Profile-configuration-and-setup"
+    timestamps:
+      created_at: "2026-08-29T22:42:17Z"
+      updated_at: "2026-08-29T22:56:15Z"
+      completed_at: "2026-08-29T22:56:15Z"
+    blocked_reason: null
+  - id: "sa-07-implement-code"
+    title: "Qualify provider CLI profiles"
+    description: "Probe conventional provider executables, accept compatible fallback paths without changing provider identity, generate maintained llama-cli/Gemini/Copilot templates, and improve exact-command qualification diagnostics."
+    context: "Local inspection found llama-cli flags differ from the guessed template, Gemini is named gemini rather than gemini-cli, and Copilot uses noninteractive --prompt rather than a chat subcommand."
+    purpose: "Make setup produce usable profiles for the common locally installed providers while explaining accessibility, argument, model, and authentication failures."
+    expected_outcome: "A selected provider remains correctly classified, its generated command uses supported noninteractive arguments, and no profile is persisted before the selected qualification path completes or is explicitly declined."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-07-write-tests"
+    requirements:
+      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Profile-configuration-and-setup"
+    timestamps:
+      created_at: "2026-08-29T22:42:17Z"
+      updated_at: "2026-08-29T22:56:15Z"
+      completed_at: "2026-08-29T22:56:15Z"
+    blocked_reason: null
+  - id: "sa-07-security-audit"
+    title: "Audit provider CLI qualification"
+    description: "Independently review executable discovery, fallback path validation, probe bounds, stdin handling, generated permission flags, model selectors, exact-command verification, and error redaction."
+    context: "Provider setup selects executable authority and may auto-approve tools during noninteractive host execution."
+    purpose: "Find command substitution, interactive blocking, authority escalation, and misleading qualification defects before saved profiles are trusted."
+    expected_outcome: "High-confidence provider qualification vulnerabilities are remediated or retained as explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-07-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Constraints-and-invariants"
+    timestamps:
+      created_at: "2026-08-29T22:42:17Z"
+      updated_at: "2026-08-29T22:42:17Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "sa-07-compliance-review"
+    title: "Review provider qualification compliance"
+    description: "Derive provider discovery, template, probe, and qualification behavior from source and tests without the specification, then compare it with the provider setup contract."
+    context: "The implementer cannot certify that locally observed CLI behavior has been represented accurately or portably."
+    purpose: "Preserve independent evidence for adopting provider-specific profiles."
+    expected_outcome: "The review classifies every provider qualification requirement and records discrepancies for explicit arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-07-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Profile-configuration-and-setup"
+    timestamps:
+      created_at: "2026-08-29T22:42:17Z"
+      updated_at: "2026-08-29T22:42:17Z"
       completed_at: null
     blocked_reason: null

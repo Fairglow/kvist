@@ -27,6 +27,7 @@ use signal_hook::{
 use crate::{Error, Result};
 
 const MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(3_600);
+const MAX_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(86_400);
 const MAX_RETRIES: u32 = 10;
 const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 const LOOP_BUFFER_BYTES: usize = 4_096;
@@ -41,6 +42,8 @@ const OUTPUT_READY_TIMEOUT_MILLISECONDS: u16 = 1_000;
 pub struct SupervisionPolicy {
     /// Maximum duration without bytes from either output stream.
     pub idle_timeout: Duration,
+    /// Optional maximum wall-clock duration of one attempt.
+    pub attempt_timeout: Option<Duration>,
     /// Whether stdout is inspected for deterministic repetition.
     pub detect_loops: bool,
     /// Number of retries after the initial attempt.
@@ -54,6 +57,14 @@ impl SupervisionPolicy {
         if self.idle_timeout.is_zero() || self.idle_timeout > MAX_IDLE_TIMEOUT {
             return Err(Error::InvalidPolicy {
                 reason: "idle timeout must be between 1 and 3600 seconds".to_owned(),
+            });
+        }
+        if self
+            .attempt_timeout
+            .is_some_and(|timeout| timeout.is_zero() || timeout > MAX_ATTEMPT_TIMEOUT)
+        {
+            return Err(Error::InvalidPolicy {
+                reason: "attempt timeout must be positive and at most 24 hours".to_owned(),
             });
         }
         if self.max_retries > MAX_RETRIES {
@@ -281,6 +292,7 @@ fn run_attempt(
     let mut command = Command::new(&specification.program);
     command
         .args(&specification.arguments)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .process_group(0);
@@ -328,6 +340,12 @@ fn run_attempt(
     let stdout_join = join_reader(stdout_reader, "read supervised stdout");
     let stderr_join = join_reader(stderr_reader, "read supervised stderr");
 
+    if matches!(
+        &event,
+        Err(Error::Cancelled | Error::AttemptTimedOut { .. })
+    ) {
+        return event;
+    }
     termination?;
     draining?;
     stdout_join?;
@@ -438,12 +456,20 @@ fn monitor(
     policy: &SupervisionPolicy,
     cancellation: &SignalCancellation,
 ) -> Result<AttemptEvent> {
+    let started = Instant::now();
     let mut last_output = Instant::now();
     let mut loop_buffer = String::new();
 
     loop {
         if cancellation.requested() {
             return Err(Error::Cancelled);
+        }
+        if let Some(timeout) = policy.attempt_timeout {
+            if started.elapsed() >= timeout {
+                return Err(Error::AttemptTimedOut {
+                    max_milliseconds: timeout.as_millis(),
+                });
+            }
         }
         if let Some(status) = child.try_wait().map_err(|source| Error::Io {
             operation: "inspect supervised command status",

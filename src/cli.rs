@@ -785,6 +785,7 @@ fn execute_prompt(
 
     let policy = supervised_agent::SupervisionPolicy {
         idle_timeout: std::time::Duration::from_secs(idle_timeout),
+        attempt_timeout: None,
         detect_loops,
         max_retries: max_restarts,
         max_output_bytes: profile.max_output_bytes,

@@ -1,10 +1,10 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:c036c7e3d772c9e54d0ce137ba670bf3f30f8b14d1a2125ad3d2d297c6505349"
+  specification_revision: "sha256:44232637f37d38db02d846ba36053468e1a8a38c16858374192e075af7647c26"
   parent_specification: null
   revalidation:
     state: current
-    checked_at: "2026-08-29T21:43:45Z"
+    checked_at: "2026-08-29T22:56:15Z"
     stale_since: null
     causes: []
 tasks:

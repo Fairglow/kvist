@@ -8,6 +8,7 @@ use supervised_agent::{AttemptContext, CommandSpec, SupervisionPolicy, run_super
 fn policy(max_retries: u32) -> SupervisionPolicy {
     SupervisionPolicy {
         idle_timeout: Duration::from_secs(5),
+        attempt_timeout: None,
         detect_loops: true,
         max_retries,
         max_output_bytes: 1024 * 1024,
@@ -79,6 +80,7 @@ fn nonzero_exit_is_not_retried() {
 fn idle_process_is_terminated_before_retry_exhaustion_returns() {
     let policy = SupervisionPolicy {
         idle_timeout: Duration::from_secs(1),
+        attempt_timeout: None,
         detect_loops: false,
         max_retries: 0,
         max_output_bytes: 1024 * 1024,
@@ -93,9 +95,33 @@ fn idle_process_is_terminated_before_retry_exhaustion_returns() {
 }
 
 #[test]
+fn attempt_timeout_is_independent_of_continuing_output() {
+    let policy = SupervisionPolicy {
+        idle_timeout: Duration::from_secs(5),
+        attempt_timeout: Some(Duration::from_millis(200)),
+        detect_loops: false,
+        max_retries: 0,
+        max_output_bytes: 1024 * 1024,
+    };
+    let started = Instant::now();
+
+    let error = run_supervised(&policy, |_| {
+        Ok(CommandSpec::new(
+            "sh",
+            ["-c", "while :; do printf x; sleep 0.05; done"],
+        ))
+    })
+    .expect_err("attempt timeout must be terminal");
+
+    assert!(error.to_string().contains("attempt timeout"));
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
+#[test]
 fn rejects_unbounded_retry_configuration() {
     let policy = SupervisionPolicy {
         idle_timeout: Duration::from_secs(5),
+        attempt_timeout: None,
         detect_loops: false,
         max_retries: 11,
         max_output_bytes: 1024 * 1024,
@@ -115,6 +141,7 @@ fn output_limit_is_terminal_and_not_retried() {
     let observed = Arc::clone(&invocations);
     let policy = SupervisionPolicy {
         idle_timeout: Duration::from_secs(5),
+        attempt_timeout: None,
         detect_loops: false,
         max_retries: 3,
         max_output_bytes: 16,

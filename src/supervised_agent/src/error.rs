@@ -48,6 +48,10 @@ pub enum Error {
     #[error("supervised command exceeded the {max_bytes}-byte output limit")]
     OutputLimitExceeded { max_bytes: usize },
 
+    /// A command remained active beyond its total per-attempt deadline.
+    #[error("supervised command exceeded its {max_milliseconds}-millisecond attempt timeout")]
+    AttemptTimedOut { max_milliseconds: u128 },
+
     /// Output pipes remained open after the supervised process group ended.
     #[error("supervised process output remained open after process-group termination")]
     OutputStreamsRetained,

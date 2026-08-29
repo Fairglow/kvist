@@ -66,9 +66,10 @@ silently providing a different process or filesystem contract.
   profiles; replace a profile with the same name or append it; validate the
   result; and use same-directory synchronized atomic persistence.
 - The idle timeout is positive and at most 3,600 seconds. Automatic retries are
-  bounded to at most 10. Combined output is positive and bounded to at most
-  16 MiB, stream transport uses bounded memory, and loop detection retains at
-  most 4 KiB of UTF-8 output.
+  bounded to at most 10. An optional per-attempt wall timeout is positive and
+  at most 24 hours. Combined output is positive and bounded to at most 16 MiB,
+  stream transport uses bounded memory, and loop detection retains at most
+  4 KiB of UTF-8 output.
 - The supervisor retries only idle timeouts and deterministic repeated-output
   loops. A nonzero exit, spawn failure, stream failure, invalid contract, or
   cancellation is terminal.
@@ -94,6 +95,22 @@ silently providing a different process or filesystem contract.
   Failed verification defaults to refusing profile persistence, with an
   explicit save-without-verification choice. Probe URLs are HTTP or HTTPS,
   contain no whitespace or control characters, and are limited to 2,048 bytes.
+- CLI-backed providers first probe their conventional executable name with a
+  `--version` invocation bounded by ten-second idle and wall timeouts. If that
+  probe fails, setup requests an explicit executable or compatible wrapper path
+  and applies the same probe.
+  Accessibility is distinct from model qualification: only a successful run of
+  the exact rendered template proves that credentials, model selection, and
+  provider arguments work together. Explicit executable and GGUF paths are
+  resolved to stable absolute paths before qualification and persistence.
+- Generated llama-cli commands use `--model`, `--prompt`, `--single-turn`,
+  `--simple-io`, `--no-display-prompt`, and a bounded `--predict` value.
+  llama-cli is inference-only: it cannot inspect context paths, edit files, or
+  invoke tools unless a separate agent wrapper implements those capabilities.
+- Generated Gemini commands use the installed `gemini` executable,
+  noninteractive `--prompt`, text output, and explicit host-agent approval
+  mode. Generated Copilot commands use noninteractive `--prompt`, silent
+  output, and explicit tool approval. Both collect an optional model selector.
 - Generated llama-server commands use `{prompt_json}` for request bodies.
   Generated Ollama commands materialize the selected endpoint through
   `OLLAMA_HOST` rather than depending on ambient endpoint configuration.
@@ -166,6 +183,18 @@ profile. Kvist may call the same collection API or load an existing standalone
 profile, but it materializes only the selected name and command into its own
 role configuration so later Kvist execution approval remains bound to exact
 command bytes.
+
+For llama-cli, Gemini, and Copilot, setup first runs the provider's conventional
+executable name with `--version` under the same bounded process supervisor. If
+it cannot be spawned or exits unsuccessfully, setup reports the failure and
+asks for a direct executable or compatible wrapper path without changing the
+provider kind. Cancellation propagates instead of entering fallback selection.
+The fallback must be an executable regular non-link file and must pass the same
+version probe. Setup uses maintained provider templates rather than inferring
+arbitrary arguments from unstable help prose. It shows the editable exact
+template before an optional live qualification prompt, whose wall timeout is
+five minutes. Provider children receive null standard input so a headless
+command cannot consume setup answers or wait for an interactive response.
 
 ### Deferred workspace recovery
 

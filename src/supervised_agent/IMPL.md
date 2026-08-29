@@ -9,11 +9,11 @@ Linux. The library publicly exports prompt resolution, command rendering, raw
 command splitting, supervision policy, attempt context, command specification,
 execution report, retry cause, and its error/result types.
 
-`SupervisionPolicy` contains an idle duration, loop-detection switch, retry
-count, and combined-output byte limit. `CommandSpec` contains a program,
-arguments, and optional working directory. `run_supervised` receives a callback
-that builds a fresh command from each `AttemptContext`; its successful report
-contains the number of attempts.
+`SupervisionPolicy` contains an idle duration, optional per-attempt wall
+duration, loop-detection switch, retry count, and combined-output byte limit.
+`CommandSpec` contains a program, arguments, and optional working directory.
+`run_supervised` receives a callback that builds a fresh command from each
+`AttemptContext`; its successful report contains the number of attempts.
 
 `ModelProfile` contains a case-sensitive name, provider identifier, and command
 template. Public profile APIs resolve the Linux user configuration path, load
@@ -52,6 +52,20 @@ defaults to refusing persistence but can be explicitly overridden.
 llama-server defaults encode prompts through `{prompt_json}`. Ollama defaults
 preserve the selected endpoint in an `OLLAMA_HOST` argument to `env`.
 
+llama-cli, Gemini, and Copilot setup first runs the conventional executable
+with `--version` under ten-second idle and wall timeouts and a 64 KiB output
+bound. A failed conventional probe prints its diagnostic and requests an
+executable regular non-link fallback, which must pass the same probe without
+changing the profile provider. Cancellation returns immediately. Fallback
+executables and GGUF files are canonicalized to stable absolute paths.
+llama-cli defaults use a validated GGUF path, prompt,
+single-turn subprocess I/O, hidden prompt echo, and a 4,096-token prediction
+bound. Gemini defaults invoke `gemini` with headless text output, host-agent
+approval, workspace trust bypass, and an optional model. Copilot defaults use
+headless silent output, tool approval, disabled user questions, and an optional
+model. Setup prints the generated template and explicitly warns when live model
+qualification is skipped.
+
 ## Prompt and command handling
 
 Prompt resolution accepts one caller-selected positional value, path, editor
@@ -71,13 +85,17 @@ placeholder with its immediately preceding option.
 
 ## Process supervision
 
-Policy validation accepts idle durations from one through 3,600 seconds, at
-most ten retries, and output limits from one byte through 16 MiB. Every child
-starts in a new Linux process group with piped stdout and stderr. Two reader
+Policy validation accepts idle durations from one through 3,600 seconds,
+positive optional attempt durations through 24 hours, at most ten retries, and
+output limits from one byte through 16 MiB. Every child
+receives null standard input and starts in a new Linux process group with piped
+stdout and stderr. Two reader
 threads poll nonblocking descriptors and read 4 KiB chunks into a bounded
 16-entry channel. A shared atomic budget caps combined bytes before enqueueing. The supervisor forwards output
 after polling the destination for writability and treats output overflow,
 blocked output, stream failure, spawn failure, and invalid policy as terminal.
+Exceeding the per-attempt wall duration is terminal even while output
+continues.
 
 Either output stream resets the idle timer. A bounded 4 KiB stdout suffix is
 checked for three identical byte cycles, four identical nonblank lines, or

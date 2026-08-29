@@ -169,7 +169,11 @@ not an isolation boundary.
 `kvist agent setup` first selects between collecting a provider profile through
 the reusable `supervised_agent` setup API and loading a named profile from the
 standalone user store. Collection obtains a nonblank profile name and command
-template. Provider probes are advisory; the reusable interaction separately
+template. CLI providers probe their conventional executable name, then request
+an explicit executable or compatible wrapper path when it is unavailable,
+without changing the selected provider kind. Safe accessibility probes and
+maintained provider-specific templates are owned by the child component.
+Provider endpoint probes are advisory; the reusable interaction separately
 offers to execute a prompt through the exact generated command before any
 configuration write. Before execution it warns that the command receives the
 user's full host filesystem, credential, executable, and network permissions

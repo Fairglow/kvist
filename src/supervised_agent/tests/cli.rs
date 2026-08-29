@@ -13,6 +13,7 @@ use nix::{
     sys::signal::{Signal, kill},
     unistd::Pid,
 };
+use supervised_agent::load_profile;
 use tempfile::TempDir;
 
 #[test]
@@ -89,6 +90,31 @@ fn standalone_cli_runs_a_prompt_from_a_file() {
 }
 
 #[test]
+fn supervised_provider_cannot_consume_caller_stdin() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+        .args([
+            "run",
+            "--allow-host-execution",
+            "--idle-timeout",
+            "1",
+            "--command",
+            "sh -c 'if read value; then exit 9; fi'",
+            "hello",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("run standalone CLI");
+    let held_stdin = child.stdin.take().expect("provider stdin pipe");
+
+    let status = child.wait().expect("wait for standalone CLI");
+    drop(held_stdin);
+
+    assert!(status.success());
+}
+
+#[test]
 fn setup_persists_a_profile_and_run_can_select_it() {
     let workspace = TempDir::new().expect("workspace");
     let configuration = workspace.path().join("profiles.toml");
@@ -107,8 +133,7 @@ fn setup_persists_a_profile_and_run_can_select_it() {
     use std::io::Write;
     write!(
         setup.stdin.take().expect("setup stdin"),
-        "6\n{}\nstandalone\n\nn\n",
-        provider.display()
+        "6\nprovider.sh\nstandalone\n\nn\n"
     )
     .expect("write setup answers");
     let setup_output = setup.wait_with_output().expect("wait for setup");
@@ -118,8 +143,9 @@ fn setup_persists_a_profile_and_run_can_select_it() {
         String::from_utf8_lossy(&setup_output.stderr)
     );
 
+    let execution_directory = TempDir::new().expect("execution directory");
     let output = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
-        .current_dir(workspace.path())
+        .current_dir(execution_directory.path())
         .args([
             "run",
             "--allow-host-execution",
@@ -141,6 +167,218 @@ fn setup_persists_a_profile_and_run_can_select_it() {
 }
 
 #[test]
+fn llama_cli_fallback_preserves_provider_and_uses_supported_flags() {
+    let workspace = TempDir::new().expect("workspace");
+    let configuration = workspace.path().join("profiles.toml");
+    let wrapper = workspace.path().join("llama-wrapper");
+    let model = workspace.path().join("model.gguf");
+    fs::write(
+        &wrapper,
+        "#!/bin/sh\n[ \"$1\" = --version ] && { echo 'llama 1.0'; exit 0; }\nexit 1\n",
+    )
+    .expect("write wrapper");
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o700))
+        .expect("make wrapper executable");
+    fs::write(&model, "test model").expect("write model");
+    let empty_path = workspace.path().join("empty-path");
+    fs::create_dir(&empty_path).expect("create empty PATH");
+
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+        .current_dir(workspace.path())
+        .env("PATH", &empty_path)
+        .args(["setup", "--config"])
+        .arg(&configuration)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start setup");
+    use std::io::Write;
+    write!(
+        setup.stdin.take().expect("setup stdin"),
+        "1\nllama-wrapper\nmodel.gguf\nlocal-llama\n\nn\n"
+    )
+    .expect("write setup answers");
+    let output = setup.wait_with_output().expect("wait for setup");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let profile = load_profile(&configuration, "local-llama").expect("load profile");
+    assert_eq!(profile.provider, "llama-cli");
+    assert!(profile.command.starts_with(&format!(
+        "\"{}\" --model \"{}\" --prompt",
+        wrapper.display(),
+        model.display()
+    )));
+    assert!(profile.command.contains("--single-turn"));
+    assert!(profile.command.contains("--simple-io"));
+    assert!(profile.command.contains("--no-display-prompt"));
+    assert!(profile.command.contains("--predict 4096"));
+    assert!(!profile.command.contains("--context"));
+    assert!(!profile.command.contains("--format"));
+}
+
+#[test]
+fn installed_gemini_and_copilot_use_noninteractive_templates() {
+    let workspace = TempDir::new().expect("workspace");
+    let bin = workspace.path().join("bin");
+    fs::create_dir(&bin).expect("create bin");
+    for executable in ["gemini", "copilot"] {
+        let path = bin.join(executable);
+        fs::write(
+            &path,
+            "#!/bin/sh\n[ \"$1\" = --version ] && { echo '1.0'; exit 0; }\nexit 1\n",
+        )
+        .expect("write executable");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).expect("make executable");
+    }
+    let configuration = workspace.path().join("profiles.toml");
+
+    for (answers, profile_name) in [
+        ("5\ngemini-2.5-pro\ngemini-pro\n\nn\n", "gemini-pro"),
+        ("4\ngpt-5.4\ncopilot-pro\n\nn\n", "copilot-pro"),
+    ] {
+        let mut setup = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+            .current_dir(workspace.path())
+            .env("PATH", &bin)
+            .args(["setup", "--config"])
+            .arg(&configuration)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("start setup");
+        use std::io::Write;
+        setup
+            .stdin
+            .take()
+            .expect("setup stdin")
+            .write_all(answers.as_bytes())
+            .expect("write setup answers");
+        let output = setup.wait_with_output().expect("wait for setup");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let profile = load_profile(&configuration, profile_name).expect("load profile");
+        if profile.provider == "gemini-cli" {
+            assert!(profile.command.starts_with("\"gemini\" --prompt"));
+            assert!(profile.command.contains("--output-format text"));
+            assert!(profile.command.contains("--approval-mode yolo"));
+            assert!(profile.command.contains("--model"));
+            assert!(profile.command.contains("gemini-2.5-pro"));
+            assert!(!profile.command.contains("--files"));
+        } else {
+            assert_eq!(profile.provider, "copilot");
+            assert!(profile.command.starts_with("\"copilot\" --prompt"));
+            assert!(profile.command.contains("--silent"));
+            assert!(profile.command.contains("--allow-all-tools"));
+            assert!(profile.command.contains("--no-ask-user"));
+            assert!(profile.command.contains("--model"));
+            assert!(profile.command.contains("gpt-5.4"));
+            assert!(!profile.command.contains("copilot chat"));
+        }
+    }
+}
+
+#[test]
+fn unusable_provider_fallback_is_rejected_before_persistence() {
+    let workspace = TempDir::new().expect("workspace");
+    let configuration = workspace.path().join("profiles.toml");
+    let unusable = workspace.path().join("broken-gemini");
+    fs::write(&unusable, "#!/bin/sh\nexit 7\n").expect("write executable");
+    fs::set_permissions(&unusable, fs::Permissions::from_mode(0o700)).expect("make executable");
+    let empty_path = workspace.path().join("empty-path");
+    fs::create_dir(&empty_path).expect("create empty PATH");
+
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+        .current_dir(workspace.path())
+        .env("PATH", &empty_path)
+        .args(["setup", "--config"])
+        .arg(&configuration)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start setup");
+    use std::io::Write;
+    writeln!(
+        setup.stdin.take().expect("setup stdin"),
+        "5\n{}",
+        unusable.display()
+    )
+    .expect("write setup answers");
+    let output = setup.wait_with_output().expect("wait for setup");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("UTF-8 stderr")
+            .contains("version probe")
+    );
+    assert!(!configuration.exists());
+}
+
+#[test]
+fn cancelling_conventional_probe_does_not_request_a_fallback() {
+    let workspace = TempDir::new().expect("workspace");
+    let bin = workspace.path().join("bin");
+    fs::create_dir(&bin).expect("create bin");
+    let marker = workspace.path().join("probe.pid");
+    let gemini = bin.join("gemini");
+    fs::write(
+        &gemini,
+        format!(
+            "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nexec sleep 30\n",
+            marker.display()
+        ),
+    )
+    .expect("write executable");
+    fs::set_permissions(&gemini, fs::Permissions::from_mode(0o700)).expect("make executable");
+
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+        .current_dir(workspace.path())
+        .env("PATH", &bin)
+        .args(["setup", "--config", "profiles.toml"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start setup");
+    use std::io::Write;
+    let mut stdin = setup.stdin.take().expect("setup stdin");
+    stdin.write_all(b"5\n").expect("select Gemini");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !marker.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(marker.exists(), "version probe did not start");
+    kill(
+        Pid::from_raw(i32::try_from(setup.id()).expect("setup pid")),
+        Signal::SIGINT,
+    )
+    .expect("interrupt setup");
+    drop(stdin);
+    let output = setup.wait_with_output().expect("wait for setup");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("UTF-8 stderr")
+            .contains("cancelled")
+    );
+    assert!(
+        !String::from_utf8(output.stdout)
+            .expect("UTF-8 stdout")
+            .contains("Supply a direct executable")
+    );
+}
+
+#[test]
 fn interrupt_terminates_the_supervised_process_group() {
     let workspace = TempDir::new().expect("workspace");
     let marker = workspace.path().join("provider.pid");
@@ -148,7 +386,7 @@ fn interrupt_terminates_the_supervised_process_group() {
     fs::write(
         &provider,
         format!(
-            "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nexec sleep 30\n",
+            "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nsetsid sleep 2 &\nexec sleep 30\n",
             marker.display()
         ),
     )

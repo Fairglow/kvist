@@ -40,6 +40,10 @@ pub fn collect_profile<R: BufRead, W: Write>(
     write_output(writer, &format!("\nConfiguring provider: {provider}\n"))?;
 
     let profile = configure_profile(provider, reader, writer)?;
+    write_output(
+        writer,
+        &format!("Generated command template: {}\n", profile.command),
+    )?;
     if confirm(reader, writer, "\nTest this model before saving?", true)? {
         let test_prompt = prompt_with_default(
             reader,
@@ -64,6 +68,7 @@ pub fn collect_profile<R: BufRead, W: Write>(
         }
         match verify_profile(&profile, &test_prompt, working_directory, true) {
             Ok(()) => write_output(writer, "Model test succeeded.\n")?,
+            Err(error @ Error::Cancelled) => return Err(error),
             Err(error) => {
                 write_output(writer, &format!("Model test failed: {error}\n"))?;
                 if !confirm(reader, writer, "Save profile anyway?", false)? {
@@ -73,6 +78,11 @@ pub fn collect_profile<R: BufRead, W: Write>(
                 }
             }
         }
+    } else {
+        write_output(
+            writer,
+            "Warning: saving without live model, credential, and argument qualification.\n",
+        )?;
     }
     Ok(profile)
 }
@@ -118,6 +128,7 @@ pub fn verify_profile(
     let (program, arguments) = render_command(&profile.command, prompt, &[], working_directory)?;
     let policy = SupervisionPolicy {
         idle_timeout: Duration::from_secs(30),
+        attempt_timeout: Some(Duration::from_secs(300)),
         detect_loops: true,
         max_retries: 0,
         max_output_bytes: 64 * 1024,
@@ -136,15 +147,26 @@ fn configure_profile<R: BufRead, W: Write>(
 ) -> Result<ModelProfile> {
     let (name, command) = match provider {
         "llama-cli" => {
-            let binary =
-                prompt_with_default(reader, writer, "Path to llama-cli executable", "llama-cli")?;
+            let binary = select_cli_executable(
+                reader,
+                writer,
+                "llama-cli",
+                "Path to llama-cli or a compatible wrapper executable: ",
+            )?;
             let model_path = prompt_required(reader, writer, "Path to GGUF model file: ")?;
+            let model_path = resolve_setup_file(&expand_home_path(&model_path), "GGUF model")?;
             let name = prompt_with_default(reader, writer, "Profile name", "llama-cli")?;
             let default = format!(
-                "{} --model {} --prompt '{{prompt}}' --context '{{context_files}}' --format json",
+                "{} --model {} --prompt '{{prompt}}' --single-turn --simple-io \
+                 --no-display-prompt --predict 4096",
                 command_argument(&binary),
-                command_argument(&expand_home_path(&model_path).to_string_lossy())
+                command_argument(&model_path.to_string_lossy())
             );
+            write_output(
+                writer,
+                "Note: llama-cli performs inference only. It cannot read context files, edit \
+                 files, or invoke tools unless your wrapper implements those capabilities.\n",
+            )?;
             let command = prompt_with_default(reader, writer, "Command template", &default)?;
             (name, command)
         }
@@ -190,23 +212,44 @@ fn configure_profile<R: BufRead, W: Write>(
             (name, command)
         }
         "copilot" => {
-            let name = prompt_with_default(reader, writer, "Profile name", "copilot")?;
-            let command = prompt_with_default(
+            let binary = select_cli_executable(
                 reader,
                 writer,
-                "Command template",
-                "copilot chat '{prompt}'",
+                "copilot",
+                "Path to the Copilot CLI or a compatible wrapper executable: ",
             )?;
+            let model =
+                prompt_optional(reader, writer, "Copilot model (blank uses CLI default): ")?;
+            let name = prompt_with_default(reader, writer, "Profile name", "copilot")?;
+            let mut default = format!(
+                "{} --prompt '{{prompt}}' --silent --allow-all-tools --no-ask-user",
+                command_argument(&binary)
+            );
+            if let Some(model) = model {
+                default.push_str(" --model ");
+                default.push_str(&command_argument(&model));
+            }
+            let command = prompt_with_default(reader, writer, "Command template", &default)?;
             (name, command)
         }
         "gemini-cli" => {
-            let name = prompt_with_default(reader, writer, "Profile name", "gemini")?;
-            let command = prompt_with_default(
+            let binary = select_cli_executable(
                 reader,
                 writer,
-                "Command template",
-                "gemini-cli --prompt '{prompt}' --files {context_files}",
+                "gemini",
+                "Path to the Gemini CLI or a compatible wrapper executable: ",
             )?;
+            let model = prompt_optional(reader, writer, "Gemini model (blank uses CLI default): ")?;
+            let name = prompt_with_default(reader, writer, "Profile name", "gemini")?;
+            let mut default = format!(
+                "{} --prompt '{{prompt}}' --output-format text --approval-mode yolo --skip-trust",
+                command_argument(&binary)
+            );
+            if let Some(model) = model {
+                default.push_str(" --model ");
+                default.push_str(&command_argument(&model));
+            }
+            let command = prompt_with_default(reader, writer, "Command template", &default)?;
             (name, command)
         }
         _ => {
@@ -215,7 +258,7 @@ fn configure_profile<R: BufRead, W: Write>(
                 writer,
                 "Path to custom wrapper executable (e.g., ~/bin/llama-cli.sh): ",
             )?;
-            let script_path = expand_home_path(&script);
+            let script_path = resolve_setup_file(&expand_home_path(&script), "custom wrapper")?;
             validate_custom_executable(&script_path)?;
             write_output(writer, "Custom wrapper found and executable.\n")?;
             let name = prompt_with_default(reader, writer, "Profile name", "custom-wrapper")?;
@@ -237,25 +280,112 @@ fn configure_profile<R: BufRead, W: Write>(
 }
 
 fn validate_custom_executable(path: &Path) -> Result<()> {
+    validate_regular_file(path, "custom wrapper")?;
     let metadata = fs::symlink_metadata(path).map_err(|source| Error::Io {
         operation: "inspect custom wrapper executable",
         path: path.to_path_buf(),
         source,
     })?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-        return Err(Error::ProfileSetup {
-            reason: format!(
-                "custom wrapper `{}` must be a regular non-link file",
-                path.display()
-            ),
-        });
-    }
     if metadata.permissions().mode() & 0o111 == 0 {
         return Err(Error::ProfileSetup {
             reason: format!("custom wrapper `{}` is not executable", path.display()),
         });
     }
     Ok(())
+}
+
+fn validate_regular_file(path: &Path, description: &str) -> Result<()> {
+    let metadata = fs::symlink_metadata(path).map_err(|source| Error::Io {
+        operation: "inspect setup file",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+        return Err(Error::ProfileSetup {
+            reason: format!(
+                "{description} `{}` must be a regular non-link file",
+                path.display()
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn select_cli_executable<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    conventional_name: &str,
+    fallback_prompt: &str,
+) -> Result<String> {
+    write_output(
+        writer,
+        &format!("Checking `{conventional_name} --version`...\n"),
+    )?;
+    match probe_cli_version(conventional_name) {
+        Ok(()) => {
+            write_output(
+                writer,
+                &format!("Provider executable `{conventional_name}` is accessible.\n"),
+            )?;
+            Ok(conventional_name.to_owned())
+        }
+        Err(error @ Error::Cancelled) => Err(error),
+        Err(error) => {
+            write_output(
+                writer,
+                &format!(
+                    "`{conventional_name}` is not accessible through PATH: {error}\n\
+                     Supply a direct executable or a compatible wrapper instead.\n"
+                ),
+            )?;
+            let path = resolve_setup_file(
+                &expand_home_path(&prompt_required(reader, writer, fallback_prompt)?),
+                "provider executable",
+            )?;
+            validate_custom_executable(&path)?;
+            let executable = path.to_string_lossy().into_owned();
+            match probe_cli_version(&executable) {
+                Ok(()) => {}
+                Err(error @ Error::Cancelled) => return Err(error),
+                Err(error) => {
+                    return Err(Error::ProfileSetup {
+                        reason: format!(
+                            "{conventional_name} version probe failed for `{}`: {error}",
+                            path.display()
+                        ),
+                    });
+                }
+            }
+            write_output(
+                writer,
+                &format!("Provider executable `{}` is accessible.\n", path.display()),
+            )?;
+            Ok(executable)
+        }
+    }
+}
+
+fn probe_cli_version(executable: &str) -> Result<()> {
+    let policy = SupervisionPolicy {
+        idle_timeout: Duration::from_secs(10),
+        attempt_timeout: Some(Duration::from_secs(10)),
+        detect_loops: false,
+        max_retries: 0,
+        max_output_bytes: 64 * 1024,
+    };
+    run_supervised(&policy, |_| Ok(CommandSpec::new(executable, ["--version"])))?;
+    Ok(())
+}
+
+fn resolve_setup_file(path: &Path, description: &str) -> Result<PathBuf> {
+    validate_regular_file(path, description)?;
+    let resolved = fs::canonicalize(path).map_err(|source| Error::Io {
+        operation: "resolve setup file",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    validate_regular_file(&resolved, description)?;
+    Ok(resolved)
 }
 
 fn probe_and_report<W: Write>(url: &str, writer: &mut W) -> Result<()> {
@@ -339,6 +469,16 @@ fn prompt_required<R: BufRead, W: Write>(
         });
     }
     Ok(value)
+}
+
+fn prompt_optional<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    prompt: &str,
+) -> Result<Option<String>> {
+    write_output(writer, prompt)?;
+    let value = read_input(reader)?;
+    Ok((!value.is_empty()).then_some(value))
 }
 
 fn confirm<R: BufRead, W: Write>(
