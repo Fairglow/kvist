@@ -924,6 +924,172 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
     })
 }
 
+const DEFAULT_RUST_TEMPLATE: &str = r#"Task Details:
+- ID: {id}
+- Title: {title}
+- Role/Kind: {kind}
+- Description: {description}
+- Context: {context}
+- Purpose: {purpose}
+- Expected Outcome: {expected_outcome}
+
+Language: Rust Best Known Methods (BKMs):
+- Code Style: Ensure code is perfectly formatted according to `rustfmt` conventions.
+- Error Handling: Avoid generic errors. Use idiomatic `Result<T, E>` and `Option<T>` types. Avoid `unwrap()` and `expect()` in production code.
+- Visibility: Keep struct fields, modules, and functions private unless they are explicitly part of the public contract.
+- Tests: Write unit tests in a `mod tests` block with `#[cfg(test)]`. Use doctests `/// ```rust` for public library items.
+"#;
+
+const DEFAULT_PYTHON_TEMPLATE: &str = r#"Task Details:
+- ID: {id}
+- Title: {title}
+- Role/Kind: {kind}
+- Description: {description}
+- Context: {context}
+- Purpose: {purpose}
+- Expected Outcome: {expected_outcome}
+
+Language: Python Best Known Methods (BKMs):
+- PEP 8: Follow PEP 8 style guide strictly (proper spacing, naming conventions).
+- Type Annotations: Use explicit type hints (PEP 484) on all function signatures and complex variables.
+- Data Structures: Use standard Python dataclasses, typed dictionaries, or Pydantic models for structured data.
+- Tests: Write unit/integration tests using `unittest` or `pytest` suites.
+"#;
+
+const DEFAULT_GENERIC_TEMPLATE: &str = r#"Task Details:
+- ID: {id}
+- Title: {title}
+- Role/Kind: {kind}
+- Description: {description}
+- Context: {context}
+- Purpose: {purpose}
+- Expected Outcome: {expected_outcome}
+
+Instructions:
+You are the developer agent tasked with executing the task above.
+Ensure all invariants defined in SPEC.md are maintained.
+Fulfill all task requirements. When finished, write your results.
+"#;
+
+fn ensure_default_templates(component_dir: &Path) -> Result<()> {
+    let templates_dir = component_dir.join(".kvist").join("templates");
+    if !templates_dir.exists() {
+        let _ = fs::create_dir_all(&templates_dir);
+    }
+
+    let rust_path = templates_dir.join("developer_rust.txt");
+    if !rust_path.exists() {
+        let _ = fs::write(&rust_path, DEFAULT_RUST_TEMPLATE);
+    }
+
+    let python_path = templates_dir.join("developer_python.txt");
+    if !python_path.exists() {
+        let _ = fs::write(&python_path, DEFAULT_PYTHON_TEMPLATE);
+    }
+
+    let generic_path = templates_dir.join("developer_generic.txt");
+    if !generic_path.exists() {
+        let _ = fs::write(&generic_path, DEFAULT_GENERIC_TEMPLATE);
+    }
+
+    Ok(())
+}
+
+fn detect_language(component_dir: &Path) -> &'static str {
+    if component_dir.join("Cargo.toml").exists() {
+        return "rust";
+    }
+
+    if let Ok(entries) = fs::read_dir(component_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                return "rust";
+            }
+            if path.is_dir() {
+                if let Ok(sub_entries) = fs::read_dir(&path) {
+                    for sub_entry in sub_entries.flatten() {
+                        if sub_entry.path().extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                            return "rust";
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if component_dir.join("requirements.txt").exists()
+        || component_dir.join("pyproject.toml").exists()
+        || component_dir.join("setup.py").exists()
+    {
+        return "python";
+    }
+
+    if let Ok(entries) = fs::read_dir(component_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) == Some("py") {
+                return "python";
+            }
+            if path.is_dir() {
+                if let Ok(sub_entries) = fs::read_dir(&path) {
+                    for sub_entry in sub_entries.flatten() {
+                        if sub_entry.path().extension().and_then(|ext| ext.to_str()) == Some("py") {
+                            return "python";
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    "generic"
+}
+
+fn load_and_interpolate_template(
+    component_dir: &Path,
+    lang: &str,
+    task: &crate::task_queue::Task,
+) -> Result<String> {
+    let _ = ensure_default_templates(component_dir);
+
+    let local_path = component_dir
+        .join(".kvist")
+        .join("templates")
+        .join(format!("developer_{lang}.txt"));
+
+    let global_path = std::env::var_os("HOME").map(PathBuf::from).map(|home| {
+        home.join(".config")
+            .join("kvist")
+            .join("templates")
+            .join(format!("developer_{lang}.txt"))
+    });
+
+    let template_content = if local_path.is_file() {
+        fs::read_to_string(&local_path).unwrap_or_default()
+    } else if global_path.as_ref().map(|p| p.is_file()).unwrap_or(false) {
+        fs::read_to_string(global_path.unwrap()).unwrap_or_default()
+    } else {
+        match lang {
+            "rust" => DEFAULT_RUST_TEMPLATE.to_owned(),
+            "python" => DEFAULT_PYTHON_TEMPLATE.to_owned(),
+            _ => DEFAULT_GENERIC_TEMPLATE.to_owned(),
+        }
+    };
+
+    let kind_str = format!("{:?}", task.kind);
+    let prompt = template_content
+        .replace("{id}", &task.id)
+        .replace("{title}", &task.title)
+        .replace("{kind}", &kind_str)
+        .replace("{description}", &task.description)
+        .replace("{context}", &task.context)
+        .replace("{purpose}", &task.purpose)
+        .replace("{expected_outcome}", &task.expected_outcome);
+
+    Ok(prompt)
+}
+
 /// Launches the external agent to execute a task, transitions the task to InProgress,
 /// captures logs, parses token usage, and transitions the task to Completed/Blocked based on exit.
 pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) -> Result<String> {
@@ -1045,27 +1211,8 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
         ];
 
         // 5. Build prompt
-        let prompt = format!(
-            "Task Details:\n\
-         - ID: {}\n\
-         - Title: {}\n\
-         - Role/Kind: {:?}\n\
-         - Description: {}\n\
-         - Context: {}\n\
-         - Purpose: {}\n\
-         - Expected Outcome: {}\n\n\
-         Instructions:\n\
-         You are the developer agent tasked with executing the task above. \n\
-         Ensure all invariants defined in SPEC.md are maintained. \n\
-         Fulfill all task requirements. When finished, write your results.",
-            task.id,
-            task.title,
-            task.kind,
-            task.description,
-            task.context,
-            task.purpose,
-            task.expected_outcome
-        );
+        let lang = detect_language(&context.component_dir);
+        let prompt = load_and_interpolate_template(&context.component_dir, lang, task)?;
 
         println!("Running task `{task_id}` via external agent...");
 

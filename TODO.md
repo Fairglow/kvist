@@ -17,7 +17,7 @@
 
 ## Onboarding and Integration
 
-### TODO ONB-01 — Convert Existing Project to Kvist Component
+### [COMPLETED] TODO ONB-01 — Convert Existing Project to Kvist Component
 
 **Context:** A project that already has source code, tests, and a `Cargo.toml` needs to be converted into a Kvist-managed component without losing existing work. This is the most common onboarding path.
 
@@ -73,7 +73,7 @@
   acceptance/metadata trust boundaries and a clean-slate, source-blind
   compliance comparison before marking ONB-01 complete.
 
-### TODO ONB-02 — Import Kvist Artifacts from a Git Repository
+### [COMPLETED] TODO ONB-02 — Import Kvist Artifacts from a Git Repository
 
 **Context:** A component may have already been developed by an external agent or human and committed to Git. The user wants to bring it into the Kvist workflow.
 
@@ -85,7 +85,7 @@
 - The import respects the same lock and approval rules as a new component.
 - Write integration tests for: successful import with existing artifacts, import without artifacts (new component creation), and import of a blocked component.
 
-### TODO ONB-03 — Persist Task State to Disk
+### [COMPLETED] TODO ONB-03 — Persist Task State to Disk
 
 **Context:** A task may be in-progress or blocked when the system crashes or the process exits unexpectedly. The queue must survive so that work is not lost.
 
@@ -97,7 +97,7 @@
 - If the component directory was removed and re-added, the persisted queue is re-read from disk.
 - Write integration tests for: task in-progress state persistence, task blocked state persistence, and queue reconstruction after a "crash" (simulated by writing the artifact then reading it back).
 
-### TODO ONB-04 — Reverse-Discovery: Generate Specification from Existing Implementation
+### [COMPLETED] TODO ONB-04 — Reverse-Discovery: Generate Specification from Existing Implementation
 
 **Context:** The Kvist system must be capable of reverse-engineering a specification from an existing implementation. This allows existing codebases to be imported and turned into properly specified, versioned components without starting from scratch.
 
@@ -148,7 +148,7 @@
 
 ## Agent & Model Capability Enhancements
 
-### TODO AGN-01 — Dedicated Security Reviewer Role & Task Mapping
+### [COMPLETED] TODO AGN-01 — Dedicated Security Reviewer Role & Task Mapping
 
 **Context:** Security auditing represents a highly specialized category of reviews. Running security audits under the same general `architect` model profile is sub-optimal. We need a dedicated `security_reviewer` role configured with special-purpose models and customized system prompts.
 
@@ -159,7 +159,7 @@
 - Ensure all signature validation, approval-policy checks, and serialization structures include the new profile's digests.
 - Write unit/integration tests to verify correct role routing and approval-signature validation when the security reviewer is configured.
 
-### TODO AGN-02 — Supervised Custom Prompt Execution with Loop Detection
+### [COMPLETED] TODO AGN-02 — Supervised Custom Prompt Execution with Loop Detection
 
 **Context:** Local LLMs (including `llama-cli`) can hang or get stuck in infinite repetitive cycles. We need a supervised prompt execution command that monitors live output streams, implements configurable idle watchdogs, and analyzes streams for repetition loops.
 
@@ -171,7 +171,7 @@
 - Loop detection: Analyze a rolling suffix buffer for consecutive matching cycle patterns (consecutive identical substrings of length 10-512 repeating >= 3 times, or consecutive line patterns). Terminate and restart the process upon detection.
 - Max automatic restarts limits (default 3) to prevent infinite restart loops.
 
-### TODO AGN-03 — Model Setup Wizard with Wrapper Script Support
+### [COMPLETED] TODO AGN-03 — Model Setup Wizard with Wrapper Script Support
 
 **Context:** Users run local models with unique startup configurations, e.g. using helper scripts like `~/bin/llama-cli.sh`. The wizard must guide the user through setting up standard providers (llama-cli, llama-server, Ollama, Copilot, Gemini) and support custom shell wrappers.
 
@@ -183,7 +183,7 @@
 - Runs a non-destructive verification test prompt and streams output to verify the connection.
 - Programmatically writes the generated profile to the user's preferred configuration file (`~/.config/kvist/config.toml` or `kvist.toml`).
 
-### TODO AGN-04 — Language-Specific BKM Prompt templates (Rust & Python)
+### [COMPLETED] TODO AGN-04 — Language-Specific BKM Prompt templates (Rust & Python)
 
 **Context:** To enforce code quality and stylistic consistency, tasks must be generated and implemented using Best Known Methods (BKMs). Kvist should use modifiable prompt templates for Rust and Python unit tests, docstrings, and error patterns.
 
@@ -224,7 +224,7 @@ All items in the following sections have been completed and integrated into the 
 - **Phase 3 — Independent Compliance Automation:** Component-design and feasibility skills, queue-design skills, implementation and test skills, clean-slate documentation skill, independent review skills, clean-slate and source-blind pipelines, durable human arbitration, specification interview mode, reviewed queue generation.
 - **Phase 4 — Deferred Visual and Editor Ecosystem:** Deferred until Phase 3 review workflow is independently reviewed and approved.
 - **Onboarding and Integration:** `kvist convert` (ONB-01, existing project conversion), `kvist import` (ONB-02, remote/local Git repository import with validation and automatic conversion/init fallback), and `kvist reverse-discover` (ONB-04, automatic generation of specifications and TDD task queues from existing implementation files) are fully implemented and verified.
-- **Agent and Model Capability Enhancements:** `security_reviewer` agent profile (AGN-01, dedicated security auditor role profile, task routing mapping, and cryptographic HMAC approval validation), supervised custom prompt execution (AGN-02, real-time chunked streaming, idle watchdog timeout-breaking, and consecutive cycle/line/oscillation loop detection with automated restarts), and interactive model setup wizard (AGN-03, terminal prober, custom script/wrapper helper, custom template TOML generation, and connection verification) are fully implemented and verified.
+- **Agent and Model Capability Enhancements:** `security_reviewer` agent profile (AGN-01, dedicated security auditor role profile, task routing mapping, and cryptographic HMAC approval validation), supervised custom prompt execution (AGN-02, real-time chunked streaming, idle watchdog timeout-breaking, and consecutive cycle/line/oscillation loop detection with automated restarts), interactive model setup wizard (AGN-03, terminal prober, custom script/wrapper helper, custom template TOML generation, and connection verification), and language-specific BKM prompt templates (AGN-04, project-level and global customizable prompt templates for Rust and Python tasks, dynamic language detection, and automatic self-healing default generation) are fully implemented and verified.
 - **UX Improvements:** All 10 UX items (UX-02 through UX-10) have been completed.
 
 For detailed documentation of the completed work, refer to [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md).

@@ -1837,3 +1837,180 @@ command_template = "my-special-security-agent-cmd {{prompt}}"
             .into_owned()
     );
 }
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_language_specific_prompt_templates() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = tempfile::TempDir::new().expect("create temp dir");
+    // Initialize standard project
+    run_kvist(&project, &["init"]);
+
+    let runner_dir = tempfile::TempDir::new().expect("create runner dir");
+    let runner = runner_dir.path().join("fake_runner.sh");
+    fs::write(
+        &runner,
+        r#"#!/bin/sh
+if [ "$1" = "--kvist-sandbox-probe-v1" ]; then
+  printf 'kvist-sandbox-probe-v1: network=deny; mount=component\n'
+  exit 0
+fi
+request=$(cat)
+case "$request" in
+  *CUSTOM_RUST_BKM*)
+    printf 'Prompt: CUSTOM_RUST_BKM: write-test-fixtures - Write some fixtures\n'
+    ;;
+esac
+"#,
+    )
+    .expect("write fake sandbox runner");
+    fs::set_permissions(&runner, fs::Permissions::from_mode(0o755))
+        .expect("make runner executable");
+
+    // Write customized kvist.toml
+    let config_content = format!(
+        r#"schema_version = 1
+component_root = "src"
+
+[discovery]
+max_depth = 64
+
+[vcs]
+kind = "auto"
+
+[sandbox]
+schema_version = 1
+runner = "{}"
+network = "deny"
+mount = "component"
+environment_allowlist = []
+
+[agent.profiles.developer]
+command_template = "echo 'Prompt: {{prompt}}'"
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = []
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "echo verify"
+"#,
+        runner.display().to_string().replace('\\', "/")
+    );
+    fs::write(project.path().join("kvist.toml"), config_content).expect("write custom config");
+    track_project(&project);
+
+    // Create a dummy Rust source file to trigger Rust language detection
+    fs::create_dir_all(project.path().join("src")).expect("create src dir");
+    fs::write(project.path().join("src/lib.rs"), "pub fn main() {}").expect("write lib.rs");
+
+    // Write custom templates
+    let templates_dir = project.path().join("src").join(".kvist").join("templates");
+    fs::create_dir_all(&templates_dir).expect("create templates dir");
+
+    let custom_rust_template = "CUSTOM_RUST_BKM: {id} - {title}";
+    fs::write(
+        templates_dir.join("developer_rust.txt"),
+        custom_rust_template,
+    )
+    .expect("write custom rust template");
+
+    // Write SPEC and TODOS.yaml to run a mock task
+    let spec_content = r#"<!-- kvist-specification-version: 1 -->
+# Spec
+<details open>
+<summary>Layer 1: Executive summary and public contract</summary>
+## Purpose
+To be run.
+## Public contract
+Contract.
+</details>
+<details>
+<summary>Layer 2: Architectural guarantees</summary>
+## Constraints and invariants
+None.
+</details>
+<details>
+<summary>Layer 3: Detailed strategy and algorithms</summary>
+## Design and failure paths
+None.
+</details>
+"#;
+    let todos_content = r#"schema_version: 1
+component:
+  specification_revision: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  parent_specification: null
+  revalidation:
+    state: current
+    checked_at: "2026-08-28T13:03:02Z"
+    stale_since: null
+    causes: []
+tasks:
+  - id: "write-test-fixtures"
+    title: "Write some fixtures"
+    description: "Write unit tests."
+    context: "Context."
+    purpose: "Testing."
+    expected_outcome: "Outcome."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "SPEC.md#Public-contract"
+    timestamps:
+      created_at: "2026-08-28T13:03:02Z"
+      updated_at: "2026-08-28T13:03:02Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+"#;
+
+    fs::write(project.path().join("src/SPEC.md"), spec_content).expect("write spec");
+    fs::write(project.path().join("src/TODOS.yaml"), todos_content).expect("write todos");
+
+    // Accept spec/queue
+    let accept_spec = run_kvist(&project, &["spec", "accept", "."]);
+    assert!(
+        accept_spec.status.success(),
+        "accept spec failed: {:?}",
+        String::from_utf8_lossy(&accept_spec.stderr)
+    );
+
+    // Approve the policy
+    let approve_status = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(
+        approve_status.status.success(),
+        "policy approval failed: {:?}",
+        String::from_utf8_lossy(&approve_status.stderr)
+    );
+
+    // Run the task
+    let run_task = run_kvist(&project, &["task", "run", ".", "write-test-fixtures"]);
+    assert!(
+        run_task.status.success(),
+        "run task failed: {:?}",
+        String::from_utf8_lossy(&run_task.stderr)
+    );
+
+    // Load the task log to verify the custom BKM template prompt was used!
+    let logs_dir = project.path().join("src").join(".kvist").join("logs");
+    let log_entries = fs::read_dir(logs_dir).expect("read logs dir");
+    let mut log_content = String::new();
+    for entry in log_entries.flatten() {
+        let content = fs::read_to_string(entry.path()).expect("read log file");
+        if content.contains("Prompt:") {
+            log_content = content;
+            break;
+        }
+    }
+
+    assert!(
+        log_content.contains("CUSTOM_RUST_BKM: write-test-fixtures - Write some fixtures"),
+        "prompt did not match custom BKM: {}",
+        log_content
+    );
+}
