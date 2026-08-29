@@ -1,10 +1,10 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:82d5147ab47ac76dc94e56a15a116dd0418aca8334a7b8a4da9d5453470ed35d"
+  specification_revision: "sha256:988cbf5f2b824db8cc3c861841056b4af4615e730bb4c10dd9616d543df7da28"
   parent_specification: null
   revalidation:
     state: current
-    checked_at: "2026-08-21T20:59:05Z"
+    checked_at: "2026-08-29T19:54:02Z"
     stale_since: null
     causes: []
 tasks:
@@ -745,4 +745,84 @@ tasks:
       created_at: "2026-08-21T20:35:03Z"
       updated_at: "2026-08-21T20:59:52Z"
       completed_at: "2026-08-21T20:59:52Z"
+    blocked_reason: null
+  - id: "agn-input-setup-write-tests"
+    title: "Define prompt input and setup regression tests"
+    description: "Write focused tests for file, redirected standard input, editor prompt authoring, model verification, and formatting-preserving configuration updates."
+    context: "Custom prompts accepted only positional text and agent setup failed when project configuration already existed."
+    purpose: "Establish executable behavior for safe multiline prompt input and additive model setup before changing command and persistence logic."
+    expected_outcome: "Tests fail for missing prompt sources, rejected existing configuration updates, absent model naming, and unverified model persistence."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "TODO.md#AGN-02"
+      - "TODO.md#AGN-03"
+    timestamps:
+      created_at: "2026-08-29T19:54:02Z"
+      updated_at: "2026-08-29T19:54:02Z"
+      completed_at: "2026-08-29T19:54:02Z"
+    blocked_reason: null
+  - id: "agn-input-setup-implement-code"
+    title: "Implement prompt input and additive model setup"
+    description: "Add bounded file, standard-input, and editor prompt sources plus verified formatting-preserving atomic model configuration updates."
+    context: "The regression tests define the missing input and configuration-update behaviors."
+    purpose: "Make custom prompts practical for multiline work and let users safely add tested models without destroying existing project settings."
+    expected_outcome: "Prompt sources are explicit and bounded, setup names and verifies models, and existing project or user configuration is merged and remains valid."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agn-input-setup-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "TODO.md#AGN-02"
+      - "TODO.md#AGN-03"
+    timestamps:
+      created_at: "2026-08-29T19:54:02Z"
+      updated_at: "2026-08-29T20:00:55Z"
+      completed_at: "2026-08-29T20:00:55Z"
+    blocked_reason: null
+  - id: "agn-input-setup-security-audit"
+    title: "Audit prompt and model setup boundaries"
+    description: "Independently review prompt input bounds, editor and provider process invocation, configuration parsing, link checks, and atomic replacement."
+    context: "Prompt files, environment-selected editors, provider commands, and existing TOML are untrusted process and filesystem inputs."
+    purpose: "Identify command confusion, unsafe path handling, resource exhaustion, or destructive configuration updates before certification."
+    expected_outcome: "Security findings are remediated or retained for explicit human arbitration."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "agn-input-setup-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "TODO.md#AGN-02"
+      - "TODO.md#AGN-03"
+    timestamps:
+      created_at: "2026-08-29T19:54:02Z"
+      updated_at: "2026-08-29T19:54:02Z"
+      completed_at: null
+    blocked_reason: null
+  - id: "agn-input-setup-compliance-review"
+    title: "Independently review prompt and setup compliance"
+    description: "Compare source-derived prompt acquisition and configuration persistence behavior with the updated component contract."
+    context: "The implementer cannot certify its own prompt and agent-configuration workflow."
+    purpose: "Preserve independent evidence of compliance and surface discrepancies without rewriting the contract."
+    expected_outcome: "A clean-slate implementation record and source-blind review classify every discrepancy for human arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "agn-input-setup-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "TODO.md#AGN-02"
+      - "TODO.md#AGN-03"
+    timestamps:
+      created_at: "2026-08-29T19:54:02Z"
+      updated_at: "2026-08-29T19:54:02Z"
+      completed_at: null
     blocked_reason: null

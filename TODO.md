@@ -166,6 +166,8 @@
 **Acceptance criteria:**
 
 - Implement `kvist prompt [PROMPT]` command supporting options: `--role`, `--idle-timeout`, `--detect-loops`, and `--max-restarts`.
+- Accept bounded nonblank UTF-8 prompts from positional text, `--file`, redirected
+  standard input, or an explicitly or interactively selected editor.
 - Real-time streaming: Read stdout/stderr chunk-by-chunk and print to the console immediately.
 - Idle watchdogs: Terminate and restart the subprocess if no new bytes are written within `idle_timeout` seconds (default 15 minutes).
 - Loop detection: Analyze a rolling suffix buffer for consecutive matching cycle patterns (consecutive identical substrings of length 10-512 repeating >= 3 times, or consecutive line patterns). Terminate and restart the process upon detection.
@@ -181,7 +183,12 @@
 - Wizard automatically queries Ollama's model tags or searches the shell `PATH` for standard binaries.
 - Supports user-provided script wrappers (like `~/bin/llama-cli.sh`) by checking execute permissions and setting up custom templates.
 - Runs a non-destructive verification test prompt and streams output to verify the connection.
-- Programmatically writes the generated profile to the user's preferred configuration file (`~/.config/kvist/config.toml` or `kvist.toml`).
+- Prompts for the provider's model configuration name and exact command
+  template before role assignment.
+- Atomically creates or formatting-preservingly updates the generated profile
+  in the user's preferred configuration file
+  (`~/.config/kvist/config.toml` or `kvist.toml`) without discarding unrelated
+  settings or models.
 
 ### [COMPLETED] TODO AGN-04 — Language-Specific BKM Prompt templates (Rust & Python)
 

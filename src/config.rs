@@ -377,6 +377,7 @@ fn parse(config_path: &Path, project_root: &Path, contents: &str) -> Result<Proj
             "`schema_version` must be a positive integer",
         ));
     }
+
     let supported_version = i64::from(CONFIGURATION_VERSION);
     if schema_version != supported_version {
         return Err(KvistError::UnsupportedProjectConfigurationVersion {
@@ -403,6 +404,27 @@ fn parse(config_path: &Path, project_root: &Path, contents: &str) -> Result<Proj
         test_policy: parse_test_policy(config_path, table)?,
         sandbox: parse_sandbox_config(config_path, table)?,
     })
+}
+
+pub(crate) fn validate_project_configuration_contents(
+    config_path: &Path,
+    project_root: &Path,
+    contents: &str,
+) -> Result<()> {
+    parse(config_path, project_root, contents).map(|_| ())
+}
+
+pub(crate) fn validate_agent_configuration_contents(
+    config_path: &Path,
+    contents: &str,
+) -> Result<()> {
+    let table = toml_table_from_str(config_path, contents)?;
+    let source_path = if config_path.exists() {
+        config_path
+    } else {
+        Path::new("built-in:agent-default-v1")
+    };
+    parse_agent_config_from_table(config_path, contents, source_path, &table).map(|_| ())
 }
 
 fn parse_sandbox_config(
@@ -1161,13 +1183,34 @@ fn agent_source_identity(path: &Path) -> Result<String> {
     if path == Path::new("built-in:agent-default-v1") {
         return Ok(path.to_string_lossy().into_owned());
     }
-    path.canonicalize()
-        .map(|path| path.to_string_lossy().into_owned())
-        .map_err(|source| KvistError::Io {
+    match path.canonicalize() {
+        Ok(path) => Ok(path.to_string_lossy().into_owned()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let parent = path.parent().ok_or_else(|| KvistError::Io {
+                operation: "resolve agent configuration parent",
+                path: path.to_path_buf(),
+                source: io::Error::other("configuration path has no parent"),
+            })?;
+            let file_name = path.file_name().ok_or_else(|| KvistError::Io {
+                operation: "resolve agent configuration filename",
+                path: path.to_path_buf(),
+                source: io::Error::other("configuration path has no filename"),
+            })?;
+            parent
+                .canonicalize()
+                .map(|parent| parent.join(file_name).to_string_lossy().into_owned())
+                .map_err(|source| KvistError::Io {
+                    operation: "canonicalize agent configuration parent",
+                    path: parent.to_path_buf(),
+                    source,
+                })
+        }
+        Err(source) => Err(KvistError::Io {
             operation: "canonicalize agent configuration source",
             path: path.to_path_buf(),
             source,
-        })
+        }),
+    }
 }
 
 fn read_agent_config_candidate(path: &Path, source_name: &'static str) -> Result<Option<String>> {

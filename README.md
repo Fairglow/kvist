@@ -25,6 +25,8 @@ The product vision is defined in [`VISION.md`](VISION.md) and its architecture i
 | `kvist task run <COMPONENT_DIR> [TASK_ID]`         | Run the configured external agent for one ready task; see the execution boundary below.      |
 | `kvist task log <COMPONENT_DIR> <TASK_ID>`         | Print the most recent bounded, redacted agent log for a task.                                |
 | `kvist task approve-policy [PROJECT_DIR]`          | Record approval of the complete effective execution policy.                                  |
+| `kvist prompt [PROMPT]`                            | Run a positional, file, piped, or editor-authored prompt under supervision.                   |
+| `kvist agent setup`                                | Test and merge a named model into project or user agent configuration.                        |
 
 Delivery is organized into phases. The completed, current, and planned phase
 scope, context, and acceptance criteria are maintained in
@@ -79,11 +81,12 @@ On Unix-like systems, the user path is
 `%APPDATA%\kvist\config.toml` and `%ProgramData%\kvist\config.toml`,
 respectively.
 
-Model commands use a deliberately limited, whitespace-delimited argument
-template, not shell parsing. For normal models, `{prompt}` and
+Model commands use a deliberately limited shell-free argument template.
+Single and double quotes group arguments and may quote executable paths, but
+no shell is started. For normal models, `{prompt}` and
 `{target_directory}` are substituted in an argument and an argument containing
 `{context_files}` is emitted once for each declared context path. Shell
-operators, redirections, pipelines, and shell quoting are not supported.
+operators, redirections, and pipelines are not supported.
 `system_prompt`, when nonempty, is prefixed to the task prompt with a blank
 line; it is not passed as a provider-specific system-message option.
 
@@ -96,6 +99,31 @@ It still executes an external program through the approved sandbox runner;
 Model selection is part of the effective agent profile covered by
 `kvist task approve-policy`. Changing the selected source, profile, model
 list, command, or prompt requires a fresh approval before `task run`.
+
+### Custom prompts and model setup
+
+`kvist prompt` accepts prompt text as a positional argument, from a regular
+UTF-8 file with `--file PATH`, or from standard input:
+
+```bash
+kvist prompt "Review this component contract"
+kvist prompt --file review-prompt.md
+printf '%s\n' "Review this component contract" | kvist prompt
+```
+
+Use `--file -` to select standard input explicitly. Use `--editor` to author a
+multiline prompt with `$VISUAL`, `$EDITOR`, or the platform default editor. If
+no source is supplied, redirected standard input is read automatically; at an
+interactive terminal Kvist offers to open the editor. These input modes are
+mutually exclusive, limited to 1 MiB, and must produce nonblank UTF-8 text.
+
+`kvist agent setup` asks for a provider, model configuration name, and command
+template. It offers to execute a test prompt through that exact command before
+asking where to save it. A failed test does not change configuration unless
+the user explicitly chooses to save anyway. Existing project-local and
+user-global TOML is updated atomically: unrelated settings, models, and
+comments are retained, while a model with the same name is updated for each
+selected role.
 
 ### Sandboxed task execution
 

@@ -45,6 +45,51 @@ fn split_command_interpolates_placeholders_and_trims_quotes_correctly() {
 }
 
 #[test]
+fn split_command_omits_an_empty_context_option_pair() {
+    let (program, args) = split_command(
+        "my-agent --message '{prompt}' --context '{context_files}'",
+        "Hello",
+        &[],
+        Path::new("."),
+    )
+    .expect("split command without context");
+
+    assert_eq!(program, "my-agent");
+    assert_eq!(args, vec!["--message", "Hello"]);
+}
+
+#[test]
+fn split_command_preserves_quoted_paths_and_arguments() {
+    let (program, args) = split_command(
+        r#""C:\Program Files\Agent\agent.exe" --label "value with spaces" '{prompt}'"#,
+        "Hello from Kvist",
+        &[],
+        Path::new("."),
+    )
+    .expect("split quoted command");
+
+    assert_eq!(program, r"C:\Program Files\Agent\agent.exe");
+    assert_eq!(
+        args,
+        vec!["--label", "value with spaces", "Hello from Kvist"]
+    );
+}
+
+#[test]
+fn split_command_decodes_escaped_backslashes_and_quotes() {
+    let (program, args) = split_command(
+        r#""C:\\Program Files\\Agent\\agent.exe" "quote: \"ready\"""#,
+        "unused",
+        &[],
+        Path::new("."),
+    )
+    .expect("split escaped command");
+
+    assert_eq!(program, r"C:\Program Files\Agent\agent.exe");
+    assert_eq!(args, vec![r#"quote: "ready""#]);
+}
+
+#[test]
 #[cfg(target_os = "linux")]
 fn execute_agent_captures_stdout_and_stderr_in_log_file() {
     let workspace = TempDir::new().expect("workspace");

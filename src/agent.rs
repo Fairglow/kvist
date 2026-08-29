@@ -64,7 +64,7 @@ pub fn split_command(
     context_paths: &[PathBuf],
     target_dir: &Path,
 ) -> Result<(String, Vec<String>)> {
-    let raw_args: Vec<&str> = template.split_whitespace().collect();
+    let raw_args = parse_command_arguments(template)?;
     if raw_args.is_empty() {
         return Err(KvistError::Io {
             operation: "split agent command template",
@@ -73,12 +73,21 @@ pub fn split_command(
         });
     }
 
-    let program = raw_arg_trim(raw_args[0]).to_owned();
+    let program = raw_args[0].clone();
     let mut args = Vec::new();
 
     for raw_arg in &raw_args[1..] {
         if raw_arg.contains("{context_files}") {
-            // Replace {context_files} with separate path arguments
+            if context_paths.is_empty() {
+                if raw_arg == "{context_files}"
+                    && args
+                        .last()
+                        .is_some_and(|argument: &String| argument.starts_with('-'))
+                {
+                    args.pop();
+                }
+                continue;
+            }
             for path in context_paths {
                 let path_str = path.to_str().ok_or_else(|| KvistError::Io {
                     operation: "serialize context path",
@@ -86,7 +95,7 @@ pub fn split_command(
                     source: io::Error::other("non-UTF-8 context path"),
                 })?;
                 let replaced = raw_arg.replace("{context_files}", path_str);
-                args.push(raw_arg_trim(&replaced));
+                args.push(replaced);
             }
         } else {
             let mut replaced = raw_arg.replace("{prompt}", prompt);
@@ -98,7 +107,7 @@ pub fn split_command(
                 })?;
                 replaced = replaced.replace("{target_directory}", dir_str);
             }
-            args.push(raw_arg_trim(&replaced));
+            args.push(replaced);
         }
     }
 
@@ -144,7 +153,7 @@ pub fn get_effective_command(
 }
 
 fn split_raw_command(template: &str) -> Result<(String, Vec<String>)> {
-    let raw_args: Vec<&str> = template.split_whitespace().collect();
+    let raw_args = parse_command_arguments(template)?;
     if raw_args.is_empty() {
         return Err(KvistError::Io {
             operation: "split agent command template",
@@ -153,17 +162,60 @@ fn split_raw_command(template: &str) -> Result<(String, Vec<String>)> {
         });
     }
 
-    let program = raw_arg_trim(raw_args[0]).to_owned();
-    let args = raw_args[1..].iter().map(|arg| raw_arg_trim(arg)).collect();
+    let program = raw_args[0].clone();
+    let args = raw_args[1..].to_vec();
     Ok((program, args))
 }
 
-fn raw_arg_trim(s: &str) -> String {
-    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
-        s[1..s.len() - 1].to_owned()
-    } else {
-        s.to_owned()
+fn parse_command_arguments(template: &str) -> Result<Vec<String>> {
+    let mut arguments = Vec::new();
+    let mut current = String::new();
+    let mut quote = None;
+    let mut started = false;
+    let mut characters = template.chars().peekable();
+
+    while let Some(character) = characters.next() {
+        match (quote, character) {
+            (None, '\'' | '"') => {
+                quote = Some(character);
+                started = true;
+            }
+            (Some(active), character) if character == active => {
+                quote = None;
+            }
+            (None, character) if character.is_whitespace() => {
+                if started {
+                    arguments.push(std::mem::take(&mut current));
+                    started = false;
+                }
+            }
+            (Some(active), '\\') => match characters.peek().copied() {
+                Some(next) if next == active || next == '\\' => {
+                    current.push(next);
+                    characters.next();
+                    started = true;
+                }
+                _ => {
+                    current.push('\\');
+                    started = true;
+                }
+            },
+            (_, character) => {
+                current.push(character);
+                started = true;
+            }
+        }
     }
+    if let Some(quote) = quote {
+        return Err(KvistError::InvalidProjectConfiguration {
+            path: PathBuf::from("agent command template"),
+            reason: format!("unterminated `{quote}` quote"),
+        });
+    }
+    if started {
+        arguments.push(current);
+    }
+    Ok(arguments)
 }
 
 /// Spawns the subprocess, redirects output to log file, and optionally streams to console.

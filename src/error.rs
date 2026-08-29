@@ -70,6 +70,18 @@ pub enum KvistError {
         /// Explanation of the import failure.
         reason: String,
     },
+    /// A prompt source could not provide safe, usable prompt text.
+    #[error("invalid prompt input: {reason}")]
+    InvalidPromptInput {
+        /// Actionable prompt-input diagnostic.
+        reason: String,
+    },
+    /// Interactive agent configuration could not be completed safely.
+    #[error("agent setup failed: {reason}")]
+    AgentSetupFailed {
+        /// Actionable setup diagnostic.
+        reason: String,
+    },
     /// A project is not safe for `init` to modify.
     #[error(
         "cannot initialize `{project_dir}` because its Kvist project state is {state}; \

@@ -39,6 +39,13 @@ The available commands are:
   failure with line-aware diagnostics.
 * `kvist spec accept COMPONENT_DIR` updates the selected component queue's
   recorded specification revisions and clears its stale evidence.
+* `kvist prompt [PROMPT]` runs one prompt through a selected agent profile.
+  `--file` reads a regular bounded UTF-8 file, `--editor` invokes a configured
+  editor on a temporary Markdown file, and omitted input reads redirected
+  standard input or offers an editor at a terminal.
+* `kvist agent setup` collects a provider command and model name, optionally
+  executes a test prompt, assigns the model to selected roles, and creates or
+  updates project-local or user-global TOML.
 
 Unknown commands are rejected by the argument parser. `main` owns output and
 exit handling; `kvist::run()` parses process arguments and `cli::execute`
@@ -347,9 +354,11 @@ Missing configuration, runner spawn failures, or an invalid acknowledgement
 fail before a lock or task-state transition. A test policy using project
 working directory is rejected by the component-only protocol.
 
-Agent templates are split into a program and arguments without a shell. The
-supported substitutions are `{prompt}`, `{context_files}`, and
-`{target_directory}`. Resolved profiles supply a timeout and combined-output
+Agent templates are parsed into a program and arguments without a shell.
+Single and double quotes group arguments. The supported substitutions are
+`{prompt}`, `{context_files}`, and `{target_directory}`; an empty context list
+also removes an immediately preceding option paired with the standalone
+context placeholder. Resolved profiles supply a timeout and combined-output
 cap, bounded by hard maxima. A timeout or output-limit breach terminates the
 runner and blocks the task. Kvist concatenates captured stdout followed by
 stderr, then replaces explicit redaction values and inherited sandbox-allowed
@@ -369,6 +378,17 @@ byte limit.
 in user state. A task run refuses if its policy is absent, any approved
 execution input differs, or a repository-contained legacy record is present.
 Verification result records are appended to the task's attempt JSONL file.
+
+Custom prompt input is limited to 1 MiB and rejects empty or non-UTF-8 text.
+File input checks for a regular non-link file before reading. Editor input uses
+`VISUAL`, then `EDITOR`, then a platform default and invokes the parsed editor
+command directly. Agent setup checks custom wrappers as regular non-link
+executables, tests the generated command only after interactive confirmation,
+and defaults to abandoning persistence after a failed test. Configuration
+updates use `toml_edit` to retain unrelated values and comments, update or
+append the named model in inline or array-of-table model lists, validate the
+result with the normal configuration parser, and atomically create or replace
+the selected file.
 
 Isolation enforcement is delegated to the configured external runner; Kvist verifies its identity and
 version-1 capability acknowledgement but cannot independently prove its

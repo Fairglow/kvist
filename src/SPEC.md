@@ -24,6 +24,15 @@ required root and discovered component artifact is tracked by the selected Git
 or jj repository. Commands use project-local configuration and produce
 deterministic, non-interactive output.
 
+`kvist prompt` executes a user-authored prompt through a selected agent role.
+It accepts exactly one explicit source: positional text, `--file`, or
+`--editor`. With no explicit source it reads redirected standard input, while
+an interactive terminal offers to open the configured editor before falling
+back to terminal input. `kvist agent setup` interactively defines a named model,
+can verify its command before persistence, assigns it to selected roles, and
+creates or updates project-local or user-global configuration without
+discarding unrelated settings.
+
 The root component also owns the version-1 `TODOS.yaml` contract. A queue is a
 durable, version-controlled execution plan for one component, not an informal
 checklist. Every task records its stable identity, actionable work, reason,
@@ -48,8 +57,18 @@ interaction surface; `doctor` reports only its root-artifact validity.
 - Persistent writes use no-clobber same-directory temporary files. Root
   initialization is not a multi-file transaction and must remain recoverable
   through explicit user action.
-- The root component performs no network or LLM invocation. It does not follow
-  link-like paths and requires a trusted workspace before future task execution.
+- Core project-inspection and lifecycle commands perform no network or LLM
+  invocation. Explicit `prompt` and agent-setup verification operations may
+  invoke the user-selected program directly without a shell. Other commands do
+  not follow link-like paths and require a trusted workspace before task
+  execution.
+- Prompt text from arguments, files, standard input, or an editor is nonblank
+  UTF-8 no larger than 1 MiB. Prompt files must be regular non-link files.
+  Positional text, `--file`, and `--editor` are mutually exclusive.
+- Agent setup reads only regular non-link configuration files no larger than
+  64 KiB. Updating a configuration preserves unrelated TOML values and
+  formatting, replaces an existing model with the same name or appends a new
+  model, validates the result, and uses synchronized atomic replacement.
 - VCS inspection never stages, commits, or snapshots a working copy. Git uses
   native tracking and ignore semantics; jj inspects only its saved snapshot.
 - A filesystem-loaded TODO queue is UTF-8 YAML at most 1 MiB. The root
@@ -105,6 +124,37 @@ returns line-aware diagnostics. Every operation returns contextual errors
 rather than silently repairing, migrating, overwriting, or following links.
 VCS auto-selection refuses a checkout containing both Git and jj until the
 project owner selects one in `kvist.toml`.
+
+## Custom prompt input and agent setup
+
+`kvist prompt [PROMPT]` uses positional text when supplied. `--file PATH`
+loads a bounded UTF-8 file, and `--file -` explicitly reads standard input.
+`--editor` creates a temporary Markdown file and invokes the first configured
+editor from `VISUAL`, then `EDITOR`, falling back to `vi` on Unix and
+`notepad` on Windows. Editor commands are split into a program and arguments
+and invoked directly without a shell. When none of these sources is supplied,
+redirected standard input is consumed automatically. At a terminal Kvist asks
+whether to open the editor; declining allows multiline terminal input through
+end-of-file. Empty, oversized, non-UTF-8, non-regular, and link-like prompt
+inputs fail before an agent process starts.
+
+`kvist agent setup` collects a nonblank model name and command template for the
+selected provider. Provider probes are advisory; the wizard separately offers
+to execute a non-destructive prompt through the exact generated command before
+any configuration write. A failed model test defaults to refusing persistence
+and requires an explicit user override to continue.
+
+For project-local setup, a missing file begins with the current
+`schema_version` and `component_root` fields. User-global setup creates only
+agent configuration. Existing configuration must parse and satisfy its
+applicable schema before editing. For every selected role the wizard retains
+all unrelated profile fields and models, updates or appends the named model,
+and selects it as both `model` and `default_model`. It preserves unrelated
+document values and comments, validates the edited result, enforces the
+configuration size bound, and atomically creates or replaces the selected
+file. A malformed, oversized, or link-like configuration is reported rather
+than repaired or truncated. As with other direct filesystem checks, concurrent
+external mutation remains outside the static-workspace guarantee.
 
 ## TODO queue schema and validation
 

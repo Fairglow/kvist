@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::{
-    KvistError, Result, convert, discovery, import, init, project_state, reverse_discovery,
-    specification, status, task_commands, task_queue::TaskStatus, tree, wizard,
+    KvistError, Result, convert, discovery, import, init, project_state, prompt_input,
+    reverse_discovery, specification, status, task_commands, task_queue::TaskStatus, tree, wizard,
 };
 
 /// Kvist's top-level command-line interface.
@@ -65,9 +65,15 @@ pub enum Command {
     },
     /// Execute a custom prompt under supervision.
     Prompt {
-        /// The custom prompt text to execute. If omitted, prompts for input.
-        #[arg(value_name = "PROMPT")]
+        /// Custom prompt text. Conflicts with --file and --editor.
+        #[arg(value_name = "PROMPT", conflicts_with_all = ["file", "editor"])]
         prompt: Option<String>,
+        /// Read the prompt from a UTF-8 file; use `-` for standard input.
+        #[arg(short, long, value_name = "PROMPT_FILE", conflicts_with_all = ["prompt", "editor"])]
+        file: Option<PathBuf>,
+        /// Author the prompt in VISUAL, EDITOR, or the platform default editor.
+        #[arg(long, conflicts_with_all = ["prompt", "file"])]
+        editor: bool,
         /// The role profile context to use (developer, architect, security-reviewer).
         #[arg(long, default_value = "developer")]
         role: String,
@@ -325,12 +331,14 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             },
             Command::Prompt {
                 prompt,
+                file,
+                editor,
                 role,
                 idle_timeout,
                 detect_loops,
                 max_restarts,
             } => {
-                let resolved_prompt = prompt.unwrap_or_else(|| "Hello, Kvist".to_owned());
+                let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
                 execute_prompt(&resolved_prompt, &role, idle_timeout, detect_loops, max_restarts)?;
                 Ok(CommandOutput::message(
                     r#"{"status":"success","command":"prompt","message":"prompt execution complete"}"#.to_owned()
@@ -566,12 +574,14 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 .map(|outcome| CommandOutput::message(outcome.to_string())),
             Command::Prompt {
                 prompt,
+                file,
+                editor,
                 role,
                 idle_timeout,
                 detect_loops,
                 max_restarts,
             } => {
-                let resolved_prompt = prompt.unwrap_or_else(|| "Hello, Kvist".to_owned());
+                let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
                 execute_prompt(
                     &resolved_prompt,
                     &role,
