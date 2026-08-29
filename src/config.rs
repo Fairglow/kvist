@@ -50,15 +50,17 @@ pub const MAX_DISCOVERY_LIMITS: DiscoveryLimits = DiscoveryLimits {
     max_relative_path_bytes: 32_768,
 };
 
-/// An agent role (e.g., "architect", "developer").
+/// An agent role (e.g., "architect", "developer", "security-reviewer").
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[repr(u8)]
 pub enum Role {
     /// The architect role handles compliance review, architecture decisions,
-    /// and security audits.
+    /// and high-level design.
     Architect,
     /// The developer role handles test generation, implementation, and refactoring.
     Developer,
+    /// The security reviewer role handles specialized security audits.
+    SecurityReviewer,
 }
 
 impl Role {
@@ -66,6 +68,7 @@ impl Role {
         match self {
             Role::Architect => "architect",
             Role::Developer => "developer",
+            Role::SecurityReviewer => "security-reviewer",
         }
     }
 }
@@ -86,6 +89,7 @@ pub struct Model {
 pub struct AgentConfig {
     pub architect: AgentProfile,
     pub developer: AgentProfile,
+    pub security_reviewer: AgentProfile,
     /// Identity and content digest of the resolver input that selected this config.
     pub source: AgentConfigSource,
 }
@@ -95,6 +99,7 @@ pub struct AgentConfig {
 pub struct AgentConfigResolved {
     pub architect: AgentProfile,
     pub developer: AgentProfile,
+    pub security_reviewer: AgentProfile,
     /// Identity and content digest of the resolver input that selected this config.
     pub source: AgentConfigSource,
 }
@@ -181,6 +186,42 @@ impl Default for AgentConfig {
                     Model {
                         name: "default".to_owned(),
                         command: "gemini-cli --prompt '{prompt}' --files {context_files}".to_owned(),
+                        system_prompt: None,
+                    },
+                    Model {
+                        name: "llama-cli".to_owned(),
+                        command: "llama-cli --prompt '{prompt}' --context '{context_files}' --format json".to_owned(),
+                        system_prompt: None,
+                    },
+                    Model {
+                        name: "ollama".to_owned(),
+                        command: "ollama run --stream=false '{model}' --prompt '{prompt}' --context '{context_files}'".to_owned(),
+                        system_prompt: None,
+                    },
+                    Model {
+                        name: "none".to_owned(),
+                        command: "{prompt} {context_files}".to_owned(),
+                        system_prompt: None,
+                    },
+                    Model {
+                        name: "mcp".to_owned(),
+                        command: "mcp run --prompt '{prompt}' --context '{context_files}'".to_owned(),
+                        system_prompt: None,
+                    },
+                ],
+                default_model: "default".to_owned(),
+                model: None,
+                token_limit: None,
+                timeout_seconds: DEFAULT_AGENT_TIMEOUT_SECONDS,
+                max_output_bytes: DEFAULT_AGENT_MAX_OUTPUT_BYTES,
+                redaction_values: Vec::new(),
+            },
+            security_reviewer: AgentProfile {
+                command_template: "claude --non-interactive --dangerously-skip-permissions --message '{prompt}' {context_files}".to_owned(),
+                models: vec![
+                    Model {
+                        name: "default".to_owned(),
+                        command: "claude --non-interactive --dangerously-skip-permissions --message '{prompt}' {context_files}".to_owned(),
                         system_prompt: None,
                     },
                     Model {
@@ -875,6 +916,85 @@ fn parse_agent_config_from_table(
             default_config.developer.token_limit = Some(limit);
         }
         parse_agent_resource_policy(config_path, developer, &mut default_config.developer)?;
+    }
+
+    if let Some(security_reviewer) = profiles
+        .get("security-reviewer")
+        .or_else(|| profiles.get("security_reviewer"))
+    {
+        let security_reviewer = security_reviewer.as_table().ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`agent.profiles.security-reviewer` must be a TOML table",
+            )
+        })?;
+        if let Some(template) = security_reviewer.get("command_template") {
+            let template = template.as_str().ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`agent.profiles.security-reviewer.command_template` must be a string",
+                )
+            })?;
+            default_config.security_reviewer.command_template = template.to_owned();
+            if let Some(model) = default_config
+                .security_reviewer
+                .models
+                .iter_mut()
+                .find(|model| model.name == "default")
+            {
+                model.command = template.to_owned();
+            }
+        }
+        if let Some(model) = security_reviewer.get("model") {
+            default_config.security_reviewer.model = Some(
+                model
+                    .as_str()
+                    .ok_or_else(|| {
+                        invalid_configuration(
+                            config_path,
+                            "`agent.profiles.security-reviewer.model` must be a string",
+                        )
+                    })?
+                    .to_owned(),
+            );
+        }
+        if let Some(models) = security_reviewer.get("models") {
+            default_config.security_reviewer.models = parse_agent_models(config_path, models)?;
+        }
+        if let Some(default_model) = security_reviewer.get("default_model") {
+            default_config.security_reviewer.default_model = default_model
+                .as_str()
+                .ok_or_else(|| {
+                    invalid_configuration(
+                        config_path,
+                        "`agent.profiles.security-reviewer.default_model` must be a string",
+                    )
+                })?
+                .to_owned();
+        }
+        if let Some(limit) = security_reviewer.get("token_limit") {
+            let limit = limit.as_integer().ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`agent.profiles.security-reviewer.token_limit` must be a positive integer",
+                )
+            })?;
+            let limit = usize::try_from(limit)
+                .ok()
+                .filter(|val| *val > 0)
+                .ok_or_else(|| {
+                    invalid_configuration(
+                        config_path,
+                        "`agent.profiles.security-reviewer.token_limit` must be a positive integer",
+                    )
+                })?;
+            default_config.security_reviewer.token_limit = Some(limit);
+        }
+        parse_agent_resource_policy(
+            config_path,
+            security_reviewer,
+            &mut default_config.security_reviewer,
+        )?;
     }
 
     fn parse_agent_resource_policy(

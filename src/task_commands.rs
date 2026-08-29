@@ -1028,9 +1028,11 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
             TaskKind::Test | TaskKind::Implementation => {
                 (&config.agent.developer, crate::config::Role::Developer)
             }
-            TaskKind::SecurityAudit | TaskKind::ComplianceReview => {
-                (&config.agent.architect, crate::config::Role::Architect)
-            }
+            TaskKind::SecurityAudit => (
+                &config.agent.security_reviewer,
+                crate::config::Role::SecurityReviewer,
+            ),
+            TaskKind::ComplianceReview => (&config.agent.architect, crate::config::Role::Architect),
         };
 
         // 4. Sliced context files gathering
@@ -1422,6 +1424,11 @@ struct ExecutionApprovalMaterial {
     developer_timeout_seconds: u64,
     developer_max_output_bytes: usize,
     developer_redaction_digest: String,
+    security_reviewer_template_digest: String,
+    security_reviewer_token_limit: Option<usize>,
+    security_reviewer_timeout_seconds: u64,
+    security_reviewer_max_output_bytes: usize,
+    security_reviewer_redaction_digest: String,
     sandbox_digest: String,
     runner_path: String,
     runner_digest: String,
@@ -1521,6 +1528,20 @@ fn build_execution_approval(
                     reason: format!("cannot serialize developer redaction policy: {error}"),
                 }
             })?,
+        ),
+        security_reviewer_template_digest: agent_profile_digest(
+            &config.agent.security_reviewer,
+            "security-reviewer",
+        )?,
+        security_reviewer_token_limit: config.agent.security_reviewer.token_limit,
+        security_reviewer_timeout_seconds: config.agent.security_reviewer.timeout_seconds,
+        security_reviewer_max_output_bytes: config.agent.security_reviewer.max_output_bytes,
+        security_reviewer_redaction_digest: digest(
+            &serde_json::to_vec(&config.agent.security_reviewer.redaction_values).map_err(
+                |error| KvistError::UnapprovedExecutionPolicy {
+                    reason: format!("cannot serialize security_reviewer redaction policy: {error}"),
+                },
+            )?,
         ),
         sandbox_digest: digest(&serde_json::to_vec(sandbox).map_err(|error| {
             KvistError::UnapprovedExecutionPolicy {
@@ -1980,6 +2001,11 @@ fn execution_approval_difference(
         || approved.developer_timeout_seconds != current.developer_timeout_seconds
         || approved.developer_max_output_bytes != current.developer_max_output_bytes
         || approved.developer_redaction_digest != current.developer_redaction_digest
+        || approved.security_reviewer_template_digest != current.security_reviewer_template_digest
+        || approved.security_reviewer_token_limit != current.security_reviewer_token_limit
+        || approved.security_reviewer_timeout_seconds != current.security_reviewer_timeout_seconds
+        || approved.security_reviewer_max_output_bytes != current.security_reviewer_max_output_bytes
+        || approved.security_reviewer_redaction_digest != current.security_reviewer_redaction_digest
     {
         "agent execution configuration has changed".to_owned()
     } else if approved.runner_path != current.runner_path

@@ -1768,3 +1768,72 @@ command = "echo verify"
     let stderr_str_3 = String::from_utf8_lossy(&third_run.stderr);
     assert!(!stderr_str_3.contains("component is locked"));
 }
+
+#[test]
+#[cfg(target_os = "linux")]
+fn test_security_reviewer_routing_and_signature_validation() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = tempfile::TempDir::new().expect("create temp dir");
+    // Initialize standard project
+    run_kvist(&project, &["init"]);
+
+    let runner_dir = tempfile::TempDir::new().expect("create runner dir");
+    let runner = runner_dir.path().join("fake_runner.sh");
+    fs::write(
+        &runner,
+        "#!/bin/sh\nprintf 'kvist-sandbox-probe-v1: network=deny; mount=component\\n'\n",
+    )
+    .expect("write fake sandbox runner");
+    fs::set_permissions(&runner, fs::Permissions::from_mode(0o755))
+        .expect("make runner executable");
+
+    // Write custom kvist.toml configuration
+    let config_content = format!(
+        r#"schema_version = 1
+component_root = "src"
+
+[discovery]
+max_depth = 64
+
+[vcs]
+kind = "auto"
+
+[sandbox]
+schema_version = 1
+runner = "{}"
+network = "deny"
+mount = "component"
+environment_allowlist = []
+
+[agent.profiles.security-reviewer]
+command_template = "my-special-security-agent-cmd {{prompt}}"
+"#,
+        runner.display().to_string().replace('\\', "/")
+    );
+    fs::write(project.path().join("kvist.toml"), config_content).expect("write custom config");
+    track_project(&project);
+
+    // Approve the policy
+    let approve_status = run_kvist(&project, &["task", "approve-policy"]);
+    assert!(
+        approve_status.status.success(),
+        "policy approval failed: {:?}",
+        String::from_utf8_lossy(&approve_status.stderr)
+    );
+
+    // Verify the policy using check_execution_approved
+    let config = kvist::config::load(project.path()).expect("load config");
+    let verified_runner = kvist::task_commands::check_execution_approved(project.path(), &config)
+        .expect("check_execution_approved failed");
+
+    // Assert that the verified runner matches our configured runner
+    assert_eq!(
+        verified_runner.canonical_path,
+        runner
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    );
+}
