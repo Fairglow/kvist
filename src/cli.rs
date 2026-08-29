@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::{
-    KvistError, Result, convert, discovery, import, init, project_state, specification, status,
-    task_commands, task_queue::TaskStatus, tree,
+    KvistError, Result, convert, discovery, import, init, project_state, reverse_discovery,
+    specification, status, task_commands, task_queue::TaskStatus, tree,
 };
 
 /// Kvist's top-level command-line interface.
@@ -57,6 +57,12 @@ pub enum Command {
     Tree(ProjectDirectory),
     /// Inspect root artifacts without changing the project.
     Doctor(ProjectDirectory),
+    /// Reverse-discover and generate Kvist artifacts from an existing implementation.
+    ReverseDiscover {
+        /// Path to the existing implementation directory.
+        #[arg(value_name = "PATH")]
+        path: PathBuf,
+    },
     /// Render a versioned project and component status report.
     Status {
         /// Project directory; defaults to the current working directory.
@@ -276,6 +282,16 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     r#"{{"status":"success","command":"import","dest_dir":{dest_dir_json},"message":{message_json}}}"#
                 )))
             },
+            Command::ReverseDiscover { path } => {
+                let outcome = reverse_discovery::reverse_discover(&path)?;
+                let mut path_json = String::new();
+                let mut message_json = String::new();
+                json_string_escape(&mut path_json, &path.to_string_lossy());
+                json_string_escape(&mut message_json, &outcome.to_string());
+                Ok(CommandOutput::message(format!(
+                    r#"{{"status":"success","command":"reverse-discover","path":{path_json},"message":{message_json}}}"#
+                )))
+            },
             Command::Init(project) => {
                 let outcome = init::initialize(&project.path)?;
                 Ok(CommandOutput::message(format!(
@@ -486,6 +502,8 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 component,
                 dest_dir,
             } => import::import(&repo_url, &branch, component.as_deref(), &dest_dir)
+                .map(|outcome| CommandOutput::message(outcome.to_string())),
+            Command::ReverseDiscover { path } => reverse_discovery::reverse_discover(&path)
                 .map(|outcome| CommandOutput::message(outcome.to_string())),
             Command::Init(project) => init::initialize(&project.path)
                 .map(|outcome| CommandOutput::message(outcome.to_string())),
