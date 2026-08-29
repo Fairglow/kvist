@@ -204,7 +204,7 @@ pub fn run_wizard<R: BufRead, W: Write>(
             command_template = tmpl;
             model_name = "gemini".to_owned();
         }
-        "custom-script" | _ => {
+        _ => {
             write_output(
                 writer,
                 "Enter path to your custom wrapper script (e.g., ~/bin/llama-cli.sh): ",

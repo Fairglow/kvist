@@ -30,8 +30,10 @@ test:
 wine:
     cargo build --locked --target x86_64-pc-windows-gnu
     @mkdir -p /opt/target/wine/drive_c/windows
-    @echo "@echo off" > /opt/target/wine/drive_c/windows/git.bat
-    @echo "Z:\\usr\\bin\\git %*" >> /opt/target/wine/drive_c/windows/git.bat
+    @install -m 700 tests/support/wine_git_proxy.sh /opt/target/wine/git-proxy.sh
+    @x86_64-w64-mingw32-gcc -municode -O2 -Wall -Wextra -Werror \
+        tests/support/wine_git_proxy.c \
+        -o /opt/target/wine/drive_c/windows/git.exe
     @if which jj >/dev/null 2>&1; then \
         echo "@echo off" > /opt/target/wine/drive_c/windows/jj.bat; \
         echo "Z:\\home\\stefan\\.cargo\\bin\\jj %*" >> /opt/target/wine/drive_c/windows/jj.bat; \
