@@ -5,26 +5,26 @@
 Kvist is a filesystem-native, spec-driven architecture tool for human-directed
 AI development. Its current interface is command-line based; graphical and
 editor integrations are planned without changing the durable project model.
-Its product architecture is defined in
+The product vision is defined in [`VISION.md`](VISION.md) and its architecture in
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md).
 
 ## CLI contract
 
-| Command                                            | Contract                                                                                         |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `kvist init [PROJECT_DIR]`                         | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.       |
-| `kvist convert <PROJECT_DIR>`                      | Generate no-clobber draft onboarding artifacts for an existing Rust project.                       |
-| `kvist doctor [PROJECT_DIR]`                       | Read-only inspection of the root artifact state and recovery guidance.                           |
-| `kvist status [PROJECT_DIR] [--format text\|json]` | Read-only versioned inspection of project and component workflow state.                          |
-| `kvist tree [PROJECT_DIR]`                         | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory.     |
-| `kvist spec new <COMPONENT_DIR>`                   | Create a layered `SPEC.md` for a component directory.                                            |
-| `kvist spec validate <SPEC_FILE>`                  | Validate a layered `SPEC.md` file.                                                               |
-| `kvist spec accept <COMPONENT_DIR>`                | Record reviewed specification revisions and clear recorded stale evidence for one component.      |
-| `kvist task next <COMPONENT_DIR>`                  | Select the first ready task without changing durable state.                                      |
-| `kvist task transition <COMPONENT_DIR> ...`        | Persist one legal task-state transition with append-only attempt evidence.                       |
-| `kvist task run <COMPONENT_DIR> [TASK_ID]`         | Run the configured external agent for one ready task; see the execution boundary below.          |
-| `kvist task log <COMPONENT_DIR> <TASK_ID>`         | Print the most recent bounded, redacted agent log for a task.                                    |
-| `kvist task approve-policy [PROJECT_DIR]`          | Record approval of the complete effective execution policy.                                       |
+| Command                                            | Contract                                                                                     |
+| -------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `kvist init [PROJECT_DIR]`                         | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.   |
+| `kvist convert <PROJECT_DIR>`                      | Generate no-clobber draft onboarding artifacts for an existing Rust project.                 |
+| `kvist doctor [PROJECT_DIR]`                       | Read-only inspection of the root artifact state and recovery guidance.                       |
+| `kvist status [PROJECT_DIR] [--format text\|json]` | Read-only versioned inspection of project and component workflow state.                      |
+| `kvist tree [PROJECT_DIR]`                         | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory. |
+| `kvist spec new <COMPONENT_DIR>`                   | Create a layered `SPEC.md` for a component directory.                                        |
+| `kvist spec validate <SPEC_FILE>`                  | Validate a layered `SPEC.md` file.                                                           |
+| `kvist spec accept <COMPONENT_DIR>`                | Record reviewed specification revisions and clear recorded stale evidence for one component. |
+| `kvist task next <COMPONENT_DIR>`                  | Select the first ready task without changing durable state.                                  |
+| `kvist task transition <COMPONENT_DIR> ...`        | Persist one legal task-state transition with append-only attempt evidence.                   |
+| `kvist task run <COMPONENT_DIR> [TASK_ID]`         | Run the configured external agent for one ready task; see the execution boundary below.      |
+| `kvist task log <COMPONENT_DIR> <TASK_ID>`         | Print the most recent bounded, redacted agent log for a task.                                |
+| `kvist task approve-policy [PROJECT_DIR]`          | Record approval of the complete effective execution policy.                                  |
 
 Delivery is organized into phases. The completed, current, and planned phase
 scope, context, and acceptance criteria are maintained in
@@ -426,21 +426,21 @@ tasks:
 
 ### Component revision and revalidation fields
 
-| Field                              | Allowed values                                                                        | Purpose and tool use                                                                                                                                                                                                    |
-| ---------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `schema_version`                   | Integer `1`                                                                           | Selects the parser contract independently of Kvist, specification, configuration, and implementation-record versions. An unsupported version is refused rather than guessed or rewritten.                                 |
+| Field                              | Allowed values                                                                        | Purpose and tool use                                                                                                                                                                      |
+| ---------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_version`                   | Integer `1`                                                                           | Selects the parser contract independently of Kvist, specification, configuration, and implementation-record versions. An unsupported version is refused rather than guessed or rewritten. |
 | `component.specification_revision` | `sha256:` plus 64 lowercase hexadecimal digits                                        | Fingerprints the exact component `SPEC.md` reviewed when the queue was planned. `kvist status` compares it with the current specification to discover that local work needs revalidation. |
-| `component.parent_specification`   | `null` for the root, otherwise `{ path: "../SPEC.md", revision: "sha256:..." }`       | Records the only allowed upstream contract: the immediate parent. It lets tools detect an upstream change without loading peer implementations or violating the context boundary.                                       |
-| `parent_specification.path`        | Exactly `../SPEC.md`                                                                  | Prevents a queue from disguising peer or arbitrary-project inputs as a parent dependency.                                                                                                                               |
-| `parent_specification.revision`    | SHA-256 revision format above                                                         | Is the parent specification the component plan was reviewed against; a later mismatch produces explicit stale evidence.                                                                                                 |
-| `revalidation.state`               | `current` or `stale`                                                                  | `current` permits later task selection; `stale` prevents it until human revalidation records a reviewed plan.                                                                                                           |
-| `revalidation.checked_at`          | Whole-second UTC RFC 3339 (`YYYY-MM-DDTHH:MM:SSZ`)                                    | Records when revision comparison last ran, rather than relying on ambiguous filesystem modification time.                                                                                                               |
-| `revalidation.stale_since`         | `null` when current; UTC timestamp when stale                                         | Preserves how long the current stale condition has existed for status views and review prioritization.                                                                                                                  |
-| `revalidation.causes`              | Empty when current; nonempty cause list when stale                                    | Retains the evidence behind staleness. A tool never hides a changed contract behind an unexplained flag.                                                                                                                |
-| `causes[].kind`                    | `component-specification-revision-changed` or `parent-specification-revision-changed` | Tells the revalidator whether the component's own contract or its immediate parent changed.                                                                                                                             |
-| `causes[].path`                    | Nonblank component-relative specification path                                        | Identifies the exact artifact inspected.                                                                                                                                                                                |
-| `causes[].expected_revision`       | SHA-256 revision                                                                      | Preserves the revision on which the old plan relied.                                                                                                                                                                    |
-| `causes[].observed_revision`       | Different SHA-256 revision                                                            | Preserves the revision that invalidated the plan.                                                                                                                                                                       |
+| `component.parent_specification`   | `null` for the root, otherwise `{ path: "../SPEC.md", revision: "sha256:..." }`       | Records the only allowed upstream contract: the immediate parent. It lets tools detect an upstream change without loading peer implementations or violating the context boundary.         |
+| `parent_specification.path`        | Exactly `../SPEC.md`                                                                  | Prevents a queue from disguising peer or arbitrary-project inputs as a parent dependency.                                                                                                 |
+| `parent_specification.revision`    | SHA-256 revision format above                                                         | Is the parent specification the component plan was reviewed against; a later mismatch produces explicit stale evidence.                                                                   |
+| `revalidation.state`               | `current` or `stale`                                                                  | `current` permits later task selection; `stale` prevents it until human revalidation records a reviewed plan.                                                                             |
+| `revalidation.checked_at`          | Whole-second UTC RFC 3339 (`YYYY-MM-DDTHH:MM:SSZ`)                                    | Records when revision comparison last ran, rather than relying on ambiguous filesystem modification time.                                                                                 |
+| `revalidation.stale_since`         | `null` when current; UTC timestamp when stale                                         | Preserves how long the current stale condition has existed for status views and review prioritization.                                                                                    |
+| `revalidation.causes`              | Empty when current; nonempty cause list when stale                                    | Retains the evidence behind staleness. A tool never hides a changed contract behind an unexplained flag.                                                                                  |
+| `causes[].kind`                    | `component-specification-revision-changed` or `parent-specification-revision-changed` | Tells the revalidator whether the component's own contract or its immediate parent changed.                                                                                               |
+| `causes[].path`                    | Nonblank component-relative specification path                                        | Identifies the exact artifact inspected.                                                                                                                                                  |
+| `causes[].expected_revision`       | SHA-256 revision                                                                      | Preserves the revision on which the old plan relied.                                                                                                                                      |
+| `causes[].observed_revision`       | Different SHA-256 revision                                                            | Preserves the revision that invalidated the plan.                                                                                                                                         |
 
 A current queue must have `stale_since: null` and `causes: []`. A stale queue
 must have both timestamps, with `stale_since` no later than `checked_at`, and

@@ -18,6 +18,7 @@ mod filesystem;
 pub mod import;
 pub mod init;
 pub mod project_state;
+pub mod prompt_supervisor;
 pub mod reverse_discovery;
 pub mod sandbox;
 pub mod specification;

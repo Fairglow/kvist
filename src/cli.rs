@@ -63,6 +63,24 @@ pub enum Command {
         #[arg(value_name = "PATH")]
         path: PathBuf,
     },
+    /// Execute a custom prompt under supervision.
+    Prompt {
+        /// The custom prompt text to execute. If omitted, prompts for input.
+        #[arg(value_name = "PROMPT")]
+        prompt: Option<String>,
+        /// The role profile context to use (developer, architect, security-reviewer).
+        #[arg(long, default_value = "developer")]
+        role: String,
+        /// Idle timeout in seconds before restarting the command if no new output.
+        #[arg(long, default_value_t = 900)]
+        idle_timeout: u64,
+        /// Enable repetitive loop detection in the streaming output.
+        #[arg(long)]
+        detect_loops: bool,
+        /// Maximum number of automatic restarts allowed.
+        #[arg(long, default_value_t = 3)]
+        max_restarts: u32,
+    },
     /// Render a versioned project and component status report.
     Status {
         /// Project directory; defaults to the current working directory.
@@ -292,6 +310,19 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     r#"{{"status":"success","command":"reverse-discover","path":{path_json},"message":{message_json}}}"#
                 )))
             },
+            Command::Prompt {
+                prompt,
+                role,
+                idle_timeout,
+                detect_loops,
+                max_restarts,
+            } => {
+                let resolved_prompt = prompt.unwrap_or_else(|| "Hello, Kvist".to_owned());
+                execute_prompt(&resolved_prompt, &role, idle_timeout, detect_loops, max_restarts)?;
+                Ok(CommandOutput::message(
+                    r#"{"status":"success","command":"prompt","message":"prompt execution complete"}"#.to_owned()
+                ))
+            },
             Command::Init(project) => {
                 let outcome = init::initialize(&project.path)?;
                 Ok(CommandOutput::message(format!(
@@ -505,6 +536,25 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 .map(|outcome| CommandOutput::message(outcome.to_string())),
             Command::ReverseDiscover { path } => reverse_discovery::reverse_discover(&path)
                 .map(|outcome| CommandOutput::message(outcome.to_string())),
+            Command::Prompt {
+                prompt,
+                role,
+                idle_timeout,
+                detect_loops,
+                max_restarts,
+            } => {
+                let resolved_prompt = prompt.unwrap_or_else(|| "Hello, Kvist".to_owned());
+                execute_prompt(
+                    &resolved_prompt,
+                    &role,
+                    idle_timeout,
+                    detect_loops,
+                    max_restarts,
+                )?;
+                Ok(CommandOutput::message(
+                    "prompt execution complete".to_owned(),
+                ))
+            }
             Command::Init(project) => init::initialize(&project.path)
                 .map(|outcome| CommandOutput::message(outcome.to_string())),
             Command::Tree(project) => {
@@ -639,6 +689,48 @@ fn json_string_escape(output: &mut String, value: &str) {
         }
     }
     output.push('"');
+}
+
+fn execute_prompt(
+    prompt: &str,
+    role_str: &str,
+    idle_timeout: u64,
+    detect_loops: bool,
+    max_restarts: u32,
+) -> Result<()> {
+    let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+        operation: "determine current project directory",
+        path: PathBuf::from("."),
+        source,
+    })?;
+    let config = crate::config::load(&current_dir)?;
+
+    let (profile, role) = match role_str {
+        "developer" => (&config.agent.developer, crate::config::Role::Developer),
+        "architect" => (&config.agent.architect, crate::config::Role::Architect),
+        "security-reviewer" | "security_reviewer" => (
+            &config.agent.security_reviewer,
+            crate::config::Role::SecurityReviewer,
+        ),
+        _ => {
+            return Err(KvistError::ImportFailed {
+                reason: format!("unknown role profile: {role_str}"),
+            });
+        }
+    };
+
+    let (program, args) =
+        crate::agent::get_effective_command(profile, role, prompt, &[], &current_dir)?;
+
+    crate::prompt_supervisor::run_supervised_prompt(
+        &program,
+        &args,
+        idle_timeout,
+        detect_loops,
+        max_restarts,
+    )?;
+
+    Ok(())
 }
 
 #[cfg(test)]
