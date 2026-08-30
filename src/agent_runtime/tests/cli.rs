@@ -415,7 +415,7 @@ fn cancelling_conventional_probe_does_not_request_a_fallback() {
     fs::write(
         &gemini,
         format!(
-            "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nexec sleep 30\n",
+            "#!/bin/sh\nprintf '%s' \"$$\" > '{}'\nexec /bin/sleep 30\n",
             marker.display()
         ),
     )
