@@ -135,6 +135,23 @@ supervised-agent run --allow-host-execution \
   --file prompt.md
 ```
 
+Test a local inference endpoint without granting a provider process host
+execution:
+
+```bash
+supervised-agent model \
+  --provider ollama \
+  --endpoint http://127.0.0.1:11434 \
+  --model qwen3-coder \
+  --stream \
+  --file prompt.md
+```
+
+Use `--provider llama-server --endpoint http://127.0.0.1:8080` for
+llama-server. This command is text-only and exposes no tools. The underlying
+library decodes canonical tool intents for future brokered use, but does not
+authorize or execute them.
+
 `kvist agent setup` either collects a profile through that same library setup
 flow or loads a saved standalone profile. Kvist then materializes the selected
 name and command into its role configuration. It does not resolve a mutable
@@ -149,6 +166,16 @@ credentials, and arguments. A llama wrapper must forward with `"$@"`, never
 unquoted `$*`. llama-cli is inference-only, whereas the generated Gemini and
 Copilot templates enable noninteractive agent tools under the explicit host
 execution warning.
+
+The planned agent runtime separates model transport, bounded native loop, typed
+tool broker, policy, execution backend, and durable evidence. Local
+llama-server and Ollama integrations will use the standalone-owned loop under
+Kvist authority; Gemini and Copilot remain opaque external agents constrained
+as complete processes. Rig 0.42.0 failed the Rust 1.85 gate, so the first local
+HTTP transport will be direct. See
+[`docs/supervised-agent/architecture.md`](docs/supervised-agent/architecture.md)
+and the versioned
+[`Rig transport evaluation`](docs/supervised-agent/rig-evaluation.md).
 
 For implementation tasks, configure and approve the repository test policy
 before running:

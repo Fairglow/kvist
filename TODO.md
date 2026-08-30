@@ -249,6 +249,50 @@ whereas Kvist roles and execution-policy approval are workflow concerns.
   over exact command bytes; do not dynamically import mutable profile content
   during task execution.
 
+### TODO AGN-09 — Layered Native Agent Runtime and Rig Transport Spike
+
+**Context:** Inference backends such as llama-server and Ollama can propose
+structured tool calls but do not provide a trusted coding-agent loop. Gemini,
+Copilot, and similar CLIs contain useful but opaque loops. Kvist must preserve
+its own policy, execution, and evidence boundaries while reusing provider
+transport work where practical.
+
+**Acceptance criteria:**
+
+- Define standalone-owned canonical model, capability, tool-intent, result,
+  runtime-event, and host-service contracts before selecting a framework.
+- Distinguish native model, one-shot model, opaque external-agent, and plan-only
+  backends, with advertised, tested, and policy-enabled capabilities.
+- Keep authorization, tool brokering, sandbox execution, transactional
+  promotion, and durable evidence outside every provider library.
+- Implement Kvist task-policy, grant, approved-binding, execution-tier,
+  promotion, and compliance-evidence adapters in the root `agn-authority`
+  lifecycle chain; child loop tests use deterministic fake host services.
+- Record the exact `rig-core` 0.42.0 no-go: it fails Rust 1.85. Its 128-package
+  delta over bare Tokio is a footprint warning, not the future marginal
+  comparison against the reviewed direct adapter.
+- The first private local Ollama/llama-server transport and text-only
+  `supervised-agent model` command are implemented; complete their independent
+  security audit and compliance review before the native loop depends on them.
+  Keep the seam replaceable and do not adopt `rig-agent`, Rig tools, MCP
+  conversion, or Rig persistence as Kvist authority.
+- Gate any future immutable Rig release on Rust 1.85, local
+  Ollama/llama-server conformance,
+  structured tool-intent conversion, cancellation, malformed-stream handling,
+  TRACE leakage tests, endpoint/credential policy, dependency features,
+  advisories, licenses, TLS, and objective dependency/binary-size thresholds.
+- Record an explicit go/no-go result. A failed Rig experiment must leave the
+  canonical interface usable by a small direct provider adapter.
+- Build the bounded native loop only after the transport, broker, transactional
+  workspace, and Linux execution boundaries pass independent review.
+- Harden Gemini, Copilot, and other external agents as whole sandboxed
+  processes; provider permission flags are defense in depth, not authorization.
+
+Detailed rationale and task chains are in
+`docs/supervised-agent/architecture.md`,
+`docs/supervised-agent/rig-evaluation.md`, and
+`src/supervised_agent/TODOS.yaml`.
+
 ### TODO AGN-05 — Configurable Log Retention & Monotonic Naming
 
 **Context:** Agent execution outputs accumulate quickly. Kvist should support log file cleanup according to a retention policy and use descriptive, monotonic file names to simplify tracing.

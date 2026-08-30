@@ -1,10 +1,10 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:44232637f37d38db02d846ba36053468e1a8a38c16858374192e075af7647c26"
+  specification_revision: "sha256:10cf14d843c9a348ef73fb8413e2d0f7b2f690b584449d2663ca2f7a2286eb7d"
   parent_specification: null
   revalidation:
     state: current
-    checked_at: "2026-08-29T22:56:15Z"
+    checked_at: "2026-08-30T07:47:24Z"
     stale_since: null
     causes: []
 tasks:
@@ -26,6 +26,7 @@ tasks:
       updated_at: "2026-08-13T20:20:00Z"
       completed_at: "2026-08-13T20:20:00Z"
     blocked_reason: null
+    recovery_state: null
   - id: "onb-01-write-tests"
     title: "Define conversion lifecycle tests"
     description: "Write failing integration tests for converted-project inspection, draft acceptance, acceptance invalidation, task gating, VCS checks, logs, locks, and recovery."
@@ -185,6 +186,7 @@ tasks:
       updated_at: "2026-08-13T20:30:00Z"
       completed_at: "2026-08-13T20:30:00Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-01-security-audit"
     title: "Audit TODO queue trust boundaries"
     description: "Review YAML parsing, input limits, identifier and timestamp validation, dependency traversal, digest handling, and serialization for unsafe acceptance or denial-of-service paths."
@@ -204,6 +206,7 @@ tasks:
       updated_at: "2026-08-13T21:07:00Z"
       completed_at: "2026-08-13T21:07:00Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-01-compliance-review"
     title: "Independently review TODO queue compliance"
     description: "Produce clean-slate observed documentation and compare it with the queue specification, recording each discrepancy for explicit architectural arbitration."
@@ -224,6 +227,7 @@ tasks:
       updated_at: "2026-08-16T12:10:01Z"
       completed_at: "2026-08-16T12:10:01Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-02-write-tests"
     title: "Define project status inspection tests"
     description: "Write focused integration and unit tests for deterministic text and JSON status reports, artifact-state precedence, staleness causes, blocked queues, and read-only operation."
@@ -242,6 +246,7 @@ tasks:
       updated_at: "2026-08-16T12:20:09Z"
       completed_at: "2026-08-16T12:20:09Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-02-implement-code"
     title: "Implement project status inspection"
     description: "Add the shared read-only component inspection model, SHA-256 revalidation comparison, and versioned text and JSON status command."
@@ -261,6 +266,7 @@ tasks:
       updated_at: "2026-08-16T12:22:01Z"
       completed_at: "2026-08-16T12:22:01Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-02-security-audit"
     title: "Audit project status inspection boundaries"
     description: "Review component discovery reuse, bounded artifact reads, digest comparison, JSON serialization, path handling, and no-write behavior for unsafe acceptance or denial-of-service paths."
@@ -280,6 +286,7 @@ tasks:
       updated_at: "2026-08-16T12:24:05Z"
       completed_at: "2026-08-16T12:24:05Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-02-compliance-review"
     title: "Independently review project status compliance"
     description: "Produce source-derived documentation and compare it with the status specification without exposing source code to the compliance reviewer."
@@ -300,6 +307,7 @@ tasks:
       updated_at: "2026-08-16T12:28:42Z"
       completed_at: "2026-08-16T12:28:42Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-03-write-tests"
     title: "Define task selection and transition tests"
     description: "Write focused integration tests for ready-task selection, revalidation gates, lifecycle and dependency completion, lock contention, atomic queue replacement, prepared/committed audit records, and cancellation recovery evidence."
@@ -318,6 +326,7 @@ tasks:
       updated_at: "2026-08-16T12:55:20Z"
       completed_at: "2026-08-16T12:55:20Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-03-implement-code"
     title: "Implement task selection and atomic transitions"
     description: "Add the task CLI, readiness checks, lock protocol, atomic queue update, and append-only prepared/committed attempt records."
@@ -337,6 +346,7 @@ tasks:
       updated_at: "2026-08-16T13:04:51Z"
       completed_at: "2026-08-16T13:04:51Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-03-security-audit"
     title: "Audit task mutation boundaries"
     description: "Review lock ownership, file replacement, audit sequencing, state eligibility, path handling, and crash behavior before execution can mutate workflow state."
@@ -356,6 +366,7 @@ tasks:
       updated_at: "2026-08-16T13:09:54Z"
       completed_at: "2026-08-16T13:09:54Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-03-compliance-review"
     title: "Independently review task mutation compliance"
     description: "Produce source-derived documentation and source-blind comparison for task selection, transition, locking, and recovery behavior."
@@ -376,6 +387,7 @@ tasks:
       updated_at: "2026-08-16T13:15:52Z"
       completed_at: "2026-08-16T13:15:52Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-04-write-tests"
     title: "Define provider runner tests"
     description: "Define fake-provider tests after the owner approves discovery, protocol, consent, credentials, context, and limits."
@@ -393,6 +405,7 @@ tasks:
       updated_at: "2026-08-21T20:59:47Z"
       completed_at: "2026-08-21T20:59:47Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-04-implement-code"
     title: "Implement approved provider contract"
     description: "Implement only the owner-approved provider protocol and policy."
@@ -411,6 +424,7 @@ tasks:
       updated_at: "2026-08-21T20:59:48Z"
       completed_at: "2026-08-21T20:59:48Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-04-security-audit"
     title: "Audit provider boundary"
     description: "Audit approved subprocess, credential, network, and context policy."
@@ -429,6 +443,7 @@ tasks:
       updated_at: "2026-08-21T20:59:48Z"
       completed_at: "2026-08-21T20:59:48Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-04-compliance-review"
     title: "Review provider compliance"
     description: "Compare observed provider behavior with approved policy."
@@ -447,6 +462,7 @@ tasks:
       updated_at: "2026-08-21T20:59:49Z"
       completed_at: "2026-08-21T20:59:49Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05-write-tests"
     title: "Define verification command tests"
     description: "Define policy, timeout, cancellation, output, and persistence fixtures after approval."
@@ -464,6 +480,7 @@ tasks:
       updated_at: "2026-08-21T20:59:49Z"
       completed_at: "2026-08-21T20:59:49Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05-implement-code"
     title: "Implement approved test verification"
     description: "Execute only approved commands with captured redacted evidence."
@@ -482,6 +499,7 @@ tasks:
       updated_at: "2026-08-21T20:59:50Z"
       completed_at: "2026-08-21T20:59:50Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05-security-audit"
     title: "Audit verification boundary"
     description: "Audit approved command authority and evidence handling."
@@ -500,6 +518,7 @@ tasks:
       updated_at: "2026-08-21T20:59:50Z"
       completed_at: "2026-08-21T20:59:50Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05-compliance-review"
     title: "Review verification compliance"
     description: "Compare observed verification behavior with approved policy."
@@ -518,6 +537,7 @@ tasks:
       updated_at: "2026-08-21T20:59:51Z"
       completed_at: "2026-08-21T20:59:51Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05b-write-tests"
     title: "Define sandbox runner protocol tests"
     description: "Write configuration, refusal, and fake-runner integration tests for isolated agent and verification execution."
@@ -536,6 +556,7 @@ tasks:
       updated_at: "2026-08-21T06:20:40Z"
       completed_at: "2026-08-21T06:20:40Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05b-implement-code"
     title: "Implement sandbox runner execution"
     description: "Route agent and verification subprocesses through the required shell-free sandbox runner protocol."
@@ -555,6 +576,7 @@ tasks:
       updated_at: "2026-08-21T06:20:40Z"
       completed_at: "2026-08-21T06:20:40Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05b-security-audit"
     title: "Audit sandbox runner trust boundary"
     description: "Review runner probing, manifest construction, environment clearing, mount scope, and host-fallback resistance."
@@ -574,6 +596,7 @@ tasks:
       updated_at: "2026-08-21T06:20:40Z"
       completed_at: "2026-08-21T06:20:40Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05b-compliance-review"
     title: "Independently review sandbox compliance"
     description: "Compare source-derived sandbox behavior with the execution contract and retain any discrepancy for arbitration."
@@ -594,6 +617,7 @@ tasks:
       updated_at: "2026-08-21T20:59:51Z"
       completed_at: "2026-08-21T20:59:51Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05c-write-tests"
     title: "Define full execution approval tests"
     description: "Write focused approval-record and refusal tests for agent sources, templates, limits, sandbox identity, runner content, test policy, absent inputs, forged repository records, runner changes, and descriptor-bound replacement races."
@@ -612,6 +636,7 @@ tasks:
       updated_at: "2026-08-21T18:07:16Z"
       completed_at: "2026-08-21T18:07:16Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05c-implement-code"
     title: "Implement full execution approval record"
     description: "Persist and verify an authenticated user-state approval record and execute descriptor-bound verified runner copies."
@@ -631,6 +656,7 @@ tasks:
       updated_at: "2026-08-21T18:07:16Z"
       completed_at: "2026-08-21T18:07:16Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05c-security-audit"
     title: "Audit execution approval boundary"
     description: "Review source provenance, hashing, record parsing, atomic persistence, and pre-mutation refusal behavior."
@@ -650,6 +676,7 @@ tasks:
       updated_at: "2026-08-21T18:22:44Z"
       completed_at: "2026-08-21T18:22:44Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05c-compliance-review"
     title: "Independently review execution approval compliance"
     description: "Compare source-derived approval behavior with the execution-policy contract and retain discrepancies."
@@ -670,6 +697,7 @@ tasks:
       updated_at: "2026-08-21T20:59:52Z"
       completed_at: "2026-08-21T20:59:52Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05d-write-tests"
     title: "Define bounded agent execution tests"
     description: "Write focused failing tests for profile limit validation, combined output cancellation, timeout cancellation, redaction, bounded durable evidence, and approval invalidation."
@@ -688,6 +716,7 @@ tasks:
       updated_at: "2026-08-21T20:35:03Z"
       completed_at: "2026-08-21T20:35:03Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05d-implement-code"
     title: "Bound agent subprocess execution"
     description: "Route mandatory per-profile resource limits and redacted evidence through the sandbox runner."
@@ -707,6 +736,7 @@ tasks:
       updated_at: "2026-08-21T20:35:03Z"
       completed_at: "2026-08-21T20:35:03Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05d-security-audit"
     title: "Audit bounded agent execution"
     description: "Review cancellation, capture, redaction, evidence persistence, and link-safe runtime log paths."
@@ -726,6 +756,7 @@ tasks:
       updated_at: "2026-08-21T20:48:52Z"
       completed_at: "2026-08-21T20:48:52Z"
     blocked_reason: null
+    recovery_state: null
   - id: "p2-05d-compliance-review"
     title: "Independently review bounded execution compliance"
     description: "Compare source-derived resource and redaction behavior with the execution contract."
@@ -746,6 +777,7 @@ tasks:
       updated_at: "2026-08-21T20:59:52Z"
       completed_at: "2026-08-21T20:59:52Z"
     blocked_reason: null
+    recovery_state: null
   - id: "agn-input-setup-write-tests"
     title: "Define prompt input and setup regression tests"
     description: "Write focused tests for file, redirected standard input, editor prompt authoring, model verification, and formatting-preserving configuration updates."
@@ -765,6 +797,7 @@ tasks:
       updated_at: "2026-08-29T19:54:02Z"
       completed_at: "2026-08-29T19:54:02Z"
     blocked_reason: null
+    recovery_state: null
   - id: "agn-input-setup-implement-code"
     title: "Implement prompt input and additive model setup"
     description: "Add bounded file, standard-input, and editor prompt sources plus verified formatting-preserving atomic model configuration updates."
@@ -785,6 +818,7 @@ tasks:
       updated_at: "2026-08-29T20:00:55Z"
       completed_at: "2026-08-29T20:00:55Z"
     blocked_reason: null
+    recovery_state: null
   - id: "agn-input-setup-security-audit"
     title: "Audit prompt and model setup boundaries"
     description: "Independently review prompt input bounds, editor and provider process invocation, configuration parsing, link checks, and atomic replacement."
@@ -805,6 +839,7 @@ tasks:
       updated_at: "2026-08-29T19:54:02Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "agn-input-setup-compliance-review"
     title: "Independently review prompt and setup compliance"
     description: "Compare source-derived prompt acquisition and configuration persistence behavior with the updated component contract."
@@ -826,3 +861,84 @@ tasks:
       updated_at: "2026-08-29T19:54:02Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
+  - id: "agn-authority-write-tests"
+    title: "Define native-agent authority integration tests"
+    description: "After the child sa-08 compliance review defines the standalone host interfaces, write failing root integration tests for task-bound tool authorization, canonical grants and resource bindings, execution-tier selection, denial, bounded redacted runtime-event ingestion, artifact promotion, and append-only compliance evidence."
+    context: "The standalone component owns reusable broker and execution mechanisms, while Kvist must supply task-specific authority and durable evidence without creating a reverse dependency; this cross-component prerequisite cannot be encoded in a component-local depends_on list."
+    purpose: "Specify the Kvist half of native agent execution before the child loop is enabled with real host services."
+    expected_outcome: "Tests prove that fake model intent cannot broaden task scope, dispatch without an exact grant, forge evidence, or promote artifacts without a separate Kvist decision."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Native-agent-host-authority-services"
+      - "TODO.md#AGN-09"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agn-authority-implement-code"
+    title: "Implement native-agent host authority"
+    description: "Implement Kvist adapters for task policy, authorization records, approved resource and credential bindings, execution-tier selection, runtime-event ingestion, artifact promotion, and canonical compliance evidence against the standalone interfaces."
+    context: "A reusable native loop can route authority but cannot invent Kvist task grants or certify completion."
+    purpose: "Connect the standalone runtime to Kvist's durable recursive workflow without leaking root types into the child crate."
+    expected_outcome: "Every effect and promotion is bound to current task, policy, workspace, tool, argument, resource, and budget revisions, with explicit denial and bounded redacted evidence."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "agn-authority-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Native-agent-host-authority-services"
+      - "TODO.md#AGN-09"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agn-authority-security-audit"
+    title: "Audit native-agent host authority"
+    description: "Independently review task and policy binding, canonicalization, grant scope, credential and network references, execution-tier selection, event redaction, evidence integrity, promotion, replay, and confused-deputy paths."
+    context: "The root adapter turns untrusted model intent into possible effects and durable workflow claims."
+    purpose: "Find authorization, escalation, leakage, and false-evidence paths before native model execution is enabled."
+    expected_outcome: "No unresolved high-confidence issue permits an effect outside an exact grant, sensitive event retention, forged completion, or unauthorized artifact promotion."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "agn-authority-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Native-agent-host-authority-services"
+      - "TODO.md#AGN-09"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agn-authority-compliance-review"
+    title: "Review native-agent authority compliance"
+    description: "Derive Kvist policy, authorization, binding, event, evidence, and promotion behavior from source without the specification, then compare it with the root host-authority contract."
+    context: "The authority implementer cannot certify the root boundary that controls effects and compliance evidence."
+    purpose: "Retain independent evidence that the Kvist host integration preserves the standalone ownership split and recursive workflow contract."
+    expected_outcome: "The review records every satisfied guarantee, discrepancy, unsupported execution tier, and remaining prerequisite before native model mode can be enabled."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "agn-authority-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Native-agent-host-authority-services"
+      - "TODO.md#AGN-09"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

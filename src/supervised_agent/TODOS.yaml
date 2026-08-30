@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:fae42e82b883dc6a21ef5af339bc3b3f634a3c05f112704c0a1bfc7da1da3292"
+  specification_revision: "sha256:5edd7bb8cddb0de981ee585c40652d6ca40310acac4cc5abc45087260c4571be"
   parent_specification:
     path: "../SPEC.md"
-    revision: "sha256:44232637f37d38db02d846ba36053468e1a8a38c16858374192e075af7647c26"
+    revision: "sha256:10cf14d843c9a348ef73fb8413e2d0f7b2f690b584449d2663ca2f7a2286eb7d"
   revalidation:
     state: current
-    checked_at: "2026-08-29T22:56:15Z"
+    checked_at: "2026-08-30T09:25:44Z"
     stale_since: null
     causes: []
 tasks:
@@ -29,6 +29,7 @@ tasks:
       updated_at: "2026-08-29T21:14:41Z"
       completed_at: "2026-08-29T21:14:41Z"
     blocked_reason: null
+    recovery_state: null
   - id: "sa-01-implement-code"
     title: "Extract supervised agent runtime"
     description: "Implement the reusable library and standalone CLI, move prompt acquisition and command rendering, add typed retry context, and integrate Kvist through the path dependency."
@@ -49,6 +50,7 @@ tasks:
       updated_at: "2026-08-29T21:14:41Z"
       completed_at: "2026-08-29T21:14:41Z"
     blocked_reason: null
+    recovery_state: null
   - id: "sa-01-security-audit"
     title: "Audit extracted host execution"
     description: "Independently inspect process-group termination, stream handling, prompt file opening, command parsing, retry classification, acknowledgement boundaries, and unsupported-platform gates."
@@ -67,6 +69,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-01-compliance-review"
     title: "Review standalone runtime compliance"
     description: "Derive the implementation record from code and tests without the specification, then compare the record with this component contract in a separate review context."
@@ -85,6 +88,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-02-write-tests"
     title: "Define transactional workspace tests"
     description: "Specify failing tests for bounded immutable input snapshots, private writable overlays, link and special-file rejection, deterministic diffs, conflict detection, and explicit promotion."
@@ -102,6 +106,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-02-implement-code"
     title: "Implement transactional workspaces"
     description: "Create bounded content-addressed input snapshots and attempt-local writable overlays that emit reviewed patches or artifacts without destructive source-control reset."
@@ -119,6 +124,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-02-security-audit"
     title: "Audit transactional workspaces"
     description: "Review snapshot traversal, hard links, symbolic links, metadata, races, resource bounds, patch application, concurrent mutation, and cleanup."
@@ -137,6 +143,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-02-compliance-review"
     title: "Review transactional workspace compliance"
     description: "Compare source-derived workspace behavior with the snapshot, overlay, conflict, and promotion contract."
@@ -155,6 +162,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-03-write-tests"
     title: "Define strict Linux isolation tests"
     description: "Write negative tests for ungranted reads and writes, inherited descriptors, credentials, process escape, network access, executable substitution, resource exhaustion, and unavailable backends."
@@ -172,6 +180,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-03-implement-code"
     title: "Implement strict Linux backend"
     description: "Add a replaceable Linux backend using a dedicated identity and Bubblewrap namespaces with explicit mounts, environment, network, process, and resource policy; evaluate Landlock as defense in depth."
@@ -189,6 +198,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-03-security-audit"
     title: "Audit strict Linux backend"
     description: "Review namespace construction, mount topology, uid and gid mapping, seccomp, Landlock compatibility, cgroups, terminal isolation, sockets, procfs, TOCTOU, and cleanup."
@@ -207,6 +217,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-03-compliance-review"
     title: "Review Linux isolation compliance"
     description: "Compare observed backend behavior and capability reporting with the strict Linux contract without inspecting implementation during the comparison."
@@ -225,46 +236,126 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
+  - id: "sa-08-write-tests"
+    title: "Define layered runtime contract tests"
+    description: "Write failing tests for standalone-owned canonical messages, model turns, capability states, typed unsupported behavior, tool descriptors, untrusted intent/results, cancellation, bounded provider extensions, host-service traits, and redacted runtime events."
+    context: "The reusable protocol boundary must be stable before broker or provider implementations can become structural, while authorization, execution, and compliance evidence remain host-owned."
+    purpose: "Prevent provider, framework, or embedding-host types from defining the standalone model protocol or crossing authority boundaries."
+    expected_outcome: "Tests express a provider-neutral contract with advertised, tested, and policy-enabled capabilities and no executable side effects in model or loop types."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T09:12:00Z"
+      completed_at: "2026-08-30T09:12:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-08-implement-code"
+    title: "Implement layered runtime contracts"
+    description: "Implement provider-independent backend classification, canonical model and tool-intent types, capability descriptors, cancellation and budget types, typed provider extensions, host-service traits, and redacted runtime events without selecting a transport framework."
+    context: "The standalone runtime must own reusable protocol interfaces before either a host broker or Rig/direct transport adapter depends on them."
+    purpose: "Create a small stable seam that keeps provider libraries replaceable and leaves authorization, execution, promotion, and compliance evidence with the embedding host."
+    expected_outcome: "Public runtime contracts contain no Kvist, Rig, or provider SDK type and cannot directly execute tools, access credentials, broaden resources, promote artifacts, or write canonical compliance evidence."
+    kind: implementation
+    status: in-progress
+    depends_on:
+      - "sa-08-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T09:28:47Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-08-security-audit"
+    title: "Audit layered runtime boundaries"
+    description: "Independently review type boundaries, provider extensions, capability transitions, endpoint references, host-service sequencing, cancellation, event redaction, and all paths from model output to effectful host services."
+    context: "A leaky canonical contract can allow provider behavior to bypass a host broker or become falsely trusted durable state."
+    purpose: "Find authority confusion and confused-deputy paths before host services or provider adapters depend on the interfaces."
+    expected_outcome: "No model or adapter type can authorize or execute an effect, enable an untested capability, or insert unbounded unredacted provider state into host evidence."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-08-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Constraints-and-invariants"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-08-compliance-review"
+    title: "Review layered runtime compliance"
+    description: "Derive the new backend, capability, model, tool-intent, host-service, and runtime-event interfaces from source without the specification, then compare them with the layered architecture contract."
+    context: "The implementation author cannot certify that provider-neutral types preserve the intended one-way ownership and authority split."
+    purpose: "Record independent evidence that the canonical runtime seam is stable enough for host broker and transport experiments."
+    expected_outcome: "The review classifies every interface and records provider leakage, host coupling, missing failure states, or authority ambiguity for arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-08-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "sa-04-write-tests"
     title: "Define brokered tool and provider tests"
-    description: "Write tests for typed tool grants, canonical arguments, MCP exposure, provider-only network paths, credential isolation, idempotency evidence, retry budgets, and audit events."
+    description: "Write tests for consuming typed host grants, canonical arguments and resources, provider-only network paths, credential-reference isolation, idempotency evidence, retry budgets, and bounded redacted runtime events."
     context: "Provider permission prompts and unrestricted agent CLIs cannot prove that only pre-approved tools and destinations were used."
     purpose: "Specify complete mediation and side-effect-aware retry behavior independently of a provider."
     expected_outcome: "Tests reject unknown tools, schemas, destinations, credentials, ambiguous outcomes, and unsafe retries."
     kind: test
     status: pending
     depends_on:
-      - "sa-03-compliance-review"
+      - "sa-08-compliance-review"
     requirements:
       - "SPEC.md#Deferred-Linux-isolation"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
       - "SPEC.md#Supervision-and-retry-algorithm"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-04-implement-code"
     title: "Implement capability and provider brokers"
-    description: "Add typed capability evaluation, a restricted MCP tool broker, mediated provider networking, protected credentials, typed outcomes, idempotency-aware retries, budgets, and append-only redacted audit events."
+    description: "Add typed capability evaluation and broker sequencing that consumes host authorization decisions and approved bindings, mediates provider networking and credential references, applies idempotency-aware retries and budgets, and emits bounded redacted runtime events."
     context: "Strict filesystem isolation alone cannot constrain in-process tools or distinguish model traffic from arbitrary egress."
     purpose: "Give callers a provider-neutral pre-approved action contract with deterministic enforcement evidence."
-    expected_outcome: "Every tool and provider action is authorized by canonical policy before execution and every retry has machine-verifiable rationale."
+    expected_outcome: "Every tool and provider action requires an explicit host authorization before execution and every retry has machine-verifiable rationale without the component inventing grants or compliance evidence."
     kind: implementation
     status: pending
     depends_on:
       - "sa-04-write-tests"
     requirements:
       - "SPEC.md#Deferred-Linux-isolation"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
       - "SPEC.md#Supervision-and-retry-algorithm"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-04-security-audit"
     title: "Audit capability and provider brokers"
-    description: "Review policy canonicalization, confused-deputy paths, MCP server trust, schema validation, provider connectors, credential handling, network mediation, idempotency, and audit integrity."
-    context: "The broker becomes the reference monitor for tools and hosted-provider authority."
+    description: "Review grant and resource canonicalization, confused-deputy paths, host-authority sequencing, schema validation, provider connectors, credential references, network mediation, idempotency, and runtime-event integrity."
+    context: "The broker mechanism becomes the reference monitor for tool dispatch while authority remains host-owned."
     purpose: "Find authorization or data-exfiltration bypasses before strict contracts expose brokered capabilities."
     expected_outcome: "Independent review leaves no unresolved high-confidence authorization bypass."
     kind: security-audit
@@ -274,14 +365,16 @@ tasks:
     requirements:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
       - "SPEC.md#Deferred-Linux-isolation"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-04-compliance-review"
     title: "Review brokered execution compliance"
-    description: "Compare source-derived capability, provider, retry, and audit behavior with the provider-neutral contract."
+    description: "Compare source-derived capability, grant consumption, provider, retry, and runtime-event behavior with the provider-neutral contract."
     context: "Tool and network mediation claims require an independent comparison."
     purpose: "Prevent provider-specific behavior from weakening the common contract unnoticed."
     expected_outcome: "The review records compliance by capability and provider or blocks unsupported combinations."
@@ -292,11 +385,13 @@ tasks:
     requirements:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
       - "SPEC.md#Deferred-Linux-isolation"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-05-write-tests"
     title: "Define deferred platform conformance tests"
     description: "Design a backend conformance suite and native CI prerequisites for macOS process containment and Windows AppContainer, restricted-token, and Job Object behavior."
@@ -314,6 +409,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-05-implement-code"
     title: "Restore independently tested platforms"
     description: "Implement platform backends only after selecting maintainable native macOS and Windows isolation mechanisms and provisioning their required native test matrices."
@@ -331,6 +427,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-05-security-audit"
     title: "Audit restored platform backends"
     description: "Run platform-native security reviews covering containment, process trees, links and reparse points, credentials, environment, network, resources, and backend failure."
@@ -349,6 +446,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-05-compliance-review"
     title: "Review restored platform compliance"
     description: "Compare source-derived native behavior with the common contract and each platform assurance statement."
@@ -367,6 +465,7 @@ tasks:
       updated_at: "2026-08-29T20:50:32Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-06-write-tests"
     title: "Define reusable model setup tests"
     description: "Write failing library and CLI tests for generic named profiles, provider defaults, command verification, formatting-preserving profile persistence, host-execution acknowledgement, and Kvist role binding."
@@ -385,6 +484,7 @@ tasks:
       updated_at: "2026-08-29T21:43:45Z"
       completed_at: "2026-08-29T21:43:45Z"
     blocked_reason: null
+    recovery_state: null
   - id: "sa-06-implement-code"
     title: "Extract model profiles and setup"
     description: "Move generic provider defaults, profile validation and verification, formatting-preserving global persistence, and terminal setup into supervised-agent; keep Kvist role bindings and project policy in Kvist."
@@ -404,6 +504,7 @@ tasks:
       updated_at: "2026-08-29T21:43:45Z"
       completed_at: "2026-08-29T21:43:45Z"
     blocked_reason: null
+    recovery_state: null
   - id: "sa-06-security-audit"
     title: "Audit reusable model setup"
     description: "Independently review profile parsing, provider probes, command verification, host acknowledgement, configuration path selection, link handling, size bounds, and atomic persistence."
@@ -422,6 +523,7 @@ tasks:
       updated_at: "2026-08-29T21:30:04Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-06-compliance-review"
     title: "Review model setup compliance"
     description: "Derive setup behavior from source and tests without the specification, then compare the observed record with the generic-profile and Kvist-binding contracts."
@@ -440,6 +542,7 @@ tasks:
       updated_at: "2026-08-29T21:30:04Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-07-write-tests"
     title: "Define provider CLI qualification tests"
     description: "Write failing tests for conventional executable discovery, provider-preserving fallback paths, bounded version probes, maintained llama-cli/Gemini/Copilot templates, null provider stdin, and actionable pre-save failures."
@@ -458,6 +561,7 @@ tasks:
       updated_at: "2026-08-29T22:56:15Z"
       completed_at: "2026-08-29T22:56:15Z"
     blocked_reason: null
+    recovery_state: null
   - id: "sa-07-implement-code"
     title: "Qualify provider CLI profiles"
     description: "Probe conventional provider executables, accept compatible fallback paths without changing provider identity, generate maintained llama-cli/Gemini/Copilot templates, and improve exact-command qualification diagnostics."
@@ -477,6 +581,7 @@ tasks:
       updated_at: "2026-08-29T22:56:15Z"
       completed_at: "2026-08-29T22:56:15Z"
     blocked_reason: null
+    recovery_state: null
   - id: "sa-07-security-audit"
     title: "Audit provider CLI qualification"
     description: "Independently review executable discovery, fallback path validation, probe bounds, stdin handling, generated permission flags, model selectors, exact-command verification, and error redaction."
@@ -495,6 +600,7 @@ tasks:
       updated_at: "2026-08-29T22:42:17Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
   - id: "sa-07-compliance-review"
     title: "Review provider qualification compliance"
     description: "Derive provider discovery, template, probe, and qualification behavior from source and tests without the specification, then compare it with the provider setup contract."
@@ -513,3 +619,395 @@ tasks:
       updated_at: "2026-08-29T22:42:17Z"
       completed_at: null
     blocked_reason: null
+    recovery_state: null
+  - id: "sa-12-write-tests"
+    title: "Define direct model transport tests"
+    description: "Write failing conformance tests for a private direct local HTTP adapter covering fake OpenAI-compatible HTTP, Ollama and llama-server, unary/streamed text, tool schema/call conversion, stable IDs, malformed/duplicate calls, invalid arguments, unsupported choices, cancellation, deadlines, malformed/truncated responses, bounded redaction, TRACE sentinels, Rust 1.85, dependency and binary deltas, licenses, advisories, and local-only TLS exclusion; add the machine-readable cargo-deny license/advisory policy and measurement commands used by the decision matrix."
+    context: "Rig 0.42.0 failed hard adoption gates, but the canonical transport seam and native loop still require a small reliable local-provider implementation."
+    purpose: "Specify only the transport behavior Kvist needs without inheriting a broad framework or weakening tool-intent and authority boundaries."
+    expected_outcome: "Tests prove deterministic text and structured-intent translation, explicit unsupported behavior, fail-closed streaming, no tool execution, and no sensitive payload leakage."
+    kind: test
+    status: completed
+    depends_on:
+      - "sa-08-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Rig-adoption-decision"
+      - "SPEC.md#Transport-dependency-gates"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T09:28:47Z"
+      completed_at: "2026-08-30T09:28:47Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-12-implement-code"
+    title: "Implement direct local model transport"
+    description: "Implement the minimal private bounded HTTP transport and provider conversion required for approved Ollama, llama-server, and fake OpenAI-compatible endpoints, exposing only standalone canonical events and untrusted tool intents."
+    context: "A direct adapter is the selected first path after the Rig no-go and must remain replaceable without entering public types or host authority logic."
+    purpose: "Provide native model text, streaming, and tool-intent transport with a small auditable dependency and behavior surface."
+    expected_outcome: "Approved local profiles produce bounded canonical turns; endpoint policy, credentials, deadlines, cancellation, capability rejection, and redaction remain explicit, and no model output can execute a tool."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-12-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T09:39:11Z"
+      completed_at: "2026-08-30T09:39:11Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-12-security-audit"
+    title: "Audit direct model transport"
+    description: "Independently review URL and redirect handling, loopback policy, credential routing, HTTP bounds, parser state, tool-call identity and arguments, cancellation, timeout races, malformed streams, TRACE/error leakage, and raw provider extensions."
+    context: "A small direct adapter still parses untrusted network data and handles prompts, credentials, and model-proposed actions."
+    purpose: "Find network, deserialization, resource-exhaustion, leakage, and authority-confusion defects before the native loop relies on the transport."
+    expected_outcome: "No unresolved high-confidence issue permits destination escape, secret disclosure, unbounded input, silent capability downgrade, tool execution, or false terminal success."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-12-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Constraints-and-invariants"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-12-compliance-review"
+    title: "Review direct transport compliance"
+    description: "Derive the adapter's provider, streaming, structured-intent, error, cancellation, endpoint, event, dependency, binary, license, advisory, and TLS behavior without the specification, then compare it with the canonical transport contract and decision matrix."
+    context: "A direct implementation is useful only if its smaller dependency graph does not hide provider-specific semantic gaps."
+    purpose: "Provide independent evidence that the first native transport is complete enough for the bounded loop and remains replaceable."
+    expected_outcome: "The review approves exact provider/server/model combinations, records unsupported capabilities and objective supply-chain measurements, and blocks native-loop use for every unevaluated or discrepant deployment."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-12-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+      - "SPEC.md#Transport-dependency-gates"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-10-write-tests"
+    title: "Define native model agent tests"
+    description: "Write failing component tests with deterministic fake host-authority and evidence services for bounded sequential tool turns, context budgets, malformed intent repair, typed unsupported capabilities, policy denial, approved tool results, uncertain side effects, cancellation, checkpoint replay, and terminal runtime events over the selected model transport."
+    context: "Local inference reaches agent parity only when the standalone loop connects model intent to the independently reviewed broker and execution backend; real Kvist authority and compliance evidence are tracked by the root agn-authority task chain."
+    purpose: "Define enforceable native agent behavior without importing provider-specific loops or allowing a model to certify task completion."
+    expected_outcome: "Tests prove with fake host services that model output cannot cause an effect before typed authorization and that every terminal run emits bounded replayable events; enabling Kvist native mode still requires the root authority review."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-04-compliance-review"
+      - "sa-12-compliance-review"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-10-implement-code"
+    title: "Implement bounded native agent loop"
+    description: "Implement the standalone-owned loop over the approved transport and typed broker mechanism with sequential calls, explicit budgets, deterministic context, typed recovery, runtime checkpoint events, cancellation, and no direct execution authority."
+    context: "The native loop is the preferred path for llama-server, Ollama, and compatible hosted inference because the embedding host can authorize every proposed action."
+    purpose: "Bring inference backends to useful agent parity while preserving Kvist policy, sandbox, and evidence guarantees."
+    expected_outcome: "Approved native model profiles can complete a contract through mediated tools, while unsupported or denied behavior fails explicitly and no provider library type escapes the transport boundary."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-10-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-10-security-audit"
+    title: "Audit native agent loop"
+    description: "Independently review prompt and result trust, tool intent validation, policy sequencing, retries, uncertain effects, context poisoning, checkpoint integrity, capability downgrade, cancellation, and denial-of-service bounds."
+    context: "A native loop becomes an authority-routing component even though it must never possess execution authority itself."
+    purpose: "Find paths by which model output, provider extensions, or replay state could bypass the broker or corrupt durable evidence."
+    expected_outcome: "No unresolved high-confidence finding permits unapproved effects, hidden capability escalation, unsafe replay, or false success."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-10-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Constraints-and-invariants"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-10-compliance-review"
+    title: "Review native agent compliance"
+    description: "Derive native loop behavior and evidence from code and tests without the specification, then compare it with the model, capability, broker, policy, execution, and journal contracts."
+    context: "The implementer cannot certify that agent parity was achieved without weakening the authority boundaries."
+    purpose: "Provide independent evidence that native model mode satisfies the layered architecture."
+    expected_outcome: "The review classifies every native-loop guarantee and records discrepancies or unsupported provider/model combinations for arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-10-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-11-write-tests"
+    title: "Define opaque external-agent tests"
+    description: "Write failing tests for explicit external-agent classification, whole-process sandboxing, credential and network exclusion, structured event adapters, artifact and VCS diff capture, cancellation, and refusal when the selected execution tier cannot enforce policy."
+    context: "Gemini, Copilot, Aider, Goose, Cline, and similar agents retain opaque internal loops that cannot be mediated tool by tool."
+    purpose: "Preserve useful mature agents without misrepresenting their permission prompts as Kvist authorization."
+    expected_outcome: "Tests prove external agents run only within an approved outer execution boundary and produce attributable artifact evidence."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-03-compliance-review"
+      - "sa-07-compliance-review"
+      - "sa-08-compliance-review"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-11-implement-code"
+    title: "Harden opaque external-agent mode"
+    description: "Implement explicit external-agent profiles, mandatory execution-backend capability checks, structured output or ACP adapters where supported, artifact/VCS evidence capture, and removal of provider auto-approval defaults unless separately authorized."
+    context: "External agents remain valuable compatibility backends but cannot share the trust claims of Kvist-native model and broker execution."
+    purpose: "Constrain mature provider-specific agents at process level while keeping their internal functionality available."
+    expected_outcome: "Every external-agent run advertises its coarse-grained assurance tier, fails closed without the required sandbox, and records exact executable, version, arguments, policy, workspace, and artifacts."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-11-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-11-security-audit"
+    title: "Audit opaque external-agent mode"
+    description: "Independently review sandbox enforcement, inherited descriptors and credentials, network scope, provider permission flags, executable identity, structured event parsing, artifact attribution, cancellation, and escape behavior."
+    context: "An opaque agent can invoke internal shell, filesystem, browser, Git, or MCP tools outside Kvist's typed broker."
+    purpose: "Ensure process-level containment claims match the actual Linux execution backend and do not rely on cooperative provider behavior."
+    expected_outcome: "No unresolved high-confidence issue permits an external agent to exceed its declared outer boundary or forge completion evidence."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-11-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Constraints-and-invariants"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-11-compliance-review"
+    title: "Review external-agent compliance"
+    description: "Derive external-agent launch, containment, event, and artifact behavior without the specification, then compare it with the opaque-backend contract and declared assurance tiers."
+    context: "Provider-specific functionality must not be described as fine-grained Kvist mediation when only process-level enforcement exists."
+    purpose: "Provide independent evidence for each supported external-agent adapter and execution tier."
+    expected_outcome: "The review approves or rejects each agent/backend combination and records every non-equivalent capability or containment guarantee."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-11-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-13-write-tests"
+    title: "Define brokered MCP host tests"
+    description: "Write failing tests for importing versioned MCP server identities and schemas behind the reviewed broker, host authorization before every tools/call, bounded resource reads, credential and network bindings, cancellation, protocol errors, and redacted runtime events."
+    context: "MCP is an external tool transport, not authorization or isolation, and must not be placed on the first native-loop delivery path."
+    purpose: "Specify optional MCP interoperability without allowing servers or models to bypass the typed broker and host grants."
+    expected_outcome: "Tests reject unknown or changed servers, tools, schemas, resources, credentials, destinations, and calls lacking an exact host authorization."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-04-compliance-review"
+      - "sa-10-compliance-review"
+      - "sa-11-compliance-review"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-13-implement-code"
+    title: "Implement brokered MCP host adapter"
+    description: "Implement optional MCP server discovery and calls as versioned tool/resource transports behind canonical descriptors, broker sequencing, host authority, selected execution/network backends, and bounded redacted runtime events."
+    context: "The reviewed native loop and broker establish the authority boundary that MCP must consume rather than replace."
+    purpose: "Reuse approved MCP tools while preserving standalone and host policy guarantees."
+    expected_outcome: "MCP behavior is disabled by default, capability-negotiated, bound to exact server and schema identity, and incapable of executing without the same authorization as a first-party tool."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-13-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-13-security-audit"
+    title: "Audit brokered MCP host"
+    description: "Independently review server identity and launch, schema changes, transport parsing, resource and URI canonicalization, credentials, network scope, cancellation, output bounds, confused-deputy paths, and event redaction."
+    context: "An imported MCP server is untrusted executable or networked code with a model-facing schema."
+    purpose: "Find paths by which MCP can broaden authority, exfiltrate data, forge tool identity, or bypass execution controls."
+    expected_outcome: "No unresolved high-confidence issue permits an unapproved server, destination, resource, credential, or effect."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-13-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Constraints-and-invariants"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-13-compliance-review"
+    title: "Review MCP host compliance"
+    description: "Derive MCP server, schema, call, resource, authorization, transport, and event behavior without the specification, then compare it with the brokered protocol contract."
+    context: "Protocol compatibility cannot certify policy mediation or containment."
+    purpose: "Provide independent evidence for every approved MCP server and execution tier."
+    expected_outcome: "The review approves exact combinations, records semantic gaps, and rejects every nominally compatible server that cannot preserve the authority boundary."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-13-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Layered-agent-architecture-and-rationale"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-09-write-tests"
+    title: "Define future Rig reevaluation tests"
+    description: "For a newer immutable Rig release that passes preflight, reuse the direct-transport conformance suite and add framework-containment tests for exact features, private types, tool schema/call conversion, cancellation, TRACE sentinels, Rust 1.85, marginal dependencies and binary size, licenses, advisories, and TLS."
+    context: "Rig-core 0.42.0 was rejected decisively because it fails Rust 1.85; its 128-package delta over bare Tokio is a preliminary footprint warning, while a future marginal comparison must use the reviewed direct adapter."
+    purpose: "Permit evidence-based reevaluation without exposing Rig types or placing a speculative framework on the native runtime critical path."
+    expected_outcome: "A named immutable successor either passes cheap MSRV and marginal-dependency preflight before tests are written or is recorded as deferred/no-go without changing production dependencies."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-12-compliance-review"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Rig-adoption-decision"
+      - "SPEC.md#Transport-dependency-gates"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-09-implement-code"
+    title: "Prototype a future private Rig transport"
+    description: "Build a removable adapter over the approved exact Rig release for canonical text, streaming, and untrusted structured tool intent; reject Rig tool execution, hosted tools, arbitrary additional parameters, persistence, and raw default evidence."
+    context: "Only a successor that passes preflight may reuse Rig conversion while the standalone boundary and embedding host retain endpoint, credential, cancellation, capability, redaction, policy, execution, and evidence contracts."
+    purpose: "Determine whether Rig reduces provider maintenance enough to justify its marginal dependency and compatibility cost over the direct adapter."
+    expected_outcome: "The experiment records a go or no-go result; a go exposes only standalone-owned types, while a no-go leaves production behavior unchanged."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-09-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Rig-adoption-decision"
+      - "SPEC.md#Transport-dependency-gates"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-09-security-audit"
+    title: "Audit Rig transport prototype"
+    description: "Independently inspect dependency features, endpoint and credential routing, raw provider extensions, hosted tools, tool-call parsing and identity, cancellation, malformed streams, TRACE/error leakage, TLS, advisories, and every translation between Rig and standalone types."
+    context: "A private adapter can still bypass policy or leak sensitive provider payloads if its boundary is incomplete."
+    purpose: "Establish whether the prototype is safe enough to retain as an optional transport implementation."
+    expected_outcome: "The audit resolves or blocks every high-confidence authority, network, credential, deserialization, cancellation, and evidence defect."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-09-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Rig-adoption-decision"
+      - "SPEC.md#Transport-dependency-gates"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-09-compliance-review"
+    title: "Review future Rig prototype decision"
+    description: "Compare source-derived prototype behavior and measured build evidence with every Rig go/no-go gate, then record an exact-version decision matrix and whether to retain, revise, upstream-patch, or remove the dependency."
+    context: "Prototype success cannot be inferred from compiling one provider example or from Rig's advertised capabilities."
+    purpose: "Produce an independent, reversible dependency decision before production code relies on Rig."
+    expected_outcome: "The review records a complete go/no-go matrix, exact dependency version and features, marginal package/binary deltas versus the direct adapter, license/advisory disposition, TLS scope, unresolved gaps, and the approved transport path."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-09-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Rig-adoption-decision"
+      - "SPEC.md#Transport-dependency-gates"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

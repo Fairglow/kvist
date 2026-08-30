@@ -166,6 +166,20 @@ selection, task lifecycle, sandbox approval, and durable component evidence.
 The child component's host-execution mode is a recovery and reliability aid,
 not an isolation boundary.
 
+The child component also owns the planned provider-neutral model contract,
+backend and capability classification, tool descriptors and untrusted
+intent/result types, bounded native agent loop, broker sequencing,
+execution-backend interfaces and reusable Linux implementations, redacted
+runtime events, and host-authority and adapter interfaces. Kvist depends on
+those interfaces; the child never imports Kvist types. Kvist retains task
+contracts, authorization policy and records, approved resource and credential
+bindings, execution-tier selection, artifact promotion, and durable compliance
+evidence. Native model backends return tool intent to the broker operating
+under Kvist grants; external agent backends remain opaque processes constrained
+by the outer execution backend. Third-party libraries may implement private
+model transports but cannot replace these Kvist-owned authority boundaries or
+appear in public contracts.
+
 `kvist agent setup` first selects between collecting a provider profile through
 the reusable `supervised_agent` setup API and loading a named profile from the
 standalone user store. Collection obtains a nonblank profile name and command
@@ -193,6 +207,34 @@ the configuration size bound, and atomically creates or replaces the selected
 file. A malformed, oversized, or link-like configuration is reported rather
 than repaired or truncated. As with other direct filesystem checks, concurrent
 external mutation remains outside the static-workspace guarantee.
+
+## Native-agent host authority services
+
+The planned native-agent integration consumes the standalone component's
+provider-neutral model, capability, tool-intent, broker, execution-backend, and
+runtime-event interfaces. Kvist never exposes its task or evidence types back
+through that dependency.
+
+For each proposed effect, Kvist resolves the current task contract, role, tool
+and schema version, canonical arguments and resource identity, approved
+filesystem and network scope, credential references, execution tier, policy
+revision, and remaining budget. It returns an explicit allow or deny decision
+bound to those values. The standalone broker mechanism may dispatch only an
+allowed request without broadening any binding.
+
+Kvist derives append-only compliance records from the exact authorization
+decision, bounded redacted runtime event, execution result, workspace revision,
+and artifact digests. Provider payloads and third-party transcripts are
+untrusted attachments and are excluded by default. Promotion remains a
+separate Kvist decision after validation; model output and standalone runtime
+events cannot certify task completion.
+
+After the child `sa-08` contract chain defines and independently reviews the
+host-authority interfaces, the child tests them with deterministic fakes. The
+root `agn-authority` chain then covers real task policy, grants, bindings,
+execution-tier selection, evidence persistence, and promotion before native
+model mode can be enabled. Cross-component prerequisites are recorded here
+because queue dependencies are component-local.
 
 ## TODO queue schema and validation
 

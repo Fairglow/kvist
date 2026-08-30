@@ -21,6 +21,62 @@ all profiles or one named profile, create or replace a profile, collect a
 profile interactively, verify its exact command, and run collection plus
 persistence as a setup wizard.
 
+The public model API contains canonical messages, tool descriptors, tool
+choice, untrusted tool intents, model turns, finish reasons, usage,
+stream events, a cloneable cancellation token, and the `ModelTransport` trait.
+`DirectModelTransport` implements that trait for Ollama and llama-server
+without exposing provider response types.
+
+## Direct local model transport
+
+Transport construction accepts a typed provider, an ASCII HTTP loopback
+endpoint with an explicit port, a positive deadline through 24 hours, and a
+positive response limit through 16 MiB. Endpoint parsing accepts loopback IP
+addresses or `localhost`; stores only resolved loopback socket addresses; and
+rejects HTTPS, credentials, query, fragment, provider paths, non-loopback
+hosts, controls, whitespace, and ambiguous IPv6 authority.
+
+The adapter writes HTTP/1.1 POST requests directly through `TcpStream`.
+Ollama uses `/api/chat`; llama-server uses `/v1/chat/completions`. It does not
+consult proxy environment variables, follow redirects, add credentials, or
+select a provider path from response data. Reads and writes use 100 ms socket
+timeouts to recheck cooperative cancellation and the overall deadline.
+
+Canonical requests are validated before connecting. They require a bounded
+ASCII model selector, 1 through 1,024 messages, no more than 128 unique tools,
+at most 8 MiB of message text, object tool schemas and arguments, bounded tool
+identities, and no more than 2 MiB of serialized JSON. Ollama rejects required
+tool choice before network access. llama-server receives explicit `none`,
+`auto`, or `required` tool choice.
+
+Response handling supports Content-Length, connection-close, and chunked
+framing. Headers, decoded body bytes, and individual streaming records have
+independent bounds. Conflicting or duplicate framing, truncated bodies and
+chunks, non-success status, malformed JSON, missing stream terminals, invalid
+arguments, and duplicate call identities produce typed errors. Provider error
+bodies are discarded before error construction.
+
+llama-server streaming incrementally parses SSE and assembles indexed,
+fragmented tool calls. Ollama streaming incrementally parses NDJSON. Text
+deltas are delivered to the callback as their complete records arrive; tool
+intents are delivered only after complete object arguments validate. Ollama
+calls without provider identities receive deterministic turn-local
+`ollama-call-N` identities and retain `provider_id = None`.
+
+The standalone `model` subcommand resolves the normal bounded prompt sources,
+builds one user message with no tools, and performs a unary or streaming local
+request. It writes text to standard output and flushes every streaming delta.
+It does not require host-execution acknowledgement because it neither starts a
+provider process nor permits a non-loopback destination.
+
+The direct adapter adds Serde and serde_json. The measured locked
+`x86_64-unknown-linux-gnu` normal/build graph is 49 packages versus 42 before
+the adapter. The release executable is 2,265,320 bytes versus 1,947,376 bytes.
+No TLS package is selected. The machine-readable dependency policy is
+`deny.toml`; advisory and allowed external dependency license checks pass.
+The two workspace packages still lack Cargo license expressions, so an
+unqualified cargo-deny license run reports those pre-existing metadata gaps.
+
 ## Profile configuration and setup
 
 Standalone profile configuration is TOML limited to 64 KiB with integer
@@ -126,6 +182,10 @@ duration, loop detection, retry count, and output limit. Without
 the configured command. On retries it appends the generated notice to the
 prompt before rendering a fresh command.
 
+`supervised-agent model` accepts the same prompt source alternatives plus
+provider, loopback endpoint, model, deadline, response limit, and streaming
+selection. It sends no tools and prints only model text.
+
 ## Observed limitations
 
 Host execution inherits the invoking process's ambient filesystem, network,
@@ -135,3 +195,9 @@ rollback, restricted identity, namespace, seccomp, Landlock, container, VM,
 tool broker, provider network broker, or macOS/Windows backend. Its
 acknowledgement and retry notice communicate risk but do not enforce isolation
 or idempotency.
+
+The direct model transport is synchronous and intended for a dedicated
+execution worker. It supports local unencrypted HTTP only and has no hosted
+provider, TLS, credential, proxy, redirect, HTTP/2, compression, multimodal,
+parallel-tool, or model-discovery behavior. Live Ollama and llama-server model
+matrices remain unevaluated when no local model/server is available.

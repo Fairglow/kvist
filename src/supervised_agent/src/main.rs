@@ -1,12 +1,14 @@
 #[cfg(not(target_os = "linux"))]
 compile_error!("supervised-agent currently supports Linux only");
 
-use std::{path::PathBuf, process::ExitCode, time::Duration};
+use std::{io::Write, path::PathBuf, process::ExitCode, time::Duration};
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use supervised_agent::{
-    CommandSpec, Error, SupervisionPolicy, default_profile_config_path, load_profile,
-    render_command, resolve_prompt, run_setup_wizard, run_supervised,
+    CancellationToken, CommandSpec, DirectModelTransport, Error, LocalModelProvider, ModelMessage,
+    ModelRequest, ModelStreamEvent, ModelTransport, SupervisionPolicy, ToolChoice,
+    default_profile_config_path, load_profile, render_command, resolve_prompt, run_setup_wizard,
+    run_supervised,
 };
 
 #[derive(Debug, Parser)]
@@ -22,9 +24,56 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Send a text-only request directly to local Ollama or llama-server.
+    Model(ModelArguments),
     Run(RunArguments),
     /// Interactively create or update a reusable provider profile.
     Setup(SetupArguments),
+}
+
+#[derive(Debug, Args)]
+struct ModelArguments {
+    #[arg(value_name = "PROMPT", conflicts_with_all = ["file", "editor"])]
+    prompt: Option<String>,
+
+    #[arg(short, long, value_name = "PROMPT_FILE", conflicts_with_all = ["prompt", "editor"])]
+    file: Option<PathBuf>,
+
+    #[arg(long, conflicts_with_all = ["prompt", "file"])]
+    editor: bool,
+
+    #[arg(long, value_enum)]
+    provider: ModelProviderArgument,
+
+    #[arg(long, value_name = "HTTP_LOOPBACK_URL")]
+    endpoint: String,
+
+    #[arg(long, value_name = "MODEL")]
+    model: String,
+
+    #[arg(long)]
+    stream: bool,
+
+    #[arg(long, default_value_t = 300)]
+    timeout: u64,
+
+    #[arg(long, default_value_t = 1_048_576)]
+    max_response_bytes: usize,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ModelProviderArgument {
+    Ollama,
+    LlamaServer,
+}
+
+impl From<ModelProviderArgument> for LocalModelProvider {
+    fn from(value: ModelProviderArgument) -> Self {
+        match value {
+            ModelProviderArgument::Ollama => Self::Ollama,
+            ModelProviderArgument::LlamaServer => Self::LlamaServer,
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -99,9 +148,60 @@ fn main() -> ExitCode {
 fn execute() -> supervised_agent::Result<()> {
     let cli = Cli::parse();
     match cli.command {
+        Command::Model(arguments) => model(arguments),
         Command::Run(arguments) => run(arguments),
         Command::Setup(arguments) => setup(arguments),
     }
+}
+
+fn model(arguments: ModelArguments) -> supervised_agent::Result<()> {
+    let prompt = resolve_prompt(
+        arguments.prompt,
+        arguments.file.as_deref(),
+        arguments.editor,
+    )?;
+    let transport = DirectModelTransport::new(
+        arguments.provider.into(),
+        &arguments.endpoint,
+        Duration::from_secs(arguments.timeout),
+        arguments.max_response_bytes,
+    )?;
+    let request = ModelRequest {
+        model: arguments.model,
+        messages: vec![ModelMessage::User(prompt)],
+        tools: Vec::new(),
+        tool_choice: ToolChoice::None,
+    };
+    let cancellation = CancellationToken::new();
+    let stdout = std::io::stdout();
+    let mut writer = stdout.lock();
+
+    if arguments.stream {
+        transport.stream(&request, &cancellation, &mut |event| match event {
+            ModelStreamEvent::TextDelta(text) => writer
+                .write_all(text.as_bytes())
+                .and_then(|()| writer.flush())
+                .map_err(|source| Error::Io {
+                    operation: "write model output",
+                    path: PathBuf::from("<stdout>"),
+                    source,
+                }),
+            ModelStreamEvent::ToolIntent(_) => Ok(()),
+        })?;
+        writer.write_all(b"\n").map_err(|source| Error::Io {
+            operation: "write model output",
+            path: PathBuf::from("<stdout>"),
+            source,
+        })?;
+    } else {
+        let turn = transport.complete(&request, &cancellation)?;
+        writeln!(writer, "{}", turn.text).map_err(|source| Error::Io {
+            operation: "write model output",
+            path: PathBuf::from("<stdout>"),
+            source,
+        })?;
+    }
+    Ok(())
 }
 
 fn run(arguments: RunArguments) -> supervised_agent::Result<()> {

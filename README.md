@@ -144,6 +144,28 @@ cargo run --locked -p supervised-agent -- run \
   "Review this change"
 ```
 
+Send a text-only request directly to a local Ollama or llama-server endpoint:
+
+```bash
+cargo run --locked -p supervised-agent -- model \
+  --provider ollama \
+  --endpoint http://127.0.0.1:11434 \
+  --model qwen3-coder \
+  --stream \
+  --file prompt.md
+
+cargo run --locked -p supervised-agent -- model \
+  --provider llama-server \
+  --endpoint http://127.0.0.1:8080 \
+  --model local \
+  "Summarize the supplied prompt"
+```
+
+The direct adapter accepts loopback HTTP only, has no proxy or credential
+support, and exposes no tools through this command. The library API additionally
+supports canonical tool descriptors and returns tool calls as untrusted
+`ToolIntent` values; it never executes them.
+
 Standalone profiles are stored at
 `$XDG_CONFIG_HOME/supervised-agent/config.toml`, falling back to
 `$HOME/.config/supervised-agent/config.toml`. Version 1 stores generic profile
@@ -160,6 +182,11 @@ command = "ollama run qwen3-coder '{prompt}'"
 
 The library crate is named `supervised_agent`. Its specification and deferred
 isolation plan live in [`src/supervised_agent/SPEC.md`](src/supervised_agent/SPEC.md).
+The layered runtime decision is documented in
+[`docs/supervised-agent/architecture.md`](docs/supervised-agent/architecture.md),
+the direct transport is available for local testing, and the Rig 0.42.0 no-go
+and future reevaluation gates are in
+[`docs/supervised-agent/rig-evaluation.md`](docs/supervised-agent/rig-evaluation.md).
 The current host mode is a reliability aid, not a sandbox. `fakeroot`, retry
 notices, and backups likewise do not restrict an agent's authority.
 

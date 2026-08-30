@@ -36,6 +36,53 @@ pub enum Error {
     #[error("host execution requires explicit --allow-host-execution acknowledgement")]
     HostExecutionNotAcknowledged,
 
+    /// A canonical model request violates a size, schema, or identity invariant.
+    #[error("invalid model request: {reason}")]
+    InvalidModelRequest { reason: String },
+
+    /// A local model transport endpoint or limit is invalid.
+    #[error("invalid model transport endpoint or limit: {reason}")]
+    InvalidModelTransport { reason: String },
+
+    /// The selected provider cannot preserve a requested capability.
+    #[error("unsupported capability `{capability}` for provider `{provider}`")]
+    UnsupportedCapability {
+        provider: &'static str,
+        capability: &'static str,
+    },
+
+    /// Cooperative cancellation stopped a model request.
+    #[error("model transport was cancelled")]
+    ModelTransportCancelled,
+
+    /// The overall model request deadline elapsed.
+    #[error("model transport timed out")]
+    ModelTransportTimedOut,
+
+    /// The provider returned a non-success response; its body is intentionally omitted.
+    #[error("model provider returned HTTP status {status}")]
+    ModelProviderStatus { status: u16 },
+
+    /// Provider response headers or body exceeded a hard bound.
+    #[error("model provider exceeded the {max_bytes}-byte response limit")]
+    ModelResponseLimitExceeded { max_bytes: usize },
+
+    /// Provider HTTP or JSON did not satisfy the selected protocol.
+    #[error("malformed model provider response: {reason}")]
+    MalformedModelResponse { reason: String },
+
+    /// One turn reused a tool call identity.
+    #[error("duplicate tool call identity in model provider response")]
+    DuplicateToolCall,
+
+    /// A socket operation failed without retaining endpoint or payload data.
+    #[error("model transport I/O failed while {operation}: {source}")]
+    ModelTransportIo {
+        operation: &'static str,
+        #[source]
+        source: io::Error,
+    },
+
     /// The supervised command exited unsuccessfully.
     #[error("supervised command failed with exit status: {status}")]
     ProcessFailed { status: ExitStatus },

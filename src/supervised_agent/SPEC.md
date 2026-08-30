@@ -28,6 +28,15 @@ operations over caller-provided input/output streams. A profile contains a
 case-sensitive name, provider kind, and command template. It does not contain
 Kvist roles, component paths, task state, or compliance policy.
 
+The planned native runtime classifies integrations as native model, one-shot
+model, external agent, or plan-only backends. Standalone-owned canonical model,
+capability, and tool-intent contracts connect model transports to a bounded
+agent loop and typed broker mechanism. Host authority interfaces connect that
+mechanism to policy, execution, and durable evidence without importing host
+types. Third-party libraries may implement a private transport adapter; their
+agent, tool, persistence, and authorization types do not become this
+component's public or durable contract.
+
 `supervised-agent setup` interactively creates or updates a profile in the
 Linux user configuration, defaulting to
 `$XDG_CONFIG_HOME/supervised-agent/config.toml` or
@@ -40,6 +49,13 @@ directory; idle/loop/retry controls; and the explicit
 `--allow-host-execution` acknowledgement. It streams provider output and exits
 nonzero on invalid input, unknown profiles, command failure, exhausted
 supervision, or refusal.
+
+`supervised-agent model` performs a text-only unary or streaming request
+through the direct local HTTP adapter. It accepts the same positional, file,
+editor, or redirected prompt sources; an Ollama or llama-server provider;
+explicit loopback endpoint and model; deadline; and response bound. It exposes
+no tools and performs no host process execution. Unary output is written after
+the complete turn; streaming output is flushed as text deltas arrive.
 
 The component supports Linux only. Other targets fail explicitly rather than
 silently providing a different process or filesystem contract.
@@ -111,12 +127,35 @@ silently providing a different process or filesystem contract.
   noninteractive `--prompt`, text output, and explicit host-agent approval
   mode. Generated Copilot commands use noninteractive `--prompt`, silent
   output, and explicit tool approval. Both collect an optional model selector.
+- The following native-runtime invariants are planned contracts. They become
+  binding only as their referenced lifecycle tasks are implemented and
+  independently reviewed; current supervisor and profile reviews do not treat
+  absent future runtime code as a discrepancy.
+- Native model transports never execute tools. They return canonical text,
+  structured tool intent, usage, finish, provider identity, and error events to
+  the component-owned bounded loop.
+- Tool intent is untrusted input. Only the component's typed broker mechanism
+  may validate and canonicalize it, obtain a host authorization decision, and
+  dispatch it through the selected execution backend. The broker emits bounded
+  redacted runtime events; it does not create host compliance evidence.
+- Capabilities are tracked separately as advertised, conformance-tested, and
+  policy-enabled. Unsupported behavior fails explicitly instead of silently
+  degrading to a provider's closest feature.
+- External agents are opaque processes. Provider permission controls are
+  defense in depth; only the selected outer execution backend can enforce
+  filesystem, process, credential, environment, and network restrictions.
+- Provider libraries remain private implementation details behind
+  component-owned types. Arbitrary provider parameters, hosted tools, raw
+  transcripts, and third-party serialized state cannot enter host policy or
+  canonical evidence.
+- The embedding host is the future MCP host and policy boundary. MCP transports
+  tools but does not authorize them. ACP may structure an external-agent
+  adapter but does not expose or mediate that agent's internal tool loop.
 - Generated llama-server commands use `{prompt_json}` for request bodies.
   Generated Ollama commands materialize the selected endpoint through
   `OLLAMA_HOST` rather than depending on ambient endpoint configuration.
-- Kvist-specific configuration, role selection, task transitions, approvals,
-  sandbox runner validation, logs, and compliance evidence remain outside this
-  component.
+- Host-specific configuration, role selection, task transitions, approvals,
+  artifact promotion, and compliance evidence remain outside this component.
 
 </details>
 
@@ -195,6 +234,213 @@ arbitrary arguments from unstable help prose. It shows the editable exact
 template before an optional live qualification prompt, whose wall timeout is
 five minutes. Provider children receive null standard input so a headless
 command cannot consume setup answers or wait for an interactive response.
+
+### Layered agent architecture and rationale
+
+The component separates responsibilities by authority:
+
+1. A run coordinator binds task contract, policy revision, workspace revision,
+   backend profile, budgets, and cancellation to an explicit state machine.
+2. A model transport owns only endpoint, credential-reference, request,
+   streaming, usage, error, deadline, and cancellation translation.
+3. A native agent loop owns bounded turns, context construction, stop
+   conditions, malformed-output handling, and tool-result continuation.
+4. A typed broker mechanism validates intent, resolves host-approved canonical
+   resources, obtains authorization, and requests execution.
+5. The host policy engine makes durable decisions over role, task, tool version,
+   arguments, resources, environment, credentials, network, and policy hash.
+6. The selected execution backend is the only layer allowed to cause local
+   effects.
+7. A host-owned versioned append-only journal records decisions and terminal
+   evidence.
+
+This component owns the reusable provider-neutral protocol: backend classes,
+capability states, model messages and turns, tool descriptors, untrusted tool
+intents and results, bounded loop state, broker sequencing, execution-backend
+interfaces and reusable Linux implementations, host-authority traits, and
+redacted runtime events. An embedding host owns policy decisions and
+authorization records, approved resource and credential bindings, execution
+tier selection, artifact promotion, and canonical compliance evidence. Kvist
+is one such host. The dependency is one way: hosts depend on this component,
+which never imports host types.
+
+This split is chosen over provider-specific agent implementations because
+planning, tool dispatch, recovery, and evidence would otherwise be duplicated
+for llama.cpp, Ollama, and each hosted API. It is chosen over a universal
+external-agent interface because mature CLIs contain opaque provider-specific
+loops that cannot be faithfully or securely reduced to model turns.
+
+Native model mode is the preferred enforceable path. llama-server is the first
+llama.cpp transport target because its persistent OpenAI-compatible service is
+better suited to multi-turn streaming and tool calls than repeated llama-cli
+processes. Ollama and an explicitly approved generic OpenAI-compatible endpoint
+follow. llama-cli remains a one-shot and diagnostic backend.
+
+Gemini CLI, Copilot CLI, and other mature coding agents remain useful as
+external-agent backends. The embedding host supervises and ultimately
+sandboxes the complete process and validates resulting artifacts, but does not
+claim to authorize each internal tool call. Plan-only mode makes no effectful
+tools available.
+
+The canonical core represents messages, tool intent/results, provider/model
+identity, usage, finish reason, streaming terminal state, cancellation, typed
+unsupported capabilities, and bounded provider extensions. Provider-specific
+fields are retained only in explicitly typed, namespaced, approved, and
+redacted extensions. Conformance tests, not nominal API compatibility,
+establish deployment support.
+
+OpenAI-compatible APIs are model-transport targets, function calling is a
+structured intent format, MCP is a brokered external-tool transport, and ACP is
+an optional external-agent protocol. None of them replaces embedding-host policy,
+execution isolation, or durable evidence. For Kvist as one embedding host, the
+supplemental rationale and delivery ordering are recorded in
+`docs/supervised-agent/architecture.md`.
+
+### Rig adoption decision
+
+Rig 0.42.0 is rejected as a transport dependency. A throwaway exact-version
+experiment with default features disabled proved that the crate does not build
+on Rust 1.85. Raising this component's MSRV was considered and rejected. The
+experiment also added 128 locked packages over a bare Tokio baseline; this is a
+footprint warning rather than the required marginal comparison against the
+future direct adapter. Its linked release-binary delta, permissive-license
+check, advisory check, and local-only no-TLS feature selection passed. No Rig
+dependency is added to this component.
+
+A later immutable Rig release may receive a new non-default prototype only
+after a cheap preflight proves Rust 1.85 compatibility and acceptable
+dependency count. Any such prototype must expose only component-owned
+canonical types and evaluate unary and streamed text plus structured
+tool-intent conversion against a fake OpenAI-compatible server, local Ollama,
+and local llama-server. The first production candidate is therefore a small
+direct local HTTP adapter behind the same private transport seam.
+
+The evaluated release contains separate `rig-core` and `rig-agent` crates, but
+not the later current-main `rig-run`, `rig-reqwest`, or `rig-rmcp` crate split.
+Any reevaluation excludes the `rig` facade, `rig-agent`, Rig tool execution,
+provider-hosted tools, arbitrary additional parameters, Rig persistence, and
+raw provider payloads in evidence. A later immutable release containing
+`rig-run` may receive a separate research spike only after transport reuse
+proves worthwhile.
+
+This boundary follows from source-level findings:
+
+- `rig-core` contains credible provider conversion, streaming normalization,
+  Ollama support, and llama.cpp-specific compatibility behavior.
+- Rig request and message types deliberately retain provider extensions and
+  raw material that are too broad for Kvist's canonical policy/evidence model.
+- `rig-agent` combines model, memory, hooks, and tool execution across the
+  authority boundaries Kvist must keep separate.
+- Current-main `rig-run` is promising directional sans-I/O machinery but is not
+  part of the evaluated release; its foreign conversational policy and
+  explicitly unstable serialized state would still need separate evaluation.
+- Rig assumes the host supplies authorization, sandboxing, persistence policy,
+  and operational evidence. That philosophy complements a narrow adapter but
+  cannot replace the Kvist engine.
+- The evaluated Rig 0.42.0 source uses a Rust 1.94 repository toolchain without
+  a declared package MSRV, while this component requires Rust 1.85.
+
+Future adoption requires all prototype gates to pass: Rust 1.85; private type
+containment; approved endpoint and credential routing; bounded cancellation,
+deadlines, malformed/truncated stream handling, and redaction; local-provider
+text, streaming, and structured tool-intent conformance; TRACE leakage tests;
+the objective dependency, license, advisory, TLS, and binary-size gates; and
+upgrade tests that detect semantic change. Failure records a no-go decision and
+leaves the canonical component transport interface available for a small
+direct implementation. The full evidence and source references are in
+`docs/supervised-agent/rig-evaluation.md`.
+
+### Transport dependency gates
+
+Every direct or framework-backed model transport is evaluated on locked Rust
+1.85 for `x86_64-unknown-linux-gnu` with explicit features. Candidate and
+baseline use the same release profile and toolchain. Target-specific
+normal/build packages are counted from `cargo tree --locked --target
+x86_64-unknown-linux-gnu -p supervised-agent -e normal,build --prefix none`
+after removing repeated markers and duplicate package/version lines. The
+unstripped release executable is measured from a fresh target directory.
+
+The first direct adapter is compared with this component before native
+transport dependencies. A later framework adapter is compared with the
+reviewed direct adapter. The default gates are at most 75 additional packages
+and 15 MiB additional executable size. An exception requires explicit human
+approval in the decision matrix.
+
+Allowed transitive licenses are MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause,
+ISC, Unicode-3.0, Zlib, and CDLA-Permissive-2.0. Any other, unknown, or
+unlicensed dependency requires explicit legal approval. `cargo deny check
+advisories` must report no unwaived advisory; a waiver records its ID,
+reachability, mitigation, owner, expiry, and review evidence.
+
+Local-only builds select no TLS backend and make no HTTPS claim. Hosted
+transport requires an explicit Rustls profile and tests for roots, proxies,
+redirects, DNS, and destination policy. TRACE sentinel tests must demonstrate
+that prompt, tool, credential, endpoint, error, and transcript values do not
+enter logs or default events. The decision matrix records exact commands,
+lockfile digests, tool versions, features, counts, sizes, license and advisory
+results, TLS scope, and approved exceptions.
+
+### Direct local model transport
+
+The first native transport is a synchronous, bounded library API intended for
+an execution worker. It performs no blocking I/O in an async task. This avoids
+introducing an async runtime before the native loop establishes its concurrency
+boundary. A future async implementation may replace it behind the same
+canonical request, event, and result types.
+
+The public provider-neutral contract contains:
+
+- `ModelRequest`, ordered role messages, tool descriptors, and tool choice;
+- `ModelTurn`, text, untrusted tool intents, normalized finish reason, usage,
+  provider kind, model identity, and optional provider request identity;
+- `ModelStreamEvent` for ordered text deltas and complete tool intents;
+- `CancellationToken` for cooperative cancellation;
+- `ModelTransport`, whose unary and streaming methods return typed failures.
+
+The direct adapter supports Ollama `/api/chat` and llama-server
+`/v1/chat/completions`. It accepts only `http` endpoints whose host resolves
+exclusively to loopback addresses. URLs containing user information, query,
+fragment, control characters, non-ASCII text, or an unsupported path are
+rejected. The provider path is selected by the typed provider kind rather than
+accepted from model output. Redirects are rejected. No credential or ambient
+proxy support exists in this local-only adapter.
+
+Requests contain at most 1,024 messages, 128 tools, 8 MiB of canonical message
+text, and 2 MiB of serialized JSON. Tool names use nonblank ASCII letters,
+digits, `_`, `-`, or `.` and are at most 128 bytes. Tool schemas and tool-call
+arguments must be JSON objects. Tool-call identifiers must be nonblank and
+unique within a turn. Ollama responses that omit identifiers receive
+deterministic turn-local identifiers; they are not represented as provider
+identifiers.
+
+HTTP response headers are bounded to 64 KiB, response bodies to the configured
+positive limit no greater than 16 MiB, and individual SSE or NDJSON records to
+1 MiB. Content-Length, chunked transfer encoding, and connection-close bodies
+are supported. Conflicting framing, malformed chunks, malformed JSON,
+non-success responses, redirects, duplicate tool identifiers, invalid tool
+arguments, truncated streams, a missing terminal record, and unsupported
+capabilities fail explicitly. Provider error bodies are never included in
+displayed errors.
+
+Unary requests set provider streaming to false. Streaming requests parse
+OpenAI-compatible SSE for llama-server and NDJSON for Ollama, emit ordered text
+deltas, assemble tool calls before emitting complete untrusted intents, and
+require an explicit terminal record. Callbacks cannot authorize or execute a
+tool. Ollama rejects required tool choice; llama-server receives explicit
+`none`, `auto`, or `required` choice. Parallel tool choice is not exposed.
+
+Deadlines are positive and at most 24 hours. Socket operations use short
+timeouts so cancellation and the overall deadline are rechecked. Cancellation,
+timeout, endpoint, protocol, response-limit, provider-status, malformed-data,
+duplicate-call, and unsupported-capability failures remain distinguishable
+without retaining raw prompts, responses, tool arguments, or credentials in
+their display text.
+
+The standalone `model` command constructs one user message with no tools and
+`ToolChoice::None`. Its deadline is 1 through 86,400 seconds and response limit
+is 1 through 16 MiB. Output stream failures are terminal. The command does not
+claim that a successful text response qualifies tool calling, a model/template
+combination, or the future native agent loop.
 
 ### Deferred workspace recovery
 

@@ -34,7 +34,17 @@ In the current landscape of AI-driven software engineering, the industry heavily
   integrations. Generic provider profiles, interactive setup, prompt
   acquisition, command rendering, and process supervision live in a standalone
   library and application that Kvist consumes. Kvist retains role assignment,
-  architectural context, execution approval, and task lifecycle.
+  architectural context, execution approval, and task lifecycle. The planned
+  native agent runtime separates model transport, bounded orchestration, typed
+  tool brokering, policy, execution, and evidence. The standalone component
+  owns provider-neutral messages, capabilities, tool descriptors and intents,
+  the bounded native loop, runtime events, broker sequencing,
+  execution-backend interfaces and reusable Linux implementations, and
+  host-authority interfaces. Kvist supplies task policy, grants, approved
+  bindings, execution-tier selection, promotion, and canonical compliance
+  evidence without creating a reverse dependency. Provider libraries remain
+  private transport implementations; opaque coding-agent CLIs are constrained
+  as whole processes rather than trusted as authorization boundaries.
 * **Linux-First Execution:** Linux is the only supported executable platform
   while the project is maintained and tested by a Linux-only development team.
   Platform-specific execution is isolated behind replaceable boundaries;
@@ -185,7 +195,14 @@ matrix. File watching, web, and editor integrations remain deferred.
 1. **Headless Engine Core (`kvist-cli` in Rust):** Manages tree state,
    `TODOS.yaml` parsing, context slicing, and Kvist-specific execution policy.
    It delegates provider-neutral prompt acquisition and process supervision to
-   the standalone `supervised-agent` component.
+   the standalone `supervised-agent` component. That component will classify
+   native model, one-shot model, external-agent, and plan-only backends;
+   capability support is advertised, independently tested, and policy-enabled
+   separately. Rig 0.42.0 is rejected by the Rust 1.85 gate, so the first local
+   HTTP transport remains a small direct adapter. A
+   later immutable Rig release may be used only behind standalone-owned
+   canonical types after its MSRV, conformance, authority, redaction, and
+   supply-chain gates pass.
 2. **Built-in Local Web View (`kvist serve`):** Spins up an embedded lightweight web server (`axum`) serving a single-page web app. Utilizes **Monaco Editor** (VS Code's open-source editor core) to render the interactive collapsible component tree, live progress bars, and compliance diffs.
 3. **Native IDE Alignment (LSP / Watcher):** Since specifications and code are plain Markdown, YAML, and Rust files, users continue using their preferred IDE (VS Code + `rust-analyzer`, Neovim, Zed, RustRover). A lightweight `kvist watch` daemon or LSP sidecar surface spec-staleness diagnostics directly inside the user's editor.
 

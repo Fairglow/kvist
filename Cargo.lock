@@ -464,6 +464,8 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "nix",
+ "serde",
+ "serde_json",
  "signal-hook",
  "tempfile",
  "thiserror",
