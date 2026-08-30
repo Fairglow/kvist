@@ -161,15 +161,31 @@ same-directory temporary file is persisted with replacement or no-clobber
 semantics. The parent directory is synchronized afterward.
 
 The setup interaction supports llama-cli, llama-server, Ollama, Copilot,
-Gemini, and custom executable defaults. HTTP endpoint probes invoke a fixed
-`curl` command after `--` and are advisory; URLs must be bounded HTTP or HTTPS
-values without whitespace or controls. Custom executables must be regular
-non-link files with an executable mode bit. Optional verification warns that
-the exact generated command receives full host authority and requires a
-separate acknowledgement that defaults to refusal. Verification failure
-defaults to refusing persistence but can be explicitly overridden.
-llama-server defaults encode prompts through `{prompt_json}`. Ollama defaults
-preserve the selected endpoint in an `OLLAMA_HOST` argument to `env`.
+Gemini, and custom executable defaults. llama-server defaults to
+`http://127.0.0.1:9931`, probes `/health`, and invokes curl with user
+configuration disabled to retrieve at most 64 KiB from `/v1/models` within
+five seconds. It accepts at most 128 unique 1-256-byte printable ASCII model
+IDs without braces in provider order, permits numeric or exact selection, and asks for a
+separate profile name. An advertised exact ID takes precedence over a bare
+number, while `#N` explicitly selects list entry N. Discovery failures report
+a bounded reason and retain manual model entry with literal `default` as the
+default. HTTP endpoint probes
+invoke a fixed `curl` command after `--` and are advisory; URLs must be bounded
+HTTP or HTTPS values without whitespace or controls. Custom executables must
+be regular non-link files with an executable mode bit. Optional verification
+warns that the exact generated command receives full host authority and
+requires a separate acknowledgement that defaults to refusal. Verification
+failure defaults to refusing persistence but can be explicitly overridden.
+llama-server defaults encode prompts through `{prompt_json}`, disable ambient
+curl configuration, report HTTP response bodies on failure, and quote the
+selected endpoint as one command argument. Ollama defaults preserve the
+selected endpoint in an `OLLAMA_HOST` argument to `env`.
+
+Against a local llama.cpp `b10590-6657ded4f` router on port 9931, the root
+endpoint returned HTTP 415, `/health` returned HTTP 200, and `/v1/models`
+advertised `Qwen3.8-9B-Q4_K_M`. A request using model `default` returned HTTP
+400 with model-not-found, while the discovered Qwen model returned HTTP 200
+and passed the generated setup qualification prompt.
 
 llama-cli, Gemini, and Copilot setup first runs the conventional executable
 with `--version` under ten-second idle and wall timeouts and a 64 KiB output

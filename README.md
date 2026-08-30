@@ -156,8 +156,8 @@ cargo run --locked -p agent-runtime --bin agent-run -- model \
 
 cargo run --locked -p agent-runtime --bin agent-run -- model \
   --provider llama-server \
-  --endpoint http://127.0.0.1:8080 \
-  --model local \
+  --endpoint http://127.0.0.1:9931 \
+  --model Qwen3.8-9B-Q4_K_M \
   "Summarize the supplied prompt"
 ```
 
@@ -180,6 +180,12 @@ cargo run --locked -p agent-runtime --bin agent-run --features rig-transport -- 
 
 It currently supports only numeric-loopback Ollama and llama-server endpoints.
 The direct adapter remains the default and fallback.
+
+During `agent-run setup`, llama-server defaults to
+`http://127.0.0.1:9931`, probes `/health`, and lists bounded model IDs from
+`/v1/models`. Select a listed number, enter an exact model ID, or retain the
+literal `default` when the server defines that alias. The reusable profile name
+is selected separately from the provider model ID.
 
 Standalone profiles are stored at
 `$XDG_CONFIG_HOME/agent-runtime/config.toml`, falling back to

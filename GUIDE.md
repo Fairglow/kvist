@@ -147,10 +147,15 @@ agent-run model \
   --file prompt.md
 ```
 
-Use `--provider llama-server --endpoint http://127.0.0.1:8080` for
+Use `--provider llama-server --endpoint http://127.0.0.1:9931` for
 llama-server. This command is text-only and exposes no tools. The underlying
 library decodes canonical tool intents for future brokered use, but does not
 authorize or execute them.
+
+llama-server setup probes `/health` rather than the router UI and reads the
+bounded OpenAI-compatible `/v1/models` list. A listed model can be selected by
+number; an exact model ID or the literal `default` can be entered instead.
+The profile name is a separate value.
 
 `kvist agent setup` either collects a profile through that same library setup
 flow or loads a saved standalone profile. Kvist then materializes the selected

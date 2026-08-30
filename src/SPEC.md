@@ -187,7 +187,10 @@ template. CLI providers probe their conventional executable name, then request
 an explicit executable or compatible wrapper path when it is unavailable,
 without changing the selected provider kind. Safe accessibility probes and
 maintained provider-specific templates are owned by the child component.
-Provider endpoint probes are advisory; the reusable interaction separately
+llama-server setup probes its health endpoint, queries its bounded
+OpenAI-compatible model list, and lets the user select an advertised model,
+enter an exact model identifier, or retain the explicit `default` value.
+Provider endpoint and discovery probes are advisory; the reusable interaction separately
 offers to execute a prompt through the exact generated command before any
 configuration write. Before execution it warns that the command receives the
 user's full host filesystem, credential, executable, and network permissions

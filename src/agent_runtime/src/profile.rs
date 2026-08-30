@@ -203,13 +203,7 @@ fn required_string<'a>(
 }
 
 pub(crate) fn validate_profile(profile: &ModelProfile) -> Result<()> {
-    if profile.name.is_empty()
-        || profile.name.len() > MAX_PROFILE_NAME_BYTES
-        || !profile
-            .name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':'))
-    {
+    if !is_valid_profile_name(&profile.name) {
         return Err(Error::ProfileSetup {
             reason: format!(
                 "profile name must use 1-{MAX_PROFILE_NAME_BYTES} ASCII letters, digits, '.', '_', '-', or ':'"
@@ -234,6 +228,14 @@ pub(crate) fn validate_profile(profile: &ModelProfile) -> Result<()> {
     }
     split_raw_command(&profile.command)?;
     Ok(())
+}
+
+pub(crate) fn is_valid_profile_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_PROFILE_NAME_BYTES
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':'))
 }
 
 fn read_configuration(path: &Path) -> Result<String> {

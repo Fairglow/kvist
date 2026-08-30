@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:278e9d95b52d9ae8956dfa5db9ba30cfa08970a7ae47bce783087cdbf940165c"
+  specification_revision: "sha256:4cad089cd42fd8138fce5fbd70fb5da17622d9247c2ee889421fd080a63a01e9"
   parent_specification:
     path: "../SPEC.md"
-    revision: "sha256:ddea9ca93468a129e0b26a0079c42cf0615ffc8f72f94c9762d5359d3255249a"
+    revision: "sha256:12d73b669601fb7e5970508065087332242602c15c5a4118a6a874da2ad3f601"
   revalidation:
     state: current
-    checked_at: "2026-08-30T16:10:00Z"
+    checked_at: "2026-08-30T16:49:14Z"
     stale_since: null
     causes: []
 tasks:
@@ -1241,6 +1241,84 @@ tasks:
     timestamps:
       created_at: "2026-08-30T16:08:00Z"
       updated_at: "2026-08-30T16:08:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-17-write-tests"
+    title: "Define llama-server setup discovery tests"
+    description: "Write failing tests for the current llama-server default endpoint, health-path probing, curl configuration isolation, bounded OpenAI-compatible model discovery, numeric and explicit model selection, separate profile naming, and exact qualified request generation."
+    context: "Probing the llama.cpp router root returns HTTP 415 while `/health` succeeds, and a literal `default` model fails when the router advertises only named models."
+    purpose: "Make setup identify a reachable server and an actually available model before the optional live qualification request."
+    expected_outcome: "Tests expose advertised models safely, retain explicit manual/default choices, and generate a request for the selected provider model without conflating it with the profile name."
+    kind: test
+    status: completed
+    depends_on:
+      - "sa-16-implement-code"
+    requirements:
+      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Profile-configuration-and-setup"
+    timestamps:
+      created_at: "2026-08-30T16:37:30Z"
+      updated_at: "2026-08-30T16:38:00Z"
+      completed_at: "2026-08-30T16:38:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-17-implement-code"
+    title: "Implement llama-server setup discovery"
+    description: "Use llama-server's current loopback default, probe `/health`, fetch and validate bounded `/v1/models` data, prompt for a listed or explicit model independently from the profile name, disable ambient curl configuration, and generate the exact chat-completions command."
+    context: "The previous root probe produced a false warning and the combined model/profile prompt generated model `default`, which this router rejected with HTTP 400."
+    purpose: "Let users qualify and persist a working named llama-server model through the normal setup flow."
+    expected_outcome: "A user can select Qwen3.8-9B-Q4_K_M from the local router, run the generated test prompt successfully, and save a separately named profile."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-17-write-tests"
+    requirements:
+      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Profile-configuration-and-setup"
+    timestamps:
+      created_at: "2026-08-30T16:37:30Z"
+      updated_at: "2026-08-30T16:51:44Z"
+      completed_at: "2026-08-30T16:51:44Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-17-security-audit"
+    title: "Audit llama-server setup discovery"
+    description: "Independently review URL construction, curl configuration isolation, subprocess bounds, JSON and model-ID validation, terminal output, selection parsing, command quoting, provider-response handling, and configuration persistence."
+    context: "Model discovery consumes untrusted network JSON and reflects selected identifiers into terminal output and a persisted executable command."
+    purpose: "Prevent option injection, terminal control injection, unbounded output, model confusion, and unintended endpoint selection."
+    expected_outcome: "No discovered or manually entered value can escape its argument/JSON boundary, exceed declared bounds, override the endpoint, or silently select another model."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-17-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Constraints-and-invariants"
+    timestamps:
+      created_at: "2026-08-30T16:37:30Z"
+      updated_at: "2026-08-30T16:37:30Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-17-compliance-review"
+    title: "Review llama-server setup compliance"
+    description: "Derive probe, discovery, selection, qualification, and persisted-command behavior from source without the specification, then compare it with the accepted setup contract."
+    context: "A successful request alone does not establish bounded discovery, deterministic selection, or configuration safety."
+    purpose: "Record independent evidence that setup behavior matches the provider-neutral profile contract."
+    expected_outcome: "The review confirms the advertised model path and all failure behavior or blocks completion with precise discrepancies."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-17-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Profile-configuration-and-setup"
+    timestamps:
+      created_at: "2026-08-30T16:37:30Z"
+      updated_at: "2026-08-30T16:37:30Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

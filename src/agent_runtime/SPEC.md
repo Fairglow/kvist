@@ -117,6 +117,17 @@ silently providing a different process or filesystem contract.
   Failed verification defaults to refusing profile persistence, with an
   explicit save-without-verification choice. Probe URLs are HTTP or HTTPS,
   contain no whitespace or control characters, and are limited to 2,048 bytes.
+- llama-server defaults to `http://127.0.0.1:9931`. Setup probes `/health` and
+  requests `/v1/models` with curl configuration disabled, a five-second
+  deadline, and a 64 KiB response bound. It accepts at most 128 unique model
+  IDs of at most 256 printable ASCII bytes excluding braces, displays them in provider order,
+  and lets the user select by number, enter an exact model ID, or retain the
+  literal `default`. An advertised exact ID takes precedence over a bare
+  numeric index; `#N` forces selection of list entry N. Probe or discovery
+  failure remains advisory and falls back to bounded manual model entry. Model
+  identity and profile name are collected
+  separately because a valid provider model ID need not satisfy profile-name
+  syntax.
 - CLI-backed providers first probe their conventional executable name with a
   `--version` invocation bounded by ten-second idle and wall timeouts. If that
   probe fails, setup requests an explicit executable or compatible wrapper path
@@ -221,7 +232,10 @@ unsupported configuration remains unchanged.
 
 The reusable setup interaction selects llama-cli, llama-server, Ollama,
 Copilot, Gemini, or a custom executable; collects a profile name and editable
-command template; and may perform an advisory endpoint probe. Optional model
+command template; and may perform advisory endpoint and model-discovery probes.
+llama-server probes `/health`, displays a bounded `/v1/models` result when
+available, and keeps model identity separate from the reusable profile name.
+Optional model
 verification displays the exact host-authority warning and defaults its
 acknowledgement to refusal. The standalone command persists the resulting
 profile. Kvist may call the same collection API or load an existing standalone

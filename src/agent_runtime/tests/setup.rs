@@ -1,7 +1,40 @@
-use std::{fs, io::Cursor, os::unix::fs::PermissionsExt};
+use std::{
+    fs,
+    io::{Cursor, Read, Write},
+    net::TcpListener,
+    os::unix::fs::PermissionsExt,
+    sync::mpsc,
+    thread,
+};
 
 use agent_runtime::{ModelProfile, collect_profile, render_command, verify_profile};
 use tempfile::TempDir;
+
+fn serve_llama_setup() -> (String, mpsc::Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake llama-server");
+    let address = listener.local_addr().expect("fake llama-server address");
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        for body in [
+            r#"{"status":"ok"}"#,
+            r#"{"object":"list","data":[{"id":"small-model"},{"id":"Qwen3.8-9B-Q4_K_M"},{"id":"42"}]}"#,
+        ] {
+            let (mut stream, _) = listener.accept().expect("accept setup request");
+            let mut request = [0_u8; 4096];
+            let count = stream.read(&mut request).expect("read setup request");
+            let _ = sender.send(String::from_utf8_lossy(&request[..count]).into_owned());
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
+                 Content-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("write setup response");
+        }
+    });
+    (format!("http://{address}"), receiver)
+}
 
 #[test]
 fn rejects_non_http_probe_urls_without_starting_curl() {
@@ -12,6 +45,11 @@ fn rejects_non_http_probe_urls_without_starting_curl() {
         .expect_err("reject local-file URL");
 
     assert!(error.to_string().contains("HTTP or HTTPS"));
+    assert!(
+        String::from_utf8(writer)
+            .expect("UTF-8 setup output")
+            .contains("http://127.0.0.1:9931")
+    );
 }
 
 #[test]
@@ -41,7 +79,7 @@ fn verification_refuses_before_spawning_without_host_acknowledgement() {
 
 #[test]
 fn llama_server_default_json_encodes_the_rendered_prompt() {
-    let mut reader = Cursor::new("2\nhttp://127.0.0.1:1\nmodel\n\nn\n");
+    let mut reader = Cursor::new("2\nhttp://127.0.0.1:1\nmodel\n\n\nn\n");
     let mut writer = Vec::new();
 
     let profile = collect_profile(&mut reader, &mut writer, std::path::Path::new("."))
@@ -54,8 +92,111 @@ fn llama_server_default_json_encodes_the_rendered_prompt() {
     )
     .expect("render llama-server command");
 
-    assert_eq!(arguments[4], "--json");
-    assert!(arguments[5].contains("\"content\":\"Say \\\"hello\\\"\\nnext\""));
+    let json_index = arguments
+        .iter()
+        .position(|argument| argument == "--json")
+        .expect("curl JSON argument");
+    assert!(arguments[json_index + 1].contains("\"content\":\"Say \\\"hello\\\"\\nnext\""));
+}
+
+#[test]
+fn llama_server_lists_models_and_keeps_profile_name_separate() {
+    let (endpoint, requests) = serve_llama_setup();
+    let input = format!("2\n{endpoint}\n2\nlocal-qwen\n\nn\n");
+    let mut reader = Cursor::new(input);
+    let mut writer = Vec::new();
+
+    let profile = collect_profile(&mut reader, &mut writer, std::path::Path::new("."))
+        .expect("collect discovered llama-server profile");
+    let output = String::from_utf8(writer).expect("UTF-8 setup output");
+    let (program, arguments) =
+        render_command(&profile.command, "hello", &[], std::path::Path::new("."))
+            .expect("render discovered llama-server command");
+
+    assert_eq!(profile.name, "local-qwen");
+    assert_eq!(profile.provider, "llama-server");
+    assert_eq!(program, "curl");
+    assert_eq!(arguments.first().map(String::as_str), Some("--disable"));
+    assert!(
+        arguments
+            .iter()
+            .any(|argument| argument.contains("\"model\":\"Qwen3.8-9B-Q4_K_M\""))
+    );
+    assert!(output.contains("Available llama-server models:"));
+    assert!(output.contains("2) Qwen3.8-9B-Q4_K_M"));
+    assert!(
+        requests
+            .recv()
+            .expect("health request")
+            .starts_with("GET /health ")
+    );
+    assert!(
+        requests
+            .recv()
+            .expect("models request")
+            .starts_with("GET /v1/models ")
+    );
+}
+
+#[test]
+fn llama_server_keeps_explicit_default_when_discovery_is_unavailable() {
+    let mut reader = Cursor::new("2\nhttp://127.0.0.1:1\n\nllama-default\n\nn\n");
+    let mut writer = Vec::new();
+
+    let profile = collect_profile(&mut reader, &mut writer, std::path::Path::new("."))
+        .expect("collect default llama-server profile");
+    let (_, arguments) = render_command(&profile.command, "hello", &[], std::path::Path::new("."))
+        .expect("render default llama-server command");
+
+    assert_eq!(profile.name, "llama-default");
+    assert!(
+        arguments
+            .iter()
+            .any(|argument| argument.contains("\"model\":\"default\""))
+    );
+}
+
+#[test]
+fn llama_server_accepts_an_advertised_numeric_model_id() {
+    let (endpoint, _) = serve_llama_setup();
+    let input = format!("2\n{endpoint}\n42\nnumeric-model\n\nn\n");
+    let mut reader = Cursor::new(input);
+    let mut writer = Vec::new();
+
+    let profile = collect_profile(&mut reader, &mut writer, std::path::Path::new("."))
+        .expect("collect numeric llama-server model");
+    let (_, arguments) = render_command(&profile.command, "hello", &[], std::path::Path::new("."))
+        .expect("render numeric llama-server command");
+
+    assert!(
+        arguments
+            .iter()
+            .any(|argument| argument.contains("\"model\":\"42\""))
+    );
+}
+
+#[test]
+fn llama_server_rejects_zero_for_forced_list_selection() {
+    let (endpoint, _) = serve_llama_setup();
+    let input = format!("2\n{endpoint}\n#0\n");
+    let mut reader = Cursor::new(input);
+    let mut writer = Vec::new();
+
+    let error = collect_profile(&mut reader, &mut writer, std::path::Path::new("."))
+        .expect_err("reject zero-based list selection");
+
+    assert!(error.to_string().contains("number from 1 to 3"));
+}
+
+#[test]
+fn llama_server_rejects_template_tokens_in_manual_model_ids() {
+    let mut reader = Cursor::new("2\nhttp://127.0.0.1:1\nx{prompt_json}y\n");
+    let mut writer = Vec::new();
+
+    let error = collect_profile(&mut reader, &mut writer, std::path::Path::new("."))
+        .expect_err("reject template-bearing model ID");
+
+    assert!(error.to_string().contains("without braces"));
 }
 
 #[test]

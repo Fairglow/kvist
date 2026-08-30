@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeSet,
     fs,
     io::{BufRead, Write},
     os::unix::fs::PermissionsExt,
@@ -7,10 +8,17 @@ use std::{
     time::Duration,
 };
 
+use serde_json::Value;
+
 use crate::{
     CommandSpec, Error, ModelProfile, Result, SupervisionPolicy, command::json_string,
-    render_command, run_supervised, upsert_profile,
+    profile::is_valid_profile_name, render_command, run_supervised, upsert_profile,
 };
+
+const LLAMA_SERVER_DEFAULT_URL: &str = "http://127.0.0.1:9931";
+const MAX_DISCOVERY_BYTES: usize = 64 * 1024;
+const MAX_DISCOVERED_MODELS: usize = 128;
+const MAX_MODEL_ID_BYTES: usize = 256;
 
 /// Collects and optionally verifies one reusable provider profile.
 pub fn collect_profile<R: BufRead, W: Write>(
@@ -22,7 +30,7 @@ pub fn collect_profile<R: BufRead, W: Write>(
         writer,
         "Select model provider:\n\
            1) Local llama-cli (direct binary execution)\n\
-           2) Local llama-server (HTTP API - default localhost:8080)\n\
+           2) Local llama-server (HTTP API - default 127.0.0.1:9931)\n\
            3) Ollama (HTTP API - default localhost:11434)\n\
            4) Copilot (CLI wrapper)\n\
            5) Gemini (CLI wrapper)\n\
@@ -175,19 +183,27 @@ fn configure_profile<R: BufRead, W: Write>(
                 reader,
                 writer,
                 "llama-server base URL",
-                "http://localhost:8080",
+                LLAMA_SERVER_DEFAULT_URL,
             )?;
             validate_probe_url(&url)?;
-            probe_and_report(&url, writer)?;
-            let name = prompt_with_default(reader, writer, "Model and profile name", "default")?;
+            let url = url.trim_end_matches('/');
+            probe_and_report(&format!("{url}/health"), writer)?;
+            let model = select_llama_server_model(reader, writer, url)?;
+            let profile_default = if is_valid_profile_name(&model) {
+                model.as_str()
+            } else {
+                "llama-server"
+            };
+            let name = prompt_with_default(reader, writer, "Profile name", profile_default)?;
             let request = format!(
                 "{{\"model\":{},\"messages\":[{{\"role\":\"user\",\"content\":{{prompt_json}}}}]}}",
-                json_string(&name)
+                json_string(&model)
             );
+            let endpoint = command_argument(&format!("{url}/v1/chat/completions"));
             let default = format!(
-                "curl --silent --fail --request POST --json {} -- \
-                 {url}/v1/chat/completions",
-                command_argument(&request)
+                "curl --disable --silent --show-error --fail-with-body --request POST --json {} -- \
+                 {endpoint}",
+                command_argument(&request),
             );
             let command = prompt_with_default(reader, writer, "Command template", &default)?;
             (name, command)
@@ -391,7 +407,15 @@ fn resolve_setup_file(path: &Path, description: &str) -> Result<PathBuf> {
 fn probe_and_report<W: Write>(url: &str, writer: &mut W) -> Result<()> {
     write_output(writer, &format!("Probing `{url}`...\n"))?;
     let responsive = Command::new("curl")
-        .args(["--silent", "--fail", "--max-time", "2", "--", url])
+        .args([
+            "--disable",
+            "--silent",
+            "--fail",
+            "--max-time",
+            "2",
+            "--",
+            url,
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -404,6 +428,136 @@ fn probe_and_report<W: Write>(url: &str, writer: &mut W) -> Result<()> {
             "Warning: endpoint probe failed; the model test can verify the full command.\n"
         },
     )
+}
+
+fn select_llama_server_model<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    base_url: &str,
+) -> Result<String> {
+    let models = match discover_llama_server_models(base_url) {
+        Ok(models) => models,
+        Err(reason) => {
+            write_output(
+                writer,
+                &format!(
+                    "Warning: could not list llama-server models ({reason}); \
+                     enter a model ID manually.\n"
+                ),
+            )?;
+            Vec::new()
+        }
+    };
+
+    let model = if models.is_empty() {
+        prompt_with_default(reader, writer, "Model ID", "default")?
+    } else {
+        write_output(writer, "Available llama-server models:\n")?;
+        for (index, model) in models.iter().enumerate() {
+            write_output(writer, &format!("  {}) {model}\n", index + 1))?;
+        }
+        let selection = prompt_with_default(
+            reader,
+            writer,
+            "Select model by number, #number, or enter an exact model ID",
+            "default",
+        )?;
+        if models.iter().any(|model| model == &selection) {
+            selection
+        } else if let Some(index) = selection
+            .strip_prefix('#')
+            .and_then(|value| value.parse::<usize>().ok())
+        {
+            if (1..=models.len()).contains(&index) {
+                models[index - 1].clone()
+            } else {
+                return Err(invalid_model_selection(models.len()));
+            }
+        } else {
+            match selection.parse::<usize>() {
+                Ok(index) if (1..=models.len()).contains(&index) => models[index - 1].clone(),
+                Ok(_) => return Err(invalid_model_selection(models.len())),
+                Err(_) => selection,
+            }
+        }
+    };
+    validate_model_id(&model)?;
+    Ok(model)
+}
+
+fn invalid_model_selection(model_count: usize) -> Error {
+    Error::ProfileSetup {
+        reason: format!(
+            "model selection must be an advertised exact ID, a number from 1 to {model_count}, \
+             # followed by such a number, or another exact model ID"
+        ),
+    }
+}
+
+fn discover_llama_server_models(base_url: &str) -> std::result::Result<Vec<String>, &'static str> {
+    let url = format!("{base_url}/v1/models");
+    let output = Command::new("curl")
+        .args([
+            "--disable",
+            "--silent",
+            "--fail",
+            "--max-time",
+            "5",
+            "--max-filesize",
+            &MAX_DISCOVERY_BYTES.to_string(),
+            "--",
+            &url,
+        ])
+        .stderr(Stdio::null())
+        .output()
+        .map_err(|_| "curl could not be executed")?;
+    if !output.status.success() {
+        return Err("the model-list endpoint returned a failure");
+    }
+    if output.stdout.len() > MAX_DISCOVERY_BYTES {
+        return Err("the model-list response exceeded 65536 bytes");
+    }
+
+    let root = serde_json::from_slice::<Value>(&output.stdout)
+        .map_err(|_| "the model-list response was not valid JSON")?;
+    let data = root
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or("the model-list response had no data array")?;
+    let mut seen = BTreeSet::new();
+    let mut models = Vec::new();
+    for entry in data {
+        let model = entry
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or("a model-list entry had no string id")?;
+        validate_discovered_model_id(model)?;
+        if seen.insert(model.to_owned()) {
+            if models.len() >= MAX_DISCOVERED_MODELS {
+                return Err("the model-list response exceeded 128 unique models");
+            }
+            models.push(model.to_owned());
+        }
+    }
+    Ok(models)
+}
+
+fn validate_discovered_model_id(model: &str) -> std::result::Result<(), &'static str> {
+    if model.is_empty()
+        || model.len() > MAX_MODEL_ID_BYTES
+        || !model
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() && !matches!(byte, b'{' | b'}'))
+    {
+        return Err("a model ID was not 1-256 printable ASCII bytes without braces");
+    }
+    Ok(())
+}
+
+fn validate_model_id(model: &str) -> Result<()> {
+    validate_discovered_model_id(model).map_err(|reason| Error::ProfileSetup {
+        reason: format!("invalid llama-server model ID: {reason}"),
+    })
 }
 
 fn validate_probe_url(url: &str) -> Result<()> {
