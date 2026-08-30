@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use supervised_agent::render_command;
+use agent_runtime::render_command;
 
 #[test]
 fn renders_prompt_context_and_target_without_a_shell() {

@@ -220,11 +220,23 @@ impl ModelTransport for DirectModelTransport {
     ) -> Result<ModelTurn> {
         let mut decoder = StreamDecoder::new(self.provider, request);
         let decode_deadline = Instant::now() + self.deadline;
+        let mut deliver = |event| {
+            check_cancelled(cancellation)?;
+            check_deadline(decode_deadline)?;
+            let result = on_event(event);
+            check_cancelled(cancellation)?;
+            check_deadline(decode_deadline)?;
+            result
+        };
         self.execute_with_body(request, true, cancellation, &mut |chunk| {
-            decoder.push(chunk, cancellation, decode_deadline, on_event)
+            decoder.push(chunk, cancellation, decode_deadline, &mut deliver)
         })?;
         check_cancelled(cancellation)?;
-        decoder.finish(on_event)
+        check_deadline(decode_deadline)?;
+        let turn = decoder.finish(&mut deliver)?;
+        check_cancelled(cancellation)?;
+        check_deadline(decode_deadline)?;
+        Ok(turn)
     }
 
     fn deadline(&self) -> Duration {
@@ -324,7 +336,7 @@ fn invalid_endpoint<T>(reason: &str) -> Result<T> {
     })
 }
 
-fn validate_request(request: &ModelRequest) -> Result<()> {
+pub(crate) fn validate_request(request: &ModelRequest) -> Result<()> {
     if request.model.trim().is_empty() || request.model.len() > 256 || !request.model.is_ascii() {
         return invalid_request("model must be nonblank ASCII no longer than 256 bytes");
     }
@@ -936,7 +948,8 @@ fn parse_openai_unary(body: &[u8], request: &ModelRequest) -> Result<ModelTurn> 
         provider: LocalModelProvider::LlamaServer,
         model: optional_bounded_string(root.get("model"), "model identity", 256)?
             .unwrap_or_else(|| request.model.clone()),
-        provider_request_id: optional_bounded_string(root.get("id"), "request identity", 256)?,
+        response_id: optional_bounded_string(root.get("id"), "response identity", 256)?,
+        provider_request_id: None,
         usage: parse_openai_usage(root.get("usage"))?,
     })
 }
@@ -963,6 +976,7 @@ fn parse_ollama_unary(body: &[u8], request: &ModelRequest) -> Result<ModelTurn> 
         provider: LocalModelProvider::Ollama,
         model: optional_bounded_string(root.get("model"), "model identity", 256)?
             .unwrap_or_else(|| request.model.clone()),
+        response_id: None,
         provider_request_id: None,
         usage: parse_ollama_usage(&root)?,
     })
@@ -1143,7 +1157,8 @@ impl OpenAiStreamState {
             tool_intents,
             provider: LocalModelProvider::LlamaServer,
             model: self.model.unwrap_or(self.requested_model),
-            provider_request_id: self.request_id,
+            response_id: self.request_id,
+            provider_request_id: None,
             usage: self.usage,
         })
     }
@@ -1175,10 +1190,10 @@ impl OllamaStreamState {
             let mut calls =
                 parse_ollama_tool_calls(message.get("tool_calls"), self.tool_intents.len())?;
             for call in &calls {
-                if let Some(provider_id) = &call.provider_id {
-                    if !self.provider_ids.insert(provider_id.clone()) {
-                        return Err(Error::DuplicateToolCall);
-                    }
+                if let Some(provider_id) = &call.provider_id
+                    && !self.provider_ids.insert(provider_id.clone())
+                {
+                    return Err(Error::DuplicateToolCall);
                 }
             }
             self.tool_intents.append(&mut calls);
@@ -1209,6 +1224,7 @@ impl OllamaStreamState {
             tool_intents: self.tool_intents,
             provider: LocalModelProvider::Ollama,
             model: self.model.unwrap_or(self.requested_model),
+            response_id: None,
             provider_request_id: None,
             usage: self.usage,
         })

@@ -82,9 +82,9 @@ pub enum KvistError {
         /// Actionable setup diagnostic.
         reason: String,
     },
-    /// The reusable supervised-agent runtime rejected or failed an operation.
+    /// The reusable agent runtime rejected or failed an operation.
     #[error(transparent)]
-    SupervisedAgent(#[from] supervised_agent::Error),
+    AgentRuntime(#[from] agent_runtime::Error),
     /// A project is not safe for `init` to modify.
     #[error(
         "cannot initialize `{project_dir}` because its Kvist project state is {state}; \

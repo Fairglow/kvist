@@ -464,12 +464,12 @@ fn monitor(
         if cancellation.requested() {
             return Err(Error::Cancelled);
         }
-        if let Some(timeout) = policy.attempt_timeout {
-            if started.elapsed() >= timeout {
-                return Err(Error::AttemptTimedOut {
-                    max_milliseconds: timeout.as_millis(),
-                });
-            }
+        if let Some(timeout) = policy.attempt_timeout
+            && started.elapsed() >= timeout
+        {
+            return Err(Error::AttemptTimedOut {
+                max_milliseconds: timeout.as_millis(),
+            });
         }
         if let Some(status) = child.try_wait().map_err(|source| Error::Io {
             operation: "inspect supervised command status",

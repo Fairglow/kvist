@@ -1,4 +1,4 @@
-# Supervised Agent Architecture
+# Agent Runtime Architecture
 
 ## Decision
 
@@ -39,7 +39,7 @@ provider-specific switches.
 
 ## Ownership topology
 
-The standalone `supervised-agent` crate owns the reusable runtime mechanism:
+The standalone `agent-runtime` crate owns the reusable runtime mechanism:
 backend classification, capability state, canonical model messages and turns,
 tool descriptors, untrusted tool intents and results, bounded loop state,
 broker sequencing, execution-backend interfaces and reusable Linux
@@ -53,8 +53,8 @@ canonical compliance evidence. The standalone interfaces accept that authority
 through narrow traits; another application may provide its own policy and
 evidence services without depending on Kvist.
 
-The dependency direction is one way: Kvist depends on `supervised-agent`.
-`supervised-agent` never imports Kvist types. Third-party framework types remain
+The dependency direction is one way: Kvist depends on `agent-runtime`.
+`agent-runtime` never imports Kvist types. Third-party framework types remain
 behind private adapters, so neither side depends on Rig as a public contract.
 
 ## Layers and authority
@@ -211,19 +211,20 @@ the trusted policy boundary.
 
 Existing projects are useful at different boundaries:
 
-- Rig is a future narrow transport candidate, but `rig-core` 0.42.0 is rejected
-  by the Rust 1.85 gate; its large preliminary dependency graph is an additional
-  warning.
+- Rig is an optional narrow transport implementation. Exactly pinned
+  `rig-core` 0.42.0 is isolated behind the `rig-transport` Cargo feature and
+  component-owned canonical types. The direct adapter remains the default,
+  fallback, and conformance baseline.
 - Goose is a valuable Rust agent/runtime reference and possible external agent.
 - Aider is a useful patch-oriented external agent and conformance benchmark.
 - OpenHands is a reference for separating control and execution environments.
 - Cline is a possible structured external-agent adapter.
 - Continue is a useful source of local-model compatibility experience.
 
-Kvist will not import a complete framework merely to obtain provider
-conversion. Dependencies must preserve the authority split above, pass the
-project MSRV and supply-chain gates, and remain replaceable behind standalone
-canonical types.
+Kvist imports only Rig's core provider conversion, not its agent runtime.
+Dependencies must preserve the authority split above, pass the project MSRV
+and supply-chain gates, and remain replaceable behind standalone canonical
+types.
 
 ## Compatibility lessons
 
@@ -247,9 +248,9 @@ Kvist therefore requires:
 2. Implement transactional workspaces and strict Linux execution.
 3. Define standalone-owned canonical model, capability, tool-intent, and
    runtime-event contracts, plus the host authority traits they consume.
-4. Complete independent security and compliance review of the implemented
-   private direct local HTTP transport; reevaluate a later immutable Rig release
-   only after MSRV and dependency preflight passes.
+4. Complete independent security and compliance review of the direct local
+   HTTP transport and exactly pinned optional Rig transport before either
+   becomes a dependency of the native loop.
 5. Implement the typed broker mechanism and Kvist policy, grant, binding, and
    compliance-evidence services against those traits.
 6. Implement a bounded native loop using the selected transport.
@@ -257,4 +258,4 @@ Kvist therefore requires:
 8. Add MCP and ACP adapters only after the trusted boundaries exist.
 
 The durable task chains are maintained in
-`src/supervised_agent/TODOS.yaml`.
+`src/agent_runtime/TODOS.yaml`.

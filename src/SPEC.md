@@ -29,7 +29,7 @@ It accepts exactly one explicit source: positional text, `--file`, or
 `--editor`. With no explicit source it reads redirected standard input, while
 an interactive terminal offers to open the configured editor before falling
 back to terminal input. Direct prompt execution is an explicitly acknowledged
-Linux host operation delegated to the standalone `supervised-agent` library;
+Linux host operation delegated to the standalone `agent-runtime` library;
 it is not represented as sandboxed. `kvist agent setup` uses the standalone
 component's provider-profile setup or loads an existing standalone profile,
 assigns its exact name and command to selected Kvist roles, and creates or
@@ -151,7 +151,7 @@ inputs fail before an agent process starts.
 that the configured provider inherits the invoking user's host authority and
 that neither retry notices nor supervision roll back filesystem or external
 side effects. Kvist renders a new provider command for every attempt through
-the standalone `supervised-agent` library. After an idle timeout or detected
+the standalone `agent-runtime` library. After an idle timeout or detected
 output loop, a retry appends a deterministic notice to the prompt stating the
 attempt number, prior failure, and possibility of prior side effects. Nonzero
 process exits, spawn failures, output failures, and policy/configuration errors
@@ -160,8 +160,8 @@ bounded combined-output limit.
 
 Prompt acquisition, shell-free command-template rendering, loop detection,
 idle supervision, process termination, retry context, and the standalone
-`supervised-agent run` command are owned by the child component at
-`supervised_agent/`. Kvist retains role/model resolution, architectural context
+`agent-run run` command are owned by the child component at
+`agent_runtime/`. Kvist retains role/model resolution, architectural context
 selection, task lifecycle, sandbox approval, and durable component evidence.
 The child component's host-execution mode is a recovery and reliability aid,
 not an isolation boundary.
@@ -181,7 +181,7 @@ model transports but cannot replace these Kvist-owned authority boundaries or
 appear in public contracts.
 
 `kvist agent setup` first selects between collecting a provider profile through
-the reusable `supervised_agent` setup API and loading a named profile from the
+the reusable `agent_runtime` setup API and loading a named profile from the
 standalone user store. Collection obtains a nonblank profile name and command
 template. CLI providers probe their conventional executable name, then request
 an explicit executable or compatible wrapper path when it is unavailable,

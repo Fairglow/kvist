@@ -4,9 +4,9 @@ use std::path::Path;
 
 use crate::Result;
 
-pub use supervised_agent::MAX_PROMPT_BYTES;
+pub use agent_runtime::MAX_PROMPT_BYTES;
 
-/// Resolves one prompt through the standalone supervised-agent library.
+/// Resolves one prompt through the standalone agent-runtime library.
 pub fn resolve(prompt: Option<String>, file: Option<&Path>, use_editor: bool) -> Result<String> {
-    supervised_agent::resolve_prompt(prompt, file, use_editor).map_err(Into::into)
+    agent_runtime::resolve_prompt(prompt, file, use_editor).map_err(Into::into)
 }

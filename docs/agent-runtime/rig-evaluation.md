@@ -5,12 +5,12 @@
 Evaluation date: 2026-08-30.
 
 Rig remains directionally promising as a private implementation of the
-`supervised-agent` model-transport boundary. The evaluated `rig-core` 0.42.0
-release is rejected because it fails Kvist's Rust 1.85 gate. Its large
-dependency graph is an additional warning, but was measured against bare Tokio
-rather than the not-yet-implemented direct adapter and is not presented as a
-marginal comparison. Rig is also not suitable as Kvist's authorization layer,
-tool broker, execution backend, sandbox, or durable evidence store.
+`agent-runtime` model-transport boundary. Exactly pinned `rig-core` 0.42.0
+is accepted as a non-default prototype behind the `rig-transport` Cargo
+feature after Kvist deliberately raised its MSRV to Rust 1.94, the compiler
+used by that Rig release's repository and CI. The direct transport remains the
+default, fallback, and conformance baseline. Rig is not Kvist's authorization
+layer, tool broker, execution backend, sandbox, or durable evidence store.
 
 The experiment used the immutable published `rig-core` 0.42.0 crate, exactly
 pinned with default features disabled. That release still directly depends on
@@ -22,10 +22,11 @@ Do not adopt the `rig` facade or `rig-agent`. Do not make Rig messages, tools,
 errors, completion requests, provider payloads, or serialized state part of a
 public or durable Kvist interface.
 
-Implement the first local Ollama/llama-server transport directly behind the
-standalone canonical seam. A later immutable Rig release may be reevaluated
-only if a cheap preflight first demonstrates Rust 1.85 compatibility and an
-acceptable dependency graph.
+The optional adapter reuses Ollama and llamafile/OpenAI-compatible conversion
+for local Ollama and llama-server. A component-owned HTTP client enforces
+numeric loopback routing and request/response bounds. Every later immutable Rig
+release requires a new locked compiler, conformance, tracing, and dependency
+review.
 
 ## Evidence baseline
 
@@ -60,8 +61,8 @@ pinning and upgrade conformance are mandatory.
 The current `main` branch has since separated more responsibilities, including
 a sans-I/O `rig-run`, a transport crate, and an MCP adapter. Those changes are
 useful evidence of direction, but they are not evidence about 0.42.0 and cannot
-be used to approve the rejected dependency. They may justify reevaluating a
-later immutable release.
+be used to approve new behavior in the pinned dependency. They may justify
+reevaluating a later immutable release.
 
 Sources for direction only:
 
@@ -80,7 +81,7 @@ usage/finish metadata, and tool-call identity handling.
 
 A private Kvist adapter can:
 
-1. translate a closed `supervised-agent` model request into a Rig request;
+1. translate a closed `agent-runtime` model request into a Rig request;
 2. invoke a selected Rig provider through an approved endpoint;
 3. translate text, structured tool calls, usage, finish reason, model identity,
    provider request identity, and terminal errors into standalone runtime
@@ -195,33 +196,33 @@ The exact prototype dependency is:
 rig-core = { version = "=0.42.0", default-features = false }
 ```
 
-The throwaway 2026-08-30 experiment measured:
+The original throwaway experiment and the integrated adapter measured:
 
 | Gate | Result |
 | --- | --- |
-| Rust 1.85 | **Fail.** `rig-core` itself produced `E0658` errors for unstable let-expression chains. |
-| Current Rust 1.98 | Pass for a linked OpenAI completion path. |
-| Locked package count | Warning. 136 packages versus 8 for a bare Tokio baseline: delta 128. This is not the future marginal comparison against the direct adapter. |
-| Release binary size | Pass. 3,993,408 bytes versus 616,808: delta 3,376,600 bytes, limit 15 MiB. |
+| Rust 1.85 | Historical fail. `rig-core` itself uses Edition 2024 let-chains stabilized in Rust 1.88. |
+| Rust 1.94 | Pass for the complete `agent-runtime --all-features` suite. This is the upstream-tested compiler, not a Rig-declared MSRV. |
+| Current Rust 1.98 | Pass for the integrated unary, streaming, tool-intent, bounds, cancellation, CLI, and tracing tests. |
+| Locked package count | Warning. 180 packages with `rig-transport` versus 52 for the direct default: delta 128, exceeding the normal 75-package gate. Retaining the dependency as optional is the explicit exception; promotion still requires independent review. |
+| Release binary size | Pass. 6,529,656 bytes with `rig-transport` versus 2,281,272 direct-default bytes: delta 4,248,384 bytes, below the 15 MiB limit. |
 | TLS with defaults disabled | As intended for local-only scope: no Rustls, native-tls, or OpenSSL selected. |
 | Advisories | Pass: `cargo deny check advisories`. |
-| Licenses | Pass for transitive dependencies under the documented permissive allowlist. |
+| Licenses | Pass for external dependencies under the documented permissive allowlist. The two workspace packages retain their pre-existing missing-license-field warnings. |
 
-The size measurement deliberately links a real OpenAI completion call so Cargo
-cannot discard the transport path. The baseline includes the same Tokio
-current-thread runtime. These are decision measurements, not production
-benchmarks.
+The integrated measurement builds the actual standalone executable from fresh
+target directories. The package count uses the direct adapter as the marginal
+baseline. These are decision measurements, not production benchmarks.
 
-The MSRV failure is sufficient to reject 0.42.0; raising Kvist's MSRV was
-considered and rejected because the project contract requires Rust 1.85. No
-live model or tool-intent conformance was attempted because it cannot reverse
-that decision.
+Rust 1.85 was a deliberate project policy derived from the first Edition 2024
+release, not a technical requirement of Kvist. The project now supports Rust
+1.94 and current stable instead. Rig itself still declares no MSRV, so every
+upgrade must be requalified rather than assumed compatible.
 
 ## Prototype scope
 
-For a future immutable release, create a non-default internal adapter.
-Production behavior and public APIs do not depend on it until the final
-decision is approved.
+The current release has a non-default internal adapter. Default production
+behavior does not depend on it until independent security and compliance
+reviews approve promotion.
 
 Support:
 
@@ -229,7 +230,7 @@ Support:
 - unary and streamed text;
 - Kvist tool descriptor to provider tool-schema translation;
 - provider tool-call to canonical `ToolIntent` translation;
-- provider/model/request identity, usage, and finish reason;
+- provider/model, response, and transport-request identity, usage, and finish reason;
 - explicit cancellation and deadlines;
 - local Ollama and llama-server;
 - one deterministic fake OpenAI-compatible server.
@@ -243,6 +244,23 @@ Reject:
 - image, audio, document, vector, and memory features;
 - Rig-owned persistence;
 - raw provider payloads in default events or evidence.
+
+The adapter additionally rejects non-numeric endpoints, redirects, proxies,
+TLS, multipart transport, requests above 2 MiB, responses above the caller's
+limit, nonterminal unary Ollama responses, overflowing Ollama usage counters,
+unsupported provider content, and unbounded provider metadata. These Ollama
+checks run on bounded JSON or NDJSON before Rig normalization, avoiding known
+0.42.0 acceptance and unchecked-addition behavior. Rig's payload-bearing
+tracing is replaced with a no-op dispatcher for the duration of each framework
+call; a sentinel test verifies that prompts and responses do not reach the
+caller's tracing subscriber.
+
+The synchronous adapter rejects calls made from an active Tokio runtime rather
+than nesting `block_on`; async hosts must use a dedicated blocking worker. Its
+stream callback is caller-controlled synchronous code. Cancellation and
+deadline expiry are checked before and after every callback, but cannot
+preempt a callback while it executes, so callbacks must remain bounded and
+nonblocking until the deferred stream-interface work replaces this boundary.
 
 ## Conformance tests
 
@@ -285,7 +303,7 @@ Unavailable live services or models are recorded as `unevaluated`, never
 ### Build and supply chain
 
 - locked Linux build and tests;
-- Rust 1.85 build;
+- Rust 1.94 and current-stable builds;
 - complete feature and dependency inventory;
 - no facade, `rig-agent`, derive, vector, memory, or provider companion crate;
 - local-only build has no selected TLS backend and makes no HTTPS claim;
@@ -304,7 +322,7 @@ packages with:
 
 ```sh
 cargo tree --locked --target x86_64-unknown-linux-gnu \
-  -p supervised-agent -e normal,build --prefix none |
+  -p agent-runtime -e normal,build --prefix none |
   sed 's/ (\*)$//' | sort -u | wc -l
 ```
 
@@ -316,9 +334,10 @@ features, counts, sizes, license result, advisory result, and exceptions.
 
 ## Go/no-go gates
 
-Adopt a future release only if:
+Promote or upgrade the Rig adapter only if:
 
-1. the exact crate and resolved dependencies build and test on Rust 1.85;
+1. the exact crate and resolved dependencies build and test on Rust 1.94 and
+   current stable;
 2. the private adapter exposes only standalone-owned canonical types;
 3. endpoint, credentials, capability decisions, cancellation, deadlines, and
    redaction remain host-controlled;
@@ -331,11 +350,11 @@ Adopt a future release only if:
    objective gates;
 9. an exact-version upgrade cannot bypass the conformance suite.
 
-The 0.42.0 experiment failed gate 1. Its dependency was not added to Kvist. The
-approved next path is a small direct local HTTP adapter, preserving the same
-conformance suite and private seam. A no-go result is a successful experiment
-because its evidence prevents an unsuitable dependency from becoming
-structural.
+The 0.42.0 adapter passes the implemented compiler and fake-provider gates and
+is retained as optional. Its 128-package marginal increase requires explicit
+review before promotion. Live Ollama and llama-server model matrices,
+independent security audit, and compliance review remain pending. A future
+no-go result leaves the direct adapter and canonical seam unchanged.
 
 ## Direction assessment
 
@@ -352,8 +371,9 @@ essential accepted adapter proves impossible upstream.
 The immediate durable target is:
 
 ```text
-supervised-agent canonical model contract
-    -> private direct local HTTP adapter
+agent-runtime canonical model contract
+    -> direct local HTTP adapter (default/fallback)
+    -> optional pinned Rig adapter
         -> approved local provider
 
 Kvist host policy
@@ -362,5 +382,6 @@ Kvist host policy
             -> durable Kvist evidence
 ```
 
-A future Rig adapter may replace only the direct transport box after all gates
-pass.
+The optional Rig adapter may become the preferred transport only after all
+promotion gates pass; it never replaces the canonical contract or host-owned
+authority layers.

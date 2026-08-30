@@ -3,8 +3,8 @@
 
 ## Package and public API
 
-The `supervised-agent` Cargo package builds the `supervised_agent` library and
-the `supervised-agent` binary. Compilation emits an error on targets other than
+The `agent-runtime` Cargo package builds the `agent_runtime` library and
+the `agent-run` binary. Compilation emits an error on targets other than
 Linux. The library publicly exports prompt resolution, command rendering, raw
 command splitting, supervision policy, attempt context, command specification,
 execution report, retry cause, and its error/result types.
@@ -25,7 +25,9 @@ The public model API contains canonical messages, tool descriptors, tool
 choice, untrusted tool intents, model turns, finish reasons, usage,
 stream events, a cloneable cancellation token, and the `ModelTransport` trait.
 `DirectModelTransport` implements that trait for Ollama and llama-server
-without exposing provider response types.
+without exposing provider response types. With the non-default
+`rig-transport` feature, `RigModelTransport` implements the same public
+component-owned boundary over exactly pinned `rig-core` 0.42.0.
 
 ## Direct local model transport
 
@@ -77,6 +79,62 @@ No TLS package is selected. The machine-readable dependency policy is
 The two workspace packages still lack Cargo license expressions, so an
 unqualified cargo-deny license run reports those pre-existing metadata gaps.
 
+## Optional Rig model transport
+
+`RigModelTransport` supports the same typed Ollama and llama-server provider
+selection behind the `rig-transport` Cargo feature. It uses Rig's Ollama and
+llamafile/OpenAI-compatible completion models, but converts every request,
+response, stream event, tool descriptor, and tool call at the
+`agent_runtime` boundary. No Rig type appears in the public canonical
+request or result, and no Rig tool implementation is registered.
+
+Construction accepts only numeric HTTP loopback socket addresses with an
+explicit nonzero port. It rejects hostnames, HTTPS, credentials, paths,
+queries, and fragments. Its Reqwest client disables redirects and environment
+proxies. A component-owned Rig `HttpClientExt` implementation rejects
+serialized requests above 2 MiB and bounds both declared and incrementally
+read unary and streaming responses before provider normalization. Multipart
+requests are unsupported.
+
+The synchronous trait implementation creates a current-thread Tokio runtime
+per call and rejects invocation from an active Tokio runtime rather than
+panicking in nested `block_on`. An outer timeout covers client construction,
+connection, request, decode, and stream consumption. Cooperative cancellation
+is polled every ten milliseconds. Synchronous stream callbacks are checked for
+cancellation and deadline expiry immediately before and after invocation, but
+cannot be preempted while caller code is executing. Rig errors are reduced to
+bounded canonical status, request, response-limit, malformed-response,
+timeout, cancellation, or framework-operation failures without retaining
+provider response bodies.
+
+Before Rig normalizes Ollama responses, the bounded client requires unary
+responses to be terminal and rejects checked overflow of Ollama's input and
+output usage counters in both JSON and incrementally framed NDJSON. This
+prevents Rig 0.42.0 from accepting `done: false` unary responses or panicking
+while adding provider-controlled `u64` counters.
+
+Canonical `none` tool choice removes tool definitions before Rig sees the
+request. Ollama `required` fails before network access because Rig 0.42.0
+cannot preserve it. Assistant tool calls retain provider identities in a
+turn-local map so later canonical tool results replay the provider-issued ID.
+Output calls are object-validated, deduplicated, and returned only as untrusted
+`ToolIntent`s. Response-scoped IDs and transport request IDs remain distinct.
+Provider model, identity, and other-finish metadata is bounded before entering
+the canonical turn.
+
+Rig 0.42.0 emits payload-bearing tracing independently of its content telemetry
+flag. Each framework call therefore runs under a no-op tracing dispatcher; a
+TRACE sentinel test confirms prompt and response values do not reach the
+caller's subscriber. This also suppresses callback-generated tracing while the
+stream is being polled and remains a documented prototype limitation.
+
+The optional graph contains 180 target-specific normal/build packages versus
+52 for the direct default, a delta of 128. The unstripped release executable is
+6,529,656 bytes versus 2,281,272 bytes, a delta of 4,248,384 bytes. No TLS
+backend is selected. Rust 1.94 and current Rust 1.98 build the selected feature;
+Rust 1.94 is the supported floor because it is the exact release toolchain Rig
+tests, while Rig itself declares no MSRV.
+
 ## Profile configuration and setup
 
 Standalone profile configuration is TOML limited to 64 KiB with integer
@@ -88,7 +146,12 @@ wrong type, unsupported schema, malformed command, link-like file, non-regular
 file, invalid UTF-8, and oversized input.
 Default discovery accepts only an absolute nonempty `XDG_CONFIG_HOME`, then an
 absolute nonempty `HOME` with `.config`; profile resolution never depends on
-the working directory.
+the working directory. It selects `agent-runtime/config.toml` when that path
+exists or when neither store exists. If the canonical file is absent and the
+corresponding former `supervised-agent/config.toml` exists, it selects that
+legacy file. An existing canonical path always takes precedence, including
+when later validation rejects it, so invalid canonical state cannot silently
+fall through to legacy configuration.
 
 Profile updates parse and validate existing content before mutation. They
 replace only the matching table's provider and command or append a new table,
@@ -172,8 +235,8 @@ repeating non-idempotent work. The callback decides where that notice is used.
 
 ## Standalone command
 
-`supervised-agent setup` runs profile collection and writes the result to an
-explicit `--config` path or the Linux user default. `supervised-agent run`
+`agent-run setup` runs profile collection and writes the result to an
+explicit `--config` path or the Linux user default. `agent-run run`
 accepts positional, file, editor, or redirected prompt input plus exactly one
 explicit command template or named stored profile. It also accepts a profile
 configuration override, repeated context paths, a working directory, idle
@@ -182,9 +245,11 @@ duration, loop detection, retry count, and output limit. Without
 the configured command. On retries it appends the generated notice to the
 prompt before rendering a fresh command.
 
-`supervised-agent model` accepts the same prompt source alternatives plus
-provider, loopback endpoint, model, deadline, response limit, and streaming
-selection. It sends no tools and prints only model text.
+`agent-run model` accepts the same prompt source alternatives plus
+transport, provider, loopback endpoint, model, deadline, response limit, and
+streaming selection. It sends no tools and prints only model text. The
+transport defaults to `direct`; `--transport rig` exists only when compiled
+with `rig-transport`.
 
 ## Observed limitations
 
@@ -196,8 +261,14 @@ tool broker, provider network broker, or macOS/Windows backend. Its
 acknowledgement and retry notice communicate risk but do not enforce isolation
 or idempotency.
 
-The direct model transport is synchronous and intended for a dedicated
-execution worker. It supports local unencrypted HTTP only and has no hosted
+Both model transports are synchronous and intended for a dedicated execution
+worker. They support local unencrypted HTTP only and have no hosted
 provider, TLS, credential, proxy, redirect, HTTP/2, compression, multimodal,
 parallel-tool, or model-discovery behavior. Live Ollama and llama-server model
-matrices remain unevaluated when no local model/server is available.
+matrices remain unevaluated when no local model/server is available. The Rig
+prototype additionally suppresses caller tracing during framework polling and
+exceeds the normal marginal package-count gate; it remains non-default pending
+independent security and compliance review. A synchronous stream callback
+cannot be forcibly interrupted while executing; deadline and cancellation are
+reported when it returns, so callers must keep delivery bounded and
+nonblocking.

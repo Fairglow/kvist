@@ -44,7 +44,7 @@ The available commands are:
   `--editor` invokes a configured editor on a temporary Markdown file, and
   omitted input reads redirected standard input or offers an editor at a
   terminal. Missing host acknowledgement refuses before prompt acquisition.
-* `kvist agent setup` collects a provider profile through `supervised_agent` or
+* `kvist agent setup` collects a provider profile through `agent_runtime` or
   loads one from an explicit/default standalone profile store, assigns its
   exact name and command to selected roles, and creates or updates project-local
   or user-global Kvist TOML.
@@ -59,7 +59,7 @@ inspect queue content directly in the durable YAML file; `doctor` reports only
 the root queue artifact's validity.
 
 The crate emits a compile-time error on non-Linux targets. The repository
-workspace includes a separate `supervised-agent` package, while the root
+workspace includes a separate `agent-runtime` package, while the root
 package remains the default for unqualified Cargo commands.
 
 ## Root artifacts and project state
@@ -360,7 +360,7 @@ Missing configuration, runner spawn failures, or an invalid acknowledgement
 fail before a lock or task-state transition. A test policy using project
 working directory is rejected by the component-only protocol.
 
-Agent templates are delegated to the `supervised_agent` library and parsed into
+Agent templates are delegated to the `agent_runtime` library and parsed into
 a program and arguments without a shell. Single and double quotes group
 arguments. The supported substitutions are `{prompt}`, `{context_files}`, and
 `{target_directory}`; an empty context list also removes an immediately
@@ -386,7 +386,7 @@ in user state. A task run refuses if its policy is absent, any approved
 execution input differs, or a repository-contained legacy record is present.
 Verification result records are appended to the task's attempt JSONL file.
 
-Custom prompt acquisition is delegated to `supervised_agent`, limited to 1 MiB,
+Custom prompt acquisition is delegated to `agent_runtime`, limited to 1 MiB,
 and rejects empty or non-UTF-8 text. File input checks for a regular non-link
 file before reading. Editor input uses `VISUAL`, then `EDITOR`, then `vi` and
 invokes the parsed editor command directly. Custom prompt execution requires
@@ -397,7 +397,7 @@ the supervised command and terminate its Linux process group before returning.
 Generic profile setup, conventional CLI version probes, provider-preserving
 wrapper fallback, maintained provider templates, endpoint probes, wrapper
 validation, host-acknowledged verification, and standalone profile persistence
-are delegated to `supervised_agent`. Kvist setup either calls that collection
+are delegated to `agent_runtime`. Kvist setup either calls that collection
 API or loads a named standalone profile, then copies its exact name and command
 into selected role model lists. It does not dynamically read standalone
 profiles during execution. Kvist configuration updates use `toml_edit` to

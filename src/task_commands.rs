@@ -1006,12 +1006,12 @@ fn detect_language(component_dir: &Path) -> &'static str {
             if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
                 return "rust";
             }
-            if path.is_dir() {
-                if let Ok(sub_entries) = fs::read_dir(&path) {
-                    for sub_entry in sub_entries.flatten() {
-                        if sub_entry.path().extension().and_then(|ext| ext.to_str()) == Some("rs") {
-                            return "rust";
-                        }
+            if path.is_dir()
+                && let Ok(sub_entries) = fs::read_dir(&path)
+            {
+                for sub_entry in sub_entries.flatten() {
+                    if sub_entry.path().extension().and_then(|ext| ext.to_str()) == Some("rs") {
+                        return "rust";
                     }
                 }
             }
@@ -1031,12 +1031,12 @@ fn detect_language(component_dir: &Path) -> &'static str {
             if path.extension().and_then(|ext| ext.to_str()) == Some("py") {
                 return "python";
             }
-            if path.is_dir() {
-                if let Ok(sub_entries) = fs::read_dir(&path) {
-                    for sub_entry in sub_entries.flatten() {
-                        if sub_entry.path().extension().and_then(|ext| ext.to_str()) == Some("py") {
-                            return "python";
-                        }
+            if path.is_dir()
+                && let Ok(sub_entries) = fs::read_dir(&path)
+            {
+                for sub_entry in sub_entries.flatten() {
+                    if sub_entry.path().extension().and_then(|ext| ext.to_str()) == Some("py") {
+                        return "python";
                     }
                 }
             }

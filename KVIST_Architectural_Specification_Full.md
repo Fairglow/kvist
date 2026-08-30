@@ -195,14 +195,14 @@ matrix. File watching, web, and editor integrations remain deferred.
 1. **Headless Engine Core (`kvist-cli` in Rust):** Manages tree state,
    `TODOS.yaml` parsing, context slicing, and Kvist-specific execution policy.
    It delegates provider-neutral prompt acquisition and process supervision to
-   the standalone `supervised-agent` component. That component will classify
+   the standalone `agent-runtime` component. That component will classify
    native model, one-shot model, external-agent, and plan-only backends;
    capability support is advertised, independently tested, and policy-enabled
-   separately. Rig 0.42.0 is rejected by the Rust 1.85 gate, so the first local
-   HTTP transport remains a small direct adapter. A
-   later immutable Rig release may be used only behind standalone-owned
-   canonical types after its MSRV, conformance, authority, redaction, and
-   supply-chain gates pass.
+   separately. The small direct local HTTP transport remains the default and
+   fallback. Exactly pinned `rig-core` 0.42.0 may be selected through a
+   non-default adapter after raising the project MSRV to Rig's upstream-tested
+   Rust 1.94 toolchain. Rig remains behind standalone-owned canonical types and
+   cannot own authorization, tool execution, evidence, or sandbox policy.
 2. **Built-in Local Web View (`kvist serve`):** Spins up an embedded lightweight web server (`axum`) serving a single-page web app. Utilizes **Monaco Editor** (VS Code's open-source editor core) to render the interactive collapsible component tree, live progress bars, and compliance diffs.
 3. **Native IDE Alignment (LSP / Watcher):** Since specifications and code are plain Markdown, YAML, and Rust files, users continue using their preferred IDE (VS Code + `rust-analyzer`, Neovim, Zed, RustRover). A lightweight `kvist watch` daemon or LSP sidecar surface spec-staleness diagnostics directly inside the user's editor.
 

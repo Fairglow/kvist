@@ -51,7 +51,7 @@ fn model_command_prompts_a_local_ollama_endpoint() {
         .expect("write response");
     });
 
-    let output = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
         .args([
             "model",
             "--provider",

@@ -201,7 +201,7 @@
 - For Python: Enforce type annotations, PEP-8 formatting, Pydantic or standard data structures, and standard `unittest` / `pytest` suites.
 - Read and inject the corresponding template during `task run` execution based on detected files or explicit configuration.
 
-### TODO AGN-07 — Extract Linux-First Supervised Agent Runtime
+### TODO AGN-07 — Extract Linux-First Agent Runtime
 
 **Context:** Prompt acquisition, provider command rendering, and process
 supervision are useful outside Kvist, while Kvist-specific task state and
@@ -211,7 +211,7 @@ access and cannot currently support trustworthy execution guarantees.
 
 **Acceptance criteria:**
 
-- Create a standalone `supervised-agent` Rust library and CLI in its own
+- Create a standalone `agent-runtime` Rust library and `agent-run` CLI in its own
   component directory, consumed by Kvist as a path dependency.
 - Move bounded prompt acquisition, shell-free command rendering, idle
   supervision, loop detection, and retry context into the reusable component.
@@ -240,7 +240,7 @@ whereas Kvist roles and execution-policy approval are workflow concerns.
 - Move provider-specific collection, custom-wrapper validation, endpoint
   probing, host-acknowledged verification, and profile persistence into
   reusable library APIs.
-- Add `supervised-agent setup` and allow `supervised-agent run --profile NAME`
+- Add `agent-run setup` and allow `agent-run run --profile NAME`
   to use the Linux user profile store.
 - Make `kvist agent setup` reuse profile collection or load an existing
   standalone profile, then materialize the exact selected command into Kvist
@@ -268,30 +268,32 @@ transport work where practical.
 - Implement Kvist task-policy, grant, approved-binding, execution-tier,
   promotion, and compliance-evidence adapters in the root `agn-authority`
   lifecycle chain; child loop tests use deterministic fake host services.
-- Record the exact `rig-core` 0.42.0 no-go: it fails Rust 1.85. Its 128-package
-  delta over bare Tokio is a footprint warning, not the future marginal
-  comparison against the reviewed direct adapter.
+- Keep the exactly pinned `rig-core` 0.42.0 adapter optional behind
+  `rig-transport`. Rust 1.94 is the supported MSRV because it is Rig's
+  upstream-tested release toolchain; Rust 1.85 remains recorded as the
+  historical failure caused by Rust 1.88 let-chain syntax.
 - The first private local Ollama/llama-server transport and text-only
-  `supervised-agent model` command are implemented; complete their independent
+  `agent-run model` command are implemented; complete their independent
   security audit and compliance review before the native loop depends on them.
   Keep the seam replaceable and do not adopt `rig-agent`, Rig tools, MCP
-  conversion, or Rig persistence as Kvist authority.
-- Gate any future immutable Rig release on Rust 1.85, local
-  Ollama/llama-server conformance,
+  conversion, or Rig persistence as Kvist authority. Complete the optional
+  Rig adapter's independent security and compliance reviews before promotion.
+- Gate every future immutable Rig upgrade on locked Rust 1.94 and current
+  stable builds, local Ollama/llama-server conformance,
   structured tool-intent conversion, cancellation, malformed-stream handling,
   TRACE leakage tests, endpoint/credential policy, dependency features,
   advisories, licenses, TLS, and objective dependency/binary-size thresholds.
-- Record an explicit go/no-go result. A failed Rig experiment must leave the
-  canonical interface usable by a small direct provider adapter.
+- Record an explicit promotion decision. A failed Rig experiment or upgrade
+  must leave the canonical interface and direct provider adapter usable.
 - Build the bounded native loop only after the transport, broker, transactional
   workspace, and Linux execution boundaries pass independent review.
 - Harden Gemini, Copilot, and other external agents as whole sandboxed
   processes; provider permission flags are defense in depth, not authorization.
 
 Detailed rationale and task chains are in
-`docs/supervised-agent/architecture.md`,
-`docs/supervised-agent/rig-evaluation.md`, and
-`src/supervised_agent/TODOS.yaml`.
+`docs/agent-runtime/architecture.md`,
+`docs/agent-runtime/rig-evaluation.md`, and
+`src/agent_runtime/TODOS.yaml`.
 
 ### TODO AGN-05 — Configurable Log Retention & Monotonic Naming
 

@@ -1,6 +1,6 @@
 use std::{fs, io::Cursor, os::unix::fs::PermissionsExt};
 
-use supervised_agent::{ModelProfile, collect_profile, render_command, verify_profile};
+use agent_runtime::{ModelProfile, collect_profile, render_command, verify_profile};
 use tempfile::TempDir;
 
 #[test]

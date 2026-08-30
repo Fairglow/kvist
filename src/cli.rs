@@ -343,7 +343,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 allow_host_execution,
             } => {
                 if !allow_host_execution {
-                    return Err(supervised_agent::Error::HostExecutionNotAcknowledged.into());
+                    return Err(agent_runtime::Error::HostExecutionNotAcknowledged.into());
                 }
                 let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
                 execute_prompt(&resolved_prompt, &role, idle_timeout, detect_loops, max_restarts)?;
@@ -590,7 +590,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 allow_host_execution,
             } => {
                 if !allow_host_execution {
-                    return Err(supervised_agent::Error::HostExecutionNotAcknowledged.into());
+                    return Err(agent_runtime::Error::HostExecutionNotAcknowledged.into());
                 }
                 let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
                 execute_prompt(
@@ -783,27 +783,24 @@ fn execute_prompt(
         }
     };
 
-    let policy = supervised_agent::SupervisionPolicy {
+    let policy = agent_runtime::SupervisionPolicy {
         idle_timeout: std::time::Duration::from_secs(idle_timeout),
         attempt_timeout: None,
         detect_loops,
         max_retries: max_restarts,
         max_output_bytes: profile.max_output_bytes,
     };
-    supervised_agent::run_supervised(&policy, |context| {
+    agent_runtime::run_supervised(&policy, |context| {
         let prompt = match context.retry_notice() {
             Some(notice) => format!("{prompt}\n\n{notice}"),
             None => prompt.to_owned(),
         };
         let (program, arguments) =
             crate::agent::get_effective_command(profile, role, &prompt, &[], &current_dir)
-                .map_err(|error| supervised_agent::Error::InvalidCommandTemplate {
+                .map_err(|error| agent_runtime::Error::InvalidCommandTemplate {
                     reason: error.to_string(),
                 })?;
-        Ok(
-            supervised_agent::CommandSpec::new(program, arguments)
-                .in_directory(current_dir.clone()),
-        )
+        Ok(agent_runtime::CommandSpec::new(program, arguments).in_directory(current_dir.clone()))
     })?;
 
     Ok(())

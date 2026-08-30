@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:5edd7bb8cddb0de981ee585c40652d6ca40310acac4cc5abc45087260c4571be"
+  specification_revision: "sha256:278e9d95b52d9ae8956dfa5db9ba30cfa08970a7ae47bce783087cdbf940165c"
   parent_specification:
     path: "../SPEC.md"
-    revision: "sha256:10cf14d843c9a348ef73fb8413e2d0f7b2f690b584449d2663ca2f7a2286eb7d"
+    revision: "sha256:ddea9ca93468a129e0b26a0079c42cf0615ffc8f72f94c9762d5359d3255249a"
   revalidation:
     state: current
-    checked_at: "2026-08-30T09:25:44Z"
+    checked_at: "2026-08-30T16:10:00Z"
     stale_since: null
     causes: []
 tasks:
@@ -31,7 +31,7 @@ tasks:
     blocked_reason: null
     recovery_state: null
   - id: "sa-01-implement-code"
-    title: "Extract supervised agent runtime"
+    title: "Extract agent runtime"
     description: "Implement the reusable library and standalone CLI, move prompt acquisition and command rendering, add typed retry context, and integrate Kvist through the path dependency."
     context: "The failing tests define a provider-neutral host-execution surface while Kvist retains workflow-specific policy and state."
     purpose: "Make supervision independently useful without duplicating or coupling it to Kvist task semantics."
@@ -469,7 +469,7 @@ tasks:
   - id: "sa-06-write-tests"
     title: "Define reusable model setup tests"
     description: "Write failing library and CLI tests for generic named profiles, provider defaults, command verification, formatting-preserving profile persistence, host-execution acknowledgement, and Kvist role binding."
-    context: "Provider and model setup remains embedded in Kvist even though profile creation and verification are useful to every supervised-agent caller."
+    context: "Provider and model setup remains embedded in Kvist even though profile creation and verification are useful to every agent-runtime caller."
     purpose: "Establish the standalone setup contract before moving wizard and configuration behavior across the component boundary."
     expected_outcome: "Tests distinguish reusable provider profiles from Kvist-specific role mappings and fail until both standalone setup and compatibility integration exist."
     kind: test
@@ -487,10 +487,10 @@ tasks:
     recovery_state: null
   - id: "sa-06-implement-code"
     title: "Extract model profiles and setup"
-    description: "Move generic provider defaults, profile validation and verification, formatting-preserving global persistence, and terminal setup into supervised-agent; keep Kvist role bindings and project policy in Kvist."
+    description: "Move generic provider defaults, profile validation and verification, formatting-preserving global persistence, and terminal setup into agent-runtime; keep Kvist role bindings and project policy in Kvist."
     context: "The reusable crate already owns prompting and supervision but standalone users must still configure commands manually."
     purpose: "Make the library and CLI self-contained for discovering, testing, saving, and running named model profiles."
-    expected_outcome: "supervised-agent setup manages reusable profiles, Kvist can bind those profiles to roles, and kvist agent setup remains a compatibility surface without duplicated setup logic."
+    expected_outcome: "agent-run setup manages reusable profiles, Kvist can bind those profiles to roles, and kvist agent setup remains a compatibility surface without duplicated setup logic."
     kind: implementation
     status: completed
     depends_on:
@@ -932,33 +932,33 @@ tasks:
     blocked_reason: null
     recovery_state: null
   - id: "sa-09-write-tests"
-    title: "Define future Rig reevaluation tests"
-    description: "For a newer immutable Rig release that passes preflight, reuse the direct-transport conformance suite and add framework-containment tests for exact features, private types, tool schema/call conversion, cancellation, TRACE sentinels, Rust 1.85, marginal dependencies and binary size, licenses, advisories, and TLS."
-    context: "Rig-core 0.42.0 was rejected decisively because it fails Rust 1.85; its 128-package delta over bare Tokio is a preliminary footprint warning, while a future marginal comparison must use the reviewed direct adapter."
+    title: "Define pinned Rig transport tests"
+    description: "For immutable rig-core 0.42.0, reuse the direct-transport conformance suite and add framework-containment tests for exact features, private types, tool schema/call conversion, cancellation, TRACE sentinels, locked Rust 1.94 and current stable builds, marginal dependencies and binary size, licenses, advisories, and TLS."
+    context: "The project deliberately raises its MSRV to Rig's upstream-tested Rust 1.94 toolchain. The earlier 128-package delta over bare Tokio remains a preliminary footprint warning; the meaningful comparison uses the reviewed direct adapter."
     purpose: "Permit evidence-based reevaluation without exposing Rig types or placing a speculative framework on the native runtime critical path."
-    expected_outcome: "A named immutable successor either passes cheap MSRV and marginal-dependency preflight before tests are written or is recorded as deferred/no-go without changing production dependencies."
+    expected_outcome: "Tests define a removable optional adapter that converts Rig output into canonical text and untrusted tool intents without exposing or invoking Rig tools."
     kind: test
-    status: pending
+    status: completed
     depends_on:
-      - "sa-12-compliance-review"
+      - "sa-12-implement-code"
     requirements:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
       - "SPEC.md#Rig-adoption-decision"
       - "SPEC.md#Transport-dependency-gates"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-08-30T07:33:10Z"
-      completed_at: null
+      updated_at: "2026-08-30T11:50:26Z"
+      completed_at: "2026-08-30T11:50:26Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-09-implement-code"
-    title: "Prototype a future private Rig transport"
-    description: "Build a removable adapter over the approved exact Rig release for canonical text, streaming, and untrusted structured tool intent; reject Rig tool execution, hosted tools, arbitrary additional parameters, persistence, and raw default evidence."
-    context: "Only a successor that passes preflight may reuse Rig conversion while the standalone boundary and embedding host retain endpoint, credential, cancellation, capability, redaction, policy, execution, and evidence contracts."
+    title: "Prototype the private Rig transport"
+    description: "Build a removable adapter over exact rig-core 0.42.0 for canonical text, streaming, and untrusted structured tool intent; reject Rig tool execution, hosted tools, arbitrary additional parameters, persistence, and raw default evidence."
+    context: "Rig may reuse provider conversion while the standalone boundary and embedding host retain endpoint, credential, cancellation, capability, redaction, policy, execution, and evidence contracts."
     purpose: "Determine whether Rig reduces provider maintenance enough to justify its marginal dependency and compatibility cost over the direct adapter."
     expected_outcome: "The experiment records a go or no-go result; a go exposes only standalone-owned types, while a no-go leaves production behavior unchanged."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "sa-09-write-tests"
     requirements:
@@ -967,8 +967,8 @@ tasks:
       - "SPEC.md#Transport-dependency-gates"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-08-30T07:33:10Z"
-      completed_at: null
+      updated_at: "2026-08-30T12:39:12Z"
+      completed_at: "2026-08-30T12:39:12Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-09-security-audit"
@@ -992,7 +992,7 @@ tasks:
     blocked_reason: null
     recovery_state: null
   - id: "sa-09-compliance-review"
-    title: "Review future Rig prototype decision"
+    title: "Review Rig prototype decision"
     description: "Compare source-derived prototype behavior and measured build evidence with every Rig go/no-go gate, then record an exact-version decision matrix and whether to retain, revise, upstream-patch, or remove the dependency."
     context: "Prototype success cannot be inferred from compiling one provider example or from Rig's advertised capabilities."
     purpose: "Produce an independent, reversible dependency decision before production code relies on Rig."
@@ -1008,6 +1008,239 @@ tasks:
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-14-write-tests"
+    title: "Define hosted Rig provider tests"
+    description: "After the local Rig adapter is independently approved, write failing tests for a deliberately selected hosted-provider matrix covering Rustls roots, endpoint and redirect policy, proxy denial, credential references, model qualification, unary and streaming text, structured tool intents, cancellation, rate-limit status, bounded redaction, and provider-specific capability differences."
+    context: "Rig can reduce provider maintenance beyond Ollama and llama-server, but each hosted provider adds credential, destination, TLS, semantic, and data-governance requirements that the local-only prototype intentionally excludes."
+    purpose: "Expand provider coverage through one canonical boundary without treating advertised Rig support as Kvist deployment conformance."
+    expected_outcome: "A named provider/version/model matrix has deterministic fake coverage and opt-in live qualification criteria before hosted network access is implemented."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-09-compliance-review"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Rig-adoption-decision"
+      - "SPEC.md#Transport-dependency-gates"
+    timestamps:
+      created_at: "2026-08-30T12:05:00Z"
+      updated_at: "2026-08-30T12:05:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-14-implement-code"
+    title: "Implement approved hosted Rig providers"
+    description: "Add only the hosted Rig providers approved by the conformance matrix, with explicit Rustls configuration, endpoint and credential bindings, capability descriptors, bounded canonical conversion, and no Rig tool execution or persistence."
+    context: "The local prototype proves the adapter seam but deliberately has no TLS, credentials, redirects, proxies, or arbitrary remote destinations."
+    purpose: "Gain wider provider support while preserving standalone-owned policy and evidence boundaries."
+    expected_outcome: "Approved hosted profiles use private Rig conversion and fail closed for every unqualified endpoint, credential, model, capability, or provider response."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-14-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Rig-adoption-decision"
+      - "SPEC.md#Transport-dependency-gates"
+    timestamps:
+      created_at: "2026-08-30T12:05:00Z"
+      updated_at: "2026-08-30T12:05:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-14-security-audit"
+    title: "Audit hosted Rig providers"
+    description: "Independently review certificate roots, DNS and redirect behavior, proxy and environment handling, credential attachment, cross-provider routing, provider-hosted tool exclusion, request and response bounds, cancellation, tracing, error redaction, and dependency advisories for every enabled hosted provider."
+    context: "Remote providers move sensitive prompts and credentials across a network boundary and have materially different risks from numeric-loopback HTTP."
+    purpose: "Prevent destination escape, credential disclosure, provider confusion, payload leakage, and silent capability downgrade."
+    expected_outcome: "Every approved hosted provider has no unresolved high-confidence network, credential, authority, or data-protection defect."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-14-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Transport-dependency-gates"
+    timestamps:
+      created_at: "2026-08-30T12:05:00Z"
+      updated_at: "2026-08-30T12:05:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-14-compliance-review"
+    title: "Review hosted Rig provider compliance"
+    description: "Derive the enabled provider, endpoint, TLS, credential, capability, conversion, redaction, dependency, and live qualification behavior from code and tests, then compare it with the approved provider matrix in a separate review context."
+    context: "Framework support and successful compilation do not establish that a hosted provider preserves Kvist's contract."
+    purpose: "Make provider promotion evidence-based and reversible."
+    expected_outcome: "The review approves exact provider/version/model combinations, records every unsupported behavior, and leaves all unevaluated combinations disabled."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-14-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Rig-adoption-decision"
+      - "SPEC.md#Transport-dependency-gates"
+    timestamps:
+      created_at: "2026-08-30T12:05:00Z"
+      updated_at: "2026-08-30T12:05:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-15-write-tests"
+    title: "Define isolated stream delivery tests"
+    description: "Write failing contract tests for a pull-based or async model stream boundary covering ordered text and tool events, bounded buffering, slow-consumer backpressure, callback-free cancellation and deadlines, consumer failure, terminal-turn assembly, and clean shutdown without detached work."
+    context: "The current synchronous callback can be checked before and after invocation but cannot be preempted while arbitrary caller code executes."
+    purpose: "Define a stream interface whose transport deadlines and cancellation do not depend on a callback returning control."
+    expected_outcome: "Tests distinguish provider progress, bounded event delivery, consumer work, timeout, cancellation, and terminal assembly without permitting unbounded queues or background leaks."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-09-compliance-review"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Transport-stream-callback-boundary"
+    timestamps:
+      created_at: "2026-08-30T13:00:00Z"
+      updated_at: "2026-08-30T13:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-15-implement-code"
+    title: "Implement isolated stream delivery"
+    description: "Replace or supplement the synchronous callback with the approved pull-based or async boundary, preserving canonical event ordering, bounded backpressure, cancellation, deadlines, consumer errors, and terminal-turn ownership for direct and Rig transports."
+    context: "Running a borrowed synchronous callback inside transport polling prevents safe preemption and makes arbitrary caller latency part of the transport control path."
+    purpose: "Keep provider I/O supervision enforceable independently of caller-controlled event processing."
+    expected_outcome: "A stalled consumer cannot block transport deadline or cancellation enforcement, exceed bounded memory, detach provider work, or reorder canonical stream events."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-15-write-tests"
+    requirements:
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Transport-stream-callback-boundary"
+    timestamps:
+      created_at: "2026-08-30T13:00:00Z"
+      updated_at: "2026-08-30T13:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-15-security-audit"
+    title: "Audit isolated stream delivery"
+    description: "Independently review queue bounds, wakeups, cancellation races, deadline ownership, consumer abandonment, thread and task lifetime, error redaction, event ordering, and cleanup for every stream transport."
+    context: "Concurrency introduced to isolate caller work can create denial-of-service, detached-work, stale-borrow, ordering, or evidence-integrity failures."
+    purpose: "Challenge the new concurrency boundary before hosts rely on preemptive stream supervision."
+    expected_outcome: "No slow or failed consumer can escape bounds, retain sensitive events indefinitely, outlive the call, or falsify terminal stream state."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-15-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Transport-stream-callback-boundary"
+    timestamps:
+      created_at: "2026-08-30T13:00:00Z"
+      updated_at: "2026-08-30T13:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-15-compliance-review"
+    title: "Review isolated stream compliance"
+    description: "Derive stream production, buffering, delivery, timeout, cancellation, failure, cleanup, and terminal assembly behavior from code without the specification, then compare it with the approved callback-free contract."
+    context: "The implementation author cannot certify that concurrency preserves ordering, bounds, ownership, and deterministic shutdown."
+    purpose: "Record independent evidence that stream delivery no longer depends on synchronous callback cooperation."
+    expected_outcome: "The review confirms every stream invariant or blocks adoption with precise discrepancies and reproducible evidence."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-15-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Transport-stream-callback-boundary"
+    timestamps:
+      created_at: "2026-08-30T13:00:00Z"
+      updated_at: "2026-08-30T13:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-16-write-tests"
+    title: "Define agent runtime rename tests"
+    description: "Update tests to require the agent-runtime package, agent_runtime library, agent-run executable, canonical agent-runtime profile path, and deterministic fallback to an existing legacy supervised-agent profile only when the canonical path is absent."
+    context: "The component now supplies a provider-neutral runtime rather than one concrete supervised agent, but existing users may already have stored standalone profiles."
+    purpose: "Make the new technical identity explicit without silently losing profile configuration during the rename."
+    expected_outcome: "Tests fail until all public identifiers are renamed and legacy profile discovery remains bounded, deterministic, and subordinate to the canonical path."
+    kind: test
+    status: completed
+    depends_on:
+      - "sa-09-implement-code"
+    requirements:
+      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Public-contract"
+    timestamps:
+      created_at: "2026-08-30T16:08:00Z"
+      updated_at: "2026-08-30T16:09:03Z"
+      completed_at: "2026-08-30T16:09:03Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-16-implement-code"
+    title: "Rename component to agent runtime"
+    description: "Rename the component directory, Cargo package, Rust crate, executable, imports, user-facing commands, documentation paths, and canonical profile directory to agent-runtime, preserving deterministic legacy profile discovery when no canonical file exists."
+    context: "Agent runtime is the conventional provider-neutral name for transport, supervision, retry, broker, and future isolation infrastructure; Rig remains a private adapter and does not define the component identity."
+    purpose: "Align names with the component's layered runtime responsibility before downstream API adoption grows."
+    expected_outcome: "Kvist and standalone usage consistently expose agent-runtime, agent_runtime, and agent-run with no stale technical identifier outside deliberate migration references."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-16-write-tests"
+    requirements:
+      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "SPEC.md#Public-contract"
+    timestamps:
+      created_at: "2026-08-30T16:08:00Z"
+      updated_at: "2026-08-30T16:14:57Z"
+      completed_at: "2026-08-30T16:14:57Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-16-security-audit"
+    title: "Audit agent runtime rename"
+    description: "Independently review profile-path fallback, link handling, canonical-path precedence, Cargo feature containment, executable selection, and stale identifier paths that could load unintended configuration or bypass existing boundaries."
+    context: "Configuration migration and executable renaming can accidentally select untrusted state or produce divergent security behavior."
+    purpose: "Ensure the rename changes identity only and does not weaken profile, process, transport, or authority controls."
+    expected_outcome: "No legacy fallback overrides canonical configuration, follows an unsafe path, broadens execution, or changes transport authority."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-16-implement-code"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Constraints-and-invariants"
+    timestamps:
+      created_at: "2026-08-30T16:08:00Z"
+      updated_at: "2026-08-30T16:08:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-16-compliance-review"
+    title: "Review agent runtime rename compliance"
+    description: "Derive package, crate, executable, component path, profile resolution, and documentation behavior from source without the specification, then compare it with the accepted rename contract."
+    context: "The implementation author cannot certify that a repository-wide rename is complete or compatibility-safe."
+    purpose: "Record independent evidence that technical names and migration behavior match the approved public contract."
+    expected_outcome: "The review identifies every stale non-migration identifier or behavioral discrepancy before the rename is declared complete."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-16-security-audit"
+    requirements:
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "SPEC.md#Public-contract"
+    timestamps:
+      created_at: "2026-08-30T16:08:00Z"
+      updated_at: "2026-08-30T16:08:00Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

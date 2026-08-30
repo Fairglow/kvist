@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use supervised_agent::{AttemptContext, CommandSpec, SupervisionPolicy, run_supervised};
+use agent_runtime::{AttemptContext, CommandSpec, SupervisionPolicy, run_supervised};
 
 fn policy(max_retries: u32) -> SupervisionPolicy {
     SupervisionPolicy {

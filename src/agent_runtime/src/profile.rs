@@ -32,7 +32,19 @@ pub struct ModelProfile {
 pub fn default_profile_config_path() -> Option<PathBuf> {
     let base = absolute_environment_path("XDG_CONFIG_HOME")
         .or_else(|| absolute_environment_path("HOME").map(|home| home.join(".config")))?;
-    Some(base.join("supervised-agent").join("config.toml"))
+    let canonical = base.join("agent-runtime").join("config.toml");
+    match fs::symlink_metadata(&canonical) {
+        Ok(_) => Some(canonical),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let legacy = base.join("supervised-agent").join("config.toml");
+            if fs::symlink_metadata(&legacy).is_ok() {
+                Some(legacy)
+            } else {
+                Some(canonical)
+            }
+        }
+        Err(_) => Some(canonical),
+    }
 }
 
 fn absolute_environment_path(name: &str) -> Option<PathBuf> {

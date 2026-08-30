@@ -62,7 +62,7 @@ pub fn run_wizard<R: BufRead, W: Write>(
     writer: &mut W,
     project_dir: &Path,
 ) -> Result<()> {
-    let profile_config = supervised_agent::default_profile_config_path();
+    let profile_config = agent_runtime::default_profile_config_path();
     run_wizard_inner(reader, writer, project_dir, profile_config.as_deref())
 }
 
@@ -94,7 +94,7 @@ fn run_wizard_inner<R: BufRead, W: Write>(
         writer,
         "Select profile source:\n\
            1) Configure a provider profile now\n\
-           2) Use a saved supervised-agent profile\n\
+           2) Use a saved agent-runtime profile\n\
          Choose (1-2) [1]: ",
     )?;
     let model = if read_input(reader)? == "2" {
@@ -102,11 +102,11 @@ fn run_wizard_inner<R: BufRead, W: Write>(
             reason: "cannot resolve standalone profile configuration; set HOME or XDG_CONFIG_HOME"
                 .to_owned(),
         })?;
-        let profiles = supervised_agent::load_profiles(profile_config)?;
+        let profiles = agent_runtime::load_profiles(profile_config)?;
         if profiles.is_empty() {
             return Err(KvistError::AgentSetupFailed {
                 reason: format!(
-                    "no standalone profiles exist in `{}`; run `supervised-agent setup` first",
+                    "no standalone profiles exist in `{}`; run `agent-run setup` first",
                     profile_config.display()
                 ),
             });
@@ -129,7 +129,7 @@ fn run_wizard_inner<R: BufRead, W: Write>(
                 ),
             })?
     } else {
-        supervised_agent::collect_profile(reader, writer, project_dir)?
+        agent_runtime::collect_profile(reader, writer, project_dir)?
     };
 
     write_output(writer, "\nWhich roles should use this model?\n")?;
@@ -178,7 +178,7 @@ fn persist_model(
     project_dir: &Path,
     project_local: bool,
     roles: &[&str],
-    model: &supervised_agent::ModelProfile,
+    model: &agent_runtime::ModelProfile,
 ) -> Result<()> {
     let (mut document, existing_contents) = load_document(config_path, project_local)?;
     if let Some(contents) = existing_contents.as_deref() {
@@ -292,7 +292,7 @@ fn ensure_table<'a>(item: &'a mut Item, config_path: &str) -> Result<&'a mut Tab
 fn upsert_role_model(
     document: &mut DocumentMut,
     role: &str,
-    model: &supervised_agent::ModelProfile,
+    model: &agent_runtime::ModelProfile,
 ) -> Result<()> {
     let agent = ensure_table(&mut document["agent"], "agent")?;
     let profiles = ensure_table(&mut agent["profiles"], "agent.profiles")?;
@@ -313,7 +313,7 @@ fn upsert_role_model(
     upsert_model_item(&mut profile["models"], model)
 }
 
-fn upsert_model_item(item: &mut Item, model: &supervised_agent::ModelProfile) -> Result<()> {
+fn upsert_model_item(item: &mut Item, model: &agent_runtime::ModelProfile) -> Result<()> {
     if item.is_none() {
         *item = Item::ArrayOfTables(ArrayOfTables::new());
     }
@@ -342,7 +342,7 @@ fn upsert_model_item(item: &mut Item, model: &supervised_agent::ModelProfile) ->
     }
 }
 
-fn upsert_inline_model(models: &mut Array, model: &supervised_agent::ModelProfile) -> Result<()> {
+fn upsert_inline_model(models: &mut Array, model: &agent_runtime::ModelProfile) -> Result<()> {
     let existing_index = models.iter().position(|value| {
         value
             .as_inline_table()

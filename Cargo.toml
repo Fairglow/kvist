@@ -2,10 +2,10 @@
 name = "kvist"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.94"
 
 [workspace]
-members = [".", "src/supervised_agent"]
+members = [".", "src/agent_runtime"]
 default-members = ["."]
 resolver = "3"
 
@@ -23,7 +23,7 @@ thiserror = "2.0"
 hex = "0.4"
 toml = "1.1"
 toml_edit = "0.25.13"
-supervised-agent = { path = "src/supervised_agent" }
+agent-runtime = { path = "src/agent_runtime" }
 
 [profile.dev]
 debug = "line-tables-only"

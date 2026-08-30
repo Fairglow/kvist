@@ -22,23 +22,23 @@ jobs:
       - name: Verify lockfile and formatting
         run: cargo fmt --check
       - name: Lint
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Test workspace
-        run: cargo test --locked --workspace
+        run: cargo test --locked --workspace --all-features
       - name: Release build
-        run: cargo build --locked --workspace --release
+        run: cargo build --locked --workspace --release --all-features
 
   msrv:
-    name: MSRV (Rust 1.85.0)
+    name: MSRV (Rust 1.94.0)
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@1.94.0
       - name: Check
-        run: cargo check --locked --workspace
+        run: cargo check --locked --workspace --all-features
       - name: Test
-        run: cargo test --locked --workspace
+        run: cargo test --locked --workspace --all-features
 
   vcs:
     name: VCS tracking (Ubuntu)

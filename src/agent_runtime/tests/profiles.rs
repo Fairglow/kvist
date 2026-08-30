@@ -1,6 +1,6 @@
 use std::fs;
 
-use supervised_agent::{ModelProfile, load_profiles, upsert_profile};
+use agent_runtime::{ModelProfile, load_profiles, upsert_profile};
 use tempfile::TempDir;
 
 fn profile(name: &str, command: &str) -> ModelProfile {

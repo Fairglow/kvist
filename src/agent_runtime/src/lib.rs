@@ -7,7 +7,7 @@
 //! host execution from future isolated execution backends.
 
 #[cfg(not(target_os = "linux"))]
-compile_error!("supervised-agent currently supports Linux only");
+compile_error!("agent-runtime currently supports Linux only");
 
 mod command;
 mod direct_transport;
@@ -15,6 +15,8 @@ mod error;
 mod model;
 mod profile;
 mod prompt;
+#[cfg(feature = "rig-transport")]
+mod rig_transport;
 mod setup;
 mod supervisor;
 
@@ -31,6 +33,8 @@ pub use profile::{
     load_profiles, upsert_profile,
 };
 pub use prompt::{MAX_PROMPT_BYTES, resolve_prompt};
+#[cfg(feature = "rig-transport")]
+pub use rig_transport::RigModelTransport;
 pub use setup::{collect_profile, run_setup_wizard, verify_profile};
 pub use supervisor::{
     AttemptContext, CommandSpec, ExecutionReport, RetryCause, SupervisionPolicy, run_supervised,

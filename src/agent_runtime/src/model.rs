@@ -145,6 +145,9 @@ pub struct ModelTurn {
     pub provider: LocalModelProvider,
     /// Model identity reported by the provider or requested by the host.
     pub model: String,
+    /// Provider response identity when supplied in the response body.
+    #[serde(default)]
+    pub response_id: Option<String>,
     /// Provider request identity when supplied.
     pub provider_request_id: Option<String>,
     /// Token accounting when supplied.

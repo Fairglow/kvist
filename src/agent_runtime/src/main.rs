@@ -1,19 +1,21 @@
 #[cfg(not(target_os = "linux"))]
-compile_error!("supervised-agent currently supports Linux only");
+compile_error!("agent-runtime currently supports Linux only");
 
 use std::{io::Write, path::PathBuf, process::ExitCode, time::Duration};
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
-use supervised_agent::{
+#[cfg(feature = "rig-transport")]
+use agent_runtime::RigModelTransport;
+use agent_runtime::{
     CancellationToken, CommandSpec, DirectModelTransport, Error, LocalModelProvider, ModelMessage,
     ModelRequest, ModelStreamEvent, ModelTransport, SupervisionPolicy, ToolChoice,
     default_profile_config_path, load_profile, render_command, resolve_prompt, run_setup_wizard,
     run_supervised,
 };
+use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "supervised-agent",
+    name = "agent-run",
     version,
     about = "Run an AI prompt under bounded Linux host-process supervision"
 )]
@@ -45,6 +47,9 @@ struct ModelArguments {
     #[arg(long, value_enum)]
     provider: ModelProviderArgument,
 
+    #[arg(long, value_enum, default_value_t = ModelTransportArgument::Direct)]
+    transport: ModelTransportArgument,
+
     #[arg(long, value_name = "HTTP_LOOPBACK_URL")]
     endpoint: String,
 
@@ -65,6 +70,14 @@ struct ModelArguments {
 enum ModelProviderArgument {
     Ollama,
     LlamaServer,
+}
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+enum ModelTransportArgument {
+    #[default]
+    Direct,
+    #[cfg(feature = "rig-transport")]
+    Rig,
 }
 
 impl From<ModelProviderArgument> for LocalModelProvider {
@@ -145,7 +158,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn execute() -> supervised_agent::Result<()> {
+fn execute() -> agent_runtime::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Model(arguments) => model(arguments),
@@ -154,18 +167,29 @@ fn execute() -> supervised_agent::Result<()> {
     }
 }
 
-fn model(arguments: ModelArguments) -> supervised_agent::Result<()> {
+fn model(arguments: ModelArguments) -> agent_runtime::Result<()> {
     let prompt = resolve_prompt(
         arguments.prompt,
         arguments.file.as_deref(),
         arguments.editor,
     )?;
-    let transport = DirectModelTransport::new(
-        arguments.provider.into(),
-        &arguments.endpoint,
-        Duration::from_secs(arguments.timeout),
-        arguments.max_response_bytes,
-    )?;
+    let provider = arguments.provider.into();
+    let timeout = Duration::from_secs(arguments.timeout);
+    let transport: Box<dyn ModelTransport> = match arguments.transport {
+        ModelTransportArgument::Direct => Box::new(DirectModelTransport::new(
+            provider,
+            &arguments.endpoint,
+            timeout,
+            arguments.max_response_bytes,
+        )?),
+        #[cfg(feature = "rig-transport")]
+        ModelTransportArgument::Rig => Box::new(RigModelTransport::new(
+            provider,
+            &arguments.endpoint,
+            timeout,
+            arguments.max_response_bytes,
+        )?),
+    };
     let request = ModelRequest {
         model: arguments.model,
         messages: vec![ModelMessage::User(prompt)],
@@ -204,7 +228,7 @@ fn model(arguments: ModelArguments) -> supervised_agent::Result<()> {
     Ok(())
 }
 
-fn run(arguments: RunArguments) -> supervised_agent::Result<()> {
+fn run(arguments: RunArguments) -> agent_runtime::Result<()> {
     if !arguments.allow_host_execution {
         return Err(Error::HostExecutionNotAcknowledged);
     }
@@ -250,7 +274,7 @@ fn run(arguments: RunArguments) -> supervised_agent::Result<()> {
     Ok(())
 }
 
-fn setup(arguments: SetupArguments) -> supervised_agent::Result<()> {
+fn setup(arguments: SetupArguments) -> agent_runtime::Result<()> {
     let config_path = resolve_config_path(arguments.config)?;
     let current_directory = std::env::current_dir().map_err(|source| Error::Io {
         operation: "determine setup working directory",
@@ -265,7 +289,7 @@ fn setup(arguments: SetupArguments) -> supervised_agent::Result<()> {
     Ok(())
 }
 
-fn resolve_config_path(path: Option<PathBuf>) -> supervised_agent::Result<PathBuf> {
+fn resolve_config_path(path: Option<PathBuf>) -> agent_runtime::Result<PathBuf> {
     path.or_else(default_profile_config_path)
         .ok_or_else(|| Error::ProfileSetup {
             reason: "cannot resolve profile configuration; set HOME or XDG_CONFIG_HOME".to_owned(),

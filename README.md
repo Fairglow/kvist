@@ -125,10 +125,10 @@ retries append a warning that an earlier attempt may already have changed
 files or external systems; the warning does not roll those effects back.
 
 Prompt acquisition, command rendering, and host-process supervision are
-provided by the independently usable `supervised-agent` workspace package:
+provided by the independently usable `agent-runtime` workspace package:
 
 ```bash
-cargo run --locked -p supervised-agent -- run \
+cargo run --locked -p agent-runtime --bin agent-run -- run \
   --allow-host-execution \
   --command "local-agent --prompt '{prompt}' {context_files}" \
   --file review-prompt.md
@@ -137,8 +137,8 @@ cargo run --locked -p supervised-agent -- run \
 Create a reusable provider profile interactively, then use it by name:
 
 ```bash
-cargo run --locked -p supervised-agent -- setup
-cargo run --locked -p supervised-agent -- run \
+cargo run --locked -p agent-runtime --bin agent-run -- setup
+cargo run --locked -p agent-runtime --bin agent-run -- run \
   --allow-host-execution \
   --profile local-coder \
   "Review this change"
@@ -147,14 +147,14 @@ cargo run --locked -p supervised-agent -- run \
 Send a text-only request directly to a local Ollama or llama-server endpoint:
 
 ```bash
-cargo run --locked -p supervised-agent -- model \
+cargo run --locked -p agent-runtime --bin agent-run -- model \
   --provider ollama \
   --endpoint http://127.0.0.1:11434 \
   --model qwen3-coder \
   --stream \
   --file prompt.md
 
-cargo run --locked -p supervised-agent -- model \
+cargo run --locked -p agent-runtime --bin agent-run -- model \
   --provider llama-server \
   --endpoint http://127.0.0.1:8080 \
   --model local \
@@ -166,10 +166,27 @@ support, and exposes no tools through this command. The library API additionally
 supports canonical tool descriptors and returns tool calls as untrusted
 `ToolIntent` values; it never executes them.
 
+The exactly pinned optional Rig adapter uses the same command contract and is
+selected explicitly after enabling its Cargo feature:
+
+```bash
+cargo run --locked -p agent-runtime --bin agent-run --features rig-transport -- model \
+  --transport rig \
+  --provider ollama \
+  --endpoint http://127.0.0.1:11434 \
+  --model qwen3-coder \
+  --file prompt.md
+```
+
+It currently supports only numeric-loopback Ollama and llama-server endpoints.
+The direct adapter remains the default and fallback.
+
 Standalone profiles are stored at
-`$XDG_CONFIG_HOME/supervised-agent/config.toml`, falling back to
-`$HOME/.config/supervised-agent/config.toml`. Version 1 stores generic profile
-names, provider kinds, and command templates:
+`$XDG_CONFIG_HOME/agent-runtime/config.toml`, falling back to
+`$HOME/.config/agent-runtime/config.toml`. If the canonical file does not exist,
+an existing profile store under the former `supervised-agent` directory remains
+discoverable. Version 1 stores generic profile names, provider kinds, and
+command templates:
 
 ```toml
 schema_version = 1
@@ -180,13 +197,13 @@ provider = "ollama"
 command = "ollama run qwen3-coder '{prompt}'"
 ```
 
-The library crate is named `supervised_agent`. Its specification and deferred
-isolation plan live in [`src/supervised_agent/SPEC.md`](src/supervised_agent/SPEC.md).
+The library crate is named `agent_runtime`. Its specification and deferred
+isolation plan live in [`src/agent_runtime/SPEC.md`](src/agent_runtime/SPEC.md).
 The layered runtime decision is documented in
-[`docs/supervised-agent/architecture.md`](docs/supervised-agent/architecture.md),
-the direct transport is available for local testing, and the Rig 0.42.0 no-go
-and future reevaluation gates are in
-[`docs/supervised-agent/rig-evaluation.md`](docs/supervised-agent/rig-evaluation.md).
+[`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md),
+the direct transport is available for local testing, and the Rig 0.42.0
+adoption decision and contained optional adapter gates are in
+[`docs/agent-runtime/rig-evaluation.md`](docs/agent-runtime/rig-evaluation.md).
 The current host mode is a reliability aid, not a sandbox. `fakeroot`, retry
 notices, and backups likewise do not restrict an agent's authority.
 
@@ -289,21 +306,22 @@ boundaries for possible future restoration.
 
 ## Toolchain and quality gates
 
-Kvist's MSRV is Rust **1.85**, the first stable release supporting edition
-2024. CI tests the MSRV and current stable Rust on Linux. `Cargo.lock` is
-committed and every CI build/test command uses `--locked`.
+Kvist's MSRV is Rust **1.94**. Edition 2024 itself is available from Rust 1.85,
+but 1.94 is the upstream-tested compiler for the exactly pinned Rig 0.42.0
+transport dependency. CI tests Rust 1.94 and current stable on Linux.
+`Cargo.lock` is committed and every CI build/test command uses `--locked`.
 
 The portable default quality gate uses only Cargo:
 
 ```bash
 cargo fmt --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --workspace
-cargo build --locked --release
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-features
+cargo build --locked --workspace --release --all-features
 ```
 
 `just` is an optional wrapper for these commands; `just all` runs the same
-gate, and `just msrv` runs tests with Rust 1.85.0. Dependency updates must be
+gate, and `just msrv` runs all-feature tests with Rust 1.94.0. Dependency updates must be
 small, intentional changes with a stated purpose, lockfile update, and passing
 MSRV and stable CI.
 

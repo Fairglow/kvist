@@ -432,10 +432,10 @@ pub fn allowed_environment(
         .environment_allowlist
         .iter()
         .filter_map(|name| {
-            if let Some(allowed) = additional.as_ref() {
-                if !allowed.contains(name) {
-                    return None;
-                }
+            if let Some(allowed) = additional.as_ref()
+                && !allowed.contains(name)
+            {
+                return None;
             }
             std::env::var(name).ok().map(|value| (name.clone(), value))
         })

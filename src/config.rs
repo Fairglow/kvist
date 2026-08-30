@@ -739,24 +739,19 @@ fn load_agent_config(
     }
 
     // Priority 3: Check global user-specific configuration path
-    if let Some(user_path) = global_user_config_path() {
-        if let Some(contents) = read_agent_config_candidate(&user_path, "user")? {
-            let parsed_table = toml_table_from_str(&user_path, &contents)?;
-            return parse_agent_config_from_table(&user_path, &contents, &user_path, &parsed_table);
-        }
+    if let Some(user_path) = global_user_config_path()
+        && let Some(contents) = read_agent_config_candidate(&user_path, "user")?
+    {
+        let parsed_table = toml_table_from_str(&user_path, &contents)?;
+        return parse_agent_config_from_table(&user_path, &contents, &user_path, &parsed_table);
     }
 
     // Priority 4: Check global system-wide configuration path
-    if let Some(system_path) = global_system_config_path() {
-        if let Some(contents) = read_agent_config_candidate(&system_path, "system")? {
-            let parsed_table = toml_table_from_str(&system_path, &contents)?;
-            return parse_agent_config_from_table(
-                &system_path,
-                &contents,
-                &system_path,
-                &parsed_table,
-            );
-        }
+    if let Some(system_path) = global_system_config_path()
+        && let Some(contents) = read_agent_config_candidate(&system_path, "system")?
+    {
+        let parsed_table = toml_table_from_str(&system_path, &contents)?;
+        return parse_agent_config_from_table(&system_path, &contents, &system_path, &parsed_table);
     }
 
     // The built-in default is a source identity, not an implicit filesystem write.

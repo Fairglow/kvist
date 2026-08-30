@@ -4,9 +4,9 @@ use std::io::Cursor;
 use std::os::unix::fs::PermissionsExt;
 use tempfile::TempDir;
 
+use agent_runtime::{ModelProfile, upsert_profile};
 use kvist::config;
 use kvist::wizard::{run_wizard, run_wizard_with_profile_config};
-use supervised_agent::{ModelProfile, upsert_profile};
 
 #[test]
 fn test_wizard_ollama_local_config() {

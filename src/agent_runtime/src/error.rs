@@ -83,6 +83,10 @@ pub enum Error {
         source: io::Error,
     },
 
+    /// A framework-backed request failed without exposing provider payload data.
+    #[error("model transport framework failed while {operation}")]
+    ModelTransportFramework { operation: &'static str },
+
     /// The supervised command exited unsuccessfully.
     #[error("supervised command failed with exit status: {status}")]
     ProcessFailed { status: ExitStatus },

@@ -49,7 +49,7 @@ pub fn collect_profile<R: BufRead, W: Write>(
             reader,
             writer,
             "Test prompt",
-            "Reply with: supervised agent model ready",
+            "Reply with: agent runtime model ready",
         )?;
         write_output(
             writer,
@@ -97,9 +97,9 @@ pub fn run_setup_wizard<R: BufRead, W: Write>(
     write_output(
         writer,
         "==================================================\n\
-              Supervised Agent Setup Wizard             \n\
+                 Agent Runtime Setup Wizard              \n\
          ==================================================\n\
-         Configure a reusable provider profile for supervised host execution.\n\n",
+         Configure a reusable provider profile for bounded host execution.\n\n",
     )?;
     let profile = collect_profile(reader, writer, working_directory)?;
     upsert_profile(config_path, &profile)?;

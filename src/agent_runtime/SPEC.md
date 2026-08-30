@@ -1,5 +1,5 @@
 <!-- kvist-specification-version: 1 -->
-# Supervised Agent Component Specification
+# Agent Runtime Component Specification
 
 <details open>
 <summary>Layer 1: Executive summary and public contract</summary>
@@ -14,7 +14,7 @@ and compliance workflow.
 
 ## Public contract
 
-The `supervised_agent` library exposes bounded prompt acquisition, shell-free
+The `agent_runtime` library exposes bounded prompt acquisition, shell-free
 command-template rendering, typed supervision policy and attempt context, and
 supervised host execution. A caller supplies the prompt, command template,
 context paths, working directory, and retry policy. Each attempt is built from
@@ -37,12 +37,16 @@ types. Third-party libraries may implement a private transport adapter; their
 agent, tool, persistence, and authorization types do not become this
 component's public or durable contract.
 
-`supervised-agent setup` interactively creates or updates a profile in the
+`agent-run setup` interactively creates or updates a profile in the
 Linux user configuration, defaulting to
-`$XDG_CONFIG_HOME/supervised-agent/config.toml` or
-`$HOME/.config/supervised-agent/config.toml`. Empty or relative base-directory
-environment values are ignored, and resolution fails if neither base is an
-absolute path. `supervised-agent run` accepts
+`$XDG_CONFIG_HOME/agent-runtime/config.toml` or
+`$HOME/.config/agent-runtime/config.toml`. When that canonical path does not
+exist and the corresponding legacy `supervised-agent/config.toml` exists, the
+runtime selects the legacy file so renamed installations retain their stored
+profiles; it never merges two stores or falls back from an existing invalid
+canonical file. Empty or relative base-directory environment values are
+ignored, and resolution fails if neither base is an absolute path. `agent-run
+run` accepts
 prompt text, `--file`, `--editor`, or redirected standard input; exactly one of
 a command template or stored profile; optional context paths and working
 directory; idle/loop/retry controls; and the explicit
@@ -50,7 +54,7 @@ directory; idle/loop/retry controls; and the explicit
 nonzero on invalid input, unknown profiles, command failure, exhausted
 supervision, or refusal.
 
-`supervised-agent model` performs a text-only unary or streaming request
+`agent-run model` performs a text-only unary or streaming request
 through the direct local HTTP adapter. It accepts the same positional, file,
 editor, or redirected prompt sources; an Ollama or llama-server provider;
 explicit loopback endpoint and model; deadline; and response bound. It exposes
@@ -67,7 +71,9 @@ silently providing a different process or filesystem contract.
 
 ## Constraints and invariants
 
-- Rust 1.85 and edition 2024 are supported; unsafe Rust is forbidden.
+- Rust 1.94 and edition 2024 are supported; unsafe Rust is forbidden. Rust
+  1.94 is the upstream-tested compiler for the pinned Rig release and remains
+  below the current stable toolchain.
 - Commands are parsed and spawned directly without a shell. Quotes group
   arguments, but expansion, redirection, pipelines, and shell operators have
   no special meaning.
@@ -283,41 +289,49 @@ claim to authorize each internal tool call. Plan-only mode makes no effectful
 tools available.
 
 The canonical core represents messages, tool intent/results, provider/model
-identity, usage, finish reason, streaming terminal state, cancellation, typed
-unsupported capabilities, and bounded provider extensions. Provider-specific
-fields are retained only in explicitly typed, namespaced, approved, and
-redacted extensions. Conformance tests, not nominal API compatibility,
-establish deployment support.
+identity, distinct response-scoped and transport-request identities, usage,
+finish reason, streaming terminal state, cancellation, typed unsupported
+capabilities, and bounded provider extensions. Provider-specific fields are
+retained only in explicitly typed, namespaced, approved, and redacted
+extensions. Conformance tests, not nominal API compatibility, establish
+deployment support.
 
 OpenAI-compatible APIs are model-transport targets, function calling is a
 structured intent format, MCP is a brokered external-tool transport, and ACP is
 an optional external-agent protocol. None of them replaces embedding-host policy,
 execution isolation, or durable evidence. For Kvist as one embedding host, the
 supplemental rationale and delivery ordering are recorded in
-`docs/supervised-agent/architecture.md`.
+`docs/agent-runtime/architecture.md`.
 
 ### Rig adoption decision
 
-Rig 0.42.0 is rejected as a transport dependency. A throwaway exact-version
-experiment with default features disabled proved that the crate does not build
-on Rust 1.85. Raising this component's MSRV was considered and rejected. The
-experiment also added 128 locked packages over a bare Tokio baseline; this is a
-footprint warning rather than the required marginal comparison against the
-future direct adapter. Its linked release-binary delta, permissive-license
-check, advisory check, and local-only no-TLS feature selection passed. No Rig
-dependency is added to this component.
+Rig 0.42.0 is approved for a pinned, non-default transport prototype after the
+project deliberately raises its MSRV from Rust 1.85 to Rust 1.94. Rust 1.85
+was the first Edition 2024 compiler and the prior project compatibility
+policy, but Rig directly uses Edition 2024 let-chains stabilized in Rust 1.88.
+Rig declares no package MSRV; Rust 1.94 is selected because that exact release
+pins and tests its repository with 1.94, while a linked narrow prototype
+already builds on current Rust 1.98.
 
-A later immutable Rig release may receive a new non-default prototype only
-after a cheap preflight proves Rust 1.85 compatibility and acceptable
-dependency count. Any such prototype must expose only component-owned
-canonical types and evaluate unary and streamed text plus structured
-tool-intent conversion against a fake OpenAI-compatible server, local Ollama,
-and local llama-server. The first production candidate is therefore a small
-direct local HTTP adapter behind the same private transport seam.
+The prototype depends exactly on `rig-core = 0.42.0`, disables default
+features, and remains behind a non-default internal Cargo feature. It exposes
+only component-owned canonical types and evaluates unary and streamed text
+plus structured tool-intent conversion against deterministic fake providers,
+local Ollama, and local llama-server. The direct adapter remains the default,
+fallback, conformance oracle, and marginal dependency baseline until the Rig
+security audit and compliance review approve promotion.
+
+The prototype supplies Rig with a component-owned HTTP client that rejects
+redirects, proxies, TLS, non-numeric or non-loopback endpoints, serialized
+requests above 2 MiB, and unary or streaming responses above the caller's
+bound. It suppresses Rig tracing within the framework call because Rig 0.42.0
+contains payload-bearing trace, debug, and error events even when content
+telemetry is disabled. Provider response bodies and framework diagnostics do
+not enter canonical errors.
 
 The evaluated release contains separate `rig-core` and `rig-agent` crates, but
 not the later current-main `rig-run`, `rig-reqwest`, or `rig-rmcp` crate split.
-Any reevaluation excludes the `rig` facade, `rig-agent`, Rig tool execution,
+The prototype excludes the `rig` facade, `rig-agent`, Rig tool execution,
 provider-hosted tools, arbitrary additional parameters, Rig persistence, and
 raw provider payloads in evidence. A later immutable release containing
 `rig-run` may receive a separate research spike only after transport reuse
@@ -338,25 +352,27 @@ This boundary follows from source-level findings:
   and operational evidence. That philosophy complements a narrow adapter but
   cannot replace the Kvist engine.
 - The evaluated Rig 0.42.0 source uses a Rust 1.94 repository toolchain without
-  a declared package MSRV, while this component requires Rust 1.85.
+  a declared package MSRV; this component adopts that tested compiler as its
+  own explicit floor rather than claiming the unverified 1.88 syntax floor.
 
-Future adoption requires all prototype gates to pass: Rust 1.85; private type
+Promotion beyond the optional prototype requires all gates to pass: locked
+Rust 1.94 and current stable builds; private type
 containment; approved endpoint and credential routing; bounded cancellation,
 deadlines, malformed/truncated stream handling, and redaction; local-provider
 text, streaming, and structured tool-intent conformance; TRACE leakage tests;
 the objective dependency, license, advisory, TLS, and binary-size gates; and
 upgrade tests that detect semantic change. Failure records a no-go decision and
-leaves the canonical component transport interface available for a small
-direct implementation. The full evidence and source references are in
-`docs/supervised-agent/rig-evaluation.md`.
+leaves the direct adapter and canonical component transport interface
+unchanged. The full evidence and source references are in
+`docs/agent-runtime/rig-evaluation.md`.
 
 ### Transport dependency gates
 
 Every direct or framework-backed model transport is evaluated on locked Rust
-1.85 for `x86_64-unknown-linux-gnu` with explicit features. Candidate and
+1.94 for `x86_64-unknown-linux-gnu` with explicit features. Candidate and
 baseline use the same release profile and toolchain. Target-specific
 normal/build packages are counted from `cargo tree --locked --target
-x86_64-unknown-linux-gnu -p supervised-agent -e normal,build --prefix none`
+x86_64-unknown-linux-gnu -p agent-runtime -e normal,build --prefix none`
 after removing repeated markers and duplicate package/version lines. The
 unstripped release executable is measured from a fresh target directory.
 
@@ -435,6 +451,21 @@ timeout, endpoint, protocol, response-limit, provider-status, malformed-data,
 duplicate-call, and unsupported-capability failures remain distinguishable
 without retaining raw prompts, responses, tool arguments, or credentials in
 their display text.
+
+### Transport stream callback boundary
+
+The current `ModelTransport` stream callback is synchronous caller code. A
+transport checks cancellation and its deadline immediately before and after
+each callback, but cannot preempt a callback while it is executing. Callers
+must therefore keep callbacks bounded and nonblocking, use a dedicated
+execution worker, and treat output backpressure as a terminal error. The
+transport must report an elapsed deadline or cancellation as soon as the
+callback returns control.
+
+An async or pull-based stream interface that can isolate delivery from caller
+work is deferred. It must preserve event ordering, bounded buffering,
+backpressure, cancellation, errors, and terminal-turn assembly without
+detaching work or allowing callbacks to outlive borrowed state.
 
 The standalone `model` command constructs one user message with no tools and
 `ToolChoice::None`. Its deadline is 1 through 86,400 seconds and response limit

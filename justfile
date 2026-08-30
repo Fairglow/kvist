@@ -7,25 +7,25 @@
 all: format lint build test release
 
 build:
-    cargo build --locked --workspace
+    cargo build --locked --workspace --all-features
 
 format:
     cargo fmt --check
 
 lint:
-    cargo clippy --locked --workspace --all-targets -- -D warnings
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
 msrv:
-    cargo +1.85.0 test --locked --workspace
+    cargo +1.94.0 test --locked --workspace --all-features
 
 reformat:
     cargo fmt
 
 release:
-    cargo build --locked --workspace --release
+    cargo build --locked --workspace --release --all-features
 
 test:
-    cargo nextest run --locked --workspace --test-threads num-cpus
+    cargo nextest run --locked --workspace --all-features --test-threads num-cpus
 
 wine:
     @echo "error: Windows support is deferred; Kvist currently supports Linux only" >&2

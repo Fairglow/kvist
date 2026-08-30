@@ -8,17 +8,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+use agent_runtime::load_profile;
 use nix::{
     errno::Errno,
     sys::signal::{Signal, kill},
     unistd::Pid,
 };
-use supervised_agent::load_profile;
 use tempfile::TempDir;
 
 #[test]
 fn host_execution_requires_explicit_acknowledgement() {
-    let output = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
         .args(["run", "--command", "/bin/echo '{prompt}'", "hello"])
         .output()
         .expect("run standalone CLI");
@@ -34,12 +34,10 @@ fn host_execution_requires_explicit_acknowledgement() {
 #[test]
 fn invalid_xdg_config_home_falls_back_to_absolute_home() {
     let workspace = TempDir::new().expect("workspace");
-    let expected = workspace
-        .path()
-        .join(".config/supervised-agent/config.toml");
+    let expected = workspace.path().join(".config/agent-runtime/config.toml");
 
     for xdg in ["", "relative-config"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+        let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
             .current_dir(workspace.path())
             .env("XDG_CONFIG_HOME", xdg)
             .env("HOME", workspace.path())
@@ -63,12 +61,97 @@ fn invalid_xdg_config_home_falls_back_to_absolute_home() {
 }
 
 #[test]
+fn default_profile_path_reads_legacy_store_when_canonical_store_is_absent() {
+    let workspace = TempDir::new().expect("workspace");
+    let legacy_directory = workspace.path().join("supervised-agent");
+    fs::create_dir(&legacy_directory).expect("create legacy profile directory");
+    fs::write(
+        legacy_directory.join("config.toml"),
+        "schema_version = 1\n\
+         [[profiles]]\n\
+         name = \"legacy\"\n\
+         provider = \"custom-script\"\n\
+         command = \"/bin/echo '{prompt}'\"\n",
+    )
+    .expect("write legacy profiles");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .current_dir(workspace.path())
+        .env("XDG_CONFIG_HOME", workspace.path())
+        .env_remove("HOME")
+        .args([
+            "run",
+            "--allow-host-execution",
+            "--profile",
+            "legacy",
+            "legacy profile",
+        ])
+        .output()
+        .expect("run legacy profile");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8(output.stdout)
+            .expect("UTF-8 output")
+            .contains("legacy profile")
+    );
+}
+
+#[test]
+fn canonical_profile_store_takes_precedence_over_legacy_store() {
+    let workspace = TempDir::new().expect("workspace");
+    let legacy_directory = workspace.path().join("supervised-agent");
+    fs::create_dir(&legacy_directory).expect("create legacy profile directory");
+    fs::write(
+        legacy_directory.join("config.toml"),
+        "schema_version = 1\n\
+         [[profiles]]\n\
+         name = \"legacy\"\n\
+         provider = \"custom-script\"\n\
+         command = \"/bin/echo '{prompt}'\"\n",
+    )
+    .expect("write legacy profiles");
+    let canonical_directory = workspace.path().join("agent-runtime");
+    fs::create_dir(&canonical_directory).expect("create canonical profile directory");
+    fs::write(
+        canonical_directory.join("config.toml"),
+        "not valid profile configuration",
+    )
+    .expect("write canonical profiles");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .current_dir(workspace.path())
+        .env("XDG_CONFIG_HOME", workspace.path())
+        .env_remove("HOME")
+        .args([
+            "run",
+            "--allow-host-execution",
+            "--profile",
+            "legacy",
+            "must not run",
+        ])
+        .output()
+        .expect("select canonical profile store");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("UTF-8 error")
+            .contains(&canonical_directory.to_string_lossy().into_owned())
+    );
+}
+
+#[test]
 fn standalone_cli_runs_a_prompt_from_a_file() {
     let workspace = TempDir::new().expect("workspace");
     let prompt = workspace.path().join("prompt.md");
     fs::write(&prompt, "standalone prompt").expect("write prompt");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
         .current_dir(workspace.path())
         .args([
             "run",
@@ -91,7 +174,7 @@ fn standalone_cli_runs_a_prompt_from_a_file() {
 
 #[test]
 fn supervised_provider_cannot_consume_caller_stdin() {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_agent-run"))
         .args([
             "run",
             "--allow-host-execution",
@@ -123,7 +206,7 @@ fn setup_persists_a_profile_and_run_can_select_it() {
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mut setup = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_agent-run"))
         .current_dir(workspace.path())
         .args(["setup", "--config", "profiles.toml"])
         .stdin(Stdio::piped())
@@ -144,7 +227,7 @@ fn setup_persists_a_profile_and_run_can_select_it() {
     );
 
     let execution_directory = TempDir::new().expect("execution directory");
-    let output = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
         .current_dir(execution_directory.path())
         .args([
             "run",
@@ -183,7 +266,7 @@ fn llama_cli_fallback_preserves_provider_and_uses_supported_flags() {
     let empty_path = workspace.path().join("empty-path");
     fs::create_dir(&empty_path).expect("create empty PATH");
 
-    let mut setup = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_agent-run"))
         .current_dir(workspace.path())
         .env("PATH", &empty_path)
         .args(["setup", "--config"])
@@ -240,7 +323,7 @@ fn installed_gemini_and_copilot_use_noninteractive_templates() {
         ("5\ngemini-2.5-pro\ngemini-pro\n\nn\n", "gemini-pro"),
         ("4\ngpt-5.4\ncopilot-pro\n\nn\n", "copilot-pro"),
     ] {
-        let mut setup = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+        let mut setup = Command::new(env!("CARGO_BIN_EXE_agent-run"))
             .current_dir(workspace.path())
             .env("PATH", &bin)
             .args(["setup", "--config"])
@@ -294,7 +377,7 @@ fn unusable_provider_fallback_is_rejected_before_persistence() {
     let empty_path = workspace.path().join("empty-path");
     fs::create_dir(&empty_path).expect("create empty PATH");
 
-    let mut setup = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_agent-run"))
         .current_dir(workspace.path())
         .env("PATH", &empty_path)
         .args(["setup", "--config"])
@@ -339,7 +422,7 @@ fn cancelling_conventional_probe_does_not_request_a_fallback() {
     .expect("write executable");
     fs::set_permissions(&gemini, fs::Permissions::from_mode(0o700)).expect("make executable");
 
-    let mut setup = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_agent-run"))
         .current_dir(workspace.path())
         .env("PATH", &bin)
         .args(["setup", "--config", "profiles.toml"])
@@ -394,7 +477,7 @@ fn interrupt_terminates_the_supervised_process_group() {
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mut supervisor = Command::new(env!("CARGO_BIN_EXE_supervised-agent"))
+    let mut supervisor = Command::new(env!("CARGO_BIN_EXE_agent-run"))
         .args([
             "run",
             "--allow-host-execution",

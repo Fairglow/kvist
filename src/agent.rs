@@ -64,8 +64,7 @@ pub fn split_command(
     context_paths: &[PathBuf],
     target_dir: &Path,
 ) -> Result<(String, Vec<String>)> {
-    supervised_agent::render_command(template, prompt, context_paths, target_dir)
-        .map_err(Into::into)
+    agent_runtime::render_command(template, prompt, context_paths, target_dir).map_err(Into::into)
 }
 
 /// Gets the effective command for a given agent profile and model selection.
@@ -107,7 +106,7 @@ pub fn get_effective_command(
 }
 
 fn split_raw_command(template: &str) -> Result<(String, Vec<String>)> {
-    supervised_agent::split_raw_command(template).map_err(Into::into)
+    agent_runtime::split_raw_command(template).map_err(Into::into)
 }
 
 /// Spawns the subprocess, redirects output to log file, and optionally streams to console.
@@ -202,13 +201,12 @@ pub fn execute_agent(
     let mut tokens_input = None;
     let mut tokens_output = None;
 
-    if record_path.exists() {
-        if let Ok(contents) = fs::read_to_string(&record_path) {
-            if let Ok(record) = serde_json::from_str::<RunRecord>(&contents) {
-                tokens_input = record.tokens_input;
-                tokens_output = record.tokens_output;
-            }
-        }
+    if record_path.exists()
+        && let Ok(contents) = fs::read_to_string(&record_path)
+        && let Ok(record) = serde_json::from_str::<RunRecord>(&contents)
+    {
+        tokens_input = record.tokens_input;
+        tokens_output = record.tokens_output;
     }
 
     Ok(AgentRunResult {

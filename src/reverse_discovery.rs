@@ -216,14 +216,14 @@ fn parse_rust_file(path: &Path, symbols: &mut DiscoveredSymbols) -> Result<()> {
                 symbols.pub_exports.push(format!("- `{}`", line_trim));
             }
         }
-        if line_trim.contains("fn test_") || line_trim.starts_with("#[test]") {
-            if let Some(pos) = line_trim.find("fn ") {
-                let decl = &line_trim[pos..];
-                if let Some(test_name) = decl.strip_suffix('{') {
-                    symbols.tests.push(format!("- `{}`", test_name.trim()));
-                } else {
-                    symbols.tests.push(format!("- `{}`", decl.trim()));
-                }
+        if (line_trim.contains("fn test_") || line_trim.starts_with("#[test]"))
+            && let Some(pos) = line_trim.find("fn ")
+        {
+            let decl = &line_trim[pos..];
+            if let Some(test_name) = decl.strip_suffix('{') {
+                symbols.tests.push(format!("- `{}`", test_name.trim()));
+            } else {
+                symbols.tests.push(format!("- `{}`", decl.trim()));
             }
         }
     }

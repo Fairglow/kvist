@@ -6,11 +6,11 @@ use std::{
     time::Duration,
 };
 
-use serde_json::{Value, json};
-use supervised_agent::{
+use agent_runtime::{
     CancellationToken, DirectModelTransport, FinishReason, LocalModelProvider, ModelMessage,
-    ModelRequest, ModelStreamEvent, ModelTransport, ToolChoice, ToolDefinition,
+    ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn, ToolChoice, ToolDefinition,
 };
+use serde_json::{Value, json};
 
 struct CapturedRequest {
     head: String,
@@ -193,7 +193,8 @@ fn llama_server_unary_maps_messages_tools_and_tool_calls() {
 
     assert_eq!(turn.text, "I will read it.");
     assert_eq!(turn.finish_reason, FinishReason::ToolCalls);
-    assert_eq!(turn.provider_request_id.as_deref(), Some("chatcmpl-1"));
+    assert_eq!(turn.response_id.as_deref(), Some("chatcmpl-1"));
+    assert_eq!(turn.provider_request_id, None);
     assert_eq!(turn.model, "server-model");
     assert_eq!(turn.usage.expect("usage").total_tokens, 19);
     assert_eq!(turn.tool_intents.len(), 1);
@@ -299,6 +300,51 @@ fn llama_server_stream_assembles_text_and_fragmented_tool_arguments() {
             ModelStreamEvent::ToolIntent(turn.tool_intents[0].clone()),
         ]
     );
+}
+
+#[test]
+fn direct_stream_checks_deadline_after_finish_callback_returns() {
+    let records = [
+        "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"workspace.read\",\"arguments\":\"{\\\"path\\\":\\\"SPEC.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: [DONE]\n\n",
+    ];
+    let (endpoint, _) = serve_once(stream_response("text/event-stream", &records));
+    let transport = DirectModelTransport::new(
+        LocalModelProvider::LlamaServer,
+        &endpoint,
+        Duration::from_millis(20),
+        1024 * 1024,
+    )
+    .expect("construct direct transport");
+
+    let error = transport
+        .stream(
+            &request(ToolChoice::Auto),
+            &CancellationToken::new(),
+            &mut |_| {
+                thread::sleep(Duration::from_millis(50));
+                Ok(())
+            },
+        )
+        .expect_err("deadline must be observed after finish-time delivery");
+
+    assert!(error.to_string().contains("timed out"));
+}
+
+#[test]
+fn model_turn_deserializes_without_response_id() {
+    let turn: ModelTurn = serde_json::from_value(json!({
+        "text": "legacy",
+        "tool_intents": [],
+        "finish_reason": "stop",
+        "provider": "ollama",
+        "model": "legacy-model",
+        "provider_request_id": null,
+        "usage": null
+    }))
+    .expect("deserialize pre-response-id model turn");
+
+    assert_eq!(turn.response_id, None);
 }
 
 #[test]
