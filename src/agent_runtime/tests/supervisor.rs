@@ -159,12 +159,6 @@ fn output_limit_is_terminal_and_not_retried() {
 
 #[test]
 fn descendants_holding_output_pipes_are_terminated_after_parent_exit() {
-    let workspace = tempfile::TempDir::new().expect("workspace");
-    let script = workspace.path().join("spawn-child.sh");
-    std::fs::write(&script, "#!/bin/sh\nsleep 30 &\nexit 0\n").expect("write helper");
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))
-        .expect("make helper executable");
     let started = Instant::now();
 
     let descendant_policy = SupervisionPolicy {
@@ -173,8 +167,8 @@ fn descendants_holding_output_pipes_are_terminated_after_parent_exit() {
     };
     let report = run_supervised(&descendant_policy, |_| {
         Ok(CommandSpec::new(
-            script.to_string_lossy(),
-            std::iter::empty::<String>(),
+            "/bin/sh",
+            ["-c", "/bin/sleep 30 & exit 0"],
         ))
     })
     .expect("parent exit succeeds");
@@ -185,22 +179,12 @@ fn descendants_holding_output_pipes_are_terminated_after_parent_exit() {
 
 #[test]
 fn escaped_descendant_retaining_output_fails_without_hanging() {
-    let workspace = tempfile::TempDir::new().expect("workspace");
-    let script = workspace.path().join("escape-child.sh");
-    std::fs::write(
-        &script,
-        "#!/bin/sh\nsetsid /bin/sh -c '/bin/sleep 5 &'\nexit 0\n",
-    )
-    .expect("write helper");
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))
-        .expect("make helper executable");
     let started = Instant::now();
 
     let error = run_supervised(&policy(0), |_| {
         Ok(CommandSpec::new(
-            script.to_string_lossy(),
-            std::iter::empty::<String>(),
+            "/bin/sh",
+            ["-c", "setsid /bin/sh -c '/bin/sleep 5 &'"],
         ))
     })
     .expect_err("retained output must be terminal");
