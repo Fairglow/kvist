@@ -187,7 +187,11 @@ fn descendants_holding_output_pipes_are_terminated_after_parent_exit() {
 fn escaped_descendant_retaining_output_fails_without_hanging() {
     let workspace = tempfile::TempDir::new().expect("workspace");
     let script = workspace.path().join("escape-child.sh");
-    std::fs::write(&script, "#!/bin/sh\nsetsid sleep 2 &\nexit 0\n").expect("write helper");
+    std::fs::write(
+        &script,
+        "#!/bin/sh\nsetsid /bin/sh -c '/bin/sleep 5 &'\nexit 0\n",
+    )
+    .expect("write helper");
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700))
         .expect("make helper executable");
