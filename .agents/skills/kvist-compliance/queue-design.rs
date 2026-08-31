@@ -1,15 +1,19 @@
 //! Skill contract: queue-design.
 //!
 //! This skill generates a component-local `TODOS.yaml` from an accepted
-//! specification, preserving requirement traceability and the required test,
-//! implementation, security, and compliance ordering.
+//! requirements, contract, and design set, preserving traceability and the
+//! required test, implementation, security, and compliance ordering.
 
 /// Inputs for the queue-design skill.
 pub struct QueueDesignInputs {
-    /// The accepted component specification.
-    pub specification: String,
-    /// The immediate parent's specification revision, if any.
-    pub parent_specification: Option<String>,
+    /// The accepted component requirements.
+    pub requirements: String,
+    /// The accepted consumer contract.
+    pub contract: String,
+    /// The accepted private design.
+    pub design: String,
+    /// The nearest ancestor component contract across transparent namespaces.
+    pub parent_contract: Option<String>,
     /// The root contract.
     pub root_contract: String,
     /// Whether to request a queue revision (for incremental planning).
@@ -24,7 +28,7 @@ pub struct QueueDesignOutputs {
     pub queue: String,
     /// Whether the queue was rejected (empty string means accepted).
     pub rejection_reason: String,
-    /// Traceability report linking tasks to specification requirements.
+    /// Traceability report linking tasks to requirement and contract locators.
     pub traceability: String,
 }
 
@@ -34,26 +38,35 @@ pub const CONTRACT: &'static str = r#"
 # Role: architect
 #
 # Contract:
-#   Inputs: accepted component specification, parent specification (optional),
-#           root contract, revision flag, current queue (optional).
+#   Inputs: accepted REQUIREMENTS.md, CONTRACT.md, DESIGN.md, immediate parent
+#           CONTRACT.md (optional), root contract, revision flag, and current
+#           queue (optional).
 #   Output: a version-1 `TODOS.yaml` that passes schema validation and
 #           requirement traceability checks.
 #   Approval: the human must review the traceability report before accepting.
-#   Independence: the skill does not read `SPEC.md` or prior `IMPL.md`.
+#   Independence: the immediate parent CONTRACT.md is the only implicit
+#               propagated component context. The skill does not read parent
+#               requirements/design, peers, implementation, or prior IMPL.md.
 #
 # Constraints:
 #   - The generated queue must respect the component's dependency graph.
-#   - Each task must include `requirements` that map to specification
-#     requirement locators.
+#   - Queue provenance uses requirements_revision, contract_revision,
+#     design_revision, and parent_contract.
+#   - parent_contract.path uses one or more `..` segments followed by
+#     CONTRACT.md to reach the actual nearest ancestor component across
+#     transparent namespace directories.
+#   - Each task must include `requirements` that map to durable requirement or
+#     contract locators.
 #   - The task order must match the dependency graph: test tasks must
 #     precede implementation tasks, and security audit tasks must precede
 #     compliance review tasks.
 #   - The skill refuses to overwrite an existing non-empty queue.
-#   - The skill refuses to generate a queue for a stale specification.
+#   - The skill refuses to generate a queue for stale component intent or a
+#     stale immediate parent contract.
 #
 # Failure paths:
-#   - Refusal: the specification is stale or the queue is already complete.
-#   - Ambiguity: the specification is underspecified for the requested scope.
+#   - Refusal: intent or parent contract is stale, or the queue is complete.
+#   - Ambiguity: component intent is underspecified for the requested scope.
 #   - Schema error: the generated queue fails validation.
 #
 # Version: 1
@@ -69,8 +82,10 @@ pub const SCHEMA: &'static str = r#"
   "role": "architect",
   "version": 1,
   "inputs": {
-    "specification": "string",
-    "parent_specification": "string (optional)",
+    "requirements": "string",
+    "contract": "string",
+    "design": "string",
+    "parent_contract": "string (optional)",
     "root_contract": "string",
     "revision_requested": "boolean",
     "current_queue": "string (optional)"
@@ -82,19 +97,22 @@ pub const SCHEMA: &'static str = r#"
   },
   "approval_gate": "human",
   "independence_boundaries": {
-    "excluded": ["SPEC.md", "IMPL.md", "agent chat history"]
+    "implicit_parent_context": "immediate parent CONTRACT.md only",
+    "excluded": ["parent REQUIREMENTS.md", "parent DESIGN.md", "peer artifacts", "implementation files", "prior IMPL.md", "agent chat history"]
   },
   "constraints": {
     "dependency_graph": "must respect component dependency graph",
     "task_ordering": "test -> implementation -> security-audit -> compliance-review",
-    "traceability": "each task must map to a specification requirement",
+    "provenance_fields": "requirements_revision, contract_revision, design_revision, parent_contract",
+    "parent_contract_path": "one or more .. segments followed by CONTRACT.md, computed to the nearest ancestor component across transparent namespaces",
+    "traceability": "each task maps to durable requirement or contract locators",
     "non_overwrite": "refuses to replace a non-empty existing queue",
-    "stale_refusal": "refuses when the specification is stale"
+    "stale_refusal": "refuses when local intent or the immediate parent contract is stale"
   },
   "failure_paths": [
-    "refusal: specification is stale",
+    "refusal: local intent or immediate parent contract is stale",
     "refusal: queue is already complete",
-    "refusal: specification is ambiguous or underspecified",
+    "refusal: component intent is ambiguous or underspecified",
     "schema_error: generated queue fails validation"
   ]
 }

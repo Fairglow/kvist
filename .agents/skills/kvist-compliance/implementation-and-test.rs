@@ -1,21 +1,25 @@
 //! Skill contract: implementation-and-test.
 //!
-//! This skill generates test cases and implementation code from a component
-//! specification, respecting the component contract and excluding peer
-//! implementation details or chat state.
+//! This skill writes tests before implementation from accepted component
+//! requirements, contract, and design while preserving strict context
+//! boundaries.
 
 /// Inputs for the implementation-and-test skill.
 pub struct ImplementationAndTestInputs {
-    /// The accepted component specification.
-    pub specification: String,
-    /// The immediate parent's specification revision, if any.
-    pub parent_specification: Option<String>,
+    /// The accepted component requirements.
+    pub requirements: String,
+    /// The accepted consumer contract.
+    pub contract: String,
+    /// The accepted private design.
+    pub design: String,
+    /// The nearest ancestor component contract across transparent namespaces.
+    pub parent_contract: Option<String>,
     /// The root contract.
     pub root_contract: String,
     /// The scope of this implementation attempt.
     pub scope: String,
-    /// Whether to generate tests in addition to implementation.
-    pub generate_tests: bool,
+    /// Whether failing tests have already been written for this task chain.
+    pub tests_written: bool,
     /// Whether to generate native documentation.
     pub generate_native_documentation: bool,
     /// The current implementation, if any (for incremental development).
@@ -32,7 +36,7 @@ pub struct ImplementationAndTestOutputs {
     pub native_documentation: Option<String>,
     /// Whether the output was rejected (empty string means accepted).
     pub rejection_reason: String,
-    /// Traceability report linking implementation to specification requirements.
+    /// Traceability report linking tests and implementation to intent locators.
     pub traceability: String,
 }
 
@@ -42,29 +46,36 @@ pub const CONTRACT: &'static str = r#"
 # Role: developer
 #
 # Contract:
-#   Inputs: accepted component specification, parent specification (optional),
-#           root contract, implementation scope, test generation flag,
-#           native documentation flag, current implementation (optional).
-#   Output: implementation code, test code (if requested), native documentation
-#           (if requested), and a traceability report.
+#   Inputs: accepted REQUIREMENTS.md, CONTRACT.md, DESIGN.md, immediate parent
+#           CONTRACT.md (optional), root contract, implementation scope,
+#           tests-written flag, native documentation flag, and current
+#           implementation (optional).
+#   Output: failing tests first, then implementation code, native documentation
+#           if requested, and a traceability report.
 #   Approval: the human must review the traceability report before accepting.
-#   Independence: the skill does not read peer implementation files or chat
-#               history; it only reads the component specification and the
-#               root contract.
+#   Independence: immediate parent CONTRACT.md is the only implicit propagated
+#               component context. The skill excludes parent
+#               requirements/design, peer artifacts, prior IMPL.md, and chat.
+#   Runtime context: sandboxed work uses writable /workspace/component,
+#               read-only /workspace/context/ROOT_CONTRACT.md, and for a child
+#               read-only /workspace/context/PARENT_CONTRACT.md. General
+#               provider-contract materialization remains deferred.
 #
 # Constraints:
-#   - The implementation must match the specified interfaces and outcomes.
-#   - Generated tests must cover public behavior, boundaries, malformed input,
-#     and failure paths.
+#   - Failing tests derived from approved intent must exist before production
+#     implementation is generated.
+#   - Tests cover outcomes, consumer behavior, boundaries, malformed input,
+#     acceptance criteria, and failure paths.
+#   - Implementation must satisfy requirements, consumer contract, and design.
 #   - The skill refuses to generate code that violates the component contract.
-#   - The skill does not read peer implementation details; it generates code
-#     from the specification alone.
+#   - The skill does not read peer implementation details.
 #   - The skill refuses to overwrite a committed implementation without a
 #     revalidation record.
 #
 # Failure paths:
-#   - Refusal: the specification is stale or the component is locked.
-#   - Ambiguity: the specification is underspecified for the requested scope.
+#   - Refusal: intent or parent contract is stale, tests are absent, or the
+#     component is locked.
+#   - Ambiguity: component intent is underspecified for the requested scope.
 #   - Schema error: the generated code fails to compile or tests fail.
 #
 # Version: 1
@@ -80,11 +91,13 @@ pub const SCHEMA: &'static str = r#"
   "role": "developer",
   "version": 1,
   "inputs": {
-    "specification": "string",
-    "parent_specification": "string (optional)",
+    "requirements": "string",
+    "contract": "string",
+    "design": "string",
+    "parent_contract": "string (optional)",
     "root_contract": "string",
     "scope": "string",
-    "generate_tests": "boolean",
+    "tests_written": "boolean",
     "generate_native_documentation": "boolean",
     "current_implementation": "string (optional)"
   },
@@ -97,18 +110,23 @@ pub const SCHEMA: &'static str = r#"
   },
   "approval_gate": "human",
   "independence_boundaries": {
-    "excluded": ["peer implementation files", "agent chat history", "prior IMPL.md"]
+    "implicit_parent_context": "nearest ancestor component CONTRACT.md across transparent namespace directories",
+    "sandbox_mounts": ["writable /workspace/component", "read-only /workspace/context/ROOT_CONTRACT.md", "read-only /workspace/context/PARENT_CONTRACT.md for children"],
+    "deferred": ["general explicitly declared provider-contract materialization"],
+    "excluded": ["parent REQUIREMENTS.md", "parent DESIGN.md", "peer artifacts", "agent chat history", "prior IMPL.md"]
   },
   "constraints": {
-    "contract_compliance": "must match specified interfaces and outcomes",
-    "test_coverage": "public behavior, boundaries, malformed input, failure paths",
+    "test_first": "failing tests precede production implementation",
+    "intent_compliance": "must satisfy requirements, contract, and design",
+    "test_coverage": "outcomes, public behavior, boundaries, malformed input, acceptance, failure paths",
     "no_peer_reading": "does not read peer implementation details",
     "no_overwrite": "refuses to overwrite a committed implementation without revalidation"
   },
   "failure_paths": [
-    "refusal: specification is stale",
+    "refusal: local intent or immediate parent contract is stale",
+    "refusal: failing tests do not exist",
     "refusal: component is locked",
-    "refusal: specification is ambiguous for the requested scope",
+    "refusal: component intent is ambiguous for the requested scope",
     "schema_error: generated code fails to compile or tests fail"
   ]
 }

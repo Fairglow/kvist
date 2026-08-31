@@ -59,6 +59,27 @@ my-component/
 The `.rs` file is compiled into a binary that can be invoked directly from the
 CLI via `kvist skill <name> <args>`.
 
+Kvist compliance skills preserve the project artifact hierarchy:
+`VISION.md` -> `ARCHITECTURE.md` -> component `REQUIREMENTS.md`,
+`CONTRACT.md`, and `DESIGN.md` -> `TODOS.yaml` -> `IMPL.md`.
+`REQUIREMENTS.md` owns outcomes, constraints, acceptance, and verification;
+`CONTRACT.md` owns consumer-visible semantics and references optional native
+schemas; `DESIGN.md` owns private realization. The immediate parent
+`CONTRACT.md` is the only implicit propagated component context. Queue paths
+use one or more `..` segments followed by `CONTRACT.md` to reach the actual
+nearest ancestor component across transparent namespace directories.
+
+Queue-producing skills emit `requirements_revision`, `contract_revision`,
+`design_revision`, and `parent_contract`. Implementation skills enforce tests
+before production code. Clean-slate documentation excludes every intent
+document and prior record; compliance comparison is independent and cannot be
+performed by the implementer.
+
+Sandboxed implementation work receives one writable `/workspace/component`
+mount plus read-only `/workspace/context/ROOT_CONTRACT.md` and, for children,
+`/workspace/context/PARENT_CONTRACT.md`. General materialization of other
+explicitly declared provider contracts remains deferred.
+
 ## Why Two Types?
 
 | Aspect | Markdown Skills | Rust Components |
@@ -83,7 +104,10 @@ The CLI reads `SKILL.md`, parses it, and invokes the skill.
 ### Rust Components
 
 ```bash
-kvist skill component-design --vision="build a web app" --contract="REST API"
+kvist skill component-design \
+  --requirements=REQUIREMENTS.md \
+  --contract=CONTRACT.md \
+  --design=DESIGN.md
 ```
 
 The CLI compiles the Rust source and runs the resulting binary.

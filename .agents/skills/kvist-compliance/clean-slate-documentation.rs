@@ -1,8 +1,8 @@
 //! Skill contract: clean-slate-documentation.
 //!
 //! This skill generates `IMPL.md` from implementation source, tests, and
-//! manifests without reading the specification, producing an observed contract
-//! that reports uncertainty and never copies planned requirements.
+//! manifests without reading any intent artifact, producing an observed record
+//! that reports uncertainty and never copies planned behavior.
 
 /// Inputs for the clean-slate-documentation skill.
 pub struct CleanSlateDocumentationInputs {
@@ -36,21 +36,23 @@ pub const CONTRACT: &'static str = r#"
 # Contract:
 #   Inputs: implementation source, test suite, manifest, uncertainty flag,
 #           observed interfaces.
-#   Output: an observed-contract `IMPL.md` that describes what the
-#           implementation actually does without referencing the specification.
+#   Output: an observed `IMPL.md` that describes what the implementation and
+#           tests demonstrate without referencing intended behavior.
 #   Approval: the human must review the observed-contract record before
 #           accepting.
-#   Independence: the skill does not read `SPEC.md` or prior `IMPL.md`;
-#               it only reads implementation artifacts.
+#   Independence: the skill reads only source, tests, manifests, and necessary
+#               non-intent build configuration. It excludes REQUIREMENTS.md,
+#               CONTRACT.md, DESIGN.md, TODOS.yaml, prior IMPL.md, VISION.md,
+#               ARCHITECTURE.md, ROOT_CONTRACT.md, ADRs, prior reviews, chat,
+#               and Git history.
 #
 # Constraints:
 #   - The generated documentation must describe observed behavior, not
 #     planned requirements.
-#   - Uncertainty markers must be included for any requirement that lacks
-#     corresponding implementation evidence.
-#   - The skill refuses to copy planned requirements into implementation
-#     evidence.
-#   - The skill does not read `SPEC.md` or prior `IMPL.md`.
+#   - Uncertainty markers identify behavior not established by source or tests.
+#   - The skill refuses to copy planned intent into implementation evidence.
+#   - The implementer may review formatting and placement but cannot revise
+#     the documenter's behavioral conclusions or certify compliance.
 #
 # Failure paths:
 #   - Refusal: the implementation lacks sufficient evidence for a complete
@@ -83,13 +85,14 @@ pub const SCHEMA: &'static str = r#"
   },
   "approval_gate": "human",
   "independence_boundaries": {
-    "excluded": ["SPEC.md", "prior IMPL.md", "agent chat history"]
+    "allowed": ["implementation source", "tests", "dependency manifests", "necessary non-intent build configuration"],
+    "excluded": ["REQUIREMENTS.md", "CONTRACT.md", "DESIGN.md", "TODOS.yaml", "prior IMPL.md", "VISION.md", "ARCHITECTURE.md", "ROOT_CONTRACT.md", "ADRs", "prior reviews", "agent chat history", "Git history"]
   },
   "constraints": {
     "observed_only": "describes actual implementation behavior",
-    "no_planned_requirements": "never copies planned requirements into evidence",
-    "uncertainty_markers": "includes markers for requirements without evidence",
-    "no_spec_reading": "does not read SPEC.md or prior IMPL.md"
+    "no_planned_intent": "never copies intended behavior into evidence",
+    "uncertainty_markers": "marks behavior not established by source or tests",
+    "no_self_certification": "implementer cannot revise conclusions or certify compliance"
   },
   "failure_paths": [
     "refusal: implementation lacks sufficient evidence",

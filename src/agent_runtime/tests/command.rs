@@ -5,7 +5,7 @@ use agent_runtime::render_command;
 #[test]
 fn renders_prompt_context_and_target_without_a_shell() {
     let context = vec![
-        PathBuf::from("/workspace/SPEC.md"),
+        PathBuf::from("/workspace/REQUIREMENTS.md"),
         PathBuf::from("/workspace/TODOS.yaml"),
     ];
 
@@ -24,7 +24,7 @@ fn renders_prompt_context_and_target_without_a_shell() {
             "--message",
             "Review this contract",
             "--files",
-            "/workspace/SPEC.md",
+            "/workspace/REQUIREMENTS.md",
             "/workspace/TODOS.yaml",
             "--dir",
             "/workspace",
@@ -56,7 +56,7 @@ fn rejects_unterminated_quotes() {
 
 #[test]
 fn renders_all_placeholders_in_a_repeated_context_argument() {
-    let context = vec![PathBuf::from("/workspace/SPEC.md")];
+    let context = vec![PathBuf::from("/workspace/REQUIREMENTS.md")];
     let (_, arguments) = render_command(
         "agent '--request={prompt}:{target_directory}:{context_files}'",
         "review",
@@ -67,7 +67,7 @@ fn renders_all_placeholders_in_a_repeated_context_argument() {
 
     assert_eq!(
         arguments,
-        ["--request=review:/workspace:/workspace/SPEC.md"]
+        ["--request=review:/workspace:/workspace/REQUIREMENTS.md"]
     );
 }
 

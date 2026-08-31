@@ -1,15 +1,18 @@
-//! Reverse-discovery pipeline to generate Kvist specifications and task queues from existing source code.
+//! Reverse-discovery pipeline for draft Kvist artifacts from existing source.
 
 use std::{
-    fs,
+    fs, io,
     path::{Path, PathBuf},
 };
 
 use sha2::{Digest, Sha256};
 
 use crate::{
-    KvistError, Result, file_io::write_new_file_atomically, filesystem::is_link_like,
-    specification, task_queue,
+    KvistError, Result,
+    component_documents::{self, DocumentKind},
+    file_io::write_new_file_atomically,
+    filesystem::is_link_like,
+    task_queue,
 };
 
 const METADATA_DIRECTORY: &str = ".kvist";
@@ -63,54 +66,55 @@ pub fn reverse_discover(path: &Path) -> Result<ReverseDiscoverOutcome> {
         });
     }
 
-    // 2. Prevent overwriting accepted or existing specification
+    // 2. Prevent overwriting existing component intent.
     let metadata_directory = path.join(METADATA_DIRECTORY);
-    let target_spec = metadata_directory.join("SPEC.md");
-    if target_spec.exists() {
-        return Err(KvistError::ImportFailed {
-            reason: format!(
-                "refusing to overwrite existing specification at {}",
-                target_spec.display()
-            ),
-        });
-    }
-
-    // Also check adjacent src/SPEC.md
-    let src_spec = path.join("src/SPEC.md");
-    if src_spec.exists() {
-        return Err(KvistError::ImportFailed {
-            reason: format!(
-                "refusing to overwrite existing specification at {}",
-                src_spec.display()
-            ),
-        });
+    ensure_metadata_directory_safe(&metadata_directory, true)?;
+    for root in [&metadata_directory, &path.join("src")] {
+        for kind in [
+            DocumentKind::Requirements,
+            DocumentKind::Contract,
+            DocumentKind::Design,
+        ] {
+            let target = root.join(kind.filename());
+            if target.exists() {
+                return Err(KvistError::ImportFailed {
+                    reason: format!(
+                        "refusing to overwrite existing component document at {}",
+                        target.display()
+                    ),
+                });
+            }
+        }
     }
 
     // 3. Scan codebase recursively for symbols
     let mut symbols = DiscoveredSymbols::default();
     scan_directory(path, &mut symbols)?;
 
-    // 4. Generate specification markdown
-    let spec_content = generate_spec(&symbols);
-    if !specification::validate(&spec_content).is_valid() {
-        return Err(KvistError::GeneratedSpecificationInvalid {
-            diagnostics: "reverse-discovered specification template failed validation".to_owned(),
-        });
+    // 4. Generate draft intent documents.
+    let (requirements, contract, design) = generate_documents(&symbols);
+    for (kind, contents) in [
+        (DocumentKind::Requirements, requirements.as_str()),
+        (DocumentKind::Contract, contract.as_str()),
+        (DocumentKind::Design, design.as_str()),
+    ] {
+        let validation = component_documents::validate(kind, contents);
+        if !validation.is_valid() {
+            return Err(KvistError::GeneratedComponentDocumentInvalid {
+                document: kind.filename(),
+                diagnostics: component_documents::format_diagnostics(&validation.diagnostics),
+            });
+        }
     }
 
-    // Calculate spec hash for TODOS/IMPL
-    let mut hasher = Sha256::new();
-    hasher.update(spec_content.as_bytes());
-    let spec_hash = hex::encode(hasher.finalize());
-
     // 5. Generate TODOS and IMPL
-    let todos_content = generate_todos(&symbols, &spec_hash);
+    let todos_content = generate_todos(&symbols, &requirements, &contract, &design);
     task_queue::parse(&todos_content).map_err(|error| KvistError::TaskQueueUnavailable {
         path: metadata_directory.join("TODOS.yaml"),
         reason: format!("generated reverse-discovered queue is invalid: {error}"),
     })?;
 
-    let impl_content = generate_impl_record(&symbols, &spec_hash);
+    let impl_content = generate_impl_record(&symbols);
 
     // 6. Write artifacts to .kvist
     if !metadata_directory.exists() {
@@ -120,18 +124,50 @@ pub fn reverse_discover(path: &Path) -> Result<ReverseDiscoverOutcome> {
             source,
         })?;
     }
+    ensure_metadata_directory_safe(&metadata_directory, false)?;
 
-    write_new_file_atomically(&target_spec, &spec_content)?;
-    write_new_file_atomically(&metadata_directory.join("TODOS.yaml"), &todos_content)?;
-    write_new_file_atomically(&metadata_directory.join("IMPL.md"), &impl_content)?;
-    write_new_file_atomically(
-        &metadata_directory.join("COMPLIANCE_REVIEW.md"),
-        "<!-- kvist-compliance-review-version: 1 -->\n# Compliance Review\n",
-    )?;
+    for (filename, contents) in [
+        ("REQUIREMENTS.md", requirements.as_str()),
+        ("CONTRACT.md", contract.as_str()),
+        ("DESIGN.md", design.as_str()),
+        ("TODOS.yaml", todos_content.as_str()),
+        ("IMPL.md", impl_content.as_str()),
+        (
+            "COMPLIANCE_REVIEW.md",
+            "<!-- kvist-compliance-review-version: 1 -->\n# Compliance Review\n",
+        ),
+    ] {
+        ensure_metadata_directory_safe(&metadata_directory, false)?;
+        write_new_file_atomically(&metadata_directory.join(filename), contents)?;
+    }
 
     Ok(ReverseDiscoverOutcome::Discovered {
         path: path.to_path_buf(),
     })
+}
+
+fn ensure_metadata_directory_safe(path: &Path, allow_missing: bool) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if is_link_like(&metadata) => Err(KvistError::ImportFailed {
+            reason: format!(
+                "refusing to use link-like reverse-discovery metadata directory {}",
+                path.display()
+            ),
+        }),
+        Ok(metadata) if !metadata.file_type().is_dir() => Err(KvistError::ImportFailed {
+            reason: format!(
+                "reverse-discovery metadata path {} must be a directory",
+                path.display()
+            ),
+        }),
+        Ok(_) => Ok(()),
+        Err(error) if allow_missing && error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(KvistError::Io {
+            operation: "inspect reverse-discovery metadata directory",
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 fn scan_directory(dir: &Path, symbols: &mut DiscoveredSymbols) -> Result<()> {
@@ -178,7 +214,14 @@ fn scan_directory(dir: &Path, symbols: &mut DiscoveredSymbols) -> Result<()> {
                 parse_python_file(&path, symbols)?;
             } else if extension == "md" {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if name != "SPEC.md" && name != "IMPL.md" && name != "COMPLIANCE_REVIEW.md" {
+                if !matches!(
+                    name,
+                    "REQUIREMENTS.md"
+                        | "CONTRACT.md"
+                        | "DESIGN.md"
+                        | "IMPL.md"
+                        | "COMPLIANCE_REVIEW.md"
+                ) {
                     let content = fs::read_to_string(&path).unwrap_or_default();
                     let summary = if content.trim().is_empty() {
                         "Empty markdown file."
@@ -259,7 +302,7 @@ fn parse_python_file(path: &Path, symbols: &mut DiscoveredSymbols) -> Result<()>
     Ok(())
 }
 
-fn generate_spec(symbols: &DiscoveredSymbols) -> String {
+fn generate_documents(symbols: &DiscoveredSymbols) -> (String, String, String) {
     let exports = if symbols.pub_exports.is_empty() {
         "- No public symbols reverse-discovered.".to_owned()
     } else {
@@ -289,55 +332,136 @@ fn generate_spec(symbols: &DiscoveredSymbols) -> String {
         symbols.tests.join("\n")
     };
 
-    format!(
-        r#"<!-- kvist-specification-version: 1 -->
-# Reverse-Discovered Specification
+    let requirements = format!(
+        r#"<!-- kvist-requirements-version: 1 -->
+# Reverse-Discovered Requirements Draft
 
-<details open>
-<summary>Layer 1: Executive summary and public contract</summary>
+## Purpose and scope
 
-## Purpose
+Human review must define the intended purpose, scope, and non-goals. This draft
+contains only observations from existing source.
 
-Automatically reverse-discovered and generated specification for the components in this directory.
+## Stakeholders and concerns
 
-## Public contract
+No stakeholders or intended concerns can be inferred safely from source symbols.
 
-The following public interfaces and symbols were extracted from implementation files:
+## Functional requirements
 
-{exports}
-
-</details>
-
-<details>
-<summary>Layer 2: Architectural guarantees</summary>
-
-## Constraints and invariants
-
-The existing codebase consists of the following identified files:
-
-{files}
-
-The following supplemental documentation files were discovered:
-
-{docs}
-
-</details>
-
-<details>
-<summary>Layer 3: Detailed strategy and algorithms</summary>
-
-## Design and failure paths
-
-The existing codebase contains the following reverse-discovered unit/integration tests:
+No intended behavior is asserted. The following tests were observed and may
+provide evidence after independent review:
 
 {tests}
 
-</details>
+## Quality requirements and constraints
+
+No intended quality requirement is inferred. The following source files were
+observed:
+
+{files}
+
+## Acceptance and traceability
+
+Replace this section with stable requirement IDs, architecture links, contract
+clauses, and observable acceptance criteria before acceptance.
 "#
-    )
+    );
+    let contract = format!(
+        r#"<!-- kvist-contract-version: 1 -->
+# Reverse-Discovered Contract Draft
+
+## Boundary and ownership
+
+Ownership, supported consumers, and component responsibility require human
+review.
+
+## Provided interfaces
+
+The following public symbols were observed. They are not yet an approved
+consumer contract:
+
+{exports}
+
+## Required interfaces
+
+No cross-component dependency contract was inferred.
+
+## Data and schemas
+
+No machine-readable interface schema was identified.
+
+## Behavioral guarantees
+
+No consumer-visible guarantee is inferred from names or signatures alone.
+
+## Errors and failure semantics
+
+No error, retry, partial-effect, or recovery semantics were inferred.
+
+## Security and authority
+
+Trust, authorization, data, filesystem, process, and network boundaries require
+human review.
+
+## Compatibility and verification
+
+Define stable interface IDs, versions, compatibility rules, and contract tests
+before acceptance.
+"#
+    );
+    let design = format!(
+        r#"<!-- kvist-design-version: 1 -->
+# Reverse-Discovered Design Draft
+
+## Design overview
+
+This source-derived draft inventories existing structure without asserting that
+it is the intended design.
+
+## Internal structure
+
+Observed implementation files:
+
+{files}
+
+Supplemental Markdown observed:
+
+{docs}
+
+## Interactions and state
+
+No interaction, lifecycle, or state model was inferred.
+
+## Algorithms and decisions
+
+No algorithm or rationale was inferred from symbol names.
+
+## Failure and recovery
+
+Failure propagation and recovery require independent analysis.
+
+## Security and resource design
+
+Security enforcement and resource bounds require independent analysis.
+
+## Verification strategy
+
+Observed tests:
+
+{tests}
+
+Map reviewed evidence to approved requirement and contract IDs before
+acceptance.
+"#
+    );
+    (requirements, contract, design)
 }
 
-fn generate_todos(symbols: &DiscoveredSymbols, spec_hash: &str) -> String {
+fn generate_todos(
+    symbols: &DiscoveredSymbols,
+    requirements: &str,
+    contract: &str,
+    design: &str,
+) -> String {
     let summary = if symbols.pub_exports.is_empty() {
         "Empty interface set"
     } else {
@@ -347,8 +471,10 @@ fn generate_todos(symbols: &DiscoveredSymbols, spec_hash: &str) -> String {
     format!(
         r#"schema_version: 1
 component:
-  specification_revision: "sha256:{spec_hash}"
-  parent_specification: null
+  requirements_revision: "{requirements_revision}"
+  contract_revision: "{contract_revision}"
+  design_revision: "{design_revision}"
+  parent_contract: null
   revalidation:
     state: current
     checked_at: "2026-08-28T13:03:02Z"
@@ -365,7 +491,7 @@ tasks:
     status: pending
     depends_on: []
     requirements:
-      - "SPEC.md#Public-contract"
+      - "REQUIREMENTS.md#Acceptance-and-traceability"
     timestamps:
       created_at: "2026-08-28T13:03:02Z"
       updated_at: "2026-08-28T13:03:02Z"
@@ -376,14 +502,16 @@ tasks:
     title: "Refactor and verify reverse-discovered symbols"
     description: "Review and align the public contract exports with architectural requirements."
     context: "Summary: {summary}."
-    purpose: "Align existing implementation with a human-approved specification."
+    purpose: "Align existing implementation with human-approved component intent."
     expected_outcome: "Clean compilation and zero compliance violations."
     kind: implementation
     status: pending
     depends_on:
       - "define-discovered-tests"
     requirements:
-      - "SPEC.md#Public-contract"
+      - "CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Design-overview"
+      - "REQUIREMENTS.md#Functional-requirements"
     timestamps:
       created_at: "2026-08-28T13:03:02Z"
       updated_at: "2026-08-28T13:03:02Z"
@@ -401,7 +529,7 @@ tasks:
     depends_on:
       - "refactor-discovered-symbols"
     requirements:
-      - "SPEC.md#Public-contract"
+      - "CONTRACT.md#Security-and-authority"
     timestamps:
       created_at: "2026-08-28T13:03:02Z"
       updated_at: "2026-08-28T13:03:02Z"
@@ -409,28 +537,33 @@ tasks:
     blocked_reason: null
     recovery_state: null
   - id: "review-discovered-spec"
-    title: "Review reverse-discovered specification"
-    description: "Align the generated SPEC.md file with human-defined architectural constraints."
+    title: "Review reverse-discovered component intent"
+    description: "Compare independently observed behavior with the approved requirements, contract, and design."
     context: "Summary: {summary}."
-    purpose: "Validate that the reverse-discovered specification matches the expected component contract."
-    expected_outcome: "Spec matches architecture and SPEC.md is human-reviewed."
+    purpose: "Validate that implementation matches the approved component intent."
+    expected_outcome: "Discrepancies are recorded for human arbitration."
     kind: compliance-review
     status: pending
     depends_on:
       - "audit-discovered-boundaries"
     requirements:
-      - "SPEC.md#Public-contract"
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "DESIGN.md#Verification-strategy"
+      - "REQUIREMENTS.md#Acceptance-and-traceability"
     timestamps:
       created_at: "2026-08-28T13:03:02Z"
       updated_at: "2026-08-28T13:03:02Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null
-"#
+"#,
+        requirements_revision = revision(requirements),
+        contract_revision = revision(contract),
+        design_revision = revision(design),
     )
 }
 
-fn generate_impl_record(symbols: &DiscoveredSymbols, spec_hash: &str) -> String {
+fn generate_impl_record(symbols: &DiscoveredSymbols) -> String {
     let files = if symbols.source_files.is_empty() {
         "- No source files recorded.".to_owned()
     } else {
@@ -444,9 +577,8 @@ fn generate_impl_record(symbols: &DiscoveredSymbols, spec_hash: &str) -> String 
 
     format!(
         r#"<!-- kvist-implementation-record-version: 1 -->
-# Root Component Implementation Record
+# Component Implementation Record
 
-- **Component Specification Revision**: `sha256:{spec_hash}`
 - **Verified At**: `2026-08-28T13:03:02Z`
 - **Result**: `completed`
 
@@ -456,5 +588,12 @@ The following files form the core implementation:
 
 {files}
 "#
+    )
+}
+
+fn revision(contents: &str) -> String {
+    format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(contents.as_bytes()))
     )
 }

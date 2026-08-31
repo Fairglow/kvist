@@ -21,6 +21,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+use nix::{
+    errno::Errno,
+    sys::signal::{Signal, killpg},
+    unistd::Pid,
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -109,6 +114,13 @@ pub struct ExecutionRequest<'a> {
     pub arguments: &'a [String],
     pub environment: BTreeMap<String, String>,
     pub context_files: &'a [String],
+    pub read_only_mounts: &'a [ReadOnlyMount],
+}
+
+/// One host file exposed to the sandbox at a fixed read-only path.
+pub struct ReadOnlyMount {
+    pub source: PathBuf,
+    pub destination: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -118,7 +130,7 @@ struct SandboxRequest<'a> {
     arguments: &'a [String],
     working_directory: &'a str,
     network: &'static str,
-    mounts: [SandboxMount<'a>; 1],
+    mounts: Vec<SandboxMount<'a>>,
     environment: BTreeMap<String, String>,
     context_files: &'a [String],
 }
@@ -126,7 +138,7 @@ struct SandboxRequest<'a> {
 #[derive(Debug, Serialize)]
 struct SandboxMount<'a> {
     source: &'a str,
-    destination: &'static str,
+    destination: &'a str,
     access: &'static str,
 }
 
@@ -187,17 +199,34 @@ pub fn execute_with_timeout(
             runner: config.runner.clone(),
             reason: "component directory is not valid UTF-8 for the sandbox manifest".to_owned(),
         })?;
+    let mut mounts = Vec::with_capacity(request.read_only_mounts.len() + 1);
+    mounts.push(SandboxMount {
+        source,
+        destination: "/workspace/component",
+        access: "read-write",
+    });
+    for mount in request.read_only_mounts {
+        let source = mount
+            .source
+            .to_str()
+            .ok_or_else(|| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: "read-only context path is not valid UTF-8 for the sandbox manifest"
+                    .to_owned(),
+            })?;
+        mounts.push(SandboxMount {
+            source,
+            destination: &mount.destination,
+            access: "read-only",
+        });
+    }
     let request = SandboxRequest {
         protocol_version: PROTOCOL_VERSION,
         program: request.program,
         arguments: request.arguments,
         working_directory: "/workspace/component",
         network: "deny",
-        mounts: [SandboxMount {
-            source,
-            destination: "/workspace/component",
-            access: "read-write",
-        }],
+        mounts,
         environment: request.environment,
         context_files: request.context_files,
     };
@@ -260,12 +289,7 @@ pub fn execute_with_timeout(
                 );
             }
             Ok(None) if capture.exceeded.load(Ordering::Acquire) => {
-                child.kill().map_err(|source| {
-                    sandbox_error(config, "terminate output-limited sandbox runner", source)
-                })?;
-                let status = child.wait().map_err(|source| {
-                    sandbox_error(config, "wait for output-limited sandbox runner", source)
-                })?;
+                let status = terminate_runner(&mut child, config, "output-limited")?;
                 break (status, false, true);
             }
             Ok(None)
@@ -274,9 +298,7 @@ pub fn execute_with_timeout(
                     .is_some_and(|limit| started.elapsed() >= limit) =>
             {
                 break (
-                    child.wait().map_err(|source| {
-                        sandbox_error(config, "wait for timed-out sandbox runner", source)
-                    })?,
+                    terminate_runner(&mut child, config, "timed-out")?,
                     true,
                     false,
                 );
@@ -297,6 +319,29 @@ pub fn execute_with_timeout(
         timed_out,
         output_limit_exceeded,
     })
+}
+
+fn terminate_runner(
+    child: &mut std::process::Child,
+    config: &SandboxConfig,
+    reason: &'static str,
+) -> Result<std::process::ExitStatus> {
+    let pid = i32::try_from(child.id()).map_err(|_| KvistError::SandboxUnavailable {
+        runner: config.runner.clone(),
+        reason: "sandbox runner process ID exceeds the supported range".to_owned(),
+    })?;
+    match killpg(Pid::from_raw(pid), Signal::SIGKILL) {
+        Ok(()) | Err(Errno::ESRCH) => {}
+        Err(source) => {
+            return Err(KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!("cannot terminate {reason} sandbox runner process group: {source}"),
+            });
+        }
+    }
+    child
+        .wait()
+        .map_err(|source| sandbox_error(config, "wait for terminated sandbox runner", source))
 }
 
 fn validate_runner(
@@ -572,11 +617,10 @@ impl VerifiedRunnerLaunch {
     }
 
     fn command(&self, config: &SandboxConfig) -> Command {
+        use std::os::unix::process::CommandExt;
+
         let mut command = Command::new(&self.launch_path);
-        // On Linux, execve is used directly so env_clear() is not needed.
-        // On non-Linux, we use Command::spawn which also does not invoke a shell
-        // when given a bare path. The environment is controlled by the allowlist
-        // below.
+        command.env_clear().process_group(0);
         for (name, value) in allowed_environment(config, None) {
             command.env(name, value);
         }

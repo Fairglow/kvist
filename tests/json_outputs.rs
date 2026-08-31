@@ -49,20 +49,57 @@ fn global_json_flag_generates_structured_outputs() {
     assert!(tree_stdout.contains("\"command\":\"tree\""));
     assert!(tree_stdout.contains("\"components\""));
 
-    // 4. Test spec validate --json
-    let spec_path = project.path().join("src/SPEC.md");
+    // 4. Test component validate --json
     let validate_output = Command::new(env!("CARGO_BIN_EXE_kvist"))
         .args([
             "--json",
-            "spec",
+            "component",
             "validate",
-            spec_path.to_str().expect("UTF-8 spec path"),
+            project
+                .path()
+                .join("src")
+                .to_str()
+                .expect("UTF-8 component path"),
         ])
         .output()
-        .expect("run spec validate --json");
+        .expect("run component validate --json");
     assert!(validate_output.status.success());
     let validate_stdout = String::from_utf8(validate_output.stdout).expect("UTF-8 text output");
     assert!(validate_stdout.contains("\"status\":\"success\""));
-    assert!(validate_stdout.contains("\"command\":\"spec-validate\""));
+    assert!(validate_stdout.contains("\"command\":\"component-validate\""));
     assert!(validate_stdout.contains("\"valid\":true"));
+}
+
+#[test]
+fn invalid_component_documents_return_structured_json_failure() {
+    let component = TempDir::new().expect("component");
+    std::fs::write(component.path().join("REQUIREMENTS.md"), "# invalid\n")
+        .expect("write invalid requirements");
+    std::fs::write(component.path().join("CONTRACT.md"), "# invalid\n")
+        .expect("write invalid contract");
+    std::fs::write(component.path().join("DESIGN.md"), "# invalid\n")
+        .expect("write invalid design");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args([
+            "--json",
+            "component",
+            "validate",
+            component.path().to_str().expect("UTF-8 component path"),
+        ])
+        .output()
+        .expect("run component validation");
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let response: serde_json::Value =
+        serde_json::from_slice(&output.stderr).expect("structured JSON error");
+    assert_eq!(response["status"], "error");
+    assert_eq!(response["command"], "component-validate");
+    assert_eq!(response["valid"], false);
+    assert!(
+        response["diagnostics"]
+            .as_array()
+            .is_some_and(|items| !items.is_empty())
+    );
 }

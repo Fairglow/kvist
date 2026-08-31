@@ -2,6 +2,9 @@ use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
 
+use kvist::component_documents::{
+    COMPONENT_CONTRACT_TEMPLATE, COMPONENT_DESIGN_TEMPLATE, COMPONENT_REQUIREMENTS_TEMPLATE,
+};
 use kvist::import::{ImportOutcome, import};
 
 fn create_local_git_repo(with_artifacts: bool, is_rust_project: bool) -> (TempDir, String) {
@@ -35,44 +38,12 @@ version = "0.1.0"
     }
 
     if with_artifacts {
-        let spec_content = r#"<!-- kvist-specification-version: 1 -->
-# Imported Specification
-
-<details open>
-<summary>Layer 1: Executive summary and public contract</summary>
-
-## Purpose
-
-To be imported.
-
-## Public contract
-
-Imported contract.
-
-</details>
-
-<details>
-<summary>Layer 2: Architectural guarantees</summary>
-
-## Constraints and invariants
-
-None.
-
-</details>
-
-<details>
-<summary>Layer 3: Detailed strategy and algorithms</summary>
-
-## Design and failure paths
-
-None.
-
-</details>
-"#;
         let todos_content = r#"schema_version: 1
 component:
-  specification_revision: "sha256:82d5147ab47ac76dc94e56a15a116dd0418aca8334a7b8a4da9d5453470ed35d"
-  parent_specification: null
+  requirements_revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  contract_revision: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  design_revision: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  parent_contract: null
   revalidation:
     state: current
     checked_at: "2026-08-21T20:59:05Z"
@@ -82,7 +53,18 @@ tasks: []
 "#;
         let impl_content = "<!-- kvist-implementation-version: 1 -->\n# Implementation Record\n";
 
-        fs::write(repo_dir.path().join("SPEC.md"), spec_content).expect("write SPEC.md");
+        fs::write(
+            repo_dir.path().join("REQUIREMENTS.md"),
+            COMPONENT_REQUIREMENTS_TEMPLATE,
+        )
+        .expect("write REQUIREMENTS.md");
+        fs::write(
+            repo_dir.path().join("CONTRACT.md"),
+            COMPONENT_CONTRACT_TEMPLATE,
+        )
+        .expect("write CONTRACT.md");
+        fs::write(repo_dir.path().join("DESIGN.md"), COMPONENT_DESIGN_TEMPLATE)
+            .expect("write DESIGN.md");
         fs::write(repo_dir.path().join("TODOS.yaml"), todos_content).expect("write TODOS.yaml");
         fs::write(repo_dir.path().join("IMPL.md"), impl_content).expect("write IMPL.md");
     } else {
@@ -113,7 +95,9 @@ fn test_import_with_existing_artifacts() {
         }
     );
 
-    assert!(dest_dir.path().join("SPEC.md").is_file());
+    assert!(dest_dir.path().join("REQUIREMENTS.md").is_file());
+    assert!(dest_dir.path().join("CONTRACT.md").is_file());
+    assert!(dest_dir.path().join("DESIGN.md").is_file());
     assert!(dest_dir.path().join("TODOS.yaml").is_file());
     assert!(dest_dir.path().join("IMPL.md").is_file());
 }
@@ -131,7 +115,9 @@ fn test_import_without_artifacts_rust_project() {
         }
     );
 
-    assert!(dest_dir.path().join(".kvist/SPEC.md").is_file());
+    assert!(dest_dir.path().join(".kvist/REQUIREMENTS.md").is_file());
+    assert!(dest_dir.path().join(".kvist/CONTRACT.md").is_file());
+    assert!(dest_dir.path().join(".kvist/DESIGN.md").is_file());
     assert!(dest_dir.path().join(".kvist/TODOS.yaml").is_file());
     assert!(dest_dir.path().join(".kvist/IMPL.md").is_file());
 }
@@ -149,7 +135,9 @@ fn test_import_without_artifacts_generic_project() {
         }
     );
 
-    assert!(dest_dir.path().join("src/SPEC.md").is_file());
+    assert!(dest_dir.path().join("src/REQUIREMENTS.md").is_file());
+    assert!(dest_dir.path().join("src/CONTRACT.md").is_file());
+    assert!(dest_dir.path().join("src/DESIGN.md").is_file());
     assert!(dest_dir.path().join("src/TODOS.yaml").is_file());
     assert!(dest_dir.path().join("src/IMPL.md").is_file());
 }

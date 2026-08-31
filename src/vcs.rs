@@ -731,8 +731,8 @@ mod tests {
 
     #[test]
     fn normal_relative_paths_reject_escape_and_root_forms() {
-        assert!(is_normal_relative(Path::new("src/SPEC.md")));
-        for path in ["", ".", "../SPEC.md", "/SPEC.md"] {
+        assert!(is_normal_relative(Path::new("src/REQUIREMENTS.md")));
+        for path in ["", ".", "../CONTRACT.md", "/REQUIREMENTS.md"] {
             assert!(!is_normal_relative(Path::new(path)), "{path}");
         }
     }
@@ -752,8 +752,8 @@ mod tests {
     #[test]
     fn jj_filesets_use_forward_slash_component_separators() {
         assert_eq!(
-            jj_fileset(&Path::new("src").join("SPEC.md")).expect("UTF-8 path"),
-            r#"root:"src/SPEC.md""#
+            jj_fileset(&Path::new("src").join("REQUIREMENTS.md")).expect("UTF-8 path"),
+            r#"root:"src/REQUIREMENTS.md""#
         );
     }
 

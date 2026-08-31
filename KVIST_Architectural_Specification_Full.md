@@ -6,235 +6,313 @@
 **License:** Business Source License (BSL 1.1) / Dual-licensed for non-commercial open-use  
 **Version:** 0.1.0
 
-**Status:** This is the authoritative product direction, not a claim that every
-described workflow is already automated. [`TODO.md`](TODO.md) tracks delivery
-status and execution-policy gaps; [`COMPLIANCE_REVIEW.md`](COMPLIANCE_REVIEW.md)
-records independent review evidence and discrepancies.
+**Status:** This is the authoritative detailed product direction, not a claim
+that every described workflow is automated. [`VISION.md`](VISION.md) owns the
+product direction, [`ARCHITECTURE.md`](ARCHITECTURE.md) owns the approved
+system decomposition, [`TODO.md`](TODO.md) tracks delivery, and
+[`docs/standards.md`](docs/standards.md) records the standards and
+interoperability posture.
 
 ---
 
-## 1. Executive Summary & Vision
+## 1. Executive Summary and Principles
 
-In the current landscape of AI-driven software engineering, the industry heavily favors unconstrained autonomous agents—frequently dubbed "vibe coding." While these black-box workflows generate impressive initial velocity, they inevitably suffer from:
-1. **Architectural Drift:** Unchecked code generation introducing structural inconsistency.
-2. **Context Window Exhaustion:** Unfocused agents losing coherence as codebases grow.
-3. **Hidden Technical Debt:** Missing rationale, unverified edge cases, and absent documentation.
-4. **Loss of Developer Control:** Developers becoming passive observers rather than active architects.
+AI-driven development often gains initial speed by giving an agent a broad
+goal and a repository. That approach tends to produce architectural drift,
+unbounded context, hidden rationale, incomplete verification, and weak human
+control. Kvist instead makes the human the architecture and arbitration
+authority and gives agents bounded, durable work.
 
-**KVIST** flips this paradigm. Rather than treating AI as an unguided coder, KVIST enforces a disciplined **Spec-Driven Architecture (SDA)** process. It positions the human user as the Principal System Architect, steering AI agents through a recursive, component-driven design lifecycle.
+Kvist's governing hierarchy is:
 
-### Core Tenets
-* **Structure Before Syntax:** No source code is written until the component specification, interfaces, and testing strategies are defined and validated.
-* **Fractal & Recursive Modularization:** Every application is built as a hierarchical tree of self-contained sub-components ("kvistar" / branches). The exact same design loop applies recursively at every level of depth.
-* **Clean-Slate Compliance Verification:** AI agents must never audit their own work in the same session. Compliance is verified by reverse-engineering documentation from code using an isolated, clean-slate agent context.
-* **Durable, File-System Native State:** Architecture, specifications, and task queues live directly in the codebase alongside source files—not in ephemeral chat windows or proprietary databases.
-* **Tool-Agnostic Engine in Rust:** Built as a headless Rust CLI engine. Core
-  workflow commands require neither a cloud service nor a runtime daemon;
-  external agent programs are optional, explicitly configured subprocess
-  integrations. Generic provider profiles, interactive setup, prompt
-  acquisition, command rendering, and process supervision live in a standalone
-  library and application that Kvist consumes. Kvist retains role assignment,
-  architectural context, execution approval, and task lifecycle. The planned
-  native agent runtime separates model transport, bounded orchestration, typed
-  tool brokering, policy, execution, and evidence. The standalone component
-  owns provider-neutral messages, capabilities, tool descriptors and intents,
-  the bounded native loop, runtime events, broker sequencing,
-  execution-backend interfaces and reusable Linux implementations, and
-  host-authority interfaces. Kvist supplies task policy, grants, approved
-  bindings, execution-tier selection, promotion, and canonical compliance
-  evidence without creating a reverse dependency. Provider libraries remain
-  private transport implementations; opaque coding-agent CLIs are constrained
-  as whole processes rather than trusted as authorization boundaries.
-* **Linux-First Execution:** Linux is the only supported executable platform
-  while the project is maintained and tested by a Linux-only development team.
-  Platform-specific execution is isolated behind replaceable boundaries;
-  macOS and Windows remain planned rather than nominally supported without
-  native testing.
+```text
+VISION.md
+  -> ARCHITECTURE.md
+    -> component REQUIREMENTS.md + CONTRACT.md + DESIGN.md
+      -> TODOS.yaml
+        -> source and tests
+          -> independently derived IMPL.md
+```
+
+The artifacts have deliberately separate authority:
+
+- `VISION.md` states product direction.
+- `ARCHITECTURE.md` states system structure, component boundaries, dependency
+  direction, cross-cutting policies, and significant decisions.
+- `REQUIREMENTS.md` states component outcomes, constraints, acceptance
+  criteria, and verification obligations.
+- `CONTRACT.md` states everything a consumer may rely on: provided and
+  required interfaces, observable behavior, data formats, errors, security,
+  and compatibility posture. Optional native schemas are referenced from this
+  file with their exact path and dialect/version.
+- `DESIGN.md` states private realization: internal structure, algorithms,
+  state transitions, design decisions, failure recovery, and internal security
+  mechanisms.
+- `TODOS.yaml` is the versioned, traceable execution queue.
+- `IMPL.md` is an independently observed implementation record, not intended
+  behavior and not user-facing documentation.
+
+No retired single-document component format is recognized. This pre-release
+model has no backward-compatibility or migration path and introduces no
+project version bump.
+
+### Core tenets
+
+- **Structure before syntax:** approve architecture and component intent before
+  implementation.
+- **Recursive filesystem components:** each component directory owns its
+  requirements, contract, design, queue, observed record, tests, and source.
+- **Durable native state:** architecture and workflow state remain inspectable
+  in version-controlled Markdown and YAML.
+- **Strict context boundaries:** the immediate parent `CONTRACT.md` is the only
+  implicit propagated component context. Peer artifacts and parent
+  requirements, design, tests, and implementation are excluded. General
+  explicitly declared provider-contract materialization remains deferred.
+- **Tests before implementation:** every deliverable chain orders test,
+  implementation, security audit, then independent compliance review.
+- **Independent verification:** an implementer cannot certify its own work.
+- **Headless local core:** core inspection and workflow commands need no cloud
+  service, telemetry, credentials, or runtime daemon.
+- **Linux-first execution:** executable workflows remain Linux-only until
+  another backend has independent native tests and review.
 
 ---
 
-## 2. System Architecture & On-Disk Layout
+## 2. System Architecture and On-Disk Layout
 
-KVIST establishes a 1:1 mapping between the conceptual component hierarchy and the file-system directory tree. Every folder acts as a self-contained module containing its own specification, task queue, reverse-engineered documentation, and implementation files.
+Kvist maps approved component boundaries to directories. A directory becomes a
+component only when it owns the complete adjacent artifact model; ordinary
+source directories do not become components merely because they exist.
 
 ```text
 repository-root/
-├── kvist.toml                  <-- Global project configuration & LLM provider settings
-├── ROOT_CONTRACT.md            <-- Global architecture rules & non-negotiable constraints
+├── VISION.md
+├── ARCHITECTURE.md
+├── ROOT_CONTRACT.md
+├── kvist.toml
 └── src/
-    ├── SPEC.md                 <-- Root component specification
-    ├── TODOS.yaml              <-- Execution task queue & progress tracker
-    ├── IMPL.md                 <-- Reverse-engineered implementation record
-    ├── lib.rs                  <-- Public interface & module root
-    └── network/                <-- Sub-component directory
-        ├── SPEC.md             <-- Sub-component specification
-        ├── TODOS.yaml          <-- Sub-component task queue
-        ├── IMPL.md             <-- Sub-component implementation record
-        ├── mod.rs              <-- Component interface
-        └── protocol/           <-- Child sub-component (recursive)
-            ├── SPEC.md
+    ├── REQUIREMENTS.md
+    ├── CONTRACT.md
+    ├── DESIGN.md
+    ├── TODOS.yaml
+    ├── IMPL.md
+    ├── lib.rs
+    └── network/
+        ├── REQUIREMENTS.md
+        ├── CONTRACT.md
+        ├── DESIGN.md
+        ├── TODOS.yaml
+        ├── IMPL.md
+        ├── mod.rs
+        └── protocol/
+            ├── REQUIREMENTS.md
+            ├── CONTRACT.md
+            ├── DESIGN.md
             ├── TODOS.yaml
             ├── IMPL.md
             └── frame.rs
 ```
 
-### Key Layout Rationale
-* **Self-Containment:** A developer or agent inspecting `src/network/protocol` has all context immediately adjacent in the same directory.
-* **Context Isolation:** When an agent works on a sub-component, KVIST injects only the local directory files, the immediate parent interface contract, and `ROOT_CONTRACT.md`. Peer code implementations are excluded, preventing prompt bloat and distraction.
-* **VCS Native:** Standard version control tools (`git`, `jj`) diff, branch, and merge specifications and task queues just like source code.
+### Context and dependency rules
+
+Work on a component may use its local intent documents and queue,
+`ROOT_CONTRACT.md`, and the immediate parent `CONTRACT.md`. The parent is the
+nearest ancestor component and may be separated from the child by transparent
+namespace directories. A consumer must not need a provider's `DESIGN.md`,
+`IMPL.md`, tests, or source to use the provider.
+
+Only an immediate parent contract revision propagates implicitly. Parent
+requirements and design changes do not stale a child by themselves. A local
+requirements or design change stales the local queue; a local contract change
+also matters to declared consumers. A general dependency-contract graph is
+deferred until its durable representation and context-materialization rules
+are designed. In particular, general explicitly declared provider-contract
+materialization is not part of current task execution.
+
+The root engine and reusable `agent-runtime` component have the stable
+decomposition recorded in [`ARCHITECTURE.md`](ARCHITECTURE.md). The dependency
+direction remains one way: Kvist consumes the runtime contract, and the runtime
+does not import Kvist types.
 
 ---
 
-## 3. The 4-Stage Lifecycle Process
+## 3. Recursive Lifecycle
 
-Every node in the component tree progresses through a structured 4-stage recursive lifecycle.
+### Stage 1: Product and architecture approval
 
-```text
-┌────────────────────────────────────────────────────────────────────────┐
-│ Stage 1: SPECIFICATION                                                 │
-│ • Interactive "Interview" Mode or AI-Drafted Blueprint                 │
-│ • Defines Purpose, Rationale, Contracts, Constraints, & Algorithms    │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Feasibility & Completeness Check
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ Stage 2: TASK BREAKDOWN (TODOS.yaml)                                   │
-│ • Mandatory Order: Test -> Implement -> Security -> Review             │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Execute Tasks via Agent
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ Stage 3: IMPLEMENTATION & NATIVE DOCS                                  │
-│ • Source Code + In-Code Docstrings (e.g., rustdoc /// comments)        │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │ Trigger Clean-Slate Review Loop
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ Stage 4: TRIPLE-BLIND COMPLIANCE REVIEW                                │
-│ • Clean-Slate Agent extracts IMPL.md -> Compliance Agent compares      │
-│   SPEC.md against IMPL.md                                              │
-└───────────────────────────────────┬────────────────────────────────────┘
+The human architect approves `VISION.md`, `ARCHITECTURE.md`, and
+`ROOT_CONTRACT.md`. Architecturally significant decisions use immutable
+numbered ADRs. The decision to separate component intent is recorded in
+[`docs/decisions/0001-separate-component-intent.md`](docs/decisions/0001-separate-component-intent.md).
+
+### Stage 2: Component intent
+
+For an approved component boundary:
+
+```bash
+kvist component new COMPONENT_DIR
+kvist component validate COMPONENT_DIR
+kvist component accept COMPONENT_DIR
 ```
 
-### Stage 1: Specification (`SPEC.md`) & Layered Disclosure
-To allow reading at both high-level executive summaries and deep technical details, `SPEC.md` enforces progressive disclosure via collapsible sections:
-* **Layer 1 (Executive Summary):** Purpose, rationale ("Why this exists"), and public contract.
-* **Layer 2 (Architectural Guarantees):** Performance bounds, concurrency invariants, memory constraints, and dependency policies.
-* **Layer 3 (Detailed Strategy & Algorithms):** Concrete algorithms, state machine transitions, and error-handling paths.
+`component new` creates deterministic no-clobber templates for
+`REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md`. `component validate`
+validates all three without rewriting them. `component accept` records exact
+reviewed revisions in the queue after validating the local intent set and the
+immediate parent contract.
 
-The human architect begins with a project-level vision, then iteratively
-decomposes it into one or more hierarchical components. The architect may
-draft specifications manually, collaborate with an agent, or ask an architect
-agent to propose the decomposition and component contracts. The human reviews,
-refines, and explicitly approves the resulting specification before its queue
-is designed.
+The architect may draft these files manually or with agent assistance, but
+unresolved product decisions remain explicit. Consumer-facing semantics never
+belong only in `DESIGN.md`; internal algorithms never become consumer promises
+merely because they are described in `CONTRACT.md`.
 
-*Planned interactive "Interview" Mode:* To eliminate specification friction, a
-future terminal mode will ask structured questions based on the component type
-to help the architect and architect agent draft the initial spec. It is not a
-current command.
+### Stage 3: Traceable task planning
 
-### Stage 2: Actionable TODO Queue (`TODOS.yaml`)
-After the human approves a component specification, a designer agent analyzes
-it for logical gaps and drafts its specialized atomic task queue. The human may
-review and improve the queue; designer and human iterate until the human
-accepts it. Every component TODO list must include:
-1. `write_tests`: Implement failing test cases corresponding to spec requirements.
-2. `implement_code`: Fulfill code logic until all tests pass.
-3. `security_audit`: Validate memory safety, boundaries, and thread-safety invariants.
-4. `compliance_review`: Trigger the triple-blind verification loop.
+A designer derives `TODOS.yaml` from the accepted requirements, contract, and
+design. Queue provenance records:
 
-### Stage 3: Implementation & Native Language Documentation
-Implementation agents write executable code alongside language-native docstrings (e.g., `///` in Rust). High-level function syntax is kept in native docstrings rather than bloated inside `SPEC.md`.
-
-### Stage 4: Triple-Blind Compliance Review
-To eliminate "hallucinated compliance":
-1. **Agent A (Implementor):** Writes code based on `SPEC.md`.
-2. **Agent B (Clean-Slate Documenter):** Receives **only** the generated code (no access to `SPEC.md`) and reverse-engineers `IMPL.md`.
-3. **Agent C (Compliance Checker):** Compares `SPEC.md` against `IMPL.md` (no access to raw source code). If discrepancies occur, an arbitration flag is raised.
-
----
-
-## 4. Conflict Arbitration Workflow (Planned)
-
-When the planned compliance workflow detects a mismatch between `SPEC.md` and
-the reverse-engineered `IMPL.md`, it must stop automated progress and retain
-the discrepancy for explicit human arbitration. The following illustrates the
-intended decision surface; it is not a current CLI or web command:
-
-```text
-⚠️ SPEC COMPLIANCE MISMATCH DETECTED in [src/network/protocol]
-
-Spec Requirement: "Must use non-blocking I/O for socket connections."
-Implemented Code: "Blocking socket connection detected in frame.rs:42."
-
-Select Arbitration Action:
-  [1] Trigger Agent Redesign (Re-prompt implementation agent with feedback)
-  [2] Propose Implementation Changes (Prepare a reviewed SPEC.md update)
-  [3] Manually Arbitrate (Open diff in user's default editor)
-  [4] AI Trade-off Analysis (Ask assistant to evaluate pros/cons before deciding)
+```yaml
+component:
+  requirements_revision: sha256:...
+  contract_revision: sha256:...
+  design_revision: sha256:...
+  parent_contract: null
 ```
 
-Every option must preserve the original discrepancy and decision rationale in
-version-controlled component artifacts. No option may overwrite `SPEC.md` or
-`IMPL.md` implicitly: an architect must review and explicitly accept any
-proposed contract or implementation change before task execution can resume.
+For a child, `parent_contract.path` is computed to the actual nearest ancestor
+component across transparent namespace directories. It contains one or more
+`..` segments followed by `CONTRACT.md`; for example, `../CONTRACT.md` or
+`../../../CONTRACT.md`. The mapping also records the reviewed revision. Tasks
+carry durable requirement locators and explicit dependency edges. Each
+deliverable chain orders:
+
+1. `write_tests`
+2. `implement_code`
+3. `security_audit`
+4. `compliance_review`
+
+### Stage 4: Tests and implementation
+
+Tests are written from the approved intent before production code. The
+implementer receives only the bounded context authorized for that component
+and cannot read peer implementation details merely for convenience. Native
+language documentation describes code-level use; it does not replace the
+consumer contract or observed implementation record.
+
+### Stage 5: Clean-slate record and independent compliance
+
+The clean-slate documenter derives a fresh `IMPL.md` from source, tests,
+manifests, and necessary non-intent build configuration. It must not read
+`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, a prior
+`IMPL.md`, root or architecture intent, prior reviews, chat history, or Git
+history.
+
+A separate source-blind compliance reviewer then compares the approved
+`REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` with the fresh `IMPL.md` and
+test evidence. The reviewer does not read source and is not the implementer or
+documenter. Every item is recorded as compliant, mismatched, approved-deferred,
+or underspecified. No implementation context may self-certify.
+
+### Stage 6: Human arbitration
+
+The architect resolves discrepancies by requesting implementation work,
+approving an explicit intent change, or recording a reasoned exception. The
+original discrepancy and decision rationale remain durable. Automation must
+not silently edit intent documents or `IMPL.md` to manufacture agreement.
 
 ---
 
-## 5. UI, Editor & Ecosystem Strategy (Planned)
+## 4. CLI, Status, and Durable State
 
-### Why Rust for Implementation?
-Rust supports the intended single-binary, portable core and strong memory-safety
-guarantees. The current product surface is headless and Linux-only. Source and
-protocol design should remain portable, but a platform is enabled only after
-its process, filesystem, and sandbox behavior has a maintained native test
-matrix. File watching, web, and editor integrations remain deferred.
+The current component document surface is
+`kvist component new|validate|accept`. Status supports
+`--only-documents` for document-focused output. Retired command spellings and
+queue fields are not aliases.
 
-### Triple-Tier Integration Strategy
-1. **Headless Engine Core (`kvist-cli` in Rust):** Manages tree state,
-   `TODOS.yaml` parsing, context slicing, and Kvist-specific execution policy.
-   It delegates provider-neutral prompt acquisition and process supervision to
-   the standalone `agent-runtime` component. That component will classify
-   native model, one-shot model, external-agent, and plan-only backends;
-   capability support is advertised, independently tested, and policy-enabled
-   separately. The small direct local HTTP transport remains the default and
-   fallback. Exactly pinned `rig-core` 0.42.0 may be selected through a
-   non-default adapter after raising the project MSRV to Rig's upstream-tested
-   Rust 1.94 toolchain. Rig remains behind standalone-owned canonical types and
-   cannot own authorization, tool execution, evidence, or sandbox policy.
-2. **Built-in Local Web View (`kvist serve`):** Spins up an embedded lightweight web server (`axum`) serving a single-page web app. Utilizes **Monaco Editor** (VS Code's open-source editor core) to render the interactive collapsible component tree, live progress bars, and compliance diffs.
-3. **Native IDE Alignment (LSP / Watcher):** Since specifications and code are plain Markdown, YAML, and Rust files, users continue using their preferred IDE (VS Code + `rust-analyzer`, Neovim, Zed, RustRover). A lightweight `kvist watch` daemon or LSP sidecar surface spec-staleness diagnostics directly inside the user's editor.
+Status compares exact UTF-8 byte revisions for local requirements, contract,
+and design and, for children, the immediate parent contract. It reports
+attributable missing, invalid, unsupported, stale, blocked, or current state
+without persisting derived staleness.
+
+Kvist writes durable state through regular non-link paths, bounded reads,
+same-directory temporary files, synchronization where supported, and explicit
+no-clobber or atomic replacement. Machine-consumed formats carry independent
+version markers, but the pre-release artifact split retains no compatibility
+or migration behavior.
 
 ---
 
-## 6. Risk Analysis & Edge Cases
+## 5. Agent Runtime and Execution Authority
 
-| Risk / Edge Case | Architectural Solution in KVIST |
-| :--- | :--- |
-| **The "Ripple Effect" (Upstream Spec Changes)** | `status` compares component and immediate-parent specification revisions and reports attributable stale evidence. Persisting revalidation remains an explicit human-reviewed write. |
-| **Global Architectural Drift** | Root and immediate-parent contracts define the intended boundary. The current task runner explicitly supplies only component artifacts; future role-specific context must be documented rather than inferred. |
-| **Context Window Overhead** | `task run` declares the component's `SPEC.md`, `TODOS.yaml`, and `IMPL.md` as agent context. It does not add parent or peer implementations. |
-| **Specification Friction** | A template-driven interview mode is planned; it is not a current command. |
+Kvist owns task policy, grants, approved resource and credential bindings,
+execution-tier selection, artifact promotion, and canonical evidence. The
+standalone `agent-runtime` component owns provider-neutral prompt acquisition,
+command rendering, process supervision, profiles, model transport, canonical
+tool intent, and reusable bounded runtime mechanisms.
+
+Provider libraries remain private adapters. A model tool call is untrusted
+intent, not authorization. Opaque coding-agent CLIs are constrained as whole
+processes by the selected external execution boundary. Core inspection does
+not require a model or network.
+
+Current sandboxed task execution provides one writable mount at
+`/workspace/component` and read-only context at
+`/workspace/context/ROOT_CONTRACT.md` plus, for a child,
+`/workspace/context/PARENT_CONTRACT.md`. The parent file is sourced from the
+actual nearest ancestor component across transparent namespace directories.
+General provider-contract context materialization remains deferred.
+
+The direct local HTTP transport is the default and fallback. The exactly pinned
+optional Rig adapter is a non-default transport prototype. Live provider
+matrices, independent security audit, and compliance review remain promotion
+gates; optional availability is not a completed interoperability claim.
+Detailed authority and transport decisions live in
+[`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md) and
+[`docs/agent-runtime/rig-evaluation.md`](docs/agent-runtime/rig-evaluation.md).
 
 ---
 
-## 7. Business Model & Licensing
+## 6. Standards and Interoperability
 
-* **License:** Business Source License 1.1 (BSL 1.1) / Dual-license.
-* **Terms:**
-  * **100% Free** for non-commercial use, individuals, open-source projects, and small teams.
-  * Commercial license required for enterprises exceeding specific revenue/employee thresholds.
-  * Automatically converts to an open-source license (Apache 2.0 / MIT) after 3 years.
+Kvist uses a tailored ISO/IEC/IEEE 42010-inspired architecture description,
+arc42 as a content checklist, selective C4-compatible views, BCP 14 normative
+language, and immutable ADRs. Interface-native schemas such as OpenAPI,
+AsyncAPI, JSON Schema, Protocol Buffers, or WIT may be referenced from the
+provider's `CONTRACT.md` when useful.
+
+Kvist does not claim completed general import/export interoperability.
+ReqIF, architecture-model exchange, Structurizr export, schema validation, and
+other adapters remain deferred or import/export-ready only to the extent
+documented in [`docs/standards.md`](docs/standards.md). Stable identifiers,
+exact versions, direction, and provenance are retained so a future adapter can
+declare what it preserves or loses.
+
+---
+
+## 7. Risks and Deferred Work
+
+| Risk | Architectural response |
+| --- | --- |
+| Upstream ripple | Only the nearest ancestor component `CONTRACT.md` propagates implicitly; general provider-contract materialization remains deferred. |
+| Context growth | Local intent, queue, root constraints, and explicitly authorized contracts bound the work context. |
+| Hallucinated compliance | Clean-slate observation and separate source-blind comparison prevent implementer self-certification. |
+| Artifact ambiguity | Requirements, contract, design, task state, and observed behavior have distinct authority. |
+| Unsafe execution | External commands are shell-free and effectful task execution requires an independently installed approved enforcement boundary. |
+| Nominal portability | Linux is the only executable target until another backend has independent native evidence. |
+| Interchange overclaim | Native schema references and retained identifiers support future adapters without claiming currently deferred conformance or interoperability. |
+
+Visual editor, LSP, web, generalized dependency graphs, architecture exchange,
+and full compliance-workflow automation remain planned until their contracts,
+security boundaries, and independent evidence exist.
 
 ---
 
 ## 8. Delivery Planning
 
 The implementation roadmap, task contexts, acceptance criteria, and status
-live in [`TODO.md`](TODO.md). This specification defines the target
-architecture and constraints; the tracker is the authoritative, versioned
-execution plan and must be updated when this document changes planned scope.
+live in [`TODO.md`](TODO.md). This document preserves detailed architectural
+strategy; `VISION.md`, `ARCHITECTURE.md`, component intent documents,
+`TODOS.yaml`, and `IMPL.md` retain their distinct authorities.
 
 ---
 *KVIST — Structured design for autonomous agents.*

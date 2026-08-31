@@ -22,7 +22,7 @@ fn limits() -> DiscoveryLimits {
 fn create_component(path: &Path) {
     fs::create_dir_all(path).expect("create component");
     fs::write(
-        path.join(ComponentArtifact::Specification.filename()),
+        path.join(ComponentArtifact::Requirements.filename()),
         "fixture",
     )
     .expect("write artifact");

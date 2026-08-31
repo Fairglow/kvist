@@ -10,9 +10,10 @@ use toml::Value;
 
 use crate::{
     KvistError, Result,
+    component_documents::{self, DocumentKind},
     file_io::{sync_directory, write_new_file_atomically},
     filesystem::is_link_like,
-    specification, task_queue,
+    task_queue,
 };
 
 const METADATA_DIRECTORY: &str = ".kvist";
@@ -39,7 +40,7 @@ impl std::fmt::Display for ConvertOutcome {
             Self::Converted { project_dir } => write!(
                 formatter,
                 "created draft Kvist artifacts for existing project at {}; review and accept \
-                 .kvist/SPEC.md and .kvist/TODOS.yaml before task execution",
+                 .kvist intent documents and TODOS.yaml before task execution",
                 project_dir.display()
             ),
             Self::AlreadyConverted { project_dir } => write!(
@@ -78,7 +79,14 @@ pub fn convert(project_dir: &Path) -> Result<ConvertOutcome> {
             });
         }
         Ok(metadata) if metadata.file_type().is_dir() => {
-            let expected_artifacts = ["SPEC.md", "TODOS.yaml", "IMPL.md", "COMPLIANCE_REVIEW.md"];
+            let expected_artifacts = [
+                "REQUIREMENTS.md",
+                "CONTRACT.md",
+                "DESIGN.md",
+                "TODOS.yaml",
+                "IMPL.md",
+                "COMPLIANCE_REVIEW.md",
+            ];
             let mut existing_artifacts = expected_artifacts
                 .iter()
                 .map(|name| metadata_directory.join(name))
@@ -118,13 +126,21 @@ pub fn convert(project_dir: &Path) -> Result<ConvertOutcome> {
         }
     }
 
-    let specification = draft_specification(&manifest);
-    if !specification::validate(&specification).is_valid() {
-        return Err(KvistError::GeneratedSpecificationInvalid {
-            diagnostics: "existing-project conversion template failed validation".to_owned(),
-        });
+    let (requirements, contract, design) = draft_documents(&manifest);
+    for (kind, contents) in [
+        (DocumentKind::Requirements, requirements.as_str()),
+        (DocumentKind::Contract, contract.as_str()),
+        (DocumentKind::Design, design.as_str()),
+    ] {
+        let validation = component_documents::validate(kind, contents);
+        if !validation.is_valid() {
+            return Err(KvistError::GeneratedComponentDocumentInvalid {
+                document: kind.filename(),
+                diagnostics: component_documents::format_diagnostics(&validation.diagnostics),
+            });
+        }
     }
-    let todos = draft_todos(&manifest, &specification)?;
+    let todos = draft_todos(&manifest, &requirements, &contract, &design)?;
     task_queue::parse(&todos).map_err(|error| KvistError::TaskQueueUnavailable {
         path: metadata_directory.join("TODOS.yaml"),
         reason: format!("generated conversion queue is invalid: {error}"),
@@ -138,7 +154,9 @@ pub fn convert(project_dir: &Path) -> Result<ConvertOutcome> {
     })?;
 
     for (name, contents) in [
-        ("SPEC.md", specification),
+        ("REQUIREMENTS.md", requirements),
+        ("CONTRACT.md", contract),
+        ("DESIGN.md", design),
         ("TODOS.yaml", todos),
         ("IMPL.md", implementation_record),
         ("COMPLIANCE_REVIEW.md", draft_compliance_review()),
@@ -261,44 +279,37 @@ fn read_manifest(project_dir: &Path) -> Result<Manifest> {
     })
 }
 
-fn draft_specification(manifest: &Manifest) -> String {
-    format!(
-        r#"<!-- kvist-specification-version: 1 -->
-# {name} Specification
+fn draft_documents(manifest: &Manifest) -> (String, String, String) {
+    let requirements = format!(
+        r#"<!-- kvist-requirements-version: 1 -->
+# {name} Requirements
 
-<details open>
-<summary>Layer 1: Executive summary and public contract</summary>
-
-## Purpose
+## Purpose and scope
 
 {description}
 
-## Public contract
+This draft covers the existing Rust package `{name}` version `{version}`.
+Its product scope and non-goals require human review.
 
-This draft describes the existing Rust package `{name}` version `{version}`. Review and
-replace its inferred contract before accepting it for task execution.
+## Stakeholders and concerns
 
-</details>
+Package authors recorded by Cargo metadata: {authors}. Identify actual users,
+operators, integrators, and review concerns before acceptance.
 
-<details>
-<summary>Layer 2: Architectural guarantees</summary>
+## Functional requirements
 
-## Constraints and invariants
+No functional requirements can be inferred safely from manifest metadata.
+Define stable requirement IDs from intended behavior before task execution.
 
-The conversion preserves `Cargo.toml`, `src/`, `tests/`, and `benches/` without
-modification. Dependencies: {dependencies}. Features: {features}. Authors: {authors}.
+## Quality requirements and constraints
 
-</details>
+Conversion MUST preserve the existing manifest, source, tests, and benchmarks.
+Current dependencies: {dependencies}. Current features: {features}.
 
-<details>
-<summary>Layer 3: Detailed strategy and algorithms</summary>
+## Acceptance and traceability
 
-## Design and failure paths
-
-This is a generated draft based on manifest metadata. It is not an assertion that the
-existing implementation meets these requirements; acceptance requires human review.
-
-</details>
+Acceptance requires human-authored requirements, links to the parent
+architecture and contract clauses, and observable verification criteria.
 "#,
         name = manifest.name,
         version = manifest.version,
@@ -306,14 +317,105 @@ existing implementation meets these requirements; acceptance requires human revi
         authors = list_or_none(&manifest.authors),
         dependencies = list_or_none(&manifest.dependencies),
         features = list_or_none(&manifest.features),
-    )
+    );
+    let contract = format!(
+        r#"<!-- kvist-contract-version: 1 -->
+# {name} Contract
+
+## Boundary and ownership
+
+Draft boundary for existing package `{name}` version `{version}`. Ownership and
+supported consumers require human confirmation.
+
+## Provided interfaces
+
+No consumer-visible interface is inferred from manifest metadata. Inspect
+public source behavior independently and define stable interface IDs.
+
+## Required interfaces
+
+Cargo dependencies observed during conversion: {dependencies}. This list is
+not yet an approved cross-component dependency contract.
+
+## Data and schemas
+
+None identified. Add exact paths and dialect versions only when a
+machine-readable schema is useful.
+
+## Behavioral guarantees
+
+No behavioral guarantee is inferred from package metadata.
+
+## Errors and failure semantics
+
+No failure contract is inferred from package metadata.
+
+## Security and authority
+
+Trust, authorization, data, filesystem, process, and network boundaries require
+human review.
+
+## Compatibility and verification
+
+Package version `{version}` was observed. Define the actual public compatibility
+policy and contract-test evidence before acceptance.
+"#,
+        name = manifest.name,
+        version = manifest.version,
+        dependencies = list_or_none(&manifest.dependencies),
+    );
+    let design = format!(
+        r#"<!-- kvist-design-version: 1 -->
+# {name} Design
+
+## Design overview
+
+Generated conversion draft for package `{name}`. It records only manifest-level
+facts and does not certify the existing implementation.
+
+## Internal structure
+
+The Rust package has features {features} and dependencies {dependencies}.
+Source-level decomposition requires a separate design pass.
+
+## Interactions and state
+
+No runtime interaction or state model is inferred from Cargo metadata.
+
+## Algorithms and decisions
+
+No algorithm or architecture decision is inferred from Cargo metadata.
+
+## Failure and recovery
+
+Failure propagation and recovery behavior require implementation-independent
+design and review.
+
+## Security and resource design
+
+Security enforcement and resource bounds require explicit design.
+
+## Verification strategy
+
+Review existing tests without treating them as intended requirements, then map
+approved requirement and contract IDs to independent verification.
+"#,
+        name = manifest.name,
+        dependencies = list_or_none(&manifest.dependencies),
+        features = list_or_none(&manifest.features),
+    );
+    (requirements, contract, design)
 }
 
-fn draft_todos(manifest: &Manifest, specification: &str) -> Result<String> {
-    let specification_revision = format!(
-        "sha256:{}",
-        hex::encode(Sha256::digest(specification.as_bytes()))
-    );
+fn draft_todos(
+    manifest: &Manifest,
+    requirements: &str,
+    contract: &str,
+    design: &str,
+) -> Result<String> {
+    let requirements_revision = revision(requirements);
+    let contract_revision = revision(contract);
+    let design_revision = revision(design);
     let context = yaml_string(&format!(
         "Converted package {} {} with authors [{}], dependencies [{}], and features [{}].",
         manifest.name,
@@ -325,8 +427,10 @@ fn draft_todos(manifest: &Manifest, specification: &str) -> Result<String> {
     Ok(format!(
         r#"schema_version: 1
 component:
-  specification_revision: {specification_revision}
-  parent_specification: null
+  requirements_revision: {requirements_revision}
+  contract_revision: {contract_revision}
+  design_revision: {design_revision}
+  parent_contract: null
   revalidation:
     state: current
     checked_at: {GENERATED_AT}
@@ -351,11 +455,11 @@ tasks:
     blocked_reason: null
     recovery_state: null
   - id: align-existing-implementation
-    title: Align implementation with accepted specification
-    description: Make only the implementation changes needed to meet the accepted specification.
+    title: Align implementation with approved component intent
+    description: Make only the implementation changes needed to meet the approved requirements, contract, and design.
     context: {context}
     purpose: Preserve existing work while making the component contract explicit.
-    expected_outcome: The implementation satisfies the accepted specification and tests.
+    expected_outcome: The implementation satisfies the approved intent documents and tests.
     kind: implementation
     status: pending
     depends_on:
@@ -388,7 +492,7 @@ tasks:
     recovery_state: null
   - id: review-converted-component
     title: Independently review converted component
-    description: Create a clean-slate implementation record and compare it against the accepted specification.
+    description: Create a clean-slate implementation record and compare it against the approved intent documents.
     context: {context}
     purpose: Ensure an implementer does not certify its own imported work.
     expected_outcome: Compliance evidence records the independent review result.
@@ -436,8 +540,8 @@ fn draft_implementation_record(project_dir: &Path) -> Result<String> {
         r#"<!-- kvist-implementation-record-version: 1 -->
 # Existing Project Implementation Record
 
-This draft records only the source files observed during conversion, without reading
-the generated specification.
+This draft records only the source files observed during conversion, without
+using the generated requirements, contract, or design.
 
 ## Observed public contract
 
@@ -464,9 +568,10 @@ fn draft_compliance_review() -> String {
 
 **Status:** Not performed
 
-The generated specification, task queue, and implementation record are drafts. An
+The generated requirements, contract, design, task queue, and implementation
+record are drafts. An
 independent clean-slate documentation and source-blind compliance review is required
-after the specification and queue are accepted.
+after the intent documents and queue are accepted.
 "#
     .to_owned()
 }
@@ -477,6 +582,13 @@ fn list_or_none(values: &[String]) -> String {
     } else {
         values.join(", ")
     }
+}
+
+fn revision(contents: &str) -> String {
+    format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(contents.as_bytes()))
+    )
 }
 
 fn yaml_string(value: &str) -> Result<String> {

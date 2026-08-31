@@ -18,18 +18,17 @@ fn phase_one_cli_workflow_initializes_generates_validates_and_renders() {
     let component = project.path().join("src/network");
     let component_path = component.to_str().expect("UTF-8 component path");
     let project_path = project.path().to_str().expect("UTF-8 project path");
-    let specification = component.join("SPEC.md");
-    let specification_path = specification.to_str().expect("UTF-8 specification path");
+    let requirements = component.join("REQUIREMENTS.md");
 
     let init = run_kvist(&["init", project_path]);
     assert!(init.status.success());
     assert!(init.stderr.is_empty());
 
-    let generate = run_kvist(&["spec", "new", component_path]);
+    let generate = run_kvist(&["component", "new", component_path]);
     assert!(generate.status.success());
     assert!(generate.stderr.is_empty());
 
-    let validate = run_kvist(&["spec", "validate", specification_path]);
+    let validate = run_kvist(&["component", "validate", component_path]);
     assert!(validate.status.success());
     assert!(validate.stderr.is_empty());
 
@@ -41,5 +40,5 @@ fn phase_one_cli_workflow_initializes_generates_validates_and_renders() {
             .contains("network [incomplete: missing TODOS.yaml; missing IMPL.md]")
     );
 
-    assert!(Path::new(specification_path).is_file());
+    assert!(Path::new(&requirements).is_file());
 }

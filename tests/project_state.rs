@@ -5,9 +5,10 @@ use std::{
 
 use kvist::{
     artifacts::{
-        CONFIGURATION_VERSION, IMPLEMENTATION_RECORD_VERSION, ROOT_CONTRACT_VERSION,
-        SPECIFICATION_VERSION, TODO_QUEUE_VERSION,
+        ARCHITECTURE_VERSION, CONFIGURATION_VERSION, IMPLEMENTATION_RECORD_VERSION,
+        ROOT_CONTRACT_VERSION, TODO_QUEUE_VERSION, VISION_VERSION,
     },
+    component_documents::{CONTRACT_VERSION, DESIGN_VERSION, REQUIREMENTS_VERSION},
     init::initialize,
     project_state::{MAX_ROOT_TEXT_ARTIFACT_BYTES, ProjectState, inspect},
 };
@@ -94,7 +95,12 @@ fn invalid_contents_and_artifact_types_are_classified_as_invalid() {
             "schema_version = \"one\"\ncomponent_root = \"src\"\n",
         ),
         ("ROOT_CONTRACT.md", "# Kvist Root Contract\n"),
-        ("src/SPEC.md", "<!-- kvist-specification-version: 1 -->\n"),
+        (
+            "src/REQUIREMENTS.md",
+            "<!-- kvist-requirements-version: 1 -->\n",
+        ),
+        ("src/CONTRACT.md", "<!-- kvist-contract-version: 1 -->\n"),
+        ("src/DESIGN.md", "<!-- kvist-design-version: 1 -->\n"),
         (
             "src/TODOS.yaml",
             "schema_version: 1\ncomponent: invalid\ntasks: []\n",
@@ -138,8 +144,24 @@ fn every_version_domain_can_report_an_unsupported_version() {
             "<!-- kvist-root-contract-version: 99 -->\n# Kvist Root Contract\n",
         ),
         (
-            "src/SPEC.md",
-            "<!-- kvist-specification-version: 99 -->\n# Root Component Specification\n",
+            "VISION.md",
+            "<!-- kvist-vision-version: 99 -->\n# Project Vision\n",
+        ),
+        (
+            "ARCHITECTURE.md",
+            "<!-- kvist-architecture-version: 99 -->\n# Project Architecture\n",
+        ),
+        (
+            "src/REQUIREMENTS.md",
+            "<!-- kvist-requirements-version: 99 -->\n# Component Requirements\n",
+        ),
+        (
+            "src/CONTRACT.md",
+            "<!-- kvist-contract-version: 99 -->\n# Component Contract\n",
+        ),
+        (
+            "src/DESIGN.md",
+            "<!-- kvist-design-version: 99 -->\n# Component Design\n",
         ),
         (
             "src/TODOS.yaml",
@@ -147,7 +169,7 @@ fn every_version_domain_can_report_an_unsupported_version() {
         ),
         (
             "src/IMPL.md",
-            "<!-- kvist-implementation-record-version: 99 -->\n# Root Component Implementation Record\n",
+            "<!-- kvist-implementation-record-version: 99 -->\n# Component Implementation Record\n",
         ),
     ];
 
@@ -165,8 +187,12 @@ fn every_version_domain_can_report_an_unsupported_version() {
 #[test]
 fn version_domains_are_independent_public_constants() {
     assert_eq!(CONFIGURATION_VERSION, 1);
+    assert_eq!(VISION_VERSION, 1);
+    assert_eq!(ARCHITECTURE_VERSION, 1);
     assert_eq!(ROOT_CONTRACT_VERSION, 1);
-    assert_eq!(SPECIFICATION_VERSION, 1);
+    assert_eq!(REQUIREMENTS_VERSION, 1);
+    assert_eq!(CONTRACT_VERSION, 1);
+    assert_eq!(DESIGN_VERSION, 1);
     assert_eq!(TODO_QUEUE_VERSION, 1);
     assert_eq!(IMPLEMENTATION_RECORD_VERSION, 1);
 }
@@ -175,7 +201,11 @@ fn version_domains_are_independent_public_constants() {
 fn oversized_or_invalid_utf8_root_artifacts_remain_inspectable_as_invalid() {
     for path in [
         "ROOT_CONTRACT.md",
-        "src/SPEC.md",
+        "VISION.md",
+        "ARCHITECTURE.md",
+        "src/REQUIREMENTS.md",
+        "src/CONTRACT.md",
+        "src/DESIGN.md",
         "src/TODOS.yaml",
         "src/IMPL.md",
     ] {

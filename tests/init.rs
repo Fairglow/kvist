@@ -48,7 +48,11 @@ fn initialization_creates_a_missing_nested_project_directory() {
             project_dir: project_dir.clone()
         }
     );
-    assert!(project_dir.join("src/SPEC.md").is_file());
+    assert!(project_dir.join("VISION.md").is_file());
+    assert!(project_dir.join("ARCHITECTURE.md").is_file());
+    assert!(project_dir.join("src/REQUIREMENTS.md").is_file());
+    assert!(project_dir.join("src/CONTRACT.md").is_file());
+    assert!(project_dir.join("src/DESIGN.md").is_file());
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! Read-only, deterministic discovery of Kvist component layouts.
 //!
-//! Content validation is deliberately outside this module: `SPEC.md`,
-//! `TODOS.yaml`, and `IMPL.md` formats are validated by their owning phases.
+//! Content validation is deliberately outside this module: component intent
+//! documents, `TODOS.yaml`, and `IMPL.md` are validated by their owning phases.
 
 use std::{
     fs, io,
@@ -20,8 +20,12 @@ pub const IGNORED_DIRECTORY_NAMES: [&str; 5] = [".git", ".hg", ".jj", "node_modu
 /// The required adjacent artifacts for every component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ComponentArtifact {
-    /// The component's progressive-disclosure specification.
-    Specification,
+    /// The component's testable requirements.
+    Requirements,
+    /// The component's consumer-visible contract.
+    Contract,
+    /// The component's internal design.
+    Design,
     /// The component's ordered implementation task queue.
     TaskQueue,
     /// The component's reverse-engineered implementation record.
@@ -32,15 +36,19 @@ impl ComponentArtifact {
     /// Returns this artifact's required filename.
     pub const fn filename(self) -> &'static str {
         match self {
-            Self::Specification => "SPEC.md",
+            Self::Requirements => "REQUIREMENTS.md",
+            Self::Contract => "CONTRACT.md",
+            Self::Design => "DESIGN.md",
             Self::TaskQueue => "TODOS.yaml",
             Self::ImplementationRecord => IMPLEMENTATION_RECORD_FILENAME,
         }
     }
 }
 
-const REQUIRED_ARTIFACTS: [ComponentArtifact; 3] = [
-    ComponentArtifact::Specification,
+const REQUIRED_ARTIFACTS: [ComponentArtifact; 5] = [
+    ComponentArtifact::Requirements,
+    ComponentArtifact::Contract,
+    ComponentArtifact::Design,
     ComponentArtifact::TaskQueue,
     ComponentArtifact::ImplementationRecord,
 ];
@@ -70,7 +78,7 @@ pub enum InvalidArtifactKind {
 /// Aggregated layout state of a component.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComponentStatus {
-    /// All three required adjacent artifacts are regular files.
+    /// All five required adjacent artifacts are regular files.
     Complete,
     /// One or more required artifacts are absent.
     Incomplete {
@@ -89,7 +97,7 @@ pub enum ComponentStatus {
 pub struct Component {
     /// Path relative to the discovered component root; `.` identifies the root.
     pub relative_path: PathBuf,
-    artifact_statuses: [ArtifactStatus; 3],
+    artifact_statuses: [ArtifactStatus; 5],
 }
 
 impl Component {
@@ -328,7 +336,9 @@ fn scan_directory(
 
 fn inspect_component(directory: &Path, relative_path: &Path) -> Result<Component> {
     let artifact_statuses = [
-        inspect_artifact(directory, ComponentArtifact::Specification)?,
+        inspect_artifact(directory, ComponentArtifact::Requirements)?,
+        inspect_artifact(directory, ComponentArtifact::Contract)?,
+        inspect_artifact(directory, ComponentArtifact::Design)?,
         inspect_artifact(directory, ComponentArtifact::TaskQueue)?,
         inspect_artifact(directory, ComponentArtifact::ImplementationRecord)?,
     ];
@@ -377,9 +387,11 @@ fn is_artifact_name(name: &std::ffi::OsStr) -> bool {
 
 const fn artifact_index(artifact: ComponentArtifact) -> usize {
     match artifact {
-        ComponentArtifact::Specification => 0,
-        ComponentArtifact::TaskQueue => 1,
-        ComponentArtifact::ImplementationRecord => 2,
+        ComponentArtifact::Requirements => 0,
+        ComponentArtifact::Contract => 1,
+        ComponentArtifact::Design => 2,
+        ComponentArtifact::TaskQueue => 3,
+        ComponentArtifact::ImplementationRecord => 4,
     }
 }
 

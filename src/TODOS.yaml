@@ -1,7 +1,9 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:12d73b669601fb7e5970508065087332242602c15c5a4118a6a874da2ad3f601"
-  parent_specification: null
+  requirements_revision: "sha256:6c41b8b02cbee03c3b5a49b153482b2a12179a30d4a74b3dee54deee3bd4870c"
+  contract_revision: "sha256:289b24e4726167bd85302963860e6d554fbad29987af093814b0ca6428d21697"
+  design_revision: "sha256:89dcad042da811ee98070f566b6e76a73b6172bcf445939336b3dc6e15fcd5a3"
+  parent_contract: null
   revalidation:
     state: current
     checked_at: "2026-08-30T16:37:41Z"
@@ -18,8 +20,8 @@ tasks:
     status: completed
     depends_on: []
     requirements:
+      - "REQUIREMENTS.md#REQ-TASK-QUEUE"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#TODO-queue-schema-and-validation"
       - "TODO.md#P2-01"
     timestamps:
       created_at: "2026-08-13T20:19:53Z"
@@ -37,8 +39,8 @@ tasks:
     status: pending
     depends_on: []
     requirements:
+      - "REQUIREMENTS.md#REQ-CONVERSION-IMPORT"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Existing-project-conversion-lifecycle"
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
@@ -57,8 +59,8 @@ tasks:
     depends_on:
       - "onb-01-write-tests"
     requirements:
+      - "REQUIREMENTS.md#REQ-CONVERSION-IMPORT"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Existing-project-conversion-lifecycle"
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
@@ -77,8 +79,8 @@ tasks:
     depends_on:
       - "onb-01-integrate-project-state"
     requirements:
+      - "REQUIREMENTS.md#REQ-CONVERSION-IMPORT"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Existing-project-conversion-lifecycle"
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
@@ -97,8 +99,8 @@ tasks:
     depends_on:
       - "onb-01-implement-acceptance"
     requirements:
+      - "REQUIREMENTS.md#REQ-CONVERSION-IMPORT"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Existing-project-conversion-lifecycle"
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
@@ -111,14 +113,14 @@ tasks:
     description: "Bound and deterministically render manifest and source evidence, recursively inventory implementation files, and replace fixed generated timestamps."
     context: "The initial generator reads only top-level source files and records a fixed timestamp."
     purpose: "Keep generated drafts trustworthy, reproducible, and useful for independent review."
-    expected_outcome: "Draft metadata is bounded, safely escaped, stable for identical inputs, and records recursively observed implementation evidence without reading SPEC.md."
+    expected_outcome: "Draft metadata is bounded, safely escaped, stable for identical inputs, and records recursively observed implementation evidence without reading intended component documents."
     kind: implementation
     status: pending
     depends_on:
       - "onb-01-connect-task-workflow"
     requirements:
+      - "REQUIREMENTS.md#REQ-CONVERSION-IMPORT"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Existing-project-conversion-lifecycle"
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
@@ -137,8 +139,8 @@ tasks:
     depends_on:
       - "onb-01-harden-draft-generation"
     requirements:
+      - "REQUIREMENTS.md#REQ-CONVERSION-IMPORT"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Existing-project-conversion-lifecycle"
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
@@ -157,9 +159,9 @@ tasks:
     depends_on:
       - "onb-01-security-audit"
     requirements:
+      - "REQUIREMENTS.md#REQ-CONVERSION-IMPORT"
       - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Existing-project-conversion-lifecycle"
       - "TODO.md#ONB-01"
     timestamps:
       created_at: "2026-08-28T13:20:32Z"
@@ -178,8 +180,8 @@ tasks:
     depends_on:
       - "p2-01-write-tests"
     requirements:
+      - "REQUIREMENTS.md#REQ-TASK-QUEUE"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#TODO-queue-schema-and-validation"
       - "TODO.md#P2-01"
     timestamps:
       created_at: "2026-08-13T20:19:53Z"
@@ -198,8 +200,8 @@ tasks:
     depends_on:
       - "p2-01-implement-code"
     requirements:
+      - "REQUIREMENTS.md#REQ-TASK-QUEUE"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#TODO-queue-schema-and-validation"
       - "TODO.md#P2-01"
     timestamps:
       created_at: "2026-08-13T20:19:53Z"
@@ -238,8 +240,8 @@ tasks:
     status: completed
     depends_on: []
     requirements:
+      - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Project-status-inspection"
       - "TODO.md#P2-02"
     timestamps:
       created_at: "2026-08-16T12:19:23Z"
@@ -258,8 +260,8 @@ tasks:
     depends_on:
       - "p2-02-write-tests"
     requirements:
+      - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Project-status-inspection"
       - "TODO.md#P2-02"
     timestamps:
       created_at: "2026-08-16T12:19:23Z"
@@ -278,8 +280,8 @@ tasks:
     depends_on:
       - "p2-02-implement-code"
     requirements:
+      - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Project-status-inspection"
       - "TODO.md#P2-02"
     timestamps:
       created_at: "2026-08-16T12:19:23Z"
@@ -318,8 +320,8 @@ tasks:
     status: completed
     depends_on: []
     requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Task-selection-and-state-updates"
       - "TODO.md#P2-03"
     timestamps:
       created_at: "2026-08-16T12:54:50Z"
@@ -338,8 +340,8 @@ tasks:
     depends_on:
       - "p2-03-write-tests"
     requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Task-selection-and-state-updates"
       - "TODO.md#P2-03"
     timestamps:
       created_at: "2026-08-16T12:54:50Z"
@@ -358,8 +360,8 @@ tasks:
     depends_on:
       - "p2-03-implement-code"
     requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Task-selection-and-state-updates"
       - "TODO.md#P2-03"
     timestamps:
       created_at: "2026-08-16T12:54:50Z"
@@ -398,7 +400,7 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - "SPEC.md#Execution-policy-decision-gates"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "TODO.md#P2-04"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
@@ -417,7 +419,7 @@ tasks:
     depends_on:
       - "p2-04-write-tests"
     requirements:
-      - "SPEC.md#Execution-policy-decision-gates"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "TODO.md#P2-04"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
@@ -436,7 +438,7 @@ tasks:
     depends_on:
       - "p2-04-implement-code"
     requirements:
-      - "SPEC.md#Execution-policy-decision-gates"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "TODO.md#P2-04"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
@@ -455,7 +457,7 @@ tasks:
     depends_on:
       - "p2-04-security-audit"
     requirements:
-      - "SPEC.md#Execution-policy-decision-gates"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "TODO.md#P2-04"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
@@ -473,7 +475,7 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - "SPEC.md#Execution-policy-decision-gates"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "TODO.md#P2-05"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
@@ -492,7 +494,7 @@ tasks:
     depends_on:
       - "p2-05-write-tests"
     requirements:
-      - "SPEC.md#Execution-policy-decision-gates"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "TODO.md#P2-05"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
@@ -511,7 +513,7 @@ tasks:
     depends_on:
       - "p2-05-implement-code"
     requirements:
-      - "SPEC.md#Execution-policy-decision-gates"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "TODO.md#P2-05"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
@@ -530,7 +532,7 @@ tasks:
     depends_on:
       - "p2-05-security-audit"
     requirements:
-      - "SPEC.md#Execution-policy-decision-gates"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "TODO.md#P2-05"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
@@ -548,8 +550,8 @@ tasks:
     status: completed
     depends_on: []
     requirements:
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Sandboxed-external-execution"
       - "TODO.md#P2-05b"
     timestamps:
       created_at: "2026-08-21T06:10:05Z"
@@ -568,8 +570,8 @@ tasks:
     depends_on:
       - "p2-05b-write-tests"
     requirements:
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Sandboxed-external-execution"
       - "TODO.md#P2-05b"
     timestamps:
       created_at: "2026-08-21T06:10:05Z"
@@ -588,8 +590,8 @@ tasks:
     depends_on:
       - "p2-05b-implement-code"
     requirements:
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Sandboxed-external-execution"
       - "TODO.md#P2-05b"
     timestamps:
       created_at: "2026-08-21T06:10:05Z"
@@ -608,9 +610,9 @@ tasks:
     depends_on:
       - "p2-05b-security-audit"
     requirements:
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Sandboxed-external-execution"
       - "TODO.md#P2-05b"
     timestamps:
       created_at: "2026-08-21T06:10:05Z"
@@ -628,8 +630,8 @@ tasks:
     status: completed
     depends_on: []
     requirements:
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Sandboxed-external-execution"
       - "TODO.md#P2-05c"
     timestamps:
       created_at: "2026-08-21T18:07:16Z"
@@ -648,8 +650,8 @@ tasks:
     depends_on:
       - "p2-05c-write-tests"
     requirements:
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Sandboxed-external-execution"
       - "TODO.md#P2-05c"
     timestamps:
       created_at: "2026-08-21T18:07:16Z"
@@ -668,8 +670,8 @@ tasks:
     depends_on:
       - "p2-05c-implement-code"
     requirements:
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Sandboxed-external-execution"
       - "TODO.md#P2-05c"
     timestamps:
       created_at: "2026-08-21T18:07:16Z"
@@ -688,9 +690,9 @@ tasks:
     depends_on:
       - "p2-05c-security-audit"
     requirements:
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Sandboxed-external-execution"
       - "TODO.md#P2-05c"
     timestamps:
       created_at: "2026-08-21T18:07:16Z"
@@ -708,8 +710,8 @@ tasks:
     status: completed
     depends_on: []
     requirements:
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Sandboxed-external-execution"
       - "TODO.md#P2-05d"
     timestamps:
       created_at: "2026-08-21T20:35:03Z"
@@ -728,8 +730,8 @@ tasks:
     depends_on:
       - "p2-05d-write-tests"
     requirements:
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Sandboxed-external-execution"
       - "TODO.md#P2-05d"
     timestamps:
       created_at: "2026-08-21T20:35:03Z"
@@ -748,8 +750,8 @@ tasks:
     depends_on:
       - "p2-05d-implement-code"
     requirements:
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Sandboxed-external-execution"
       - "TODO.md#P2-05d"
     timestamps:
       created_at: "2026-08-21T20:35:03Z"
@@ -768,9 +770,9 @@ tasks:
     depends_on:
       - "p2-05d-security-audit"
     requirements:
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Sandboxed-external-execution"
       - "TODO.md#P2-05d"
     timestamps:
       created_at: "2026-08-21T20:35:03Z"
@@ -788,8 +790,8 @@ tasks:
     status: completed
     depends_on: []
     requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Custom-prompt-input-and-agent-setup"
       - "TODO.md#AGN-02"
       - "TODO.md#AGN-03"
     timestamps:
@@ -809,8 +811,8 @@ tasks:
     depends_on:
       - "agn-input-setup-write-tests"
     requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Custom-prompt-input-and-agent-setup"
       - "TODO.md#AGN-02"
       - "TODO.md#AGN-03"
     timestamps:
@@ -830,8 +832,8 @@ tasks:
     depends_on:
       - "agn-input-setup-implement-code"
     requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Custom-prompt-input-and-agent-setup"
       - "TODO.md#AGN-02"
       - "TODO.md#AGN-03"
     timestamps:
@@ -851,9 +853,9 @@ tasks:
     depends_on:
       - "agn-input-setup-security-audit"
     requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
       - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Custom-prompt-input-and-agent-setup"
       - "TODO.md#AGN-02"
       - "TODO.md#AGN-03"
     timestamps:
@@ -872,8 +874,8 @@ tasks:
     status: pending
     depends_on: []
     requirements:
+      - "DESIGN.md#Security-and-resource-design"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Native-agent-host-authority-services"
       - "TODO.md#AGN-09"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
@@ -892,8 +894,8 @@ tasks:
     depends_on:
       - "agn-authority-write-tests"
     requirements:
+      - "DESIGN.md#Security-and-resource-design"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Native-agent-host-authority-services"
       - "TODO.md#AGN-09"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
@@ -912,8 +914,8 @@ tasks:
     depends_on:
       - "agn-authority-implement-code"
     requirements:
+      - "DESIGN.md#Security-and-resource-design"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Native-agent-host-authority-services"
       - "TODO.md#AGN-09"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
@@ -932,13 +934,100 @@ tasks:
     depends_on:
       - "agn-authority-security-audit"
     requirements:
+      - "DESIGN.md#Security-and-resource-design"
       - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Native-agent-host-authority-services"
       - "TODO.md#AGN-09"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
       updated_at: "2026-08-30T07:33:10Z"
       completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "artifact-model-write-tests"
+    title: "Define separated artifact model tests"
+    description: "Specify executable coverage for separate requirements, contract, and design documents, five-artifact discovery, independent revisions, parent-contract propagation, CLI behavior, and sandbox context."
+    context: "Retiring the combined component specification changes every durable component boundary and must be executable before implementation."
+    purpose: "Prevent the new document hierarchy from becoming an untested naming-only convention."
+    expected_outcome: "Focused tests cover templates, validation, discovery, status, provenance, parent paths, JSON diagnostics, onboarding, and root/parent contract context."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "DESIGN.md#Verification-strategy"
+      - "REQUIREMENTS.md#REQ-ARTIFACT-MODEL"
+      - "REQUIREMENTS.md#REQ-COMPONENT-DOCUMENTS"
+      - "REQUIREMENTS.md#REQ-REVISION-PROVENANCE"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-31T17:30:00Z"
+      updated_at: "2026-08-31T18:30:03Z"
+      completed_at: "2026-08-31T18:30:03Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "artifact-model-implement-code"
+    title: "Implement separated artifact model"
+    description: "Replace the combined specification implementation with separate component intent documents and wire the model through CLI, discovery, status, queues, task context, onboarding, and durable evidence."
+    context: "The pre-release project has no compatibility or migration obligation, so all old names and schema fields are removed rather than aliased."
+    purpose: "Make architecture, consumer contracts, private design, and task provenance independently inspectable and enforceable."
+    expected_outcome: "The engine consistently uses the five-artifact component model with exact local revisions and immediate-parent contract provenance."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "artifact-model-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Internal-structure"
+      - "REQUIREMENTS.md#REQ-ARTIFACT-MODEL"
+      - "REQUIREMENTS.md#REQ-COMPONENT-DOCUMENTS"
+      - "REQUIREMENTS.md#REQ-REVISION-PROVENANCE"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-31T17:30:00Z"
+      updated_at: "2026-08-31T18:30:03Z"
+      completed_at: "2026-08-31T18:30:03Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "artifact-model-security-audit"
+    title: "Audit separated artifact model security"
+    description: "Independently review untrusted document parsing, no-clobber writes, path normalization, revision provenance, parent-contract resolution, JSON diagnostics, generated drafts, and read-only sandbox context mounts."
+    context: "The redesign changes trusted workflow inputs and the contract material exposed to external agents."
+    purpose: "Detect traversal, overwrite, spoofed provenance, context confusion, information exposure, and sandbox-boundary regressions before acceptance."
+    expected_outcome: "Every high-confidence vulnerability is either corrected with focused tests or retained as an explicit blocker."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "artifact-model-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#REQ-COMPONENT-DOCUMENTS"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "REQUIREMENTS.md#REQ-REVISION-PROVENANCE"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-31T18:30:03Z"
+      updated_at: "2026-08-31T18:36:00Z"
+      completed_at: "2026-08-31T18:36:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "artifact-model-compliance-review"
+    title: "Review separated artifact model compliance"
+    description: "Compare approved requirements, contract, and design with independently derived implementation records and executable evidence without production-source access."
+    context: "The implementer and clean-slate documenter cannot certify the artifact-model redesign."
+    purpose: "Retain an independent verdict and every remaining discrepancy or accepted deferral for human arbitration."
+    expected_outcome: "The review distinguishes redesign compliance from pre-existing whole-product blockers and records a durable verdict."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "artifact-model-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-COMPLIANCE"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-31T18:30:03Z"
+      updated_at: "2026-08-31T18:41:39Z"
+      completed_at: "2026-08-31T18:41:39Z"
     blocked_reason: null
     recovery_state: null

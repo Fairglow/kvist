@@ -12,6 +12,7 @@ use tempfile::NamedTempFile;
 
 use crate::{
     KvistError, Result,
+    component_documents::{self, DocumentKind},
     discovery::{self, ComponentArtifact},
     file_io::{replace_file_atomically, sync_directory, write_new_file_atomically},
     filesystem::is_link_like,
@@ -642,8 +643,7 @@ fn status_name(status: TaskStatus) -> &'static str {
     }
 }
 
-/// Revalidates the component specification, updating the specification hash inside TODOS.yaml
-/// and resetting the revalidation state back to Current.
+/// Records reviewed component-document and immediate-parent contract revisions.
 pub fn accept(component_path: &Path) -> Result<String> {
     let context = validate_accept_context(component_path)?;
     let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
@@ -653,53 +653,28 @@ pub fn accept(component_path: &Path) -> Result<String> {
         let context = validate_accept_context(component_path)?;
         let mut queue = read_queue(&context.component_dir)?;
 
-        // 1. Read and validate the local specification
-        let spec_path = context
-            .component_dir
-            .join(ComponentArtifact::Specification.filename());
-        let spec_metadata = fs::symlink_metadata(&spec_path).map_err(|source| KvistError::Io {
-            operation: "inspect component specification",
-            path: spec_path.clone(),
-            source,
-        })?;
-        if is_link_like(&spec_metadata) || !spec_metadata.file_type().is_file() {
-            return Err(KvistError::SpecificationValidationFailed {
-                path: spec_path,
-                diagnostics: "it is not a regular non-link file".to_owned(),
-            });
-        }
-        if spec_metadata.len() > MAX_ROOT_TEXT_ARTIFACT_BYTES {
-            return Err(KvistError::SpecificationValidationFailed {
-                path: spec_path,
-                diagnostics: format!(
-                    "it exceeds the {MAX_ROOT_TEXT_ARTIFACT_BYTES}-byte component artifact limit"
-                ),
-            });
-        }
-        let spec_contents = fs::read_to_string(&spec_path).map_err(|source| KvistError::Io {
-            operation: "read component specification",
-            path: spec_path.clone(),
-            source,
-        })?;
+        let requirements = read_validated_document(
+            DocumentKind::Requirements,
+            &context
+                .component_dir
+                .join(ComponentArtifact::Requirements.filename()),
+        )?;
+        let contract = read_validated_document(
+            DocumentKind::Contract,
+            &context
+                .component_dir
+                .join(ComponentArtifact::Contract.filename()),
+        )?;
+        let design = read_validated_document(
+            DocumentKind::Design,
+            &context
+                .component_dir
+                .join(ComponentArtifact::Design.filename()),
+        )?;
 
-        // Rigorously validate specification structure
-        let spec_validation = crate::specification::validate(&spec_contents);
-        if !spec_validation.is_valid() {
-            return Err(KvistError::SpecificationValidationFailed {
-                path: spec_path,
-                diagnostics: crate::specification::format_diagnostics(&spec_validation.diagnostics),
-            });
-        }
-
-        // 2. Compute the new specification SHA-256 revision
-        use sha2::{Digest, Sha256};
-        let new_hash = format!(
-            "sha256:{}",
-            hex::encode(Sha256::digest(spec_contents.as_bytes()))
-        );
-
-        // 3. If there is an immediate parent, update its revision to current parent's revision
-        if let Some(ref mut parent) = queue.component.parent_specification {
+        if context.component_path == Path::new(".") {
+            queue.component.parent_contract = None;
+        } else {
             let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
                 operation: "determine current project directory",
                 path: PathBuf::from("."),
@@ -712,61 +687,29 @@ pub fn accept(component_path: &Path) -> Result<String> {
                     .clone()
                     .unwrap_or_else(|| PathBuf::from("src")),
             );
-            let (parent_component_dir, _) =
+            let (parent_component_dir, parent_relative_path) =
                 discovery::find_parent_component_dir(&component_root, &context.component_path)?;
-            let parent_spec_path =
-                parent_component_dir.join(ComponentArtifact::Specification.filename());
-            let parent_metadata =
-                fs::symlink_metadata(&parent_spec_path).map_err(|source| KvistError::Io {
-                    operation: "inspect parent specification",
-                    path: parent_spec_path.clone(),
-                    source,
-                })?;
-            if is_link_like(&parent_metadata) || !parent_metadata.file_type().is_file() {
-                return Err(KvistError::SpecificationValidationFailed {
-                    path: parent_spec_path,
-                    diagnostics: "parent specification is not a regular non-link file".to_owned(),
-                });
-            }
-            if parent_metadata.len() > MAX_ROOT_TEXT_ARTIFACT_BYTES {
-                return Err(KvistError::SpecificationValidationFailed {
-                    path: parent_spec_path,
-                    diagnostics: format!(
-                        "parent specification exceeds the {MAX_ROOT_TEXT_ARTIFACT_BYTES}-byte component artifact limit"
-                    ),
-                });
-            }
+            let parent_contract_path =
+                parent_component_dir.join(ComponentArtifact::Contract.filename());
             let parent_contents =
-                fs::read_to_string(&parent_spec_path).map_err(|source| KvistError::Io {
-                    operation: "read parent specification",
-                    path: parent_spec_path.clone(),
-                    source,
-                })?;
-            // Rigorously validate parent specification structure too
-            let parent_validation = crate::specification::validate(&parent_contents);
-            if !parent_validation.is_valid() {
-                return Err(KvistError::SpecificationValidationFailed {
-                    path: parent_spec_path,
-                    diagnostics: crate::specification::format_diagnostics(
-                        &parent_validation.diagnostics,
-                    ),
-                });
-            }
-            let parent_hash = format!(
-                "sha256:{}",
-                hex::encode(Sha256::digest(parent_contents.as_bytes()))
-            );
-            parent.revision = parent_hash;
+                read_validated_document(DocumentKind::Contract, &parent_contract_path)?;
+            queue.component.parent_contract = Some(crate::task_queue::ParentContract {
+                path: project_state::relative_parent_contract_path(
+                    &context.component_path,
+                    &parent_relative_path,
+                ),
+                revision: digest(parent_contents.as_bytes()),
+            });
         }
 
-        // 4. Update the queue component state and clear revalidation causes
-        queue.component.specification_revision = new_hash.clone();
+        queue.component.requirements_revision = digest(requirements.as_bytes());
+        queue.component.contract_revision = digest(contract.as_bytes());
+        queue.component.design_revision = digest(design.as_bytes());
         queue.component.revalidation.state = crate::task_queue::RevalidationState::Current;
         queue.component.revalidation.checked_at = started_at.clone();
         queue.component.revalidation.stale_since = None;
         queue.component.revalidation.causes = Vec::new();
 
-        // 5. Serialize and replace the YAML queue atomically
         let serialized = serialize(&queue).map_err(|error| KvistError::TaskQueueUnavailable {
             path: context
                 .component_dir
@@ -782,7 +725,7 @@ pub fn accept(component_path: &Path) -> Result<String> {
         )?;
 
         Ok(format!(
-            "accepted specification change for component {}",
+            "accepted component document changes for {}",
             context.component_path.display()
         ))
     })();
@@ -793,6 +736,41 @@ pub fn accept(component_path: &Path) -> Result<String> {
         (Ok(_), Err(error)) => Err(error),
         (Err(error), _) => Err(error),
     }
+}
+
+fn read_validated_document(kind: DocumentKind, path: &Path) -> Result<String> {
+    let metadata = fs::symlink_metadata(path).map_err(|source| KvistError::Io {
+        operation: "inspect component document",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if is_link_like(&metadata) || !metadata.file_type().is_file() {
+        return Err(KvistError::ComponentDocumentValidationFailed {
+            path: path.to_path_buf(),
+            diagnostics: "it is not a regular non-link file".to_owned(),
+        });
+    }
+    if metadata.len() > MAX_ROOT_TEXT_ARTIFACT_BYTES {
+        return Err(KvistError::ComponentDocumentValidationFailed {
+            path: path.to_path_buf(),
+            diagnostics: format!(
+                "it exceeds the {MAX_ROOT_TEXT_ARTIFACT_BYTES}-byte component artifact limit"
+            ),
+        });
+    }
+    let contents = fs::read_to_string(path).map_err(|source| KvistError::Io {
+        operation: "read component document",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let validation = component_documents::validate(kind, &contents);
+    if !validation.is_valid() {
+        return Err(KvistError::ComponentDocumentValidationFailed {
+            path: path.to_path_buf(),
+            diagnostics: component_documents::format_diagnostics(&validation.diagnostics),
+        });
+    }
+    Ok(contents)
 }
 
 /// Unlocks a locked component directory, optionally asking for confirmation.
@@ -862,7 +840,6 @@ pub fn unlock(component_path: &Path, force: bool) -> Result<String> {
 }
 
 fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
-    let component_path = normalize_component_path(component_path)?;
     let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
         operation: "determine current project directory",
         path: PathBuf::from("."),
@@ -890,6 +867,16 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
                 .unwrap_or(inspection.vcs.summary),
         });
     }
+    let component_root =
+        inspection
+            .component_root
+            .clone()
+            .ok_or_else(|| KvistError::TaskComponentNotCurrent {
+                component: component_path.to_path_buf(),
+                state: "component root is unavailable".to_owned(),
+            })?;
+    let component_path =
+        normalize_component_argument(component_path, &project_dir, &component_root)?;
     let component = inspection
         .components
         .iter()
@@ -899,29 +886,48 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
             state: "not a discovered component".to_owned(),
         })?;
 
-    // We allow Current, Stale, and Blocked component states for accepting spec changes.
+    let has_valid_artifacts = component
+        .artifacts
+        .iter()
+        .all(|artifact| artifact.state == project_state::ComponentArtifactState::Valid);
     let is_allowed = matches!(
         component.state,
         ComponentState::Current | ComponentState::Stale | ComponentState::Blocked
-    );
+    ) || (component.state == ComponentState::Invalid && has_valid_artifacts);
     if !is_allowed {
         return Err(KvistError::TaskComponentNotCurrent {
             component: component_path.clone(),
             state: component.state.name().to_owned(),
         });
     }
-    let component_root =
-        inspection
-            .component_root
-            .ok_or_else(|| KvistError::TaskComponentNotCurrent {
-                component: component_path.clone(),
-                state: "component root is unavailable".to_owned(),
-            })?;
     Ok(TaskContext {
         project_dir: project_dir.clone(),
         component_dir: project_dir.join(component_root).join(&component_path),
         component_path,
     })
+}
+
+fn normalize_component_argument(
+    path: &Path,
+    project_dir: &Path,
+    component_root: &Path,
+) -> Result<PathBuf> {
+    let project_relative = if path.is_absolute() {
+        path.strip_prefix(project_dir)
+            .map_err(|_| KvistError::TaskComponentPathInvalid {
+                path: path.to_path_buf(),
+            })?
+    } else {
+        path
+    };
+    let component_relative = project_relative
+        .strip_prefix(component_root)
+        .unwrap_or(project_relative);
+    if component_relative.as_os_str().is_empty() {
+        Ok(PathBuf::from("."))
+    } else {
+        normalize_component_path(component_relative)
+    }
 }
 
 const DEFAULT_RUST_TEMPLATE: &str = r#"Task Details:
@@ -967,7 +973,7 @@ const DEFAULT_GENERIC_TEMPLATE: &str = r#"Task Details:
 
 Instructions:
 You are the developer agent tasked with executing the task above.
-Ensure all invariants defined in SPEC.md are maintained.
+Satisfy REQUIREMENTS.md and CONTRACT.md using the approved DESIGN.md.
 Fulfill all task requirements. When finished, write your results.
 "#;
 
@@ -1202,13 +1208,28 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
         };
 
         // 4. Sliced context files gathering
-        // The sandbox receives only paths in its component mount. Root and parent
-        // files are described by task text, never exposed as host-path context.
-        let context_files = vec![
-            PathBuf::from("/workspace/component/SPEC.md"),
+        let mut context_files = vec![
+            PathBuf::from("/workspace/component/REQUIREMENTS.md"),
+            PathBuf::from("/workspace/component/CONTRACT.md"),
+            PathBuf::from("/workspace/component/DESIGN.md"),
             PathBuf::from("/workspace/component/TODOS.yaml"),
             PathBuf::from("/workspace/component/IMPL.md"),
+            PathBuf::from("/workspace/context/ROOT_CONTRACT.md"),
         ];
+        let mut read_only_mounts = vec![crate::sandbox::ReadOnlyMount {
+            source: project_dir.join("ROOT_CONTRACT.md"),
+            destination: "/workspace/context/ROOT_CONTRACT.md".to_owned(),
+        }];
+        if context.component_path != Path::new(".") {
+            let component_root = project_dir.join(&config.component_root);
+            let (parent_component_dir, _) =
+                discovery::find_parent_component_dir(&component_root, &context.component_path)?;
+            context_files.push(PathBuf::from("/workspace/context/PARENT_CONTRACT.md"));
+            read_only_mounts.push(crate::sandbox::ReadOnlyMount {
+                source: parent_component_dir.join(ComponentArtifact::Contract.filename()),
+                destination: "/workspace/context/PARENT_CONTRACT.md".to_owned(),
+            });
+        }
 
         // 5. Build prompt
         let lang = detect_language(&context.component_dir);
@@ -1226,6 +1247,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                 vcs_selection: config.vcs,
                 prompt: &prompt,
                 context_paths: &context_files,
+                read_only_mounts: &read_only_mounts,
                 target_dir: &context.component_dir,
                 task_id: &task_id,
                 stream_output: stream,
@@ -1420,29 +1442,12 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
 }
 
 fn get_ready_tasks(queue: &TaskQueue) -> Vec<Task> {
-    // A task is ready if its status is Pending or InProgress, and all its depends_on tasks are Completed
-    let mut ready = Vec::new();
-    for task in &queue.tasks {
-        if task.status == TaskStatus::Pending || task.status == TaskStatus::InProgress {
-            // Check dependencies
-            let mut deps_complete = true;
-            for dep_id in &task.depends_on {
-                if let Some(dep_task) = queue.tasks.iter().find(|t| &t.id == dep_id) {
-                    if dep_task.status != TaskStatus::Completed {
-                        deps_complete = false;
-                        break;
-                    }
-                } else {
-                    deps_complete = false;
-                    break;
-                }
-            }
-            if deps_complete {
-                ready.push(task.clone());
-            }
-        }
-    }
-    ready
+    queue
+        .tasks
+        .iter()
+        .filter(|task| task_is_ready(task, &queue.tasks))
+        .cloned()
+        .collect()
 }
 
 /// Reads and returns the most recent execution log file for a specific task.
@@ -1559,6 +1564,7 @@ struct ExecutionApprovalMaterial {
     approval_schema_version: u32,
     sandbox_protocol_version: u32,
     sandbox_schema_version: u32,
+    root_contract_digest: String,
     agent_source: String,
     agent_source_digest: String,
     architect_template_digest: String,
@@ -1652,6 +1658,7 @@ fn build_execution_approval(
         approval_schema_version: EXECUTION_APPROVAL_VERSION,
         sandbox_protocol_version: crate::sandbox::PROTOCOL_VERSION,
         sandbox_schema_version: 1,
+        root_contract_digest: approved_root_contract_digest(project_dir)?,
         agent_source: config.agent.source.identity.clone(),
         agent_source_digest: config.agent.source.digest.clone(),
         architect_template_digest: agent_profile_digest(&config.agent.architect, "architect")?,
@@ -2134,7 +2141,9 @@ fn execution_approval_difference(
     approved: &ExecutionApprovalMaterial,
     current: &ExecutionApprovalMaterial,
 ) -> String {
-    if approved.agent_source != current.agent_source
+    if approved.root_contract_digest != current.root_contract_digest {
+        "ROOT_CONTRACT.md has changed since execution policy approval".to_owned()
+    } else if approved.agent_source != current.agent_source
         || approved.agent_source_digest != current.agent_source_digest
     {
         "agent configuration source identity or digest has changed".to_owned()
@@ -2168,6 +2177,33 @@ fn execution_approval_difference(
     } else {
         "execution protocol or schema versions have changed".to_owned()
     }
+}
+
+fn approved_root_contract_digest(project_dir: &Path) -> Result<String> {
+    let path = project_dir.join("ROOT_CONTRACT.md");
+    let metadata = fs::symlink_metadata(&path).map_err(|source| KvistError::Io {
+        operation: "inspect root contract for execution approval",
+        path: path.clone(),
+        source,
+    })?;
+    if is_link_like(&metadata) || !metadata.file_type().is_file() {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: "ROOT_CONTRACT.md must be a regular non-link file".to_owned(),
+        });
+    }
+    if metadata.len() > MAX_ROOT_TEXT_ARTIFACT_BYTES {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason: format!(
+                "ROOT_CONTRACT.md exceeds the {MAX_ROOT_TEXT_ARTIFACT_BYTES}-byte limit"
+            ),
+        });
+    }
+    let contents = fs::read(&path).map_err(|source| KvistError::Io {
+        operation: "read root contract for execution approval",
+        path,
+        source,
+    })?;
+    Ok(digest(&contents))
 }
 
 /// Legacy compatibility wrapper for callers that previously checked only tests.
@@ -2279,6 +2315,7 @@ pub fn verify_task(
                 Some(&policy.environment_allowlist),
             ),
             context_files: &[],
+            read_only_mounts: &[],
         },
         crate::sandbox::ExecutionOptions {
             timeout: Some(std::time::Duration::from_secs(policy.timeout_seconds)),

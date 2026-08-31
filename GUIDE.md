@@ -1,47 +1,52 @@
 # Kvist workflow guide
 
-Kvist is a local, filesystem-native tool for human-directed, spec-driven
-development. Its current interface is command-line based; future graphical and
-editor interfaces operate on the same durable project artifacts. A component
-directory contains a layered `SPEC.md`, a versioned `TODOS.yaml`, observed
-implementation record `IMPL.md`, and source. The architecture is recursive: a
-component works from its own contract, its immediate parent contract, and
-`ROOT_CONTRACT.md`, not from peer implementations.
+Kvist is a local, filesystem-native tool for human-directed,
+architecture-driven development. Its current interface is command-line based;
+future graphical and editor interfaces operate on the same durable project
+artifacts. The hierarchy is `VISION.md` -> `ARCHITECTURE.md` -> per-component
+`REQUIREMENTS.md` + `CONTRACT.md` + `DESIGN.md` -> `TODOS.yaml` -> `IMPL.md`.
+A component works from its local artifacts, `ROOT_CONTRACT.md`, and the
+immediate parent `CONTRACT.md`. That parent is the nearest ancestor component,
+even across transparent namespace directories. Parent requirements or design
+and peer implementations do not propagate implicitly.
 
 Executable releases currently support Linux only. macOS and Windows remain
 disabled until native test environments and independently reviewed execution
 backends are available.
 
+[`VISION.md`](VISION.md) defines product direction,
+[`ARCHITECTURE.md`](ARCHITECTURE.md) defines approved system structure, and
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
-defines the target architecture. This guide describes the commands that exist
-today and labels the required but not-yet-automated stages explicitly.
+retains detailed strategy. This guide describes current commands and labels
+required but not-yet-automated stages explicitly.
 
 ## Intended lifecycle
 
-1. The human architect defines and validates the component contract in the
-   three-layer `SPEC.md` format. The architect begins with a project `VISION`,
-   then decomposes it into one or more hierarchical components. Specifications
-   may be drafted manually, with agent assistance, or by an architect agent;
-   the architect iterates and explicitly approves the resulting component
-   boundary and contract.
-2. A designer agent derives a traceable `TODOS.yaml` plan from the approved
-   specification in test, implementation, security-audit, and
-   compliance-review order. The architect may refine that specialized plan;
-   agent and architect iterate until the architect accepts it.
+1. The human architect approves `VISION.md`, `ARCHITECTURE.md`, and each
+   component boundary. For that component, `REQUIREMENTS.md` owns outcomes,
+   constraints, acceptance criteria, and verification obligations;
+   `CONTRACT.md` owns consumer-facing interfaces and observable semantics; and
+   `DESIGN.md` owns internal realization. The three documents may be drafted
+   manually or with agent assistance, but the human explicitly approves them.
+2. A designer derives a traceable `TODOS.yaml` plan from the approved
+   requirements, contract, and design in test, implementation, security-audit,
+   and compliance-review order. The architect reviews and accepts that plan.
 3. The executor advances every accepted, ready task in the queue in dependency
    order with only the permitted component context. It can run uninterrupted
    and unsupervised; the human may choose to observe or run one task at a time,
    but does not need to intervene between tasks.
-4. A clean-slate documenter derives `IMPL.md` from code without the
-   specification. A separate, source-blind reviewer compares it with the
-   specification. The architect arbitrates every discrepancy explicitly.
+4. A clean-slate documenter derives `IMPL.md` from implementation and test
+   evidence without reading any intent document or prior `IMPL.md`. A separate,
+   source-blind reviewer compares the fresh record and test evidence with
+   `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md`. The architect arbitrates
+   every discrepancy explicitly.
 
 The human remains the approval authority at every stage. Kvist validates
-specifications and queues, persists legal task transitions, and can invoke a
-configured external agent for one task. It does **not** yet automate the
-architect or designer agent roles, the interview, clean-slate implementation-record creation,
+component documents and queues, persists legal task transitions, and can
+invoke a configured external agent for one task. It does **not** yet automate
+the architect or designer roles, the interview, clean-slate record creation,
 source-blind review, or arbitration loop. Do not claim a component is
-compliant until the independent review is actually recorded.
+compliant until independent review is recorded.
 
 ## Start a project
 
@@ -60,33 +65,43 @@ read-only diagnostics, and `status` reports component state without persisting
 derived stale evidence.
 
 After the architect approves a child component boundary, create and validate
-its specification:
+its intent documents:
 
 ```bash
-kvist spec new src/network
-kvist spec validate src/network/SPEC.md
+kvist component new src/network
+kvist component validate src/network
 ```
 
-The designer agent then drafts the queue from that approved specification. The
-architect reviews and may improve the result before accepting it. Each task
-must state its purpose, context, expected outcome, requirements, dependencies,
+The architect reviews the three documents, then records their current
+revisions:
+
+```bash
+kvist component accept src/network
+```
+
+The designer then drafts the queue from the approved intent. Each task states
+its purpose, context, expected outcome, requirement references, dependencies,
 lifecycle kind, and status. The queue is durable workflow state, not an agent
-transcript.
+transcript. Its component provenance fields are `requirements_revision`,
+`contract_revision`, `design_revision`, and `parent_contract`.
 
 ## Inspect and revalidate work
 
 ```bash
 kvist status .
+kvist status . --only-documents
 kvist tree .
 kvist task next .
-kvist spec accept .
+kvist component accept .
 ```
 
-`status` detects local and immediate-parent specification digest mismatches and
-reports stale components. `spec accept` is an explicit revalidation write: it
-records the currently reviewed revisions and clears stale evidence for the
-selected component. It does not approve an arbitrary implementation change or
-replace independent compliance review.
+`status` detects local requirements, contract, design, and immediate-parent
+contract digest mismatches and reports attributable stale components.
+`--only-documents` limits status output to document state. `component accept`
+is an explicit revalidation write: it records the currently reviewed revisions
+and clears attributable stale evidence for the selected component. It does not
+approve an arbitrary implementation change or replace independent compliance
+review.
 
 `task next` selects the first ready task in declared order. `task transition`
 performs one audited state change and records `prepared` and `committed`
@@ -99,6 +114,14 @@ complete VCS tracking.
 It uses the `developer` profile for `test` and `implementation` tasks, the
 `security-reviewer` profile for security audits, and the `architect` profile
 for compliance reviews.
+
+The sandbox exposes one writable mount at `/workspace/component`. It also
+materializes `ROOT_CONTRACT.md` read-only at
+`/workspace/context/ROOT_CONTRACT.md` and, for a child, its actual nearest
+ancestor component contract at `/workspace/context/PARENT_CONTRACT.md`.
+Transparent namespace directories do not prevent that parent lookup. General
+materialization of other explicitly declared provider contracts remains
+deferred.
 
 The target executor runs the accepted queue uninterrupted and lets the final
 independent review decide compliance. The current command-line surface exposes
@@ -201,10 +224,10 @@ kvist task run . implement-code
 kvist task log . implement-code
 ```
 
-The approval record covers agent configuration, sandbox runner identity,
-resource limits, redaction policy, and `[test_policy]`. Agent and test programs
-are sent to the separately installed sandbox runner; Kvist never falls back to
-executing them directly on the host.
+The approval record covers the exact `ROOT_CONTRACT.md` digest, agent
+configuration, sandbox runner identity, resource limits, redaction policy, and
+`[test_policy]`. Agent and test programs are sent to the separately installed
+sandbox runner; Kvist never falls back to executing them directly on the host.
 
 `kvist prompt`, in contrast, is an explicitly acknowledged host operation:
 
@@ -219,17 +242,26 @@ standalone CLI can be invoked with
 Host-mode retry notices warn that an earlier attempt may have left side effects;
 they do not provide rollback or isolation. Snapshot workspaces, restricted
 identities, Linux sandboxing, brokered tools, and future platforms are planned
-in `src/agent_runtime/SPEC.md` and `TODOS.yaml`.
+in
+`src/agent_runtime/REQUIREMENTS.md`, `src/agent_runtime/CONTRACT.md`,
+`src/agent_runtime/DESIGN.md`, and `src/agent_runtime/TODOS.yaml`.
 
 ## Documentation and review discipline
 
 `IMPL.md` is an observed implementation record, not user-facing documentation.
-Its documenter must examine source and tests without reading `SPEC.md` or the
-existing `IMPL.md`. The source-blind reviewer then examines only the
-specification, newly derived implementation record, immediate parent contract, and
-root contract. Record compliance, mismatches, deferred work, and arbitration
-in version control; never edit the specification or observed implementation record to
-hide a disagreement.
+Its documenter examines source, tests, manifests, and necessary non-intent
+build configuration without reading `REQUIREMENTS.md`, `CONTRACT.md`,
+`DESIGN.md`, `TODOS.yaml`, any prior `IMPL.md`, architecture or root intent,
+prior reviews, chat history, or Git history. The source-blind reviewer examines
+the approved requirements, contract, design, fresh implementation record, test
+evidence, immediate parent contract, and root contract without source access.
+Record compliance, mismatches, approved deferrals, and arbitration in version
+control. The implementer may not certify its own work, and no participant may
+edit intent or observed records merely to hide a disagreement.
+
+The component artifact split is pre-release. Retired component documents,
+commands, and queue fields are not accepted or migrated, and there is no
+version bump for this clean break.
 
 The reusable procedure is in [`REVIEW_RUNBOOK.md`](REVIEW_RUNBOOK.md).
 [`COMPLIANCE_REVIEW.md`](COMPLIANCE_REVIEW.md) records completed reviews and

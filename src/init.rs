@@ -60,7 +60,7 @@ impl fmt::Display for InitOutcome {
             Self::ConvertedExistingRustProject { project_dir } => write!(
                 formatter,
                 "created draft Kvist artifacts for existing project at {}; review and accept \
-                 .kvist/SPEC.md and .kvist/TODOS.yaml before task execution",
+                 .kvist component documents and TODOS.yaml before task execution",
                 project_dir.display()
             ),
             Self::AlreadyConvertedExistingRustProject { project_dir } => write!(

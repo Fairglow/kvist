@@ -29,7 +29,9 @@ fn discovers_complete_nested_components_in_lexical_order() {
     create_component(
         &component_root.join("zebra"),
         &[
-            ComponentArtifact::Specification,
+            ComponentArtifact::Requirements,
+            ComponentArtifact::Contract,
+            ComponentArtifact::Design,
             ComponentArtifact::TaskQueue,
             ComponentArtifact::ImplementationRecord,
         ],
@@ -37,7 +39,9 @@ fn discovers_complete_nested_components_in_lexical_order() {
     create_component(
         &component_root.join("alpha"),
         &[
-            ComponentArtifact::Specification,
+            ComponentArtifact::Requirements,
+            ComponentArtifact::Contract,
+            ComponentArtifact::Design,
             ComponentArtifact::TaskQueue,
             ComponentArtifact::ImplementationRecord,
         ],
@@ -72,7 +76,7 @@ fn identifies_incomplete_components_without_treating_ordinary_directories_as_com
     let (_project, component_root) = initialized_component_root();
     create_component(
         &component_root.join("network"),
-        &[ComponentArtifact::Specification],
+        &[ComponentArtifact::Requirements],
     );
     fs::create_dir(component_root.join("ordinary-source-directory"))
         .expect("create non-component directory");
@@ -88,6 +92,8 @@ fn identifies_incomplete_components_without_treating_ordinary_directories_as_com
         network.status(),
         ComponentStatus::Incomplete {
             missing: vec![
+                ComponentArtifact::Contract,
+                ComponentArtifact::Design,
                 ComponentArtifact::TaskQueue,
                 ComponentArtifact::ImplementationRecord
             ]
@@ -100,7 +106,7 @@ fn identifies_incomplete_components_without_treating_ordinary_directories_as_com
 fn identifies_malformed_artifact_layouts() {
     let (_project, component_root) = initialized_component_root();
     let broken = component_root.join("broken");
-    create_component(&broken, &[ComponentArtifact::Specification]);
+    create_component(&broken, &[ComponentArtifact::Requirements]);
     fs::create_dir(broken.join(ComponentArtifact::TaskQueue.filename()))
         .expect("create invalid task queue directory");
 
@@ -145,11 +151,11 @@ fn ignores_known_non_component_directories() {
     let (_project, component_root) = initialized_component_root();
     create_component(
         &component_root.join("target/generated"),
-        &[ComponentArtifact::Specification],
+        &[ComponentArtifact::Requirements],
     );
     create_component(
         &component_root.join(".git/hooks"),
-        &[ComponentArtifact::Specification],
+        &[ComponentArtifact::Requirements],
     );
 
     let discovery = discover(&component_root).expect("discover components");

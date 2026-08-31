@@ -7,8 +7,9 @@ use std::{
 
 use crate::{
     KvistError, Result,
+    component_documents::{self, DocumentKind},
     init::{self, InitOutcome},
-    specification, task_queue,
+    task_queue,
 };
 
 /// The observable result of a repository import.
@@ -130,29 +131,50 @@ pub fn import(
     }
 
     // 4. Detect Kvist artifacts
-    let std_spec = target_dir.join("SPEC.md");
+    let std_requirements = target_dir.join("REQUIREMENTS.md");
+    let std_contract = target_dir.join("CONTRACT.md");
+    let std_design = target_dir.join("DESIGN.md");
     let std_todos = target_dir.join("TODOS.yaml");
     let std_impl = target_dir.join("IMPL.md");
-    let has_std = std_spec.is_file() && std_todos.is_file() && std_impl.is_file();
+    let has_std = std_requirements.is_file()
+        && std_contract.is_file()
+        && std_design.is_file()
+        && std_todos.is_file()
+        && std_impl.is_file();
 
     let conv_dir = target_dir.join(".kvist");
-    let conv_spec = conv_dir.join("SPEC.md");
+    let conv_requirements = conv_dir.join("REQUIREMENTS.md");
+    let conv_contract = conv_dir.join("CONTRACT.md");
+    let conv_design = conv_dir.join("DESIGN.md");
     let conv_todos = conv_dir.join("TODOS.yaml");
     let conv_impl = conv_dir.join("IMPL.md");
-    let has_converted = conv_spec.is_file() && conv_todos.is_file() && conv_impl.is_file();
+    let has_converted = conv_requirements.is_file()
+        && conv_contract.is_file()
+        && conv_design.is_file()
+        && conv_todos.is_file()
+        && conv_impl.is_file();
 
     if has_std || has_converted {
-        // Validate existing artifacts
-        let spec_path = if has_converted { conv_spec } else { std_spec };
+        let document_root = if has_converted {
+            &conv_dir
+        } else {
+            &target_dir
+        };
         let todos_path = if has_converted { conv_todos } else { std_todos };
 
-        // Validate specification
-        let validation = specification::validate_file(&spec_path)?;
-        if !validation.is_valid() {
-            return Err(KvistError::SpecificationValidationFailed {
-                path: spec_path,
-                diagnostics: specification::format_diagnostics(&validation.diagnostics),
-            });
+        for kind in [
+            DocumentKind::Requirements,
+            DocumentKind::Contract,
+            DocumentKind::Design,
+        ] {
+            let path = document_root.join(kind.filename());
+            let validation = component_documents::validate_file(kind, &path)?;
+            if !validation.is_valid() {
+                return Err(KvistError::ComponentDocumentValidationFailed {
+                    path,
+                    diagnostics: component_documents::format_diagnostics(&validation.diagnostics),
+                });
+            }
         }
 
         // Validate task queue

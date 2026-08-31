@@ -2,8 +2,10 @@ use kvist::task_queue::{TaskStatus, parse, serialize};
 
 const VALID_QUEUE: &str = r#"schema_version: 1
 component:
-  specification_revision: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-  parent_specification: null
+  requirements_revision: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  contract_revision: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  design_revision: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+  parent_contract: null
   revalidation:
     state: current
     checked_at: 2026-08-13T20:19:53Z
@@ -20,7 +22,7 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - SPEC.md#TODO-queue-schema-and-validation
+      - REQUIREMENTS.md#TODO-queue-schema-and-validation
     timestamps:
       created_at: 2026-08-13T20:19:53Z
       updated_at: 2026-08-13T20:19:54Z
@@ -37,7 +39,7 @@ tasks:
     depends_on:
       - write-tests
     requirements:
-      - SPEC.md#TODO-queue-schema-and-validation
+      - REQUIREMENTS.md#TODO-queue-schema-and-validation
     timestamps:
       created_at: 2026-08-13T20:19:53Z
       updated_at: 2026-08-13T20:19:53Z
@@ -53,6 +55,25 @@ fn parses_and_serializes_a_canonical_queue_deterministically() {
 
     assert!(serialized.contains("tasks:\n  - id:"));
     assert_eq!(serialize(&reparsed).expect("serialize again"), serialized);
+}
+
+#[test]
+fn accepts_only_safe_ancestor_contract_paths() {
+    let nested = VALID_QUEUE.replace(
+        "parent_contract: null",
+        "parent_contract:\n    path: ../../CONTRACT.md\n    revision: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    );
+    parse(&nested).expect("nested parent contract");
+
+    for path in [
+        "CONTRACT.md",
+        "../DESIGN.md",
+        "../../peer/CONTRACT.md",
+        "/CONTRACT.md",
+    ] {
+        let invalid = nested.replace("../../CONTRACT.md", path);
+        assert!(parse(&invalid).is_err(), "{path} must be rejected");
+    }
 }
 
 #[test]

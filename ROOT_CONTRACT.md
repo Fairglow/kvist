@@ -7,13 +7,16 @@ constraint set injected into component work.
 
 ## Non-negotiable architecture
 
-- Define and validate a component's specification, public contract,
-  constraints, and test strategy before implementation.
-- Keep each component's `SPEC.md`, `TODOS.yaml`, `IMPL.md` (the component's
-  internal implementation record), and implementation adjacent in its directory.
+- Approve `VISION.md` and `ARCHITECTURE.md` before detailed component work.
+- Define and validate a component's requirements, consumer contract, design,
+  constraints, acceptance criteria, and verification strategy before
+  implementation.
+- Keep each component's `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`,
+  `TODOS.yaml`, `IMPL.md`, and implementation adjacent in its directory.
 - Persist architecture and workflow state in version-controlled project files.
-- Keep component context limited to the component, its immediate parent
-  contract, and this root contract.
+- Keep component context limited to local artifacts, explicitly required
+  provider contracts, the immediate parent `CONTRACT.md`, and this root
+  contract. Exclude peer and parent designs and implementations by default.
 - Treat agent configuration, prompts, and output as untrusted input. External
   commands must be resolved without a shell and covered by an explicit,
   human-approved execution policy before they run.
@@ -26,9 +29,13 @@ constraint set injected into component work.
 
 - `TODOS.yaml` orders work as tests, implementation, security audit, then
   compliance review.
+- Requirements state what must be achieved, contracts state what consumers may
+  rely on, and designs state how a component intends to satisfy them. Do not
+  duplicate normative facts across these artifacts.
 - `IMPL.md` describes observed implementation behavior and is not copied from
-  `SPEC.md`. Human-facing user and integration documentation belongs separately under a dedicated `/docs/` structure.
+  intended requirements, contracts, or designs. Human-facing user and
+  integration documentation belongs under `/docs/`.
 - A clean-slate documenter and a separate compliance reviewer must verify
   implemented behavior before it is declared compliant.
-- Record specification-to-implementation discrepancies for explicit
+- Record intent-to-implementation discrepancies for explicit
   arbitration; do not silently alter either artifact.

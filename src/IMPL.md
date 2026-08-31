@@ -1,430 +1,254 @@
 <!-- kvist-implementation-record-version: 1 -->
-# Root Component Implementation Record
+# Component Implementation Record
 
-This document records behavior observed from the Rust implementation and its
-tests. It describes the current executable surface; it does not establish
-requirements for behavior that is absent.
+## Observation basis
 
-## Public command-line interface
+This record describes behavior observed in the root Rust crate and its tests. It
+does not certify conformance to a separate specification. The `agent_runtime`
+crate is treated as a dependency; its reusable behavior is recorded separately.
 
-The `kvist` executable uses a `clap` subcommand interface. It prints a
-successful command result followed by a newline to standard output. Domain
-failures print `error: <message>` to standard error and exit with status 1.
-Parser help and parser-generated argument errors use clap's own output and
-exit status (help exits successfully).
+## Build and runtime surface
 
-The available commands are:
+- The package builds a `kvist` binary and exposes a library used by integration
+  tests.
+- The crate targets Rust edition 2024, declares Rust 1.94 as its minimum
+  compiler version, forbids unsafe code, and rejects non-Linux targets at
+  compile time.
+- `main` parses command-line arguments, dispatches into library modules, prints
+  successful command output to stdout, and renders domain errors to stderr.
+- Major command families initialize and inspect projects, discover and render
+  component trees, validate component documents, import or reverse-discover
+  component material, manage task queues, accept observed component revisions,
+  approve execution policy, run tasks, inspect task logs, and remove eligible
+  orphaned locks.
+- Component-document JSON validation serializes structured diagnostics with
+  document, diagnostic kind, line, column, and message fields. Invalid
+  documents cause a nonzero exit, JSON-only stderr, and empty stdout.
 
-* `kvist init [PROJECT_DIR]` initializes the explicit directory, or `.` when
-  omitted. Success reports either `initialized Kvist project at <path>` or
-  `Kvist project already initialized at <path>`.
-* `kvist doctor [PROJECT_DIR]` performs a read-only root-artifact inspection
-  and writes its multi-line report to standard output.
-* `kvist status [PROJECT_DIR] [--format text|json]` performs a read-only
-  project and component inspection. It defaults to `.` and text output.
-* `kvist task next COMPONENT_DIR` selects one ready task without writing.
-* `kvist task transition COMPONENT_DIR TASK_ID STATUS [--reason REASON]`
-  persists one audited task-state transition.
-* `kvist task run COMPONENT_DIR [TASK_ID] [--stream]` runs the configured
-  external agent for an explicit or first ready task.
-* `kvist task log COMPONENT_DIR TASK_ID` prints the most recent task log.
-* `kvist task approve-policy [PROJECT_DIR]` atomically stores a versioned
-  complete execution-policy approval record in user-owned state outside the
-  project.
-* `kvist tree [PROJECT_DIR]` loads configuration, discovers components, and
-  renders a deterministic ASCII tree.
-* `kvist spec new COMPONENT_DIR` creates a new `SPEC.md`.
-* `kvist spec validate SPEC_FILE` validates an existing specification. A valid
-  file reports `valid specification: <path>`; an invalid file is a command
-  failure with line-aware diagnostics.
-* `kvist spec accept COMPONENT_DIR` updates the selected component queue's
-  recorded specification revisions and clears its stale evidence.
-* `kvist prompt [PROMPT] --allow-host-execution` runs one prompt through a
-  selected agent profile. `--file` reads a regular bounded UTF-8 file,
-  `--editor` invokes a configured editor on a temporary Markdown file, and
-  omitted input reads redirected standard input or offers an editor at a
-  terminal. Missing host acknowledgement refuses before prompt acquisition.
-* `kvist agent setup` collects a provider profile through `agent_runtime` or
-  loads one from an explicit/default standalone profile store, assigns its
-  exact name and command to selected roles, and creates or updates project-local
-  or user-global Kvist TOML.
+## Project and component discovery
 
-Unknown commands are rejected by the argument parser. `main` owns output and
-exit handling; `kvist::run()` parses process arguments and `cli::execute`
-returns a displayable `CommandOutput` or `KvistError`.
+- Project discovery walks ancestors from a supplied path and loads the nearest
+  recognized project configuration.
+- Configuration names a component root. Component discovery walks beneath that
+  root in deterministic path order.
+- A directory is recognized as a component from its component artifacts.
+  Directories without component artifacts can act as transparent namespace
+  directories between components.
+- Discovery rejects link-like component paths rather than following them.
+- Component and configuration text reads enforce code-defined size limits.
+  Root component text artifacts are limited to 1 MiB and `kvist.toml` is
+  limited to 64 KiB.
+- Paths are canonicalized and checked against the selected project, component
+  root, and VCS worktree boundaries before security-sensitive operations.
 
-Task commands do not create queues, revise task definitions, or migrate queues.
-`status` loads queues as read-only component-inspection data. Humans otherwise
-inspect queue content directly in the durable YAML file; `doctor` reports only
-the root queue artifact's validity.
+## Component documents and observed state
 
-The crate emits a compile-time error on non-Linux targets. The repository
-workspace includes a separate `agent-runtime` package, while the root
-package remains the default for unqualified Cargo commands.
+- The engine recognizes `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`,
+  `TODOS.yaml`, and `IMPL.md` as component artifacts.
+- An implementation record is accepted by the production validator only when
+  its first line is
+  `<!-- kvist-implementation-record-version: 1 -->` and it contains the exact
+  heading `# Component Implementation Record`.
+- Project inspection parses component documents and the task queue, reports
+  missing or invalid artifacts, derives phase/state information, and emits
+  stable human-readable or structured output where the command supports it.
+- Local requirements, contract, and design revisions are hashed and compared
+  independently. A change to any one is attributed to that document rather
+  than collapsed into a single local revision.
+- The only document revision propagated across a component boundary is the
+  nearest ancestor component's contract. Changes to an ancestor's requirements
+  or design can stale that ancestor without staling its child.
+- The nearest parent component can be separated by transparent namespace
+  directories. Inspection computes the relative path from the child component
+  to that parent's `CONTRACT.md`.
 
-## Root artifacts and project state
+## Task queue format and validation
 
-Initialization's fixed root artifact set, in inspection order, is:
+- `TODOS.yaml` is parsed into a versioned queue with component revision
+  references and an ordered list of typed tasks.
+- Queue validation rejects unknown fields, duplicate task identifiers, unknown
+  dependencies, self-dependencies, dependency cycles, dependencies on later
+  declarations, illegal status data, and invalid task-kind sequencing.
+- Required task-kind ancestry is checked transitively through the dependency
+  graph.
+- A recorded parent contract path consists of one or more leading `..`
+  components followed directly by `CONTRACT.md`. Absolute paths, peer paths,
+  alternate filenames, and other path forms are rejected.
+- Inspection also compares the recorded parent path with the path computed from
+  discovered component ancestry, so a syntactically safe but incorrect path is
+  invalid.
+- Queue serialization is deterministic and task mutations use atomic file
+  replacement.
 
-1. `kvist.toml`
-2. `ROOT_CONTRACT.md`
-3. `src/SPEC.md`
-4. `src/TODOS.yaml`
-5. `src/IMPL.md`
+## Task state and readiness
 
-Each generated artifact has independently versioned content: configuration
-version 1, root-contract version 1, specification version 1, TODO-queue
-version 1, and implementation-record version 1. The generated configuration selects
-`src` as component root, default discovery limits, automatic VCS selection,
-and an LLM provider value of `none`.
+- Tasks use pending, in-progress, blocked, and completed states with
+  code-enforced transitions.
+- Entering in-progress from pending or blocked requires every direct and
+  transitive dependency to exist and be completed.
+- `task next` selects the first pending ready task in declared queue order and
+  does not mutate the queue.
+- Automatic selection in `task run` uses the same readiness predicate as
+  `task next`, including the full transitive dependency check.
+- Explicitly selecting an already in-progress task is allowed so an interrupted
+  execution can be resumed without reapplying the pending-to-in-progress
+  readiness transition.
+- Blocking requires a nonempty reason. Completion is accepted only from
+  in-progress.
+- Task transitions are protected by an exclusive component lock and use
+  prepared and committed durable audit entries around the queue replacement.
+- The execution lifecycle uses a separate lock spanning selection, agent
+  execution, verification evidence, and terminal transition. Agent-visible
+  component contents cannot release that host-held lock.
 
-`init` creates a missing target directory, including missing parents. It
-inspects the complete root set before writing: an uninitialized directory is
-written; a current project is returned unchanged; partial, invalid, and
-unsupported-version projects are refused. Files are written through
-same-directory temporary files, synced, and persisted without replacing an
-existing destination. Artifact parent directories are created before writes.
-This means a filesystem failure after a prior artifact write can leave a
-partial project, which later initialization refuses rather than repairs.
+## Component acceptance
 
-Project and artifact parents must be real directories. On the supported Linux
-target, initialization and inspection reject symbolic links, regular files
-where directories are required, and non-regular artifacts. A current project
-is determined by validating all five artifact paths; it is not determined by
-mere file presence.
+- Acceptance validates the component before mutating its queue.
+- Component arguments can be `.`, component-relative paths, paths prefixed by
+  the configured component root, or absolute paths within the project.
+- Acceptance records current local document digests.
+- For a child component it computes the nearest parent contract across
+  transparent namespace directories and repairs both the recorded relative
+  path and its SHA-256 revision.
+- Writes use the queue serializer and atomic replacement; invalid documents or
+  paths leave the queue unchanged.
 
-`project_state::inspect` classifies a root as follows:
+## Execution approval
 
-* `uninitialized`: the root is absent, or all required artifacts are missing.
-* `current`: every required artifact is valid at the supported version.
-* `partial`: at least one artifact is valid and at least one is missing, with
-  neither invalid nor unsupported artifacts.
-* `invalid`: the root is not a real directory, an artifact or its parent has
-  an invalid filesystem type, or content validation fails.
-* `unsupported-version`: at least one artifact has a syntactically valid,
-  positive but unsupported version. This classification takes precedence over
-  `invalid`.
+- Task execution requires project-local agent, sandbox, and test-policy
+  configuration where applicable.
+- The authenticated approval record binds normalized configuration, agent
+  source, configured resource limits, selected VCS state, the canonical
+  content-addressed sandbox runner identity, and the SHA-256 digest of the
+  exact project-root `ROOT_CONTRACT.md`.
+- Root-contract binding accepts only a regular non-link file within the 1 MiB
+  root-artifact limit. Approval and execution checking both hash its bytes.
+- Approval performs the runner capability probe before recording approval.
+- Execution recomputes the bound inputs and refuses changed or forged approval
+  data before task mutation or runner request execution.
+- A changed root contract produces a specific unapproved-policy error before
+  the sandbox capability probe, component lock creation, queue read, or queue
+  mutation.
+- Runner paths must be absolute and outside both the project and selected VCS
+  worktree. Link-like, incorrectly owned, or insecurely permissioned runner
+  paths are rejected.
+- The runner is copied into a restricted temporary state directory and its
+  digest is checked again before launch.
 
-The `doctor` report starts with project path and state, then reports artifacts
-in the fixed order above, VCS information, and guidance. It does not repair or
-migrate files. For non-current roots VCS inspection is explicitly not checked.
-Text root artifacts other than configuration have a 1 MiB byte limit and must
-be UTF-8. An implementation record is valid only when its first line is exactly a
-positive supported `kvist-implementation-record-version` marker and it contains this
-document's title as a complete line.
+## Sandbox request and runner lifecycle
 
-## Configuration, discovery, tree, and VCS inspection
+- Sandbox requests are encoded as JSON with a versioned protocol, direct
+  program and argument fields, a fixed component working directory, denied
+  network access, explicit environment data, context files, and mounts.
+- The target component is mounted read-write at `/workspace/component`.
+- Additional context mounts are read-only. Agent task execution supplies the
+  root contract at `/workspace/context/ROOT_CONTRACT.md` and, for a child, the
+  nearest parent contract at `/workspace/context/PARENT_CONTRACT.md`.
+- Parent selection for that mount follows discovered component ancestry across
+  transparent namespace directories.
+- The runner is launched directly without shell interpolation.
+- The launch command clears the host environment before adding only values
+  selected by the configured allowlist. Ambient caller variables therefore do
+  not reach the runner unless explicitly allowed.
+- The runner starts as leader of a dedicated process group. Kvist captures
+  stdout and stderr concurrently under one combined output budget.
+- On deadline expiration or combined output exhaustion, Kvist sends `SIGKILL`
+  to the runner process group and waits for the group leader. This terminates
+  runner descendants holding inherited output pipes and allows capture threads
+  to finish without waiting for a sleeping runner tree.
+- The bounded result separately reports exit status, timeout, and output-limit
+  exhaustion. There is no host-side fallback execution of the requested
+  program.
 
-`kvist.toml` must be a regular, non-link UTF-8 file no larger than 64 KiB.
-Its root value is a TOML table with positive `schema_version = 1` and a
-non-empty relative `component_root` containing only normal path segments.
-Optional `[discovery]` values are positive integers. Their defaults are
-`max_depth = 64`, `max_directories = 10000`, `max_components = 10000`,
-`max_entries_per_directory = 10000`, and
-`max_relative_path_bytes = 4096`; their hard maxima are respectively 256,
-100000, 100000, 100000, and 32768. Optional `vcs.kind` is `auto` (including
-an omitted table or value), `git`, or `jj`.
+## Agent task execution and verification
 
-Discovery always represents the component root and represents a descendant
-only when at least one of `SPEC.md`, `TODOS.yaml`, or `IMPL.md` exists there.
-A component is complete only when all three are regular files. Missing,
-directory, symbolic-link, and other invalid artifact entries are distinguished.
-Traversal is lexical and deterministic, ignores directories named `.git`,
-`.hg`, `.jj`, `node_modules`, and `target`, and skips the three artifact
-filenames as traversal entries. It refuses link-like roots and descendants,
-excess depth, scanned-directory count, component count, entry count, and
-encoded relative-path-byte limits. It also rejects a candidate component below
-an ordinary intermediate directory; intervening directories must themselves
-be component candidates.
+- The root engine builds bounded context lists and invokes `agent_runtime`
+  through the approved sandbox request.
+- Execution output is streamed and persisted only after configured redaction
+  and combined-size limiting. Redaction handles configured values split across
+  stdout and stderr boundaries.
+- Agent failure, timeout, or output exhaustion produces durable attempt
+  evidence and transitions the task to blocked with a bounded reason.
+- After successful agent execution, configured verification commands are run
+  through the sandbox under their own timeout, environment, working-directory,
+  and output limits.
+- Verification failure, timeout, or excessive output blocks the task and
+  records bounded evidence. Successful execution and verification transition
+  the task to completed.
+- Per-task JSON-lines attempt history and bounded log files are stored below
+  the component. `task log` returns the latest matching execution log.
 
-`tree` uses configured limits and prints `component root: <configured path>`,
-then lexical components indented two spaces per normal path segment. Each line
-ends in `[complete]`, `[incomplete: missing ...]`, or `[invalid: ...]`.
+## Reverse discovery
 
-## Project and component status inspection
+- Reverse discovery requires its target to be a real directory and recursively
+  inspects regular Rust, Python, and selected Markdown files.
+- Link-like entries are skipped during traversal. `.git`, `target`, `.kvist`,
+  and `node_modules` directories are not descended into.
+- Generated documents and the generated queue are validated in memory before
+  artifact publication.
+- The destination `.kvist` metadata path may initially be absent, but an
+  existing path must be a real, non-link directory. A regular file or
+  link-like path is rejected.
+- The metadata directory is revalidated after creation and again immediately
+  before every artifact publication. Each artifact uses an atomic create-new
+  write, so existing targets are not overwritten.
 
-`project_state::inspect` produces a root `ProjectInspection` with optional
-component root, lexical `ComponentInspection` records, and an optional
-discovery error. `init` uses its root state to gate writes, `doctor` displays
-its root diagnostics, and `status` renders its component records. `tree` uses
-the same configuration limits and `discovery::Component` layout model, while
-queue parsing is shared by root and component inspection.
+## VCS and filesystem boundaries
 
-`status` renders `status-format-version: 1` text in this order: project path,
-project state, component root or `unavailable`, optional discovery error, then
-one lexical component record with adjacent artifacts and stale causes. Compact
-JSON has these top-level keys in order: `format_version`, `project_path`,
-`project_state`, `component_root`, `components`, and `discovery_error`. A
-component object has `path`, `state`, `artifacts`, and
-`revalidation_causes` keys in order; its artifact array is ordered `SPEC.md`,
-`TODOS.yaml`, `IMPL.md`, and each item has `path` then `state`. A current root
-uses the configured component root and lexical, bounded discovery. If
-discovery fails, the report has no component records and carries the error;
-the already determined root state is retained. A root that is not current has
-no component root or component records. Status omits root-artifact, VCS, and
-guidance details from its own output, although its root inspection invokes the
-existing read-only VCS inspection when the root is current.
+- Security-sensitive commands require the configured VCS selection and inspect
+  tracking or worktree state before mutation.
+- Durable writes use create-new files or same-directory atomic replacement,
+  directory synchronization where implemented, and refusal of link-like state
+  paths.
+- Stable ordering is used for discovered components, directory-runner content
+  hashing, diagnostics, and serialized queue data.
+- Filesystem paths, YAML, TOML, Markdown, JSON, subprocess output, and
+  environment values are treated as fallible inputs and mapped to contextual
+  domain errors.
 
-Every discovered component has `SPEC.md`, `TODOS.yaml`, and `IMPL.md` entries
-in that order. Each must be a regular non-link UTF-8 file of at most 1 MiB.
-Specification, queue, and implementation-record content use the corresponding
-existing validators. Component state precedence is
-`unsupported-version`, `invalid`, `missing`, `stale`, `blocked`, then
-`current`. A topology-inconsistent queue parent, or an unreadable immediate
-parent specification, makes an otherwise present child invalid.
+## Errors and recovery behavior
 
-For valid component queues, inspection retains recorded staleness causes and
-computes a SHA-256 fingerprint over the exact valid component specification
-bytes. It compares that fingerprint with the queue's component revision and,
-for children, compares the immediate parent's specification with its recorded
-parent revision. A differing digest adds a local or parent cause and makes the
-component stale. It retains recorded stale causes without reconciling them to
-newly derived causes. A blocked task produces `blocked` only when no higher
-precedence condition applies. Status does not write its derived evidence,
-timestamps, revisions, task state, or any other file.
+- Recoverable filesystem, parse, validation, VCS, approval, sandbox, task, and
+  subprocess failures return domain errors rather than intentionally panicking.
+- Validation errors identify the affected path or document and preserve
+  structured diagnostics where supported.
+- Mutating commands validate before replacement and release locks after either
+  success or failure.
+- Failed execution is represented durably by blocked task state, attempt
+  records, and bounded logs. An explicit unlock command handles only locks that
+  pass the engine's orphan checks.
 
-Text dynamically escapes backslashes and ASCII control characters. JSON
-escapes JSON control characters, quotes, and backslashes; all rendered paths
-are lossy display text. Inspection is path-based and point-in-time: it checks
-metadata and links before separate file reads and traversal, so it does not
-provide a descriptor-based TOCTOU guarantee. Inspection I/O errors fail the
-command; invalid artifacts and discovery errors are generally represented in
-the successful report.
+## Incomplete or weakly evidenced surfaces
 
-When root artifacts are current, `doctor` also discovers components and asks
-the configured VCS about every root artifact and every discovered component's
-three adjacent artifact paths. This inspection never stages, commits, or
-writes. Automatic selection rejects colocated Git and jj repositories as
-ambiguous. Git distinguishes tracked, ignored, untracked, missing, and
-unavailable classification. jj checks its saved `@` snapshot without
-snapshotting; an absent listing is reported as not tracked by the jj snapshot
-and may reflect ignore rules, `snapshot.auto-track`, or a newer file. VCS
-arguments are limited to 8 KiB batches; paths that cannot be safely queried
-are `unknown`.
+- Reverse discovery uses line-oriented source analysis and recursive traversal.
+  No explicit traversal-depth, entry-count, or source-file-size bound was
+  observed; regular Rust and Python files are read completely.
+- Directory-form sandbox runners are hashed and copied, but the integration
+  evidence is concentrated on executable-file runners.
+- Prepared transition journal entries are durable, but no command dedicated to
+  replaying or reconciling an interrupted prepared entry was observed.
 
-## Specification behavior
+## Verification evidence
 
-`spec new` creates missing component directories, rejects link-like or
-non-directory targets, refuses an existing `SPEC.md`, validates the built-in
-template first, then atomically writes that template without overwriting.
-`spec validate` and the public `validate_file` reject links, non-files, and
-files larger than 1 MiB; otherwise they read UTF-8 and do not modify it.
-
-The public `validate(&str)` returns a `SpecificationValidation` with an
-optional parsed template version and deterministic, source-ordered
-line/column-one diagnostics. It checks the first-line version marker,
-three exact disclosure-layer summaries and opening tags, their order and
-closures, and required headings, order, uniqueness, and nonblank content.
-`format_diagnostics` renders one diagnostic per line as
-`line:column: message`. Other Markdown is not rewritten or otherwise
-interpreted by this validator.
-
-## TODO queue library API and data model
-
-`task_queue::parse(contents)` parses YAML into `TaskQueue` and then performs
-semantic validation. It returns `TaskQueueError::Yaml` for typed-YAML shape
-failures, `UnsupportedVersion` unless `schema_version` is 1, or `Invalid` for
-semantic failures. Unknown fields are rejected for every typed mapping.
-`validate(&TaskQueue)` applies the same semantic checks to an in-memory queue.
-Neither function reads or writes the filesystem.
-
-`TaskQueue` has `schema_version`, `component`, and authoring-order `tasks`.
-`ComponentState` records a local `sha256:` revision, optional immediate parent
-specification, and `Revalidation`. A parent, when present, must use exactly
-`../SPEC.md` and a valid revision. Revisions have the prefix `sha256:` plus
-exactly 64 lowercase hexadecimal digits. Revalidation is `current` or
-`stale`, has a whole-second UTC timestamp, optional stale-since timestamp,
-and zero or more causes. Current requires null stale-since and no causes;
-stale requires a stale-since timestamp no later than checked-at and at least
-one cause. Causes require a nonempty path, distinct valid expected and
-observed revisions, and one of the two serialized kind names
-`component-specification-revision-changed` or
-`parent-specification-revision-changed`.
-
-The transparent `Timestamp` type accepts only real UTC calendar instants in
-the exact `YYYY-MM-DDTHH:MM:SSZ` form. It checks leap years, month lengths,
-and ranges, but exposes no public constructor or clock operation.
-
-Each `Task` has ID, title, four detail fields (`description`, `context`,
-`purpose`, and `expected_outcome`), lifecycle `kind`, `status`,
-`depends_on`, `requirements`, timestamps, and `blocked_reason`.
-
-* IDs are 1--64 lowercase ASCII letters, digits, and single hyphens; they
-  cannot start or end with a hyphen.
-* Titles are nonblank, trimmed, one-line, and at most 120 Unicode scalar
-  values. Each detail field is nonblank, trimmed, and at most 4096 scalar
-  values.
-* Dependency and requirement lists are lexically sorted, duplicate-free, and
-  contain no blank entries. Every requirement contains a nonblank source and
-  nonblank locator separated by `#`.
-* Task IDs are unique. Dependencies cannot be self-references, must name
-  existing earlier tasks, and must be acyclic.
-* `test` tasks need no lifecycle predecessor. `implementation` needs a
-  transitive preceding `test`; `security-audit` needs a transitive preceding
-  `implementation`; and `compliance-review` needs a transitive preceding
-  `security-audit`.
-* `updated_at` cannot precede `created_at`. A completed task has a valid
-  `completed_at` no earlier than `updated_at`; every other status requires it
-  to be null. A blocked task requires a nonblank reason; every other status
-  requires a null reason.
-
-`TaskStatus::can_transition_to` is the state-transition query API. It permits
-`pending -> in-progress|blocked`, `in-progress -> pending|blocked|completed`,
-and `blocked -> pending|in-progress`. Completed has no permitted outbound
-transition. The API reports permission only: no public operation changes a
-task, sets timestamps, checks dependencies' completion, changes revalidation,
-or persists a transition.
-
-## Queue serialization
-
-`serialize(&TaskQueue)` validates first, then returns canonical deterministic
-YAML or the same validation error classes. It preserves task and list order;
-it does not sort tasks or list values. It emits mappings and fields in a fixed
-order, two-space indentation, block lists, `null` for absent optional values,
-and `[]` for empty lists (including `tasks: []`). All string-valued scalar
-fields are double quoted. Within quoted strings it escapes double quotes,
-backslashes, newline, carriage return, tab, and control characters through
-U+001F (the latter as four-digit lowercase `\u` escapes). Enum values are
-unquoted kebab-case names. Serialization ends with a newline and a
-parse/serialize cycle is stable for valid data.
-
-## Task selection and state updates
-
-`kvist task next COMPONENT_DIR` validates a component-root-relative path, the
-current project/component state, and complete VCS tracking, then prints the
-first declared pending task whose dependency chain is completed or `no ready
-task`. It does not write files. `kvist task transition COMPONENT_DIR TASK_ID
-STATUS [--reason REASON]` applies only legal queue state transitions, requires
-readiness for `in-progress`, requires a nonblank reason only for `blocked`,
-and updates UTC task timestamps.
-
-Transitions create a no-clobber lock in a user-owned state directory, keyed by
-canonical project and component identities, append a `prepared` JSONL attempt,
-atomically replace `TODOS.yaml`, then append `committed`. They revalidate the
-retained lock before durable queue writes. A trailing prepared record fences
-another transition for that task until explicit future recovery. The writer
-rejects invalid queues, stale or non-current components, incomplete VCS
-tracking, unknown task IDs, illegal transitions, locks, clock, and filesystem
-failures. Attempt directories and new attempt files are directory-synced on
-Unix; other platforms retain the records without a directory-entry durability
-guarantee. The commands do not invoke providers, tests, shells, networks, or
-task execution.
-
-## Agent execution and test verification
-
-`task run` validates the same current project, component, and complete-VCS
-tracking gates as task transitions. It runs `test` and `implementation` tasks
-through the `developer` profile, and `security-audit` and `compliance-review`
-tasks through the `architect` profile. The selected agent receives the local
-component `SPEC.md`, `TODOS.yaml`, and `IMPL.md` at sandbox paths; root,
-parent, and peer files are not passed as explicit context.
-
-Before a sandbox probe or selecting a transition, `task run` verifies a
-user-state approval record. A 32-byte cryptographically random secret is
-created once in the user state directory and is required to authenticate the
-record; on Unix its file must be user-private. The record is stored below that
-state directory under a digest of canonical project and selected-worktree
-identities, which are also authenticated in its payload. A project-contained
-`.kvist/approved_execution_policy.json` is a rejected legacy/forgery signal.
-The record contains no command templates or policy content. Instead, its
-SHA-256-protected deterministic material records digests for the effective
-architect and developer templates, their token limits, timeouts, combined-output
-caps, redaction-policy digests, the selected agent
-configuration source identity and digest, parsed sandbox configuration,
-canonical runner path and digest, the test-policy digest or explicit absence,
-and configuration, approval, sandbox, and protocol versions. The resolver
-retains source provenance while selecting project, project-local, user, system,
-or built-in defaults and no longer creates a user configuration. A missing,
-malformed, unauthenticated, changed, or unsupported approval record/input is a
-command error before runner probing, locking, or task mutation.
-
-After that approval gate, `task run` requires project-local
-`[sandbox]` configuration and starts its configured runner with
-`--kvist-sandbox-probe-v1`. It proceeds only when the runner exits successfully
-with the exact version-1 deny-network/component-mount acknowledgement.
-The configured runner path must be absolute, name a regular non-symlink file,
-and canonically resolve outside both the project root and the selected Git or
-jj worktree root. On Linux, Kvist re-hashes the runner immediately before every
-probe and request spawn, copies matching bytes to a private user-state file,
-and executes its retained `/proc/self/fd` descriptor. The source path can
-therefore be replaced after validation without changing launched bytes.
-Non-Linux builds are disabled.
-A repository-provided runner, including a sibling of a nested project, is
-refused even if it returns the expected acknowledgement. Failure to resolve
-the selected worktree root also refuses execution. Kvist invokes the runner shell-free with `--kvist-sandbox-request-v1` and a
-JSON standard-input manifest containing the requested program and arguments,
-`/workspace/component` working directory, one read-write component mount,
-denied network, filtered environment, and context paths. The runner's output
-and exit status become the agent or test result. There is no host fallback.
-Missing configuration, runner spawn failures, or an invalid acknowledgement
-fail before a lock or task-state transition. A test policy using project
-working directory is rejected by the component-only protocol.
-
-Agent templates are delegated to the `agent_runtime` library and parsed into
-a program and arguments without a shell. Single and double quotes group
-arguments. The supported substitutions are `{prompt}`, `{context_files}`, and
-`{target_directory}`; an empty context list also removes an immediately
-preceding option paired with the standalone context placeholder. Resolved
-profiles supply a timeout and combined-output cap, bounded by hard maxima. A
-timeout or output-limit breach terminates the runner and blocks the task. Kvist
-concatenates captured stdout followed by stderr, then replaces explicit
-redaction values and inherited sandbox-allowed environment values in that one
-value. The combined redacted result is copied to a real, non-link
-`.kvist/logs/TASK_ID_TIMESTAMP.log`, written once to stdout for `--stream`,
-displayed, and appended to agent-attempt evidence; original inter-stream
-ordering is therefore not preserved. A zero exit status completes the task
-except that an implementation also requires its configured test command to
-succeed. Agent failures, verification failures, and verification-policy
-failures block the task.
-
-The test policy selects inherited commands by component path, intersects its
-allowlist with the sandbox allowlist, applies its configured timeout to the
-sandbox runner, and records each returned output stream up to the configured
-byte limit.
-`approve-policy` writes the authenticated complete approval record atomically
-in user state. A task run refuses if its policy is absent, any approved
-execution input differs, or a repository-contained legacy record is present.
-Verification result records are appended to the task's attempt JSONL file.
-
-Custom prompt acquisition is delegated to `agent_runtime`, limited to 1 MiB,
-and rejects empty or non-UTF-8 text. File input checks for a regular non-link
-file before reading. Editor input uses `VISUAL`, then `EDITOR`, then `vi` and
-invokes the parsed editor command directly. Custom prompt execution requires
-the CLI host acknowledgement and uses the selected profile's output bound.
-Idle and repetition retries rebuild the model command with a notice that prior
-side effects may remain; other failures are terminal. SIGINT and SIGTERM cancel
-the supervised command and terminate its Linux process group before returning.
-Generic profile setup, conventional CLI version probes, provider-preserving
-wrapper fallback, maintained provider templates, endpoint probes, wrapper
-validation, host-acknowledged verification, and standalone profile persistence
-are delegated to `agent_runtime`. Kvist setup either calls that collection
-API or loads a named standalone profile, then copies its exact name and command
-into selected role model lists. It does not dynamically read standalone
-profiles during execution. Kvist configuration updates use `toml_edit` to
-retain unrelated values and comments, update or append the named model in
-inline or array-of-table model lists, validate the result with the normal
-configuration parser, and atomically create or replace the selected file.
-
-Isolation enforcement is delegated to the configured external runner; Kvist verifies its identity and
-version-1 capability acknowledgement but cannot independently prove its
-implementation.
-
-## Observable omissions and failure behavior
-
-The implementation contains no general-purpose queue-file loader or reusable
-queue-loader size-bound API; root inspection is the only queue-file reader and
-applies its 1 MiB root-artifact limit before parsing. Status separately reads
-component queues only for inspection. It contains no queue creation, task-queue migration, or general-purpose queue
-persistence API. Queue validation verifies the shape and
-relationships described above;
-it does not compare recorded revisions with files, resolve requirement
-locators, verify that status history actually followed
-`can_transition_to`, require unique or canonical revalidation causes, or
-require a cause kind and path to correspond.
-
-Failures are reported as typed `KvistError` or `TaskQueueError` values with
-path and operation context where applicable. Filesystem, decoding, parser, configuration, traversal, validation, VCS-tool,
-and safe-path failures do not
-fall back to destructive recovery. Link-like filesystem objects are rejected
-rather than followed. The current executable has no network behavior or
-daemon, but it does invoke configured local agent and approved test programs.
+- Component-state tests directly exercise independent local contract and design
+  staleness and show that parent requirements/design changes do not propagate
+  to a child.
+- Task-queue tests cover dependency validation and safe ancestor contract path
+  forms.
+- Task-command tests cover component-root-prefixed acceptance, repair of parent
+  paths through namespaces, and read-only nearest-parent contract mounting.
+- JSON-output tests cover structured invalid-document diagnostics on stderr
+  with a failing exit status.
+- Task execution tests set an unapproved ambient variable and observe it as
+  absent inside the runner.
+- Approval tests change `ROOT_CONTRACT.md` after approval and observe rejection
+  before sandbox request creation with the task queue unchanged.
+- Reverse-discovery tests reject a symlinked `.kvist` directory without writing
+  through it; production code also rejects non-directory metadata paths and
+  revalidates the directory before each no-clobber write.
+- Timeout tests exercise a shell runner with a sleeping descendant and assert
+  return within the configured bound; output-limit tests exercise cancellation
+  and bounded, redacted durable evidence.
+- Task selection and transition code share the same transitive dependency
+  traversal used by `task next`, transition-to-in-progress checks, and
+  `task run` automatic readiness.

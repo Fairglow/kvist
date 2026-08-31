@@ -39,7 +39,9 @@ pub fn render(component_root: &Path, discovery: &discovery::Discovery) -> String
 
 fn component_diagnostic(component: &Component) -> String {
     let diagnostics = [
-        ComponentArtifact::Specification,
+        ComponentArtifact::Requirements,
+        ComponentArtifact::Contract,
+        ComponentArtifact::Design,
         ComponentArtifact::TaskQueue,
         ComponentArtifact::ImplementationRecord,
     ]

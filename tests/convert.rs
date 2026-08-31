@@ -4,9 +4,10 @@ use std::{
 };
 
 use kvist::{
+    component_documents::{self, DocumentKind},
     convert::{ConvertOutcome, convert},
     init::{InitOutcome, initialize},
-    specification, task_queue,
+    task_queue,
 };
 use tempfile::TempDir;
 
@@ -83,12 +84,17 @@ fn init_converts_an_existing_rust_project_without_changing_implementation_files(
     );
 
     let metadata = project.path().join(".kvist");
-    let specification_path = metadata.join("SPEC.md");
-    assert!(
-        specification::validate_file(&specification_path)
-            .expect("validate generated specification")
-            .is_valid()
-    );
+    for kind in [
+        DocumentKind::Requirements,
+        DocumentKind::Contract,
+        DocumentKind::Design,
+    ] {
+        assert!(
+            component_documents::validate_file(kind, &metadata.join(kind.filename()))
+                .expect("validate generated component document")
+                .is_valid()
+        );
+    }
     let queue = fs::read_to_string(metadata.join("TODOS.yaml")).expect("read generated queue");
     task_queue::parse(&queue).expect("validate generated queue");
     assert!(queue.contains("converted-example 1.2.3"));
@@ -102,8 +108,8 @@ fn init_converts_an_existing_rust_project_without_changing_implementation_files(
 fn conversion_is_no_clobber_when_metadata_already_exists() {
     let project = existing_project();
     convert(project.path()).expect("initial conversion");
-    let specification_path = project.path().join(".kvist/SPEC.md");
-    fs::write(&specification_path, "human-edited specification\n").expect("edit specification");
+    let requirements_path = project.path().join(".kvist/REQUIREMENTS.md");
+    fs::write(&requirements_path, "human-edited requirements\n").expect("edit requirements");
 
     let outcome = convert(project.path()).expect("repeated conversion");
 
@@ -114,8 +120,8 @@ fn conversion_is_no_clobber_when_metadata_already_exists() {
         }
     );
     assert_eq!(
-        fs::read_to_string(specification_path).expect("read specification"),
-        "human-edited specification\n"
+        fs::read_to_string(requirements_path).expect("read requirements"),
+        "human-edited requirements\n"
     );
 }
 
@@ -142,7 +148,9 @@ fn init_keeps_normal_initialization_when_a_manifest_has_no_source_directory() {
     let outcome = initialize(project.path()).expect("normally initialize project");
 
     assert!(matches!(outcome, InitOutcome::Initialized { .. }));
-    assert!(project.path().join("src/SPEC.md").is_file());
+    assert!(project.path().join("src/REQUIREMENTS.md").is_file());
+    assert!(project.path().join("src/CONTRACT.md").is_file());
+    assert!(project.path().join("src/DESIGN.md").is_file());
     assert!(!project.path().join(".kvist").exists());
 }
 
@@ -154,5 +162,5 @@ fn conversion_refuses_an_unrelated_metadata_directory() {
     let error = convert(project.path()).expect_err("metadata conflict must be explicit");
 
     assert!(error.to_string().contains("Kvist artifacts already exist"));
-    assert!(!project.path().join(".kvist/SPEC.md").exists());
+    assert!(!project.path().join(".kvist/REQUIREMENTS.md").exists());
 }

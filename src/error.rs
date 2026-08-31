@@ -264,56 +264,64 @@ pub enum KvistError {
         /// Invalid component-directory path.
         path: PathBuf,
     },
-    /// Specification generation would follow a component-directory symlink.
+    /// Component-document generation would follow a component-directory symlink.
     #[error(
-        "refusing to create a specification through link-like path `{path}` (symbolic link or Windows reparse point)"
+        "refusing to create component documents through link-like path `{path}` (symbolic link or Windows reparse point)"
     )]
     ComponentDirectoryIsSymlink {
         /// Symbolic-link component-directory path.
         path: PathBuf,
     },
-    /// A specification already exists and must never be overwritten implicitly.
+    /// A component intent document already exists and must not be overwritten.
     #[error(
-        "specification `{path}` already exists; edit it or remove it explicitly before retrying"
+        "component document `{path}` already exists; edit it or remove it explicitly before retrying"
     )]
-    SpecificationAlreadyExists {
-        /// Existing specification path.
+    ComponentDocumentAlreadyExists {
+        /// Existing document path.
         path: PathBuf,
     },
-    /// The checked-in generation template no longer satisfies its own contract.
-    #[error("generated specification template is invalid: {diagnostics}")]
-    GeneratedSpecificationInvalid {
+    /// A checked-in component-document template violates its own structure.
+    #[error("generated {document} template is invalid: {diagnostics}")]
+    GeneratedComponentDocumentInvalid {
+        /// Template filename.
+        document: &'static str,
         /// Rendered validation diagnostics.
         diagnostics: String,
     },
-    /// A specification failed validation.
-    #[error("specification `{path}` is invalid:\n{diagnostics}")]
-    SpecificationValidationFailed {
-        /// Invalid specification path.
+    /// A component intent document failed validation.
+    #[error("component document `{path}` is invalid:\n{diagnostics}")]
+    ComponentDocumentValidationFailed {
+        /// Invalid document path.
         path: PathBuf,
         /// Line-aware validation diagnostics.
         diagnostics: String,
     },
-    /// A specification path is not a regular file.
-    #[error("specification `{path}` must be a regular file")]
-    SpecificationNotFile {
-        /// Invalid specification path.
+    /// A command requested JSON output and failed with a structured response.
+    #[error("{output}")]
+    JsonCommandFailure {
+        /// Complete JSON object written without a plain-text error prefix.
+        output: String,
+    },
+    /// A component intent document is not a regular file.
+    #[error("component document `{path}` must be a regular file")]
+    ComponentDocumentNotFile {
+        /// Invalid document path.
         path: PathBuf,
     },
-    /// Validation would follow a symbolic-link specification.
+    /// Validation would follow a symbolic-link component document.
     #[error(
-        "refusing to validate specification through link-like path `{path}` (symbolic link or Windows reparse point)"
+        "refusing to validate component document through link-like path `{path}` (symbolic link or Windows reparse point)"
     )]
-    SpecificationIsSymlink {
-        /// Symbolic-link specification path.
+    ComponentDocumentIsSymlink {
+        /// Symbolic-link document path.
         path: PathBuf,
     },
-    /// The specification exceeds the bounded parsing limit.
-    #[error("specification `{path}` exceeds the {max_bytes}-byte limit")]
-    SpecificationTooLarge {
-        /// Oversized specification path.
+    /// A component intent document exceeds the bounded parsing limit.
+    #[error("component document `{path}` exceeds the {max_bytes}-byte limit")]
+    ComponentDocumentTooLarge {
+        /// Oversized document path.
         path: PathBuf,
-        /// Maximum permitted specification size.
+        /// Maximum permitted document size.
         max_bytes: u64,
     },
     /// A task command requires a normal component-root-relative path.
@@ -458,6 +466,10 @@ impl KvistError {
     pub fn print(&self) -> io::Result<()> {
         match self {
             Self::ArgumentParsing(error) => error.print(),
+            Self::JsonCommandFailure { output } => {
+                let mut stderr = io::stderr().lock();
+                writeln!(stderr, "{output}")
+            }
             _ => {
                 let mut stderr = io::stderr().lock();
                 writeln!(stderr, "error: {self}")

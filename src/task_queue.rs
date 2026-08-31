@@ -1,6 +1,8 @@
 //! Versioned, durable task-queue parsing and semantic validation.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
+use std::path::{Component, Path};
 use std::time::{SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -26,23 +28,27 @@ pub struct TaskQueue {
     pub tasks: Vec<Task>,
 }
 
-/// The specification revisions against which a component plan was reviewed.
+/// The intent-document revisions against which a component plan was reviewed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ComponentState {
-    /// SHA-256 revision of this component's reviewed `SPEC.md`.
-    pub specification_revision: String,
-    /// Immediate-parent specification revision, or `null` for the root.
-    pub parent_specification: Option<ParentSpecification>,
+    /// SHA-256 revision of this component's reviewed `REQUIREMENTS.md`.
+    pub requirements_revision: String,
+    /// SHA-256 revision of this component's reviewed `CONTRACT.md`.
+    pub contract_revision: String,
+    /// SHA-256 revision of this component's reviewed `DESIGN.md`.
+    pub design_revision: String,
+    /// Immediate-parent contract revision, or `null` for the root.
+    pub parent_contract: Option<ParentContract>,
     /// Evidence that determines whether tasks may be selected.
     pub revalidation: Revalidation,
 }
 
-/// The only upstream specification allowed in a component context.
+/// The only implicit upstream component contract allowed in a component context.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct ParentSpecification {
-    /// Relative path to the immediate parent's specification.
+pub struct ParentContract {
+    /// Relative path to the immediate parent's consumer contract.
     pub path: String,
     /// SHA-256 revision reviewed by this queue.
     pub revision: String,
@@ -66,19 +72,19 @@ pub struct Revalidation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum RevalidationState {
-    /// Reviewed specifications still match recorded revisions.
+    /// Reviewed intent documents still match recorded revisions.
     Current,
-    /// A local or immediate-parent specification revision changed.
+    /// A local intent document or immediate-parent contract changed.
     Stale,
 }
 
-/// Attributable evidence of a specification revision mismatch.
+/// Attributable evidence of an intent-document revision mismatch.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StalenessCause {
-    /// Whether the changed specification is local or the immediate parent.
+    /// Which local document or parent contract changed.
     pub kind: StalenessCauseKind,
-    /// Component-relative specification path that was compared.
+    /// Component-relative document path that was compared.
     pub path: String,
     /// Revision recorded when this queue was reviewed.
     pub expected_revision: String,
@@ -86,14 +92,18 @@ pub struct StalenessCause {
     pub observed_revision: String,
 }
 
-/// The two specification changes that can stale a component plan.
+/// Intent-document changes that can stale a component plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum StalenessCauseKind {
-    /// The component's own `SPEC.md` changed.
-    ComponentSpecificationRevisionChanged,
-    /// The immediate parent's `SPEC.md` changed.
-    ParentSpecificationRevisionChanged,
+    /// The component's own requirements changed.
+    ComponentRequirementsRevisionChanged,
+    /// The component's own consumer contract changed.
+    ComponentContractRevisionChanged,
+    /// The component's own design changed.
+    ComponentDesignRevisionChanged,
+    /// The immediate parent's consumer contract changed.
+    ParentContractRevisionChanged,
 }
 
 /// One actionable, traceable unit of component work.
@@ -346,13 +356,29 @@ fn append_component(output: &mut String, component: &ComponentState, indentation
         output,
         indentation,
         &format!(
-            "specification_revision: {}",
-            yaml_string(&component.specification_revision)
+            "requirements_revision: {}",
+            yaml_string(&component.requirements_revision)
         ),
     );
-    match &component.parent_specification {
+    line(
+        output,
+        indentation,
+        &format!(
+            "contract_revision: {}",
+            yaml_string(&component.contract_revision)
+        ),
+    );
+    line(
+        output,
+        indentation,
+        &format!(
+            "design_revision: {}",
+            yaml_string(&component.design_revision)
+        ),
+    );
+    match &component.parent_contract {
         Some(parent) => {
-            line(output, indentation, "parent_specification:");
+            line(output, indentation, "parent_contract:");
             line(
                 output,
                 indentation + 2,
@@ -364,7 +390,7 @@ fn append_component(output: &mut String, component: &ComponentState, indentation
                 &format!("revision: {}", yaml_string(&parent.revision)),
             );
         }
-        None => line(output, indentation, "parent_specification: null"),
+        None => line(output, indentation, "parent_contract: null"),
     }
     line(output, indentation, "revalidation:");
     line(
@@ -527,16 +553,18 @@ fn yaml_string(value: &str) -> String {
 
 fn validate_component(component: &ComponentState) -> std::result::Result<(), TaskQueueError> {
     validate_revision(
-        &component.specification_revision,
-        "component.specification_revision",
+        &component.requirements_revision,
+        "component.requirements_revision",
     )?;
-    if let Some(parent) = &component.parent_specification {
-        if parent.path != "../SPEC.md" {
+    validate_revision(&component.contract_revision, "component.contract_revision")?;
+    validate_revision(&component.design_revision, "component.design_revision")?;
+    if let Some(parent) = &component.parent_contract {
+        if !is_parent_contract_path(&parent.path) {
             return Err(TaskQueueError::invalid(
-                "`component.parent_specification.path` must be `../SPEC.md`",
+                "`component.parent_contract.path` must contain one or more `..` segments followed by `CONTRACT.md`",
             ));
         }
-        validate_revision(&parent.revision, "component.parent_specification.revision")?;
+        validate_revision(&parent.revision, "component.parent_contract.revision")?;
     }
 
     component
@@ -595,6 +623,21 @@ fn validate_component(component: &ComponentState) -> std::result::Result<(), Tas
         }
     }
     Ok(())
+}
+
+fn is_parent_contract_path(value: &str) -> bool {
+    let mut components = Path::new(value).components().peekable();
+    let mut parent_count = 0;
+    while matches!(components.peek(), Some(Component::ParentDir)) {
+        parent_count += 1;
+        components.next();
+    }
+    parent_count > 0
+        && matches!(
+            components.next(),
+            Some(Component::Normal(filename)) if filename == OsStr::new("CONTRACT.md")
+        )
+        && components.next().is_none()
 }
 
 fn validate_tasks(tasks: &[Task]) -> std::result::Result<(), TaskQueueError> {
@@ -946,12 +989,14 @@ fn revalidation_state_name(state: RevalidationState) -> &'static str {
 
 fn staleness_cause_kind_name(kind: StalenessCauseKind) -> &'static str {
     match kind {
-        StalenessCauseKind::ComponentSpecificationRevisionChanged => {
-            "component-specification-revision-changed"
+        StalenessCauseKind::ComponentRequirementsRevisionChanged => {
+            "component-requirements-revision-changed"
         }
-        StalenessCauseKind::ParentSpecificationRevisionChanged => {
-            "parent-specification-revision-changed"
+        StalenessCauseKind::ComponentContractRevisionChanged => {
+            "component-contract-revision-changed"
         }
+        StalenessCauseKind::ComponentDesignRevisionChanged => "component-design-revision-changed",
+        StalenessCauseKind::ParentContractRevisionChanged => "parent-contract-revision-changed",
     }
 }
 

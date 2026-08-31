@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::{
-    KvistError, Result, convert, discovery, import, init, project_state, prompt_input,
-    reverse_discovery, specification, status, task_commands, task_queue::TaskStatus, tree, wizard,
+    KvistError, Result, component_documents, convert, discovery, import, init, project_state,
+    prompt_input, reverse_discovery, status, task_commands, task_queue::TaskStatus, tree, wizard,
 };
 
 /// Kvist's top-level command-line interface.
@@ -15,7 +15,7 @@ use crate::{
     name = "kvist",
     version,
     about = "Spec-driven architecture workflow for human-directed AI development",
-    long_about = "Kvist manages filesystem-native component specifications, task queues, and compliance documentation."
+    long_about = "Kvist manages filesystem-native requirements, contracts, designs, task queues, and compliance evidence."
 )]
 pub struct Cli {
     /// Output structured JSON instead of plain text.
@@ -98,9 +98,9 @@ pub enum Command {
         /// Stable report representation for scripts and tools.
         #[arg(long, value_enum, default_value_t = status::StatusFormat::Text)]
         format: status::StatusFormat,
-        /// Filter report to show only specification artifacts (SPEC.md) and their revalidation details.
+        /// Show only requirements, contract, and design artifacts plus revalidation details.
         #[arg(long)]
-        only_specs: bool,
+        only_documents: bool,
         /// Filter report to show only implementation artifacts (IMPL.md).
         #[arg(long)]
         only_impls: bool,
@@ -114,11 +114,11 @@ pub enum Command {
         #[command(subcommand)]
         command: TaskCommand,
     },
-    /// Create or validate a component specification.
-    Spec {
-        /// Specification operation to execute.
+    /// Create, validate, or accept component intent documents.
+    Component {
+        /// Component-document operation to execute.
         #[command(subcommand)]
-        command: SpecCommand,
+        command: ComponentCommand,
     },
     /// Manage AI agent profiles, models, and configurations.
     Agent {
@@ -163,24 +163,24 @@ pub struct ProjectDirectory {
     pub path: PathBuf,
 }
 
-/// Specification operations.
+/// Component-document operations.
 #[derive(Debug, Subcommand)]
-pub enum SpecCommand {
-    /// Create a layered SPEC.md in a component directory.
+pub enum ComponentCommand {
+    /// Create REQUIREMENTS.md, CONTRACT.md, and DESIGN.md templates.
     New {
-        /// Component directory that will contain the generated SPEC.md.
+        /// Component directory that will contain the generated documents.
         #[arg(value_name = "COMPONENT_DIR")]
         component_dir: PathBuf,
     },
-    /// Validate a layered SPEC.md file.
+    /// Validate a component's three intent documents.
     Validate {
-        /// Path to the SPEC.md file to validate.
-        #[arg(value_name = "SPEC_FILE")]
-        spec_file: PathBuf,
+        /// Component directory containing the documents.
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: PathBuf,
     },
-    /// Accept a modified SPEC.md and revalidate.
+    /// Record reviewed document and immediate-parent contract revisions.
     Accept {
-        /// Component directory containing the SPEC.md to revalidate.
+        /// Component directory containing the intent documents to revalidate.
         #[arg(value_name = "COMPONENT_DIR")]
         component_dir: PathBuf,
     },
@@ -406,7 +406,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Status {
                 path,
                 format: _,
-                only_specs,
+                only_documents,
                 only_impls,
                 unfinished,
             } => {
@@ -414,7 +414,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 Ok(CommandOutput::message(status::render(
                     &inspection,
                     status::StatusFormat::Json,
-                    only_specs,
+                    only_documents,
                     only_impls,
                     unfinished,
                 )))
@@ -507,47 +507,66 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     message.replace('\n', "\\n").replace('"', "\\\"")
                 )))
             }
-            Command::Spec {
-                command: SpecCommand::New { component_dir },
+            Command::Component {
+                command: ComponentCommand::New { component_dir },
             } => {
-                let generated = specification::create(&component_dir)?;
+                let generated = component_documents::create(&component_dir)?;
+                let paths = generated
+                    .paths
+                    .iter()
+                    .map(|path| {
+                        let mut encoded = String::new();
+                        json_string_escape(&mut encoded, &path.to_string_lossy());
+                        encoded
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
                 Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"spec-new\",\"spec_path\":\"{}\",\"message\":\"created specification at {}\"}}",
-                    generated.path.to_string_lossy().replace('\\', "\\\\"),
-                    generated.path.display()
+                    "{{\"status\":\"success\",\"command\":\"component-new\",\"document_paths\":[{paths}],\"message\":\"created component document templates\"}}"
                 )))
             }
-            Command::Spec {
-                command: SpecCommand::Validate { spec_file },
+            Command::Component {
+                command: ComponentCommand::Validate { component_dir },
             } => {
-                let validation = specification::validate_file(&spec_file)?;
-                let mut diagnostics_json = String::from("[");
-                for (index, diagnostic) in validation.diagnostics.iter().enumerate() {
-                    if index > 0 {
-                        diagnostics_json.push(',');
+                let validations = validate_component_documents(&component_dir)?;
+                let mut diagnostics = Vec::new();
+                for (path, validation) in &validations {
+                    for diagnostic in &validation.diagnostics {
+                        let message = component_documents::format_diagnostics(
+                            std::slice::from_ref(diagnostic),
+                        );
+                        diagnostics.push(serde_json::json!({
+                            "document": path,
+                            "kind": format!("{:?}", diagnostic.kind),
+                            "line": diagnostic.line,
+                            "column": diagnostic.column,
+                            "message": message,
+                        }));
                     }
-                    let message = specification::format_diagnostics(std::slice::from_ref(diagnostic));
-                    diagnostics_json.push_str(&format!(
-                        "{{\"kind\":\"{:?}\",\"line\":{},\"column\":{},\"message\":\"{}\"}}",
-                        diagnostic.kind,
-                        diagnostic.line,
-                        diagnostic.column,
-                        message.replace('"', "\\\"")
-                    ));
                 }
-                diagnostics_json.push(']');
-                Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"spec-validate\",\"valid\":{},\"spec_path\":\"{}\",\"diagnostics\":{diagnostics_json}}}",
-                    validation.is_valid(),
-                    spec_file.to_string_lossy().replace('\\', "\\\\"),
-                )))
+                let valid = validations
+                    .iter()
+                    .all(|(_, validation)| validation.is_valid());
+                let response = serde_json::json!({
+                    "status": if valid { "success" } else { "error" },
+                    "command": "component-validate",
+                    "valid": valid,
+                    "component_dir": component_dir,
+                    "diagnostics": diagnostics,
+                })
+                .to_string();
+                if valid {
+                    Ok(CommandOutput::message(response))
+                } else {
+                    Err(KvistError::JsonCommandFailure { output: response })
+                }
             }
-            Command::Spec {
-                command: SpecCommand::Accept { component_dir },
+            Command::Component {
+                command: ComponentCommand::Accept { component_dir },
             } => {
                 let message = task_commands::accept(&component_dir)?;
                 Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"spec-accept\",\"component_dir\":\"{}\",\"message\":\"{}\"}}",
+                    "{{\"status\":\"success\",\"command\":\"component-accept\",\"component_dir\":\"{}\",\"message\":\"{}\"}}",
                     component_dir.to_string_lossy().replace('\\', "\\\\"),
                     message.replace('\n', "\\n").replace('"', "\\\"")
                 )))
@@ -629,14 +648,14 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Status {
                 path,
                 format,
-                only_specs,
+                only_documents,
                 only_impls,
                 unfinished,
             } => project_state::inspect(&path).map(|inspection| {
                 CommandOutput::message(status::render(
                     &inspection,
                     format,
-                    only_specs,
+                    only_documents,
                     only_impls,
                     unfinished,
                 ))
@@ -685,32 +704,52 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         force,
                     },
             } => task_commands::unlock(&component_dir, force).map(CommandOutput::message),
-            Command::Spec {
-                command: SpecCommand::New { component_dir },
-            } => specification::create(&component_dir).map(|generated| {
+            Command::Component {
+                command: ComponentCommand::New { component_dir },
+            } => component_documents::create(&component_dir).map(|generated| {
                 CommandOutput::message(format!(
-                    "created specification at {}",
-                    generated.path.display()
+                    "created component documents at {}",
+                    generated
+                        .paths
+                        .iter()
+                        .map(|path| path.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ))
             }),
-            Command::Spec {
-                command: SpecCommand::Validate { spec_file },
+            Command::Component {
+                command: ComponentCommand::Validate { component_dir },
             } => {
-                let validation = specification::validate_file(&spec_file)?;
-                if validation.is_valid() {
+                let validations = validate_component_documents(&component_dir)?;
+                if validations
+                    .iter()
+                    .all(|(_, validation)| validation.is_valid())
+                {
                     Ok(CommandOutput::message(format!(
-                        "valid specification: {}",
-                        spec_file.display()
+                        "valid component documents: {}",
+                        component_dir.display()
                     )))
                 } else {
-                    Err(KvistError::SpecificationValidationFailed {
-                        path: spec_file,
-                        diagnostics: specification::format_diagnostics(&validation.diagnostics),
+                    let diagnostics = validations
+                        .iter()
+                        .filter(|(_, validation)| !validation.is_valid())
+                        .map(|(path, validation)| {
+                            format!(
+                                "{}:\n{}",
+                                path.display(),
+                                component_documents::format_diagnostics(&validation.diagnostics)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    Err(KvistError::ComponentDocumentValidationFailed {
+                        path: component_dir,
+                        diagnostics,
                     })
                 }
             }
-            Command::Spec {
-                command: SpecCommand::Accept { component_dir },
+            Command::Component {
+                command: ComponentCommand::Accept { component_dir },
             } => task_commands::accept(&component_dir).map(CommandOutput::message),
             Command::Completions { shell } => {
                 use clap::CommandFactory;
@@ -806,6 +845,23 @@ fn execute_prompt(
     Ok(())
 }
 
+fn validate_component_documents(
+    component_dir: &std::path::Path,
+) -> Result<Vec<(PathBuf, component_documents::DocumentValidation)>> {
+    [
+        component_documents::DocumentKind::Requirements,
+        component_documents::DocumentKind::Contract,
+        component_documents::DocumentKind::Design,
+    ]
+    .into_iter()
+    .map(|kind| {
+        let path = component_dir.join(kind.filename());
+        let validation = component_documents::validate_file(kind, &path)?;
+        Ok((path, validation))
+    })
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -846,33 +902,33 @@ mod tests {
     }
 
     #[test]
-    fn parses_specification_creation() {
-        let cli = Cli::try_parse_from(["kvist", "spec", "new", "src/network"])
-            .expect("valid specification creation command");
+    fn parses_component_creation() {
+        let cli = Cli::try_parse_from(["kvist", "component", "new", "src/network"])
+            .expect("valid component creation command");
 
-        let Command::Spec {
-            command: SpecCommand::New { component_dir },
+        let Command::Component {
+            command: ComponentCommand::New { component_dir },
         } = cli.command
         else {
-            panic!("expected spec new command");
+            panic!("expected component new command");
         };
 
         assert_eq!(component_dir, PathBuf::from("src/network"));
     }
 
     #[test]
-    fn parses_specification_validation() {
-        let cli = Cli::try_parse_from(["kvist", "spec", "validate", "src/SPEC.md"])
-            .expect("valid specification validation command");
+    fn parses_component_validation() {
+        let cli = Cli::try_parse_from(["kvist", "component", "validate", "src/network"])
+            .expect("valid component validation command");
 
-        let Command::Spec {
-            command: SpecCommand::Validate { spec_file },
+        let Command::Component {
+            command: ComponentCommand::Validate { component_dir },
         } = cli.command
         else {
-            panic!("expected spec validate command");
+            panic!("expected component validate command");
         };
 
-        assert_eq!(spec_file, PathBuf::from("src/SPEC.md"));
+        assert_eq!(component_dir, PathBuf::from("src/network"));
     }
 
     #[test]

@@ -1,6 +1,7 @@
 # Kvist Implementation Tracker
 
-**Authority:** [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
+**Authority:** [`VISION.md`](VISION.md) -> [`ARCHITECTURE.md`](ARCHITECTURE.md)
+-> component `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md`
 **Reviewed:** Phase 1, Phase 2, Phase 3, and all UX hardening items
 **Reviewed by:** Stefan Kvist | 2026-08-25
 **Build:** `cargo build --release` passes with 0 warnings
@@ -19,71 +20,64 @@
 
 ### [COMPLETED] TODO ONB-01 — Convert Existing Project to Kvist Component
 
-**Context:** A project that already has source code, tests, and a `Cargo.toml` needs to be converted into a Kvist-managed component without losing existing work. This is the most common onboarding path.
+**Context:** An existing Rust project needs draft Kvist intent and queue
+artifacts without losing source, tests, benchmarks, or manifest data.
 
 **Acceptance criteria:**
 
-- `kvist init <PROJECT_DIR>` detects an existing `Cargo.toml` and prompts to create a component directory structure.
-- The tool preserves the existing `Cargo.toml`, `src/`, `tests/`, and `benches/` as the component's implementation root.
-- A new `SPEC.md` is optionally proposed via `kvist spec interview` or `kvist spec new`.
-- A draft `TODOS.yaml` is generated from the existing `Cargo.toml`'s manifest fields (name, version, authors, dependencies, features).
-- The resulting directory layout is:
-  ```
+- `kvist init <PROJECT_DIR>` detects the existing Rust project, while
+  `kvist convert <PROJECT_DIR>` exposes conversion explicitly.
+- Existing `Cargo.toml`, `src/`, `tests/`, and `benches/` remain unchanged.
+- Source-derived `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` are marked
+  as drafts rather than inferred truth.
+- A traceable draft `TODOS.yaml` uses `requirements_revision`,
+  `contract_revision`, `design_revision`, and `parent_contract`; the parent
+  path crosses transparent namespace directories to the nearest ancestor
+  component contract.
+- The metadata layout is:
+
+  ```text
   <PROJECT_DIR>/
-    Cargo.toml              # existing, preserved
-    .kvist/                 # Kvist metadata directory
-      SPEC.md              # created or accepted
-      TODOS.yaml           # generated from Cargo.toml
-      IMPL.md              # generated via clean-slate pipeline
-      COMPLIANCE_REVIEW.md # review evidence
-    src/                    # existing source
-    tests/                  # existing tests
-    benches/                # existing benchmarks
+    Cargo.toml
+    .kvist/
+      REQUIREMENTS.md
+      CONTRACT.md
+      DESIGN.md
+      TODOS.yaml
+      IMPL.md
+    src/
+    tests/
+    benches/
   ```
-- The user must explicitly accept the generated `SPEC.md` and `TODOS.yaml` via `kvist spec accept` and `kvist queue accept` before any task runs.
-- No files are overwritten without explicit confirmation.
-- Write integration tests for: existing `Cargo.toml` detection, preservation of existing files, spec interview flow, TODOS generation from `Cargo.toml`, and the "accept all" flow.
-
-**Remediation plan (2026-08-28):**
-
-- **ONB-01a — Define conversion lifecycle and tests:** Specify a distinct
-  `draft`, `spec-accepted`, and `queue-accepted` conversion state, its durable
-  versioned evidence, and backward-compatible CLI/JSON behavior. Write
-  failing integration tests for every legal and illegal lifecycle transition,
-  including a modified draft invalidating prior acceptance.
-- **ONB-01b — Integrate converted-project inspection:** Extend the shared
-  project-state and component-discovery model to inspect `.kvist` conversion
-  artifacts as a component whose implementation root is the project directory.
-  Preserve current-project inspection behavior and report actionable draft,
-  partial, stale, invalid, and accepted states without writes.
-- **ONB-01c — Implement explicit acceptance:** Add `kvist queue accept` and
-  conversion-aware `kvist spec accept`, requiring a valid reviewed
-  specification before queue acceptance. Persist acceptance evidence atomically
-  and reject link-like, partial, malformed, or changed artifacts.
-- **ONB-01d — Connect execution safely:** Make `task next`, `transition`,
-  `run`, `log`, and VCS/approval checks resolve a converted component's
-  metadata and implementation root consistently. Prove no task can start
-  before both acceptances and that logs, locks, and recovery evidence remain
-  component-scoped.
-- **ONB-01e — Harden draft generation:** Replace fixed timestamps, include
-  recursively discovered source/test/benchmark evidence in the source-blind
-  implementation draft, bound all manifest and filesystem reads, and make
-  manifest rendering deterministic and safely escaped.
-- **ONB-01f — Independently audit and certify:** Run a security review of
-  acceptance/metadata trust boundaries and a clean-slate, source-blind
-  compliance comparison before marking ONB-01 complete.
+- `kvist component validate .kvist` validates all three intent documents;
+  `kvist component accept .kvist` records reviewed intent and immediate-parent
+  contract revisions.
+- Conversion never recognizes or migrates retired component artifacts and
+  never overwrites existing metadata.
+- Tests cover detection, preservation, bounded deterministic generation,
+  validation, acceptance, stale drafts, and task-execution refusal before
+  review.
 
 ### [COMPLETED] TODO ONB-02 — Import Kvist Artifacts from a Git Repository
 
-**Context:** A component may have already been developed by an external agent or human and committed to Git. The user wants to bring it into the Kvist workflow.
+**Context:** A component developed elsewhere may be brought into a local Kvist
+workflow as untrusted repository content.
 
 **Acceptance criteria:**
 
-- `kvist import <REPO_URL> --branch <BRANCH> --component <COMPONENT_DIR>` clones or fetches a branch and detects Kvist artifacts (`SPEC.md`, `TODOS.yaml`, `IMPL.md`).
-- If artifacts are absent, the tool offers to create a new component from the directory layout.
-- Existing `TODOS.yaml` entries are validated and marked as "imported"; any blocked tasks are presented as unresolved.
+- `kvist import <REPO_URL> --branch <BRANCH> --component <COMPONENT_DIR>`
+  imports a selected repository and detects the current requirements, contract,
+  design, queue, and implementation-record set.
+- If artifacts are absent, onboarding creates explicit drafts rather than
+  asserting inferred intent.
+- Imported queues are validated and blocked tasks remain unresolved.
 - The import respects the same lock and approval rules as a new component.
-- Write integration tests for: successful import with existing artifacts, import without artifacts (new component creation), and import of a blocked component.
+- Tests cover a current artifact set, absent artifacts, blocked state,
+  malformed input, and no-clobber destination handling.
+
+This repository operation is not a claim of ReqIF, architecture-model,
+OpenAPI, AsyncAPI, or other general interchange support. Those adapters remain
+deferred as documented in `docs/standards.md`.
 
 ### [COMPLETED] TODO ONB-03 — Persist Task State to Disk
 
@@ -97,9 +91,10 @@
 - If the component directory was removed and re-added, the persisted queue is re-read from disk.
 - Write integration tests for: task in-progress state persistence, task blocked state persistence, and queue reconstruction after a "crash" (simulated by writing the artifact then reading it back).
 
-### [COMPLETED] TODO ONB-04 — Reverse-Discovery: Generate Specification from Existing Implementation
+### [COMPLETED] TODO ONB-04 — Reverse-Discovery: Generate Draft Intent from Existing Implementation
 
-**Context:** The Kvist system must be capable of reverse-engineering a specification from an existing implementation. This allows existing codebases to be imported and turned into properly specified, versioned components without starting from scratch.
+**Context:** Existing source can provide evidence for a draft component model,
+but implementation cannot prove intended product outcomes by itself.
 
 **Requirements:**
 
@@ -109,38 +104,46 @@
    - Detect existing tests and infer test cases.
    - Detect existing documentation (README, doc comments, markdown files).
    - Infer component boundaries from directory structure and module exports.
-3. **Spec Generation:**
-   - Generate a `SPEC.md` for each detected component with:
-     - Purpose and scope
-     - Public API (types, functions, methods)
-     - Invariants and constraints
-     - Dependencies on other components
+3. **Intent Generation:**
+   - Generate draft `REQUIREMENTS.md` with observed candidate outcomes,
+     constraints, acceptance gaps, and verification needs.
+   - Generate draft `CONTRACT.md` with observed public interfaces and failure
+     behavior. Reference optional native schemas only by exact path and
+     dialect/version.
+   - Generate draft `DESIGN.md` with observed internal structure, algorithms,
+     state, failure recovery, and uncertainty.
    - Generate a `TODOS.yaml` with:
      - Tasks to refactor existing code into Kvist components
      - Tasks to add missing tests
      - Tasks to add documentation
      - Tasks to fix security issues (if detected)
-4. **Output:** A `.kvist/` directory with generated artifacts (`SPEC.md`, `TODOS.yaml`, `IMPL.md`).
+4. **Output:** A `.kvist/` directory containing the three draft intent
+   documents, `TODOS.yaml`, and independently observed `IMPL.md`.
 5. **User Review:** The generated artifacts are presented to the user for review. The user can:
-   - Accept the generated specification and queue
-   - Modify the specification and regenerate
+   - validate and accept the generated intent set;
+   - modify requirements, contract, or design and regenerate the queue; or
    - Reject and start from scratch
-6. **Integration with Phase 3:** The generated specification is treated as a draft and requires independent review via Phase 3 workflows (clean-slate documentation skill, source-blind pipeline, human arbitration).
+6. **Independent Review:** Clean-slate `IMPL.md` derivation excludes all intent
+   documents. A separate reviewer compares requirements, contract, and design
+   with the record and test evidence before human arbitration.
 
 **Constraints:**
 
-- The generated specification is a suggestion, not a guarantee of correctness.
+- Generated intent is a suggestion, not a guarantee of correctness.
 - The user must explicitly accept the generated artifacts before they are used.
-- The generated specification is versioned and tracked in the repository.
-- The generated specification must not overwrite an existing, accepted `SPEC.md` without explicit confirmation.
+- Generated artifacts are independently versioned and tracked.
+- Existing accepted intent is never overwritten.
+- Retired component formats are neither read as current intent nor migrated.
 
 **Acceptance criteria:**
 
 - `kvist reverse-discover <PATH>` scans a directory and produces a draft `.kvist/` directory.
-- The generated `SPEC.md` must be valid Markdown and pass `kvist spec validate`.
+- The generated intent documents must pass `kvist component validate`.
 - The generated `TODOS.yaml` must be valid YAML and pass schema validation.
-- The generated `IMPL.md` must be derived from the implementation alone (not from `SPEC.md`).
-- Write integration tests for: reverse-discovery on a simple crate, reverse-discovery on a multi-component project, and rejection of overwriting an existing accepted spec.
+- The generated `IMPL.md` is derived from implementation and test evidence
+  without access to requirements, contract, design, queue, or a prior record.
+- Tests cover simple and multi-component projects and refusal to overwrite
+  accepted intent.
 
 **Context for future work:** This feature is part of the broader onboarding and integration effort. It enables Kvist to work with existing projects that were not designed with Kvist in mind. The reverse-discovery process is a one-time or infrequent operation, unlike the normal workflow which is driven by human-directed AI development.
 
@@ -320,12 +323,25 @@ Detailed rationale and task chains are in
 
 All items in the following sections have been completed and integrated into the codebase:
 
-- **Phase 1 — Core Engine:** `kvist init`, `kvist tree`, `kvist spec new`, `kvist spec validate`, bounded directory traversal, symlink safety checks, read-only VCS tracking.
+- **Phase 1 — Core Engine:** `kvist init`, `kvist tree`,
+  `kvist component new`, `kvist component validate`, bounded directory
+  traversal, symlink safety checks, and read-only VCS tracking.
 - **Phase 2 — Execution Boundary:** Independent TODO queue, project inspection, safe task selection, user-provided agent invocation, test-command verification, sandboxed execution, cryptographic approval binding, resource-bounded subprocesses, atomic task execution, security/compliance review, execution-boundary reconciliation, model-resolution coverage, template-contract validation, execution portability decisions.
-- **Phase 3 — Independent Compliance Automation:** Component-design and feasibility skills, queue-design skills, implementation and test skills, clean-slate documentation skill, independent review skills, clean-slate and source-blind pipelines, durable human arbitration, specification interview mode, reviewed queue generation.
+- **Phase 3 — Independent Compliance Automation:** Component-intent and
+  feasibility skills, queue-design skills, test-before-implementation skills,
+  clean-slate documentation, independent review, source-blind comparison,
+  durable human arbitration, component-intent interview mode, and reviewed
+  queue generation.
 - **Phase 4 — Deferred Visual and Editor Ecosystem:** Deferred until Phase 3 review workflow is independently reviewed and approved.
-- **Onboarding and Integration:** `kvist convert` (ONB-01, existing project conversion), `kvist import` (ONB-02, remote/local Git repository import with validation and automatic conversion/init fallback), and `kvist reverse-discover` (ONB-04, automatic generation of specifications and TDD task queues from existing implementation files) are fully implemented and verified.
+- **Onboarding and Integration:** `kvist convert`, `kvist import`, and
+  `kvist reverse-discover` provide bounded repository onboarding and draft
+  generation for the current artifact set. They do not constitute completed
+  standards interchange; ReqIF, architecture-model, native-schema adapter, and
+  generalized import/export support remain deferred in `docs/standards.md`.
 - **Agent and Model Capability Enhancements:** `security_reviewer` agent profile (AGN-01, dedicated security auditor role profile, task routing mapping, and cryptographic HMAC approval validation), supervised custom prompt execution (AGN-02, real-time chunked streaming, idle watchdog timeout-breaking, and consecutive cycle/line/oscillation loop detection with automated restarts), interactive model setup wizard (AGN-03, terminal prober, custom script/wrapper helper, custom template TOML generation, and connection verification), and language-specific BKM prompt templates (AGN-04, project-level and global customizable prompt templates for Rust and Python tasks, dynamic language detection, and automatic self-healing default generation) are fully implemented and verified.
 - **UX Improvements:** All 10 UX items (UX-02 through UX-10) have been completed.
 
-For detailed documentation of the completed work, refer to [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md).
+For detailed strategy and current contracts, refer to
+[`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md),
+[`ARCHITECTURE.md`](ARCHITECTURE.md), and the root component documents under
+`src/`.

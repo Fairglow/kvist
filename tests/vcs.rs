@@ -33,7 +33,13 @@ fn command_exists(program: &str) -> bool {
 
 fn create_complete_component(path: &Path) {
     fs::create_dir_all(path).expect("create component");
-    for name in ["SPEC.md", "TODOS.yaml", "IMPL.md"] {
+    for name in [
+        "REQUIREMENTS.md",
+        "CONTRACT.md",
+        "DESIGN.md",
+        "TODOS.yaml",
+        "IMPL.md",
+    ] {
         fs::write(path.join(name), "fixture").expect("write artifact");
     }
 }
@@ -69,8 +75,8 @@ fn doctor_reports_git_tracked_and_ignored_durable_artifacts_without_mutation() {
     assert!(stdout.contains("vcs kvist.toml: tracked"));
     let root_documentation = Path::new("src").join("IMPL.md");
     assert!(stdout.contains(&format!("vcs {}: ignored", root_documentation.display())));
-    let nested_specification = Path::new("src").join("child").join("SPEC.md");
-    assert!(stdout.contains(&format!("vcs {}: tracked", nested_specification.display())));
+    let nested_contract = Path::new("src").join("child").join("CONTRACT.md");
+    assert!(stdout.contains(&format!("vcs {}: tracked", nested_contract.display())));
     assert_eq!(
         run("git", &["status", "--porcelain=v1"], project.path()).stdout,
         before
@@ -132,7 +138,9 @@ fn doctor_tracks_git_artifacts_in_non_utf8_component_paths() {
     );
 
     let inspection = inspect(project.path()).expect("inspect");
-    let expected_path = Path::new("src").join(component_name).join("SPEC.md");
+    let expected_path = Path::new("src")
+        .join(component_name)
+        .join("REQUIREMENTS.md");
     assert!(
         inspection.vcs.artifacts.iter().any(|artifact| {
             artifact.path == expected_path && artifact.state == VcsArtifactState::Tracked
@@ -197,8 +205,8 @@ fn doctor_reports_jj_snapshot_tracking_when_jj_is_available() {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("vcs: all required durable artifacts are tracked"));
-    assert!(stdout.contains("vcs src/SPEC.md: tracked"));
-    assert!(stdout.contains("vcs --components/SPEC.md: tracked"));
+    assert!(stdout.contains("vcs src/REQUIREMENTS.md: tracked"));
+    assert!(stdout.contains("vcs --components/REQUIREMENTS.md: tracked"));
     assert!(stdout.contains("vcs diagnostic: jj inspection uses its saved working-copy snapshot"));
     assert_eq!(
         run(

@@ -41,6 +41,7 @@ pub struct AgentExecutionRequest<'a> {
     pub vcs_selection: VcsSelection,
     pub prompt: &'a str,
     pub context_paths: &'a [PathBuf],
+    pub read_only_mounts: &'a [sandbox::ReadOnlyMount],
     pub target_dir: &'a Path,
     pub task_id: &'a str,
     pub stream_output: bool,
@@ -162,6 +163,7 @@ pub fn execute_agent(
             arguments: &args,
             environment: sandbox::allowed_environment(sandbox_config, None),
             context_files: &context_files,
+            read_only_mounts: request.read_only_mounts,
         },
         sandbox::ExecutionOptions {
             timeout: Some(Duration::from_secs(profile.timeout_seconds)),

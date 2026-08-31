@@ -1,9 +1,10 @@
 //! Component design skill.
 //!
-//! This skill defines a component's context, public contract, and constraints
-//! from a product vision without accessing the full source tree. It produces
-//! a feasibility report that identifies unresolved decisions, contradictions,
-//! bounds, and failure paths.
+//! This skill defines a component's requirements, consumer contract, and
+//! private design from approved vision and architecture context without
+//! accessing implementation or peer artifacts. It produces a feasibility
+//! report that identifies unresolved decisions, contradictions, bounds, and
+//! failure paths.
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -19,8 +20,18 @@ pub struct ComponentContext {
     pub name: String,
     /// The product vision or goal this component addresses.
     pub vision: String,
-    /// The public contract (interface) of the component.
+    /// The approved project architecture.
+    pub architecture: String,
+    /// The global root contract.
+    pub root_contract: String,
+    /// The nearest ancestor component contract across transparent namespaces.
+    pub parent_contract: Option<String>,
+    /// Component outcomes, constraints, acceptance, and verification.
+    pub requirements: String,
+    /// Consumer-visible interface and behavior.
     pub contract: String,
+    /// Private structure, algorithms, state, and recovery.
+    pub design: String,
     /// Constraints and boundaries for this component.
     pub constraints: Vec<String>,
     /// List of unresolved decisions (open questions).
@@ -46,7 +57,7 @@ pub struct UnresolvedDecision {
     pub options: Vec<String>,
 }
 
-/// A contradiction found in the specification.
+/// A contradiction found across the component intent documents.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Contradiction {
     /// Title of the contradiction.
@@ -109,22 +120,39 @@ impl ComponentDesignSkill {
     /// 4. Identifying unresolved decisions.
     /// 5. Enumerating failure paths.
     /// 6. Producing a feasibility report.
-    pub fn design(&self, vision: &str, contract: &str, constraints: &[String]) -> Result<FeasibilityReport> {
-        // Step 1: Parse the vision and contract
+    ///
+    /// The nearest ancestor component contract across transparent namespace
+    /// directories is the only implicit propagated component context. Parent
+    /// requirements/design, peers, and implementation files are excluded.
+    pub fn design(
+        &self,
+        vision: &str,
+        architecture: &str,
+        root_contract: &str,
+        parent_contract: Option<&str>,
+        requirements: &str,
+        contract: &str,
+        design: &str,
+        constraints: &[String],
+    ) -> Result<FeasibilityReport> {
+        // Step 1: Parse the approved intent inputs.
         let vision_lower = vision.to_lowercase();
+        let requirements_lower = requirements.to_lowercase();
         let contract_lower = contract.to_lowercase();
+        let design_lower = design.to_lowercase();
+        let local_intent = format!("{requirements_lower}\n{contract_lower}\n{design_lower}");
 
         // Step 2: Identify unresolved decisions
-        let unresolved = self.identify_unresolved_decisions(&vision_lower, &contract_lower);
+        let unresolved = self.identify_unresolved_decisions(&vision_lower, &local_intent);
 
         // Step 3: Identify contradictions
-        let contradictions = self.identify_contradictions(&vision_lower, &contract_lower);
+        let contradictions = self.identify_contradictions(&vision_lower, &local_intent);
 
         // Step 4: Identify bounds and assumptions
-        let bounds = self.identify_bounds(&vision_lower, &contract_lower);
+        let bounds = self.identify_bounds(&vision_lower, &local_intent);
 
         // Step 5: Identify failure paths
-        let failure_paths = self.identify_failure_paths(&vision_lower, &contract_lower);
+        let failure_paths = self.identify_failure_paths(&vision_lower, &local_intent);
 
         // Step 6: Determine feasibility
         let is_feasible = !contradictions.is_empty();
@@ -143,7 +171,12 @@ impl ComponentDesignSkill {
                 id: format!("comp-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()),
                 name: "component-design-session".to_string(),
                 vision: vision.to_string(),
+                architecture: architecture.to_string(),
+                root_contract: root_contract.to_string(),
+                parent_contract: parent_contract.map(str::to_string),
+                requirements: requirements.to_string(),
                 contract: contract.to_string(),
+                design: design.to_string(),
                 constraints: constraints.to_vec(),
                 unresolved,
                 contradictions,
@@ -440,8 +473,27 @@ impl ComponentDesignSkill {
     }
 
     /// Runs a component design session.
-    pub fn run(&self, vision: &str, contract: &str, constraints: &[String]) -> Result<String> {
-        let report = self.design(vision, contract, constraints)?;
+    pub fn run(
+        &self,
+        vision: &str,
+        architecture: &str,
+        root_contract: &str,
+        parent_contract: Option<&str>,
+        requirements: &str,
+        contract: &str,
+        design: &str,
+        constraints: &[String],
+    ) -> Result<String> {
+        let report = self.design(
+            vision,
+            architecture,
+            root_contract,
+            parent_contract,
+            requirements,
+            contract,
+            design,
+            constraints,
+        )?;
 
         // Write the feasibility report to a file
         let report_path = self.working_directory.join("FEASIBILITY.md");

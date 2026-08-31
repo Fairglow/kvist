@@ -172,7 +172,7 @@ fn llama_server_unary_maps_messages_tools_and_tool_calls() {
                         "type": "function",
                         "function": {
                             "name": "workspace.read",
-                            "arguments": "{\"path\":\"SPEC.md\"}"
+                            "arguments": "{\"path\":\"REQUIREMENTS.md\"}"
                         }
                     }]
                 },
@@ -200,7 +200,10 @@ fn llama_server_unary_maps_messages_tools_and_tool_calls() {
     assert_eq!(turn.tool_intents.len(), 1);
     assert_eq!(turn.tool_intents[0].id, "call-1");
     assert_eq!(turn.tool_intents[0].name, "workspace.read");
-    assert_eq!(turn.tool_intents[0].arguments, json!({"path": "SPEC.md"}));
+    assert_eq!(
+        turn.tool_intents[0].arguments,
+        json!({"path": "REQUIREMENTS.md"})
+    );
 
     let captured = captured.recv().expect("captured request");
     assert!(captured.head.starts_with("POST /v1/chat/completions "));
@@ -229,7 +232,7 @@ fn ollama_unary_maps_native_tool_calls_and_rejects_required_choice() {
                 "tool_calls": [{
                     "function": {
                         "name": "workspace.read",
-                        "arguments": {"path": "SPEC.md"}
+                        "arguments": {"path": "REQUIREMENTS.md"}
                     }
                 }]
             },
@@ -248,7 +251,10 @@ fn ollama_unary_maps_native_tool_calls_and_rejects_required_choice() {
     assert_eq!(turn.model, "qwen3");
     assert_eq!(turn.tool_intents[0].id, "ollama-call-0");
     assert_eq!(turn.tool_intents[0].provider_id, None);
-    assert_eq!(turn.tool_intents[0].arguments, json!({"path": "SPEC.md"}));
+    assert_eq!(
+        turn.tool_intents[0].arguments,
+        json!({"path": "REQUIREMENTS.md"})
+    );
     assert_eq!(turn.usage.expect("usage").total_tokens, 14);
 
     let captured = captured.recv().expect("captured request");
@@ -271,7 +277,7 @@ fn llama_server_stream_assembles_text_and_fragmented_tool_arguments() {
     let records = [
         "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"content\":\"Read\"},\"finish_reason\":null}]}\n\n",
         "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"content\":\"ing\",\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"workspace.read\",\"arguments\":\"{\\\"path\\\":\"}}]},\"finish_reason\":null}]}\n\n",
-        "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"SPEC.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n",
+        "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"REQUIREMENTS.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n",
         "data: [DONE]\n\n",
     ];
     let (endpoint, _) = serve_once(stream_response("text/event-stream", &records));
@@ -291,7 +297,10 @@ fn llama_server_stream_assembles_text_and_fragmented_tool_arguments() {
 
     assert_eq!(turn.text, "Reading");
     assert_eq!(turn.finish_reason, FinishReason::ToolCalls);
-    assert_eq!(turn.tool_intents[0].arguments, json!({"path": "SPEC.md"}));
+    assert_eq!(
+        turn.tool_intents[0].arguments,
+        json!({"path": "REQUIREMENTS.md"})
+    );
     assert_eq!(
         events,
         [
@@ -305,7 +314,7 @@ fn llama_server_stream_assembles_text_and_fragmented_tool_arguments() {
 #[test]
 fn direct_stream_checks_deadline_after_finish_callback_returns() {
     let records = [
-        "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"workspace.read\",\"arguments\":\"{\\\"path\\\":\\\"SPEC.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"workspace.read\",\"arguments\":\"{\\\"path\\\":\\\"REQUIREMENTS.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
         "data: [DONE]\n\n",
     ];
     let (endpoint, _) = serve_once(stream_response("text/event-stream", &records));
@@ -423,7 +432,7 @@ fn decodes_chunked_stream_records_split_across_http_chunks() {
 fn ollama_stream_requires_terminal_record_and_emits_complete_intent() {
     let records = [
         "{\"model\":\"qwen3\",\"message\":{\"role\":\"assistant\",\"content\":\"Use \"},\"done\":false}\n",
-        "{\"model\":\"qwen3\",\"message\":{\"role\":\"assistant\",\"content\":\"the tool\",\"tool_calls\":[{\"function\":{\"name\":\"workspace.read\",\"arguments\":{\"path\":\"SPEC.md\"}}}]},\"done\":false}\n",
+        "{\"model\":\"qwen3\",\"message\":{\"role\":\"assistant\",\"content\":\"the tool\",\"tool_calls\":[{\"function\":{\"name\":\"workspace.read\",\"arguments\":{\"path\":\"REQUIREMENTS.md\"}}}]},\"done\":false}\n",
         "{\"model\":\"qwen3\",\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":2,\"eval_count\":3}\n",
     ];
     let (endpoint, _) = serve_once(stream_response("application/x-ndjson", &records));
@@ -536,7 +545,7 @@ fn preserves_explicit_length_finish_with_a_tool_call() {
                         "type": "function",
                         "function": {
                             "name": "workspace.read",
-                            "arguments": "{\"path\":\"SPEC.md\"}"
+                            "arguments": "{\"path\":\"REQUIREMENTS.md\"}"
                         }
                     }]
                 },

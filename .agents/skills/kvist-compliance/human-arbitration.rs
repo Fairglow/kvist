@@ -5,10 +5,16 @@
 
 /// Inputs for the human-arbitration skill.
 pub struct HumanArbitrationInputs {
-    /// The original specification.
-    pub specification: String,
+    /// The approved component requirements.
+    pub requirements: String,
+    /// The approved consumer contract.
+    pub contract: String,
+    /// The approved private design.
+    pub design: String,
     /// The independently generated implementation documentation.
     pub impl_documentation: String,
+    /// The bounded test evidence used by compliance review.
+    pub test_evidence: String,
     /// The compliance checker's structured findings.
     pub findings: String,
     /// The retained discrepancy details (optional).
@@ -33,9 +39,9 @@ pub const CONTRACT: &'static str = r#"
 # Role: architect
 #
 # Contract:
-#   Inputs: original specification, independently generated IMPL.md,
-#           compliance checker findings, discrepancy details (optional),
-#           redesign request flag.
+#   Inputs: approved REQUIREMENTS.md, CONTRACT.md, and DESIGN.md;
+#           independently generated IMPL.md; test evidence; compliance findings;
+#           discrepancy details (optional); and redesign request flag.
 #   Output: selected action (redesign, contract change, manual arbitration)
 #            and proposal record.
 #   Approval: the human must review and accept before revalidation.
@@ -43,7 +49,8 @@ pub const CONTRACT: &'static str = r#"
 #               read agent chat history or implementation source.
 #
 # Constraints:
-#   - Never automatically rewrite SPEC.md or IMPL.md.
+#   - Never automatically rewrite REQUIREMENTS.md, CONTRACT.md, DESIGN.md, or
+#     IMPL.md.
 #   - The proposal must be traceable to findings.
 #   - The skill refuses when findings are ambiguous or underspecified.
 #
@@ -64,8 +71,11 @@ pub const SCHEMA: &'static str = r#"
   "role": "architect",
   "version": 1,
   "inputs": {
-    "specification": "string",
+    "requirements": "string",
+    "contract": "string",
+    "design": "string",
     "impl_documentation": "string",
+    "test_evidence": "string",
     "findings": "string",
     "discrepancy": "string (optional)",
     "request_redesign": "boolean"
@@ -80,7 +90,7 @@ pub const SCHEMA: &'static str = r#"
     "excluded": ["agent chat history", "implementation source"]
   },
   "constraints": {
-    "no_automated_rewrite": "never rewrites SPEC.md or IMPL.md",
+    "no_automated_rewrite": "never rewrites REQUIREMENTS.md, CONTRACT.md, DESIGN.md, or IMPL.md",
     "traceability": "proposal must be traceable to findings",
     "refusal_on_ambiguity": "refuses when findings are ambiguous"
   },

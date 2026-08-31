@@ -1,9 +1,11 @@
 schema_version: 1
 component:
-  specification_revision: "sha256:4cad089cd42fd8138fce5fbd70fb5da17622d9247c2ee889421fd080a63a01e9"
-  parent_specification:
-    path: "../SPEC.md"
-    revision: "sha256:12d73b669601fb7e5970508065087332242602c15c5a4118a6a874da2ad3f601"
+  requirements_revision: "sha256:bd70f3241a721bcb6fcb2fdc8c80ac1d5678b11bae5fba0dd5a0623c924fae02"
+  contract_revision: "sha256:c273566076c9e7d5c0b5a69eb99c8244360486ed55f9033d76c32fe911cee1d4"
+  design_revision: "sha256:000e93544b05d6ae8a95e3af43a86c34fd94084628b833c82f6dbcfec98a7e5f"
+  parent_contract:
+    path: "../CONTRACT.md"
+    revision: "sha256:289b24e4726167bd85302963860e6d554fbad29987af093814b0ca6428d21697"
   revalidation:
     state: current
     checked_at: "2026-08-30T16:49:14Z"
@@ -20,9 +22,9 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Public-contract"
       - "TODO.md#AGN-07"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
@@ -41,9 +43,9 @@ tasks:
     depends_on:
       - "sa-01-write-tests"
     requirements:
-      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "../CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Interactions-and-state"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Supervision-and-retry-algorithm"
       - "TODO.md#AGN-07"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
@@ -62,8 +64,8 @@ tasks:
     depends_on:
       - "sa-01-implement-code"
     requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Constraints-and-invariants"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -81,8 +83,8 @@ tasks:
     depends_on:
       - "sa-01-security-audit"
     requirements:
+      - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Public-contract"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -100,7 +102,7 @@ tasks:
     depends_on:
       - "sa-01-compliance-review"
     requirements:
-      - "SPEC.md#Deferred-workspace-recovery"
+      - "DESIGN.md#Failure-and-recovery"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -118,7 +120,7 @@ tasks:
     depends_on:
       - "sa-02-write-tests"
     requirements:
-      - "SPEC.md#Deferred-workspace-recovery"
+      - "DESIGN.md#Failure-and-recovery"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -136,8 +138,8 @@ tasks:
     depends_on:
       - "sa-02-implement-code"
     requirements:
+      - "DESIGN.md#Failure-and-recovery"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Deferred-workspace-recovery"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -155,8 +157,8 @@ tasks:
     depends_on:
       - "sa-02-security-audit"
     requirements:
+      - "DESIGN.md#Failure-and-recovery"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Deferred-workspace-recovery"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -174,7 +176,7 @@ tasks:
     depends_on:
       - "sa-02-compliance-review"
     requirements:
-      - "SPEC.md#Deferred-Linux-isolation"
+      - "DESIGN.md#Security-and-resource-design"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -192,7 +194,7 @@ tasks:
     depends_on:
       - "sa-03-write-tests"
     requirements:
-      - "SPEC.md#Deferred-Linux-isolation"
+      - "DESIGN.md#Security-and-resource-design"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -210,8 +212,8 @@ tasks:
     depends_on:
       - "sa-03-implement-code"
     requirements:
+      - "DESIGN.md#Security-and-resource-design"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Deferred-Linux-isolation"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -229,8 +231,8 @@ tasks:
     depends_on:
       - "sa-03-security-audit"
     requirements:
+      - "DESIGN.md#Security-and-resource-design"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Deferred-Linux-isolation"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -247,8 +249,8 @@ tasks:
     status: completed
     depends_on: []
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T09:12:00Z"
@@ -266,8 +268,8 @@ tasks:
     depends_on:
       - "sa-08-write-tests"
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T09:28:47Z"
@@ -285,8 +287,8 @@ tasks:
     depends_on:
       - "sa-08-implement-code"
     requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Constraints-and-invariants"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:33:10Z"
@@ -304,8 +306,8 @@ tasks:
     depends_on:
       - "sa-08-security-audit"
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:33:10Z"
@@ -323,9 +325,9 @@ tasks:
     depends_on:
       - "sa-08-compliance-review"
     requirements:
-      - "SPEC.md#Deferred-Linux-isolation"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
-      - "SPEC.md#Supervision-and-retry-algorithm"
+      - "DESIGN.md#Interactions-and-state"
+      - "DESIGN.md#Internal-structure"
+      - "DESIGN.md#Security-and-resource-design"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -343,9 +345,9 @@ tasks:
     depends_on:
       - "sa-04-write-tests"
     requirements:
-      - "SPEC.md#Deferred-Linux-isolation"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
-      - "SPEC.md#Supervision-and-retry-algorithm"
+      - "DESIGN.md#Interactions-and-state"
+      - "DESIGN.md#Internal-structure"
+      - "DESIGN.md#Security-and-resource-design"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -363,9 +365,9 @@ tasks:
     depends_on:
       - "sa-04-implement-code"
     requirements:
+      - "DESIGN.md#Internal-structure"
+      - "DESIGN.md#Security-and-resource-design"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Deferred-Linux-isolation"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -383,9 +385,9 @@ tasks:
     depends_on:
       - "sa-04-security-audit"
     requirements:
+      - "DESIGN.md#Internal-structure"
+      - "DESIGN.md#Security-and-resource-design"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Deferred-Linux-isolation"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -403,7 +405,7 @@ tasks:
     depends_on:
       - "sa-04-compliance-review"
     requirements:
-      - "SPEC.md#Deferred-platforms"
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -421,7 +423,7 @@ tasks:
     depends_on:
       - "sa-05-write-tests"
     requirements:
-      - "SPEC.md#Deferred-platforms"
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -439,8 +441,8 @@ tasks:
     depends_on:
       - "sa-05-implement-code"
     requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Deferred-platforms"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -458,8 +460,8 @@ tasks:
     depends_on:
       - "sa-05-security-audit"
     requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Deferred-platforms"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
       updated_at: "2026-08-29T20:50:32Z"
@@ -476,9 +478,9 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Public-contract"
     timestamps:
       created_at: "2026-08-29T21:30:04Z"
       updated_at: "2026-08-29T21:43:45Z"
@@ -496,9 +498,9 @@ tasks:
     depends_on:
       - "sa-06-write-tests"
     requirements:
-      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Public-contract"
     timestamps:
       created_at: "2026-08-29T21:30:04Z"
       updated_at: "2026-08-29T21:43:45Z"
@@ -516,8 +518,8 @@ tasks:
     depends_on:
       - "sa-06-implement-code"
     requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Constraints-and-invariants"
     timestamps:
       created_at: "2026-08-29T21:30:04Z"
       updated_at: "2026-08-29T21:30:04Z"
@@ -535,8 +537,8 @@ tasks:
     depends_on:
       - "sa-06-security-audit"
     requirements:
+      - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Public-contract"
     timestamps:
       created_at: "2026-08-29T21:30:04Z"
       updated_at: "2026-08-29T21:30:04Z"
@@ -553,9 +555,9 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "../CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Profile-configuration-and-setup"
     timestamps:
       created_at: "2026-08-29T22:42:17Z"
       updated_at: "2026-08-29T22:56:15Z"
@@ -573,9 +575,9 @@ tasks:
     depends_on:
       - "sa-07-write-tests"
     requirements:
-      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "../CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Profile-configuration-and-setup"
     timestamps:
       created_at: "2026-08-29T22:42:17Z"
       updated_at: "2026-08-29T22:56:15Z"
@@ -593,8 +595,8 @@ tasks:
     depends_on:
       - "sa-07-implement-code"
     requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Constraints-and-invariants"
     timestamps:
       created_at: "2026-08-29T22:42:17Z"
       updated_at: "2026-08-29T22:42:17Z"
@@ -612,8 +614,8 @@ tasks:
     depends_on:
       - "sa-07-security-audit"
     requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Profile-configuration-and-setup"
     timestamps:
       created_at: "2026-08-29T22:42:17Z"
       updated_at: "2026-08-29T22:42:17Z"
@@ -631,9 +633,9 @@ tasks:
     depends_on:
       - "sa-08-write-tests"
     requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Rig-adoption-decision"
-      - "SPEC.md#Transport-dependency-gates"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
       updated_at: "2026-08-30T09:28:47Z"
@@ -651,8 +653,8 @@ tasks:
     depends_on:
       - "sa-12-write-tests"
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
       updated_at: "2026-08-30T09:39:11Z"
@@ -670,8 +672,8 @@ tasks:
     depends_on:
       - "sa-12-implement-code"
     requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Constraints-and-invariants"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
       updated_at: "2026-08-30T07:33:10Z"
@@ -689,9 +691,9 @@ tasks:
     depends_on:
       - "sa-12-security-audit"
     requirements:
+      - "DESIGN.md#Internal-structure"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
-      - "SPEC.md#Transport-dependency-gates"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
       updated_at: "2026-08-30T07:33:10Z"
@@ -710,8 +712,8 @@ tasks:
       - "sa-04-compliance-review"
       - "sa-12-compliance-review"
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:05:12Z"
@@ -729,8 +731,8 @@ tasks:
     depends_on:
       - "sa-10-write-tests"
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:05:12Z"
@@ -748,8 +750,8 @@ tasks:
     depends_on:
       - "sa-10-implement-code"
     requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Constraints-and-invariants"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:05:12Z"
@@ -767,8 +769,8 @@ tasks:
     depends_on:
       - "sa-10-security-audit"
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:05:12Z"
@@ -788,8 +790,8 @@ tasks:
       - "sa-07-compliance-review"
       - "sa-08-compliance-review"
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:05:12Z"
@@ -807,8 +809,8 @@ tasks:
     depends_on:
       - "sa-11-write-tests"
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:05:12Z"
@@ -826,8 +828,8 @@ tasks:
     depends_on:
       - "sa-11-implement-code"
     requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Constraints-and-invariants"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:05:12Z"
@@ -845,8 +847,8 @@ tasks:
     depends_on:
       - "sa-11-security-audit"
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:05:12Z"
@@ -866,8 +868,8 @@ tasks:
       - "sa-10-compliance-review"
       - "sa-11-compliance-review"
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
       updated_at: "2026-08-30T07:33:10Z"
@@ -885,8 +887,8 @@ tasks:
     depends_on:
       - "sa-13-write-tests"
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
       updated_at: "2026-08-30T07:33:10Z"
@@ -904,8 +906,8 @@ tasks:
     depends_on:
       - "sa-13-implement-code"
     requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Constraints-and-invariants"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
       updated_at: "2026-08-30T07:33:10Z"
@@ -923,8 +925,8 @@ tasks:
     depends_on:
       - "sa-13-security-audit"
     requirements:
+      - "DESIGN.md#Internal-structure"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Layered-agent-architecture-and-rationale"
     timestamps:
       created_at: "2026-08-30T07:33:10Z"
       updated_at: "2026-08-30T07:33:10Z"
@@ -942,9 +944,9 @@ tasks:
     depends_on:
       - "sa-12-implement-code"
     requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Rig-adoption-decision"
-      - "SPEC.md#Transport-dependency-gates"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T11:50:26Z"
@@ -962,9 +964,9 @@ tasks:
     depends_on:
       - "sa-09-write-tests"
     requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Rig-adoption-decision"
-      - "SPEC.md#Transport-dependency-gates"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T12:39:12Z"
@@ -982,9 +984,9 @@ tasks:
     depends_on:
       - "sa-09-implement-code"
     requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Rig-adoption-decision"
-      - "SPEC.md#Transport-dependency-gates"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:33:10Z"
@@ -1002,9 +1004,9 @@ tasks:
     depends_on:
       - "sa-09-security-audit"
     requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Rig-adoption-decision"
-      - "SPEC.md#Transport-dependency-gates"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-08-30T07:33:10Z"
@@ -1022,9 +1024,9 @@ tasks:
     depends_on:
       - "sa-09-compliance-review"
     requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Rig-adoption-decision"
-      - "SPEC.md#Transport-dependency-gates"
     timestamps:
       created_at: "2026-08-30T12:05:00Z"
       updated_at: "2026-08-30T12:05:00Z"
@@ -1042,9 +1044,9 @@ tasks:
     depends_on:
       - "sa-14-write-tests"
     requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Rig-adoption-decision"
-      - "SPEC.md#Transport-dependency-gates"
     timestamps:
       created_at: "2026-08-30T12:05:00Z"
       updated_at: "2026-08-30T12:05:00Z"
@@ -1062,8 +1064,8 @@ tasks:
     depends_on:
       - "sa-14-implement-code"
     requirements:
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Transport-dependency-gates"
     timestamps:
       created_at: "2026-08-30T12:05:00Z"
       updated_at: "2026-08-30T12:05:00Z"
@@ -1081,9 +1083,9 @@ tasks:
     depends_on:
       - "sa-14-security-audit"
     requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Rig-adoption-decision"
-      - "SPEC.md#Transport-dependency-gates"
     timestamps:
       created_at: "2026-08-30T12:05:00Z"
       updated_at: "2026-08-30T12:05:00Z"
@@ -1101,8 +1103,8 @@ tasks:
     depends_on:
       - "sa-09-compliance-review"
     requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Transport-stream-callback-boundary"
     timestamps:
       created_at: "2026-08-30T13:00:00Z"
       updated_at: "2026-08-30T13:00:00Z"
@@ -1120,8 +1122,8 @@ tasks:
     depends_on:
       - "sa-15-write-tests"
     requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Transport-stream-callback-boundary"
     timestamps:
       created_at: "2026-08-30T13:00:00Z"
       updated_at: "2026-08-30T13:00:00Z"
@@ -1139,8 +1141,8 @@ tasks:
     depends_on:
       - "sa-15-implement-code"
     requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Transport-stream-callback-boundary"
     timestamps:
       created_at: "2026-08-30T13:00:00Z"
       updated_at: "2026-08-30T13:00:00Z"
@@ -1158,8 +1160,8 @@ tasks:
     depends_on:
       - "sa-15-security-audit"
     requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Transport-stream-callback-boundary"
     timestamps:
       created_at: "2026-08-30T13:00:00Z"
       updated_at: "2026-08-30T13:00:00Z"
@@ -1177,9 +1179,9 @@ tasks:
     depends_on:
       - "sa-09-implement-code"
     requirements:
-      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Public-contract"
     timestamps:
       created_at: "2026-08-30T16:08:00Z"
       updated_at: "2026-08-30T16:09:03Z"
@@ -1197,9 +1199,9 @@ tasks:
     depends_on:
       - "sa-16-write-tests"
     requirements:
-      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Public-contract"
     timestamps:
       created_at: "2026-08-30T16:08:00Z"
       updated_at: "2026-08-30T16:14:57Z"
@@ -1217,8 +1219,8 @@ tasks:
     depends_on:
       - "sa-16-implement-code"
     requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Constraints-and-invariants"
     timestamps:
       created_at: "2026-08-30T16:08:00Z"
       updated_at: "2026-08-30T16:08:00Z"
@@ -1236,8 +1238,8 @@ tasks:
     depends_on:
       - "sa-16-security-audit"
     requirements:
+      - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Public-contract"
     timestamps:
       created_at: "2026-08-30T16:08:00Z"
       updated_at: "2026-08-30T16:08:00Z"
@@ -1255,9 +1257,9 @@ tasks:
     depends_on:
       - "sa-16-implement-code"
     requirements:
-      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "../CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Profile-configuration-and-setup"
     timestamps:
       created_at: "2026-08-30T16:37:30Z"
       updated_at: "2026-08-30T16:38:00Z"
@@ -1275,9 +1277,9 @@ tasks:
     depends_on:
       - "sa-17-write-tests"
     requirements:
-      - "../SPEC.md#Custom-prompt-input-and-agent-setup"
+      - "../CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "SPEC.md#Profile-configuration-and-setup"
     timestamps:
       created_at: "2026-08-30T16:37:30Z"
       updated_at: "2026-08-30T16:51:44Z"
@@ -1295,8 +1297,8 @@ tasks:
     depends_on:
       - "sa-17-implement-code"
     requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Constraints-and-invariants"
     timestamps:
       created_at: "2026-08-30T16:37:30Z"
       updated_at: "2026-08-30T16:37:30Z"
@@ -1314,8 +1316,8 @@ tasks:
     depends_on:
       - "sa-17-security-audit"
     requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "SPEC.md#Profile-configuration-and-setup"
     timestamps:
       created_at: "2026-08-30T16:37:30Z"
       updated_at: "2026-08-30T16:37:30Z"

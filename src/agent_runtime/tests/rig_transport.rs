@@ -223,7 +223,7 @@ fn rig_llama_server_unary_returns_untrusted_tool_intents() {
                     "type": "function",
                     "function": {
                         "name": "workspace.read",
-                        "arguments": "{\"path\":\"SPEC.md\"}"
+                        "arguments": "{\"path\":\"REQUIREMENTS.md\"}"
                     }
                 }]
             },
@@ -249,7 +249,10 @@ fn rig_llama_server_unary_returns_untrusted_tool_intents() {
     assert_eq!(turn.tool_intents[0].id, "call-1");
     assert_eq!(turn.tool_intents[0].provider_id.as_deref(), Some("call-1"));
     assert_eq!(turn.tool_intents[0].name, "workspace.read");
-    assert_eq!(turn.tool_intents[0].arguments, json!({"path": "SPEC.md"}));
+    assert_eq!(
+        turn.tool_intents[0].arguments,
+        json!({"path": "REQUIREMENTS.md"})
+    );
 
     let captured = captured.recv().expect("captured request");
     assert!(captured.head.starts_with("POST /v1/chat/completions "));
@@ -261,7 +264,7 @@ fn rig_llama_server_stream_emits_text_and_complete_tool_intents() {
     let records = [
         "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"content\":\"Read\"},\"finish_reason\":null}]}\n\n",
         "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"content\":\"ing\",\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"workspace.read\",\"arguments\":\"{\\\"path\\\":\"}}]},\"finish_reason\":null}]}\n\n",
-        "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"SPEC.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n",
+        "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"REQUIREMENTS.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n",
         "data: [DONE]\n\n",
     ];
     let (endpoint, _) = serve_once(stream_response(&records));
@@ -528,7 +531,7 @@ fn rig_tool_result_reuses_the_provider_call_identity() {
                     id: "canonical-call".to_owned(),
                     provider_id: Some("provider-call".to_owned()),
                     name: "workspace.read".to_owned(),
-                    arguments: json!({"path": "SPEC.md"}),
+                    arguments: json!({"path": "REQUIREMENTS.md"}),
                 }],
             },
             ModelMessage::ToolResult {

@@ -30,14 +30,16 @@ fn cli_renders_a_stable_ascii_tree_with_component_statuses() {
     create_component(
         &component_root.join("zebra"),
         &[
-            ComponentArtifact::Specification,
+            ComponentArtifact::Requirements,
+            ComponentArtifact::Contract,
+            ComponentArtifact::Design,
             ComponentArtifact::TaskQueue,
             ComponentArtifact::ImplementationRecord,
         ],
     );
     create_component(
         &component_root.join("alpha"),
-        &[ComponentArtifact::Specification],
+        &[ComponentArtifact::Requirements],
     );
 
     let output = run_tree(project.path());
@@ -49,7 +51,7 @@ fn cli_renders_a_stable_ascii_tree_with_component_statuses() {
         concat!(
             "component root: src\n",
             ". [complete]\n",
-            "  alpha [incomplete: missing TODOS.yaml; missing IMPL.md]\n",
+            "  alpha [incomplete: missing CONTRACT.md; missing DESIGN.md; missing TODOS.yaml; missing IMPL.md]\n",
             "  zebra [complete]\n",
         )
     );
@@ -60,12 +62,14 @@ fn tree_reports_invalid_component_artifacts() {
     let project = TempDir::new().expect("create temporary project");
     initialize(project.path()).expect("initialize project");
     let broken = project.path().join("src/broken");
-    create_component(&broken, &[ComponentArtifact::Specification]);
+    create_component(&broken, &[ComponentArtifact::Requirements]);
     fs::create_dir(broken.join("TODOS.yaml")).expect("create invalid task queue");
 
     let output = render_project(project.path()).expect("render tree");
 
-    assert!(output.contains("broken [invalid: TODOS.yaml is a directory; missing IMPL.md]"));
+    assert!(output.contains(
+        "broken [invalid: missing CONTRACT.md; missing DESIGN.md; TODOS.yaml is a directory; missing IMPL.md]"
+    ));
 }
 
 #[test]
@@ -80,7 +84,9 @@ fn tree_uses_the_configured_component_root() {
     create_component(
         &project.path().join("components"),
         &[
-            ComponentArtifact::Specification,
+            ComponentArtifact::Requirements,
+            ComponentArtifact::Contract,
+            ComponentArtifact::Design,
             ComponentArtifact::TaskQueue,
             ComponentArtifact::ImplementationRecord,
         ],

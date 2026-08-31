@@ -20,19 +20,19 @@ pub enum StatusFormat {
 pub fn render(
     inspection: &ProjectInspection,
     format: StatusFormat,
-    only_specs: bool,
+    only_documents: bool,
     only_impls: bool,
     unfinished: bool,
 ) -> String {
     match format {
-        StatusFormat::Text => render_text(inspection, only_specs, only_impls, unfinished),
-        StatusFormat::Json => render_json(inspection, only_specs, only_impls, unfinished),
+        StatusFormat::Text => render_text(inspection, only_documents, only_impls, unfinished),
+        StatusFormat::Json => render_json(inspection, only_documents, only_impls, unfinished),
     }
 }
 
 fn render_text(
     inspection: &ProjectInspection,
-    only_specs: bool,
+    only_documents: bool,
     only_impls: bool,
     unfinished: bool,
 ) -> String {
@@ -61,7 +61,12 @@ fn render_text(
         output.push_str(" state: ");
         output.push_str(component.state.name());
         for artifact in &component.artifacts {
-            if only_specs && artifact.path != "SPEC.md" {
+            if only_documents
+                && !matches!(
+                    artifact.path,
+                    "REQUIREMENTS.md" | "CONTRACT.md" | "DESIGN.md"
+                )
+            {
                 continue;
             }
             if only_impls && artifact.path != "IMPL.md" {
@@ -90,7 +95,7 @@ fn render_text(
         }
         if component.state == ComponentState::Stale {
             output.push_str(&format!(
-                "\n  Next Step: The component specification has been modified. Run 'kvist spec accept {}' to revalidate and update the specification digest.",
+                "\n  Next Step: Component intent documents have changed. Run 'kvist component accept {}' after review to record their revisions.",
                 escape_text(&component.path.to_string_lossy())
             ));
         } else if component.state == ComponentState::Blocked {
@@ -100,12 +105,12 @@ fn render_text(
             ));
         } else if component.state == ComponentState::Invalid {
             output.push_str(&format!(
-                "\n  Next Step: The component contains invalid or malformed artifacts. Re-run 'kvist spec validate {}/SPEC.md' or check the schema of YAML/Markdown files.",
+                "\n  Next Step: The component contains invalid or malformed artifacts. Run 'kvist component validate {}' and check the reported Markdown or YAML document.",
                 escape_text(&component.path.to_string_lossy())
             ));
         } else if component.state == ComponentState::Missing {
             output.push_str(&format!(
-                "\n  Next Step: The component is is missing required adjacent Kvist artifacts. Run 'kvist spec new {}' to initialize them.",
+                "\n  Next Step: The component is missing required adjacent Kvist artifacts. Run 'kvist component new {}' to create its intent-document templates.",
                 escape_text(&component.path.to_string_lossy())
             ));
         }
@@ -115,7 +120,7 @@ fn render_text(
 
 fn render_json(
     inspection: &ProjectInspection,
-    only_specs: bool,
+    only_documents: bool,
     only_impls: bool,
     unfinished: bool,
 ) -> String {
@@ -137,7 +142,7 @@ fn render_json(
         if rendered_any {
             output.push(',');
         }
-        append_component_json(&mut output, component, only_specs, only_impls);
+        append_component_json(&mut output, component, only_documents, only_impls);
         rendered_any = true;
     }
     output.push_str("],\"discovery_error\":");
@@ -152,7 +157,7 @@ fn render_json(
 fn append_component_json(
     output: &mut String,
     component: &ComponentInspection,
-    only_specs: bool,
+    only_documents: bool,
     only_impls: bool,
 ) {
     output.push_str("{\"path\":");
@@ -162,7 +167,12 @@ fn append_component_json(
     output.push_str(",\"artifacts\":[");
     let mut rendered_any_artifact = false;
     for artifact in &component.artifacts {
-        if only_specs && artifact.path != "SPEC.md" {
+        if only_documents
+            && !matches!(
+                artifact.path,
+                "REQUIREMENTS.md" | "CONTRACT.md" | "DESIGN.md"
+            )
+        {
             continue;
         }
         if only_impls && artifact.path != "IMPL.md" {
@@ -245,11 +255,13 @@ fn escape_text(value: &str) -> String {
 
 fn staleness_kind_name(kind: StalenessCauseKind) -> &'static str {
     match kind {
-        StalenessCauseKind::ComponentSpecificationRevisionChanged => {
-            "component-specification-revision-changed"
+        StalenessCauseKind::ComponentRequirementsRevisionChanged => {
+            "component-requirements-revision-changed"
         }
-        StalenessCauseKind::ParentSpecificationRevisionChanged => {
-            "parent-specification-revision-changed"
+        StalenessCauseKind::ComponentContractRevisionChanged => {
+            "component-contract-revision-changed"
         }
+        StalenessCauseKind::ComponentDesignRevisionChanged => "component-design-revision-changed",
+        StalenessCauseKind::ParentContractRevisionChanged => "parent-contract-revision-changed",
     }
 }

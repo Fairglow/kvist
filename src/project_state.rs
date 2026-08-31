@@ -14,46 +14,66 @@ use sha2::{Digest, Sha256};
 use crate::{
     KvistError, Result,
     artifacts::{
-        CONFIGURATION_VERSION, IMPLEMENTATION_RECORD_HEADING, IMPLEMENTATION_RECORD_VERSION,
-        IMPLEMENTATION_RECORD_VERSION_MARKER, ROOT_CONTRACT_VERSION,
-        ROOT_IMPLEMENTATION_RECORD_PATH, SPECIFICATION_VERSION, TODO_QUEUE_VERSION,
+        ARCHITECTURE_VERSION, CONFIGURATION_VERSION, IMPLEMENTATION_RECORD_HEADING,
+        IMPLEMENTATION_RECORD_VERSION, IMPLEMENTATION_RECORD_VERSION_MARKER, ROOT_CONTRACT_VERSION,
+        ROOT_IMPLEMENTATION_RECORD_PATH, TODO_QUEUE_VERSION, VISION_VERSION,
     },
+    component_documents::{self, DocumentDiagnosticKind, DocumentKind},
     config,
     discovery::{self, ComponentArtifact},
     filesystem::is_link_like,
-    specification::{self, SpecificationDiagnosticKind},
     task_queue::{self, StalenessCause, StalenessCauseKind, TaskQueue, TaskQueueError, TaskStatus},
     vcs::{self, VcsInspection},
 };
 
 /// Required root artifacts, in stable diagnostic order.
-pub const REQUIRED_ROOT_ARTIFACT_PATHS: [&str; 5] = [
+pub const REQUIRED_ROOT_ARTIFACT_PATHS: [&str; 9] = [
     "kvist.toml",
+    "VISION.md",
+    "ARCHITECTURE.md",
     "ROOT_CONTRACT.md",
-    "src/SPEC.md",
+    "src/REQUIREMENTS.md",
+    "src/CONTRACT.md",
+    "src/DESIGN.md",
     "src/TODOS.yaml",
     ROOT_IMPLEMENTATION_RECORD_PATH,
 ];
 
-const ARTIFACTS: [Artifact; 5] = [
+const ARTIFACTS: [Artifact; 9] = [
     Artifact {
         path: REQUIRED_ROOT_ARTIFACT_PATHS[0],
         kind: ArtifactKind::Configuration,
     },
     Artifact {
         path: REQUIRED_ROOT_ARTIFACT_PATHS[1],
-        kind: ArtifactKind::RootContract,
+        kind: ArtifactKind::Vision,
     },
     Artifact {
         path: REQUIRED_ROOT_ARTIFACT_PATHS[2],
-        kind: ArtifactKind::Specification,
+        kind: ArtifactKind::Architecture,
     },
     Artifact {
         path: REQUIRED_ROOT_ARTIFACT_PATHS[3],
-        kind: ArtifactKind::TodoQueue,
+        kind: ArtifactKind::RootContract,
     },
     Artifact {
         path: REQUIRED_ROOT_ARTIFACT_PATHS[4],
+        kind: ArtifactKind::ComponentDocument(DocumentKind::Requirements),
+    },
+    Artifact {
+        path: REQUIRED_ROOT_ARTIFACT_PATHS[5],
+        kind: ArtifactKind::ComponentDocument(DocumentKind::Contract),
+    },
+    Artifact {
+        path: REQUIRED_ROOT_ARTIFACT_PATHS[6],
+        kind: ArtifactKind::ComponentDocument(DocumentKind::Design),
+    },
+    Artifact {
+        path: REQUIRED_ROOT_ARTIFACT_PATHS[7],
+        kind: ArtifactKind::TodoQueue,
+    },
+    Artifact {
+        path: REQUIRED_ROOT_ARTIFACT_PATHS[8],
         kind: ArtifactKind::ImplementationRecord,
     },
 ];
@@ -70,8 +90,10 @@ struct Artifact {
 #[derive(Debug, Clone, Copy)]
 enum ArtifactKind {
     Configuration,
+    Vision,
+    Architecture,
     RootContract,
-    Specification,
+    ComponentDocument(DocumentKind),
     TodoQueue,
     ImplementationRecord,
 }
@@ -164,7 +186,7 @@ pub enum ComponentState {
     Invalid,
     /// One or more adjacent component artifacts are absent.
     Missing,
-    /// The recorded or freshly derived specification evidence is stale.
+    /// The recorded or freshly derived intent-document evidence is stale.
     Stale,
     /// A current queue contains one or more explicitly blocked tasks.
     Blocked,
@@ -218,10 +240,10 @@ pub struct ComponentArtifactInspection {
     pub state: ComponentArtifactState,
 }
 
-/// An attributable recorded or derived specification revision mismatch.
+/// An attributable recorded or derived intent-document revision mismatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RevalidationCause {
-    /// The changed local or immediate-parent specification.
+    /// The changed local document or immediate-parent contract.
     pub kind: StalenessCauseKind,
     /// Path relative to the component context.
     pub path: String,
@@ -238,9 +260,9 @@ pub struct ComponentInspection {
     pub path: PathBuf,
     /// Aggregate state with stable precedence.
     pub state: ComponentState,
-    /// Adjacent artifact states in specification, queue, implementation-record order.
+    /// Adjacent artifact states in requirements, contract, design, queue, record order.
     pub artifacts: Vec<ComponentArtifactInspection>,
-    /// Recorded and freshly derived evidence explaining stale state.
+    /// Recorded and freshly derived document evidence explaining stale state.
     pub revalidation_causes: Vec<RevalidationCause>,
 }
 
@@ -387,20 +409,34 @@ fn inspect_component(
     component: &discovery::Component,
 ) -> Result<ComponentInspection> {
     let component_dir = component_root.join(&component.relative_path);
-    let specification_path = component_dir.join(ComponentArtifact::Specification.filename());
+    let requirements_path = component_dir.join(ComponentArtifact::Requirements.filename());
+    let contract_path = component_dir.join(ComponentArtifact::Contract.filename());
+    let design_path = component_dir.join(ComponentArtifact::Design.filename());
     let queue_path = component_dir.join(ComponentArtifact::TaskQueue.filename());
     let implementation_record_path =
         component_dir.join(ComponentArtifact::ImplementationRecord.filename());
 
-    let (specification_state, specification_contents) =
-        inspect_component_specification(&specification_path)?;
+    let (requirements_state, requirements_contents) =
+        inspect_component_document(DocumentKind::Requirements, &requirements_path)?;
+    let (contract_state, contract_contents) =
+        inspect_component_document(DocumentKind::Contract, &contract_path)?;
+    let (design_state, design_contents) =
+        inspect_component_document(DocumentKind::Design, &design_path)?;
     let (queue_state, queue) = inspect_component_queue(&queue_path)?;
     let implementation_record_state =
         inspect_component_implementation_record(&implementation_record_path)?;
     let artifacts = vec![
         ComponentArtifactInspection {
-            path: ComponentArtifact::Specification.filename(),
-            state: specification_state,
+            path: ComponentArtifact::Requirements.filename(),
+            state: requirements_state,
+        },
+        ComponentArtifactInspection {
+            path: ComponentArtifact::Contract.filename(),
+            state: contract_state,
+        },
+        ComponentArtifactInspection {
+            path: ComponentArtifact::Design.filename(),
+            state: design_state,
         },
         ComponentArtifactInspection {
             path: ComponentArtifact::TaskQueue.filename(),
@@ -430,35 +466,58 @@ fn inspect_component(
                 .map(revalidation_cause),
         );
 
-        if let Some(specification_contents) = specification_contents.as_deref() {
-            let observed_revision = sha256_revision(specification_contents);
+        if let Some(contents) = requirements_contents.as_deref() {
             add_revision_cause(
                 &mut revalidation_causes,
-                StalenessCauseKind::ComponentSpecificationRevisionChanged,
-                "SPEC.md",
-                &queue.component.specification_revision,
-                observed_revision,
+                StalenessCauseKind::ComponentRequirementsRevisionChanged,
+                ComponentArtifact::Requirements.filename(),
+                &queue.component.requirements_revision,
+                sha256_revision(contents),
+            );
+        }
+        if let Some(contents) = contract_contents.as_deref() {
+            add_revision_cause(
+                &mut revalidation_causes,
+                StalenessCauseKind::ComponentContractRevisionChanged,
+                ComponentArtifact::Contract.filename(),
+                &queue.component.contract_revision,
+                sha256_revision(contents),
+            );
+        }
+        if let Some(contents) = design_contents.as_deref() {
+            add_revision_cause(
+                &mut revalidation_causes,
+                StalenessCauseKind::ComponentDesignRevisionChanged,
+                ComponentArtifact::Design.filename(),
+                &queue.component.design_revision,
+                sha256_revision(contents),
             );
         }
 
         let is_component_root = is_component_root(&component.relative_path);
-        match (&queue.component.parent_specification, is_component_root) {
+        match (&queue.component.parent_contract, is_component_root) {
             (None, true) => {}
             (Some(_), true) | (None, false) => context_is_invalid = true,
             (Some(parent), false) => {
                 let (parent_component_dir, parent_relative_path) =
                     discovery::find_parent_component_dir(component_root, &component.relative_path)?;
-                let parent_specification =
-                    parent_component_dir.join(ComponentArtifact::Specification.filename());
-                let (state, contents) = inspect_component_specification(&parent_specification)?;
+                let parent_contract =
+                    parent_component_dir.join(ComponentArtifact::Contract.filename());
+                let (state, contents) =
+                    inspect_component_document(DocumentKind::Contract, &parent_contract)?;
                 if state != ComponentArtifactState::Valid {
                     context_is_invalid = true;
                 } else if let Some(contents) = contents {
-                    let relative_parent_path =
-                        relative_parent_spec_path(&component.relative_path, &parent_relative_path);
+                    let relative_parent_path = relative_parent_contract_path(
+                        &component.relative_path,
+                        &parent_relative_path,
+                    );
+                    if parent.path != relative_parent_path {
+                        context_is_invalid = true;
+                    }
                     add_revision_cause(
                         &mut revalidation_causes,
-                        StalenessCauseKind::ParentSpecificationRevisionChanged,
+                        StalenessCauseKind::ParentContractRevisionChanged,
                         &relative_parent_path,
                         &parent.revision,
                         sha256_revision(&contents),
@@ -512,14 +571,17 @@ fn is_component_root(path: &Path) -> bool {
     path.as_os_str().is_empty() || path == Path::new(".")
 }
 
-fn relative_parent_spec_path(relative_path: &Path, parent_relative_path: &Path) -> String {
+pub(crate) fn relative_parent_contract_path(
+    relative_path: &Path,
+    parent_relative_path: &Path,
+) -> String {
     if parent_relative_path.as_os_str().is_empty() || parent_relative_path == Path::new(".") {
         let depth = relative_path.components().count();
         let mut path = String::new();
         for _ in 0..depth {
             path.push_str("../");
         }
-        path.push_str("SPEC.md");
+        path.push_str("CONTRACT.md");
         path
     } else {
         let child_depth = relative_path.components().count();
@@ -528,7 +590,7 @@ fn relative_parent_spec_path(relative_path: &Path, parent_relative_path: &Path) 
         for _ in 0..(child_depth - parent_depth) {
             path.push_str("../");
         }
-        path.push_str("SPEC.md");
+        path.push_str("CONTRACT.md");
         path
     }
 }
@@ -570,19 +632,20 @@ fn sha256_revision(contents: &str) -> String {
     )
 }
 
-fn inspect_component_specification(
+fn inspect_component_document(
+    kind: DocumentKind,
     path: &Path,
 ) -> Result<(ComponentArtifactState, Option<String>)> {
     let Some(contents) = read_component_text_artifact(path)? else {
         return Ok((component_path_state(path)?, None));
     };
-    let validation = specification::validate(&contents);
+    let validation = component_documents::validate(kind, &contents);
     if validation.is_valid() {
         Ok((ComponentArtifactState::Valid, Some(contents)))
     } else if validation.diagnostics.iter().any(|diagnostic| {
         matches!(
             diagnostic.kind,
-            SpecificationDiagnosticKind::UnsupportedTemplateVersion { .. }
+            DocumentDiagnosticKind::UnsupportedTemplateVersion { .. }
         )
     }) {
         Ok((ComponentArtifactState::UnsupportedVersion, None))
@@ -745,7 +808,9 @@ fn inspect_vcs(project_dir: &Path, state: ProjectState) -> VcsInspection {
             config.component_root.join(component.relative_path)
         };
         for artifact in [
-            ComponentArtifact::Specification,
+            ComponentArtifact::Requirements,
+            ComponentArtifact::Contract,
+            ComponentArtifact::Design,
             ComponentArtifact::TaskQueue,
             ComponentArtifact::ImplementationRecord,
         ] {
@@ -839,6 +904,20 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
             }
             Err(error) => Ok(invalid_status(artifact.path, format!("invalid ({error})"))),
         },
+        ArtifactKind::Vision => validate_markdown_version(
+            artifact.path,
+            &path,
+            "kvist-vision-version",
+            VISION_VERSION,
+            "# Project Vision",
+        ),
+        ArtifactKind::Architecture => validate_markdown_version(
+            artifact.path,
+            &path,
+            "kvist-architecture-version",
+            ARCHITECTURE_VERSION,
+            "# Project Architecture",
+        ),
         ArtifactKind::RootContract => validate_markdown_version(
             artifact.path,
             &path,
@@ -846,10 +925,10 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
             ROOT_CONTRACT_VERSION,
             "# Kvist Root Contract",
         ),
-        ArtifactKind::Specification => {
-            let validation = match specification::validate_file(&path) {
+        ArtifactKind::ComponentDocument(kind) => {
+            let validation = match component_documents::validate_file(kind, &path) {
                 Ok(validation) => validation,
-                Err(KvistError::SpecificationTooLarge { .. }) => {
+                Err(KvistError::ComponentDocumentTooLarge { .. }) => {
                     return Ok(invalid_status(
                         artifact.path,
                         format!(
@@ -858,8 +937,8 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
                     ));
                 }
                 Err(
-                    KvistError::SpecificationIsSymlink { .. }
-                    | KvistError::SpecificationNotFile { .. },
+                    KvistError::ComponentDocumentIsSymlink { .. }
+                    | KvistError::ComponentDocumentNotFile { .. },
                 ) => {
                     return Ok(invalid_status(
                         artifact.path,
@@ -879,26 +958,27 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
             if validation.is_valid() {
                 Ok(valid_status(
                     artifact.path,
-                    format!("valid (specification version {SPECIFICATION_VERSION})"),
+                    format!("valid ({} version {})", kind.filename(), kind.version()),
                 ))
-            } else if let Some(SpecificationDiagnosticKind::UnsupportedTemplateVersion {
-                found,
-                ..
+            } else if let Some(DocumentDiagnosticKind::UnsupportedTemplateVersion {
+                found, ..
             }) =
                 validation
                     .diagnostics
                     .iter()
                     .find_map(|diagnostic| match &diagnostic.kind {
-                        kind @ SpecificationDiagnosticKind::UnsupportedTemplateVersion {
-                            ..
-                        } => Some(kind),
+                        kind @ DocumentDiagnosticKind::UnsupportedTemplateVersion { .. } => {
+                            Some(kind)
+                        }
                         _ => None,
                     })
             {
                 Ok(unsupported_status(
                     artifact.path,
                     format!(
-                        "unsupported version {found} (supported specification version {SPECIFICATION_VERSION})"
+                        "unsupported version {found} (supported {} version {})",
+                        kind.filename(),
+                        kind.version()
                     ),
                 ))
             } else {
@@ -906,7 +986,7 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
                     artifact.path,
                     format!(
                         "invalid ({})",
-                        specification::format_diagnostics(&validation.diagnostics)
+                        component_documents::format_diagnostics(&validation.diagnostics)
                     ),
                 ))
             }
@@ -1111,8 +1191,12 @@ mod tests {
     #[test]
     fn independent_version_domains_are_declared() {
         assert_eq!(CONFIGURATION_VERSION, 1);
+        assert_eq!(VISION_VERSION, 1);
+        assert_eq!(ARCHITECTURE_VERSION, 1);
         assert_eq!(ROOT_CONTRACT_VERSION, 1);
-        assert_eq!(SPECIFICATION_VERSION, 1);
+        assert_eq!(component_documents::REQUIREMENTS_VERSION, 1);
+        assert_eq!(component_documents::CONTRACT_VERSION, 1);
+        assert_eq!(component_documents::DESIGN_VERSION, 1);
         assert_eq!(TODO_QUEUE_VERSION, 1);
         assert_eq!(IMPLEMENTATION_RECORD_VERSION, 1);
     }

@@ -3,47 +3,57 @@
 ## Project intent
 
 Kvist is a production-quality, headless Rust CLI that enforces a recursive,
-spec-driven architecture workflow for human-directed AI development. The
-authoritative product vision is
-[`KVIST_Architectural_Specification_Full.md`](../KVIST_Architectural_Specification_Full.md).
-Read the relevant sections before proposing or implementing a feature. Preserve
-these non-negotiable principles:
+architecture-driven workflow for human-directed AI development. Product
+direction is authoritative in [`VISION.md`](../VISION.md), system structure in
+[`ARCHITECTURE.md`](../ARCHITECTURE.md), and the standards posture in
+[`docs/standards.md`](../docs/standards.md). Read the relevant documents before
+proposing or implementing a feature. Preserve these non-negotiable principles:
 
 - **Structure before syntax:** define and validate a component's requirements,
   public contract, constraints, and test strategy before implementing it.
-- **Filesystem-native, recursive components:** a component directory owns its
-  specification, task queue, implementation record, and implementation.
+- **Filesystem-native, recursive components:** a component directory owns
+  `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, `IMPL.md`,
+  tests, and implementation.
 - **Durable, inspectable state:** persist workflow state in version-controlled
   project files, never only in chat context or an opaque database.
-- **Strict context boundaries:** work from the target component, its immediate
+- **Strict context boundaries:** the immediate parent `CONTRACT.md` is the only
+  implicit propagated component context. Work from local artifacts, that
   parent contract, and global constraints; do not couple a component to peer
-  implementations without an explicit interface requirement.
+  implementations. General explicitly declared provider-contract
+  materialization remains deferred.
 - **Independent compliance review:** an implementer must not certify its own
-  work. The implementation record is derived from code without the specification,
-  then compared against the specification by a separate review context.
+  work. A clean-slate context derives `IMPL.md` without reading intent
+  documents, and a separate source-blind context compares requirements,
+  contract, and design with observed and test evidence.
 
 ## Change workflow
 
-1. Inspect the applicable `ROOT_CONTRACT.md`, local `SPEC.md`, parent interface,
-   and `TODOS.yaml` before changing an existing component. Treat them as
-   contracts, not optional documentation.
-2. If a component does not yet have these artifacts, create or update its
-   specification and task breakdown before its implementation. Do not silently
-   invent externally observable behavior: identify unresolved product decisions
-   or use a clearly documented, conservative assumption.
-3. Keep `SPEC.md` progressively disclosed: an executive summary and public
-   contract first, guarantees and constraints next, then algorithms, state
-   transitions, edge cases, and failure paths.
+1. Inspect `VISION.md`, `ARCHITECTURE.md`, `ROOT_CONTRACT.md`, the local
+   `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, immediate parent
+   `CONTRACT.md` when present, and `TODOS.yaml` before changing an existing
+   component. Treat each artifact's authority as binding.
+2. If a component does not yet have these artifacts, define or update the
+   requirements, consumer contract, design, and task breakdown before its
+   implementation. Do not silently invent externally observable behavior:
+   identify unresolved product decisions or use a clearly documented,
+   conservative assumption.
+3. Put outcomes, constraints, acceptance criteria, and verification obligations
+   in `REQUIREMENTS.md`; consumer-visible interfaces and semantics in
+   `CONTRACT.md`; and private structure, algorithms, state transitions, edge
+   cases, and recovery in `DESIGN.md`. Reference optional native schemas from
+   `CONTRACT.md` with exact paths and dialect/version.
 4. Make `TODOS.yaml` atomic, ordered, and traceable to requirements. Each
    component queue must include `write_tests`, `implement_code`,
    `security_audit`, and `compliance_review`, in that order.
-5. Write failing tests from the specification before production code. Update
-   tests, specs, and task state together when a deliberate contract change is
-   approved.
-6. After implementation, produce or update `IMPL.md` from observed code
-   behavior, not by copying `SPEC.md`. Report any spec-to-implementation
-   discrepancy for explicit arbitration; never conceal it by changing either
-   artifact automatically.
+5. Write failing tests from the approved intent before production code. Update
+   tests, affected intent documents, and task state together only when a
+   deliberate change is approved.
+6. After implementation, derive `IMPL.md` from source and test evidence in a
+   clean-slate context that excludes all intent documents, the queue, prior
+   record, architecture/root intent, prior reviews, chat history, and Git
+   history. A separate reviewer compares requirements, contract, and design
+   with `IMPL.md` and test evidence. Report discrepancies for explicit human
+   arbitration; never conceal them by automatically changing either side.
 
 ## Rust engineering standards
 
@@ -73,9 +83,17 @@ these non-negotiable principles:
 
 ## Quality gates
 
-- Preserve compatibility unless a specification explicitly authorizes a
-  breaking change. Update all affected contracts when parent requirements make
-  child components stale.
+- The current artifact model is pre-release and intentionally has no backward
+  compatibility or migration. Do not recognize retired component documents,
+  command spellings, or queue fields. A local contract change affects declared
+  consumers; only an immediate parent `CONTRACT.md` change propagates
+  implicitly to a child.
+- For sandboxed task execution, the component is writable at
+  `/workspace/component`; `ROOT_CONTRACT.md` is read-only at
+  `/workspace/context/ROOT_CONTRACT.md`; and a child's nearest ancestor
+  component contract is read-only at
+  `/workspace/context/PARENT_CONTRACT.md`. Transparent namespace directories
+  may separate the child from that ancestor.
 - Cover normal behavior, boundary cases, malformed input, error propagation,
   and platform-sensitive path behavior. Use unit tests for pure logic and
   integration tests for CLI and filesystem workflows.

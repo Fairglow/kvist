@@ -21,7 +21,7 @@ fn split_command_interpolates_placeholders_and_trims_quotes_correctly() {
         "my-agent --message '{prompt}' --files {context_files} --dir '{target_directory}'";
     let prompt = "Implement user authentication";
     let context_paths = vec![
-        PathBuf::from("/workspace/src/SPEC.md"),
+        PathBuf::from("/workspace/src/REQUIREMENTS.md"),
         PathBuf::from("/workspace/src/TODOS.yaml"),
     ];
     let target_dir = Path::new("/workspace/src");
@@ -36,7 +36,7 @@ fn split_command_interpolates_placeholders_and_trims_quotes_correctly() {
             "--message".to_owned(),
             "Implement user authentication".to_owned(),
             "--files".to_owned(),
-            "/workspace/src/SPEC.md".to_owned(),
+            "/workspace/src/REQUIREMENTS.md".to_owned(),
             "/workspace/src/TODOS.yaml".to_owned(),
             "--dir".to_owned(),
             "/workspace/src".to_owned(),
@@ -161,6 +161,7 @@ printf 'sandboxed agent output\n'"#,
             vcs_selection: VcsSelection::Git,
             prompt,
             context_paths: &context_paths,
+            read_only_mounts: &[],
             target_dir,
             task_id,
             stream_output: false,
