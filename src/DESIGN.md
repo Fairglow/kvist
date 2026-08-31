@@ -69,6 +69,87 @@ document changes are attributable without hidden normalization.
 Significant artifact separation rationale is retained in
 `docs/decisions/0001-separate-component-intent.md`.
 
+The approved target workflow adds three planned capabilities without changing
+the current CLI contract:
+
+- advisory document-review evidence and acceptance;
+- observed-intent proposal and advisory comparison; and
+- contract-clause traceability verification.
+
+These capabilities are design intent, not claims of current implementation.
+
+### Planned review evidence and acceptance state
+
+The initial review subject is a digest-bound bundle containing exact local
+`REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` bytes plus a canonical
+projection of `TODOS.yaml` task definitions. The projection contains only each
+task's `id`, `title`, `description`, `context`, `purpose`, `expected_outcome`,
+`kind`, `depends_on`, and `requirements`. Canonicalization excludes all
+`component` metadata plus task `status`, `timestamps`, `blocked_reason`, and
+`recovery_state`, so acceptance and task execution do not invalidate the
+review.
+
+A separate review operation will construct the strict context from that bundle,
+`ROOT_CONTRACT.md`, and the immediate parent `CONTRACT.md`. It will use the
+existing shell-free, bounded, approved or explicitly acknowledged agent path.
+It will not expose peer artifacts or parent internals. Separate authoring and
+reviewing contexts are preferred, but the resulting provenance is not treated
+as proof of independence or quality.
+
+Kvist, not the model, will write a versioned receipt from execution evidence
+under component-local `.kvist/reviews/`. The receipt will bind exact target
+digests and scope, reviewing and authoring context identity when known,
+provider/profile/model/tool identity, Kvist version, timestamp, and the digest
+and path of a bounded redacted report. Human acknowledgement or a per-bundle
+exception is recorded with it. An exception records actor, timestamp, reason,
+and exact digests. Review defaults to required when its configuration is
+absent, and generated project templates state `[review] required = true`
+explicitly. Setting it to `false` is the visible persistent opt-out; absence of
+a configured agent in a review-required project requires an explicit exception
+rather than an implicit pass.
+
+Receipt and report files are VCS-trackable durable state but remain outside the
+five-artifact set. Discovery ignores them for component candidacy, revision
+staleness, task context, and compliance evidence. Generated evidence such as
+`IMPL.md`, compliance reports, review reports, status, and attempt logs is
+exempt. Generated intent drafts are not exempt.
+
+When project review is required and no exact-bundle exception exists, missing
+current review evidence or acknowledgement blocks target acceptance. A visible
+project opt-out disables that per-bundle gate. Review findings are retained for
+the human to consider but have no blocking severity and cannot determine
+compliance. `component accept` continues to be deterministic and local; it
+consumes valid evidence but never spawns an agent or performs network I/O.
+Project-level documents and referenced native schemas need a later
+project-level acceptance state rather than being folded into component
+discovery.
+
+### Planned observed-intent workflows
+
+The `propose intent`/`derive draft` path starts from an independently generated
+`IMPL.md` and writes no-clobber draft `REQUIREMENTS.md` and `DESIGN.md`.
+Because observed behavior cannot recover stakeholder intent, drafts identify
+uncertainty and omitted decisions. The path never produces a normative
+`CONTRACT.md`.
+
+A separate advisory comparison reads `IMPL.md` and existing intent, emits
+differences without modifying either, avoids compliance verdict vocabulary,
+and is not compliance evidence. Both outputs remain subject to human review and
+the normal advisory-review-or-exception acceptance gate. This path is separate
+from `reverse_discovery`, which analyzes source for onboarding and may produce
+a non-normative draft contract.
+
+### Planned contract verification
+
+Contract verification begins with stable clause locators derived from existing
+heading anchors. Explicit clause IDs require a later explicit format/version
+decision rather than an unversioned syntax change. Test metadata maps tests to
+clauses, approved execution provides bounded results, and a traceability report
+identifies clauses with passing evidence, failed evidence, or no linked test.
+
+The report is not code coverage and tests are not proof. Independent compliance
+still compares `CONTRACT.md`, `IMPL.md`, and test evidence.
+
 ## Failure and recovery
 
 Readers return contextual domain errors or read-only invalid states. Writers
@@ -100,6 +181,10 @@ Prompt and subprocess data are bounded before persistence. Literal configured
 redactions apply across output chunks and streams. Errors avoid secrets and
 success-shaped fallbacks.
 
+Planned review reports apply the same bounded-output and redaction rules. Raw
+transcripts, credentials, and secrets are not retained, and untrusted model
+output cannot authorize acceptance or mint canonical receipts.
+
 ## Verification strategy
 
 Pure parsing, validation, hashing, ordering, transitions, and serialization use
@@ -112,3 +197,13 @@ must cover all three templates, line-aware diagnostics, no-clobber creation,
 five-artifact discovery, separate staleness causes, parent-contract
 propagation, component context paths, conversion/import/reverse-discovery, and
 independent compliance evidence.
+
+Future review work must additionally test stable task projection, exact-digest
+receipt matching, acknowledgement and exception paths, opt-out visibility,
+no-agent refusal, report redaction and bounds, `.kvist/reviews/` discovery and
+staleness exclusion, strict review context, and evidence that `component accept`
+performs no agent or network work. Observed-intent tests must cover no-clobber
+drafting, uncertainty, absence of normative contract generation, and
+non-mutating comparison. Contract-verification tests must cover locator
+stability, test-to-clause mappings, approved execution evidence, and
+uncovered/failed clause reporting.

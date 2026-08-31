@@ -2,13 +2,16 @@
 
 **Authority:** [`VISION.md`](VISION.md) -> [`ARCHITECTURE.md`](ARCHITECTURE.md)
 -> component `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md`
-**Reviewed:** Phase 1, Phase 2, Phase 3, and all UX hardening items
+**Reviewed:** Implemented portions through 2026-08-25; partial and planned
+review, onboarding, promotion, and compliance work is tracked below
 **Reviewed by:** Stefan Kvist | 2026-08-25
 **Build:** `cargo build --release` passes with 0 warnings
 
 ## Status conventions
 
 - `TODO` — scoped and ready once its dependencies are done.
+- `PARTIAL` — useful implementation exists, but listed acceptance criteria,
+  review, promotion, or dependent queue chains remain incomplete.
 - `IN PROGRESS` — actively being implemented.
 - `BLOCKED` — needs an explicit product or security decision.
 
@@ -16,12 +19,115 @@
 
 # Remaining Prioritized Backlog
 
+## Target Workflow: Review, Intent Proposals, and Contract Verification
+
+The command names below are provisional design labels, not current CLI
+interfaces. DOC-01 establishes shared evidence and acceptance machinery used
+by DOC-02 and DOC-03.
+
+### TODO DOC-01 — Advisory Review Evidence and Acceptance
+
+**Context:** Controlled intent should receive bounded AI review before
+acceptance when reasonable, without turning model findings into approval or
+compliance decisions. Current `component accept` only structurally validates
+and records revisions.
+
+**Acceptance criteria:**
+
+- Define a canonical review bundle containing exact
+  `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` digests plus a canonical
+  projection containing task `id`, `title`, `description`, `context`, `purpose`,
+  `expected_outcome`, `kind`, `depends_on`, and `requirements`, while excluding
+  all `component` metadata and task lifecycle state.
+- Add a separate review operation using the existing shell-free, bounded,
+  approved or acknowledged agent execution path. Keep `component accept`
+  deterministic, local, and free of agent or network calls.
+- Limit review context to the local intent bundle, `ROOT_CONTRACT.md`, and the
+  immediate parent `CONTRACT.md`; exclude peer and parent internals.
+- Persist versioned Kvist-minted receipts and redacted bounded reports under
+  component-local `.kvist/reviews/`, binding exact target digests and scope,
+  reviewing and authoring context identity when known,
+  provider/profile/model/tool identity, Kvist version, timestamp, report digest
+  and path, and acknowledgement or exception. Do not retain raw transcripts or
+  secrets.
+- Keep review files VCS-trackable but outside the five-artifact set, component
+  candidacy, staleness, task context, and compliance evidence.
+- When project review is required, require either a current receipt plus
+  explicit human acknowledgement or an exception with actor, timestamp, reason,
+  and exact digests. Support a visible project `[review] required = false`
+  opt-out that disables the per-bundle gate. Require an explicit exception when
+  review is required but no agent is configured.
+- Default review to required when configuration is absent; add the setting to
+  the configuration schema, parser, generated template, and documentation, and
+  emit `[review] required = true` in new projects.
+- Ensure generated intent drafts are reviewed, generated evidence is exempt,
+  arbitrary Markdown is not implicitly governed, and no finding or severity
+  blocks acceptance or determines compliance.
+- Add a separate project-level acceptance design and queue chain for
+  `VISION.md`, `ARCHITECTURE.md`, `ROOT_CONTRACT.md`, ADRs, and referenced
+  native schemas.
+- Test exact-digest invalidation, canonical projection stability,
+  acknowledgement, exception, opt-out, no-agent, redaction/bounds, strict
+  context, model-output non-authority, and discovery/staleness exclusions.
+- Complete independent security audit and compliance review before promotion.
+
+### TODO DOC-02 — IMPL-Derived Intent Proposals and Advisory Comparison
+
+**Context:** Independently observed behavior can suggest candidate intent, but
+cannot recover stakeholder intent or create a normative consumer contract.
+
+**Acceptance criteria:**
+
+- Add a no-clobber `propose intent`/`derive draft` workflow that reads an
+  independently generated `IMPL.md` and writes draft `REQUIREMENTS.md` and
+  `DESIGN.md` only.
+- Mark uncertainty and missing stakeholder decisions explicitly; do not
+  generate normative `CONTRACT.md`.
+- Keep generated drafts subject to human review, DOC-01 advisory review or
+  exception, acknowledgement, and normal acceptance.
+- Add a separate non-mutating advisory comparison between `IMPL.md` and
+  existing intent. Do not use compliance verdict vocabulary or treat its
+  output as compliance evidence.
+- Preserve `reverse-discover` as a distinct source-based onboarding pipeline;
+  any generated contract remains a non-normative draft.
+- Test no-clobber behavior, uncertainty markers, contract non-generation,
+  non-mutating comparison, strict input provenance, and review-gate handoff.
+- Complete independent security audit and compliance review before promotion.
+
+### TODO DOC-03 — Contract Clause Traceability Verification
+
+**Depends on:** DOC-01 shared bounded evidence and receipt/report machinery.
+
+**Context:** Contract implementation should be exercised by tests, while
+recognizing that tests are evidence rather than proof.
+
+**Acceptance criteria:**
+
+- Define stable contract-clause locators using existing heading anchors
+  initially. Introduce explicit IDs only through an explicit format/version
+  decision.
+- Define durable test-to-clause traceability and validate references without
+  calling it code coverage.
+- Use approved bounded test execution evidence to produce a contract-clause
+  traceability report identifying clauses with passing evidence, failed
+  evidence, or no linked tests.
+- Keep the report advisory evidence and preserve independent compliance
+  comparison of `CONTRACT.md`, `IMPL.md`, and test evidence.
+- Test locator stability, malformed and duplicate references, approved
+  execution binding, failed/uncovered reporting, deterministic output,
+  redaction, and resource bounds.
+- Complete independent security audit and compliance review before promotion.
+
 ## Onboarding and Integration
 
-### [COMPLETED] TODO ONB-01 — Convert Existing Project to Kvist Component
+### [PARTIAL] TODO ONB-01 — Convert Existing Project to Kvist Component
 
 **Context:** An existing Rust project needs draft Kvist intent and queue
 artifacts without losing source, tests, benchmarks, or manifest data.
+
+The conversion and preservation path exists. Detailed root queue chains and the
+new advisory review, acknowledgement/exception, and associated bounds work
+remain pending.
 
 **Acceptance criteria:**
 
@@ -50,13 +156,15 @@ artifacts without losing source, tests, benchmarks, or manifest data.
     benches/
   ```
 - `kvist component validate .kvist` validates all three intent documents;
-  `kvist component accept .kvist` records reviewed intent and immediate-parent
-  contract revisions.
+  current `kvist component accept .kvist` structurally validates and records
+  current intent and immediate-parent contract revisions.
 - Conversion never recognizes or migrates retired component artifacts and
   never overwrites existing metadata.
 - Tests cover detection, preservation, bounded deterministic generation,
   validation, acceptance, stale drafts, and task-execution refusal before
-  review.
+  explicit revision acceptance.
+- Complete the detailed root queue chain and DOC-01 review/bounds integration,
+  then independently review the finished onboarding workflow.
 
 ### [COMPLETED] TODO ONB-02 — Import Kvist Artifacts from a Git Repository
 
@@ -91,10 +199,14 @@ deferred as documented in `docs/standards.md`.
 - If the component directory was removed and re-added, the persisted queue is re-read from disk.
 - Write integration tests for: task in-progress state persistence, task blocked state persistence, and queue reconstruction after a "crash" (simulated by writing the artifact then reading it back).
 
-### [COMPLETED] TODO ONB-04 — Reverse-Discovery: Generate Draft Intent from Existing Implementation
+### [PARTIAL] TODO ONB-04 — Reverse-Discovery: Generate Draft Intent from Existing Implementation
 
 **Context:** Existing source can provide evidence for a draft component model,
 but implementation cannot prove intended product outcomes by itself.
+
+The source-analysis and draft-generation path exists. Detailed root queue
+chains and the new advisory review, acknowledgement/exception, and bounded
+evidence work remain pending.
 
 **Requirements:**
 
@@ -144,6 +256,8 @@ but implementation cannot prove intended product outcomes by itself.
   without access to requirements, contract, design, queue, or a prior record.
 - Tests cover simple and multi-component projects and refusal to overwrite
   accepted intent.
+- Complete the detailed root queue chain and DOC-01 review/bounds integration,
+  then independently review the finished reverse-discovery workflow.
 
 **Context for future work:** This feature is part of the broader onboarding and integration effort. It enables Kvist to work with existing projects that were not designed with Kvist in mind. The reverse-discovery process is a one-time or infrequent operation, unlike the normal workflow which is driven by human-directed AI development.
 
@@ -162,9 +276,12 @@ but implementation cannot prove intended product outcomes by itself.
 - Ensure all signature validation, approval-policy checks, and serialization structures include the new profile's digests.
 - Write unit/integration tests to verify correct role routing and approval-signature validation when the security reviewer is configured.
 
-### [COMPLETED] TODO AGN-02 — Supervised Custom Prompt Execution with Loop Detection
+### [PARTIAL] TODO AGN-02 — Supervised Custom Prompt Execution with Loop Detection
 
 **Context:** Local LLMs (including `llama-cli`) can hang or get stuck in infinite repetitive cycles. We need a supervised prompt execution command that monitors live output streams, implements configurable idle watchdogs, and analyzes streams for repetition loops.
+
+The runtime behavior exists, but its shared prompt-input and model-setup
+security audit and compliance review remain pending.
 
 **Acceptance criteria:**
 
@@ -176,9 +293,12 @@ but implementation cannot prove intended product outcomes by itself.
 - Loop detection: Analyze a rolling suffix buffer for consecutive matching cycle patterns (consecutive identical substrings of length 10-512 repeating >= 3 times, or consecutive line patterns). Terminate and restart the process upon detection.
 - Max automatic restarts limits (default 3) to prevent infinite restart loops.
 
-### [COMPLETED] TODO AGN-03 — Model Setup Wizard with Wrapper Script Support
+### [PARTIAL] TODO AGN-03 — Model Setup Wizard with Wrapper Script Support
 
 **Context:** Users run local models with unique startup configurations, e.g. using helper scripts like `~/bin/llama-cli.sh`. The wizard must guide the user through setting up standard providers (llama-cli, llama-server, Ollama, Copilot, Gemini) and support custom shell wrappers.
+
+The setup behavior exists, but its shared prompt-input and model-setup security
+audit and compliance review remain pending.
 
 **Acceptance criteria:**
 
@@ -204,13 +324,16 @@ but implementation cannot prove intended product outcomes by itself.
 - For Python: Enforce type annotations, PEP-8 formatting, Pydantic or standard data structures, and standard `unittest` / `pytest` suites.
 - Read and inject the corresponding template during `task run` execution based on detected files or explicit configuration.
 
-### TODO AGN-07 — Extract Linux-First Agent Runtime
+### [PARTIAL] TODO AGN-07 — Extract Linux-First Agent Runtime
 
 **Context:** Prompt acquisition, provider command rendering, and process
 supervision are useful outside Kvist, while Kvist-specific task state and
 architectural context should not be embedded in a generic runtime. Nominal
 Windows and macOS support consumes maintenance effort without native test
 access and cannot currently support trustworthy execution guarantees.
+
+The standalone runtime extraction and Linux-first boundaries exist. Review and
+the deferred isolation, brokering, and platform-restoration queue work remain.
 
 **Acceptance criteria:**
 
@@ -229,12 +352,16 @@ access and cannot currently support trustworthy execution guarantees.
   Bubblewrap/Landlock or stronger Linux isolation, brokered tools and provider
   networking, and independently tested macOS/Windows backends.
 
-### TODO AGN-08 — Extract Reusable Provider Profile Setup
+### [PARTIAL] TODO AGN-08 — Extract Reusable Provider Profile Setup
 
-**Context:** The standalone runtime can execute an explicit command but provider
-defaults, model verification, and formatting-preserving setup remain embedded
-in Kvist. Those operations are provider concerns useful to other callers,
-whereas Kvist roles and execution-policy approval are workflow concerns.
+**Context:** The standalone runtime initially executed only an explicit command
+while provider defaults, model verification, and formatting-preserving setup
+were embedded in Kvist. Those operations are provider concerns useful to other
+callers, whereas Kvist roles and execution-policy approval are workflow
+concerns.
+
+Reusable profile setup and Kvist integration exist. Remaining promotion work
+includes independent review and closure of deferred provider/bounds cases.
 
 **Acceptance criteria:**
 
@@ -252,13 +379,17 @@ whereas Kvist roles and execution-policy approval are workflow concerns.
   over exact command bytes; do not dynamically import mutable profile content
   during task execution.
 
-### TODO AGN-09 — Layered Native Agent Runtime and Rig Transport Spike
+### [PARTIAL] TODO AGN-09 — Layered Native Agent Runtime and Rig Transport Spike
 
 **Context:** Inference backends such as llama-server and Ollama can propose
 structured tool calls but do not provide a trusted coding-agent loop. Gemini,
 Copilot, and similar CLIs contain useful but opaque loops. Kvist must preserve
 its own policy, execution, and evidence boundaries while reusing provider
 transport work where practical.
+
+Canonical transport seams, direct local transports, the text-only model
+command, and optional Rig spike exist. Independent review, promotion decisions,
+native-loop prerequisites, and deferred hardening remain incomplete.
 
 **Acceptance criteria:**
 
@@ -319,26 +450,41 @@ Detailed rationale and task chains are in
 
 ---
 
-## Summary of Completed Work
+## Implemented Work and Remaining Qualifications
 
-All items in the following sections have been completed and integrated into the codebase:
+The following summarizes implemented capabilities without claiming that every
+phase, queue chain, review, or promotion gate is complete:
 
 - **Phase 1 — Core Engine:** `kvist init`, `kvist tree`,
   `kvist component new`, `kvist component validate`, bounded directory
   traversal, symlink safety checks, and read-only VCS tracking.
-- **Phase 2 — Execution Boundary:** Independent TODO queue, project inspection, safe task selection, user-provided agent invocation, test-command verification, sandboxed execution, cryptographic approval binding, resource-bounded subprocesses, atomic task execution, security/compliance review, execution-boundary reconciliation, model-resolution coverage, template-contract validation, execution portability decisions.
-- **Phase 3 — Independent Compliance Automation:** Component-intent and
-  feasibility skills, queue-design skills, test-before-implementation skills,
-  clean-slate documentation, independent review, source-blind comparison,
-  durable human arbitration, component-intent interview mode, and reviewed
-  queue generation.
+- **Phase 2 — Execution Boundary:** Implemented work includes the TODO queue,
+  project inspection, safe task selection, user-provided agent invocation,
+  test-command verification, sandboxed execution, cryptographic approval
+  binding, resource-bounded subprocesses, atomic task execution,
+  execution-boundary reconciliation, model-resolution coverage,
+  template-contract validation, and Linux portability decisions. Remaining
+  child-runtime review, promotion, and deferred isolation work is captured by
+  AGN-07 through AGN-09; the newly approved document-review evidence is DOC-01.
+- **Phase 3 — Independent Compliance Workflow:** Manual procedures and
+  implemented supporting primitives preserve clean-slate documentation,
+  source-blind comparison, and durable human arbitration. Full workflow
+  automation and review/promotion remain incomplete and must not be inferred
+  from the existing compliance evidence.
 - **Phase 4 — Deferred Visual and Editor Ecosystem:** Deferred until Phase 3 review workflow is independently reviewed and approved.
 - **Onboarding and Integration:** `kvist convert`, `kvist import`, and
-  `kvist reverse-discover` provide bounded repository onboarding and draft
-  generation for the current artifact set. They do not constitute completed
-  standards interchange; ReqIF, architecture-model, native-schema adapter, and
-  generalized import/export support remain deferred in `docs/standards.md`.
-- **Agent and Model Capability Enhancements:** `security_reviewer` agent profile (AGN-01, dedicated security auditor role profile, task routing mapping, and cryptographic HMAC approval validation), supervised custom prompt execution (AGN-02, real-time chunked streaming, idle watchdog timeout-breaking, and consecutive cycle/line/oscillation loop detection with automated restarts), interactive model setup wizard (AGN-03, terminal prober, custom script/wrapper helper, custom template TOML generation, and connection verification), and language-specific BKM prompt templates (AGN-04, project-level and global customizable prompt templates for Rust and Python tasks, dynamic language detection, and automatic self-healing default generation) are fully implemented and verified.
+  `kvist reverse-discover` provide repository onboarding and draft generation
+  for the current artifact set. ONB-01 and ONB-04 remain partial because their
+  detailed root queue chains and review/bounds integration are pending. These
+  commands do not constitute completed standards interchange; ReqIF,
+  architecture-model, native-schema adapter, and generalized import/export
+  support remain deferred in `docs/standards.md`.
+- **Agent and Model Capability Enhancements:** The `security_reviewer` profile
+  (AGN-01) and language-specific BKM prompt templates (AGN-04) are implemented
+  and verified. Supervised custom prompt execution (AGN-02) and the interactive
+  model setup wizard (AGN-03) are implemented but remain partial until their
+  shared security audit and compliance review finish. AGN-07 through AGN-09
+  describe the remaining runtime extraction, provider, and native-loop work.
 - **UX Improvements:** All 10 UX items (UX-02 through UX-10) have been completed.
 
 For detailed strategy and current contracts, refer to

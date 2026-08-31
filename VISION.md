@@ -24,9 +24,15 @@ Successful use produces:
 - a product vision approved before architecture;
 - an explicit component hierarchy with narrow dependency direction;
 - testable requirements separated from consumer contracts and internal design;
+- an advisory AI review opportunity for controlled intent before
+  acceptance, with visible acknowledgement or deliberate exception;
 - task queues traceable to stable requirement and contract identifiers;
 - bounded agent execution with explicit authority;
-- implementation records derived independently from source; and
+- implementation records derived independently from source;
+- uncertain no-clobber intent proposals and comparisons derived from observed
+  records without claiming to recover stakeholder intent;
+- contract clauses traceable to approved test evidence without treating tests
+  as proof; and
 - discrepancies retained for human arbitration.
 
 The primary stakeholders are the human architect, component designers,
@@ -47,6 +53,7 @@ owns adjacent `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`,
 Kvist is not intended to:
 
 - autonomously choose product direction or silently resolve ambiguity;
+- let an AI review finding, score, or severity decide acceptance or compliance;
 - use peer implementations as implicit component context;
 - make Markdown a substitute for executable tests or native interface schemas;
 - claim that an external agent's internal tool loop is an authorization
@@ -57,6 +64,15 @@ Kvist is not intended to:
 Linux is the only supported executable platform while the project is developed
 and tested by a Linux-only team. Other platforms remain planned behind explicit
 replaceable boundaries.
+
+The initial enforceable advisory-review target is the local component intent
+bundle—`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, and a canonical projection
+of task definitions from `TODOS.yaml`. Generated intent drafts are included.
+It does not govern every Markdown file.
+Project-level vision, architecture, root-contract, ADR, and referenced
+native-schema review needs a later project-level acceptance surface.
+Kvist-generated evidence, including `IMPL.md`, compliance and review reports,
+status, and attempt logs, is exempt.
 
 ## Principles and priorities
 
@@ -77,5 +93,11 @@ replaceable boundaries.
    project artifacts rather than chat history or opaque storage.
 7. **Independent compliance evidence.** An implementer cannot certify its own
    work.
-8. **Deterministic and safe behavior.** Validation, ordering, serialization,
+8. **Advisory review preserves human authority.** Review exposes possible
+   shortcomings, but findings may be wrong or overly exacting and never compel
+   a change or determine compliance. When review is enabled, acceptance requires
+   an acknowledged review opportunity or an exact-bundle exception; a visible
+   project opt-out may disable that gate. Agreement with the reviewer is never
+   required.
+9. **Deterministic and safe behavior.** Validation, ordering, serialization,
    failures, and authority boundaries are explicit and reproducible.

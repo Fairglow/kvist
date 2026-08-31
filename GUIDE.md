@@ -27,10 +27,15 @@ required but not-yet-automated stages explicitly.
    constraints, acceptance criteria, and verification obligations;
    `CONTRACT.md` owns consumer-facing interfaces and observable semantics; and
    `DESIGN.md` owns internal realization. The three documents may be drafted
-   manually or with agent assistance, but the human explicitly approves them.
+   manually or with agent assistance, and the architect approves their content
+   as ready for task planning.
 2. A designer derives a traceable `TODOS.yaml` plan from the approved
    requirements, contract, and design in test, implementation, security-audit,
-   and compliance-review order. The architect reviews and accepts that plan.
+   and compliance-review order. The target workflow then performs one bounded
+   advisory review of the three intent documents and a canonical projection of
+   the task definitions, or records the configured opt-out or an exact-bundle
+   exception. Findings remain nonbinding; the architect acknowledges the
+   opportunity and accepts the bundle.
 3. The executor advances every accepted, ready task in the queue in dependency
    order with only the permitted component context. It can run uninterrupted
    and unsupervised; the human may choose to observe or run one task at a time,
@@ -45,8 +50,47 @@ The human remains the approval authority at every stage. Kvist validates
 component documents and queues, persists legal task transitions, and can
 invoke a configured external agent for one task. It does **not** yet automate
 the architect or designer roles, the interview, clean-slate record creation,
-source-blind review, or arbitration loop. Do not claim a component is
-compliant until independent review is recorded.
+source-blind review, advisory-review acceptance gate, or arbitration loop. Do
+not claim a component is compliant until independent review is recorded.
+
+## Current and target document review
+
+Current `component accept` only structurally validates local intent and records
+its revisions in `TODOS.yaml`. It does **not** enforce AI review, inspect a
+review receipt, or call an agent.
+
+The planned target gate applies to the exact digests of local
+`REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` plus a canonical projection
+of task definitions from `TODOS.yaml`. It contains only authored definition
+fields and excludes all `component` metadata plus per-task status, timestamps,
+blocked reason, and recovery state. Generated intent drafts are included.
+Generated evidence—`IMPL.md`, compliance and review reports, status, and
+attempt logs—is exempt. Arbitrary Markdown files are not automatically
+governed.
+
+A separate planned review operation will use strict context: the local intent
+bundle, `ROOT_CONTRACT.md`, and the immediate parent `CONTRACT.md`. It will use
+the existing shell-free, bounded, approved or acknowledged agent execution
+path. `component accept` remains deterministic and local and never spawns an
+agent or performs network I/O.
+
+When project review is required, target acceptance requires either a current
+exact-digest receipt plus explicit human acknowledgement or an explicit
+exception. A per-bundle exception records actor, timestamp, reason, and exact
+digests. A project `[review] required = false` setting visibly disables the
+per-bundle gate. With no configured agent, a review-required project needs an
+exception; absence is never an implicit pass. Findings and severity are
+advisory only and cannot block acceptance or determine compliance.
+Review defaults to required when the configuration is absent, and generated
+projects will state `[review] required = true` explicitly.
+
+Versioned receipts and redacted bounded reports will live under component-local
+`.kvist/reviews/`. They are VCS-trackable, but are outside the five-artifact
+set, do not trigger candidacy or staleness, are not task context, and are not
+compliance evidence. Kvist mints receipts from execution evidence; model output
+cannot. Raw transcripts and secrets are not retained. Project-level review of
+`VISION.md`, `ARCHITECTURE.md`, `ROOT_CONTRACT.md`, ADRs, and referenced native
+schemas requires a later project-level acceptance surface.
 
 ## Start a project
 
@@ -98,10 +142,10 @@ kvist component accept .
 `status` detects local requirements, contract, design, and immediate-parent
 contract digest mismatches and reports attributable stale components.
 `--only-documents` limits status output to document state. `component accept`
-is an explicit revalidation write: it records the currently reviewed revisions
-and clears attributable stale evidence for the selected component. It does not
-approve an arbitrary implementation change or replace independent compliance
-review.
+is currently an explicit revalidation write: it structurally validates the
+intent, records its current revisions, and clears attributable stale evidence
+for the selected component. It does not enforce AI review, approve an arbitrary
+implementation change, or replace independent compliance review.
 
 `task next` selects the first ready task in declared order. `task transition`
 performs one audited state change and records `prepared` and `committed`
@@ -246,6 +290,31 @@ in
 `src/agent_runtime/REQUIREMENTS.md`, `src/agent_runtime/CONTRACT.md`,
 `src/agent_runtime/DESIGN.md`, and `src/agent_runtime/TODOS.yaml`.
 
+## Planned observed-intent and contract-verification workflows
+
+A planned `propose intent` or `derive draft` operation reads an independently
+generated `IMPL.md` and writes no-clobber draft `REQUIREMENTS.md` and
+`DESIGN.md` only. It cannot recover stakeholder intent, must mark uncertainty,
+and never generates a normative `CONTRACT.md`. Generated drafts still require
+human review, advisory AI review or exception, acknowledgement, and acceptance.
+
+A separate advisory comparison may report differences between `IMPL.md` and
+existing intent without modifying either. It avoids compliance verdict
+vocabulary and cannot count as compliance evidence. This is distinct from
+`reverse-discover`, the source-based onboarding pipeline; any contract produced
+there is a non-normative draft.
+
+Contract verification will use stable clause locators, initially existing
+heading anchors, with explicit IDs introduced only by a later explicit
+format/version decision. Tests will map to clauses, approved execution evidence
+will feed a traceability report, and the report will identify uncovered or
+failed clauses. Tests are evidence, not proof; this is not code coverage and
+does not replace compliance comparison of `CONTRACT.md`, `IMPL.md`, and test
+evidence.
+
+Command names and syntax for these planned workflows are provisional and are
+not current interfaces.
+
 ## Documentation and review discipline
 
 `IMPL.md` is an observed implementation record, not user-facing documentation.
@@ -258,6 +327,11 @@ evidence, immediate parent contract, and root contract without source access.
 Record compliance, mismatches, approved deferrals, and arbitration in version
 control. The implementer may not certify its own work, and no participant may
 edit intent or observed records merely to hide a disagreement.
+
+Advisory intent review happens before acceptance and is deliberately
+nonbinding. Its receipt records an opportunity and acknowledgement or
+exception, not correctness, independence, or compliance. Independent
+compliance review remains mandatory after implementation.
 
 The component artifact split is pre-release. Retired component documents,
 commands, and queue fields are not accepted or migrated, and there is no

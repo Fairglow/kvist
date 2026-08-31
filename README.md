@@ -26,7 +26,7 @@ and the standards posture in [`docs/standards.md`](docs/standards.md).
 | `kvist tree [PROJECT_DIR]`                         | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory. |
 | `kvist component new <COMPONENT_DIR>`              | Create no-clobber `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` templates.               |
 | `kvist component validate <COMPONENT_DIR>`         | Validate all three component intent documents without rewriting them.                        |
-| `kvist component accept <COMPONENT_DIR>`           | Record reviewed local intent and immediate-parent contract revisions.                        |
+| `kvist component accept <COMPONENT_DIR>`           | Structurally validate and record local intent and immediate-parent contract revisions.        |
 | `kvist task next <COMPONENT_DIR>`                  | Select the first ready task without changing durable state.                                  |
 | `kvist task transition <COMPONENT_DIR> ...`        | Persist one legal task-state transition with append-only attempt evidence.                   |
 | `kvist task run <COMPONENT_DIR> [TASK_ID]`         | Run the configured external agent for one ready task; see the execution boundary below.      |
@@ -538,8 +538,16 @@ writing, creates deterministic templates with same-directory no-clobber
 persistence, and never overwrites. `kvist component validate <COMPONENT_DIR>`
 validates the complete local intent set.
 `kvist component accept <COMPONENT_DIR>` additionally validates the immediate
-parent contract and records reviewed revisions without changing task
-definitions or task status.
+parent contract and records current revisions without changing task definitions
+or task status. It does not currently enforce AI review or inspect a review
+receipt.
+
+The planned advisory workflow reviews the exact local intent documents plus
+authored task-definition fields before acceptance. Findings remain nonbinding:
+a review-required project accepts an acknowledged receipt or an exact-bundle
+exception, while a visible project opt-out disables the gate. Review evidence,
+project-level acceptance, IMPL-derived intent proposals, and contract-clause
+traceability are not current CLI interfaces.
 
 ## Dependencies
 

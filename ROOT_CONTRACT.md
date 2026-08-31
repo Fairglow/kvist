@@ -27,6 +27,21 @@ constraint set injected into component work.
 
 ## Change and compliance rules
 
+- Before target-workflow acceptance, give each controlled local component
+  intent bundle an advisory AI review opportunity or record an explicit
+  exception. The bundle is `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, and
+  the canonical task-definition projection of `TODOS.yaml`; generated intent
+  drafts are included even when an agent produced them.
+- Treat review feedback as nonbinding input. Findings may be incorrect or
+  overly exacting and never require a document change, block acceptance by
+  severity, or determine compliance. When project review is required,
+  acceptance requires review plus explicit human acknowledgement, or a
+  deliberate exception bound to the exact bundle digests. A persistent project
+  opt-out may disable the per-bundle gate but must be visible and explicit.
+- Keep `component accept` deterministic and local. Current behavior only
+  validates structure and records revisions; advisory-review enforcement and
+  project-level acceptance are planned and must not be represented as already
+  implemented.
 - `TODOS.yaml` orders work as tests, implementation, security audit, then
   compliance review.
 - Requirements state what must be achieved, contracts state what consumers may
@@ -35,6 +50,8 @@ constraint set injected into component work.
 - `IMPL.md` describes observed implementation behavior and is not copied from
   intended requirements, contracts, or designs. Human-facing user and
   integration documentation belongs under `/docs/`.
+- Generated evidence—`IMPL.md`, compliance and review reports, status, and
+  attempt logs—is exempt from the advisory document-review gate.
 - A clean-slate documenter and a separate compliance reviewer must verify
   implemented behavior before it is declared compliant.
 - Record intent-to-implementation discrepancies for explicit

@@ -74,7 +74,7 @@ tasks:
     recovery_state: null
   - id: "sa-01-compliance-review"
     title: "Review standalone runtime compliance"
-    description: "Derive the implementation record from code and tests without the specification, then compare the record with this component contract in a separate review context."
+    description: "Derive the implementation record from code and tests without intended component documents, then compare the record with this component contract in a separate review context."
     context: "The implementer cannot certify that the extracted API and CLI satisfy their own contract."
     purpose: "Preserve independent evidence and surface discrepancies for explicit arbitration."
     expected_outcome: "The implementation record and source-blind review classify every contract difference without silently revising either artifact."
@@ -297,7 +297,7 @@ tasks:
     recovery_state: null
   - id: "sa-08-compliance-review"
     title: "Review layered runtime compliance"
-    description: "Derive the new backend, capability, model, tool-intent, host-service, and runtime-event interfaces from source without the specification, then compare them with the layered architecture contract."
+    description: "Derive the new backend, capability, model, tool-intent, host-service, and runtime-event interfaces from source without intended component documents, then compare them with the layered architecture contract."
     context: "The implementation author cannot certify that provider-neutral types preserve the intended one-way ownership and authority split."
     purpose: "Record independent evidence that the canonical runtime seam is stable enough for host broker and transport experiments."
     expected_outcome: "The review classifies every interface and records provider leakage, host coupling, missing failure states, or authority ambiguity for arbitration."
@@ -528,7 +528,7 @@ tasks:
     recovery_state: null
   - id: "sa-06-compliance-review"
     title: "Review model setup compliance"
-    description: "Derive setup behavior from source and tests without the specification, then compare the observed record with the generic-profile and Kvist-binding contracts."
+    description: "Derive setup behavior from source and tests without intended component documents, then compare the observed record with the generic-profile and Kvist-binding contracts."
     context: "The implementer cannot certify that model setup is reusable without leaking Kvist workflow semantics into the standalone component."
     purpose: "Preserve independent evidence for the extracted configuration boundary."
     expected_outcome: "The review classifies every setup and integration requirement and records discrepancies for explicit arbitration."
@@ -605,7 +605,7 @@ tasks:
     recovery_state: null
   - id: "sa-07-compliance-review"
     title: "Review provider qualification compliance"
-    description: "Derive provider discovery, template, probe, and qualification behavior from source and tests without the specification, then compare it with the provider setup contract."
+    description: "Derive provider discovery, template, probe, and qualification behavior from source and tests without intended component documents, then compare it with the provider setup contract."
     context: "The implementer cannot certify that locally observed CLI behavior has been represented accurately or portably."
     purpose: "Preserve independent evidence for adopting provider-specific profiles."
     expected_outcome: "The review classifies every provider qualification requirement and records discrepancies for explicit arbitration."
@@ -682,7 +682,7 @@ tasks:
     recovery_state: null
   - id: "sa-12-compliance-review"
     title: "Review direct transport compliance"
-    description: "Derive the adapter's provider, streaming, structured-intent, error, cancellation, endpoint, event, dependency, binary, license, advisory, and TLS behavior without the specification, then compare it with the canonical transport contract and decision matrix."
+    description: "Derive the adapter's provider, streaming, structured-intent, error, cancellation, endpoint, event, dependency, binary, license, advisory, and TLS behavior without intended component documents, then compare it with the canonical transport contract and decision matrix."
     context: "A direct implementation is useful only if its smaller dependency graph does not hide provider-specific semantic gaps."
     purpose: "Provide independent evidence that the first native transport is complete enough for the bounded loop and remains replaceable."
     expected_outcome: "The review approves exact provider/server/model combinations, records unsupported capabilities and objective supply-chain measurements, and blocks native-loop use for every unevaluated or discrepant deployment."
@@ -760,7 +760,7 @@ tasks:
     recovery_state: null
   - id: "sa-10-compliance-review"
     title: "Review native agent compliance"
-    description: "Derive native loop behavior and evidence from code and tests without the specification, then compare it with the model, capability, broker, policy, execution, and journal contracts."
+    description: "Derive native loop behavior and evidence from code and tests without intended component documents, then compare it with the model, capability, broker, policy, execution, and journal contracts."
     context: "The implementer cannot certify that agent parity was achieved without weakening the authority boundaries."
     purpose: "Provide independent evidence that native model mode satisfies the layered architecture."
     expected_outcome: "The review classifies every native-loop guarantee and records discrepancies or unsupported provider/model combinations for arbitration."
@@ -838,7 +838,7 @@ tasks:
     recovery_state: null
   - id: "sa-11-compliance-review"
     title: "Review external-agent compliance"
-    description: "Derive external-agent launch, containment, event, and artifact behavior without the specification, then compare it with the opaque-backend contract and declared assurance tiers."
+    description: "Derive external-agent launch, containment, event, and artifact behavior without intended component documents, then compare it with the opaque-backend contract and declared assurance tiers."
     context: "Provider-specific functionality must not be described as fine-grained Kvist mediation when only process-level enforcement exists."
     purpose: "Provide independent evidence for each supported external-agent adapter and execution tier."
     expected_outcome: "The review approves or rejects each agent/backend combination and records every non-equivalent capability or containment guarantee."
@@ -916,7 +916,7 @@ tasks:
     recovery_state: null
   - id: "sa-13-compliance-review"
     title: "Review MCP host compliance"
-    description: "Derive MCP server, schema, call, resource, authorization, transport, and event behavior without the specification, then compare it with the brokered protocol contract."
+    description: "Derive MCP server, schema, call, resource, authorization, transport, and event behavior without intended component documents, then compare it with the brokered protocol contract."
     context: "Protocol compatibility cannot certify policy mediation or containment."
     purpose: "Provide independent evidence for every approved MCP server and execution tier."
     expected_outcome: "The review approves exact combinations, records semantic gaps, and rejects every nominally compatible server that cannot preserve the authority boundary."
@@ -1151,7 +1151,7 @@ tasks:
     recovery_state: null
   - id: "sa-15-compliance-review"
     title: "Review isolated stream compliance"
-    description: "Derive stream production, buffering, delivery, timeout, cancellation, failure, cleanup, and terminal assembly behavior from code without the specification, then compare it with the approved callback-free contract."
+    description: "Derive stream production, buffering, delivery, timeout, cancellation, failure, cleanup, and terminal assembly behavior from code without intended component documents, then compare it with the approved callback-free contract."
     context: "The implementation author cannot certify that concurrency preserves ordering, bounds, ownership, and deterministic shutdown."
     purpose: "Record independent evidence that stream delivery no longer depends on synchronous callback cooperation."
     expected_outcome: "The review confirms every stream invariant or blocks adoption with precise discrepancies and reproducible evidence."
@@ -1229,7 +1229,7 @@ tasks:
     recovery_state: null
   - id: "sa-16-compliance-review"
     title: "Review agent runtime rename compliance"
-    description: "Derive package, crate, executable, component path, profile resolution, and documentation behavior from source without the specification, then compare it with the accepted rename contract."
+    description: "Derive package, crate, executable, component path, profile resolution, and documentation behavior from source without intended component documents, then compare it with the accepted rename contract."
     context: "The implementation author cannot certify that a repository-wide rename is complete or compatibility-safe."
     purpose: "Record independent evidence that technical names and migration behavior match the approved public contract."
     expected_outcome: "The review identifies every stale non-migration identifier or behavioral discrepancy before the rename is declared complete."
@@ -1307,7 +1307,7 @@ tasks:
     recovery_state: null
   - id: "sa-17-compliance-review"
     title: "Review llama-server setup compliance"
-    description: "Derive probe, discovery, selection, qualification, and persisted-command behavior from source without the specification, then compare it with the accepted setup contract."
+    description: "Derive probe, discovery, selection, qualification, and persisted-command behavior from source without intended component documents, then compare it with the accepted setup contract."
     context: "A successful request alone does not establish bounded discovery, deterministic selection, or configuration safety."
     purpose: "Record independent evidence that setup behavior matches the provider-neutral profile contract."
     expected_outcome: "The review confirms the advertised model path and all failure behavior or blocks completion with precise discrepancies."

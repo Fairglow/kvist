@@ -25,6 +25,10 @@ proposing or implementing a feature. Preserve these non-negotiable principles:
   work. A clean-slate context derives `IMPL.md` without reading intent
   documents, and a separate source-blind context compares requirements,
   contract, and design with observed and test evidence.
+- **Advisory intent review:** controlled intent should receive a
+  bounded AI review opportunity before acceptance when reasonable, or a
+  deliberate explicit exception. Findings are nonbinding, may be wrong or
+  overly exacting, and never determine compliance.
 
 ## Change workflow
 
@@ -45,15 +49,33 @@ proposing or implementing a feature. Preserve these non-negotiable principles:
 4. Make `TODOS.yaml` atomic, ordered, and traceable to requirements. Each
    component queue must include `write_tests`, `implement_code`,
    `security_audit`, and `compliance_review`, in that order.
-5. Write failing tests from the approved intent before production code. Update
+5. When the planned advisory-review mechanism exists, request and record review
+   for the exact local `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, and
+   canonical task-definition projection before acceptance, or record the
+   explicit project opt-out or per-bundle exception. Acknowledge findings
+   without treating them as binding. Do not include peer or parent internals,
+   and do not treat review receipts or reports as compliance evidence.
+   Generated intent drafts are included. When a later project-level acceptance
+   surface exists, apply its review opportunity to controlled project intent
+   such as vision, architecture, root contract, ADRs, and referenced native
+   schemas.
+6. Write failing tests from the approved intent before production code. Update
    tests, affected intent documents, and task state together only when a
    deliberate change is approved.
-6. After implementation, derive `IMPL.md` from source and test evidence in a
+7. After implementation, derive `IMPL.md` from source and test evidence in a
    clean-slate context that excludes all intent documents, the queue, prior
    record, architecture/root intent, prior reviews, chat history, and Git
    history. A separate reviewer compares requirements, contract, and design
    with `IMPL.md` and test evidence. Report discrepancies for explicit human
    arbitration; never conceal them by automatically changing either side.
+
+Current enforcement note: `component accept` only structurally validates and
+records revisions. Advisory-review receipts, acknowledgement/exception
+enforcement, project-level acceptance, IMPL-derived intent proposals, and
+contract-clause traceability are not implemented. Do not fabricate receipts,
+reports, command results, or current interfaces. The rubber-duck review in the
+parent context for the documentation change that introduced this policy is
+advisory input, not a Kvist receipt.
 
 ## Rust engineering standards
 

@@ -21,6 +21,11 @@ trusted core.
 - Product intent and architecture MUST be approved before component
   implementation work.
 - Component requirements, contracts, and designs MUST have distinct authority.
+- The target workflow MUST provide advisory review of controlled intent before
+  acceptance when review is required, while preserving explicit opt-out and
+  exception paths.
+- Review findings and severity MUST NOT block acceptance or determine
+  compliance.
 - Component boundaries MUST map to filesystem directories with adjacent
   durable artifacts.
 - A consumer MUST NOT need a provider's design or implementation to use its
@@ -50,11 +55,16 @@ owns all five.
 ## Interactions and dependency rules
 
 1. The architect approves `VISION.md`, this architecture, and global
-   `ROOT_CONTRACT.md`.
+   `ROOT_CONTRACT.md`. Advisory review for these project-level artifacts is
+   planned but needs a project-level acceptance surface; it is not enforced by
+   current component commands.
 2. `kvist component new` creates adjacent requirements, contract, and design
    templates for an approved component boundary.
 3. The architect approves those documents; a designer derives a traceable
-   `TODOS.yaml`.
+   `TODOS.yaml`. In the target workflow, one bounded advisory review covers the
+   exact digests of the three documents and the canonical task-definition
+   projection. The human acknowledges the feedback or records an exact-digest
+   exception before acceptance.
 4. Task execution receives local component artifacts plus read-only sandbox
    mounts for `ROOT_CONTRACT.md` and the immediate parent `CONTRACT.md`.
    Explicit provider contracts are the only additional cross-component
@@ -64,7 +74,20 @@ owns all five.
 6. A clean-slate documenter derives `IMPL.md` from code and tests without
    intended requirements, contract, or design. A separate reviewer compares
    intended documents with the observed record without source access.
-7. Human arbitration resolves every discrepancy and preserves rationale.
+7. Planned onboarding support may use an independently generated `IMPL.md` to
+   propose no-clobber draft requirements and design, or to produce a
+   non-mutating advisory comparison. It cannot recover stakeholder intent or
+   produce a normative contract.
+8. Planned contract verification maps stable contract-clause locators to
+   approved test evidence and reports uncovered or failed clauses. Tests remain
+   evidence rather than proof, and compliance still compares contract,
+   implementation record, and test evidence.
+9. Human arbitration resolves every discrepancy and preserves rationale.
+
+Current `component accept` behavior remains narrower: it structurally validates
+the component intent and records revisions. It does not enforce AI review.
+The planned review operation is separate because `component accept` must remain
+deterministic, local, and free of agent or network invocation.
 
 Local requirements or design changes stale only the local task plan. A local
 contract change also matters to declared consumers. The currently implemented
@@ -98,6 +121,26 @@ Machine-readable schemas, when useful, are referenced by exact path and
 dialect/version from the provider-owned contract rather than copied into
 Markdown.
 
+**Advisory review evidence:** the initial gate covers the local
+`REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` plus a canonical task
+projection containing authored task-definition fields but excluding
+`component` metadata and per-task lifecycle state. Versioned reports and
+Kvist-minted receipts live under the component's `.kvist/reviews/`. They are
+VCS-trackable but are outside the five-artifact set, do not trigger component
+candidacy or staleness, are not task context, and are not compliance evidence.
+A receipt binds exact target digests and scope to execution evidence, reviewer
+and authoring context identity when known, provider/profile/model/tool
+identity, Kvist version, timestamp, a redacted bounded report digest and path,
+and human acknowledgement or exception. Model output cannot mint a receipt.
+Raw transcripts and secrets are not retained.
+
+The review context is limited to the local intent set and canonical task
+projection, `ROOT_CONTRACT.md`, and the immediate parent `CONTRACT.md`.
+Separate authoring and reviewing contexts are preferred; recorded provenance
+does not prove independence or review quality. With no configured agent, a
+required review never passes implicitly: the human records an explicit
+exception.
+
 ## Views and diagrams
 
 The component table is the canonical static decomposition view. The lifecycle
@@ -116,8 +159,12 @@ using immutable numbered ADRs when the decision has material structural,
 security, compatibility, cost, or reversibility consequences. This artifact
 model is recorded in
 [`0001-separate-component-intent.md`](docs/decisions/0001-separate-component-intent.md).
+The nonbinding review gate and its separation from compliance are recorded in
+[`0002-advisory-document-review.md`](docs/decisions/0002-advisory-document-review.md).
 
-The main deferred risks are general cross-component contract graph resolution,
+The main deferred risks are advisory-review and project-level acceptance
+automation, observed-intent proposal and comparison, contract-clause
+traceability, general cross-component contract graph resolution,
 schema-compatibility analysis, architecture-model interchange, and automated
 materialization of explicitly declared provider contracts. Root and
 immediate-parent contracts are already materialized read-only. Deferral must

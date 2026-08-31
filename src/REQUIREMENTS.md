@@ -18,6 +18,14 @@ The reusable provider runtime belongs to the child `agent-runtime` component.
 Kvist consumes that component's public contract and MUST NOT make its provider
 or implementation types part of Kvist's durable formats.
 
+This document defines both implemented requirements and newly approved target
+requirements. The current CLI contract remains authoritative for implemented
+commands: in particular, `component accept` currently performs structural
+validation and revision recording only. The review, intent-proposal, and
+contract-verification workflows below are planned and MUST NOT be reported as
+implemented until their queues, code, tests, and independent review are
+complete.
+
 ## Stakeholders and concerns
 
 - Human architects need explicit approval, attribution, and arbitration.
@@ -99,6 +107,81 @@ Implementation work MUST NOT certify itself. A clean-slate documenter derives
 source-blind reviewer compares that record with intended artifacts and retains
 every discrepancy for human arbitration.
 
+### REQ-ADVISORY-DOCUMENT-REVIEW
+
+For the target component-acceptance workflow, Kvist MUST authorize acceptance
+through one of three explicit paths:
+
+1. when project review is required, a current review receipt covering the exact
+   digests of
+   `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, and a canonical projection of
+   task definitions from `TODOS.yaml`, plus explicit human acknowledgement; or
+2. an explicit exception bound to the same exact digests; or
+3. a visible, deliberate project `[review] required = false` opt-out.
+
+Review MUST default to required when the `[review]` section or `required` field
+is absent, and generated project templates MUST emit `required = true`
+explicitly. The task projection MUST contain only `id`, `title`, `description`,
+`context`, `purpose`, `expected_outcome`, `kind`, `depends_on`, and
+`requirements`; it MUST exclude all `component` metadata plus task `status`,
+`timestamps`, `blocked_reason`, and `recovery_state`. Generated intent drafts
+MUST NOT be exempt. The review is advisory: no finding, score, or severity
+threshold may require a change, block acceptance, or determine compliance. A
+per-bundle exception MUST record actor, timestamp, reason, and exact digests. If
+project review is required but no review agent is configured, Kvist MUST
+require an explicit exception and MUST NOT infer a pass.
+
+`component accept` MUST remain deterministic and local and MUST NOT launch an
+agent or make a network call. A separate planned review operation MUST use the
+existing shell-free, bounded, explicitly approved or acknowledged agent
+execution path. Review context MUST be limited to the local intent set and
+canonical task projection, `ROOT_CONTRACT.md`, and the immediate parent
+`CONTRACT.md`; peer and parent internals MUST be excluded.
+
+Kvist MUST mint receipts from bounded execution evidence rather than accepting
+model-generated receipts. Versioned receipts and redacted reports MUST be
+stored under component-local `.kvist/reviews/` and MUST bind target digests,
+scope, reviewer and authoring context identity when known,
+provider/profile/model/tool identity, Kvist version, timestamp, bounded report
+digest and path, and acknowledgement or exception. Raw transcripts and secrets
+MUST NOT be retained. These files MUST be VCS-trackable but MUST NOT join the
+five-artifact set, trigger component candidacy or staleness, enter task
+context, or count as compliance evidence.
+
+Project-level review of `VISION.md`, `ARCHITECTURE.md`, `ROOT_CONTRACT.md`,
+ADRs, and referenced native schemas MUST be addressed by a later project-level
+acceptance surface rather than claimed as current component enforcement. The
+gate MUST NOT be generalized to arbitrary Markdown files.
+
+### REQ-OBSERVED-INTENT-PROPOSAL
+
+Kvist MUST provide a planned `propose intent` or `derive draft` workflow that
+reads an independently generated `IMPL.md` and writes no-clobber draft
+`REQUIREMENTS.md` and `DESIGN.md` only. It MUST mark uncertainty, MUST NOT
+claim to recover stakeholder intent, and MUST NOT generate a normative
+`CONTRACT.md`.
+
+Generated drafts MUST remain subject to human review, advisory AI review or an
+explicit exception, acknowledgement, and normal acceptance. A separate
+advisory comparison MAY report differences between `IMPL.md` and existing
+intent without modifying either. That comparison MUST NOT use compliance
+verdict vocabulary and MUST NOT count as compliance evidence.
+
+The existing `reverse-discover` source-based onboarding pipeline remains
+distinct. Any contract it generates is a non-normative draft.
+
+### REQ-CONTRACT-VERIFICATION
+
+Kvist MUST plan stable contract-clause locators, initially using existing
+heading anchors. Explicit clause IDs MAY be introduced only through an
+explicit format/version decision. Tests MUST be traceable to contract clauses,
+and approved test execution evidence MUST feed a contract-clause traceability
+report that identifies uncovered and failed clauses.
+
+Tests are evidence, not proof. This report MUST NOT be described as code
+coverage and MUST NOT replace compliance comparison of `CONTRACT.md`,
+`IMPL.md`, and test evidence.
+
 ### REQ-CONVERSION-IMPORT
 
 Conversion, reverse discovery, and repository import MUST preserve existing
@@ -113,6 +196,8 @@ explicitly draft rather than inferred truth.
   boundaries exist.
 - Core inspection and lifecycle operations perform no hidden network or model
   invocation.
+- Advisory document review, observed-intent proposal, and contract-clause
+  traceability are target requirements, not claims about the current CLI.
 - Configuration is limited to 64 KiB. Component Markdown and YAML artifacts
   read by the engine are limited to 1 MiB.
 - Traversal depth, directory count, component count, entries per directory,
@@ -128,11 +213,12 @@ explicitly draft rather than inferred truth.
 
 ## Acceptance and traceability
 
-Each `REQ-*` item requires unit or integration coverage appropriate to its
-boundary. CLI and filesystem workflows require integration tests; pure schema
-and transition behavior require unit tests; Linux sandbox and process behavior
-require native boundary tests. Security audit and independent compliance review
-are mandatory terminal tasks for each deliverable chain.
+Each implemented `REQ-*` item requires unit or integration evidence appropriate
+to its boundary. CLI and filesystem workflows require integration tests; pure
+schema and transition behavior require unit tests; Linux sandbox and process
+behavior require native boundary tests. Tests provide evidence rather than
+proof. Security audit and independent compliance review are mandatory terminal
+tasks for each deliverable chain.
 
 The system decomposition and authority direction are defined in
 [`../ARCHITECTURE.md`](../ARCHITECTURE.md). Consumer-visible behavior is

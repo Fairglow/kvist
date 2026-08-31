@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:6c41b8b02cbee03c3b5a49b153482b2a12179a30d4a74b3dee54deee3bd4870c"
+  requirements_revision: "sha256:504196e135d684d9ca074bb1f0f1e1942bc2a278309ae07937ad9465f85bb244"
   contract_revision: "sha256:289b24e4726167bd85302963860e6d554fbad29987af093814b0ca6428d21697"
-  design_revision: "sha256:89dcad042da811ee98070f566b6e76a73b6172bcf445939336b3dc6e15fcd5a3"
+  design_revision: "sha256:a799c9bb75270d2573337fb710afd805edeb585142c863474111f0a3198e60b6"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-08-30T16:37:41Z"
+    checked_at: "2026-08-31T19:14:11Z"
     stale_since: null
     causes: []
 tasks:
@@ -29,15 +29,309 @@ tasks:
       completed_at: "2026-08-13T20:20:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: "onb-01-write-tests"
-    title: "Define conversion lifecycle tests"
-    description: "Write failing integration tests for converted-project inspection, draft acceptance, acceptance invalidation, task gating, VCS checks, logs, locks, and recovery."
-    context: "Conversion artifacts currently live in .kvist while existing inspection and task commands only understand adjacent src artifacts."
-    purpose: "Establish executable evidence for safely integrating existing projects before implementation changes."
-    expected_outcome: "Tests cover normal conversion, malformed and link-like metadata, every acceptance transition, changed drafts, and task execution refusal before acceptance."
+  - id: "doc-01-write-tests"
+    title: "Define advisory document review tests"
+    description: "Write failing tests for exact-digest component and project review bundles, bounded redacted reports, explicit acknowledgement, per-bundle exceptions, default-on configuration and project opt-out, unavailable agents, canonical task projections, governed project paths, and stale review evidence."
+    context: "Component acceptance currently records structurally valid document revisions without proving that an advisory review opportunity was presented or explicitly declined."
+    purpose: "Make review occurrence and human acknowledgement enforceable without allowing agent findings to become compliance or veto authority."
+    expected_outcome: "Tests distinguish review evidence from review findings and prove component and project acceptance require a configured persistent opt-out, a current acknowledged receipt, or an exact-bundle exception while validation, status, and task readiness remain unchanged."
     kind: test
     status: pending
     depends_on: []
+    requirements:
+      - "DESIGN.md#Verification-strategy"
+      - "REQUIREMENTS.md#REQ-ADVISORY-DOCUMENT-REVIEW"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#DOC-01"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-01-implement-evidence"
+    title: "Implement advisory review evidence"
+    description: "Define default-on review configuration and generated templates plus the versioned component-local review receipt, report, acknowledgement, and exception formats under .kvist/reviews with exact target digests and bounded provenance."
+    context: "Review evidence must be durable and VCS-inspectable without becoming a sixth component artifact, a staleness cause, task context, or compliance evidence."
+    purpose: "Give acceptance deterministic local evidence that feedback was produced and acknowledged or deliberately skipped."
+    expected_outcome: "Kvist alone writes canonical evidence from bounded agent execution records, rejects stale or malformed records, and never persists raw transcripts or secrets."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "doc-01-write-tests"
+    requirements:
+      - "DESIGN.md#Planned-review-evidence-and-acceptance-state"
+      - "REQUIREMENTS.md#REQ-ADVISORY-DOCUMENT-REVIEW"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#DOC-01"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-01-implement-component-review"
+    title: "Integrate component advisory review"
+    description: "Add a separate bounded review operation for the exact local intent bundle and canonical task-definition projection, then require its acknowledged receipt or an explicit exception during component acceptance when project review is enabled."
+    context: "Acceptance must stay local and deterministic and must never spawn an agent or infer that favorable feedback is required."
+    purpose: "Ensure the user has an opportunity to understand review findings while preserving unconditional human arbitration."
+    expected_outcome: "Review uses only local intent, root constraints, and the immediate parent contract; no finding severity blocks acceptance, and no configured agent requires an explicit exception rather than an implicit pass."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "doc-01-implement-evidence"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#REQ-ADVISORY-DOCUMENT-REVIEW"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "TODO.md#DOC-01"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-01-implement-project-review"
+    title: "Define project document acceptance"
+    description: "Add an explicit project-level review and acceptance surface for VISION.md, ARCHITECTURE.md, ROOT_CONTRACT.md, ADRs, and referenced normative schemas without treating arbitrary repository documentation as governed artifacts."
+    context: "Project-level intent currently has human approval language but no command or durable revision evidence to which an advisory review gate can attach."
+    purpose: "Apply the same review opportunity to authoritative project documents without silently broadening component acceptance."
+    expected_outcome: "Project acceptance validates exact governed paths and the configured opt-out, review receipt plus acknowledgement, or exception path while preserving independent format versions and strict context boundaries."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "doc-01-implement-component-review"
+    requirements:
+      - "ARCHITECTURE.md#Interactions-and-dependency-rules"
+      - "REQUIREMENTS.md#REQ-ADVISORY-DOCUMENT-REVIEW"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#DOC-01"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-01-security-audit"
+    title: "Audit advisory review boundaries"
+    description: "Independently review receipt forgery, digest confusion, prompt injection, context leakage, agent authority, opt-out visibility, acknowledgement spoofing, report redaction, and review-to-compliance laundering."
+    context: "Repository-controlled review input and model output are untrusted, while a forged receipt could bypass the intended human review opportunity."
+    purpose: "Ensure advisory review adds informed human choice without creating a new execution, disclosure, or false-certification boundary."
+    expected_outcome: "Every high-confidence bypass or data-exposure issue is fixed or retained as an explicit blocker before review gating is enabled."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "doc-01-implement-project-review"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#REQ-ADVISORY-DOCUMENT-REVIEW"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#DOC-01"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-01-compliance-review"
+    title: "Review advisory document workflow compliance"
+    description: "Independently derive review and acceptance behavior, then compare it with the advisory nonbinding contract without treating receipts or favorable findings as compliance evidence."
+    context: "The review-workflow implementer cannot certify that review remains advisory, bounded, explicit, and separate from later implementation compliance."
+    purpose: "Retain an independent verdict for every review, acknowledgement, exception, project-scope, and context-boundary guarantee."
+    expected_outcome: "The review records satisfied clauses, discrepancies, and approved deferrals before advisory review gating is promoted."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "doc-01-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-ADVISORY-DOCUMENT-REVIEW"
+      - "REVIEW_RUNBOOK.md#Advisory-document-review"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#DOC-01"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-02-write-tests"
+    title: "Define observed intent proposal tests"
+    description: "Write failing tests for IMPL-only input, no-clobber draft requirements and design output, uncertainty markers, advisory comparison, context exclusion, and refusal to emit compliance verdicts or normative contracts."
+    context: "Observed implementation can suggest candidate intent but cannot recover stakeholder goals or consumer promises."
+    purpose: "Prevent an implementation-derived convenience from laundering current behavior into authoritative intent."
+    expected_outcome: "Tests prove that proposal and comparison are bounded advisory operations that preserve every existing intended and observed artifact."
+    kind: test
+    status: pending
+    depends_on:
+      - "doc-01-compliance-review"
+    requirements:
+      - "DESIGN.md#Verification-strategy"
+      - "REQUIREMENTS.md#REQ-OBSERVED-INTENT-PROPOSAL"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#DOC-02"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-02-implement-code"
+    title: "Implement observed intent proposals"
+    description: "Add no-clobber draft REQUIREMENTS.md and DESIGN.md proposal from independently generated IMPL.md plus a separate advisory comparison against existing intent."
+    context: "The operation must not read source, infer a normative CONTRACT.md, alter accepted artifacts, or duplicate the source-blind compliance verdict."
+    purpose: "Help users articulate intent for existing implementations while keeping uncertainty and human authorship explicit."
+    expected_outcome: "Proposal output is clearly draft, comparison output uses non-compliance vocabulary, and both remain subject to advisory review or explicit exception before acceptance."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "doc-02-write-tests"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#REQ-OBSERVED-INTENT-PROPOSAL"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "TODO.md#DOC-02"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-02-security-audit"
+    title: "Audit observed intent proposal safety"
+    description: "Independently review source access exclusion, path handling, no-clobber writes, prompt injection, uncertainty retention, contract laundering, and comparison-output authority."
+    context: "A malicious or incomplete implementation record can manipulate generated drafts or create false confidence about recovered intent."
+    purpose: "Ensure proposal tooling cannot overwrite intent, broaden context, or present observed behavior as approved requirements."
+    expected_outcome: "Security and authority findings are corrected or retained as explicit blockers before proposal tooling is promoted."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "doc-02-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#REQ-OBSERVED-INTENT-PROPOSAL"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#DOC-02"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-02-compliance-review"
+    title: "Review observed intent proposal compliance"
+    description: "Independently compare observed proposal and advisory comparison behavior with the approved context, draft, no-clobber, uncertainty, and authority boundaries."
+    context: "The proposal implementer cannot certify that implementation evidence remains distinct from human intent and compliance."
+    purpose: "Record whether the feature assists intent authoring without claiming to recover or approve it."
+    expected_outcome: "Every discrepancy and unsupported inference is retained for human arbitration before the feature is declared compliant."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "doc-02-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-OBSERVED-INTENT-PROPOSAL"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#DOC-02"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-03-write-tests"
+    title: "Define contract traceability tests"
+    description: "Write failing tests for stable contract locators, test-to-clause mappings, approved execution results, uncovered and failed clauses, deterministic reports, and explicit distinction from source coverage and compliance."
+    context: "Passing tests do not establish that every consumer-visible contract clause is represented or fully implemented unless traceability gaps remain visible."
+    purpose: "Turn contract-test claims into bounded inspectable evidence without overstating what tests prove."
+    expected_outcome: "Tests require a deterministic contract clause traceability report and reject unknown, duplicate, stale, or unexecuted mappings."
+    kind: test
+    status: pending
+    depends_on:
+      - "doc-01-compliance-review"
+    requirements:
+      - "DESIGN.md#Verification-strategy"
+      - "REQUIREMENTS.md#REQ-CONTRACT-VERIFICATION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#DOC-03"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-03-implement-code"
+    title: "Implement contract clause traceability"
+    description: "Map stable CONTRACT.md locators to declared tests, run them through approved verification policy, and produce a deterministic report of exercised, failed, stale, and uncovered clauses."
+    context: "Existing requirement locators can seed traceability, but stricter explicit clause identifiers require a separate format and version decision."
+    purpose: "Give users evidence that consumer promises are exercised while leaving completeness and compliance judgments independent."
+    expected_outcome: "The report preserves exact contract and test revisions, never calls itself code coverage, and cannot mark a component compliant."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "doc-03-write-tests"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#REQ-CONTRACT-VERIFICATION"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "TODO.md#DOC-03"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-03-security-audit"
+    title: "Audit contract traceability evidence"
+    description: "Independently review locator spoofing, stale test results, policy bypass, report forgery, untrusted test output, and false completeness or compliance claims."
+    context: "A traceability report can mislead consumers if repository-controlled mappings or results are accepted without exact revision and execution provenance."
+    purpose: "Ensure the report is useful evidence rather than a forgeable certification surface."
+    expected_outcome: "High-confidence provenance and authority defects are fixed or retained as blockers before contract verification is promoted."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "doc-03-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#REQ-CONTRACT-VERIFICATION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#DOC-03"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "doc-03-compliance-review"
+    title: "Review contract traceability compliance"
+    description: "Independently compare clause mapping, approved execution, gap reporting, and evidence authority with the contract-verification requirements and observed implementation."
+    context: "The verification implementer cannot certify that test evidence covers the contract or that reported gaps are complete."
+    purpose: "Preserve a separate compliance judgment over contract, implementation record, test evidence, and traceability output."
+    expected_outcome: "The review records every uncovered or unsupported claim and prevents traceability evidence from becoming self-certification."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "doc-03-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-CONTRACT-VERIFICATION"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#DOC-03"
+    timestamps:
+      created_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-08-31T18:50:51Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "onb-01-write-tests"
+    title: "Define conversion lifecycle tests"
+    description: "Write failing integration tests for converted-project inspection, advisory review or explicit exception, draft acceptance, acceptance invalidation, task gating, VCS checks, logs, locks, and recovery."
+    context: "Conversion artifacts currently live in .kvist while existing inspection and task commands only understand adjacent src artifacts."
+    purpose: "Establish executable evidence for safely integrating existing projects before implementation changes."
+    expected_outcome: "Tests cover normal conversion, malformed and link-like metadata, every review and acceptance transition, changed drafts, and task execution refusal until the configured review policy and acceptance state are satisfied."
+    kind: test
+    status: pending
+    depends_on:
+      - "doc-01-compliance-review"
     requirements:
       - "REQUIREMENTS.md#REQ-CONVERSION-IMPORT"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
@@ -70,10 +364,10 @@ tasks:
     recovery_state: null
   - id: "onb-01-implement-acceptance"
     title: "Implement conversion acceptance"
-    description: "Add explicit spec and queue acceptance commands with versioned atomic approval evidence and invalidation after a reviewed artifact changes."
-    context: "A converted draft has no durable acceptance state and kvist queue accept does not exist."
+    description: "Add explicit component-intent and queue acceptance commands with versioned atomic approval evidence and invalidation after a reviewed artifact changes."
+    context: "A converted draft has no durable review or acceptance evidence integrated with task execution."
     purpose: "Prevent imported work from being selected or executed before human review."
-    expected_outcome: "Only a valid current accepted specification can precede queue acceptance; malformed, stale, partial, and link-like metadata is rejected."
+    expected_outcome: "Only a valid current accepted component intent set can precede queue acceptance; malformed, stale, partial, and link-like metadata is rejected."
     kind: implementation
     status: pending
     depends_on:
@@ -150,7 +444,7 @@ tasks:
     recovery_state: null
   - id: "onb-01-compliance-review"
     title: "Independently review project conversion"
-    description: "Generate source-derived conversion documentation and compare it against the lifecycle specification without exposing implementation source to the comparer."
+    description: "Generate source-derived conversion documentation and compare it against the conversion lifecycle requirements, contract, and design without exposing implementation source to the comparer."
     context: "The conversion implementer cannot certify its own acceptance and execution integration."
     purpose: "Retain independent evidence that the implemented conversion lifecycle matches its approved contract."
     expected_outcome: "Clean-slate and source-blind review records every discrepancy for human arbitration before ONB-01 is completed."
@@ -160,7 +454,7 @@ tasks:
       - "onb-01-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-CONVERSION-IMPORT"
-      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
       - "TODO.md#ONB-01"
     timestamps:
@@ -211,7 +505,7 @@ tasks:
     recovery_state: null
   - id: "p2-01-compliance-review"
     title: "Independently review TODO queue compliance"
-    description: "Produce clean-slate observed documentation and compare it with the queue specification, recording each discrepancy for explicit architectural arbitration."
+    description: "Produce clean-slate observed documentation and compare it with the queue requirements and design, recording each discrepancy for explicit architectural arbitration."
     context: "The implementer cannot certify their own workflow-control format; the product requires independent clean-slate and source-blind review."
     purpose: "Verify that documented requirements, implementation behavior, and future tool assumptions remain aligned before this format becomes the workflow system of record."
     expected_outcome: "Retained independent documentation and a source-blind comparison identify the queue schema as compliant, mismatched, deferred, or underspecified without silently changing requirements."
@@ -220,7 +514,7 @@ tasks:
     depends_on:
       - "p2-01-security-audit"
     requirements:
-      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
       - "TODO.md#P2-01"
@@ -291,7 +585,7 @@ tasks:
     recovery_state: null
   - id: "p2-02-compliance-review"
     title: "Independently review project status compliance"
-    description: "Produce source-derived documentation and compare it with the status specification without exposing source code to the compliance reviewer."
+    description: "Produce source-derived documentation and compare it with the status requirements and contract without exposing source code to the compliance reviewer."
     context: "The status model will be an execution and automation boundary, so its implementer cannot certify the observed behavior."
     purpose: "Verify that status output, component-state precedence, and deferred persistence behavior remain aligned with the component contract."
     expected_outcome: "Retained clean-slate documentation and a source-blind comparison classify the status implementation as compliant, mismatched, deferred, or underspecified."
@@ -300,7 +594,7 @@ tasks:
     depends_on:
       - "p2-02-security-audit"
     requirements:
-      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
       - "TODO.md#P2-02"
@@ -380,7 +674,7 @@ tasks:
     depends_on:
       - "p2-03-security-audit"
     requirements:
-      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
       - "TODO.md#P2-03"
@@ -611,7 +905,7 @@ tasks:
       - "p2-05b-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
-      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
       - "TODO.md#P2-05b"
     timestamps:
@@ -691,7 +985,7 @@ tasks:
       - "p2-05c-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
-      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
       - "TODO.md#P2-05c"
     timestamps:
@@ -771,7 +1065,7 @@ tasks:
       - "p2-05d-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
-      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
       - "TODO.md#P2-05d"
     timestamps:
@@ -854,7 +1148,7 @@ tasks:
       - "agn-input-setup-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
-      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
       - "TODO.md#AGN-02"
       - "TODO.md#AGN-03"
@@ -925,7 +1219,7 @@ tasks:
     recovery_state: null
   - id: "agn-authority-compliance-review"
     title: "Review native-agent authority compliance"
-    description: "Derive Kvist policy, authorization, binding, event, evidence, and promotion behavior from source without the specification, then compare it with the root host-authority contract."
+    description: "Derive Kvist policy, authorization, binding, event, evidence, and promotion behavior from source without intended component documents, then compare it with the root host-authority contract."
     context: "The authority implementer cannot certify the root boundary that controls effects and compliance evidence."
     purpose: "Retain independent evidence that the Kvist host integration preserves the standalone ownership split and recursive workflow contract."
     expected_outcome: "The review records every satisfied guarantee, discrepancy, unsupported execution tier, and remaining prerequisite before native model mode can be enabled."
@@ -935,7 +1229,7 @@ tasks:
       - "agn-authority-security-audit"
     requirements:
       - "DESIGN.md#Security-and-resource-design"
-      - "REVIEW_RUNBOOK.md#Clean-slate-documentation-pass"
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
       - "TODO.md#AGN-09"
     timestamps:
