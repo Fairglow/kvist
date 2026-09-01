@@ -289,6 +289,27 @@ pub enum TaskCommand {
         #[arg(long)]
         force: bool,
     },
+    /// Reconcile one fenced attempt only when durable host evidence proves no execution began.
+    Recover {
+        /// Component-root-relative component directory; `.` selects the root component.
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: PathBuf,
+        /// Queue-local task identifier.
+        #[arg(value_name = "TASK_ID")]
+        task_id: String,
+        /// Stable identity of the fenced attempt.
+        #[arg(value_name = "ATTEMPT_ID")]
+        attempt_id: String,
+        /// Explicit human disposition for the exact fenced attempt.
+        #[arg(long, value_enum)]
+        disposition: RecoveryDispositionArgument,
+    },
+}
+
+/// The limited recovery disposition supported by the pre-spawn recovery tier.
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum RecoveryDispositionArgument {
+    ExecutionDidNotStart,
 }
 
 /// Command-line spelling of a queue task status.
@@ -535,7 +556,8 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     stream,
                 },
             } => {
-                let message = task_commands::run_task(&component_dir, task_id.as_deref(), stream)?;
+                let message =
+                    task_commands::run_task(&component_dir, task_id.as_deref(), stream)?;
                 Ok(CommandOutput::message(format!(
                     "{{\"status\":\"success\",\"command\":\"task-run\",\"component_dir\":\"{}\",\"message\":\"{}\"}}",
                     component_dir.to_string_lossy().replace('\\', "\\\\"),
@@ -577,6 +599,29 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 Ok(CommandOutput::message(format!(
                     "{{\"status\":\"success\",\"command\":\"task-unlock\",\"component_dir\":\"{}\",\"message\":\"{}\"}}",
                     component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    message.replace('\n', "\\n").replace('"', "\\\"")
+                )))
+            }
+            Command::Task {
+                command:
+                    TaskCommand::Recover {
+                        component_dir,
+                        task_id,
+                        attempt_id,
+                        disposition,
+                    },
+            } => {
+                let message = task_commands::recover(
+                    &component_dir,
+                    &task_id,
+                    &attempt_id,
+                    disposition,
+                )?;
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"task-recover\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"attempt_id\":\"{}\",\"message\":\"{}\"}}",
+                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    task_id,
+                    attempt_id,
                     message.replace('\n', "\\n").replace('"', "\\\"")
                 )))
             }
@@ -782,6 +827,16 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         force,
                     },
             } => task_commands::unlock(&component_dir, force).map(CommandOutput::message),
+            Command::Task {
+                command:
+                    TaskCommand::Recover {
+                        component_dir,
+                        task_id,
+                        attempt_id,
+                        disposition,
+                    },
+            } => task_commands::recover(&component_dir, &task_id, &attempt_id, disposition)
+                .map(CommandOutput::message),
             Command::Component {
                 command: ComponentCommand::New { component_dir },
             } => component_documents::create(&component_dir).map(|generated| {
@@ -1162,6 +1217,42 @@ mod tests {
         assert_eq!(component_dir, PathBuf::from("src"));
         assert_eq!(task_id, Some("task-1".to_string()));
         assert!(stream);
+    }
+
+    #[test]
+    fn parses_task_recover_command() {
+        let cli = Cli::try_parse_from([
+            "kvist",
+            "task",
+            "recover",
+            "engine",
+            "task-1",
+            "attempt-0001",
+            "--disposition",
+            "execution-did-not-start",
+        ])
+        .expect("valid recovery command");
+
+        let Command::Task {
+            command:
+                TaskCommand::Recover {
+                    component_dir,
+                    task_id,
+                    attempt_id,
+                    disposition,
+                },
+        } = cli.command
+        else {
+            panic!("expected task recover command");
+        };
+
+        assert_eq!(component_dir, PathBuf::from("engine"));
+        assert_eq!(task_id, "task-1");
+        assert_eq!(attempt_id, "attempt-0001");
+        assert!(matches!(
+            disposition,
+            RecoveryDispositionArgument::ExecutionDidNotStart
+        ));
     }
 
     #[test]

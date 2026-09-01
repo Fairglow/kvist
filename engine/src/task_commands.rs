@@ -1,12 +1,14 @@
 //! Durable task selection and serialized state transitions.
 
 use std::{
+    collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Component, Path, PathBuf},
 };
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 
@@ -17,7 +19,10 @@ use crate::{
     file_io::{replace_file_atomically, sync_directory, write_new_file_atomically},
     filesystem::is_link_like,
     project_state::{self, ComponentState, MAX_ROOT_TEXT_ARTIFACT_BYTES, ProjectState},
-    task_queue::{Task, TaskKind, TaskQueue, TaskStatus, Timestamp, parse, serialize},
+    task_queue::{
+        RecoveryState, RecoveryStateKind, Task, TaskKind, TaskQueue, TaskStatus, Timestamp, parse,
+        serialize,
+    },
     vcs::VcsArtifactState,
 };
 
@@ -62,7 +67,7 @@ fn transition_locked(
     timestamp: &Timestamp,
 ) -> Result<String> {
     let mut queue = read_queue(&context.component_dir)?;
-    ensure_attempt_recovered(&context.component_dir, task_id)?;
+    ensure_component_attempts_recovered(&context.component_dir)?;
     let task_index = queue
         .tasks
         .iter()
@@ -199,6 +204,10 @@ fn normalize_component_path(path: &Path) -> Result<PathBuf> {
 }
 
 fn read_queue(component_dir: &Path) -> Result<TaskQueue> {
+    read_queue_snapshot(component_dir).map(|(queue, _)| queue)
+}
+
+fn read_queue_snapshot(component_dir: &Path) -> Result<(TaskQueue, String)> {
     let path = component_dir.join(ComponentArtifact::TaskQueue.filename());
     let metadata = fs::symlink_metadata(&path).map_err(|source| KvistError::Io {
         operation: "inspect component TODO queue",
@@ -224,10 +233,11 @@ fn read_queue(component_dir: &Path) -> Result<TaskQueue> {
         path: path.clone(),
         source,
     })?;
-    parse(&contents).map_err(|error| KvistError::TaskQueueUnavailable {
+    let queue = parse(&contents).map_err(|error| KvistError::TaskQueueUnavailable {
         path,
         reason: error.to_string(),
-    })
+    })?;
+    Ok((queue, digest(contents.as_bytes())))
 }
 
 fn task_is_ready(task: &Task, tasks: &[Task]) -> bool {
@@ -329,6 +339,7 @@ fn transition_error(task: &Task, target: TaskStatus, reason: &str) -> KvistError
 struct TaskLock {
     path: PathBuf,
     contents: String,
+    snapshot: TaskLockSnapshot,
     released: bool,
 }
 
@@ -338,13 +349,27 @@ impl TaskLock {
     }
 
     fn create(path: &Path, task_id: &str, started_at: &Timestamp) -> Result<Self> {
-        let contents = format!("started_at: {started_at}\ntask_id: {task_id:?}\n");
+        let contents = format!(
+            "schema_version: 1\nstarted_at: {started_at}\ntask_id: {task_id:?}\npid: {}\nnonce: {}\n",
+            std::process::id(),
+            random_lock_nonce()?
+        );
         match write_new_file_atomically(path, &contents) {
-            Ok(()) => Ok(Self {
-                path: path.to_path_buf(),
-                contents,
-                released: false,
-            }),
+            Ok(()) => {
+                let snapshot = read_task_lock(path)?;
+                if snapshot.contents != contents {
+                    return Err(KvistError::TaskQueueUnavailable {
+                        path: path.to_path_buf(),
+                        reason: "task lock ownership changed immediately after creation".to_owned(),
+                    });
+                }
+                Ok(Self {
+                    path: path.to_path_buf(),
+                    contents,
+                    snapshot,
+                    released: false,
+                })
+            }
             Err(KvistError::Io { source, .. }) if source.kind() == io::ErrorKind::AlreadyExists => {
                 Err(KvistError::TaskLockExists {
                     path: path.to_path_buf(),
@@ -355,25 +380,94 @@ impl TaskLock {
         }
     }
 
-    fn revalidate(&self) -> Result<()> {
-        let metadata = fs::symlink_metadata(&self.path).map_err(|source| {
-            KvistError::TaskQueueUnavailable {
-                path: self.path.clone(),
-                reason: format!("cannot revalidate task lock ownership: {source}"),
+    fn recover_for_context(
+        context: &TaskContext,
+        task_id: &str,
+        started_at: &Timestamp,
+        expected_crashed_lock_digest: &str,
+    ) -> Result<Self> {
+        let path = Self::task_lock_path(context)?;
+        Self::recover_path(&path, task_id, started_at, expected_crashed_lock_digest)
+    }
+
+    fn recover_path(
+        path: &Path,
+        task_id: &str,
+        started_at: &Timestamp,
+        expected_crashed_lock_digest: &str,
+    ) -> Result<Self> {
+        match Self::create(path, task_id, started_at) {
+            Ok(lock) => Ok(lock),
+            Err(KvistError::TaskLockExists { .. }) => {
+                let retained = read_task_lock(path)?;
+                if !valid_task_lock_record(&retained.contents)
+                    || digest(retained.contents.as_bytes()) != expected_crashed_lock_digest
+                    || !retained
+                        .contents
+                        .contains(&format!("task_id: {task_id:?}\n"))
+                {
+                    return Err(KvistError::TaskQueueUnavailable {
+                        path: path.to_path_buf(),
+                        reason: "recovery refused because the retained task lock is not the exact authenticated crashed-operation lock".to_owned(),
+                    });
+                }
+                if lock_owner_appears_live(&retained.contents) {
+                    return Err(KvistError::TaskQueueUnavailable {
+                        path: path.to_path_buf(),
+                        reason: "recovery refused because the exact crashed-operation lock owner still appears live".to_owned(),
+                    });
+                }
+
+                let quarantine = unique_lock_quarantine_path(path)?;
+                fs::rename(path, &quarantine).map_err(|source| KvistError::Io {
+                    operation: "quarantine exact stale task lock for recovery",
+                    path: path.to_path_buf(),
+                    source,
+                })?;
+                sync_lock_directory(path)?;
+
+                let quarantined = read_task_lock(&quarantine)?;
+                if quarantined != retained
+                    || digest(quarantined.contents.as_bytes()) != expected_crashed_lock_digest
+                    || lock_owner_appears_live(&quarantined.contents)
+                {
+                    return Err(restore_quarantined_lock(
+                        path,
+                        &quarantine,
+                        "recovery refused because the task lock changed while it was being quarantined",
+                    ));
+                }
+
+                match Self::create(path, task_id, started_at) {
+                    Ok(lock) => {
+                        fs::remove_file(&quarantine).map_err(|source| KvistError::Io {
+                            operation: "remove quarantined stale task lock",
+                            path: quarantine.clone(),
+                            source,
+                        })?;
+                        sync_lock_directory(path)?;
+                        Ok(lock)
+                    }
+                    Err(error) => Err(restore_quarantined_lock(
+                        path,
+                        &quarantine,
+                        &format!(
+                            "recovery lock takeover raced another owner; retained quarantined state: {error}"
+                        ),
+                    )),
+                }
             }
-        })?;
-        if is_link_like(&metadata) || !metadata.file_type().is_file() {
-            return Err(KvistError::TaskQueueUnavailable {
-                path: self.path.clone(),
-                reason: "task lock ownership was replaced".to_owned(),
-            });
+            Err(error) => Err(error),
         }
-        let contents =
-            fs::read_to_string(&self.path).map_err(|source| KvistError::TaskQueueUnavailable {
-                path: self.path.clone(),
-                reason: format!("cannot read task lock ownership: {source}"),
-            })?;
-        if contents != self.contents {
+    }
+
+    fn contents_digest(&self) -> String {
+        digest(self.contents.as_bytes())
+    }
+
+    fn revalidate(&self) -> Result<()> {
+        let snapshot = read_task_lock(&self.path)?;
+        if snapshot.contents != self.contents || snapshot != self.snapshot {
             return Err(KvistError::TaskQueueUnavailable {
                 path: self.path.clone(),
                 reason: "task lock ownership changed".to_owned(),
@@ -384,11 +478,71 @@ impl TaskLock {
 
     fn release(mut self) -> Result<()> {
         self.released = true;
-        fs::remove_file(&self.path).map_err(|source| KvistError::Io {
-            operation: "remove user-owned task lock",
+        self.remove_if_owned()
+    }
+
+    fn remove_if_owned(&self) -> Result<()> {
+        self.revalidate()?;
+        let quarantine = unique_lock_quarantine_path(&self.path)?;
+        fs::rename(&self.path, &quarantine).map_err(|source| KvistError::Io {
+            operation: "quarantine user-owned task lock for release",
             path: self.path.clone(),
             source,
-        })
+        })?;
+        sync_lock_directory(&self.path)?;
+        let snapshot = read_task_lock(&quarantine)?;
+        if snapshot.contents != self.contents || snapshot != self.snapshot {
+            return Err(restore_quarantined_lock(
+                &self.path,
+                &quarantine,
+                "task lock ownership changed during release",
+            ));
+        }
+        fs::remove_file(&quarantine).map_err(|source| KvistError::Io {
+            operation: "remove user-owned task lock",
+            path: quarantine,
+            source,
+        })?;
+        sync_lock_directory(&self.path)
+    }
+
+    fn remove_stale_path(path: &Path) -> Result<()> {
+        let retained = read_task_lock(path)?;
+        if !valid_task_lock_record(&retained.contents) {
+            return Err(KvistError::TaskQueueUnavailable {
+                path: path.to_path_buf(),
+                reason: "unlock refused because the task lock record is malformed".to_owned(),
+            });
+        }
+        if lock_owner_appears_live(&retained.contents) {
+            return Err(KvistError::TaskQueueUnavailable {
+                path: path.to_path_buf(),
+                reason: "unlock refused because the task lock owner still appears live".to_owned(),
+            });
+        }
+
+        let quarantine = unique_lock_quarantine_path(path)?;
+        fs::rename(path, &quarantine).map_err(|source| KvistError::Io {
+            operation: "quarantine stale task lock for unlock",
+            path: path.to_path_buf(),
+            source,
+        })?;
+        sync_lock_directory(path)?;
+
+        let quarantined = read_task_lock(&quarantine)?;
+        if quarantined != retained || lock_owner_appears_live(&quarantined.contents) {
+            return Err(restore_quarantined_lock(
+                path,
+                &quarantine,
+                "unlock refused because the task lock changed while it was being quarantined",
+            ));
+        }
+        fs::remove_file(&quarantine).map_err(|source| KvistError::Io {
+            operation: "remove quarantined stale task lock for unlock",
+            path: quarantine,
+            source,
+        })?;
+        sync_lock_directory(path)
     }
 
     fn task_lock_path(context: &TaskContext) -> Result<PathBuf> {
@@ -468,9 +622,248 @@ impl TaskLock {
 impl Drop for TaskLock {
     fn drop(&mut self) {
         if !self.released {
-            let _ = fs::remove_file(&self.path);
+            let _ = self.remove_if_owned();
         }
     }
+}
+
+fn random_lock_nonce() -> Result<String> {
+    let mut bytes = [0_u8; 16];
+    getrandom::fill(&mut bytes).map_err(|error| KvistError::TaskQueueUnavailable {
+        path: PathBuf::from("."),
+        reason: format!("cannot generate task lock owner nonce: {error}"),
+    })?;
+    Ok(hex::encode(bytes))
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct TaskLockSnapshot {
+    contents: String,
+    identity: TaskLockFileIdentity,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct TaskLockFileIdentity {
+    length: u64,
+    #[cfg(unix)]
+    device: u64,
+    #[cfg(unix)]
+    inode: u64,
+}
+
+fn task_lock_file_identity(metadata: &fs::Metadata) -> TaskLockFileIdentity {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        TaskLockFileIdentity {
+            length: metadata.len(),
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        TaskLockFileIdentity {
+            length: metadata.len(),
+        }
+    }
+}
+
+fn read_task_lock(path: &Path) -> Result<TaskLockSnapshot> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|source| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: format!("cannot inspect task lock ownership: {source}"),
+        })?;
+    if is_link_like(&metadata)
+        || !metadata.file_type().is_file()
+        || metadata.len() > MAX_TASK_LOCK_BYTES
+    {
+        return Err(KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: "task lock ownership was replaced or is malformed".to_owned(),
+        });
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NOFOLLOW);
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|source| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: format!("cannot open task lock ownership without following links: {source}"),
+        })?;
+    let opened_metadata = file
+        .metadata()
+        .map_err(|source| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: format!("cannot inspect opened task lock ownership: {source}"),
+        })?;
+    let expected_identity = task_lock_file_identity(&metadata);
+    let opened_identity = task_lock_file_identity(&opened_metadata);
+    if !opened_metadata.file_type().is_file() || opened_identity != expected_identity {
+        return Err(KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: "task lock ownership changed while it was opened".to_owned(),
+        });
+    }
+    let mut bytes = Vec::with_capacity(opened_metadata.len() as usize);
+    (&mut file)
+        .take(MAX_TASK_LOCK_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|source| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: format!("cannot read bounded task lock ownership: {source}"),
+        })?;
+    let final_metadata = file
+        .metadata()
+        .map_err(|source| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: format!("cannot reinspect task lock ownership: {source}"),
+        })?;
+    if bytes.len() as u64 > MAX_TASK_LOCK_BYTES
+        || task_lock_file_identity(&final_metadata) != opened_identity
+        || final_metadata.len() != bytes.len() as u64
+    {
+        return Err(KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: "task lock ownership grew or changed while it was read".to_owned(),
+        });
+    }
+    let contents = String::from_utf8(bytes).map_err(|_| KvistError::TaskQueueUnavailable {
+        path: path.to_path_buf(),
+        reason: "task lock ownership is not valid UTF-8".to_owned(),
+    })?;
+    Ok(TaskLockSnapshot {
+        contents,
+        identity: opened_identity,
+    })
+}
+
+fn unique_lock_quarantine_path(path: &Path) -> Result<PathBuf> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: "task lock has no parent directory".to_owned(),
+        })?;
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: "task lock file name is not valid UTF-8".to_owned(),
+        })?;
+    for _ in 0..16 {
+        let candidate = parent.join(format!(
+            ".{name}.recovery-quarantine-{}",
+            random_lock_nonce()?
+        ));
+        match fs::symlink_metadata(&candidate) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(candidate),
+            Ok(_) => continue,
+            Err(source) => {
+                return Err(KvistError::Io {
+                    operation: "inspect task lock quarantine path",
+                    path: candidate,
+                    source,
+                });
+            }
+        }
+    }
+    Err(KvistError::TaskQueueUnavailable {
+        path: path.to_path_buf(),
+        reason: "cannot allocate a unique task lock quarantine path".to_owned(),
+    })
+}
+
+fn restore_quarantined_lock(path: &Path, quarantine: &Path, reason: &str) -> KvistError {
+    match fs::hard_link(quarantine, path) {
+        Ok(()) => {
+            let _ = fs::remove_file(quarantine);
+            let _ = sync_lock_directory(path);
+            KvistError::TaskQueueUnavailable {
+                path: path.to_path_buf(),
+                reason: reason.to_owned(),
+            }
+        }
+        Err(error) => KvistError::TaskQueueUnavailable {
+            path: quarantine.to_path_buf(),
+            reason: format!(
+                "{reason}; could not restore without overwriting another owner: {error}"
+            ),
+        },
+    }
+}
+
+fn sync_lock_directory(path: &Path) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: "task lock has no parent directory".to_owned(),
+        })?;
+    sync_directory(parent)
+}
+
+fn lock_owner_appears_live(contents: &str) -> bool {
+    let Some(pid) = contents
+        .lines()
+        .find_map(|line| line.strip_prefix("pid: "))
+        .and_then(|value| value.parse::<u32>().ok())
+    else {
+        return false;
+    };
+    #[cfg(target_os = "linux")]
+    {
+        Path::new("/proc").join(pid.to_string()).is_dir()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
+fn valid_task_lock_record(contents: &str) -> bool {
+    let mut lines = contents.lines();
+    let valid = lines.next() == Some("schema_version: 1")
+        && lines
+            .next()
+            .and_then(|line| line.strip_prefix("started_at: "))
+            .is_some_and(|value| !value.is_empty())
+        && lines
+            .next()
+            .and_then(|line| line.strip_prefix("task_id: \""))
+            .and_then(|value| value.strip_suffix('"'))
+            .is_some_and(|value| {
+                !value.is_empty()
+                    && value.len() <= 64
+                    && !value.starts_with('-')
+                    && !value.ends_with('-')
+                    && value.bytes().all(|byte| {
+                        byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-'
+                    })
+            })
+        && lines
+            .next()
+            .and_then(|line| line.strip_prefix("pid: "))
+            .and_then(|value| value.parse::<u32>().ok())
+            .is_some_and(|pid| pid > 0)
+        && lines
+            .next()
+            .and_then(|line| line.strip_prefix("nonce: "))
+            .is_some_and(|value| {
+                value.len() == 32
+                    && value
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            });
+    valid && lines.next().is_none()
 }
 
 fn attempt_path(component_dir: &Path, task_id: &str) -> Result<PathBuf> {
@@ -501,6 +894,12 @@ fn attempt_path(component_dir: &Path, task_id: &str) -> Result<PathBuf> {
         }
     }
     Ok(directory.join(format!("{task_id}.jsonl")))
+}
+
+fn existing_attempt_path(component_dir: &Path, task_id: &str) -> PathBuf {
+    component_dir
+        .join(".kvist-attempts")
+        .join(format!("{task_id}.jsonl"))
 }
 
 #[derive(Serialize)]
@@ -564,27 +963,21 @@ fn append_attempt(path: &Path, record: AttemptRecord<'_>) -> Result<()> {
 }
 
 fn append_encoded_attempt(path: &Path, encoded: &str, operation: &'static str) -> Result<()> {
-    let existed = if let Ok(metadata) = fs::symlink_metadata(path) {
-        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-            return Err(KvistError::Io {
-                operation,
-                path: path.to_path_buf(),
-                source: io::Error::other("attempt record must be a regular file"),
-            });
+    let (mut file, created) = match open_existing_attempt_for_append(path, operation) {
+        Ok(file) => (file, false),
+        Err(KvistError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+            match create_attempt_for_append(path, operation) {
+                Ok(file) => (file, true),
+                Err(KvistError::Io { source, .. })
+                    if source.kind() == io::ErrorKind::AlreadyExists =>
+                {
+                    (open_existing_attempt_for_append(path, operation)?, false)
+                }
+                Err(error) => return Err(error),
+            }
         }
-        true
-    } else {
-        false
+        Err(error) => return Err(error),
     };
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|source| KvistError::Io {
-            operation: "open attempt record",
-            path: path.to_path_buf(),
-            source,
-        })?;
     file.write_all(encoded.as_bytes())
         .and_then(|()| file.write_all(b"\n"))
         .and_then(|()| file.sync_all())
@@ -593,7 +986,7 @@ fn append_encoded_attempt(path: &Path, encoded: &str, operation: &'static str) -
             path: path.to_path_buf(),
             source,
         })?;
-    if !existed {
+    if created {
         let parent = path.parent().ok_or_else(|| KvistError::Io {
             operation: "determine attempt record parent",
             path: path.to_path_buf(),
@@ -604,34 +997,511 @@ fn append_encoded_attempt(path: &Path, encoded: &str, operation: &'static str) -
     Ok(())
 }
 
-fn ensure_attempt_recovered(component_dir: &Path, task_id: &str) -> Result<()> {
-    let path = component_dir
-        .join(".kvist-attempts")
-        .join(format!("{task_id}.jsonl"));
-    let contents = match fs::read_to_string(&path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+fn open_existing_attempt_for_append(path: &Path, operation: &'static str) -> Result<fs::File> {
+    let mut options = OpenOptions::new();
+    options.append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
+    }
+    let file = options.open(path).map_err(|source| KvistError::Io {
+        operation: "open attempt record without following links",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    validate_opened_attempt_file(&file, path, operation)?;
+    Ok(file)
+}
+
+fn create_attempt_for_append(path: &Path, operation: &'static str) -> Result<fs::File> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
+    }
+    let file = options.open(path).map_err(|source| KvistError::Io {
+        operation: "create attempt record without overwriting",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    validate_opened_attempt_file(&file, path, operation)?;
+    Ok(file)
+}
+
+fn validate_opened_attempt_file(
+    file: &fs::File,
+    path: &Path,
+    operation: &'static str,
+) -> Result<()> {
+    let metadata = file.metadata().map_err(|source| KvistError::Io {
+        operation: "inspect opened attempt record",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if !metadata.file_type().is_file() {
+        return Err(KvistError::Io {
+            operation,
+            path: path.to_path_buf(),
+            source: io::Error::other("attempt record must be a regular file"),
+        });
+    }
+    Ok(())
+}
+
+fn append_json_attempt<T: Serialize>(
+    path: &Path,
+    record: &T,
+    operation: &'static str,
+) -> Result<()> {
+    let encoded =
+        serde_json::to_string(record).map_err(|error| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: format!("cannot serialize attempt evidence: {error}"),
+        })?;
+    append_encoded_attempt(path, &encoded, operation)
+}
+
+struct AttemptJournal {
+    events: Vec<Value>,
+    digest: String,
+}
+
+fn read_attempt_journal(path: &Path) -> Result<AttemptJournal> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(AttemptJournal {
+                events: Vec::new(),
+                digest: digest(b""),
+            });
+        }
         Err(source) => {
             return Err(KvistError::Io {
-                operation: "read attempt record",
-                path,
+                operation: "inspect attempt journal",
+                path: path.to_path_buf(),
                 source,
             });
         }
     };
-    if contents
-        .lines()
-        .rev()
-        .find(|line| !line.trim().is_empty())
-        .is_some_and(|line| line.contains(r#""phase":"prepared""#))
-    {
+    if is_link_like(&metadata) || !metadata.file_type().is_file() {
         return Err(KvistError::TaskQueueUnavailable {
-            path,
-            reason: "a prepared task attempt requires explicit recovery before another transition"
+            path: path.to_path_buf(),
+            reason: "attempt journal must be a regular non-link file".to_owned(),
+        });
+    }
+    if metadata.len() > MAX_ATTEMPT_JOURNAL_BYTES {
+        return Err(KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: format!("attempt journal exceeds the {MAX_ATTEMPT_JOURNAL_BYTES}-byte limit"),
+        });
+    }
+
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(path).map_err(|source| KvistError::Io {
+        operation: "open attempt journal without following links",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let opened_metadata = file.metadata().map_err(|source| KvistError::Io {
+        operation: "inspect opened attempt journal",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if !opened_metadata.file_type().is_file() || opened_metadata.len() > MAX_ATTEMPT_JOURNAL_BYTES {
+        return Err(KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: "attempt journal changed to a non-regular or oversized file while opening"
                 .to_owned(),
         });
     }
+    let mut bytes =
+        Vec::with_capacity(opened_metadata.len().min(MAX_ATTEMPT_JOURNAL_BYTES) as usize);
+    (&mut file)
+        .take(MAX_ATTEMPT_JOURNAL_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|source| KvistError::Io {
+            operation: "read bounded attempt journal",
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let final_metadata = file.metadata().map_err(|source| KvistError::Io {
+        operation: "reinspect opened attempt journal",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if bytes.len() as u64 > MAX_ATTEMPT_JOURNAL_BYTES
+        || final_metadata.len() != opened_metadata.len()
+        || final_metadata.len() != bytes.len() as u64
+    {
+        return Err(KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: "attempt journal grew or changed while it was read".to_owned(),
+        });
+    }
+    let contents =
+        String::from_utf8(bytes.clone()).map_err(|_| KvistError::TaskQueueUnavailable {
+            path: path.to_path_buf(),
+            reason: "attempt journal is not valid UTF-8".to_owned(),
+        })?;
+    let mut events = Vec::new();
+    for (line_number, line) in contents.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if events.len() >= MAX_ATTEMPT_EVENTS {
+            return Err(KvistError::TaskQueueUnavailable {
+                path: path.to_path_buf(),
+                reason: format!("attempt journal exceeds the {MAX_ATTEMPT_EVENTS}-event limit"),
+            });
+        }
+        events.push(serde_json::from_str(line).map_err(|error| {
+            KvistError::TaskQueueUnavailable {
+                path: path.to_path_buf(),
+                reason: format!(
+                    "attempt journal line {} is malformed: {error}",
+                    line_number + 1
+                ),
+            }
+        })?);
+    }
+    Ok(AttemptJournal {
+        events,
+        digest: digest(&bytes),
+    })
+}
+
+fn next_attempt_id(path: &Path) -> Result<String> {
+    let journal = read_attempt_journal(path)?;
+    let mut used = BTreeSet::new();
+    for event in journal.events {
+        if event.get("schema_version").is_none() {
+            continue;
+        }
+        let attempt = event
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KvistError::TaskQueueUnavailable {
+                path: path.to_path_buf(),
+                reason: "versioned attempt evidence is missing attempt_id".to_owned(),
+            })?;
+        if !valid_attempt_id(attempt) {
+            return Err(KvistError::TaskQueueUnavailable {
+                path: path.to_path_buf(),
+                reason: "versioned attempt evidence has an invalid attempt_id".to_owned(),
+            });
+        }
+        used.insert(attempt.to_owned());
+    }
+    for number in 1..=MAX_ATTEMPT_EVENTS {
+        let attempt_id = format!("attempt-{number:04}");
+        if !used.contains(&attempt_id) {
+            return Ok(attempt_id);
+        }
+    }
+    Err(KvistError::TaskQueueUnavailable {
+        path: path.to_path_buf(),
+        reason: "attempt journal has no available bounded attempt identity".to_owned(),
+    })
+}
+
+fn valid_attempt_id(value: &str) -> bool {
+    value
+        .strip_prefix("attempt-")
+        .is_some_and(|number| number.len() == 4 && number.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn ensure_component_attempts_recovered(component_dir: &Path) -> Result<()> {
+    let queue = read_queue(component_dir)?;
+    ensure_component_attempts_recovered_except(component_dir, &queue, None)
+}
+
+fn ensure_component_attempts_recovered_for_recovery(
+    component_dir: &Path,
+    task_id: &str,
+    attempt_id: &str,
+) -> Result<()> {
+    let queue = read_queue(component_dir)?;
+    ensure_component_attempts_recovered_except(component_dir, &queue, Some((task_id, attempt_id)))
+}
+
+fn ensure_component_attempts_recovered_except(
+    component_dir: &Path,
+    queue: &TaskQueue,
+    recovery_in_progress: Option<(&str, &str)>,
+) -> Result<()> {
+    for task in &queue.tasks {
+        let permitted_attempt = recovery_in_progress.and_then(|(recovery_task, attempt_id)| {
+            (task.id == recovery_task).then_some(attempt_id)
+        });
+        let attempt_path = existing_attempt_path(component_dir, &task.id);
+        if task
+            .recovery_state
+            .as_ref()
+            .is_some_and(|state| Some(state.attempt_id.as_str()) != permitted_attempt)
+        {
+            return Err(unresolved_attempt_error(&attempt_path));
+        }
+        ensure_task_attempt_recovered(component_dir, &task.id, permitted_attempt)?;
+    }
     Ok(())
+}
+
+fn ensure_task_attempt_recovered(
+    component_dir: &Path,
+    task_id: &str,
+    permitted_attempt: Option<&str>,
+) -> Result<()> {
+    let path = existing_attempt_path(component_dir, task_id);
+    let journal = read_attempt_journal(&path)?;
+    if journal.events.is_empty() {
+        return Ok(());
+    }
+    if legacy_trailing_prepared(&journal.events) {
+        return Err(KvistError::TaskQueueUnavailable {
+            path,
+            reason: "a legacy trailing prepared task attempt requires explicit recovery before another transition"
+                .to_owned(),
+        });
+    }
+    if !journal
+        .events
+        .iter()
+        .any(|event| event.get("schema_version").is_some())
+    {
+        return Ok(());
+    }
+    let secret = load_existing_recovery_secret()?;
+    let assessed = assess_attempt_journal(&path, journal, task_id, &secret)?;
+    if assessed.attempts.iter().any(|(attempt_id, attempt)| {
+        !attempt.is_fully_recovered() && Some(attempt_id.as_str()) != permitted_attempt
+    }) {
+        return Err(unresolved_attempt_error(&path));
+    }
+    Ok(())
+}
+
+fn unresolved_attempt_error(path: &Path) -> KvistError {
+    KvistError::TaskQueueUnavailable {
+        path: path.to_path_buf(),
+        reason: "a fenced or unresolved authenticated task attempt requires `kvist task recover` before another transition"
+            .to_owned(),
+    }
+}
+
+#[derive(Default)]
+struct AssessedAttempt {
+    prepared: Option<PreparedAttempt>,
+    pre_spawn_failure: Option<PreSpawnFailure>,
+    recovery_prepared: Option<RecoveryPreparedAttempt>,
+    recovered: Option<RecoveredAttempt>,
+}
+
+impl AssessedAttempt {
+    fn is_fully_recovered(&self) -> bool {
+        matches!(
+            (&self.prepared, &self.pre_spawn_failure, &self.recovery_prepared, &self.recovered),
+            (Some(prepared), Some(failure), Some(decision), Some(recovered))
+                if decision.fenced_queue_digest == prepared.intended_post_queue_digest
+                    && failure.prepared_event_digest.starts_with("sha256:")
+                    && decision.recovered_queue_digest == recovered.recovered_queue_digest
+                    && decision.pre_status == prepared.pre_status
+        )
+    }
+}
+
+struct AssessedJournal {
+    digest: String,
+    attempts: BTreeMap<String, AssessedAttempt>,
+}
+
+fn assess_attempt_journal(
+    path: &Path,
+    journal: AttemptJournal,
+    task_id: &str,
+    secret: &[u8],
+) -> Result<AssessedJournal> {
+    let mut attempts = BTreeMap::<String, AssessedAttempt>::new();
+    for event in journal.events {
+        let Some(version) = event.get("schema_version") else {
+            continue;
+        };
+        if version != &Value::from(ATTEMPT_SCHEMA_VERSION) {
+            return Err(journal_error(
+                path,
+                "attempt journal contains an unsupported versioned evidence record",
+            ));
+        }
+        let event_task_id = event
+            .get("task_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| journal_error(path, "versioned attempt evidence is missing task_id"))?;
+        if event_task_id != task_id {
+            return Err(journal_error(
+                path,
+                "attempt journal contains evidence bound to a different task",
+            ));
+        }
+        let event_attempt_id =
+            event
+                .get("attempt_id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    journal_error(path, "versioned attempt evidence is missing attempt_id")
+                })?;
+        if !valid_attempt_id(event_attempt_id) {
+            return Err(journal_error(
+                path,
+                "versioned attempt evidence has an invalid attempt_id",
+            ));
+        }
+        let phase = event
+            .get("phase")
+            .and_then(Value::as_str)
+            .ok_or_else(|| journal_error(path, "attempt journal evidence is missing its phase"))?;
+        let attempt = attempts.entry(event_attempt_id.to_owned()).or_default();
+        match phase {
+            "prepared" => {
+                if attempt.prepared.is_some()
+                    || attempt.pre_spawn_failure.is_some()
+                    || attempt.recovery_prepared.is_some()
+                    || attempt.recovered.is_some()
+                {
+                    return Err(journal_error(
+                        path,
+                        "attempt journal contains duplicate or out-of-order prepared evidence",
+                    ));
+                }
+                let prepared = decode_evidence::<PreparedAttempt>(&event, path, "prepared")?;
+                validate_prepared_attempt(&prepared, path)?;
+                if prepared.authentication_tag != prepared_attempt_tag(secret, &prepared)? {
+                    return Err(journal_error(
+                        path,
+                        "prepared attempt evidence is not authentically bound by the user-owned host secret",
+                    ));
+                }
+                attempt.prepared = Some(prepared);
+            }
+            "pre-spawn-failure" => {
+                if attempt.prepared.is_none()
+                    || attempt.pre_spawn_failure.is_some()
+                    || attempt.recovery_prepared.is_some()
+                    || attempt.recovered.is_some()
+                {
+                    return Err(journal_error(
+                        path,
+                        "attempt journal contains duplicate or out-of-order pre-spawn failure evidence",
+                    ));
+                }
+                let failure =
+                    decode_evidence::<PreSpawnFailure>(&event, path, "pre-spawn failure")?;
+                let prepared = attempt.prepared.as_ref().ok_or_else(|| {
+                    journal_error(path, "pre-spawn failure has no prepared attempt")
+                })?;
+                validate_pre_spawn_failure(&failure, prepared, path)?;
+                if failure.authentication_tag != pre_spawn_failure_tag(secret, &failure)? {
+                    return Err(journal_error(
+                        path,
+                        "pre-spawn failure evidence is not authentically bound by the user-owned host secret",
+                    ));
+                }
+                attempt.pre_spawn_failure = Some(failure);
+            }
+            "recovery-prepared" => {
+                if attempt.prepared.is_none()
+                    || attempt.pre_spawn_failure.is_none()
+                    || attempt.recovery_prepared.is_some()
+                    || attempt.recovered.is_some()
+                {
+                    return Err(journal_error(
+                        path,
+                        "attempt journal contains duplicate or out-of-order recovery-prepared evidence",
+                    ));
+                }
+                let decision =
+                    decode_evidence::<RecoveryPreparedAttempt>(&event, path, "recovery-prepared")?;
+                let prepared = attempt.prepared.as_ref().ok_or_else(|| {
+                    journal_error(path, "recovery evidence has no prepared attempt")
+                })?;
+                let failure = attempt.pre_spawn_failure.as_ref().ok_or_else(|| {
+                    journal_error(path, "recovery evidence has no pre-spawn failure evidence")
+                })?;
+                validate_recovery_prepared(&decision, prepared, failure, path)?;
+                if decision.authentication_tag != recovery_prepared_tag(secret, &decision)? {
+                    return Err(journal_error(
+                        path,
+                        "recovery-prepared evidence is not authentically bound by the user-owned host secret",
+                    ));
+                }
+                attempt.recovery_prepared = Some(decision);
+            }
+            "recovered" => {
+                if attempt.recovery_prepared.is_none() || attempt.recovered.is_some() {
+                    return Err(journal_error(
+                        path,
+                        "attempt journal contains duplicate or out-of-order recovered evidence",
+                    ));
+                }
+                let recovered = decode_evidence::<RecoveredAttempt>(&event, path, "recovered")?;
+                let decision = attempt.recovery_prepared.as_ref().ok_or_else(|| {
+                    journal_error(path, "recovered evidence has no recovery-prepared decision")
+                })?;
+                validate_recovered_attempt(&recovered, decision, path)?;
+                if recovered.authentication_tag != recovered_attempt_tag(secret, &recovered)? {
+                    return Err(journal_error(
+                        path,
+                        "recovered evidence is not authentically bound by the user-owned host secret",
+                    ));
+                }
+                attempt.recovered = Some(recovered);
+            }
+            _ => {
+                return Err(journal_error(
+                    path,
+                    "attempt journal contains an unsupported versioned evidence phase",
+                ));
+            }
+        }
+    }
+    Ok(AssessedJournal {
+        digest: journal.digest,
+        attempts,
+    })
+}
+
+fn decode_evidence<T: for<'de> Deserialize<'de>>(
+    event: &Value,
+    path: &Path,
+    name: &str,
+) -> Result<T> {
+    serde_json::from_value(event.clone()).map_err(|_| {
+        journal_error(
+            path,
+            &format!("{name} attempt evidence has malformed or unsupported fields"),
+        )
+    })
+}
+
+fn journal_error(path: &Path, reason: &str) -> KvistError {
+    KvistError::TaskQueueUnavailable {
+        path: path.to_path_buf(),
+        reason: reason.to_owned(),
+    }
+}
+
+fn legacy_trailing_prepared(events: &[Value]) -> bool {
+    events.last().is_some_and(|event| {
+        event.get("schema_version").is_none()
+            && event.get("phase").and_then(Value::as_str) == Some("prepared")
+    })
 }
 
 fn status_name(status: TaskStatus) -> &'static str {
@@ -652,6 +1522,7 @@ pub fn accept(component_path: &Path) -> Result<String> {
     let result = (|| {
         let context = validate_accept_context(component_path)?;
         let mut queue = read_queue(&context.component_dir)?;
+        ensure_component_attempts_recovered(&context.component_dir)?;
 
         let requirements = read_validated_document(
             DocumentKind::Requirements,
@@ -776,19 +1647,11 @@ fn read_validated_document(kind: DocumentKind, path: &Path) -> Result<String> {
 /// Unlocks a locked component directory, optionally asking for confirmation.
 pub fn unlock(component_path: &Path, force: bool) -> Result<String> {
     let context = validate_context(component_path)?;
+    ensure_component_attempts_recovered(&context.component_dir)?;
     let lock_path = TaskLock::task_lock_path(&context)?;
 
-    // Check if the lock file exists
     match fs::symlink_metadata(&lock_path) {
-        Ok(metadata) => {
-            if is_link_like(&metadata) || !metadata.file_type().is_file() {
-                return Err(KvistError::TaskQueueUnavailable {
-                    path: lock_path,
-                    reason: "stale lock state is not a regular file".to_owned(),
-                });
-            }
-
-            // Prompt user for confirmation unless --force is active
+        Ok(_) => {
             if !force {
                 eprint!(
                     "Component at '{}' is locked. Do you really want to unlock it? (y/N): ",
@@ -815,12 +1678,7 @@ pub fn unlock(component_path: &Path, force: bool) -> Result<String> {
                 }
             }
 
-            // Remove lock file
-            fs::remove_file(&lock_path).map_err(|source| KvistError::Io {
-                operation: "remove manual task lock",
-                path: lock_path.clone(),
-                source,
-            })?;
+            TaskLock::remove_stale_path(&lock_path)?;
 
             Ok(format!(
                 "successfully unlocked component {}",
@@ -837,6 +1695,664 @@ pub fn unlock(component_path: &Path, force: bool) -> Result<String> {
             source,
         }),
     }
+}
+
+/// Reconciles a fenced attempt only when host-authenticated evidence proves the
+/// runner descriptor was never launched and no write scope was exposed.
+pub fn recover(
+    component_path: &Path,
+    task_id: &str,
+    attempt_id: &str,
+    disposition: crate::cli::RecoveryDispositionArgument,
+) -> Result<String> {
+    if !matches!(
+        disposition,
+        crate::cli::RecoveryDispositionArgument::ExecutionDidNotStart
+    ) {
+        return Err(KvistError::TaskQueueUnavailable {
+            path: component_path.to_path_buf(),
+            reason: "unsupported recovery disposition".to_owned(),
+        });
+    }
+    if !valid_attempt_id(attempt_id) {
+        return Err(KvistError::TaskQueueUnavailable {
+            path: component_path.to_path_buf(),
+            reason: "attempt ID must be a bounded `attempt-` identity".to_owned(),
+        });
+    }
+    let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+    let context = validate_context_with_blocked(component_path, true)?;
+    ensure_task_attempt_is_recovery_candidate(&context, task_id, attempt_id)?;
+    preflight_recovery_evidence(
+        &existing_attempt_path(&context.component_dir, task_id),
+        task_id,
+        attempt_id,
+    )?;
+    ensure_component_attempts_recovered_for_recovery(&context.component_dir, task_id, attempt_id)?;
+    let initial = recovery_inputs(&context, task_id, attempt_id)?;
+    let lock = TaskLock::recover_for_context(
+        &context,
+        task_id,
+        &timestamp,
+        &initial.prepared.operation_lock_digest,
+    )?;
+    let result = (|| {
+        // The first assessment only authorizes a stale-lock takeover. Every
+        // mutable input is read again after that exclusive operation lock.
+        ensure_component_attempts_recovered_for_recovery(
+            &context.component_dir,
+            task_id,
+            attempt_id,
+        )?;
+        let mut inputs = recovery_inputs(&context, task_id, attempt_id)?;
+        let queue_path = context
+            .component_dir
+            .join(ComponentArtifact::TaskQueue.filename());
+
+        match &inputs.decision {
+            Some(decision) if inputs.queue_digest == decision.recovered_queue_digest => {
+                if inputs.recovered.is_none() {
+                    append_recovered_attempt(
+                        &inputs.journal_path,
+                        task_id,
+                        attempt_id,
+                        decision,
+                        &inputs.secret,
+                    )?;
+                }
+            }
+            Some(decision) if inputs.queue_digest == decision.fenced_queue_digest => {
+                revalidate_recovery_inputs_before_replace(
+                    &context, task_id, attempt_id, &inputs, &lock,
+                )?;
+                lock.revalidate()?;
+                replace_file_atomically(&queue_path, &inputs.recovered_queue)?;
+                append_recovered_attempt(
+                    &inputs.journal_path,
+                    task_id,
+                    attempt_id,
+                    decision,
+                    &inputs.secret,
+                )?;
+            }
+            Some(_) => {
+                return Err(journal_error(
+                    &queue_path,
+                    "recovery-prepared evidence does not match the current fenced or recovered queue",
+                ));
+            }
+            None => {
+                let decision = new_recovery_decision(&inputs, task_id, attempt_id, &timestamp)?;
+                append_json_attempt(
+                    &inputs.journal_path,
+                    &decision,
+                    "append authenticated recovery-prepared evidence",
+                )?;
+
+                // Re-read queue, journal, config, approval and scope after
+                // persisting the decision and immediately before replacement.
+                inputs = recovery_inputs(&context, task_id, attempt_id)?;
+                let decision = inputs.decision.as_ref().ok_or_else(|| {
+                    journal_error(
+                        &inputs.journal_path,
+                        "recovery-prepared evidence disappeared after it was appended",
+                    )
+                })?;
+                if inputs.queue_digest != decision.fenced_queue_digest {
+                    return Err(journal_error(
+                        &queue_path,
+                        "the fenced queue changed before recovery replacement",
+                    ));
+                }
+                revalidate_recovery_inputs_before_replace(
+                    &context, task_id, attempt_id, &inputs, &lock,
+                )?;
+                lock.revalidate()?;
+                replace_file_atomically(&queue_path, &inputs.recovered_queue)?;
+                append_recovered_attempt(
+                    &inputs.journal_path,
+                    task_id,
+                    attempt_id,
+                    decision,
+                    &inputs.secret,
+                )?;
+            }
+        }
+        Ok(format!(
+            "recovered fenced attempt `{attempt_id}` for task `{task_id}` to {} because the authenticated runner descriptor failure occurred before launch",
+            inputs.prepared.pre_status
+        ))
+    })();
+    let release = lock.release();
+    match (result, release) {
+        (Ok(output), Ok(())) => Ok(output),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), _) => Err(error),
+    }
+}
+
+fn ensure_task_attempt_is_recovery_candidate(
+    context: &TaskContext,
+    task_id: &str,
+    attempt_id: &str,
+) -> Result<()> {
+    let queue = read_queue(&context.component_dir)?;
+    let task = queue
+        .tasks
+        .iter()
+        .find(|task| task.id == task_id)
+        .ok_or_else(|| KvistError::TaskNotFound {
+            component: context.component_path.clone(),
+            task_id: task_id.to_owned(),
+        })?;
+    let is_fenced = task.status == TaskStatus::InProgress
+        && task.recovery_state.as_ref().is_some_and(|state| {
+            state.state == RecoveryStateKind::Fenced && state.attempt_id == attempt_id
+        });
+    let may_be_recovered_after_queue_replacement = task.recovery_state.is_none()
+        && matches!(task.status, TaskStatus::Pending | TaskStatus::InProgress);
+    if !is_fenced && !may_be_recovered_after_queue_replacement {
+        return Err(journal_error(
+            &context
+                .component_dir
+                .join(ComponentArtifact::TaskQueue.filename()),
+            "the requested task and attempt are not currently fenced together or at an exact recovery-decision queue state",
+        ));
+    }
+    Ok(())
+}
+
+fn preflight_recovery_evidence(journal_path: &Path, task_id: &str, attempt_id: &str) -> Result<()> {
+    let journal = read_attempt_journal(journal_path)?;
+    let mut prepared = None;
+    let mut failure = None;
+    for event in journal.events {
+        let Some(version) = event.get("schema_version") else {
+            continue;
+        };
+        if version != &Value::from(ATTEMPT_SCHEMA_VERSION) {
+            return Err(journal_error(
+                journal_path,
+                "attempt journal contains an unsupported versioned evidence record",
+            ));
+        }
+        if event.get("task_id").and_then(Value::as_str) != Some(task_id)
+            || event.get("attempt_id").and_then(Value::as_str) != Some(attempt_id)
+        {
+            continue;
+        }
+        match event.get("phase").and_then(Value::as_str) {
+            Some("prepared") if prepared.is_none() => {
+                let candidate = decode_evidence::<PreparedAttempt>(&event, journal_path, "prepared")
+                    .map_err(|_| {
+                        journal_error(
+                            journal_path,
+                            "fenced recovery requires authenticated prepared evidence with complete bounded fields",
+                        )
+                    })?;
+                validate_prepared_attempt(&candidate, journal_path).map_err(|_| {
+                    journal_error(
+                        journal_path,
+                        "fenced recovery requires authenticated prepared evidence with valid bounded fields",
+                    )
+                })?;
+                prepared = Some(candidate);
+            }
+            Some("pre-spawn-failure") if failure.is_none() => {
+                let candidate =
+                    decode_evidence::<PreSpawnFailure>(&event, journal_path, "pre-spawn failure")?;
+                failure = Some(candidate);
+            }
+            Some("recovery-prepared") | Some("recovered") => {}
+            Some(_) | None => {
+                return Err(journal_error(
+                    journal_path,
+                    "fenced recovery requires exactly one prepared no-launch evidence chain",
+                ));
+            }
+        }
+    }
+    let prepared = prepared.ok_or_else(|| {
+        journal_error(
+            journal_path,
+            "fenced recovery requires exactly one authenticated prepared attempt record",
+        )
+    })?;
+    let failure = failure.ok_or_else(|| {
+        journal_error(
+            journal_path,
+            "fenced recovery requires authenticated durable pre-spawn failure evidence",
+        )
+    })?;
+    validate_pre_spawn_failure(&failure, &prepared, journal_path)
+}
+
+fn validate_prepared_attempt(prepared: &PreparedAttempt, path: &Path) -> Result<()> {
+    if prepared.phase != "prepared"
+        || !valid_attempt_id(&prepared.attempt_id)
+        || prepared.task_id.trim().is_empty()
+        || !valid_recovery_status(&prepared.pre_status)
+        || !valid_digest(&prepared.pre_queue_digest)
+        || !valid_digest(&prepared.intended_post_queue_digest)
+        || !valid_digest(&prepared.policy_identity)
+        || !valid_digest(&prepared.runner_identity)
+        || !valid_digest(&prepared.operation_lock_digest)
+        || prepared.approved_write_scope.is_empty()
+        || !valid_authentication_tag(&prepared.authentication_tag)
+    {
+        return Err(journal_error(
+            path,
+            "prepared attempt evidence has invalid bounded identities or digests",
+        ));
+    }
+    validate_write_scope(&prepared.approved_write_scope, path)
+}
+
+fn validate_pre_spawn_failure(
+    failure: &PreSpawnFailure,
+    prepared: &PreparedAttempt,
+    path: &Path,
+) -> Result<()> {
+    if failure.phase != "pre-spawn-failure"
+        || failure.attempt_id != prepared.attempt_id
+        || failure.task_id != prepared.task_id
+        || failure.pre_status != prepared.pre_status
+        || failure.prepared_event_digest != prepared_event_digest(prepared)?
+        || failure.pre_queue_digest != prepared.pre_queue_digest
+        || failure.intended_post_queue_digest != prepared.intended_post_queue_digest
+        || failure.policy_identity != prepared.policy_identity
+        || failure.runner_identity != prepared.runner_identity
+        || failure.approved_write_scope != prepared.approved_write_scope
+        || failure.recorded_by != "kvist-host"
+        || failure.runner_descriptor_launched
+        || failure.write_scope_exposed
+        || failure.failure != "runner-descriptor-open-failed"
+        || !valid_authentication_tag(&failure.authentication_tag)
+    {
+        return Err(journal_error(
+            path,
+            "pre-spawn failure evidence is not exactly bound to the prepared no-launch attempt",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_recovery_prepared(
+    decision: &RecoveryPreparedAttempt,
+    prepared: &PreparedAttempt,
+    failure: &PreSpawnFailure,
+    path: &Path,
+) -> Result<()> {
+    if decision.phase != "recovery-prepared"
+        || decision.disposition != "execution-did-not-start"
+        || decision.attempt_id != prepared.attempt_id
+        || decision.task_id != prepared.task_id
+        || decision.prepared_event_digest != prepared_event_digest(prepared)?
+        || decision.pre_spawn_failure_event_digest != pre_spawn_failure_event_digest(failure)?
+        || decision.pre_status != prepared.pre_status
+        || decision.fenced_queue_digest != prepared.intended_post_queue_digest
+        || !valid_digest(&decision.recovered_queue_digest)
+        || decision.policy_identity != prepared.policy_identity
+        || decision.runner_identity != prepared.runner_identity
+        || decision.approved_write_scope != prepared.approved_write_scope
+        || decision.recorded_by != "kvist-host"
+        || !valid_authentication_tag(&decision.authentication_tag)
+    {
+        return Err(journal_error(
+            path,
+            "recovery-prepared evidence is not exactly bound to the prepared no-launch attempt",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_recovered_attempt(
+    recovered: &RecoveredAttempt,
+    decision: &RecoveryPreparedAttempt,
+    path: &Path,
+) -> Result<()> {
+    if recovered.phase != "recovered"
+        || recovered.attempt_id != decision.attempt_id
+        || recovered.task_id != decision.task_id
+        || recovered.recovery_prepared_event_digest != recovery_prepared_event_digest(decision)?
+        || recovered.recovered_queue_digest != decision.recovered_queue_digest
+        || recovered.recorded_by != "kvist-host"
+        || !valid_authentication_tag(&recovered.authentication_tag)
+    {
+        return Err(journal_error(
+            path,
+            "recovered evidence is not exactly bound to the recovery-prepared decision",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_write_scope(scope: &[AttemptWriteScope], path: &Path) -> Result<()> {
+    if scope.is_empty() || scope.len() > MAX_SCOPE_ENTRIES {
+        return Err(journal_error(
+            path,
+            "attempt evidence has an invalid bounded write scope",
+        ));
+    }
+    let mut paths = BTreeSet::new();
+    for entry in scope {
+        let candidate = Path::new(&entry.path);
+        if entry.path.len() > 4_096
+            || entry.path.trim().is_empty()
+            || candidate.is_absolute()
+            || !candidate
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)))
+            || !valid_digest(&entry.pre_digest)
+            || !paths.insert(&entry.path)
+        {
+            return Err(journal_error(
+                path,
+                "attempt evidence has an invalid bounded write scope",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn valid_recovery_status(value: &str) -> bool {
+    matches!(value, "pending" | "in-progress")
+}
+
+fn valid_authentication_tag(value: &str) -> bool {
+    value.len() == 83
+        && value.starts_with("hmac-sha256:sha256:")
+        && value.as_bytes()[19..]
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+}
+
+struct RecoveryInputs {
+    secret: Vec<u8>,
+    journal_path: PathBuf,
+    journal_digest: String,
+    queue_digest: String,
+    prepared: PreparedAttempt,
+    failure: PreSpawnFailure,
+    decision: Option<RecoveryPreparedAttempt>,
+    recovered: Option<RecoveredAttempt>,
+    recovery_task_index: usize,
+    recovered_queue_model: TaskQueue,
+    recovered_queue: String,
+}
+
+fn recovery_inputs(
+    context: &TaskContext,
+    task_id: &str,
+    attempt_id: &str,
+) -> Result<RecoveryInputs> {
+    let revalidated_context = validate_context_with_blocked(&context.component_path, true)?;
+    if revalidated_context.project_dir != context.project_dir
+        || revalidated_context.component_dir != context.component_dir
+    {
+        return Err(journal_error(
+            &context.component_dir,
+            "component identity changed while recovery inputs were revalidated",
+        ));
+    }
+    let config = crate::config::load(&revalidated_context.project_dir)?;
+    let (approval, secret) =
+        load_authenticated_execution_approval(&revalidated_context.project_dir, &config)?;
+    let stored_runner = crate::sandbox::RunnerIdentity {
+        canonical_path: approval.material.runner_path.clone(),
+        digest: approval.material.runner_digest.clone(),
+    };
+    let current = build_execution_approval_for_runner(
+        &revalidated_context.project_dir,
+        &config,
+        &stored_runner,
+    )?;
+    ensure_approval_matches(&approval, &current)?;
+
+    let (queue, queue_digest) = read_queue_snapshot(&revalidated_context.component_dir)?;
+    let index = queue
+        .tasks
+        .iter()
+        .position(|task| task.id == task_id)
+        .ok_or_else(|| KvistError::TaskNotFound {
+            component: revalidated_context.component_path.clone(),
+            task_id: task_id.to_owned(),
+        })?;
+    let task = &queue.tasks[index];
+    let journal_path = existing_attempt_path(&revalidated_context.component_dir, task_id);
+    let assessed = assess_attempt_journal(
+        &journal_path,
+        read_attempt_journal(&journal_path)?,
+        task_id,
+        &secret,
+    )?;
+    let attempt = assessed.attempts.get(attempt_id).ok_or_else(|| {
+        journal_error(
+            &journal_path,
+            "fenced recovery requires exactly one authenticated prepared attempt record",
+        )
+    })?;
+    let prepared = attempt.prepared.clone().ok_or_else(|| {
+        journal_error(
+            &journal_path,
+            "fenced recovery requires exactly one authenticated prepared attempt record",
+        )
+    })?;
+    let failure = attempt.pre_spawn_failure.clone().ok_or_else(|| {
+        journal_error(
+            &journal_path,
+            "fenced recovery requires authenticated durable pre-spawn failure evidence",
+        )
+    })?;
+    if prepared.policy_identity != approval.approval_digest
+        || prepared.runner_identity != approval.material.runner_digest
+        || prepared.approved_write_scope
+            != approved_write_scope(
+                &revalidated_context.project_dir,
+                &revalidated_context,
+                &config,
+            )?
+    {
+        return Err(journal_error(
+            &journal_path,
+            "authenticated recovery evidence no longer matches current approval or write scope",
+        ));
+    }
+    if attempt
+        .recovery_prepared
+        .as_ref()
+        .is_some_and(|decision| decision.fenced_queue_digest != prepared.intended_post_queue_digest)
+    {
+        return Err(journal_error(
+            &journal_path,
+            "recovery-prepared evidence does not bind the exact fenced queue",
+        ));
+    }
+
+    let mut recovered_queue_model = queue.clone();
+    recovered_queue_model.tasks[index].status = status_from_recovery(&prepared.pre_status)?;
+    recovered_queue_model.tasks[index].timestamps.updated_at =
+        attempt.recovery_prepared.as_ref().map_or_else(
+            || prepared.timestamp.clone(),
+            |decision| decision.timestamp.clone(),
+        );
+    recovered_queue_model.tasks[index].recovery_state = None;
+    let recovered_queue = serialize(&recovered_queue_model).map_err(|error| {
+        journal_error(
+            &revalidated_context
+                .component_dir
+                .join(ComponentArtifact::TaskQueue.filename()),
+            &error.to_string(),
+        )
+    })?;
+
+    let decision = attempt.recovery_prepared.clone();
+    if let Some(decision) = &decision {
+        if digest(recovered_queue.as_bytes()) != decision.recovered_queue_digest {
+            return Err(journal_error(
+                &journal_path,
+                "recovery-prepared evidence does not bind the exact recovered queue",
+            ));
+        }
+    } else if task.status != TaskStatus::InProgress
+        || !task.recovery_state.as_ref().is_some_and(|state| {
+            state.state == RecoveryStateKind::Fenced && state.attempt_id == attempt_id
+        })
+        || queue_digest != prepared.intended_post_queue_digest
+    {
+        return Err(journal_error(
+            &journal_path,
+            "the requested task and attempt are not currently fenced together",
+        ));
+    }
+
+    Ok(RecoveryInputs {
+        secret,
+        journal_path,
+        journal_digest: assessed.digest,
+        queue_digest,
+        prepared,
+        failure,
+        decision,
+        recovered: attempt.recovered.clone(),
+        recovery_task_index: index,
+        recovered_queue_model,
+        recovered_queue,
+    })
+}
+
+fn new_recovery_decision(
+    inputs: &RecoveryInputs,
+    task_id: &str,
+    attempt_id: &str,
+    timestamp: &Timestamp,
+) -> Result<RecoveryPreparedAttempt> {
+    if inputs.queue_digest != inputs.prepared.intended_post_queue_digest {
+        return Err(journal_error(
+            &inputs.journal_path,
+            "the current fenced queue digest does not match the prepared attempt",
+        ));
+    }
+    let recovered_queue = serialize_recovery_queue(
+        &inputs.recovered_queue_model,
+        inputs.recovery_task_index,
+        timestamp,
+    )?;
+    let mut decision = RecoveryPreparedAttempt {
+        schema_version: ATTEMPT_SCHEMA_VERSION,
+        attempt_id: attempt_id.to_owned(),
+        task_id: task_id.to_owned(),
+        phase: "recovery-prepared".to_owned(),
+        disposition: "execution-did-not-start".to_owned(),
+        prepared_event_digest: prepared_event_digest(&inputs.prepared)?,
+        pre_spawn_failure_event_digest: pre_spawn_failure_event_digest(&inputs.failure)?,
+        pre_status: inputs.prepared.pre_status.clone(),
+        fenced_queue_digest: inputs.queue_digest.clone(),
+        recovered_queue_digest: digest(recovered_queue.as_bytes()),
+        policy_identity: inputs.prepared.policy_identity.clone(),
+        runner_identity: inputs.prepared.runner_identity.clone(),
+        approved_write_scope: inputs.prepared.approved_write_scope.clone(),
+        timestamp: timestamp.clone(),
+        recorded_by: "kvist-host".to_owned(),
+        authentication_tag: String::new(),
+    };
+    decision.authentication_tag = recovery_prepared_tag(&inputs.secret, &decision)?;
+    Ok(decision)
+}
+
+fn serialize_recovery_queue(
+    queue: &TaskQueue,
+    task_index: usize,
+    timestamp: &Timestamp,
+) -> Result<String> {
+    let mut queue = queue.clone();
+    let task = queue.tasks.get_mut(task_index).ok_or_else(|| {
+        journal_error(
+            &PathBuf::from(ComponentArtifact::TaskQueue.filename()),
+            "recovery task disappeared while preparing the recovered queue",
+        )
+    })?;
+    task.timestamps.updated_at = timestamp.clone();
+    serialize(&queue).map_err(|error| {
+        journal_error(
+            &PathBuf::from(ComponentArtifact::TaskQueue.filename()),
+            &error.to_string(),
+        )
+    })
+}
+
+fn append_recovered_attempt(
+    journal_path: &Path,
+    task_id: &str,
+    attempt_id: &str,
+    decision: &RecoveryPreparedAttempt,
+    secret: &[u8],
+) -> Result<()> {
+    let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+    let mut recovered = RecoveredAttempt {
+        schema_version: ATTEMPT_SCHEMA_VERSION,
+        attempt_id: attempt_id.to_owned(),
+        task_id: task_id.to_owned(),
+        phase: "recovered".to_owned(),
+        recovery_prepared_event_digest: recovery_prepared_event_digest(decision)?,
+        recovered_queue_digest: decision.recovered_queue_digest.clone(),
+        timestamp,
+        recorded_by: "kvist-host".to_owned(),
+        authentication_tag: String::new(),
+    };
+    recovered.authentication_tag = recovered_attempt_tag(secret, &recovered)?;
+    append_json_attempt(
+        journal_path,
+        &recovered,
+        "append authenticated recovered evidence",
+    )
+}
+
+fn revalidate_recovery_inputs_before_replace(
+    context: &TaskContext,
+    task_id: &str,
+    attempt_id: &str,
+    expected: &RecoveryInputs,
+    lock: &TaskLock,
+) -> Result<()> {
+    let reread = recovery_inputs(context, task_id, attempt_id)?;
+    if reread.queue_digest != expected.queue_digest
+        || reread.journal_digest != expected.journal_digest
+        || reread.prepared != expected.prepared
+        || reread.failure != expected.failure
+        || reread.decision != expected.decision
+        || reread.recovered.is_some()
+        || reread.recovered_queue != expected.recovered_queue
+    {
+        return Err(journal_error(
+            &expected.journal_path,
+            "recovery inputs changed before queue replacement",
+        ));
+    }
+    lock.revalidate()
+}
+
+fn current_queue_digest(component_dir: &Path) -> Result<String> {
+    read_queue_snapshot(component_dir).map(|(_, digest)| digest)
+}
+
+fn status_from_recovery(status: &str) -> Result<TaskStatus> {
+    match status {
+        "pending" => Ok(TaskStatus::Pending),
+        "in-progress" => Ok(TaskStatus::InProgress),
+        _ => Err(KvistError::TaskQueueUnavailable {
+            path: PathBuf::from("."),
+            reason: "prepared recovery evidence has an unsupported pre-attempt status".to_owned(),
+        }),
+    }
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 71
+        && value.starts_with("sha256:")
+        && value.as_bytes()[7..]
+            .iter()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
 }
 
 fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
@@ -977,6 +2493,97 @@ Satisfy REQUIREMENTS.md and CONTRACT.md using the approved DESIGN.md.
 Fulfill all task requirements. When finished, write your results.
 "#;
 
+const ATTEMPT_SCHEMA_VERSION: u32 = 1;
+const MAX_ATTEMPT_JOURNAL_BYTES: u64 = 1_048_576;
+const MAX_ATTEMPT_EVENTS: usize = 1_024;
+const MAX_TASK_LOCK_BYTES: u64 = 1_024;
+const MAX_SCOPE_DEPTH: usize = 64;
+const MAX_SCOPE_ENTRIES: usize = 4_096;
+const MAX_SCOPE_FILE_BYTES: u64 = 1_048_576;
+const MAX_SCOPE_TOTAL_BYTES: u64 = 8 * 1_048_576;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct AttemptWriteScope {
+    path: String,
+    pre_digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PreparedAttempt {
+    schema_version: u32,
+    attempt_id: String,
+    task_id: String,
+    phase: String,
+    pre_status: String,
+    pre_queue_digest: String,
+    intended_post_queue_digest: String,
+    policy_identity: String,
+    runner_identity: String,
+    approved_write_scope: Vec<AttemptWriteScope>,
+    timestamp: Timestamp,
+    operation_lock_digest: String,
+    authentication_tag: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PreSpawnFailure {
+    schema_version: u32,
+    attempt_id: String,
+    task_id: String,
+    phase: String,
+    prepared_event_digest: String,
+    pre_status: String,
+    pre_queue_digest: String,
+    intended_post_queue_digest: String,
+    policy_identity: String,
+    runner_identity: String,
+    approved_write_scope: Vec<AttemptWriteScope>,
+    recorded_by: String,
+    runner_descriptor_launched: bool,
+    write_scope_exposed: bool,
+    failure: String,
+    timestamp: Timestamp,
+    authentication_tag: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveryPreparedAttempt {
+    schema_version: u32,
+    attempt_id: String,
+    task_id: String,
+    phase: String,
+    disposition: String,
+    prepared_event_digest: String,
+    pre_spawn_failure_event_digest: String,
+    pre_status: String,
+    fenced_queue_digest: String,
+    recovered_queue_digest: String,
+    policy_identity: String,
+    runner_identity: String,
+    approved_write_scope: Vec<AttemptWriteScope>,
+    timestamp: Timestamp,
+    recorded_by: String,
+    authentication_tag: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveredAttempt {
+    schema_version: u32,
+    attempt_id: String,
+    task_id: String,
+    phase: String,
+    recovery_prepared_event_digest: String,
+    recovered_queue_digest: String,
+    timestamp: Timestamp,
+    recorded_by: String,
+    authentication_tag: String,
+}
+
 fn ensure_default_templates(component_dir: &Path) -> Result<()> {
     let templates_dir = component_dir.join(".kvist").join("templates");
     if !templates_dir.exists() {
@@ -1096,9 +2703,448 @@ fn load_and_interpolate_template(
     Ok(prompt)
 }
 
+enum TaskRunApproval {
+    Ready(crate::sandbox::RunnerIdentity),
+    DescriptorUnavailable {
+        approval: Box<ExecutionApproval>,
+        secret: Vec<u8>,
+        error: KvistError,
+    },
+}
+
+fn task_run_approval(
+    project_dir: &Path,
+    config: &crate::config::ProjectConfig,
+) -> Result<TaskRunApproval> {
+    let (approved, secret) = load_authenticated_execution_approval(project_dir, config)?;
+    match crate::sandbox::runner_identity(
+        config
+            .sandbox
+            .as_ref()
+            .ok_or_else(|| KvistError::SandboxUnavailable {
+                runner: "<unconfigured>".to_owned(),
+                reason: "task execution requires a project-local [sandbox] configuration"
+                    .to_owned(),
+            })?,
+        project_dir,
+        config.vcs,
+    ) {
+        Ok(runner) => {
+            let current = build_execution_approval_for_runner(project_dir, config, &runner)?;
+            ensure_approval_matches(&approved, &current)?;
+            Ok(TaskRunApproval::Ready(runner))
+        }
+        Err(error) => {
+            let runner = crate::sandbox::RunnerIdentity {
+                canonical_path: approved.material.runner_path.clone(),
+                digest: approved.material.runner_digest.clone(),
+            };
+            let current = build_execution_approval_for_runner(project_dir, config, &runner)?;
+            ensure_approval_matches(&approved, &current)?;
+            Ok(TaskRunApproval::DescriptorUnavailable {
+                approval: Box::new(approved),
+                secret,
+                error,
+            })
+        }
+    }
+}
+
+fn fence_pre_spawn_failure(
+    component_path: &Path,
+    task_id: &str,
+    project_dir: &Path,
+    config: &crate::config::ProjectConfig,
+    approval: &ExecutionApproval,
+    secret: &[u8],
+    runner_error: &KvistError,
+) -> Result<()> {
+    let context = validate_context(component_path)?;
+    let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+    let lock = TaskLock::for_context(&context, task_id, &timestamp)?;
+    let result = (|| {
+        let queue_path = context
+            .component_dir
+            .join(ComponentArtifact::TaskQueue.filename());
+        let (mut queue, pre_queue_digest) = read_queue_snapshot(&context.component_dir)?;
+        let index = queue
+            .tasks
+            .iter()
+            .position(|task| task.id == task_id)
+            .ok_or_else(|| KvistError::TaskNotFound {
+                component: context.component_path.clone(),
+                task_id: task_id.to_owned(),
+            })?;
+        let pre_status = queue.tasks[index].status;
+        if !can_fence_pre_spawn(&queue.tasks[index], &queue.tasks) {
+            return Err(journal_error(
+                &queue_path,
+                &format!(
+                    "task `{task_id}` cannot be fenced for a pre-spawn failure because it is neither ready-pending nor a legitimate resumable in-progress task"
+                ),
+            ));
+        }
+        ensure_component_attempts_recovered(&context.component_dir)?;
+        let attempt_path = attempt_path(&context.component_dir, task_id)?;
+        let attempt_id = next_attempt_id(&attempt_path)?;
+        let write_scope = approved_write_scope(project_dir, &context, config)?;
+        queue.tasks[index].status = TaskStatus::InProgress;
+        queue.tasks[index].timestamps.updated_at = timestamp.clone();
+        queue.tasks[index].recovery_state = Some(RecoveryState {
+            state: RecoveryStateKind::Fenced,
+            attempt_id: attempt_id.clone(),
+            reason: "runner-descriptor-open-failed".to_owned(),
+        });
+        let intended_queue =
+            serialize(&queue).map_err(|error| KvistError::TaskQueueUnavailable {
+                path: queue_path.clone(),
+                reason: error.to_string(),
+            })?;
+        let intended_post_queue_digest = digest(intended_queue.as_bytes());
+        let mut prepared = PreparedAttempt {
+            schema_version: ATTEMPT_SCHEMA_VERSION,
+            attempt_id: attempt_id.clone(),
+            task_id: task_id.to_owned(),
+            phase: "prepared".to_owned(),
+            pre_status: status_name(pre_status).to_owned(),
+            pre_queue_digest: pre_queue_digest.clone(),
+            intended_post_queue_digest: intended_post_queue_digest.clone(),
+            policy_identity: approval.approval_digest.clone(),
+            runner_identity: approval.material.runner_digest.clone(),
+            approved_write_scope: write_scope.clone(),
+            timestamp: timestamp.clone(),
+            operation_lock_digest: lock.contents_digest(),
+            authentication_tag: String::new(),
+        };
+        prepared.authentication_tag = prepared_attempt_tag(secret, &prepared)?;
+        append_json_attempt(
+            &attempt_path,
+            &prepared,
+            "append prepared pre-spawn attempt",
+        )?;
+        if current_queue_digest(&context.component_dir)? != pre_queue_digest {
+            return Err(journal_error(
+                &queue_path,
+                "the queue changed before the pre-spawn fence could be recorded",
+            ));
+        }
+        lock.revalidate()?;
+        replace_file_atomically(&queue_path, &intended_queue)?;
+
+        let mut failure = PreSpawnFailure {
+            schema_version: ATTEMPT_SCHEMA_VERSION,
+            attempt_id,
+            task_id: task_id.to_owned(),
+            phase: "pre-spawn-failure".to_owned(),
+            prepared_event_digest: prepared_event_digest(&prepared)?,
+            pre_status: status_name(pre_status).to_owned(),
+            pre_queue_digest,
+            intended_post_queue_digest,
+            policy_identity: approval.approval_digest.clone(),
+            runner_identity: approval.material.runner_digest.clone(),
+            approved_write_scope: write_scope,
+            recorded_by: "kvist-host".to_owned(),
+            runner_descriptor_launched: false,
+            write_scope_exposed: false,
+            failure: pre_spawn_failure_name(runner_error).to_owned(),
+            timestamp,
+            authentication_tag: String::new(),
+        };
+        failure.authentication_tag = pre_spawn_failure_tag(secret, &failure)?;
+        append_json_attempt(
+            &attempt_path,
+            &failure,
+            "append authenticated pre-spawn failure",
+        )
+    })();
+    let release = lock.release();
+    match (result, release) {
+        (Ok(()), Ok(())) => Ok(()),
+        (Ok(()), Err(error)) => Err(error),
+        (Err(error), _) => Err(error),
+    }
+}
+
+fn pre_spawn_failure_name(_: &KvistError) -> &'static str {
+    "runner-descriptor-open-failed"
+}
+
+fn can_fence_pre_spawn(task: &Task, tasks: &[Task]) -> bool {
+    match task.status {
+        TaskStatus::Pending => task_is_ready(task, tasks),
+        TaskStatus::InProgress => task.recovery_state.is_none(),
+        TaskStatus::Blocked | TaskStatus::Completed => false,
+    }
+}
+
+fn approved_write_scope(
+    project_dir: &Path,
+    context: &TaskContext,
+    _: &crate::config::ProjectConfig,
+) -> Result<Vec<AttemptWriteScope>> {
+    let scope = context.component_dir.join("tests");
+    let path = scope
+        .strip_prefix(project_dir)
+        .map_err(|_| KvistError::TaskQueueUnavailable {
+            path: scope.clone(),
+            reason: "approved write scope is not below the project root".to_owned(),
+        })?;
+    let path = path
+        .to_str()
+        .ok_or_else(|| KvistError::TaskQueueUnavailable {
+            path: scope.clone(),
+            reason: "approved write scope is not valid UTF-8".to_owned(),
+        })?;
+    Ok(vec![AttemptWriteScope {
+        path: path.to_owned(),
+        pre_digest: digest_path_tree(&scope)?,
+    }])
+}
+
+fn digest_path_tree(path: &Path) -> Result<String> {
+    enum Visit {
+        Enter(PathBuf, usize),
+        Exit(PathBuf, Vec<(String, PathBuf)>),
+    }
+
+    let mut budget = ScopeHashBudget::default();
+    let mut hashes = BTreeMap::<PathBuf, String>::new();
+    let mut pending = vec![Visit::Enter(path.to_path_buf(), 0)];
+    while let Some(visit) = pending.pop() {
+        match visit {
+            Visit::Enter(current, depth) => match fs::symlink_metadata(&current) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    hashes.insert(current, scoped_digest(b"absent", b""));
+                }
+                Err(source) => {
+                    return Err(KvistError::Io {
+                        operation: "inspect approved write scope",
+                        path: current,
+                        source,
+                    });
+                }
+                Ok(metadata) if is_link_like(&metadata) => {
+                    return Err(scope_hash_error(
+                        &current,
+                        "approved write scope must not be link-like",
+                    ));
+                }
+                Ok(metadata) if metadata.file_type().is_file() => {
+                    let bytes = read_bounded_scope_file(&current, &metadata, &mut budget)?;
+                    let mut material = Vec::with_capacity(8 + bytes.len());
+                    material.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+                    material.extend_from_slice(&bytes);
+                    hashes.insert(current, scoped_digest(b"file", &material));
+                }
+                Ok(metadata) if metadata.file_type().is_dir() => {
+                    if depth > MAX_SCOPE_DEPTH {
+                        return Err(scope_hash_error(
+                            &current,
+                            "approved write scope exceeds the directory-depth limit",
+                        ));
+                    }
+                    let entries = read_scope_entries(&current, &mut budget)?;
+                    pending.push(Visit::Exit(current, entries.clone()));
+                    for (_, child) in entries.into_iter().rev() {
+                        pending.push(Visit::Enter(child, depth + 1));
+                    }
+                }
+                Ok(_) => {
+                    return Err(scope_hash_error(
+                        &current,
+                        "approved write scope must be a regular file or real directory",
+                    ));
+                }
+            },
+            Visit::Exit(current, entries) => {
+                let reread = read_scope_entries(&current, &mut budget)?;
+                if entries
+                    .iter()
+                    .map(|(name, _)| name)
+                    .ne(reread.iter().map(|(name, _)| name))
+                {
+                    return Err(scope_hash_error(
+                        &current,
+                        "approved write scope changed while it was hashed",
+                    ));
+                }
+                let mut material = Vec::new();
+                material.extend_from_slice(&(entries.len() as u64).to_be_bytes());
+                for (name, child) in entries {
+                    let child_digest = hashes.get(&child).ok_or_else(|| {
+                        scope_hash_error(
+                            &current,
+                            "approved write scope changed while child hashes were collected",
+                        )
+                    })?;
+                    material.extend_from_slice(&(name.len() as u64).to_be_bytes());
+                    material.extend_from_slice(name.as_bytes());
+                    material.extend_from_slice(&(child_digest.len() as u64).to_be_bytes());
+                    material.extend_from_slice(child_digest.as_bytes());
+                }
+                budget.charge(&current, material.len())?;
+                hashes.insert(current, scoped_digest(b"directory", &material));
+            }
+        }
+    }
+    hashes.remove(path).ok_or_else(|| {
+        scope_hash_error(
+            path,
+            "approved write scope hash was not produced for the requested path",
+        )
+    })
+}
+
+#[derive(Default)]
+struct ScopeHashBudget {
+    entries: usize,
+    material_bytes: u64,
+}
+
+impl ScopeHashBudget {
+    fn charge_entry(&mut self, path: &Path, name_bytes: usize) -> Result<()> {
+        self.entries = self.entries.checked_add(1).ok_or_else(|| {
+            scope_hash_error(path, "approved write scope entry accounting overflowed")
+        })?;
+        if self.entries > MAX_SCOPE_ENTRIES {
+            return Err(scope_hash_error(
+                path,
+                "approved write scope exceeds the aggregate entry limit",
+            ));
+        }
+        self.charge(path, name_bytes)
+    }
+
+    fn charge(&mut self, path: &Path, bytes: usize) -> Result<()> {
+        self.material_bytes = self
+            .material_bytes
+            .checked_add(bytes as u64)
+            .ok_or_else(|| {
+                scope_hash_error(path, "approved write scope byte accounting overflowed")
+            })?;
+        if self.material_bytes > MAX_SCOPE_TOTAL_BYTES {
+            return Err(scope_hash_error(
+                path,
+                "approved write scope exceeds the aggregate material limit",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn read_scope_entries(
+    directory: &Path,
+    budget: &mut ScopeHashBudget,
+) -> Result<Vec<(String, PathBuf)>> {
+    let iterator = fs::read_dir(directory).map_err(|source| KvistError::Io {
+        operation: "read approved write scope",
+        path: directory.to_path_buf(),
+        source,
+    })?;
+    let mut entries = Vec::new();
+    for entry in iterator {
+        let entry = entry.map_err(|source| KvistError::Io {
+            operation: "inspect approved write scope entry",
+            path: directory.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        let name = entry.file_name().into_string().map_err(|_| {
+            scope_hash_error(&path, "approved write scope contains a non-UTF-8 name")
+        })?;
+        budget.charge_entry(directory, name.len())?;
+        entries.push((name, path));
+    }
+    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(entries)
+}
+
+fn read_bounded_scope_file(
+    path: &Path,
+    initial_metadata: &fs::Metadata,
+    budget: &mut ScopeHashBudget,
+) -> Result<Vec<u8>> {
+    if initial_metadata.len() > MAX_SCOPE_FILE_BYTES {
+        return Err(scope_hash_error(
+            path,
+            "approved write scope file exceeds the per-file byte limit",
+        ));
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(nix::libc::O_NOFOLLOW);
+    }
+    let mut file = options.open(path).map_err(|source| KvistError::Io {
+        operation: "open approved write scope without following links",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let opened_metadata = file.metadata().map_err(|source| KvistError::Io {
+        operation: "inspect opened approved write scope",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if !opened_metadata.file_type().is_file()
+        || opened_metadata.len() != initial_metadata.len()
+        || opened_metadata.len() > MAX_SCOPE_FILE_BYTES
+    {
+        return Err(scope_hash_error(
+            path,
+            "approved write scope file changed while it was opened",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(opened_metadata.len() as usize);
+    (&mut file)
+        .take(MAX_SCOPE_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|source| KvistError::Io {
+            operation: "read bounded approved write scope",
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let final_metadata = file.metadata().map_err(|source| KvistError::Io {
+        operation: "reinspect opened approved write scope",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if bytes.len() as u64 > MAX_SCOPE_FILE_BYTES
+        || final_metadata.len() != opened_metadata.len()
+        || final_metadata.len() != bytes.len() as u64
+    {
+        return Err(scope_hash_error(
+            path,
+            "approved write scope file grew or changed while it was read",
+        ));
+    }
+    budget.charge(path, bytes.len())?;
+    Ok(bytes)
+}
+
+fn scoped_digest(kind: &[u8], material: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"kvist.scope-tree.v1\0");
+    hasher.update((kind.len() as u64).to_be_bytes());
+    hasher.update(kind);
+    hasher.update((material.len() as u64).to_be_bytes());
+    hasher.update(material);
+    format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
+fn scope_hash_error(path: &Path, reason: &str) -> KvistError {
+    KvistError::TaskQueueUnavailable {
+        path: path.to_path_buf(),
+        reason: reason.to_owned(),
+    }
+}
+
 /// Launches the external agent to execute a task, transitions the task to InProgress,
 /// captures logs, parses token usage, and transitions the task to Completed/Blocked based on exit.
 pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) -> Result<String> {
+    let initial_context = validate_context(component_path)?;
+    let task_id = select_runnable_task(&initial_context, task_id_opt)?;
     let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
         operation: "determine current project directory",
         path: PathBuf::from("."),
@@ -1110,12 +3156,31 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
             reason: "sandbox configuration is absent".to_owned(),
         });
     }
-    let approved_runner = check_execution_approved(&project_dir, &config)?;
+    let task_approval = task_run_approval(&project_dir, &config)?;
     if config.test_policy.is_none() {
         return Err(KvistError::UnapprovedExecutionPolicy {
             reason: "test policy is absent".to_owned(),
         });
     }
+    let approved_runner = match task_approval {
+        TaskRunApproval::Ready(runner) => runner,
+        TaskRunApproval::DescriptorUnavailable {
+            approval,
+            secret,
+            error,
+        } => {
+            fence_pre_spawn_failure(
+                component_path,
+                &task_id,
+                &project_dir,
+                &config,
+                &approval,
+                &secret,
+                &error,
+            )?;
+            return Err(error);
+        }
+    };
     let sandbox_config = config
         .sandbox
         .as_ref()
@@ -1127,36 +3192,17 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
     let context = validate_context(component_path)?;
     let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     // This single lock covers selection, execution, evidence, and the terminal
-    // transition. Its provisional task ID deliberately prevents a second runner
-    // from selecting the same ready task.
-    let lock = TaskLock::for_context(&context, task_id_opt.unwrap_or("run"), &started_at)?;
+    // transition. It prevents a second runner from selecting the same ready task.
+    let lock = TaskLock::for_context(&context, &task_id, &started_at)?;
     let result = (|| {
         let context = validate_context(component_path)?;
         let mut queue = read_queue(&context.component_dir)?;
 
-        // 1. Determine the task to run
-        let task_id = match task_id_opt {
-            Some(id) => id.to_owned(),
-            None => {
-                // Pick next ready task
-                let ready_tasks = get_ready_tasks(&queue);
-                let Some(first_ready) = ready_tasks.first() else {
-                    return Err(KvistError::TaskQueueUnavailable {
-                        path: context
-                            .component_dir
-                            .join(ComponentArtifact::TaskQueue.filename()),
-                        reason: "no ready tasks available in the queue".to_owned(),
-                    });
-                };
-                first_ready.id.clone()
-            }
-        };
-
-        // Verify task is ready/valid to run
+        // Revalidate the selected task after acquiring the operation lock.
         let task_index = queue
             .tasks
             .iter()
-            .position(|t| t.id == task_id)
+            .position(|task| task.id == task_id)
             .ok_or_else(|| KvistError::TaskQueueUnavailable {
                 path: context
                     .component_dir
@@ -1166,15 +3212,14 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
 
         let task = &queue.tasks[task_index];
 
-        // Ensure task is ready or in-progress
-        let ready_ids: Vec<String> = get_ready_tasks(&queue).into_iter().map(|t| t.id).collect();
-        if task.status != TaskStatus::InProgress && !ready_ids.contains(&task_id) {
-            return Err(KvistError::TaskQueueUnavailable {
-                path: context
+        ensure_component_attempts_recovered(&context.component_dir)?;
+        if !is_runnable_task(task, &queue.tasks) {
+            return Err(journal_error(
+                &context
                     .component_dir
                     .join(ComponentArtifact::TaskQueue.filename()),
-                reason: format!("task `{task_id}` is not ready for execution"),
-            });
+                &format!("task `{task_id}` is not ready for execution"),
+            ));
         }
 
         // 2. Transition task status to InProgress atomically (if not already InProgress)
@@ -1441,13 +3486,46 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
     }
 }
 
-fn get_ready_tasks(queue: &TaskQueue) -> Vec<Task> {
-    queue
+fn select_runnable_task(context: &TaskContext, requested: Option<&str>) -> Result<String> {
+    let queue = read_queue(&context.component_dir)?;
+    let task_id = match requested {
+        Some(task_id) => task_id.to_owned(),
+        None => queue
+            .tasks
+            .iter()
+            .find(|task| task_is_ready(task, &queue.tasks))
+            .map(|task| task.id.clone())
+            .ok_or_else(|| {
+                journal_error(
+                    &context
+                        .component_dir
+                        .join(ComponentArtifact::TaskQueue.filename()),
+                    "no ready tasks available in the queue",
+                )
+            })?,
+    };
+    let task = queue
         .tasks
         .iter()
-        .filter(|task| task_is_ready(task, &queue.tasks))
-        .cloned()
-        .collect()
+        .find(|task| task.id == task_id)
+        .ok_or_else(|| KvistError::TaskNotFound {
+            component: context.component_path.clone(),
+            task_id: task_id.clone(),
+        })?;
+    if !is_runnable_task(task, &queue.tasks) {
+        return Err(journal_error(
+            &context
+                .component_dir
+                .join(ComponentArtifact::TaskQueue.filename()),
+            &format!("task `{task_id}` is not ready for execution"),
+        ));
+    }
+    Ok(task_id)
+}
+
+fn is_runnable_task(task: &Task, tasks: &[Task]) -> bool {
+    task.recovery_state.is_none()
+        && (task_is_ready(task, tasks) || task.status == TaskStatus::InProgress)
 }
 
 /// Reads and returns the most recent execution log file for a specific task.
@@ -1651,6 +3729,21 @@ fn build_execution_approval(
             reason: "sandbox configuration is absent".to_owned(),
         })?;
     let runner = crate::sandbox::runner_identity(sandbox, project_dir, config.vcs)?;
+    let approval = build_execution_approval_for_runner(project_dir, config, &runner)?;
+    Ok((approval, runner))
+}
+
+fn build_execution_approval_for_runner(
+    project_dir: &Path,
+    config: &crate::config::ProjectConfig,
+    runner: &crate::sandbox::RunnerIdentity,
+) -> Result<ExecutionApproval> {
+    let sandbox = config
+        .sandbox
+        .as_ref()
+        .ok_or_else(|| KvistError::UnapprovedExecutionPolicy {
+            reason: "sandbox configuration is absent".to_owned(),
+        })?;
     let (canonical_project, canonical_worktree) =
         project_worktree_identity(project_dir, config.vcs)?;
     let material = ExecutionApprovalMaterial {
@@ -1718,17 +3811,14 @@ fn build_execution_approval(
             reason: format!("cannot serialize execution approval inputs: {error}"),
         }
     })?);
-    Ok((
-        ExecutionApproval {
-            schema_version: EXECUTION_APPROVAL_VERSION,
-            canonical_project,
-            canonical_worktree,
-            material,
-            approval_digest,
-            authentication_tag: String::new(),
-        },
-        runner,
-    ))
+    Ok(ExecutionApproval {
+        schema_version: EXECUTION_APPROVAL_VERSION,
+        canonical_project,
+        canonical_worktree,
+        material,
+        approval_digest,
+        authentication_tag: String::new(),
+    })
 }
 
 fn agent_profile_digest(
@@ -1869,6 +3959,32 @@ fn load_or_create_approval_secret(state_root: &Path) -> Result<Vec<u8>> {
     }
 }
 
+fn load_existing_recovery_secret() -> Result<Vec<u8>> {
+    let state_base = user_state_base()
+        .filter(|path| path.is_absolute())
+        .ok_or_else(|| KvistError::TaskQueueUnavailable {
+            path: PathBuf::from("."),
+            reason: "cannot determine user-owned recovery authentication state".to_owned(),
+        })?;
+    let path = state_base
+        .join("kvist")
+        .join(APPROVAL_STATE_DIRECTORY)
+        .join(APPROVAL_SECRET_FILE);
+    let metadata =
+        fs::symlink_metadata(&path).map_err(|source| KvistError::TaskQueueUnavailable {
+            path: path.clone(),
+            reason: if source.kind() == io::ErrorKind::NotFound {
+                "user-owned recovery authentication secret is missing".to_owned()
+            } else {
+                format!("cannot inspect user-owned recovery authentication secret: {source}")
+            },
+        })?;
+    read_approval_secret(&path, &metadata).map_err(|error| KvistError::TaskQueueUnavailable {
+        path,
+        reason: format!("cannot use user-owned recovery authentication secret: {error}"),
+    })
+}
+
 fn ensure_user_state_directory(path: &Path) -> Result<()> {
     fs::create_dir_all(path).map_err(|source| KvistError::Io {
         operation: "create user approval state directory",
@@ -1985,6 +4101,124 @@ fn hmac_sha256(secret: &[u8], message: &[u8]) -> String {
     format!("sha256:{}", hex::encode(outer.finalize()))
 }
 
+fn prepared_event_digest(prepared: &PreparedAttempt) -> Result<String> {
+    serde_json::to_vec(prepared)
+        .map(|bytes| digest(&bytes))
+        .map_err(|error| KvistError::TaskQueueUnavailable {
+            path: PathBuf::from("."),
+            reason: format!("cannot canonicalize prepared attempt evidence: {error}"),
+        })
+}
+
+fn pre_spawn_failure_event_digest(failure: &PreSpawnFailure) -> Result<String> {
+    serde_json::to_vec(failure)
+        .map(|bytes| digest(&bytes))
+        .map_err(|error| KvistError::TaskQueueUnavailable {
+            path: PathBuf::from("."),
+            reason: format!("cannot canonicalize pre-spawn failure evidence: {error}"),
+        })
+}
+
+fn recovery_prepared_event_digest(decision: &RecoveryPreparedAttempt) -> Result<String> {
+    serde_json::to_vec(decision)
+        .map(|bytes| digest(&bytes))
+        .map_err(|error| KvistError::TaskQueueUnavailable {
+            path: PathBuf::from("."),
+            reason: format!("cannot canonicalize recovery-prepared evidence: {error}"),
+        })
+}
+
+fn prepared_attempt_tag(secret: &[u8], evidence: &PreparedAttempt) -> Result<String> {
+    let payload = serde_json::to_vec(&(
+        evidence.schema_version,
+        &evidence.attempt_id,
+        &evidence.task_id,
+        &evidence.phase,
+        &evidence.pre_status,
+        &evidence.pre_queue_digest,
+        &evidence.intended_post_queue_digest,
+        &evidence.policy_identity,
+        &evidence.runner_identity,
+        &evidence.approved_write_scope,
+        &evidence.timestamp,
+        &evidence.operation_lock_digest,
+    ))
+    .map_err(|error| KvistError::TaskQueueUnavailable {
+        path: PathBuf::from("."),
+        reason: format!("cannot canonicalize prepared attempt evidence: {error}"),
+    })?;
+    Ok(format!("hmac-sha256:{}", hmac_sha256(secret, &payload)))
+}
+
+fn pre_spawn_failure_tag(secret: &[u8], evidence: &PreSpawnFailure) -> Result<String> {
+    let payload = serde_json::to_vec(&(
+        evidence.schema_version,
+        &evidence.attempt_id,
+        &evidence.task_id,
+        &evidence.phase,
+        &evidence.prepared_event_digest,
+        &evidence.pre_status,
+        &evidence.pre_queue_digest,
+        &evidence.intended_post_queue_digest,
+        &evidence.policy_identity,
+        &evidence.runner_identity,
+        &evidence.approved_write_scope,
+        &evidence.recorded_by,
+        evidence.runner_descriptor_launched,
+        evidence.write_scope_exposed,
+        &evidence.failure,
+        &evidence.timestamp,
+    ))
+    .map_err(|error| KvistError::TaskQueueUnavailable {
+        path: PathBuf::from("."),
+        reason: format!("cannot canonicalize pre-spawn failure evidence: {error}"),
+    })?;
+    Ok(format!("hmac-sha256:{}", hmac_sha256(secret, &payload)))
+}
+
+fn recovery_prepared_tag(secret: &[u8], evidence: &RecoveryPreparedAttempt) -> Result<String> {
+    let payload = serde_json::to_vec(&(
+        evidence.schema_version,
+        &evidence.attempt_id,
+        &evidence.task_id,
+        &evidence.phase,
+        &evidence.disposition,
+        &evidence.prepared_event_digest,
+        &evidence.pre_spawn_failure_event_digest,
+        &evidence.pre_status,
+        &evidence.fenced_queue_digest,
+        &evidence.recovered_queue_digest,
+        &evidence.policy_identity,
+        &evidence.runner_identity,
+        &evidence.approved_write_scope,
+        &evidence.timestamp,
+        &evidence.recorded_by,
+    ))
+    .map_err(|error| KvistError::TaskQueueUnavailable {
+        path: PathBuf::from("."),
+        reason: format!("cannot canonicalize recovery-prepared evidence: {error}"),
+    })?;
+    Ok(format!("hmac-sha256:{}", hmac_sha256(secret, &payload)))
+}
+
+fn recovered_attempt_tag(secret: &[u8], evidence: &RecoveredAttempt) -> Result<String> {
+    let payload = serde_json::to_vec(&(
+        evidence.schema_version,
+        &evidence.attempt_id,
+        &evidence.task_id,
+        &evidence.phase,
+        &evidence.recovery_prepared_event_digest,
+        &evidence.recovered_queue_digest,
+        &evidence.timestamp,
+        &evidence.recorded_by,
+    ))
+    .map_err(|error| KvistError::TaskQueueUnavailable {
+        path: PathBuf::from("."),
+        reason: format!("cannot canonicalize recovered evidence: {error}"),
+    })?;
+    Ok(format!("hmac-sha256:{}", hmac_sha256(secret, &payload)))
+}
+
 /// Verification run result
 #[derive(Debug, Clone)]
 pub struct VerificationResult {
@@ -2016,49 +4250,12 @@ struct VerificationRecord<'a> {
 }
 
 fn append_verification(path: &Path, record: VerificationRecord<'_>) -> Result<()> {
-    let existed = if let Ok(metadata) = fs::symlink_metadata(path) {
-        if !metadata.file_type().is_file() || metadata.file_type().is_symlink() {
-            return Err(KvistError::Io {
-                operation: "append verification record",
-                path: path.to_path_buf(),
-                source: io::Error::other("attempt record must be a regular file"),
-            });
-        }
-        true
-    } else {
-        false
-    };
     let encoded =
         serde_json::to_string(&record).map_err(|error| KvistError::TaskQueueUnavailable {
             path: path.to_path_buf(),
             reason: format!("cannot serialize verification record: {error}"),
         })?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|source| KvistError::Io {
-            operation: "open verification record",
-            path: path.to_path_buf(),
-            source,
-        })?;
-    file.write_all(encoded.as_bytes())
-        .and_then(|()| file.write_all(b"\n"))
-        .and_then(|()| file.sync_all())
-        .map_err(|source| KvistError::Io {
-            operation: "append verification record",
-            path: path.to_path_buf(),
-            source,
-        })?;
-    if !existed {
-        let parent = path.parent().ok_or_else(|| KvistError::Io {
-            operation: "determine verification record parent",
-            path: path.to_path_buf(),
-            source: io::Error::other("verification record has no parent"),
-        })?;
-        sync_directory(parent)?;
-    }
-    Ok(())
+    append_encoded_attempt(path, &encoded, "append verification record")
 }
 
 /// Verifies the complete effective execution policy before external execution.
@@ -2066,13 +4263,24 @@ pub fn check_execution_approved(
     project_dir: &Path,
     config: &crate::config::ProjectConfig,
 ) -> Result<crate::sandbox::RunnerIdentity> {
-    reject_project_approval_record(project_dir)?;
+    let (approved, _) = load_authenticated_execution_approval(project_dir, config)?;
     let (current, runner) = build_execution_approval(project_dir, config)?;
+    ensure_approval_matches(&approved, &current)?;
+    Ok(runner)
+}
+
+fn load_authenticated_execution_approval(
+    project_dir: &Path,
+    config: &crate::config::ProjectConfig,
+) -> Result<(ExecutionApproval, Vec<u8>)> {
+    reject_project_approval_record(project_dir)?;
+    let (canonical_project, canonical_worktree) =
+        project_worktree_identity(project_dir, config.vcs)?;
     let (state_root, approved_path) = approval_state_paths(
         project_dir,
         config.vcs,
-        &current.canonical_project,
-        &current.canonical_worktree,
+        &canonical_project,
+        &canonical_worktree,
     )?;
     let secret = load_or_create_approval_secret(&state_root)?;
     let metadata = fs::symlink_metadata(&approved_path).map_err(|error| {
@@ -2126,15 +4334,28 @@ pub fn check_execution_approved(
             reason: "approval record authentication failed".to_owned(),
         });
     }
-    if approved.canonical_project != current.canonical_project
-        || approved.canonical_worktree != current.canonical_worktree
-        || approved.material != current.material
+    if approved.canonical_project != canonical_project
+        || approved.canonical_worktree != canonical_worktree
     {
+        return Err(KvistError::UnapprovedExecutionPolicy {
+            reason:
+                "canonical project or worktree identity changed since execution policy approval"
+                    .to_owned(),
+        });
+    }
+    Ok((approved, secret))
+}
+
+fn ensure_approval_matches(
+    approved: &ExecutionApproval,
+    current: &ExecutionApproval,
+) -> Result<()> {
+    if approved.material != current.material {
         return Err(KvistError::UnapprovedExecutionPolicy {
             reason: execution_approval_difference(&approved.material, &current.material),
         });
     }
-    Ok(runner)
+    Ok(())
 }
 
 fn execution_approval_difference(
@@ -2361,4 +4582,172 @@ pub fn verify_task(
         stdout,
         stderr,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::TempDir;
+
+    use super::{
+        MAX_ATTEMPT_JOURNAL_BYTES, MAX_SCOPE_DEPTH, MAX_SCOPE_ENTRIES, MAX_SCOPE_FILE_BYTES,
+        TaskLock, Timestamp, append_encoded_attempt, digest, digest_path_tree,
+        read_attempt_journal,
+    };
+
+    #[test]
+    fn scope_hash_distinguishes_types_and_enforces_file_and_depth_bounds() {
+        let directory = TempDir::new().expect("create scope test directory");
+        let empty_file = directory.path().join("empty-file");
+        let empty_directory = directory.path().join("empty-directory");
+        fs::write(&empty_file, []).expect("write empty scope file");
+        fs::create_dir(&empty_directory).expect("create empty scope directory");
+        assert_ne!(
+            digest_path_tree(&empty_file).expect("hash empty file"),
+            digest_path_tree(&empty_directory).expect("hash empty directory")
+        );
+
+        let oversized = directory.path().join("oversized");
+        fs::write(&oversized, vec![0_u8; MAX_SCOPE_FILE_BYTES as usize + 1])
+            .expect("write oversized scope file");
+        assert!(
+            digest_path_tree(&oversized).is_err(),
+            "oversized files must not be fully materialized"
+        );
+        let oversized_journal = directory.path().join("oversized.jsonl");
+        fs::write(
+            &oversized_journal,
+            vec![b'x'; MAX_ATTEMPT_JOURNAL_BYTES as usize + 1],
+        )
+        .expect("write oversized journal");
+        assert!(
+            read_attempt_journal(&oversized_journal).is_err(),
+            "journal reads must reject a file before it exceeds their bounded handle read"
+        );
+
+        let mut deep = directory.path().join("deep");
+        fs::create_dir(&deep).expect("create depth root");
+        for index in 0..=MAX_SCOPE_DEPTH {
+            deep = deep.join(format!("level-{index}"));
+            fs::create_dir(&deep).expect("create nested scope directory");
+        }
+        assert!(
+            digest_path_tree(&directory.path().join("deep")).is_err(),
+            "scope traversal must stop at its configured depth"
+        );
+    }
+
+    #[test]
+    fn scope_hash_applies_entry_limits_again_during_revalidation() {
+        let directory = TempDir::new().expect("create scope revalidation directory");
+        for index in 0..=(MAX_SCOPE_ENTRIES / 2) {
+            fs::write(directory.path().join(format!("entry-{index:04}")), []).expect("write entry");
+        }
+        assert!(
+            digest_path_tree(directory.path()).is_err(),
+            "the exit re-read must consume the same global entry budget"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn attempt_journal_append_refuses_link_like_paths() {
+        use std::os::unix::fs::symlink;
+
+        let directory = TempDir::new().expect("create attempt journal directory");
+        let target = directory.path().join("target.jsonl");
+        let journal = directory.path().join("journal.jsonl");
+        fs::write(&target, "retained\n").expect("write target journal");
+        symlink(&target, &journal).expect("link attempt journal");
+
+        assert!(
+            append_encoded_attempt(&journal, r#"{"phase":"prepared"}"#, "append test journal")
+                .is_err(),
+            "attempt appends must not follow a journal symlink"
+        );
+        assert_eq!(
+            fs::read_to_string(&target).expect("read retained target journal"),
+            "retained\n"
+        );
+    }
+
+    #[test]
+    fn recovery_lock_takeover_refuses_live_or_changed_owners_and_release_preserves_replacement() {
+        let directory = TempDir::new().expect("create lock test directory");
+        let timestamp = Timestamp::now().expect("read test timestamp");
+
+        let stale_path = directory.path().join("stale.lock");
+        let stale_contents = "schema_version: 1\nstarted_at: 2026-09-01T20:30:00Z\ntask_id: \"task\"\npid: 999999\nnonce: 00000000000000000000000000000000\n";
+        fs::write(&stale_path, stale_contents).expect("write stale lock");
+        let recovered = TaskLock::recover_path(
+            &stale_path,
+            "task",
+            &timestamp,
+            &digest(stale_contents.as_bytes()),
+        )
+        .expect("take over exact stale lock");
+        recovered.release().expect("release recovery lock");
+
+        let live_path = directory.path().join("live.lock");
+        let live_contents = format!(
+            "schema_version: 1\nstarted_at: 2026-09-01T20:30:00Z\ntask_id: \"task\"\npid: {}\nnonce: 11111111111111111111111111111111\n",
+            std::process::id()
+        );
+        fs::write(&live_path, &live_contents).expect("write live lock");
+        assert!(
+            TaskLock::recover_path(
+                &live_path,
+                "task",
+                &timestamp,
+                &digest(live_contents.as_bytes())
+            )
+            .is_err(),
+            "recovery must not take over a lock whose owner appears live"
+        );
+        assert_eq!(
+            fs::read_to_string(&live_path).expect("read retained live lock"),
+            live_contents
+        );
+
+        let changed_path = directory.path().join("changed.lock");
+        fs::write(&changed_path, stale_contents).expect("write changed lock");
+        assert!(
+            TaskLock::recover_path(
+                &changed_path,
+                "task",
+                &timestamp,
+                &digest(b"different-crashed-owner")
+            )
+            .is_err(),
+            "recovery must not take over a different retained lock"
+        );
+        assert_eq!(
+            fs::read_to_string(&changed_path).expect("read retained changed lock"),
+            stale_contents
+        );
+
+        let malformed_path = directory.path().join("malformed.lock");
+        fs::write(&malformed_path, "pid: 999999\n").expect("write malformed lock");
+        assert!(
+            TaskLock::remove_stale_path(&malformed_path).is_err(),
+            "forced unlock must not treat a malformed record as stale"
+        );
+        assert_eq!(
+            fs::read_to_string(&malformed_path).expect("read retained malformed lock"),
+            "pid: 999999\n"
+        );
+
+        let replacement_path = directory.path().join("replacement.lock");
+        let owner =
+            TaskLock::create(&replacement_path, "task", &timestamp).expect("create owned lock");
+        let displaced = directory.path().join("displaced.lock");
+        fs::rename(&replacement_path, &displaced).expect("displace old lock");
+        fs::write(&replacement_path, "replacement-owner").expect("write replacement lock");
+        assert!(owner.release().is_err());
+        assert_eq!(
+            fs::read_to_string(&replacement_path).expect("read replacement lock"),
+            "replacement-owner"
+        );
+    }
 }

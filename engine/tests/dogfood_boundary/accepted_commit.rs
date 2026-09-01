@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use crate::support::{
     ACCEPTANCE_ID, ATTEMPT_ID, TASK_ID, assert_success, create_target_project, git, output_text,
-    run, run_kvist, run_kvist_with_path, sha256_file, temporary_directory,
+    run, run_kvist, run_kvist_with_path, sha256_file, task_block, temporary_directory,
     write_finalizable_attempt,
 };
 
@@ -494,8 +494,9 @@ fn tampered_attempt_evidence_cannot_be_finalized_and_committed() {
     assert_eq!(head(project.path()), head_before);
     let queue = fs::read_to_string(project.path().join("engine/TODOS.yaml"))
         .expect("read queue after refusal");
-    assert!(queue.contains("status: in-progress"));
-    assert!(!queue.contains("status: completed"));
+    let task = task_block(&queue, TASK_ID);
+    assert!(task.contains("status: in-progress"));
+    assert!(!task.contains("status: completed"));
     assert!(
         queue.contains("state: fenced") || queue.contains("evidence"),
         "tampered commit attempt must remain durably fenced"
@@ -625,7 +626,10 @@ fn task_finalization_commit_handles_creations_deletions_and_renames_exactly() {
         &["show", &format!("{new_head}:engine/TODOS.yaml")],
     );
     assert_success(&committed_queue, "read committed queue");
-    assert!(String::from_utf8_lossy(&committed_queue.stdout).contains("status: completed"));
+    assert!(
+        task_block(&String::from_utf8_lossy(&committed_queue.stdout), TASK_ID)
+            .contains("status: completed")
+    );
     assert!(queue_path.exists());
 }
 

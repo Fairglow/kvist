@@ -1953,6 +1953,17 @@ command = "echo verify"
 
     std::thread::sleep(std::time::Duration::from_millis(250));
 
+    let live_unlock = run_kvist(&project, &["task", "unlock", ".", "--force"]);
+    assert!(
+        !live_unlock.status.success(),
+        "force unlock must not remove a lock whose owner is still live"
+    );
+    assert!(
+        String::from_utf8_lossy(&live_unlock.stderr).contains("still appears live"),
+        "live lock refusal must identify the live owner: {}",
+        String::from_utf8_lossy(&live_unlock.stderr)
+    );
+
     bg_process.kill().expect("kill bg process");
     let _ = bg_process.wait();
 

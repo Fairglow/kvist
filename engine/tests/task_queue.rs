@@ -58,6 +58,50 @@ fn parses_and_serializes_a_canonical_queue_deterministically() {
 }
 
 #[test]
+fn accepts_a_fenced_recovery_state_only_for_an_in_progress_task() {
+    let fenced = VALID_QUEUE
+        .replacen("status: pending", "status: in-progress", 1)
+        .replacen(
+            "completed_at: null\n    blocked_reason: null\n",
+            "completed_at: null\n    blocked_reason: null\n    recovery_state: { state: fenced, attempt_id: attempt-0001, reason: runner-descriptor-open-failed }\n",
+            1,
+        );
+    let queue = parse(&fenced).expect("fenced in-progress queue");
+    let serialized = serialize(&queue).expect("serialize fenced queue");
+    assert!(serialized.contains("recovery_state:\n      state: fenced"));
+    assert!(
+        parse(&fenced.replacen("status: in-progress", "status: pending", 1)).is_err(),
+        "only in-progress tasks may be fenced"
+    );
+}
+
+#[test]
+fn rejects_lifecycle_tasks_without_their_required_predecessor_role() {
+    for (name, invalid) in [
+        (
+            "implementation without test",
+            VALID_QUEUE.replace("kind: test", "kind: implementation"),
+        ),
+        (
+            "security audit without implementation",
+            VALID_QUEUE.replace("kind: implementation", "kind: security-audit"),
+        ),
+        (
+            "compliance review without security audit",
+            VALID_QUEUE.replace("kind: implementation", "kind: compliance-review"),
+        ),
+    ] {
+        assert!(
+            parse(&invalid)
+                .expect_err(name)
+                .to_string()
+                .contains("must depend on a preceding"),
+            "{name} must be rejected"
+        );
+    }
+}
+
+#[test]
 fn accepts_only_safe_ancestor_contract_paths() {
     let nested = VALID_QUEUE.replace(
         "parent_contract: null",

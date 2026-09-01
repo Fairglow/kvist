@@ -136,6 +136,23 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: "write-tests"
+    title: "Write fixture tests"
+    description: "Define the fixture coverage before implementation."
+    context: "The recovery fixture needs a completed lifecycle predecessor."
+    purpose: "Keep every fixture queue valid under lifecycle validation."
+    expected_outcome: "The prerequisite test task is complete."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
+    timestamps:
+      created_at: "2026-09-01T20:30:00Z"
+      updated_at: "2026-09-01T20:30:00Z"
+      completed_at: "2026-09-01T20:30:00Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "{TASK_ID}"
     title: "Implement fixture"
     description: "Implement only the accepted fixture scope."
@@ -144,7 +161,8 @@ tasks:
     expected_outcome: "The attempt remains pending until explicit human finalization."
     kind: implementation
     status: {status}
-    depends_on: []
+    depends_on:
+      - "write-tests"
     requirements:
       - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
     timestamps:
@@ -158,6 +176,44 @@ tasks:
         sha256_file(&engine.join("CONTRACT.md")),
         sha256_file(&engine.join("DESIGN.md")),
     )
+}
+
+pub fn task_block<'a>(queue: &'a str, task_id: &str) -> &'a str {
+    let marker = format!("  - id: \"{task_id}\"");
+    let (_, task_and_following) = queue
+        .split_once(&marker)
+        .unwrap_or_else(|| panic!("queue must contain task `{task_id}`"));
+    task_and_following
+        .split("\n  - id: ")
+        .next()
+        .expect("task block must end at the next declaration or end of queue")
+}
+
+pub fn add_independent_ready_implementation_task(project: &Path) {
+    let queue_path = project.join("engine/TODOS.yaml");
+    let mut queue = fs::read_to_string(&queue_path).expect("read fixture queue");
+    queue.push_str(
+        r#"  - id: "independent-implementation"
+    title: "Implement independent fixture"
+    description: "Exercise a legal unrelated queue mutation."
+    context: "The completed test predecessor makes this task independently ready."
+    purpose: "Prove a fenced sibling prevents component-wide queue rewrites."
+    expected_outcome: "The task remains independently runnable once recovery completes."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
+    timestamps:
+      created_at: "2026-09-01T20:30:00Z"
+      updated_at: "2026-09-01T20:30:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+"#,
+    );
+    fs::write(queue_path, queue).expect("add independent fixture task");
 }
 
 fn create_child(engine: &Path, name: &str, package: &str) {

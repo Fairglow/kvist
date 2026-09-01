@@ -40,6 +40,7 @@ The `kvist` executable provides:
 - `task log COMPONENT_DIR TASK_ID`
 - `task approve-policy [PROJECT_DIR]`
 - `task unlock COMPONENT_DIR [--force]`
+- `task recover COMPONENT_DIR TASK_ID ATTEMPT_ID --disposition execution-did-not-start`
 - `prompt` with one explicit prompt source or redirected input, optional
   `--role`, `--model`, and `--reasoning-effort`
 - `agent setup [--force]`
@@ -89,10 +90,11 @@ documents. `component accept` validates local intent and the immediate parent
 contract, records their exact revisions in the queue, and clears attributable
 stale evidence without changing task definitions or status.
 
-The target dogfooding execution surface additionally provides explicit attempt
-recovery and human finalization operations. Their final command spellings are
-defined by the queued CLI tests before implementation. Acceptance operations
-also gain an explicit `--commit` option, and a planned
+The pre-spawn dogfooding recovery surface provides explicit attempt recovery
+only when authenticated evidence proves the runner descriptor was not launched
+and no write scope was exposed. Human finalization belongs to the later
+dogfood-runner-integrate-code task and has no current command spelling.
+Acceptance operations also gain an explicit `--commit` option, and a planned
 `vcs commit-accepted ACCEPTANCE_ID` operation retries a commit for an already
 accepted set. They are not current CLI interfaces.
 
@@ -166,6 +168,11 @@ A task is ready only when pending, current, and all explicit and transitive
 predecessors are completed. Completed task IDs are terminal. Queue writes,
 policy approvals, attempt records, and test verification follow the atomicity,
 locking, and evidence guarantees stated in the requirements.
+Any fenced task or unresolved authenticated attempt fences every queue writer
+in that component until its exact recovery finishes; read-only inspection
+remains available. A completed authenticated recovery chain remains terminal
+historical evidence after the recovered queue digest has been verified, so
+later legal queue updates do not re-fence it.
 
 `prompt` host execution requires `--allow-host-execution`. It is never
 represented as sandboxed. Current `task run` retains the old component-only
@@ -217,6 +224,8 @@ task with bounded redacted evidence. Retained locks or a trailing prepared
 record fence further writes until explicit recovery. Target recovery can
 reconcile only digest-proven state; uncertain source effects remain fenced for
 human disposition.
+`task unlock --force` bypasses only the confirmation prompt: it refuses a
+demonstrably live, changed, replaced, malformed, or fenced lock state.
 
 Commit recovery operates only on an already accepted canonical set. A changed
 accepted path, expected head, signing policy, backend identity, or repository

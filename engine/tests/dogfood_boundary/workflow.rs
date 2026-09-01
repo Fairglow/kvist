@@ -3,7 +3,8 @@ use std::fs;
 use serde_json::json;
 
 use crate::support::{
-    ATTEMPT_ID, TASK_ID, create_target_project, git, output_text, run_kvist, sha256_file,
+    ATTEMPT_ID, TASK_ID, add_independent_ready_implementation_task, assert_success,
+    create_target_project, git, output_text, run_kvist, sha256_file, task_block,
     write_ambiguous_attempt, write_finalizable_attempt,
 };
 
@@ -14,8 +15,9 @@ fn attempt_journal(project: &std::path::Path) -> std::path::PathBuf {
 fn assert_attempt_is_fenced_and_unfinalized(project: &std::path::Path) {
     let queue = fs::read_to_string(project.join("engine/TODOS.yaml"))
         .expect("read refused-finalization queue");
-    assert!(queue.contains("status: in-progress"));
-    assert!(!queue.contains("status: completed"));
+    let task = task_block(&queue, TASK_ID);
+    assert!(task.contains("status: in-progress"));
+    assert!(!task.contains("status: completed"));
     assert!(
         queue.contains("state: fenced") || queue.contains("evidence"),
         "evidence tampering must leave the attempt durably fenced"
@@ -96,11 +98,12 @@ fn successful_process_and_verification_remain_pending_for_human_disposition() {
     );
     let queue = fs::read_to_string(project.path().join("engine/TODOS.yaml"))
         .expect("read pending-disposition queue");
+    let task = task_block(&queue, TASK_ID);
     assert!(
-        queue.contains("status: in-progress"),
+        task.contains("status: in-progress"),
         "successful execution evidence alone must not complete the task"
     );
-    assert!(!queue.contains("status: completed"));
+    assert!(!task.contains("status: completed"));
     let journal_path = project
         .path()
         .join(format!("engine/.kvist-attempts/{TASK_ID}.jsonl"));
@@ -131,7 +134,7 @@ fn successful_process_and_verification_remain_pending_for_human_disposition() {
     );
     let queue =
         fs::read_to_string(project.path().join("engine/TODOS.yaml")).expect("read final queue");
-    assert!(queue.contains("status: completed"));
+    assert!(task_block(&queue, TASK_ID).contains("status: completed"));
     let journal = fs::read_to_string(journal_path).expect("read final attempt journal");
     assert!(journal.contains("\"phase\":\"human-finalized\""));
     assert!(journal.contains("\"disposition\":\"accepted\""));
@@ -281,7 +284,7 @@ fn a_prepared_record_and_user_disposition_do_not_prove_execution_never_started()
         output_text(&output)
     );
     let queue = fs::read_to_string(queue_path).expect("read fenced queue");
-    assert!(!queue.contains("status: completed"));
+    assert!(!task_block(&queue, TASK_ID).contains("status: completed"));
     let journal =
         fs::read_to_string(attempts.join(format!("{TASK_ID}.jsonl"))).expect("read journal");
     assert!(!journal.contains("\"phase\":\"recovered\""));
@@ -335,7 +338,7 @@ fn recovery_can_use_independent_durable_pre_spawn_failure_evidence() {
     );
     let queue =
         fs::read_to_string(project.path().join("engine/TODOS.yaml")).expect("read recovered queue");
-    assert!(queue.contains("status: pending"));
+    assert!(task_block(&queue, TASK_ID).contains("status: pending"));
     let journal =
         fs::read_to_string(attempt_journal(project.path())).expect("read recovered journal");
     assert!(journal.contains("\"phase\":\"pre-spawn-failure\""));
@@ -403,6 +406,275 @@ fn forged_pre_spawn_evidence_cannot_clear_a_fenced_attempt() {
     let refused_journal =
         fs::read_to_string(journal_path).expect("read forged journal after refusal");
     assert!(!refused_journal.contains("\"phase\":\"recovered\""));
+}
+
+#[test]
+fn forged_recovered_evidence_cannot_enable_transition_unlock_or_run() {
+    let project = create_target_project("pending");
+    assert!(
+        run_kvist(project.path(), &["task", "approve-policy"])
+            .status
+            .success()
+    );
+    fs::remove_file(
+        project
+            .external_tools_path()
+            .join("controlled-sandbox-runner"),
+    )
+    .expect("remove runner before descriptor validation");
+    assert!(
+        !run_kvist(project.path(), &["task", "run", ".", TASK_ID])
+            .status
+            .success()
+    );
+    let journal_path = attempt_journal(project.path());
+    let mut journal = fs::read_to_string(&journal_path).expect("read fenced journal");
+    journal.push_str(&format!(
+        "{}\n",
+        json!({
+            "schema_version": 1,
+            "attempt_id": ATTEMPT_ID,
+            "task_id": TASK_ID,
+            "phase": "recovered",
+            "recovery_prepared_event_digest": crate::support::sha256_bytes(b"forged"),
+            "recovered_queue_digest": crate::support::sha256_bytes(b"forged"),
+            "timestamp": "2026-09-01T20:30:00Z",
+            "recorded_by": "kvist-host",
+            "authentication_tag": "hmac-sha256:sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        })
+    ));
+    fs::write(&journal_path, journal).expect("append forged recovered evidence");
+    let queue_path = project.path().join("engine/TODOS.yaml");
+    let before = fs::read(&queue_path).expect("read fenced queue");
+
+    for arguments in [
+        vec!["task", "transition", ".", TASK_ID, "pending"],
+        vec!["task", "unlock", ".", "--force"],
+        vec!["task", "run", ".", TASK_ID],
+    ] {
+        let output = run_kvist(project.path(), &arguments);
+        assert!(
+            !output.status.success(),
+            "forged recovered evidence must not authorize {:?}: {}",
+            arguments,
+            output_text(&output)
+        );
+    }
+    assert_eq!(fs::read(&queue_path).expect("read retained fence"), before);
+}
+
+#[test]
+fn unresolved_attempt_fences_every_component_queue_writer() {
+    let project = create_target_project("pending");
+    write_ambiguous_attempt(project.path());
+    add_independent_ready_implementation_task(project.path());
+    let queue_path = project.path().join("engine/TODOS.yaml");
+    let before = fs::read(&queue_path).expect("read fenced two-task queue");
+
+    let transition = run_kvist(
+        project.path(),
+        &[
+            "task",
+            "transition",
+            ".",
+            "independent-implementation",
+            "blocked",
+            "--reason",
+            "this legal transition must remain fenced",
+        ],
+    );
+    assert!(
+        !transition.status.success(),
+        "a fenced task must prevent an unrelated task transition: {}",
+        output_text(&transition)
+    );
+    assert!(
+        output_text(&transition).contains("recover") || output_text(&transition).contains("fenced"),
+        "transition refusal must identify component-wide recovery fencing: {}",
+        output_text(&transition)
+    );
+    assert_eq!(
+        fs::read(&queue_path).expect("read after transition"),
+        before
+    );
+
+    let accept = run_kvist(project.path(), &["component", "accept", "."]);
+    assert!(
+        !accept.status.success(),
+        "a fenced task must prevent component acceptance from rewriting the queue: {}",
+        output_text(&accept)
+    );
+    assert!(
+        output_text(&accept).contains("recover") || output_text(&accept).contains("fenced"),
+        "acceptance refusal must identify component-wide recovery fencing: {}",
+        output_text(&accept)
+    );
+    assert_eq!(
+        fs::read(&queue_path).expect("read after acceptance"),
+        before
+    );
+
+    assert_success(
+        &run_kvist(project.path(), &["task", "approve-policy"]),
+        "approve task policy",
+    );
+    fs::remove_file(
+        project
+            .external_tools_path()
+            .join("controlled-sandbox-runner"),
+    )
+    .expect("remove runner before independent automatic selection");
+    let run = run_kvist(project.path(), &["task", "run", "."]);
+    assert!(
+        !run.status.success(),
+        "a fenced task must prevent task-run from fencing a selected sibling: {}",
+        output_text(&run)
+    );
+    assert!(
+        output_text(&run).contains("recover") || output_text(&run).contains("fenced"),
+        "task-run refusal must identify component-wide recovery fencing: {}",
+        output_text(&run)
+    );
+    assert_eq!(fs::read(&queue_path).expect("read after task run"), before);
+}
+
+#[test]
+fn recovery_resumes_durable_partial_states_and_restores_the_pre_attempt_status() {
+    let project = create_target_project("in-progress");
+    assert!(
+        run_kvist(project.path(), &["task", "approve-policy"])
+            .status
+            .success()
+    );
+    fs::remove_file(
+        project
+            .external_tools_path()
+            .join("controlled-sandbox-runner"),
+    )
+    .expect("remove runner before descriptor validation");
+    assert!(
+        !run_kvist(project.path(), &["task", "run", ".", TASK_ID])
+            .status
+            .success()
+    );
+    let queue_path = project.path().join("engine/TODOS.yaml");
+    let fenced_queue = fs::read(&queue_path).expect("save fenced queue");
+    let journal_path = attempt_journal(project.path());
+
+    let first = run_kvist(
+        project.path(),
+        &[
+            "task",
+            "recover",
+            ".",
+            TASK_ID,
+            ATTEMPT_ID,
+            "--disposition",
+            "execution-did-not-start",
+        ],
+    );
+    assert!(
+        first.status.success(),
+        "initial recovery failed: {}",
+        output_text(&first)
+    );
+    let recovered_queue = fs::read(&queue_path).expect("save recovered queue");
+    assert!(
+        task_block(&String::from_utf8_lossy(&recovered_queue), TASK_ID,)
+            .contains("status: in-progress"),
+        "recovery must restore an explicitly resumed task to in-progress"
+    );
+    let recovered_journal = fs::read_to_string(&journal_path).expect("read recovered journal");
+    let without_recovered = recovered_journal
+        .lines()
+        .filter(|line| !line.contains("\"phase\":\"recovered\""))
+        .collect::<Vec<_>>()
+        .join("\n")
+        + "\n";
+
+    // These direct durable fault states model a crash after recovery-prepared,
+    // first before queue replacement and then after it but before the commit record.
+    fs::write(&queue_path, &fenced_queue).expect("restore fenced partial state");
+    fs::write(&journal_path, &without_recovered).expect("remove recovered record");
+    let before_replace = run_kvist(
+        project.path(),
+        &[
+            "task",
+            "recover",
+            ".",
+            TASK_ID,
+            ATTEMPT_ID,
+            "--disposition",
+            "execution-did-not-start",
+        ],
+    );
+    assert!(
+        before_replace.status.success(),
+        "fenced recovery-prepared state did not resume: {}",
+        output_text(&before_replace)
+    );
+    assert_eq!(
+        fs::read(&queue_path).expect("read resumed recovered queue"),
+        recovered_queue
+    );
+
+    fs::write(&journal_path, &without_recovered).expect("model missing committed recovery");
+    let before_commit = run_kvist(
+        project.path(),
+        &[
+            "task",
+            "recover",
+            ".",
+            TASK_ID,
+            ATTEMPT_ID,
+            "--disposition",
+            "execution-did-not-start",
+        ],
+    );
+    assert!(
+        before_commit.status.success(),
+        "recovered queue missing its record did not resume: {}",
+        output_text(&before_commit)
+    );
+    assert_eq!(
+        fs::read(&queue_path).expect("read idempotent recovered queue"),
+        recovered_queue
+    );
+    assert_eq!(
+        fs::read_to_string(&journal_path)
+            .expect("read idempotent journal")
+            .matches("\"phase\":\"recovered\"")
+            .count(),
+        1
+    );
+    let transition = run_kvist(
+        project.path(),
+        &[
+            "task",
+            "transition",
+            ".",
+            TASK_ID,
+            "blocked",
+            "--reason",
+            "human review resumes after authenticated recovery",
+        ],
+    );
+    assert!(
+        transition.status.success(),
+        "a complete authenticated chain must permit ordinary lifecycle work: {}",
+        output_text(&transition)
+    );
+    let reset = run_kvist(
+        project.path(),
+        &["task", "transition", ".", TASK_ID, "pending"],
+    );
+    assert!(
+        reset.status.success(),
+        "a completed recovery chain must remain terminal after one legal queue update: {}",
+        output_text(&reset)
+    );
+    let queue = fs::read_to_string(queue_path).expect("read queue after second lifecycle update");
+    assert!(task_block(&queue, TASK_ID).contains("status: pending"));
 }
 
 #[test]

@@ -272,6 +272,16 @@ digests, policy and runner identities, scoped filesystem preconditions, and
 durable phase markers. Recovery finalizes only an exact known state or records
 that execution provably did not begin. Every other case remains fenced and
 requires a human disposition; it never performs a destructive VCS reset.
+Recovery is a sequence of individually durable journal append and atomic
+single-file queue replacement steps, not a multi-file transaction. A signed
+recovery-prepared decision permits an interrupted invocation to complete only
+the exact fenced or recovered queue state it names; any changed input remains
+inspectable and refused.
+Queue writers assess every task journal while holding the component lock.
+Only the exact recovery operation may proceed while its named attempt is
+unresolved. Once a fully authenticated recovery chain records its recovered
+queue digest, it remains terminal audit history rather than requiring all
+future legal queue revisions to retain that digest.
 
 Acceptance and commit journals are separate. Acceptance does not become false
 because the VCS operation failed. Recovery reports the accepted-but-uncommitted

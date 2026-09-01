@@ -107,9 +107,6 @@ pub enum StalenessCauseKind {
 }
 
 /// One actionable, traceable unit of component work.
-///
-/// `recovery_state` records the prior lifecycle state before the failed attempt,
-/// enabling rollback to that state when an attempt is interrupted.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Task {
@@ -137,8 +134,29 @@ pub struct Task {
     pub timestamps: TaskTimestamps,
     /// Actionable blocker explanation when the task is blocked.
     pub blocked_reason: Option<String>,
-    /// The prior lifecycle state before this attempt, for recovery rollback.
-    pub recovery_state: Option<String>,
+    /// A fenced execution attempt that requires explicit recovery.
+    #[serde(default)]
+    pub recovery_state: Option<RecoveryState>,
+}
+
+/// Durable state for an attempt whose effects cannot be inferred.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RecoveryState {
+    /// The only recovery state supported by version-one queues.
+    pub state: RecoveryStateKind,
+    /// Stable identity of the fenced attempt.
+    pub attempt_id: String,
+    /// Bounded explanation of why the attempt is fenced.
+    pub reason: String,
+}
+
+/// Recovery-state variants understood by the version-one queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RecoveryStateKind {
+    /// Effects may be ambiguous and no ordinary transition may proceed.
+    Fenced,
 }
 
 /// Mandatory lifecycle roles for an executable task.
@@ -499,12 +517,31 @@ fn append_task(output: &mut String, task: &Task) {
         None => line(output, 4, "blocked_reason: null"),
     }
     match &task.recovery_state {
-        Some(recovery) => line(
-            output,
-            4,
-            &format!("recovery_state: {}", yaml_string(recovery)),
-        ),
+        Some(recovery) => {
+            line(output, 4, "recovery_state:");
+            line(
+                output,
+                6,
+                &format!("state: {}", recovery_state_name(recovery.state)),
+            );
+            line(
+                output,
+                6,
+                &format!("attempt_id: {}", yaml_string(&recovery.attempt_id)),
+            );
+            line(
+                output,
+                6,
+                &format!("reason: {}", yaml_string(&recovery.reason)),
+            );
+        }
         None => line(output, 4, "recovery_state: null"),
+    }
+}
+
+fn recovery_state_name(state: RecoveryStateKind) -> &'static str {
+    match state {
+        RecoveryStateKind::Fenced => "fenced",
     }
 }
 
@@ -770,34 +807,35 @@ fn validate_task(task: &Task) -> std::result::Result<(), TaskQueueError> {
         }
     }
     match (task.status, &task.recovery_state) {
-        (TaskStatus::InProgress, Some(_state)) => {
-            return Err(TaskQueueError::invalid(format!(
-                "in-progress task `{}` requires recovery_state: null",
-                task.id
-            )));
+        (TaskStatus::InProgress, Some(recovery)) => {
+            if recovery.state != RecoveryStateKind::Fenced {
+                return Err(TaskQueueError::invalid(format!(
+                    "in-progress task `{}` has an unsupported recovery state",
+                    task.id
+                )));
+            }
+            if !valid_attempt_id(&recovery.attempt_id) {
+                return Err(TaskQueueError::invalid(format!(
+                    "in-progress task `{}` recovery attempt ID `{}` must use the bounded `attempt-NNNN` form",
+                    task.id, recovery.attempt_id
+                )));
+            }
+            validate_text(
+                &recovery.reason,
+                "recovery_state.reason",
+                MAX_DETAIL_CHARS,
+                false,
+            )?;
         }
         (TaskStatus::InProgress, None) => {}
-        (TaskStatus::Pending, Some(_state)) => {
+        (_, Some(_)) => {
             return Err(TaskQueueError::invalid(format!(
-                "pending task `{}` requires recovery_state: null",
+                "{} task `{}` requires recovery_state: null",
+                task_status_name(task.status),
                 task.id
             )));
         }
-        (TaskStatus::Pending, None) => {}
-        (TaskStatus::Completed, Some(_)) => {
-            return Err(TaskQueueError::invalid(format!(
-                "completed task `{}` requires recovery_state: null",
-                task.id
-            )));
-        }
-        (TaskStatus::Completed, None) => {}
-        (TaskStatus::Blocked, Some(_state)) => {
-            return Err(TaskQueueError::invalid(format!(
-                "blocked task `{}` requires recovery_state: null",
-                task.id
-            )));
-        }
-        (TaskStatus::Blocked, None) => {}
+        (_, None) => {}
     }
     Ok(())
 }
@@ -924,6 +962,13 @@ fn valid_task_id(value: &str) -> bool {
             character.is_ascii_lowercase() || character.is_ascii_digit() || character == b'-'
         })
         && !value.contains("--")
+}
+
+fn valid_attempt_id(value: &str) -> bool {
+    let Some(number) = value.strip_prefix("attempt-") else {
+        return false;
+    };
+    number.len() == 4 && number.bytes().all(|character| character.is_ascii_digit())
 }
 
 fn validate_text(

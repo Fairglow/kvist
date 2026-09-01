@@ -1,12 +1,12 @@
 schema_version: 1
 component:
   requirements_revision: "sha256:31879c02266ed8f24ef353818871e2adef67913854de3a279e1ad865991bcea0"
-  contract_revision: "sha256:87eac3c091fafec1353a2fa9f95014cc4fb105ecc2a91b2c28ebb2b32491b803"
-  design_revision: "sha256:37699b24a838d3fb918060525cebd18ef1f3b7dcb4658ea9afff61b598e12c5c"
+  contract_revision: "sha256:771ba2a3e5dfd359f482f8a47528bbb78439b995c93d6d6633bf5f95c193151a"
+  design_revision: "sha256:72fa5c67542d450f4fe9abb2e0ea7a1da7da89952ad625289a0dffd8235afc18"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-01T21:04:20Z"
+    checked_at: "2026-09-01T22:31:53Z"
     stale_since: null
     causes: []
 tasks:
@@ -82,7 +82,7 @@ tasks:
     purpose: "Prevent ambiguous attempts from being unlocked, retried, completed, or forgotten without durable human arbitration."
     expected_outcome: "Exact known states can be reconciled deterministically, uncertain source effects remain fenced, and every recovery decision retains bounded authenticated evidence."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "dogfood-layout-implement-code"
     requirements:
@@ -93,8 +93,8 @@ tasks:
       - "TODO.md#TODO-DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
-      updated_at: "2026-09-01T19:57:32Z"
-      completed_at: null
+      updated_at: "2026-09-01T22:32:02Z"
+      completed_at: "2026-09-01T22:32:02Z"
     blocked_reason: null
     recovery_state: null
   - id: "dogfood-protocol-implement-code"
