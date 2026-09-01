@@ -1,6 +1,6 @@
 <!-- kvist-implementation-record-version: 1 -->
 
-# agent_runtime implementation record
+# Component Implementation Record
 
 ## Scope and evidence
 
