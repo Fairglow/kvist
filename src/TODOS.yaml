@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:7f6ef8a456268508e8da2fbdd1cf796d830a7521da608c7e06bcdfb5a4e15c97"
-  contract_revision: "sha256:5e8f49fc7d151c87933d7ba366d4f1ff54de41cb7ba6cbf45c8c1f14eb7d3102"
-  design_revision: "sha256:975365178bb9992fdc107e8d7f8e0eba60c40ea0bb63c208c87647d360a13646"
+  requirements_revision: "sha256:31879c02266ed8f24ef353818871e2adef67913854de3a279e1ad865991bcea0"
+  contract_revision: "sha256:87eac3c091fafec1353a2fa9f95014cc4fb105ecc2a91b2c28ebb2b32491b803"
+  design_revision: "sha256:a5ca37e12b64e171ded70169f699a3f8ff50f5937ffaa0ffe391f5709816c7f2"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-01T07:15:25Z"
+    checked_at: "2026-09-01T20:30:00Z"
     stale_since: null
     causes: []
 tasks:
@@ -36,7 +36,7 @@ tasks:
     purpose: "Establish complete negative and positive evidence before changing repository layout or enabling any new effectful path."
     expected_outcome: "Tests cover malformed and legacy requests, path aliasing and links, write-scope escape, hidden state, backend identity, dependency-source policy, cache bounds, process cleanup, ambiguous recovery, human disposition, isolated-index exact commits, unrelated and overlapping changes, commit recovery, hook and signing policy, unsupported VCS backends, and absence of host fallback."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Compatibility-and-verification"
@@ -50,8 +50,8 @@ tasks:
       - "TODO.md#TODO-DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
-      updated_at: "2026-09-01T19:57:32Z"
-      completed_at: null
+      updated_at: "2026-09-01T20:58:49Z"
+      completed_at: "2026-09-01T20:58:49Z"
     blocked_reason: null
     recovery_state: null
   - id: "dogfood-layout-implement-code"

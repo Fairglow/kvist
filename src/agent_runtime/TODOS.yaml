@@ -5,10 +5,10 @@ component:
   design_revision: "sha256:d290df050d46ccafd0bc0aabf75b22f79eeb8920058dca293bd7d33586eff366"
   parent_contract:
     path: "../CONTRACT.md"
-    revision: "sha256:5e8f49fc7d151c87933d7ba366d4f1ff54de41cb7ba6cbf45c8c1f14eb7d3102"
+    revision: "sha256:87eac3c091fafec1353a2fa9f95014cc4fb105ecc2a91b2c28ebb2b32491b803"
   revalidation:
     state: current
-    checked_at: "2026-09-01T08:54:44Z"
+    checked_at: "2026-09-01T20:30:00Z"
     stale_since: null
     causes: []
 tasks:
