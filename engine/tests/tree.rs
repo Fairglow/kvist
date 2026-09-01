@@ -22,6 +22,14 @@ fn run_tree(path: &Path) -> Output {
         .expect("run kvist tree")
 }
 
+fn run_json_tree(path: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args(["--json", "tree"])
+        .arg(path)
+        .output()
+        .expect("run JSON kvist tree")
+}
+
 #[test]
 fn cli_renders_a_stable_ascii_tree_with_component_statuses() {
     let project = TempDir::new().expect("create temporary project");
@@ -95,6 +103,78 @@ fn tree_uses_the_configured_component_root() {
     let output = render_project(project.path()).expect("render configured tree");
 
     assert_eq!(output, "component root: components\n. [complete]");
+}
+
+#[test]
+fn json_tree_uses_the_configured_component_root() {
+    let project = TempDir::new().expect("create temporary project");
+    initialize(project.path()).expect("initialize project");
+    fs::write(
+        project.path().join("kvist.toml"),
+        "schema_version = 1\ncomponent_root = \"components\"\n",
+    )
+    .expect("configure component root");
+    create_component(
+        &project.path().join("components"),
+        &[
+            ComponentArtifact::Requirements,
+            ComponentArtifact::Contract,
+            ComponentArtifact::Design,
+            ComponentArtifact::TaskQueue,
+            ComponentArtifact::ImplementationRecord,
+        ],
+    );
+
+    let output = run_json_tree(project.path());
+
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("valid JSON tree output");
+    assert_eq!(value["component_root"], "components");
+    assert_eq!(value["components"][0]["path"], ".");
+    assert_eq!(value["components"][0]["state"], "Complete");
+}
+
+#[test]
+fn json_tree_enforces_configured_discovery_limits() {
+    let project = TempDir::new().expect("create temporary project");
+    initialize(project.path()).expect("initialize project");
+    fs::write(
+        project.path().join("kvist.toml"),
+        concat!(
+            "schema_version = 1\n",
+            "component_root = \"components\"\n",
+            "[discovery]\n",
+            "max_components = 1\n",
+        ),
+    )
+    .expect("configure bounded component root");
+    for path in [
+        project.path().join("components"),
+        project.path().join("components/child"),
+    ] {
+        create_component(
+            &path,
+            &[
+                ComponentArtifact::Requirements,
+                ComponentArtifact::Contract,
+                ComponentArtifact::Design,
+                ComponentArtifact::TaskQueue,
+                ComponentArtifact::ImplementationRecord,
+            ],
+        );
+    }
+
+    let output = run_json_tree(project.path());
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("maximum of 1 recognized components"),
+        "{stderr}"
+    );
 }
 
 #[test]

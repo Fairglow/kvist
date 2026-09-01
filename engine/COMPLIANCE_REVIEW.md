@@ -1,6 +1,10 @@
 <!-- kvist-compliance-review-version: 1 -->
 # Component Compliance Review
 
+> Historical evidence notice: this review predates the one-way move from the
+> root component at `src/` to `engine/`. Its original review boundary is
+> retained, and this report does not certify the migrated layout.
+
 ## Review boundary and independence
 
 This is an independent, source-blind compliance review of the root component

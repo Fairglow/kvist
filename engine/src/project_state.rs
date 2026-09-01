@@ -39,51 +39,12 @@ pub const REQUIRED_ROOT_ARTIFACT_PATHS: [&str; 9] = [
     ROOT_IMPLEMENTATION_RECORD_PATH,
 ];
 
-const ARTIFACTS: [Artifact; 9] = [
-    Artifact {
-        path: REQUIRED_ROOT_ARTIFACT_PATHS[0],
-        kind: ArtifactKind::Configuration,
-    },
-    Artifact {
-        path: REQUIRED_ROOT_ARTIFACT_PATHS[1],
-        kind: ArtifactKind::Vision,
-    },
-    Artifact {
-        path: REQUIRED_ROOT_ARTIFACT_PATHS[2],
-        kind: ArtifactKind::Architecture,
-    },
-    Artifact {
-        path: REQUIRED_ROOT_ARTIFACT_PATHS[3],
-        kind: ArtifactKind::RootContract,
-    },
-    Artifact {
-        path: REQUIRED_ROOT_ARTIFACT_PATHS[4],
-        kind: ArtifactKind::ComponentDocument(DocumentKind::Requirements),
-    },
-    Artifact {
-        path: REQUIRED_ROOT_ARTIFACT_PATHS[5],
-        kind: ArtifactKind::ComponentDocument(DocumentKind::Contract),
-    },
-    Artifact {
-        path: REQUIRED_ROOT_ARTIFACT_PATHS[6],
-        kind: ArtifactKind::ComponentDocument(DocumentKind::Design),
-    },
-    Artifact {
-        path: REQUIRED_ROOT_ARTIFACT_PATHS[7],
-        kind: ArtifactKind::TodoQueue,
-    },
-    Artifact {
-        path: REQUIRED_ROOT_ARTIFACT_PATHS[8],
-        kind: ArtifactKind::ImplementationRecord,
-    },
-];
-
 /// Maximum supported size for root contract, TODO queue, and implementation records.
 pub const MAX_ROOT_TEXT_ARTIFACT_BYTES: u64 = 1024 * 1024;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Artifact {
-    path: &'static str,
+    path: String,
     kind: ArtifactKind,
 }
 
@@ -136,7 +97,7 @@ impl fmt::Display for ProjectState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactStatus {
     /// Artifact path relative to the project root.
-    pub path: &'static str,
+    pub path: String,
     /// Human-readable status suitable for `doctor`.
     pub status: String,
     /// Whether this artifact exists at the expected location.
@@ -321,12 +282,13 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
     };
 
     if !root_exists {
+        let artifacts = artifacts_for_project(project_dir);
         return Ok(ProjectInspection {
             project_dir: project_dir.to_path_buf(),
             state: ProjectState::Uninitialized,
-            artifacts: ARTIFACTS
+            artifacts: artifacts
                 .iter()
-                .map(|artifact| missing_status(artifact.path))
+                .map(|artifact| missing_status(&artifact.path))
                 .collect(),
             root_diagnostic: None,
             vcs: VcsInspection::not_checked(
@@ -339,9 +301,10 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         });
     }
 
-    let artifacts = ARTIFACTS
+    let artifact_specs = artifacts_for_project(project_dir);
+    let artifacts = artifact_specs
         .iter()
-        .map(|artifact| inspect_artifact(project_dir, *artifact))
+        .map(|artifact| inspect_artifact(project_dir, artifact))
         .collect::<Result<Vec<_>>>()?;
     let state = classify(&artifacts);
     let (component_root, components, discovery_error) = inspect_components(project_dir, state)?;
@@ -356,6 +319,53 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         components,
         discovery_error,
     })
+}
+
+fn artifacts_for_project(project_dir: &Path) -> Vec<Artifact> {
+    let component_root = config::load(project_dir)
+        .map(|configuration| configuration.component_root)
+        .unwrap_or_else(|_| PathBuf::from("src"));
+    let component_path =
+        |filename: &str| component_root.join(filename).to_string_lossy().into_owned();
+
+    vec![
+        Artifact {
+            path: "kvist.toml".to_owned(),
+            kind: ArtifactKind::Configuration,
+        },
+        Artifact {
+            path: "VISION.md".to_owned(),
+            kind: ArtifactKind::Vision,
+        },
+        Artifact {
+            path: "ARCHITECTURE.md".to_owned(),
+            kind: ArtifactKind::Architecture,
+        },
+        Artifact {
+            path: "ROOT_CONTRACT.md".to_owned(),
+            kind: ArtifactKind::RootContract,
+        },
+        Artifact {
+            path: component_path(DocumentKind::Requirements.filename()),
+            kind: ArtifactKind::ComponentDocument(DocumentKind::Requirements),
+        },
+        Artifact {
+            path: component_path(DocumentKind::Contract.filename()),
+            kind: ArtifactKind::ComponentDocument(DocumentKind::Contract),
+        },
+        Artifact {
+            path: component_path(DocumentKind::Design.filename()),
+            kind: ArtifactKind::ComponentDocument(DocumentKind::Design),
+        },
+        Artifact {
+            path: component_path(ComponentArtifact::TaskQueue.filename()),
+            kind: ArtifactKind::TodoQueue,
+        },
+        Artifact {
+            path: component_path(ComponentArtifact::ImplementationRecord.filename()),
+            kind: ArtifactKind::ImplementationRecord,
+        },
+    ]
 }
 
 fn invalid_root_inspection(project_dir: &Path) -> ProjectInspection {
@@ -797,7 +807,7 @@ fn inspect_vcs(project_dir: &Path, state: ProjectState) -> VcsInspection {
         }
     };
 
-    let mut required_paths = REQUIRED_ROOT_ARTIFACT_PATHS
+    let mut required_paths = REQUIRED_ROOT_ARTIFACT_PATHS[..4]
         .iter()
         .map(PathBuf::from)
         .collect::<Vec<_>>();
@@ -821,11 +831,11 @@ fn inspect_vcs(project_dir: &Path, state: ProjectState) -> VcsInspection {
     vcs::inspect(project_dir, config.vcs, required_paths)
 }
 
-fn inspect_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactStatus> {
-    let path = project_dir.join(artifact.path);
-    if let Some(parent_problem) = parent_problem(project_dir, artifact.path)? {
+fn inspect_artifact(project_dir: &Path, artifact: &Artifact) -> Result<ArtifactStatus> {
+    let path = project_dir.join(&artifact.path);
+    if let Some(parent_problem) = parent_problem(project_dir, &artifact.path)? {
         return Ok(ArtifactStatus {
-            path: artifact.path,
+            path: artifact.path.clone(),
             status: parent_problem,
             exists: false,
             class: ArtifactClass::Invalid,
@@ -835,7 +845,7 @@ fn inspect_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactSt
     let metadata = match fs::symlink_metadata(&path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return Ok(missing_status(artifact.path));
+            return Ok(missing_status(&artifact.path));
         }
         Err(source) => {
             return Err(KvistError::Io {
@@ -847,11 +857,11 @@ fn inspect_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactSt
     };
     let file_type = metadata.file_type();
     if is_link_like(&metadata) {
-        return Ok(invalid_status(artifact.path, "invalid (link-like path)"));
+        return Ok(invalid_status(&artifact.path, "invalid (link-like path)"));
     }
     if !file_type.is_file() {
         return Ok(invalid_status(
-            artifact.path,
+            &artifact.path,
             "invalid (must be a regular file)",
         ));
     }
@@ -886,40 +896,40 @@ fn parent_problem(project_dir: &Path, relative_path: &str) -> Result<Option<Stri
     }
 }
 
-fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactStatus> {
-    let path = project_dir.join(artifact.path);
+fn validate_artifact(project_dir: &Path, artifact: &Artifact) -> Result<ArtifactStatus> {
+    let path = project_dir.join(&artifact.path);
     match artifact.kind {
         ArtifactKind::Configuration => match config::load(project_dir) {
             Ok(_) => Ok(valid_status(
-                artifact.path,
+                &artifact.path,
                 format!("valid (configuration version {CONFIGURATION_VERSION})"),
             )),
             Err(KvistError::UnsupportedProjectConfigurationVersion { version, .. }) => {
                 Ok(unsupported_status(
-                    artifact.path,
+                    &artifact.path,
                     format!(
                         "unsupported version {version} (supported configuration version {CONFIGURATION_VERSION})"
                     ),
                 ))
             }
-            Err(error) => Ok(invalid_status(artifact.path, format!("invalid ({error})"))),
+            Err(error) => Ok(invalid_status(&artifact.path, format!("invalid ({error})"))),
         },
         ArtifactKind::Vision => validate_markdown_version(
-            artifact.path,
+            &artifact.path,
             &path,
             "kvist-vision-version",
             VISION_VERSION,
             "# Project Vision",
         ),
         ArtifactKind::Architecture => validate_markdown_version(
-            artifact.path,
+            &artifact.path,
             &path,
             "kvist-architecture-version",
             ARCHITECTURE_VERSION,
             "# Project Architecture",
         ),
         ArtifactKind::RootContract => validate_markdown_version(
-            artifact.path,
+            &artifact.path,
             &path,
             "kvist-root-contract-version",
             ROOT_CONTRACT_VERSION,
@@ -930,7 +940,7 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
                 Ok(validation) => validation,
                 Err(KvistError::ComponentDocumentTooLarge { .. }) => {
                     return Ok(invalid_status(
-                        artifact.path,
+                        &artifact.path,
                         format!(
                             "invalid (exceeds the {MAX_ROOT_TEXT_ARTIFACT_BYTES}-byte root artifact limit)"
                         ),
@@ -941,7 +951,7 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
                     | KvistError::ComponentDocumentNotFile { .. },
                 ) => {
                     return Ok(invalid_status(
-                        artifact.path,
+                        &artifact.path,
                         "invalid (must be a regular non-symbolic-link file)",
                     ));
                 }
@@ -949,7 +959,7 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
                     if source.kind() == io::ErrorKind::InvalidData =>
                 {
                     return Ok(invalid_status(
-                        artifact.path,
+                        &artifact.path,
                         "invalid (must be valid UTF-8)",
                     ));
                 }
@@ -957,7 +967,7 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
             };
             if validation.is_valid() {
                 Ok(valid_status(
-                    artifact.path,
+                    &artifact.path,
                     format!("valid ({} version {})", kind.filename(), kind.version()),
                 ))
             } else if let Some(DocumentDiagnosticKind::UnsupportedTemplateVersion {
@@ -974,7 +984,7 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
                     })
             {
                 Ok(unsupported_status(
-                    artifact.path,
+                    &artifact.path,
                     format!(
                         "unsupported version {found} (supported {} version {})",
                         kind.filename(),
@@ -983,7 +993,7 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
                 ))
             } else {
                 Ok(invalid_status(
-                    artifact.path,
+                    &artifact.path,
                     format!(
                         "invalid ({})",
                         component_documents::format_diagnostics(&validation.diagnostics)
@@ -991,9 +1001,9 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
                 ))
             }
         }
-        ArtifactKind::TodoQueue => validate_todo_queue(artifact.path, &path),
+        ArtifactKind::TodoQueue => validate_todo_queue(&artifact.path, &path),
         ArtifactKind::ImplementationRecord => validate_markdown_version(
-            artifact.path,
+            &artifact.path,
             &path,
             IMPLEMENTATION_RECORD_VERSION_MARKER,
             IMPLEMENTATION_RECORD_VERSION,
@@ -1003,7 +1013,7 @@ fn validate_artifact(project_dir: &Path, artifact: Artifact) -> Result<ArtifactS
 }
 
 fn validate_markdown_version(
-    relative_path: &'static str,
+    relative_path: &str,
     path: &Path,
     marker_name: &str,
     supported_version: u32,
@@ -1054,7 +1064,7 @@ fn validate_markdown_version(
     ))
 }
 
-fn validate_todo_queue(relative_path: &'static str, path: &Path) -> Result<ArtifactStatus> {
+fn validate_todo_queue(relative_path: &str, path: &Path) -> Result<ArtifactStatus> {
     let contents = match read_root_text_artifact(relative_path, path)? {
         Ok(contents) => contents,
         Err(status) => return Ok(status),
@@ -1075,7 +1085,7 @@ fn validate_todo_queue(relative_path: &'static str, path: &Path) -> Result<Artif
 }
 
 fn read_root_text_artifact(
-    relative_path: &'static str,
+    relative_path: &str,
     path: &Path,
 ) -> Result<std::result::Result<String, ArtifactStatus>> {
     let metadata = fs::metadata(path).map_err(|source| KvistError::Io {
@@ -1142,36 +1152,36 @@ fn guidance(state: ProjectState) -> &'static str {
     }
 }
 
-fn missing_status(path: &'static str) -> ArtifactStatus {
+fn missing_status(path: &str) -> ArtifactStatus {
     ArtifactStatus {
-        path,
+        path: path.to_owned(),
         status: "missing".to_owned(),
         exists: false,
         class: ArtifactClass::Missing,
     }
 }
 
-fn valid_status(path: &'static str, status: String) -> ArtifactStatus {
+fn valid_status(path: &str, status: String) -> ArtifactStatus {
     ArtifactStatus {
-        path,
+        path: path.to_owned(),
         status,
         exists: true,
         class: ArtifactClass::Valid,
     }
 }
 
-fn invalid_status(path: &'static str, status: impl Into<String>) -> ArtifactStatus {
+fn invalid_status(path: &str, status: impl Into<String>) -> ArtifactStatus {
     ArtifactStatus {
-        path,
+        path: path.to_owned(),
         status: status.into(),
         exists: true,
         class: ArtifactClass::Invalid,
     }
 }
 
-fn unsupported_status(path: &'static str, status: String) -> ArtifactStatus {
+fn unsupported_status(path: &str, status: String) -> ArtifactStatus {
     ArtifactStatus {
-        path,
+        path: path.to_owned(),
         status,
         exists: true,
         class: ArtifactClass::UnsupportedVersion,

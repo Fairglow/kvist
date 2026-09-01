@@ -49,6 +49,42 @@ fn doctor_reports_state_diagnostics_without_writing() {
 }
 
 #[test]
+fn inspection_honors_an_arbitrary_configured_component_root() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::rename(
+        project.path().join("src"),
+        project.path().join("components"),
+    )
+    .expect("move component root");
+    fs::write(
+        project.path().join("kvist.toml"),
+        "schema_version = 1\ncomponent_root = \"components\"\n",
+    )
+    .expect("configure component root");
+
+    let inspection = inspect(project.path()).expect("inspect");
+
+    assert_eq!(inspection.state, ProjectState::Current);
+    assert_eq!(
+        inspection.component_root.as_deref(),
+        Some(std::path::Path::new("components"))
+    );
+    assert!(
+        inspection
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.path == "components/REQUIREMENTS.md")
+    );
+    assert!(
+        inspection
+            .artifacts
+            .iter()
+            .all(|artifact| !artifact.path.starts_with("src/"))
+    );
+}
+
+#[test]
 fn init_refuses_partial_invalid_and_unsupported_projects_without_overwriting() {
     let partial = TempDir::new().expect("partial project");
     let partial_config = partial.path().join("kvist.toml");

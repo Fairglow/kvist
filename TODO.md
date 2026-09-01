@@ -5,7 +5,8 @@
 **Reviewed:** Implemented portions through 2026-08-25; partial and planned
 review, onboarding, promotion, and compliance work is tracked below
 **Reviewed by:** Stefan Kvist | 2026-08-25
-**Build:** `cargo build --release` passes with 0 warnings
+**Build:** `cargo build --manifest-path engine/Cargo.toml --release` passes with
+0 warnings
 
 ## Status conventions
 
@@ -24,8 +25,8 @@ review, onboarding, promotion, and compliance work is tracked below
 ### TODO DOG-01 — Recoverable Supervised Bubblewrap Execution
 
 **Context:** Kvist cannot currently use `task run` on its own root component.
-No production runner implements the sandbox protocol, the current `src/`
-component excludes its Cargo manifest and integration tests, version-one
+No production runner implements the sandbox protocol, the migrated `engine/`
+component now owns its Cargo manifest and integration tests, version-one
 requests cannot express task-scoped workspace authority, and ambiguous
 prepared attempts have no reconciliation command.
 
@@ -480,7 +481,7 @@ native-loop prerequisites, and deferred hardening remain incomplete.
 Detailed rationale and task chains are in
 `docs/agent-runtime/architecture.md`,
 `docs/agent-runtime/rig-evaluation.md`, and
-`src/agent_runtime/TODOS.yaml`.
+`engine/agent_runtime/TODOS.yaml`.
 
 ### TODO AGN-05 — Configurable Log Retention & Monotonic Naming
 
@@ -543,4 +544,4 @@ phase, queue chain, review, or promotion gate is complete:
 For detailed strategy and current contracts, refer to
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md),
 [`ARCHITECTURE.md`](ARCHITECTURE.md), and the root component documents under
-`src/`.
+`engine/`.

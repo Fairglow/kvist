@@ -29,7 +29,7 @@ Its `agent_runtime/` and `sandbox_runner/` directories are separately packaged
 child components with their own requirements, contracts, designs, queues,
 records, tests, and manifests. The one-way migration from the current `src/`
 layout is described in
-`docs/decisions/0003-align-rust-workspace-with-components.md`.
+[`../docs/decisions/0003-align-rust-workspace-with-components.md`](../docs/decisions/0003-align-rust-workspace-with-components.md).
 
 ## Interactions and state
 

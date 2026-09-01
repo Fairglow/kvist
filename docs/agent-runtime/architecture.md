@@ -259,4 +259,4 @@ Kvist therefore requires:
 8. Add MCP and ACP adapters only after the trusted boundaries exist.
 
 The durable task chains are maintained in
-`src/agent_runtime/TODOS.yaml`.
+`engine/agent_runtime/TODOS.yaml`.

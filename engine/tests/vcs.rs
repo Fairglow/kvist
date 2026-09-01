@@ -158,7 +158,11 @@ fn doctor_reports_jj_snapshot_tracking_when_jj_is_available() {
 
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
-    create_complete_component(&project.path().join("--components"));
+    fs::rename(
+        project.path().join("src"),
+        project.path().join("--components"),
+    )
+    .expect("move component root");
     fs::write(
         project.path().join("kvist.toml"),
         "schema_version = 1\ncomponent_root = \"--components\"\n[vcs]\nkind = \"jj\"\n",
@@ -204,8 +208,11 @@ fn doctor_reports_jj_snapshot_tracking_when_jj_is_available() {
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("vcs: all required durable artifacts are tracked"));
-    assert!(stdout.contains("vcs src/REQUIREMENTS.md: tracked"));
+    assert!(
+        stdout.contains("vcs: all required durable artifacts are tracked"),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("vcs src/REQUIREMENTS.md:"));
     assert!(stdout.contains("vcs --components/REQUIREMENTS.md: tracked"));
     assert!(stdout.contains("vcs diagnostic: jj inspection uses its saved working-copy snapshot"));
     assert_eq!(

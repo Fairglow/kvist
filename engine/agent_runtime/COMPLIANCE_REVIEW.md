@@ -2,6 +2,10 @@
 
 # agent_runtime compliance review
 
+> Historical evidence notice: this review predates relocation from
+> `src/agent_runtime/` to `engine/agent_runtime/`. Its original review boundary
+> is retained, and this report does not certify the migrated layout.
+
 ## Review basis and limits
 
 This review was regenerated as an independent, source-blind comparison using

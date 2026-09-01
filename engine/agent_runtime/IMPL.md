@@ -2,6 +2,10 @@
 
 # Component Implementation Record
 
+> Historical evidence notice: this record predates relocation from
+> `src/agent_runtime/` to `engine/agent_runtime/`. Its original evidence paths
+> are retained rather than rewritten as a new clean-slate derivation.
+
 ## Scope and evidence
 
 This record is observational only. It was regenerated from static inspection of:

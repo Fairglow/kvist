@@ -1,6 +1,10 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+> Historical evidence notice: this record predates the one-way move from the
+> repository-root Rust layout to `engine/`. Its original evidence paths are
+> retained rather than rewritten as a new clean-slate derivation.
+
 ## Evidence boundary
 
 This record was derived from the Rust implementation files directly under

@@ -7,34 +7,34 @@
 all: format lint build test release
 
 build:
-    cargo build --locked --workspace --all-features
+    cargo build --manifest-path engine/Cargo.toml --locked --workspace --all-features
 
 format:
-    cargo fmt --check
+    cargo fmt --manifest-path engine/Cargo.toml --check
 
 lint:
-    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+    cargo clippy --manifest-path engine/Cargo.toml --locked --workspace --all-targets --all-features -- -D warnings
 
 msrv:
-    cargo +1.94.0 test --locked --workspace --all-features
+    cargo +1.94.0 test --manifest-path engine/Cargo.toml --locked --workspace --all-features
 
 reformat:
-    cargo fmt
+    cargo fmt --manifest-path engine/Cargo.toml
 
 release:
-    cargo build --locked --workspace --release --all-features
+    cargo build --manifest-path engine/Cargo.toml --locked --workspace --release --all-features
 
 test:
-    cargo nextest run --locked --workspace --all-features --test-threads num-cpus
+    cargo nextest run --manifest-path engine/Cargo.toml --locked --workspace --all-features --test-threads num-cpus
 
 audit:
-    cargo deny --all-features --locked check advisories bans licenses sources
+    cargo deny --manifest-path engine/Cargo.toml --all-features --locked check advisories bans licenses sources
 
 wine:
     @echo "error: Windows support is deferred; Kvist currently supports Linux only" >&2
     @exit 1
 
 completions:
-    cargo run --locked -p kvist -- completions bash > /dev/null
-    cargo run --locked -p kvist -- completions zsh > /dev/null
-    cargo run --locked -p kvist -- completions fish > /dev/null
+    cargo run --manifest-path engine/Cargo.toml --locked -p kvist -- completions bash > /dev/null
+    cargo run --manifest-path engine/Cargo.toml --locked -p kvist -- completions zsh > /dev/null
+    cargo run --manifest-path engine/Cargo.toml --locked -p kvist -- completions fish > /dev/null

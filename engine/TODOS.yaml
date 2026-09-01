@@ -2,11 +2,11 @@ schema_version: 1
 component:
   requirements_revision: "sha256:31879c02266ed8f24ef353818871e2adef67913854de3a279e1ad865991bcea0"
   contract_revision: "sha256:87eac3c091fafec1353a2fa9f95014cc4fb105ecc2a91b2c28ebb2b32491b803"
-  design_revision: "sha256:a5ca37e12b64e171ded70169f699a3f8ff50f5937ffaa0ffe391f5709816c7f2"
+  design_revision: "sha256:37699b24a838d3fb918060525cebd18ef1f3b7dcb4658ea9afff61b598e12c5c"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-01T20:30:00Z"
+    checked_at: "2026-09-01T21:04:20Z"
     stale_since: null
     causes: []
 tasks:
@@ -61,7 +61,7 @@ tasks:
     purpose: "Make Kvist's own repository obey the filesystem-native component structure expected from projects it manages."
     expected_outcome: "The engine component owns its manifest, source, and tests under engine; both child components are complete and current; all supported commands and checks use the new layout only."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "dogfood-boundary-write-tests"
     requirements:
@@ -71,8 +71,8 @@ tasks:
       - "TODO.md#TODO-DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
-      updated_at: "2026-09-01T19:57:32Z"
-      completed_at: null
+      updated_at: "2026-09-01T21:26:05Z"
+      completed_at: "2026-09-01T21:26:05Z"
     blocked_reason: null
     recovery_state: null
   - id: "dogfood-recovery-implement-code"

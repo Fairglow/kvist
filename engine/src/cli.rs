@@ -5,8 +5,9 @@ use std::{io::IsTerminal, path::PathBuf};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
 use crate::{
-    KvistError, Result, component_documents, convert, discovery, import, init, project_state,
-    prompt_input, reverse_discovery, status, task_commands, task_queue::TaskStatus, tree, wizard,
+    KvistError, Result, component_documents, config, convert, discovery, import, init,
+    project_state, prompt_input, reverse_discovery, status, task_commands, task_queue::TaskStatus,
+    tree, wizard,
 };
 
 /// Kvist's top-level command-line interface.
@@ -442,22 +443,30 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 )))
             }
             Command::Tree(project) => {
-                let discovery = discovery::discover(&project.path)?;
-                let mut components_json = String::from("[");
-                for (index, component) in discovery.components.iter().enumerate() {
-                    if index > 0 {
-                        components_json.push(',');
-                    }
-                    components_json.push_str(&format!(
-                        "{{\"path\":\"{}\",\"state\":\"{:?}\"}}",
-                        component.relative_path.to_string_lossy().replace('\\', "\\\\"),
-                        component.status()
-                    ));
-                }
-                components_json.push(']');
-                Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"tree\",\"component_root\":\"src\",\"components\":{components_json}}}"
-                )))
+                let configuration = config::load(&project.path)?;
+                let discovery = discovery::discover_with_limits(
+                    &project.path.join(&configuration.component_root),
+                    configuration.discovery,
+                )?;
+                let components = discovery
+                    .components
+                    .iter()
+                    .map(|component| {
+                        serde_json::json!({
+                            "path": component.relative_path.to_string_lossy(),
+                            "state": format!("{:?}", component.status()),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                Ok(CommandOutput::message(
+                    serde_json::json!({
+                        "status": "success",
+                        "command": "tree",
+                        "component_root": configuration.component_root.to_string_lossy(),
+                        "components": components,
+                    })
+                    .to_string(),
+                ))
             }
             Command::Doctor(project) => {
                 let inspection = project_state::inspect(&project.path)?;

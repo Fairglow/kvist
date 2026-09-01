@@ -1,0 +1,18 @@
+[package]
+name = "kvist-sandbox-runner"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+authors = ["Stefan Lindblad"]
+description = "Independent Linux sandbox enforcement boundary for Kvist"
+license = "AGPL-3.0-or-later"
+license-file = "../../LICENSE"
+repository = "https://github.com/Fairglow/kvist"
+homepage = "https://github.com/Fairglow/kvist"
+
+[lib]
+name = "kvist_sandbox_runner"
+
+[[bin]]
+name = "kvist-sandbox-runner"
+path = "src/main.rs"

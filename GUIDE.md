@@ -254,7 +254,7 @@ and the versioned
 Run the default Rig adapter:
 
 ```bash
-cargo run -p agent-runtime --bin agent-run -- \
+cargo run --manifest-path engine/Cargo.toml -p agent-runtime --bin agent-run -- \
   model --provider ollama \
   --endpoint http://127.0.0.1:11434 --model qwen3-coder \
   --file prompt.md
@@ -288,13 +288,14 @@ kvist prompt --allow-host-execution --file prompt.md
 Its bounded prompt input, command rendering, idle supervision, loop detection,
 and retry notices come from the standalone `agent-runtime` library. The
 standalone CLI can be invoked with
-`cargo run -p agent-runtime --bin agent-run -- run ...`.
+`cargo run --manifest-path engine/Cargo.toml -p agent-runtime --bin agent-run -- run ...`.
 Host-mode retry notices warn that an earlier attempt may have left side effects;
 they do not provide rollback or isolation. Snapshot workspaces, restricted
 identities, Linux sandboxing, brokered tools, and future platforms are planned
 in
-`src/agent_runtime/REQUIREMENTS.md`, `src/agent_runtime/CONTRACT.md`,
-`src/agent_runtime/DESIGN.md`, and `src/agent_runtime/TODOS.yaml`.
+`engine/agent_runtime/REQUIREMENTS.md`,
+`engine/agent_runtime/CONTRACT.md`, `engine/agent_runtime/DESIGN.md`, and
+`engine/agent_runtime/TODOS.yaml`.
 
 ## Planned observed-intent and contract-verification workflows
 

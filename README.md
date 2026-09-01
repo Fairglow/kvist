@@ -157,7 +157,7 @@ Prompt acquisition, command rendering, and host-process supervision are
 provided by the independently usable `agent-runtime` workspace package:
 
 ```bash
-cargo run --locked -p agent-runtime --bin agent-run -- run \
+cargo run --manifest-path engine/Cargo.toml --locked -p agent-runtime --bin agent-run -- run \
   --allow-host-execution \
   --command "local-agent --prompt '{prompt}' {context_files}" \
   --file review-prompt.md
@@ -166,8 +166,8 @@ cargo run --locked -p agent-runtime --bin agent-run -- run \
 Create a reusable provider profile interactively, then use it by name:
 
 ```bash
-cargo run --locked -p agent-runtime --bin agent-run -- setup
-cargo run --locked -p agent-runtime --bin agent-run -- run \
+cargo run --manifest-path engine/Cargo.toml --locked -p agent-runtime --bin agent-run -- setup
+cargo run --manifest-path engine/Cargo.toml --locked -p agent-runtime --bin agent-run -- run \
   --allow-host-execution \
   --profile local-coder \
   "Review this change"
@@ -177,14 +177,14 @@ Send a text-only request through the Rig-backed local Ollama or llama-server
 transport:
 
 ```bash
-cargo run --locked -p agent-runtime --bin agent-run -- model \
+cargo run --manifest-path engine/Cargo.toml --locked -p agent-runtime --bin agent-run -- model \
   --provider ollama \
   --endpoint http://127.0.0.1:11434 \
   --model qwen3-coder \
   --stream \
   --file prompt.md
 
-cargo run --locked -p agent-runtime --bin agent-run -- model \
+cargo run --manifest-path engine/Cargo.toml --locked -p agent-runtime --bin agent-run -- model \
   --provider llama-server \
   --endpoint http://127.0.0.1:9931 \
   --model Qwen3.8-9B-Q4_K_M \
@@ -198,7 +198,7 @@ additionally supports canonical tool descriptors and returns tool calls as
 untrusted `ToolIntent` values; it never executes them.
 
 ```bash
-cargo run --locked -p agent-runtime --bin agent-run -- model \
+cargo run --manifest-path engine/Cargo.toml --locked -p agent-runtime --bin agent-run -- model \
   --provider ollama \
   --endpoint http://127.0.0.1:11434 \
   --model qwen3-coder \
@@ -214,12 +214,12 @@ automatically replays a failed Rig request through it.
 List provider-advertised model IDs without running inference:
 
 ```bash
-cargo run --locked -p agent-runtime --bin agent-run -- models \
+cargo run --manifest-path engine/Cargo.toml --locked -p agent-runtime --bin agent-run -- models \
   --provider ollama
-cargo run --locked -p agent-runtime --bin agent-run -- models \
+cargo run --manifest-path engine/Cargo.toml --locked -p agent-runtime --bin agent-run -- models \
   --provider copilot \
   --allow-host-discovery
-cargo run --locked -p agent-runtime --bin agent-run -- models \
+cargo run --manifest-path engine/Cargo.toml --locked -p agent-runtime --bin agent-run -- models \
   --provider gemini \
   --allow-host-discovery \
   --json
@@ -258,9 +258,9 @@ command = "ollama run qwen3-coder '{prompt}'"
 
 The library crate is named `agent_runtime`. Its outcomes and constraints,
 consumer boundary, and private realization live in
-[`src/agent_runtime/REQUIREMENTS.md`](src/agent_runtime/REQUIREMENTS.md),
-[`src/agent_runtime/CONTRACT.md`](src/agent_runtime/CONTRACT.md), and
-[`src/agent_runtime/DESIGN.md`](src/agent_runtime/DESIGN.md).
+[`engine/agent_runtime/REQUIREMENTS.md`](engine/agent_runtime/REQUIREMENTS.md),
+[`engine/agent_runtime/CONTRACT.md`](engine/agent_runtime/CONTRACT.md), and
+[`engine/agent_runtime/DESIGN.md`](engine/agent_runtime/DESIGN.md).
 The layered runtime decision is documented in
 [`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md),
 the current and planned runtime choices in
@@ -378,15 +378,22 @@ boundaries for possible future restoration.
 Kvist's MSRV is Rust **1.94**. Edition 2024 itself is available from Rust 1.85,
 but 1.94 is the upstream-tested compiler for the exactly pinned Rig 0.42.0
 transport dependency. CI tests Rust 1.94 and current stable on Linux.
-`Cargo.lock` is committed and every CI build/test command uses `--locked`.
+`engine/Cargo.lock` is committed and every CI build/test command uses
+`--locked`. Kvist's own repository dogfoods the component model: the root Rust
+workspace and package live in `engine/`, with `agent_runtime/` and
+`sandbox_runner/` as complete child component boundaries. The
+[`sandbox_runner` intent](engine/sandbox_runner/REQUIREMENTS.md) is present, but
+its package remains an explicit fail-closed scaffold; the Bubblewrap protocol
+is assigned to later tasks. Newly initialized projects retain their configured
+component root and currently default to `src/`.
 
 The portable default quality gate uses only Cargo:
 
 ```bash
-cargo fmt --check
-cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-cargo test --locked --workspace --all-features
-cargo build --locked --workspace --release --all-features
+cargo fmt --manifest-path engine/Cargo.toml --check
+cargo clippy --manifest-path engine/Cargo.toml --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --manifest-path engine/Cargo.toml --locked --workspace --all-features
+cargo build --manifest-path engine/Cargo.toml --locked --workspace --release --all-features
 ```
 
 `just` is an optional wrapper for these commands; `just all` runs the same
@@ -619,7 +626,7 @@ Dependency policy is enforced with
 
 ```bash
 cargo install --locked --version 0.20.2 cargo-deny
-cargo deny --all-features --locked check advisories bans licenses sources
+cargo deny --manifest-path engine/Cargo.toml --all-features --locked check advisories bans licenses sources
 ```
 
 CI rejects known advisories, wildcard requirements, unknown registries or Git

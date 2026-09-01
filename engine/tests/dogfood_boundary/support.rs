@@ -46,12 +46,7 @@ pub fn repository_root() -> PathBuf {
 }
 
 fn engine_authority_root() -> PathBuf {
-    let root = repository_root();
-    if root.join("engine/REQUIREMENTS.md").is_file() {
-        root.join("engine")
-    } else {
-        root.join("src")
-    }
+    repository_root().join("engine")
 }
 
 pub fn temporary_directory(prefix: &str) -> TempDir {
