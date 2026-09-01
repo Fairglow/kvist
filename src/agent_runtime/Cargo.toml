@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.94"
 
 [features]
-default = []
+default = ["rig-transport"]
 rig-transport = ["dep:bytes", "dep:futures", "dep:reqwest", "dep:rig-core", "dep:tokio", "dep:tracing"]
 
 [lib]

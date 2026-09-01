@@ -4,13 +4,16 @@
 ## Design overview
 
 The crate separates command rendering, prompt acquisition, profile storage and
-setup, process supervision, direct model transport, optional Rig transport, and
+setup, process supervision, direct model transport, private Rig transport, and
 canonical provider-neutral types. Reusable mechanisms remain independent of
 host policy and durable evidence.
 
 Native model mode is the preferred long-term path because the embedding host
 can observe and authorize every proposed effect. External coding agents remain
-supported as opaque processes constrained by an outer execution backend.
+supported as opaque processes constrained by an outer execution backend. On
+the `rig-integration` experiment branch, Rig is the preferred provider-wire
+adapter while the direct implementation remains an explicit conformance oracle
+and fallback.
 
 ## Internal structure
 
@@ -24,7 +27,7 @@ supported as opaque processes constrained by an outer execution backend.
 | `catalog` | Bounded HTTP, ACP, and fallback provider-model discovery |
 | `supervisor` | Process groups, forward-or-capture streams, idle/loop/wall/output limits, retry, cancellation |
 | `direct_transport` | Bounded loopback Ollama and llama-server HTTP adapters |
-| `rig_transport` | Pinned non-default private Rig adapter to canonical types |
+| `rig_transport` | Pinned default-enabled experiment adapter to canonical types |
 | `lib` / `main` | Public library surface and standalone CLI boundary |
 
 The future runtime layers are run coordinator, model transport, native loop,
@@ -102,12 +105,23 @@ their presentation boundary. Restricting qualification to a narrower
 tool/filesystem authority is deferred with the broader execution backend work.
 
 Direct transports implement the minimal provider wire surface explicitly. Rig
-0.42.0 is exact-pinned, default-disabled, supplied with a constrained
-component-owned HTTP client, and translated immediately into canonical types.
-It cannot own tools, persistence, policy, evidence, or public provider types.
-The current Rig conversion cannot preserve requested reasoning effort or
-provider reasoning content, so those requests fail before provider I/O rather
-than being silently dropped.
+0.42.0 is exact-pinned, enabled by default for this experiment, supplied with a
+constrained component-owned HTTP client, and translated immediately into
+canonical types. It cannot own tools, persistence, policy, evidence, or public
+provider types. The current Rig conversion cannot preserve requested reasoning
+effort or provider reasoning content, so those requests fail before provider
+I/O rather than being silently dropped. Selecting the direct adapter is always
+explicit; transport failure never triggers automatic replay.
+
+An optional canonical JSON object schema is validated against a bounded common
+provider subset. Ollama maps through Rig's `CompletionRequest.output_schema`.
+For llama-server, the adapter supplies a private typed
+`response_format.json_schema` extension with the stable `kvist_output` name so
+Rig cannot sanitize or rename the host-owned schema. The direct adapter emits
+the same envelopes. Schema requests are rejected when tools are enabled because
+llama.cpp may otherwise defer or ignore one constraint. Provider-native
+enforcement is only a generation aid; returned JSON parsing and validation
+remain a host responsibility.
 
 Detailed authority rationale and delivery ordering live in
 `../../docs/agent-runtime/architecture.md`; dependency and transport evaluation
@@ -155,7 +169,7 @@ Unit tests cover parsing, placeholder encoding, canonical types, limits,
 profile validation, model conversion, and loop detection. Integration tests
 cover CLI prompt sources, profile persistence, provider setup, fake
 subprocesses, process groups, signal cancellation, output/backpressure,
-loopback HTTP, streaming, malformed provider data, and optional Rig parity.
+loopback HTTP, streaming, malformed provider data, and Rig parity.
 Focused output tests distinguish live text forwarding from captured JSON,
 verify that no success trailer contaminates content, and cover reasoning-event
 separation, per-prompt profile/model/effort selection, the fixed setup prompt,
@@ -166,6 +180,6 @@ unsolicited requests, incomplete initialization, empty or inconsistent model
 state, oversized records, timeout, cancellation, and retained descendants.
 
 Conformance tests compare canonical behavior across direct Ollama,
-llama-server, and optional Rig adapters. Platform support requires native
+llama-server, and Rig adapters. Platform support requires native
 process, filesystem, and transport tests. Security audit and independent
 compliance review gate promotion of each provider or execution capability.

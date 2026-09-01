@@ -211,10 +211,11 @@ the trusted policy boundary.
 
 Existing projects are useful at different boundaries:
 
-- Rig is an optional narrow transport implementation. Exactly pinned
-  `rig-core` 0.42.0 is isolated behind the `rig-transport` Cargo feature and
-  component-owned canonical types. The direct adapter remains the default,
-  fallback, and conformance baseline.
+- Rig is a narrow transport implementation. On the `rig-integration`
+  experiment branch, exactly pinned `rig-core` 0.42.0 is enabled by default
+  behind the `rig-transport` Cargo feature and component-owned canonical
+  types. The direct adapter remains an explicit fallback and conformance
+  baseline; failures never trigger automatic cross-transport replay.
 - Goose is a valuable Rust agent/runtime reference and possible external agent.
 - Aider is a useful patch-oriented external agent and conformance benchmark.
 - OpenHands is a reference for separating control and execution environments.
@@ -249,7 +250,7 @@ Kvist therefore requires:
 3. Define standalone-owned canonical model, capability, tool-intent, and
    runtime-event contracts, plus the host authority traits they consume.
 4. Complete independent security and compliance review of the direct local
-   HTTP transport and exactly pinned optional Rig transport before either
+   HTTP transport and exactly pinned Rig transport before either
    becomes a dependency of the native loop.
 5. Implement the typed broker mechanism and Kvist policy, grant, binding, and
    compliance-evidence services against those traits.

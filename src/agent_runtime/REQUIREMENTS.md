@@ -112,6 +112,15 @@ streamed text and structured tool-intent translation without executing tools.
 Endpoints, requests, responses, deadlines, cancellation, identities, usage,
 finish reason, and errors MUST remain explicit.
 
+The Rig integration experiment MUST use the exact pinned Rig release as the
+preferred provider-wire adapter while retaining the direct adapter as an
+explicit, non-automatic fallback and conformance oracle. Both adapters MUST
+accept a bounded host-owned common JSON Schema 2020-12 provider subset for provider-native structured output,
+MUST reject incompatible schema-and-tool requests rather than silently dropping
+either constraint, and MUST NOT represent provider enforcement as output
+validation. Rig failures MUST NOT automatically replay through the direct
+adapter because request acceptance may be uncertain.
+
 ### AR-REQ-NATIVE-RUNTIME
 
 The planned native runtime MUST separate model transport, bounded agent loop,
@@ -145,6 +154,8 @@ evidence, or public serialized state.
   explicit-port endpoint restriction as local model transports.
 - Capabilities are tracked separately as advertised, conformance-tested, and
   policy-enabled.
+- Provider-native structured-output schemas are bounded untrusted input;
+  returned content is independently validated by the embedding host.
 
 ## Acceptance and traceability
 

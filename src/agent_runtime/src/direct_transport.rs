@@ -19,6 +19,9 @@ const MAX_REQUEST_BYTES: usize = 2 * 1024 * 1024;
 const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MESSAGES: usize = 1024;
 const MAX_TOOLS: usize = 128;
+const MAX_OUTPUT_SCHEMA_BYTES: usize = 256 * 1024;
+const MAX_OUTPUT_SCHEMA_DEPTH: usize = 32;
+const MAX_OUTPUT_SCHEMA_NODES: usize = 4096;
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_RECORD_BYTES: usize = 1024 * 1024;
 const IO_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -428,6 +431,180 @@ pub(crate) fn validate_request(request: &ModelRequest) -> Result<()> {
     if request.tool_choice != ToolChoice::None && request.tools.is_empty() {
         return invalid_request("tool choice requires at least one tool");
     }
+    if let Some(schema) = &request.output_schema {
+        validate_output_schema(schema)?;
+        if request.tool_choice != ToolChoice::None {
+            return invalid_request("output schema cannot be combined with callable tools");
+        }
+    }
+    Ok(())
+}
+
+fn validate_output_schema(schema: &Value) -> Result<()> {
+    let encoded = serde_json::to_vec(schema).map_err(|_| Error::InvalidModelRequest {
+        reason: "output schema cannot be serialized".to_owned(),
+    })?;
+    if encoded.len() > MAX_OUTPUT_SCHEMA_BYTES {
+        return invalid_request("output schema exceeds 262144 bytes");
+    }
+
+    let mut nodes = 0_usize;
+    validate_output_schema_node(schema, 0, &mut nodes)
+}
+
+fn validate_output_schema_node(schema: &Value, depth: usize, nodes: &mut usize) -> Result<()> {
+    if depth > MAX_OUTPUT_SCHEMA_DEPTH {
+        return invalid_request("output schema exceeds 32 levels");
+    }
+    *nodes = nodes
+        .checked_add(1)
+        .ok_or_else(|| Error::InvalidModelRequest {
+            reason: "output schema node count overflow".to_owned(),
+        })?;
+    if *nodes > MAX_OUTPUT_SCHEMA_NODES {
+        return invalid_request("output schema exceeds 4096 nodes");
+    }
+
+    let object = schema
+        .as_object()
+        .ok_or_else(|| Error::InvalidModelRequest {
+            reason: "output schema nodes must be JSON objects".to_owned(),
+        })?;
+    const ALLOWED_KEYWORDS: &[&str] = &[
+        "type",
+        "title",
+        "description",
+        "properties",
+        "required",
+        "additionalProperties",
+        "items",
+        "enum",
+        "const",
+        "anyOf",
+        "allOf",
+        "minimum",
+        "maximum",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+    ];
+    if let Some(keyword) = object
+        .keys()
+        .find(|keyword| !ALLOWED_KEYWORDS.contains(&keyword.as_str()))
+    {
+        return invalid_request(&format!(
+            "output schema keyword `{keyword}` is outside the supported provider subset"
+        ));
+    }
+
+    if let Some(types) = object.get("type") {
+        let valid_type = |value: &str| {
+            matches!(
+                value,
+                "null" | "boolean" | "object" | "array" | "number" | "string" | "integer"
+            )
+        };
+        match types {
+            Value::String(value) if valid_type(value) => {}
+            Value::Array(values)
+                if !values.is_empty()
+                    && values
+                        .iter()
+                        .all(|value| value.as_str().is_some_and(valid_type)) => {}
+            _ => return invalid_request("output schema `type` is invalid"),
+        }
+    }
+    for keyword in ["title", "description"] {
+        if object.get(keyword).is_some_and(|value| !value.is_string()) {
+            return invalid_request(&format!("output schema `{keyword}` must be text"));
+        }
+    }
+    for keyword in ["minimum", "maximum"] {
+        if object.get(keyword).is_some_and(|value| !value.is_number()) {
+            return invalid_request(&format!("output schema `{keyword}` must be a number"));
+        }
+    }
+    for keyword in ["minLength", "maxLength", "minItems", "maxItems"] {
+        if object
+            .get(keyword)
+            .is_some_and(|value| value.as_u64().is_none())
+        {
+            return invalid_request(&format!(
+                "output schema `{keyword}` must be a nonnegative integer"
+            ));
+        }
+    }
+    if let Some(values) = object.get("enum")
+        && values.as_array().is_none_or(Vec::is_empty)
+    {
+        return invalid_request("output schema `enum` must be a nonempty array");
+    }
+
+    let properties = object.get("properties").map(|value| {
+        value.as_object().ok_or_else(|| Error::InvalidModelRequest {
+            reason: "output schema `properties` must be an object".to_owned(),
+        })
+    });
+    let properties = properties.transpose()?;
+    if let Some(properties) = properties {
+        for child in properties.values() {
+            validate_output_schema_node(child, depth + 1, nodes)?;
+        }
+    }
+    if let Some(required) = object.get("required") {
+        let required = required
+            .as_array()
+            .filter(|values| {
+                values.iter().all(Value::is_string)
+                    && values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .collect::<HashSet<_>>()
+                        .len()
+                        == values.len()
+            })
+            .ok_or_else(|| Error::InvalidModelRequest {
+                reason: "output schema `required` must contain unique property names".to_owned(),
+            })?;
+        let Some(properties) = properties else {
+            return invalid_request("output schema `required` needs `properties`");
+        };
+        if required
+            .iter()
+            .filter_map(Value::as_str)
+            .any(|name| !properties.contains_key(name))
+        {
+            return invalid_request("output schema `required` names an absent property");
+        }
+    }
+    if let Some(additional) = object.get("additionalProperties") {
+        match additional {
+            Value::Bool(_) => {}
+            Value::Object(_) => validate_output_schema_node(additional, depth + 1, nodes)?,
+            _ => {
+                return invalid_request(
+                    "output schema `additionalProperties` must be a boolean or schema",
+                );
+            }
+        }
+    }
+    if let Some(items) = object.get("items") {
+        validate_output_schema_node(items, depth + 1, nodes)?;
+    }
+    for keyword in ["anyOf", "allOf"] {
+        if let Some(branches) = object.get(keyword) {
+            let branches = branches
+                .as_array()
+                .filter(|branches| !branches.is_empty())
+                .ok_or_else(|| Error::InvalidModelRequest {
+                    reason: format!("output schema `{keyword}` must be a nonempty array"),
+                })?;
+            for branch in branches {
+                validate_output_schema_node(branch, depth + 1, nodes)?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -519,6 +696,26 @@ fn encode_request(
                     } else {
                         Value::String(effort.as_str().to_owned())
                     },
+                );
+            }
+        }
+    }
+    if let Some(schema) = &request.output_schema {
+        match provider {
+            LocalModelProvider::Ollama => {
+                root.insert("format".to_owned(), schema.clone());
+            }
+            LocalModelProvider::LlamaServer => {
+                root.insert(
+                    "response_format".to_owned(),
+                    json!({
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "kvist_output",
+                            "strict": true,
+                            "schema": schema
+                        }
+                    }),
                 );
             }
         }

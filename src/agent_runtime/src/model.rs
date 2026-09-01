@@ -121,6 +121,9 @@ pub struct ModelRequest {
     /// Requested provider reasoning effort, when explicitly supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<ReasoningEffort>,
+    /// Optional host-owned JSON Schema used as a provider generation constraint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_schema: Option<Value>,
 }
 
 /// A complete untrusted tool proposal returned by a model.

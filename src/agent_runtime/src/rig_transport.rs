@@ -396,6 +396,32 @@ fn convert_request(
         (_, ToolChoice::Auto) => Some(rig_core::message::ToolChoice::Auto),
         (_, ToolChoice::Required) => Some(rig_core::message::ToolChoice::Required),
     };
+    let (output_schema, additional_params) = match (provider, &request.output_schema) {
+        (LocalModelProvider::Ollama, Some(schema)) => (
+            Some(
+                serde_json::from_value::<rig_core::schemars::Schema>(schema.clone()).map_err(
+                    |_| Error::InvalidModelRequest {
+                        reason: "output schema is not a valid JSON Schema object".to_owned(),
+                    },
+                )?,
+            ),
+            None,
+        ),
+        (LocalModelProvider::LlamaServer, Some(schema)) => (
+            None,
+            Some(serde_json::json!({
+                "response_format": {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "kvist_output",
+                        "strict": true,
+                        "schema": schema
+                    }
+                }
+            })),
+        ),
+        (_, None) => (None, None),
+    };
 
     Ok(RigCompletionRequest {
         model: Some(request.model.clone()),
@@ -406,8 +432,8 @@ fn convert_request(
         temperature: None,
         max_tokens: None,
         tool_choice,
-        additional_params: None,
-        output_schema: None,
+        additional_params,
+        output_schema,
         record_telemetry_content: false,
     })
 }

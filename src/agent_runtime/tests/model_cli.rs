@@ -20,8 +20,10 @@ fn read_request(stream: &mut TcpStream) -> Vec<u8> {
     let content_length = headers
         .lines()
         .find_map(|line| {
-            line.strip_prefix("Content-Length: ")
-                .and_then(|value| value.parse::<usize>().ok())
+            let (name, value) = line.split_once(':')?;
+            name.eq_ignore_ascii_case("content-length")
+                .then(|| value.trim().parse::<usize>().ok())
+                .flatten()
         })
         .expect("content length");
     while request.len() < header_end + content_length {
@@ -46,8 +48,9 @@ fn model_command_prompts_a_local_ollama_endpoint() {
         let body = std::str::from_utf8(&request).expect("request");
         assert!(body.contains("\"content\":\"hello local model\""));
         assert!(body.contains("\"stream\":false"));
+        assert!(body.contains("\"format\":{\"type\":\"object\"}"));
 
-        let response = r#"{"model":"local-test","message":{"role":"assistant","content":"local response"},"done":true,"done_reason":"stop","prompt_eval_count":2,"eval_count":2}"#;
+        let response = r#"{"model":"local-test","created_at":"2026-09-01T00:00:00Z","message":{"role":"assistant","content":"local response"},"done":true,"done_reason":"stop","prompt_eval_count":2,"eval_count":2}"#;
         write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",
@@ -65,6 +68,8 @@ fn model_command_prompts_a_local_ollama_endpoint() {
             &endpoint,
             "--model",
             "local-test",
+            "--output-schema",
+            r#"{"type":"object"}"#,
             "hello local model",
         ])
         .output()
@@ -97,9 +102,11 @@ fn streaming_model_command_preserves_provider_content_exactly() {
         );
 
         let response = concat!(
-            "{\"model\":\"local-test\",\"message\":{\"role\":\"assistant\",",
+            "{\"model\":\"local-test\",\"created_at\":\"2026-09-01T00:00:00Z\",",
+            "\"message\":{\"role\":\"assistant\",",
             "\"content\":\"streamed\"},\"done\":false}\n",
-            "{\"model\":\"local-test\",\"message\":{\"role\":\"assistant\",",
+            "{\"model\":\"local-test\",\"created_at\":\"2026-09-01T00:00:01Z\",",
+            "\"message\":{\"role\":\"assistant\",",
             "\"content\":\" response\"},\"done\":true,\"done_reason\":\"stop\"}\n"
         );
         write!(

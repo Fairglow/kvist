@@ -147,7 +147,8 @@ cargo run --locked -p agent-runtime --bin agent-run -- run \
   "Review this change"
 ```
 
-Send a text-only request directly to a local Ollama or llama-server endpoint:
+Send a text-only request through the Rig-backed local Ollama or llama-server
+transport:
 
 ```bash
 cargo run --locked -p agent-runtime --bin agent-run -- model \
@@ -164,25 +165,25 @@ cargo run --locked -p agent-runtime --bin agent-run -- model \
   "Summarize the supplied prompt"
 ```
 
-The direct adapter accepts loopback HTTP only, has no proxy or credential
-support, and exposes no tools through this command. The library API additionally
-supports canonical tool descriptors and returns tool calls as untrusted
-`ToolIntent` values; it never executes them.
-
-The exactly pinned optional Rig adapter uses the same command contract and is
-selected explicitly after enabling its Cargo feature:
+The exactly pinned Rig adapter is enabled and selected by default on the
+`rig-integration` branch. It accepts loopback HTTP only, has no proxy or
+credential support, and exposes no tools through this command. The library API
+additionally supports canonical tool descriptors and returns tool calls as
+untrusted `ToolIntent` values; it never executes them.
 
 ```bash
-cargo run --locked -p agent-runtime --bin agent-run --features rig-transport -- model \
-  --transport rig \
+cargo run --locked -p agent-runtime --bin agent-run -- model \
   --provider ollama \
   --endpoint http://127.0.0.1:11434 \
   --model qwen3-coder \
+  --output-schema '{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}' \
   --file prompt.md
 ```
 
-It currently supports only numeric-loopback Ollama and llama-server endpoints.
-The direct adapter remains the default and fallback.
+Provider-native schema enforcement is a generation constraint; callers still
+parse and validate the returned content. The direct adapter remains an
+explicit conformance and fallback path via `--transport direct`. Kvist never
+automatically replays a failed Rig request through it.
 
 List provider-advertised model IDs without running inference:
 

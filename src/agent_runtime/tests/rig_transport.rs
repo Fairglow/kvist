@@ -149,7 +149,150 @@ fn request(tool_choice: ToolChoice) -> ModelRequest {
         }],
         tool_choice,
         reasoning_effort: None,
+        output_schema: None,
     }
+}
+
+#[test]
+fn rig_transports_encode_provider_native_output_schemas() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "result": {"type": "string"},
+            "optional_note": {"type": "string"}
+        },
+        "required": ["result"],
+        "additionalProperties": false
+    });
+
+    let (endpoint, captured) = serve_once(json_response(json!({
+        "model": "test-model",
+        "created_at": "2026-09-01T00:00:00Z",
+        "message": {"role": "assistant", "content": "{\"result\":\"ok\"}"},
+        "done": true,
+        "done_reason": "stop"
+    })));
+    let mut ollama_request = request(ToolChoice::None);
+    ollama_request.output_schema = Some(schema.clone());
+    transport(LocalModelProvider::Ollama, &endpoint)
+        .complete(&ollama_request, &CancellationToken::new())
+        .expect("send schema through Rig Ollama");
+    assert_eq!(
+        captured.recv().expect("Ollama request").body["format"],
+        schema
+    );
+
+    let (endpoint, captured) = serve_once(json_response(json!({
+        "id": "chatcmpl-schema",
+        "model": "test-model",
+        "choices": [{
+            "message": {"role": "assistant", "content": "{\"result\":\"ok\"}"},
+            "finish_reason": "stop"
+        }]
+    })));
+    let mut llama_request = request(ToolChoice::None);
+    llama_request.output_schema = Some(schema.clone());
+    transport(LocalModelProvider::LlamaServer, &endpoint)
+        .complete(&llama_request, &CancellationToken::new())
+        .expect("send schema through Rig llama-server");
+    let body = captured.recv().expect("llama-server request").body;
+    assert_eq!(body["response_format"]["json_schema"]["schema"], schema);
+    assert_eq!(
+        body["response_format"]["json_schema"]["name"],
+        "kvist_output"
+    );
+    assert_eq!(body["response_format"]["json_schema"]["strict"], true);
+}
+
+#[test]
+fn default_cli_transport_is_rig_and_direct_fallback_is_explicit() {
+    let help = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args(["model", "--help"])
+        .output()
+        .expect("show model help");
+    assert!(help.status.success());
+    assert!(
+        String::from_utf8(help.stdout)
+            .expect("UTF-8 help")
+            .contains("[default: rig]")
+    );
+
+    let (endpoint, _) = serve_once(json_response(json!({
+        "model": "qwen3",
+        "message": {
+            "role": "assistant",
+            "thinking": "fallback reasoning",
+            "content": "direct"
+        },
+        "done": true,
+        "done_reason": "stop"
+    })));
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args([
+            "model",
+            "--transport",
+            "direct",
+            "--provider",
+            "ollama",
+            "--endpoint",
+            &endpoint,
+            "--model",
+            "test-model",
+            "--reasoning-effort",
+            "high",
+            "hello",
+        ])
+        .output()
+        .expect("run explicit direct fallback");
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "direct");
+}
+
+#[test]
+fn failed_rig_request_is_not_replayed_through_direct_transport() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind failing provider");
+    listener
+        .set_nonblocking(false)
+        .expect("start in blocking mode");
+    let endpoint = format!("http://{}", listener.local_addr().expect("local address"));
+    let worker = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept Rig request");
+        let mut request = [0_u8; 8192];
+        let _ = stream.read(&mut request).expect("read Rig request");
+        stream
+            .write_all(
+                b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            )
+            .expect("write provider failure");
+        listener
+            .set_nonblocking(true)
+            .expect("check for replay without blocking");
+        thread::sleep(Duration::from_millis(50));
+        assert!(matches!(
+            listener.accept(),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+        ));
+    });
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args([
+            "model",
+            "--provider",
+            "ollama",
+            "--endpoint",
+            &endpoint,
+            "--model",
+            "test-model",
+            "hello",
+        ])
+        .output()
+        .expect("run failed default Rig request");
+    assert!(!output.status.success());
+    worker.join().expect("provider worker");
 }
 
 fn transport(provider: LocalModelProvider, endpoint: &str) -> RigModelTransport {
@@ -403,7 +546,7 @@ fn rig_transport_deadline_interrupts_a_stalled_provider() {
 }
 
 #[test]
-fn model_cli_selects_the_optional_rig_transport() {
+fn model_cli_selects_the_rig_transport() {
     let (endpoint, _) = serve_once(json_response(json!({
         "model": "qwen3",
         "created_at": "2026-08-30T00:00:00Z",
@@ -590,6 +733,7 @@ fn rig_tool_result_reuses_the_provider_call_identity() {
         tools: vec![],
         tool_choice: ToolChoice::None,
         reasoning_effort: None,
+        output_schema: None,
     };
 
     transport
@@ -647,6 +791,7 @@ fn rig_payload_sentinels_do_not_reach_the_callers_tracing_subscriber() {
         tools: Vec::new(),
         tool_choice: ToolChoice::None,
         reasoning_effort: None,
+        output_schema: None,
     };
     let captured = CapturedLogs::default();
     let subscriber = tracing_subscriber::fmt()

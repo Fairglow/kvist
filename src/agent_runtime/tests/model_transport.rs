@@ -135,7 +135,112 @@ fn request(tool_choice: ToolChoice) -> ModelRequest {
         }],
         tool_choice,
         reasoning_effort: None,
+        output_schema: None,
     }
+}
+
+#[test]
+fn direct_transports_encode_provider_native_output_schemas() {
+    let schema = json!({
+        "type": "object",
+        "properties": {
+            "result": {"type": "string"},
+            "optional_note": {"type": "string"}
+        },
+        "required": ["result"],
+        "additionalProperties": false
+    });
+
+    let (endpoint, captured) = serve_once(json_response(
+        "200 OK",
+        json!({
+            "model": "test-model",
+            "message": {"role": "assistant", "content": "{\"result\":\"ok\"}"},
+            "done": true,
+            "done_reason": "stop"
+        }),
+    ));
+    let mut ollama_request = request(ToolChoice::None);
+    ollama_request.output_schema = Some(schema.clone());
+    transport(LocalModelProvider::Ollama, &endpoint)
+        .complete(&ollama_request, &CancellationToken::new())
+        .expect("send Ollama output schema");
+    assert_eq!(
+        captured.recv().expect("Ollama request").body["format"],
+        schema
+    );
+
+    let (endpoint, captured) = serve_once(json_response(
+        "200 OK",
+        json!({
+            "id": "chatcmpl-schema",
+            "model": "test-model",
+            "choices": [{
+                "message": {"role": "assistant", "content": "{\"result\":\"ok\"}"},
+                "finish_reason": "stop"
+            }]
+        }),
+    ));
+    let mut llama_request = request(ToolChoice::None);
+    llama_request.output_schema = Some(schema.clone());
+    transport(LocalModelProvider::LlamaServer, &endpoint)
+        .complete(&llama_request, &CancellationToken::new())
+        .expect("send llama-server output schema");
+    let body = captured.recv().expect("llama-server request").body;
+    assert_eq!(body["response_format"]["json_schema"]["schema"], schema);
+    assert_eq!(body["response_format"]["json_schema"]["strict"], true);
+}
+
+#[test]
+fn output_schema_rejects_non_objects_and_callable_tools_before_io() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind unused endpoint");
+    listener
+        .set_nonblocking(true)
+        .expect("make unused endpoint nonblocking");
+    let endpoint = format!("http://{}", listener.local_addr().expect("local address"));
+    let transport = transport(LocalModelProvider::LlamaServer, &endpoint);
+
+    let mut invalid = request(ToolChoice::None);
+    invalid.output_schema = Some(json!(true));
+    assert!(
+        transport
+            .complete(&invalid, &CancellationToken::new())
+            .expect_err("reject non-object schema")
+            .to_string()
+            .contains("output schema")
+    );
+    invalid.output_schema = Some(json!({"type": 7}));
+    assert!(
+        transport
+            .complete(&invalid, &CancellationToken::new())
+            .expect_err("reject malformed schema keyword")
+            .to_string()
+            .contains("`type`")
+    );
+    invalid.output_schema = Some(json!({
+        "oneOf": [{"type": "string"}, {"type": "number"}]
+    }));
+    assert!(
+        transport
+            .complete(&invalid, &CancellationToken::new())
+            .expect_err("reject unsupported schema keyword")
+            .to_string()
+            .contains("oneOf")
+    );
+
+    let mut incompatible = request(ToolChoice::Auto);
+    incompatible.output_schema = Some(json!({"type": "object"}));
+    assert!(
+        transport
+            .complete(&incompatible, &CancellationToken::new())
+            .expect_err("reject schema and callable tools")
+            .to_string()
+            .contains("cannot be combined")
+    );
+    assert!(matches!(
+        listener.accept(),
+        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+    ));
 }
 
 #[test]

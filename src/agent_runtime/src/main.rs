@@ -110,7 +110,7 @@ struct ModelArguments {
     #[arg(long, value_enum)]
     provider: ModelProviderArgument,
 
-    #[arg(long, value_enum, default_value_t = ModelTransportArgument::Direct)]
+    #[arg(long, value_enum, default_value_t)]
     transport: ModelTransportArgument,
 
     #[arg(long, value_name = "HTTP_LOOPBACK_URL")]
@@ -129,9 +129,14 @@ struct ModelArguments {
     max_response_bytes: usize,
 
     #[arg(long, value_enum)]
+    /// Requires `--transport direct`; Rig 0.42 cannot preserve this value.
     reasoning_effort: Option<ReasoningEffortArgument>,
 
-    /// Show provider-supplied reasoning on stderr while keeping stdout clean.
+    /// Apply a provider-native JSON Schema generation constraint.
+    #[arg(long, value_name = "JSON_SCHEMA")]
+    output_schema: Option<String>,
+
+    /// Show provider-supplied reasoning on stderr; requires `--transport direct`.
     #[arg(long, conflicts_with = "json")]
     show_reasoning: bool,
 
@@ -148,9 +153,10 @@ enum ModelProviderArgument {
 
 #[derive(Debug, Clone, Copy, Default, ValueEnum)]
 enum ModelTransportArgument {
-    #[default]
+    #[cfg_attr(not(feature = "rig-transport"), default)]
     Direct,
     #[cfg(feature = "rig-transport")]
+    #[default]
     Rig,
 }
 
@@ -351,6 +357,14 @@ fn model(arguments: ModelArguments) -> agent_runtime::Result<()> {
         });
     }
     let provider = arguments.provider.into();
+    let output_schema = arguments
+        .output_schema
+        .map(|schema| {
+            serde_json::from_str(&schema).map_err(|_| Error::InvalidModelRequest {
+                reason: "--output-schema must contain one valid JSON value".to_owned(),
+            })
+        })
+        .transpose()?;
     let timeout = Duration::from_secs(arguments.timeout);
     let transport: Box<dyn ModelTransport> = match arguments.transport {
         ModelTransportArgument::Direct => Box::new(DirectModelTransport::new(
@@ -373,6 +387,7 @@ fn model(arguments: ModelArguments) -> agent_runtime::Result<()> {
         tools: Vec::new(),
         tool_choice: ToolChoice::None,
         reasoning_effort: arguments.reasoning_effort.map(Into::into),
+        output_schema,
     };
     let cancellation = CancellationToken::new();
     let stdout = std::io::stdout();

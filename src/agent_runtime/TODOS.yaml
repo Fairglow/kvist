@@ -1,14 +1,14 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:14fc968bd63493c7683ea684dc2ba6137b19e5cb6a8b2b31e99e73291fff65b7"
-  contract_revision: "sha256:8f2013019e6a753dc6617347f47bcd1d62bd8772a1888a25f0ce8feb2db47369"
-  design_revision: "sha256:5648cabedd920f571097cb5ec9186da3c130e37855a65da295e12f43de95dc8f"
+  requirements_revision: "sha256:58849618584e9af48dd94cd0aea2806fd6f1905484846a9907a76806caa502e7"
+  contract_revision: "sha256:2b7478dcc6d7667c475e6128ef91f9ea031dffd94e1863630931b52a810f115e"
+  design_revision: "sha256:d290df050d46ccafd0bc0aabf75b22f79eeb8920058dca293bd7d33586eff366"
   parent_contract:
     path: "../CONTRACT.md"
     revision: "sha256:5e8f49fc7d151c87933d7ba366d4f1ff54de41cb7ba6cbf45c8c1f14eb7d3102"
   revalidation:
     state: current
-    checked_at: "2026-09-01T07:15:43Z"
+    checked_at: "2026-09-01T08:54:44Z"
     stale_since: null
     causes: []
 tasks:
@@ -1486,5 +1486,85 @@ tasks:
       created_at: "2026-09-01T06:27:02Z"
       updated_at: "2026-09-01T07:01:22Z"
       completed_at: "2026-09-01T07:01:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-20-write-tests"
+    title: "Define promoted Rig integration tests"
+    description: "Write failing parity tests for Rig-default selection, explicit direct fallback, provider-native JSON Schema requests, incompatible schema-and-tool rejection, and non-replay failure behavior."
+    context: "The isolated integration branch needs to exercise Rig in normal builds and evaluate one high-value structured-output capability without weakening Kvist authority."
+    purpose: "Make the experiment's preferred transport and fallback semantics executable before promotion."
+    expected_outcome: "Tests distinguish the default and fallback paths and prove both encode bounded structured-output constraints without executing tools."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T08:34:52Z"
+      updated_at: "2026-09-01T08:49:35Z"
+      completed_at: "2026-09-01T08:49:35Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-20-implement-code"
+    title: "Promote Rig on integration branch"
+    description: "Enable exact-pinned Rig by default, select it for model calls, retain explicit direct selection, map canonical output schemas through both adapters, and document measured tradeoffs."
+    context: "Rig reduces provider-wire maintenance but must remain replaceable and must not own policy, retries, tools, validation, or evidence."
+    purpose: "Create a complete branch-level trial that exercises Rig under realistic default build and CLI flow."
+    expected_outcome: "Normal integration-branch builds use Rig, explicit direct fallback remains available, and structured generation stays behind Kvist-owned canonical types."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-20-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-09-01T08:34:52Z"
+      updated_at: "2026-09-01T08:49:35Z"
+      completed_at: "2026-09-01T08:49:35Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-20-security-audit"
+    title: "Audit promoted Rig integration"
+    description: "Independently review default dependency activation, schema conversion and bounds, provider enforcement claims, tracing suppression, request replay semantics, and fallback isolation."
+    context: "Making the framework path normal increases exposure to upstream provider conversion, async runtime, HTTP, and supply-chain defects."
+    purpose: "Prevent branch findings from being represented as production-ready without an independent authority and leakage review."
+    expected_outcome: "Every high-confidence issue is fixed or retained as an explicit promotion blocker."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-20-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T08:34:52Z"
+      updated_at: "2026-09-01T08:34:52Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-20-compliance-review"
+    title: "Review promoted Rig integration compliance"
+    description: "Independently derive default selection, schema, fallback, error, and dependency behavior and compare it with the accepted experiment intent."
+    context: "The integration implementer cannot certify that framework reuse preserved the canonical contract."
+    purpose: "Provide a separate promotion verdict and retain every discrepancy for human arbitration."
+    expected_outcome: "The review either supports a bounded transport-only promotion or records precise blockers."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-20-security-audit"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T08:34:52Z"
+      updated_at: "2026-09-01T08:34:52Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null

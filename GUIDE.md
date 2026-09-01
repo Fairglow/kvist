@@ -241,23 +241,29 @@ execution warning.
 
 The planned agent runtime separates model transport, bounded native loop, typed
 tool broker, policy, execution backend, and durable evidence. Local
-llama-server and Ollama integrations will use the standalone-owned loop under
-Kvist authority; Gemini and Copilot remain opaque external agents constrained
-as complete processes. The direct HTTP transport remains the default and
-fallback. An exactly pinned Rig 0.42.0 adapter is available behind the
-`rig-transport` Cargo feature after raising the project MSRV to Rust 1.94. See
+llama-server and Ollama integrations use the standalone-owned model boundary
+under Kvist authority; Gemini and Copilot remain opaque external agents
+constrained as complete processes. On the `rig-integration` branch, exactly
+pinned Rig 0.42.0 is the default provider-wire adapter and the direct HTTP
+transport remains an explicit, non-automatic fallback and conformance oracle.
+See
 [`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md)
 and the versioned
 [`Rig transport evaluation`](docs/agent-runtime/rig-evaluation.md).
 
-Build the optional adapter and select it explicitly:
+Run the default Rig adapter:
 
 ```bash
-cargo run -p agent-runtime --bin agent-run --features rig-transport -- \
-  model --transport rig --provider ollama \
+cargo run -p agent-runtime --bin agent-run -- \
+  model --provider ollama \
   --endpoint http://127.0.0.1:11434 --model qwen3-coder \
   --file prompt.md
 ```
+
+Use `--output-schema '<JSON Schema object>'` for provider-native structured
+generation, while still validating returned JSON in the host. Use
+`--transport direct` only for explicit fallback or conformance testing; a Rig
+failure is never replayed automatically.
 
 For implementation tasks, configure and approve the repository test policy
 before running:
