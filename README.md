@@ -16,6 +16,31 @@ structure in [`ARCHITECTURE.md`](ARCHITECTURE.md), detailed strategy in
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md),
 and the standards posture in [`docs/standards.md`](docs/standards.md).
 
+## Why Kvist
+
+AI coding tools are increasingly capable at producing code. The harder problem
+is keeping product intent, architecture, authority, and evidence coherent as
+those tools act. Important decisions can otherwise remain in chat history,
+context can cross component boundaries without review, and successful
+execution can be mistaken for correctness.
+
+Kvist provides a durable control layer around AI-assisted development. It does
+not try to replace coding agents or model frameworks. It gives them explicit,
+version-controlled work to perform; limits the context and authority they
+receive; and keeps intended behavior separate from independently observed
+implementation evidence.
+
+The human remains the architect and final arbiter. Agents may propose,
+implement, document, and review, but an agent does not approve product intent
+or certify its own work. When evidence and intent disagree, Kvist preserves the
+discrepancy for a person to resolve rather than silently choosing a side.
+
+This makes Kvist most relevant to teams that value architectural continuity,
+inspectable state, bounded execution, and reviewable evidence more than
+unrestricted autonomy. See [Why Kvist](docs/why-kvist.md) for a grounded
+comparison with coding agents, specification kits, agent frameworks,
+sandboxes, and governance tools.
+
 ## CLI contract
 
 | Command                                            | Contract                                                                                     |
