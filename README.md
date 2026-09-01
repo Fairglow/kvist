@@ -748,8 +748,8 @@ Stefan Lindblad and licensed under the
 The AGPL permits personal, open-source, and commercial use under its terms.
 Organizations that need to distribute, embed, modify, or operate Kvist without
 AGPL obligations may request separate commercial terms as described in
-[`COMMERCIAL-LICENSE.md`](COMMERCIAL-LICENSE.md). No commercial permission is
-granted unless both parties execute a separate written agreement.
+[`COMMERCIAL-LICENSE.md`](COMMERCIAL-LICENSE.md). No permission beyond the
+AGPL is granted unless both parties execute a separate written agreement.
 
 External code contributions are not accepted at this stage. Bug reports,
 use-case feedback, and design discussion remain welcome. See
