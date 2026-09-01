@@ -19,7 +19,10 @@ constraint set injected into component work.
   contract. Exclude peer and parent designs and implementations by default.
 - Treat agent configuration, prompts, and output as untrusted input. External
   commands must be resolved without a shell and covered by an explicit,
-  human-approved execution policy before they run.
+  human-approved execution policy before they run. A one-off host command may
+  use an explicit invocation acknowledgement that states its authority and
+  scope; sandboxed task execution requires separately persisted policy
+  approval.
 - Support executable agent workflows on Linux only until independently tested
   platform backends exist. Keep operating-system enforcement behind explicit
   interfaces so deferred platforms do not leak conditional behavior through

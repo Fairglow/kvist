@@ -12,19 +12,38 @@ use serde_json::Value;
 
 use crate::{
     CommandSpec, Error, ModelProfile, Result, SupervisionPolicy, command::json_string,
-    profile::is_valid_profile_name, render_command, run_supervised, upsert_profile,
+    profile::is_valid_profile_name, render_command, run_supervised, run_supervised_capture,
+    upsert_profile,
 };
 
 const LLAMA_SERVER_DEFAULT_URL: &str = "http://127.0.0.1:9931";
 const MAX_DISCOVERY_BYTES: usize = 64 * 1024;
 const MAX_DISCOVERED_MODELS: usize = 128;
 const MAX_MODEL_ID_BYTES: usize = 256;
+const SETUP_TEST_PROMPT: &str = "Reply with exactly: OK";
+
+/// Controls the non-interactive qualification decision made by setup.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SetupOptions {
+    /// Persist a profile even when its mandatory live qualification fails.
+    pub force: bool,
+}
 
 /// Collects and optionally verifies one reusable provider profile.
 pub fn collect_profile<R: BufRead, W: Write>(
     reader: &mut R,
     writer: &mut W,
     working_directory: &Path,
+) -> Result<ModelProfile> {
+    collect_profile_with_options(reader, writer, working_directory, SetupOptions::default())
+}
+
+/// Collects and qualifies one profile with explicit setup options.
+pub fn collect_profile_with_options<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    working_directory: &Path,
+    options: SetupOptions,
 ) -> Result<ModelProfile> {
     write_output(
         writer,
@@ -52,45 +71,31 @@ pub fn collect_profile<R: BufRead, W: Write>(
         writer,
         &format!("Generated command template: {}\n", profile.command),
     )?;
-    if confirm(reader, writer, "\nTest this model before saving?", true)? {
-        let test_prompt = prompt_with_default(
-            reader,
-            writer,
-            "Test prompt",
-            "Reply with: agent runtime model ready",
-        )?;
-        write_output(
-            writer,
-            "Warning: this test runs the generated command with your current host \
-             filesystem, credential, executable, and network permissions.\n",
-        )?;
-        if !confirm(
-            reader,
-            writer,
-            "Allow this command to run with full host permissions?",
-            false,
-        )? {
+    write_output(
+        writer,
+        "\nTesting the generated command with current host permissions and the fixed \
+         prompt `Reply with exactly: OK`.\n",
+    )?;
+    match verify_profile(&profile, SETUP_TEST_PROMPT, working_directory, true) {
+        Ok(()) => write_output(writer, "Model test succeeded.\n")?,
+        Err(error @ Error::Cancelled) => return Err(error),
+        Err(error) if options.force => {
+            write_output(
+                writer,
+                &format!(
+                    "Model test failed: {error}\n\
+                     Warning: --force permits this failed profile to be saved.\n"
+                ),
+            )?;
+        }
+        Err(error) => {
             return Err(Error::ProfileSetup {
-                reason: "host execution was not acknowledged; profile was not saved".to_owned(),
+                reason: format!(
+                    "model verification failed; profile was not saved: {error}; \
+                     rerun setup with --force to persist it explicitly"
+                ),
             });
         }
-        match verify_profile(&profile, &test_prompt, working_directory, true) {
-            Ok(()) => write_output(writer, "Model test succeeded.\n")?,
-            Err(error @ Error::Cancelled) => return Err(error),
-            Err(error) => {
-                write_output(writer, &format!("Model test failed: {error}\n"))?;
-                if !confirm(reader, writer, "Save profile anyway?", false)? {
-                    return Err(Error::ProfileSetup {
-                        reason: "model verification failed; profile was not saved".to_owned(),
-                    });
-                }
-            }
-        }
-    } else {
-        write_output(
-            writer,
-            "Warning: saving without live model, credential, and argument qualification.\n",
-        )?;
     }
     Ok(profile)
 }
@@ -102,6 +107,23 @@ pub fn run_setup_wizard<R: BufRead, W: Write>(
     working_directory: &Path,
     config_path: &Path,
 ) -> Result<ModelProfile> {
+    run_setup_wizard_with_options(
+        reader,
+        writer,
+        working_directory,
+        config_path,
+        SetupOptions::default(),
+    )
+}
+
+/// Runs setup with explicit qualification and persistence options.
+pub fn run_setup_wizard_with_options<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    working_directory: &Path,
+    config_path: &Path,
+    options: SetupOptions,
+) -> Result<ModelProfile> {
     write_output(
         writer,
         "==================================================\n\
@@ -109,7 +131,7 @@ pub fn run_setup_wizard<R: BufRead, W: Write>(
          ==================================================\n\
          Configure a reusable provider profile for bounded host execution.\n\n",
     )?;
-    let profile = collect_profile(reader, writer, working_directory)?;
+    let profile = collect_profile_with_options(reader, writer, working_directory, options)?;
     upsert_profile(config_path, &profile)?;
     write_output(
         writer,
@@ -141,7 +163,7 @@ pub fn verify_profile(
         max_retries: 0,
         max_output_bytes: 64 * 1024,
     };
-    run_supervised(&policy, |_| {
+    run_supervised_capture(&policy, |_| {
         Ok(CommandSpec::new(program.clone(), arguments.clone())
             .in_directory(working_directory.to_path_buf()))
     })?;
@@ -238,7 +260,8 @@ fn configure_profile<R: BufRead, W: Write>(
                 prompt_optional(reader, writer, "Copilot model (blank uses CLI default): ")?;
             let name = prompt_with_default(reader, writer, "Profile name", "copilot")?;
             let mut default = format!(
-                "{} --prompt '{{prompt}}' --silent --allow-all-tools --no-ask-user",
+                "{} --prompt '{{prompt}}' --silent --allow-all-tools --no-ask-user \
+                 --reasoning-effort '{{reasoning_effort}}'",
                 command_argument(&binary)
             );
             if let Some(model) = model {
@@ -633,29 +656,6 @@ fn prompt_optional<R: BufRead, W: Write>(
     write_output(writer, prompt)?;
     let value = read_input(reader)?;
     Ok((!value.is_empty()).then_some(value))
-}
-
-fn confirm<R: BufRead, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
-    prompt: &str,
-    default: bool,
-) -> Result<bool> {
-    write_output(
-        writer,
-        &format!("{prompt} [{}]: ", if default { "Y/n" } else { "y/N" }),
-    )?;
-    let answer = read_input(reader)?.to_ascii_lowercase();
-    if answer.is_empty() {
-        return Ok(default);
-    }
-    match answer.as_str() {
-        "y" | "yes" => Ok(true),
-        "n" | "no" => Ok(false),
-        _ => Err(Error::ProfileSetup {
-            reason: format!("expected yes or no, received `{answer}`"),
-        }),
-    }
 }
 
 fn command_argument(value: &str) -> String {

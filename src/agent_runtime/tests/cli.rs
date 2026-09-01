@@ -173,6 +173,200 @@ fn standalone_cli_runs_a_prompt_from_a_file() {
 }
 
 #[test]
+fn standalone_json_run_emits_only_captured_content() {
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args([
+            "run",
+            "--json",
+            "--allow-host-execution",
+            "--command",
+            "sh -c 'printf answer; printf progress >&2'",
+            "hello",
+        ])
+        .output()
+        .expect("run standalone JSON prompt");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).expect("single JSON output"),
+        serde_json::json!({"content": "answer"})
+    );
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn standalone_json_run_replaces_invalid_utf8_content() {
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args([
+            "run",
+            "--json",
+            "--allow-host-execution",
+            "--command",
+            "sh -c 'printf \"\\377\"'",
+            "hello",
+        ])
+        .output()
+        .expect("run standalone JSON prompt with invalid UTF-8");
+
+    assert!(output.status.success());
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).expect("single JSON output"),
+        serde_json::json!({"content": "\u{fffd}"})
+    );
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn standalone_run_selects_reasoning_effort_per_prompt() {
+    let workspace = TempDir::new().expect("workspace");
+    let configuration = workspace.path().join("profiles.toml");
+    fs::write(
+        &configuration,
+        "schema_version = 1\n\
+         [[profiles]]\n\
+         name = \"copilot-high\"\n\
+         provider = \"copilot\"\n\
+         command = \"/bin/echo '{reasoning_effort}'\"\n",
+    )
+    .expect("write profile");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args([
+            "run",
+            "--allow-host-execution",
+            "--profile",
+            "copilot-high",
+            "--config",
+        ])
+        .arg(configuration)
+        .args(["--reasoning-effort", "high", "hello"])
+        .output()
+        .expect("run selected effort");
+
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("UTF-8 output"),
+        "high\n"
+    );
+}
+
+#[test]
+fn model_json_rejects_separate_reasoning_presentation() {
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args([
+            "model",
+            "--provider",
+            "ollama",
+            "--endpoint",
+            "http://127.0.0.1:1",
+            "--model",
+            "test-model",
+            "--json",
+            "--show-reasoning",
+            "hello",
+        ])
+        .output()
+        .expect("parse conflicting model presentation flags");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("UTF-8 stderr")
+            .contains("cannot be used with")
+    );
+}
+
+#[test]
+fn setup_uses_fixed_prompt_and_refuses_failed_qualification() {
+    let workspace = TempDir::new().expect("workspace");
+    let configuration = workspace.path().join("profiles.toml");
+    let recorded_prompt = workspace.path().join("prompt.txt");
+    let provider = workspace.path().join("provider.sh");
+    fs::write(
+        &provider,
+        format!(
+            "#!/bin/sh\n[ \"$1\" = --prompt ] || exit 8\nprintf '%s' \"$2\" > '{}'\nexit 7\n",
+            recorded_prompt.display()
+        ),
+    )
+    .expect("write provider");
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .current_dir(workspace.path())
+        .args(["setup", "--config"])
+        .arg(&configuration)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start setup");
+    use std::io::Write;
+    write!(
+        setup.stdin.take().expect("setup stdin"),
+        "6\nprovider.sh\nfailed\n\n"
+    )
+    .expect("write setup answers");
+    let output = setup.wait_with_output().expect("wait for setup");
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 setup output");
+
+    assert!(!output.status.success());
+    assert!(!configuration.exists());
+    assert_eq!(
+        fs::read_to_string(recorded_prompt).expect("recorded prompt"),
+        "Reply with exactly: OK"
+    );
+    assert!(!stdout.contains("Test prompt"));
+    assert!(!stdout.contains("full host permissions?"));
+    assert!(!stdout.contains("Save profile anyway?"));
+}
+
+#[test]
+fn setup_force_persists_profile_after_failed_qualification() {
+    let workspace = TempDir::new().expect("workspace");
+    let configuration = workspace.path().join("profiles.toml");
+    let provider = workspace.path().join("provider.sh");
+    fs::write(&provider, "#!/bin/sh\nexit 7\n").expect("write provider");
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .current_dir(workspace.path())
+        .args(["setup", "--force", "--config"])
+        .arg(&configuration)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("start forced setup");
+    use std::io::Write;
+    write!(
+        setup.stdin.take().expect("setup stdin"),
+        "6\nprovider.sh\nforced\n\n"
+    )
+    .expect("write setup answers");
+    let output = setup.wait_with_output().expect("wait for setup");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        load_profile(&configuration, "forced")
+            .expect("forced profile")
+            .name,
+        "forced"
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 setup output");
+    assert!(stdout.contains("--force"));
+    assert!(!stdout.contains("Save profile anyway?"));
+}
+
+#[test]
 fn supervised_provider_cannot_consume_caller_stdin() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_agent-run"))
         .args([
@@ -269,7 +463,7 @@ fn llama_cli_fallback_preserves_provider_and_uses_supported_flags() {
     let mut setup = Command::new(env!("CARGO_BIN_EXE_agent-run"))
         .current_dir(workspace.path())
         .env("PATH", &empty_path)
-        .args(["setup", "--config"])
+        .args(["setup", "--force", "--config"])
         .arg(&configuration)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -326,7 +520,7 @@ fn installed_gemini_and_copilot_use_noninteractive_templates() {
         let mut setup = Command::new(env!("CARGO_BIN_EXE_agent-run"))
             .current_dir(workspace.path())
             .env("PATH", &bin)
-            .args(["setup", "--config"])
+            .args(["setup", "--force", "--config"])
             .arg(&configuration)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -360,6 +554,8 @@ fn installed_gemini_and_copilot_use_noninteractive_templates() {
             assert!(profile.command.contains("--silent"));
             assert!(profile.command.contains("--allow-all-tools"));
             assert!(profile.command.contains("--no-ask-user"));
+            assert!(profile.command.contains("--reasoning-effort"));
+            assert!(profile.command.contains("{reasoning_effort}"));
             assert!(profile.command.contains("--model"));
             assert!(profile.command.contains("gpt-5.4"));
             assert!(!profile.command.contains("copilot chat"));

@@ -1,14 +1,14 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:bd70f3241a721bcb6fcb2fdc8c80ac1d5678b11bae5fba0dd5a0623c924fae02"
-  contract_revision: "sha256:c273566076c9e7d5c0b5a69eb99c8244360486ed55f9033d76c32fe911cee1d4"
-  design_revision: "sha256:000e93544b05d6ae8a95e3af43a86c34fd94084628b833c82f6dbcfec98a7e5f"
+  requirements_revision: "sha256:b5f701ec8fe7e2d366086c2314ecec56c50397198fd0bd034197c8322caad2cf"
+  contract_revision: "sha256:29470452d699f5a3ad2ae3261e54bc0b0df248aa1388ebf1dac25170ff115a6f"
+  design_revision: "sha256:3ac52dfabdb18cf5be0c8c7d14bda1386e04a36d456cddb5b2b9783bd73539c3"
   parent_contract:
     path: "../CONTRACT.md"
-    revision: "sha256:289b24e4726167bd85302963860e6d554fbad29987af093814b0ca6428d21697"
+    revision: "sha256:ec6fb1a64df19b7d8f04edbe3d38688d7b15bf4cc01dd3e7ef773f8ad631298e"
   revalidation:
     state: current
-    checked_at: "2026-08-30T16:49:14Z"
+    checked_at: "2026-08-31T23:29:25Z"
     stale_since: null
     causes: []
 tasks:
@@ -1322,5 +1322,88 @@ tasks:
       created_at: "2026-08-30T16:37:30Z"
       updated_at: "2026-08-30T16:37:30Z"
       completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-18-write-tests"
+    title: "Define prompt presentation and qualification tests"
+    description: "Write failing tests for content-only text output, single-object JSON capture, provider-supplied reasoning events, profile and reasoning selection, fixed-prompt setup qualification, failed-test refusal, and forced persistence."
+    context: "The runtime currently appends or forwards provider presentation without a canonical JSON capture path, drops direct reasoning, and asks three avoidable setup questions."
+    purpose: "Make the requested prompt and setup experience executable before changing public runtime behavior."
+    expected_outcome: "Focused tests fail until output, selection, reasoning, and qualification behavior matches the revised contract."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#AR-REQ-OUTPUT-PRESENTATION"
+      - "REQUIREMENTS.md#AR-REQ-PROMPT-COMMAND"
+      - "REQUIREMENTS.md#AR-REQ-SETUP"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-31T19:53:23Z"
+      updated_at: "2026-08-31T20:15:25Z"
+      completed_at: "2026-08-31T20:15:25Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-18-implement-code"
+    title: "Implement prompt presentation and qualification"
+    description: "Add bounded capture, content-only text and JSON output, provider-supplied reasoning events, typed reasoning placeholders, and automatic fixed-prompt setup qualification with force-only failed persistence."
+    context: "The failing tests define one portable output boundary while preserving opaque provider limitations and explicit host authority."
+    purpose: "Let users observe supported progress, select configured behavior per prompt, and trust setup qualification without repetitive prompts."
+    expected_outcome: "The standalone CLI exposes deterministic output and qualification while multiple named profiles remain independently selectable."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-18-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-OUTPUT-PRESENTATION"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-31T19:53:23Z"
+      updated_at: "2026-08-31T20:15:25Z"
+      completed_at: "2026-08-31T20:15:25Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-18-security-audit"
+    title: "Audit prompt output and setup authority"
+    description: "Independently review output capture bounds, terminal disclosure, JSON encoding, reasoning-data handling, option injection, setup host authority, fixed-prompt execution, and forced failed-profile persistence."
+    context: "Provider output and reasoning are untrusted, while setup qualification intentionally runs one exact command with current host authority."
+    purpose: "Prevent clean-output and setup convenience from creating injection, leakage, authority, or false-qualification defects."
+    expected_outcome: "Every high-confidence defect is fixed or retained as an explicit blocker before promotion."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "sa-18-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-31T19:53:23Z"
+      updated_at: "2026-08-31T23:28:28Z"
+      completed_at: "2026-08-31T23:28:28Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-18-compliance-review"
+    title: "Review prompt presentation compliance"
+    description: "Independently derive output, reasoning, selection, and setup behavior and compare it with the accepted runtime requirements and contract."
+    context: "The implementer cannot certify that provider content stays clean, reasoning stays accurately labeled, or failed qualification remains explicit."
+    purpose: "Retain a separate verdict for every revised prompt and setup guarantee."
+    expected_outcome: "The review records each satisfied clause, discrepancy, and approved deferral before the feature is promoted."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "sa-18-security-audit"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#AR-REQ-OUTPUT-PRESENTATION"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-31T19:53:23Z"
+      updated_at: "2026-08-31T23:28:28Z"
+      completed_at: "2026-08-31T23:28:28Z"
     blocked_reason: null
     recovery_state: null

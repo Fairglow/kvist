@@ -66,6 +66,27 @@ unknown fields and invalid graph/state combinations, then emits canonical YAML
 with explicit field order. SHA-256 hashes exact UTF-8 bytes, so VCS-visible
 document changes are attributable without hidden normalization.
 
+Explicit prompt execution selects a configured model within the requested role,
+then renders typed reasoning effort only through the runtime's declared
+placeholder. Text mode uses live bounded supervision and returns no wrapper
+message. JSON mode uses bounded capture and emits one escaped `content` value,
+replacing invalid UTF-8 sequences with U+FFFD so provider output cannot corrupt
+the command's structured response.
+
+Agent setup delegates provider collection and mandatory qualification to the
+runtime with a typed force option. The setup invocation supplies authority for
+the runtime's fixed-prompt qualification only. A successful qualification
+continues to role selection and atomic configuration persistence; a failed
+qualification exits before those steps unless `--force` was supplied.
+Forced persistence retains a visible warning, while cancellation remains
+terminal. No separate test prompt, host-authority question, or
+save-after-failure question is part of the root wizard state machine.
+For global JSON presentation, the wizard receives standard error as its
+interaction writer and qualification uses bounded capture, leaving standard
+output exclusively for the dispatcher's single result object.
+Selecting an already saved reusable runtime profile skips provider collection
+and qualification and proceeds directly to role binding.
+
 Significant artifact separation rationale is retained in
 `docs/decisions/0001-separate-component-intent.md`.
 
@@ -177,9 +198,10 @@ is authenticated in user-owned storage and bound to exact project, worktree,
 root-contract, runner, and policy identity. Environment inheritance is
 allowlisted, network is denied, and the component is the only writable mount.
 
-Prompt and subprocess data are bounded before persistence. Literal configured
-redactions apply across output chunks and streams. Errors avoid secrets and
-success-shaped fallbacks.
+Direct prompt and setup streams are bounded but are not retained as durable
+evidence by the root component. Task subprocess output is bounded and literal
+configured redactions apply across output chunks and streams before task
+evidence is persisted. Errors avoid secrets and success-shaped fallbacks.
 
 Planned review reports apply the same bounded-output and redaction rules. Raw
 transcripts, credentials, and secrets are not retained, and untrusted model

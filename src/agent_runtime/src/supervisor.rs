@@ -163,6 +163,17 @@ pub struct ExecutionReport {
     pub attempts: u32,
 }
 
+/// Bounded output returned after a successful non-forwarding execution.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapturedExecutionReport {
+    /// Total attempts including the successful attempt.
+    pub attempts: u32,
+    /// Standard output from the successful attempt.
+    pub stdout: Vec<u8>,
+    /// Standard error from the successful attempt.
+    pub stderr: Vec<u8>,
+}
+
 #[derive(Clone, Copy)]
 enum Stream {
     Stdout,
@@ -184,6 +195,48 @@ struct SignalCancellation {
     requested: Arc<AtomicBool>,
     handle: SignalHandle,
     listener: Option<JoinHandle<()>>,
+}
+
+struct OutputDestination {
+    forward: bool,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+}
+
+impl OutputDestination {
+    fn forwarding() -> Self {
+        Self {
+            forward: true,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }
+    }
+
+    fn capturing() -> Self {
+        Self {
+            forward: false,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }
+    }
+
+    fn reset_capture(&mut self) {
+        if !self.forward {
+            self.stdout.clear();
+            self.stderr.clear();
+        }
+    }
+
+    fn write(&mut self, stream: Stream, bytes: &[u8]) -> Result<()> {
+        if self.forward {
+            return forward(stream, bytes);
+        }
+        match stream {
+            Stream::Stdout => self.stdout.extend_from_slice(bytes),
+            Stream::Stderr => self.stderr.extend_from_slice(bytes),
+        }
+        Ok(())
+    }
 }
 
 impl SignalCancellation {
@@ -228,8 +281,38 @@ impl Drop for SignalCancellation {
 /// isolation boundary.
 pub fn run_supervised<F>(
     policy: &SupervisionPolicy,
-    mut command_for_attempt: F,
+    command_for_attempt: F,
 ) -> Result<ExecutionReport>
+where
+    F: FnMut(&AttemptContext) -> Result<CommandSpec>,
+{
+    let (report, _) =
+        run_supervised_inner(policy, command_for_attempt, OutputDestination::forwarding())?;
+    Ok(report)
+}
+
+/// Runs a command while retaining bounded output instead of forwarding it.
+pub fn run_supervised_capture<F>(
+    policy: &SupervisionPolicy,
+    command_for_attempt: F,
+) -> Result<CapturedExecutionReport>
+where
+    F: FnMut(&AttemptContext) -> Result<CommandSpec>,
+{
+    let (report, output) =
+        run_supervised_inner(policy, command_for_attempt, OutputDestination::capturing())?;
+    Ok(CapturedExecutionReport {
+        attempts: report.attempts,
+        stdout: output.stdout,
+        stderr: output.stderr,
+    })
+}
+
+fn run_supervised_inner<F>(
+    policy: &SupervisionPolicy,
+    mut command_for_attempt: F,
+    mut output: OutputDestination,
+) -> Result<(ExecutionReport, OutputDestination)>
 where
     F: FnMut(&AttemptContext) -> Result<CommandSpec>,
 {
@@ -238,6 +321,7 @@ where
     let mut prior_failure = None;
 
     for attempt_number in 1..=policy.max_retries + 1 {
+        output.reset_capture();
         if cancellation.requested() {
             return Err(Error::Cancelled);
         }
@@ -252,12 +336,15 @@ where
             });
         }
 
-        let event = run_attempt(&specification, policy, &cancellation)?;
+        let event = run_attempt(&specification, policy, &cancellation, &mut output)?;
         match event {
             AttemptEvent::Exited(status) if status.success() => {
-                return Ok(ExecutionReport {
-                    attempts: attempt_number,
-                });
+                return Ok((
+                    ExecutionReport {
+                        attempts: attempt_number,
+                    },
+                    output,
+                ));
             }
             AttemptEvent::Exited(status) => return Err(Error::ProcessFailed { status }),
             AttemptEvent::Retry(cause) if attempt_number <= policy.max_retries => {
@@ -288,6 +375,7 @@ fn run_attempt(
     specification: &CommandSpec,
     policy: &SupervisionPolicy,
     cancellation: &SignalCancellation,
+    output: &mut OutputDestination,
 ) -> Result<AttemptEvent> {
     let mut command = Command::new(&specification.program);
     command
@@ -333,10 +421,10 @@ fn run_attempt(
         budget,
         Arc::clone(&stop_readers),
     );
-    let event = monitor(&mut child, &receiver, policy, cancellation);
+    let event = monitor(&mut child, &receiver, policy, cancellation, output);
 
     let termination = terminate_process_group(&mut child, &specification.program);
-    let draining = drain_to_end(&receiver, policy.max_output_bytes, &stop_readers);
+    let draining = drain_to_end(&receiver, policy.max_output_bytes, &stop_readers, output);
     let stdout_join = join_reader(stdout_reader, "read supervised stdout");
     let stderr_join = join_reader(stderr_reader, "read supervised stderr");
 
@@ -455,6 +543,7 @@ fn monitor(
     receiver: &Receiver<StreamEvent>,
     policy: &SupervisionPolicy,
     cancellation: &SignalCancellation,
+    output: &mut OutputDestination,
 ) -> Result<AttemptEvent> {
     let started = Instant::now();
     let mut last_output = Instant::now();
@@ -482,7 +571,7 @@ fn monitor(
         match receiver.recv_timeout(Duration::from_millis(50)) {
             Ok(StreamEvent::Data(stream, bytes)) => {
                 last_output = Instant::now();
-                forward(&stream, &bytes)?;
+                output.write(stream, &bytes)?;
                 if policy.detect_loops && matches!(stream, Stream::Stdout) {
                     append_loop_text(&mut loop_buffer, &bytes);
                     if contains_repetition(&loop_buffer) {
@@ -527,6 +616,7 @@ fn drain_to_end(
     receiver: &Receiver<StreamEvent>,
     max_output_bytes: usize,
     stop_readers: &AtomicBool,
+    output: &mut OutputDestination,
 ) -> Result<()> {
     let mut failure = None;
     let deadline = Instant::now() + STREAM_DRAIN_TIMEOUT;
@@ -535,24 +625,29 @@ fn drain_to_end(
         if remaining.is_zero() {
             stop_readers.store(true, Ordering::Release);
             while let Ok(event) = receiver.recv_timeout(Duration::from_millis(100)) {
-                record_stream_event(event, max_output_bytes, &mut failure);
+                record_stream_event(event, max_output_bytes, &mut failure, output);
             }
             return failure.map_or(Err(Error::OutputStreamsRetained), Err);
         }
         match receiver.recv_timeout(remaining) {
-            Ok(event) => record_stream_event(event, max_output_bytes, &mut failure),
+            Ok(event) => record_stream_event(event, max_output_bytes, &mut failure, output),
             Err(RecvTimeoutError::Disconnected) => return failure.map_or(Ok(()), Err),
             Err(RecvTimeoutError::Timeout) => {}
         }
     }
 }
 
-fn record_stream_event(event: StreamEvent, max_output_bytes: usize, failure: &mut Option<Error>) {
+fn record_stream_event(
+    event: StreamEvent,
+    max_output_bytes: usize,
+    failure: &mut Option<Error>,
+    output: &mut OutputDestination,
+) {
     if failure.is_some() {
         return;
     }
     *failure = match event {
-        StreamEvent::Data(stream, bytes) => forward(&stream, &bytes).err(),
+        StreamEvent::Data(stream, bytes) => output.write(stream, &bytes).err(),
         StreamEvent::ReadFailed(stream, source) => Some(Error::Io {
             operation: match stream {
                 Stream::Stdout => "read supervised stdout",
@@ -570,7 +665,7 @@ fn record_stream_event(event: StreamEvent, max_output_bytes: usize, failure: &mu
     };
 }
 
-fn forward(stream: &Stream, bytes: &[u8]) -> Result<()> {
+fn forward(stream: Stream, bytes: &[u8]) -> Result<()> {
     match stream {
         Stream::Stdout => write_when_ready(io::stdout().lock(), bytes, "stdout"),
         Stream::Stderr => write_when_ready(io::stderr().lock(), bytes, "stderr"),

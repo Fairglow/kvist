@@ -1,12 +1,22 @@
-use std::fs;
-use std::io::Cursor;
+#[cfg(unix)]
+use nix::{
+    sys::signal::{Signal, kill},
+    unistd::Pid,
+};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
+use std::{
+    fs,
+    io::{Cursor, Write},
+    process::{Command, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
 use tempfile::TempDir;
 
 use agent_runtime::{ModelProfile, upsert_profile};
 use kvist::config;
-use kvist::wizard::{run_wizard, run_wizard_with_profile_config};
+use kvist::wizard::{run_wizard, run_wizard_with_force, run_wizard_with_profile_config};
 
 #[test]
 fn test_wizard_ollama_local_config() {
@@ -17,14 +27,13 @@ fn test_wizard_ollama_local_config() {
     // 1. Choose Ollama (Option 3)
     // 2. Enter Ollama base URL (Default)
     // 3. Enter Ollama model name (llama3.1:8b)
-    // 4. Skip the optional model test
-    // 5. Choose All Roles (Option 4)
-    // 6. Choose Project-local configuration (Option 1)
-    let mock_input = "1\n3\n\nllama3.1:8b\n\nn\n4\n1\n";
+    // 4. Choose All Roles (Option 4)
+    // 5. Choose Project-local configuration (Option 1)
+    let mock_input = "1\n3\n\nllama3.1:8b\n\n4\n1\n";
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
-    let result = run_wizard(&mut reader, &mut writer, project_dir);
+    let result = run_wizard_with_force(&mut reader, &mut writer, project_dir, true);
     assert!(result.is_ok());
 
     let output_str = String::from_utf8(writer).expect("valid utf-8 output");
@@ -61,13 +70,9 @@ fn test_wizard_custom_script_local_config() {
     // 2. Enter script path
     // 3. Name the model
     // 4. Keep the default command template
-    // 5. Skip the optional model test
-    // 6. Choose Developer Role (Option 1 / default)
-    // 7. Choose Project-local configuration (Option 1)
-    let mock_input = format!(
-        "1\n6\n{}\nlocal-wrapper\n\nn\n1\n1\n",
-        script_path.display()
-    );
+    // 5. Choose Developer Role (Option 1 / default)
+    // 6. Choose Project-local configuration (Option 1)
+    let mock_input = format!("1\n6\n{}\nlocal-wrapper\n\n1\n1\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -105,7 +110,7 @@ profiles = { developer = { model = "existing", default_model = "existing", model
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mock_input = format!("1\n6\n{}\nnew-model\n\nn\n1\n1\n", script_path.display());
+    let mock_input = format!("1\n6\n{}\nnew-model\n\n1\n1\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -132,18 +137,20 @@ profiles = { developer = { model = "existing", default_model = "existing", model
 fn wizard_tests_a_model_before_persisting_it() {
     let project = TempDir::new().expect("create temp dir");
     let script_path = project.path().join("provider.sh");
+    let recorded_prompt = project.path().join("qualification-prompt.txt");
     fs::write(
         &script_path,
-        "#!/bin/sh\nprintf 'verified model: %s\\n' \"$*\"\n",
+        format!(
+            "#!/bin/sh\n[ \"$1\" = --prompt ] || exit 8\n\
+             printf '%s' \"$2\" > '{}'\nprintf 'verified model: %s\\n' \"$*\"\n",
+            recorded_prompt.display()
+        ),
     )
     .expect("write provider");
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mock_input = format!(
-        "1\n6\n{}\nverified\n\ny\nConnection test\ny\n1\n1\n",
-        script_path.display()
-    );
+    let mock_input = format!("1\n6\n{}\nverified\n\n1\n1\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -151,6 +158,10 @@ fn wizard_tests_a_model_before_persisting_it() {
 
     let output = String::from_utf8(writer).expect("UTF-8 wizard output");
     assert!(output.contains("Model test succeeded"));
+    assert_eq!(
+        fs::read_to_string(recorded_prompt).expect("read qualification prompt"),
+        "Reply with exactly: OK"
+    );
     assert!(project.path().join("kvist.toml").is_file());
 }
 
@@ -163,10 +174,7 @@ fn wizard_does_not_persist_a_failed_model_test_without_confirmation() {
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mock_input = format!(
-        "1\n6\n{}\nfailing\n\ny\nConnection test\ny\nn\n",
-        script_path.display()
-    );
+    let mock_input = format!("1\n6\n{}\nfailing\n\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -178,7 +186,140 @@ fn wizard_does_not_persist_a_failed_model_test_without_confirmation() {
 
 #[cfg(unix)]
 #[test]
-fn wizard_does_not_execute_or_persist_without_host_acknowledgement() {
+fn agent_setup_force_persists_after_failed_qualification() {
+    let project = TempDir::new().expect("create temp dir");
+    let script_path = project.path().join("provider.sh");
+    fs::write(&script_path, "#!/bin/sh\nexit 7\n").expect("write provider");
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .current_dir(project.path())
+        .args(["agent", "setup", "--force"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start forced setup");
+    write!(
+        child.stdin.take().expect("setup stdin"),
+        "1\n6\n{}\nforced\n\n1\n1\n",
+        script_path.display()
+    )
+    .expect("write setup answers");
+    let output = child.wait_with_output().expect("wait for forced setup");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 setup output");
+    assert!(stdout.contains("Warning: --force"));
+    assert!(stdout.contains("Successfully configured model `forced`"));
+    let configuration =
+        fs::read_to_string(project.path().join("kvist.toml")).expect("read configuration");
+    assert!(configuration.contains("model = \"forced\""));
+}
+
+#[cfg(unix)]
+#[test]
+fn json_agent_setup_keeps_stdout_machine_readable() {
+    let project = TempDir::new().expect("create temp dir");
+    let script_path = project.path().join("provider.sh");
+    fs::write(
+        &script_path,
+        "#!/bin/sh\nprintf 'qualification stdout'\nprintf 'qualification stderr' >&2\n",
+    )
+    .expect("write provider");
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .current_dir(project.path())
+        .args(["--json", "agent", "setup"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start JSON setup");
+    write!(
+        child.stdin.take().expect("setup stdin"),
+        "1\n6\n{}\njson-model\n\n1\n1\n",
+        script_path.display()
+    )
+    .expect("write setup answers");
+    let output = child.wait_with_output().expect("wait for JSON setup");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("UTF-8 stdout"),
+        "{\"status\":\"success\",\"command\":\"agent-setup\",\"message\":\"agent setup wizard complete\"}\n"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("UTF-8 stderr");
+    assert!(stderr.contains("Kvist Agent Setup Wizard"));
+    assert!(!stderr.contains("qualification stdout"));
+    assert!(!stderr.contains("qualification stderr"));
+    assert!(project.path().join("kvist.toml").is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn agent_setup_force_does_not_persist_after_cancellation() {
+    let project = TempDir::new().expect("create temp dir");
+    let marker = project.path().join("qualification-started");
+    let script_path = project.path().join("provider.sh");
+    fs::write(
+        &script_path,
+        format!("#!/bin/sh\ntouch '{}'\nexec sleep 30\n", marker.display()),
+    )
+    .expect("write provider");
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .current_dir(project.path())
+        .args(["agent", "setup", "--force"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start forced setup");
+    write!(
+        child.stdin.take().expect("setup stdin"),
+        "1\n6\n{}\ncancelled\n\n",
+        script_path.display()
+    )
+    .expect("write setup answers");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !marker.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(marker.exists(), "qualification command did not start");
+    kill(
+        Pid::from_raw(i32::try_from(child.id()).expect("child PID")),
+        Signal::SIGINT,
+    )
+    .expect("interrupt setup");
+    let output = child.wait_with_output().expect("wait for cancelled setup");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("UTF-8 stderr")
+            .contains("cancelled")
+    );
+    assert!(!project.path().join("kvist.toml").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn wizard_qualification_implies_host_acknowledgement() {
     let project = TempDir::new().expect("create temp dir");
     let marker = project.path().join("executed");
     let script_path = project.path().join("provider.sh");
@@ -190,23 +331,15 @@ fn wizard_does_not_execute_or_persist_without_host_acknowledgement() {
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mock_input = format!(
-        "1\n6\n{}\nunacknowledged\n\ny\nConnection test\nn\n",
-        script_path.display()
-    );
+    let mock_input = format!("1\n6\n{}\nimplicit\n\n1\n1\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
-    let error = run_wizard(&mut reader, &mut writer, project.path())
-        .expect_err("host execution acknowledgement is required");
+    run_wizard(&mut reader, &mut writer, project.path())
+        .expect("setup qualification implies host acknowledgement");
 
-    assert!(
-        error
-            .to_string()
-            .contains("host execution was not acknowledged")
-    );
-    assert!(!marker.exists());
-    assert!(!project.path().join("kvist.toml").exists());
+    assert!(marker.exists());
+    assert!(project.path().join("kvist.toml").exists());
 }
 
 #[test]
@@ -226,7 +359,7 @@ models = []
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mock_input = format!("1\n6\n{}\nnew-model\n\nn\n1\n1\n", script_path.display());
+    let mock_input = format!("1\n6\n{}\nnew-model\n\n1\n1\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 

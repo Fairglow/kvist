@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use crate::{Error, Result};
+use crate::{Error, ReasoningEffort, Result};
 
 /// Parses a shell-free command template and substitutes its supported values.
 pub fn render_command(
@@ -9,12 +9,37 @@ pub fn render_command(
     context_paths: &[PathBuf],
     target_dir: &Path,
 ) -> Result<(String, Vec<String>)> {
+    render_command_with_reasoning_effort(template, prompt, context_paths, target_dir, None)
+}
+
+/// Renders a command with an optional typed reasoning-effort value.
+pub fn render_command_with_reasoning_effort(
+    template: &str,
+    prompt: &str,
+    context_paths: &[PathBuf],
+    target_dir: &Path,
+    reasoning_effort: Option<ReasoningEffort>,
+) -> Result<(String, Vec<String>)> {
     let raw_arguments = parse_arguments(template)?;
     let Some(program) = raw_arguments.first().cloned() else {
         return Err(Error::InvalidCommandTemplate {
             reason: "template must contain a program".to_owned(),
         });
     };
+    if program.contains("{reasoning_effort}") {
+        return Err(Error::InvalidCommandTemplate {
+            reason: "{reasoning_effort} cannot select the executable".to_owned(),
+        });
+    }
+    let declares_reasoning_effort = raw_arguments[1..]
+        .iter()
+        .any(|argument| argument.contains("{reasoning_effort}"));
+    if reasoning_effort.is_some() && !declares_reasoning_effort {
+        return Err(Error::InvalidCommandTemplate {
+            reason: "a reasoning effort was requested but the command has no {reasoning_effort} placeholder"
+                .to_owned(),
+        });
+    }
     let mut arguments = Vec::new();
 
     for raw_argument in &raw_arguments[1..] {
@@ -33,7 +58,19 @@ pub fn render_command(
             rendered = rendered.replace("{target_directory}", directory);
         }
 
-        if raw_argument.contains("{context_files}") {
+        if raw_argument.contains("{reasoning_effort}") {
+            if let Some(reasoning_effort) = reasoning_effort {
+                arguments.push(rendered.replace("{reasoning_effort}", reasoning_effort.as_str()));
+            } else if raw_argument == "{reasoning_effort}"
+                && arguments
+                    .last()
+                    .is_some_and(|argument: &String| argument.starts_with('-'))
+            {
+                arguments.pop();
+            } else {
+                arguments.push(rendered.replace("{reasoning_effort}", ""));
+            }
+        } else if raw_argument.contains("{context_files}") {
             if context_paths.is_empty() {
                 if raw_argument == "{context_files}"
                     && arguments

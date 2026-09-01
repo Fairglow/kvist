@@ -62,8 +62,24 @@ pub fn run_wizard<R: BufRead, W: Write>(
     writer: &mut W,
     project_dir: &Path,
 ) -> Result<()> {
+    run_wizard_with_force(reader, writer, project_dir, false)
+}
+
+/// Runs the setup wizard with an explicit failed-qualification override.
+pub fn run_wizard_with_force<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    project_dir: &Path,
+    force: bool,
+) -> Result<()> {
     let profile_config = agent_runtime::default_profile_config_path();
-    run_wizard_inner(reader, writer, project_dir, profile_config.as_deref())
+    run_wizard_inner(
+        reader,
+        writer,
+        project_dir,
+        profile_config.as_deref(),
+        force,
+    )
 }
 
 /// Runs setup with an explicit standalone profile store.
@@ -73,7 +89,7 @@ pub fn run_wizard_with_profile_config<R: BufRead, W: Write>(
     project_dir: &Path,
     profile_config: &Path,
 ) -> Result<()> {
-    run_wizard_inner(reader, writer, project_dir, Some(profile_config))
+    run_wizard_inner(reader, writer, project_dir, Some(profile_config), false)
 }
 
 fn run_wizard_inner<R: BufRead, W: Write>(
@@ -81,6 +97,7 @@ fn run_wizard_inner<R: BufRead, W: Write>(
     writer: &mut W,
     project_dir: &Path,
     profile_config: Option<&Path>,
+    force: bool,
 ) -> Result<()> {
     write_output(
         writer,
@@ -129,7 +146,12 @@ fn run_wizard_inner<R: BufRead, W: Write>(
                 ),
             })?
     } else {
-        agent_runtime::collect_profile(reader, writer, project_dir)?
+        agent_runtime::collect_profile_with_options(
+            reader,
+            writer,
+            project_dir,
+            agent_runtime::SetupOptions { force },
+        )?
     };
 
     write_output(writer, "\nWhich roles should use this model?\n")?;

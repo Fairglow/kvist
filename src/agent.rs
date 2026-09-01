@@ -76,7 +76,22 @@ pub fn get_effective_command(
     context_paths: &[PathBuf],
     target_dir: &Path,
 ) -> Result<(String, Vec<String>)> {
-    let model_name = profile.model.as_deref().unwrap_or(&profile.default_model);
+    get_effective_command_with_options(profile, role, None, None, prompt, context_paths, target_dir)
+}
+
+/// Gets the effective command with explicit per-invocation model and effort selection.
+pub fn get_effective_command_with_options(
+    profile: &AgentProfile,
+    role: crate::config::Role,
+    model_override: Option<&str>,
+    reasoning_effort: Option<agent_runtime::ReasoningEffort>,
+    prompt: &str,
+    context_paths: &[PathBuf],
+    target_dir: &Path,
+) -> Result<(String, Vec<String>)> {
+    let model_name = model_override
+        .or(profile.model.as_deref())
+        .unwrap_or(&profile.default_model);
     let selected_model = if matches!(model_name, "default" | "default-model") {
         profile.models.first()
     } else {
@@ -103,7 +118,14 @@ pub fn get_effective_command(
         }
         _ => prompt.to_owned(),
     };
-    split_command(&selected_model.command, &prompt, context_paths, target_dir)
+    agent_runtime::render_command_with_reasoning_effort(
+        &selected_model.command,
+        &prompt,
+        context_paths,
+        target_dir,
+        reasoning_effort,
+    )
+    .map_err(Into::into)
 }
 
 fn split_raw_command(template: &str) -> Result<(String, Vec<String>)> {

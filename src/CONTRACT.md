@@ -40,14 +40,38 @@ The `kvist` executable provides:
 - `task log COMPONENT_DIR TASK_ID`
 - `task approve-policy [PROJECT_DIR]`
 - `task unlock COMPONENT_DIR [--force]`
-- `prompt` with one explicit prompt source or redirected input
-- `agent setup`
+- `prompt` with one explicit prompt source or redirected input, optional
+  `--role`, `--model`, and `--reasoning-effort`
+- `agent setup [--force]`
 - `completions SHELL`
 
 Commands are non-interactive unless their contract explicitly obtains terminal
 input. Success is written to standard output. Domain failures are actionable,
 written to standard error, and return a nonzero status. Parser help returns
 success and parser input errors use the parser's nonzero status.
+
+Plain `prompt` output is the bounded provider content and has no synthetic
+completion trailer. Global `--json` suppresses live provider streams and emits
+exactly one JSON object with `content`; invalid UTF-8 byte sequences in captured
+output are replaced with U+FFFD. Model selection is limited to the configured
+models for the selected role. Reasoning effort is a typed
+per-invocation value and fails if the selected command lacks an explicit
+`{reasoning_effort}` placeholder.
+On an interactive terminal, the initial prompt and response label are written
+only to standard error; standard output remains provider content.
+
+`agent setup` always runs the generated provider command with the fixed prompt
+`Reply with exactly: OK` before role configuration is persisted. The explicit
+setup invocation acknowledges current host authority for that qualification
+command only; it does not authorize a later `prompt`. Qualification failure
+returns without persisting the new model. `--force` still runs qualification
+but permits a non-cancellation failure to be persisted after a visible warning;
+setup never offers an interactive save-after-failure bypass.
+With global `--json`, setup writes its interactive transcript and status to
+standard error, suppresses qualification-command output, and writes exactly one
+result object to standard output.
+A setup invocation that binds an already saved reusable runtime profile does
+not generate or execute a new qualification command.
 
 `init` writes the complete root artifact set only for an uninitialized project,
 is a no-op for a current project, converts an existing Rust package into draft
@@ -134,6 +158,13 @@ a writable component-only implementation mount plus read-only root and
 immediate-parent contract mounts; runner failure cannot fall back to host
 execution.
 
+`agent setup` is the explicit acknowledgement for its single generated
+qualification command. Kvist adds no filesystem, credential, executable, or
+network restriction to that command and does not represent it as sandboxed;
+the selected runtime and provider determine which available host authority
+they exercise. The acknowledgement does not extend to subsequent provider
+runs.
+
 ## Errors and failure semantics
 
 Invalid, oversized, unsupported, non-UTF-8, missing, non-regular, or link-like
@@ -154,8 +185,10 @@ record fence further writes until explicit recovery.
 
 Repository files, schemas, prompts, configuration, paths, environment values,
 external commands, and subprocess output are untrusted. Commands are split and
-spawned directly without shell expansion. Host prompt execution inherits the
-user's full authority only after explicit acknowledgment.
+spawned directly by Kvist without shell expansion. A selected provider remains
+an external trust boundary and may implement its own subprocess behavior. Host
+prompt execution inherits the user's full authority only after explicit
+acknowledgment.
 
 Sandbox approval is bound to canonical project/worktree identity, the exact
 bounded `ROOT_CONTRACT.md` digest, runner identity, exact policy bytes, and a

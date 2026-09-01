@@ -8,7 +8,8 @@ use std::{
 
 use agent_runtime::{
     CancellationToken, DirectModelTransport, FinishReason, LocalModelProvider, ModelMessage,
-    ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn, ToolChoice, ToolDefinition,
+    ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn, ReasoningEffort, ToolChoice,
+    ToolDefinition,
 };
 use serde_json::{Value, json};
 
@@ -133,6 +134,7 @@ fn request(tool_choice: ToolChoice) -> ModelRequest {
             }),
         }],
         tool_choice,
+        reasoning_effort: None,
     }
 }
 
@@ -140,6 +142,7 @@ fn request(tool_choice: ToolChoice) -> ModelRequest {
 fn rejects_non_loopback_and_non_http_endpoints() {
     for endpoint in [
         "https://127.0.0.1:11434",
+        "http://localhost:11434",
         "http://example.com:11434",
         "http://user@127.0.0.1:11434",
         "http://127.0.0.1:11434?secret=value",
@@ -273,6 +276,92 @@ fn ollama_unary_maps_native_tool_calls_and_rejects_required_choice() {
 }
 
 #[test]
+fn direct_transports_map_every_reasoning_effort_value() {
+    let efforts = [
+        (ReasoningEffort::None, "none"),
+        (ReasoningEffort::Minimal, "minimal"),
+        (ReasoningEffort::Low, "low"),
+        (ReasoningEffort::Medium, "medium"),
+        (ReasoningEffort::High, "high"),
+        (ReasoningEffort::Xhigh, "xhigh"),
+        (ReasoningEffort::Max, "max"),
+    ];
+
+    for (effort, spelling) in efforts {
+        let (endpoint, captured) = serve_once(json_response(
+            "200 OK",
+            json!({
+                "id": "chatcmpl-effort",
+                "model": "test-model",
+                "choices": [{
+                    "message": {"role": "assistant", "content": "ok"},
+                    "finish_reason": "stop"
+                }]
+            }),
+        ));
+        let mut llama_request = request(ToolChoice::None);
+        llama_request.reasoning_effort = Some(effort);
+        transport(LocalModelProvider::LlamaServer, &endpoint)
+            .complete(&llama_request, &CancellationToken::new())
+            .expect("map llama-server reasoning effort");
+        assert_eq!(
+            captured.recv().expect("captured llama request").body["reasoning_effort"],
+            spelling
+        );
+
+        let (endpoint, captured) = serve_once(json_response(
+            "200 OK",
+            json!({
+                "model": "test-model",
+                "message": {"role": "assistant", "content": "ok"},
+                "done": true,
+                "done_reason": "stop"
+            }),
+        ));
+        let mut ollama_request = request(ToolChoice::None);
+        ollama_request.reasoning_effort = Some(effort);
+        transport(LocalModelProvider::Ollama, &endpoint)
+            .complete(&ollama_request, &CancellationToken::new())
+            .expect("map Ollama reasoning effort");
+        let expected = if effort == ReasoningEffort::None {
+            Value::Bool(false)
+        } else {
+            Value::String(spelling.to_owned())
+        };
+        assert_eq!(
+            captured.recv().expect("captured Ollama request").body["think"],
+            expected
+        );
+    }
+}
+
+#[test]
+fn ollama_unary_keeps_provider_reasoning_separate_from_answer_content() {
+    let (endpoint, _) = serve_once(json_response(
+        "200 OK",
+        json!({
+            "model": "qwen3",
+            "message": {
+                "role": "assistant",
+                "thinking": "Check the contract first.",
+                "content": "The contract is satisfied."
+            },
+            "done": true,
+            "done_reason": "stop",
+            "prompt_eval_count": 3,
+            "eval_count": 5
+        }),
+    ));
+
+    let turn = transport(LocalModelProvider::Ollama, &endpoint)
+        .complete(&request(ToolChoice::None), &CancellationToken::new())
+        .expect("complete reasoning response");
+
+    assert_eq!(turn.reasoning.as_deref(), Some("Check the contract first."));
+    assert_eq!(turn.text, "The contract is satisfied.");
+}
+
+#[test]
 fn llama_server_stream_assembles_text_and_fragmented_tool_arguments() {
     let records = [
         "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"content\":\"Read\"},\"finish_reason\":null}]}\n\n",
@@ -307,6 +396,39 @@ fn llama_server_stream_assembles_text_and_fragmented_tool_arguments() {
             ModelStreamEvent::TextDelta("Read".to_owned()),
             ModelStreamEvent::TextDelta("ing".to_owned()),
             ModelStreamEvent::ToolIntent(turn.tool_intents[0].clone()),
+        ]
+    );
+}
+
+#[test]
+fn ollama_stream_emits_reasoning_before_answer_text() {
+    let records = [
+        "{\"model\":\"qwen3\",\"message\":{\"role\":\"assistant\",\"thinking\":\"Check \",\"content\":\"\"},\"done\":false}\n",
+        "{\"model\":\"qwen3\",\"message\":{\"role\":\"assistant\",\"thinking\":\"first.\",\"content\":\"Done\"},\"done\":false}\n",
+        "{\"model\":\"qwen3\",\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":1,\"eval_count\":3}\n",
+    ];
+    let (endpoint, _) = serve_once(stream_response("application/x-ndjson", &records));
+    let mut events = Vec::new();
+
+    let turn = transport(LocalModelProvider::Ollama, &endpoint)
+        .stream(
+            &request(ToolChoice::None),
+            &CancellationToken::new(),
+            &mut |event| {
+                events.push(event);
+                Ok(())
+            },
+        )
+        .expect("stream reasoning response");
+
+    assert_eq!(turn.reasoning.as_deref(), Some("Check first."));
+    assert_eq!(turn.text, "Done");
+    assert_eq!(
+        events,
+        [
+            ModelStreamEvent::ReasoningDelta("Check ".to_owned()),
+            ModelStreamEvent::ReasoningDelta("first.".to_owned()),
+            ModelStreamEvent::TextDelta("Done".to_owned()),
         ]
     );
 }

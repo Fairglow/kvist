@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use agent_runtime::render_command;
+use agent_runtime::{ReasoningEffort, render_command, render_command_with_reasoning_effort};
 
 #[test]
 fn renders_prompt_context_and_target_without_a_shell() {
@@ -88,4 +88,40 @@ fn renders_a_prompt_as_a_complete_json_string() {
             "{\"content\":\"Say \\\"hello\\\"\\\\again\\nnext\"}"
         ]
     );
+}
+
+#[test]
+fn reasoning_effort_requires_and_renders_an_explicit_placeholder() {
+    let (_, arguments) = render_command_with_reasoning_effort(
+        "copilot --reasoning-effort '{reasoning_effort}' --prompt '{prompt}'",
+        "review",
+        &[],
+        Path::new("."),
+        Some(ReasoningEffort::High),
+    )
+    .expect("render reasoning effort");
+
+    assert_eq!(
+        arguments,
+        ["--reasoning-effort", "high", "--prompt", "review"]
+    );
+
+    let (_, arguments) = render_command(
+        "copilot --reasoning-effort '{reasoning_effort}' --prompt '{prompt}'",
+        "review",
+        &[],
+        Path::new("."),
+    )
+    .expect("remove absent reasoning effort");
+    assert_eq!(arguments, ["--prompt", "review"]);
+
+    let error = render_command_with_reasoning_effort(
+        "copilot --prompt '{prompt}'",
+        "review",
+        &[],
+        Path::new("."),
+        Some(ReasoningEffort::High),
+    )
+    .expect_err("reject ignored reasoning effort");
+    assert!(error.to_string().contains("{reasoning_effort}"));
 }

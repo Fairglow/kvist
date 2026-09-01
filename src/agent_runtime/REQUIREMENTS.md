@@ -38,7 +38,28 @@ the reusable runtime component.
 
 The component MUST acquire one bounded prompt source, render documented command
 placeholders without a shell, and build every retry from fresh typed input with
-explicit prior-attempt context.
+explicit prior-attempt context. Named profiles MUST allow multiple providers,
+models, and command configurations to coexist and MUST be selectable per
+prompt. A requested reasoning effort MUST be applied only through a declared
+template placeholder or a transport that explicitly supports it; it MUST NOT be
+silently ignored or converted into shell text.
+
+### AR-REQ-OUTPUT-PRESENTATION
+
+Plain-text prompt commands MUST write only provider answer content to standard
+output. They MAY show the initial prompt and live provider progress on an
+interactive standard error stream, but MUST NOT append success banners,
+statistics, or wrapper metadata. JSON mode MUST suppress live provider streams
+and emit exactly one valid JSON object whose `content` field contains the
+provider's standard output as text. Invalid UTF-8 byte sequences MUST be
+replaced with U+FFFD rather than making the JSON invalid or exposing a partial
+object.
+
+Direct model mode MUST optionally expose bounded provider-supplied reasoning
+text or summaries while streaming and in its canonical JSON result. Such data
+MUST be identified as provider-supplied reasoning, MUST remain separate from
+answer content, and MUST NOT be described as hidden chain-of-thought. Providers
+that do not emit reasoning remain fully valid.
 
 ### AR-REQ-SUPERVISION
 
@@ -56,8 +77,15 @@ configuration locations, and persist through synchronized atomic replacement.
 ### AR-REQ-SETUP
 
 Setup MUST use caller-provided terminal-neutral I/O, maintained provider
-templates, bounded advisory probes, explicit executable/model selection, and a
-separate host-authority acknowledgement before live qualification.
+templates, bounded advisory probes, and explicit executable/model selection.
+It MUST qualify the generated command automatically with one fixed, minimal,
+nonblank test prompt rather than asking the user to supply a prompt or repeat a
+host-authority acknowledgement. The setup action itself is the acknowledgement
+for that exact qualification command. Failed qualification MUST prevent
+persistence without offering an interactive bypass; an explicit `--force` MAY
+persist the failed profile with a warning. Qualification uses current host
+authority and does not claim tool or filesystem isolation. Qualification
+output MUST remain bounded and MUST NOT be forwarded as setup presentation.
 
 ### AR-REQ-MODEL-TRANSPORT
 

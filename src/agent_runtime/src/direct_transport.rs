@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, HashSet, VecDeque},
     io::{self, Read, Write},
-    net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs},
+    net::{IpAddr, SocketAddr, TcpStream},
     str::FromStr,
     time::{Duration, Instant},
 };
@@ -67,6 +67,7 @@ enum StreamState {
 struct OpenAiStreamState {
     requested_model: String,
     text: String,
+    reasoning: String,
     calls: BTreeMap<usize, PartialToolCall>,
     terminal: bool,
     finish_reason: Option<FinishReason>,
@@ -79,6 +80,7 @@ struct OpenAiStreamState {
 struct OllamaStreamState {
     requested_model: String,
     text: String,
+    reasoning: String,
     tool_intents: Vec<ToolIntent>,
     terminal: bool,
     finish_reason: Option<FinishReason>,
@@ -268,30 +270,16 @@ fn parse_endpoint(value: &str) -> Result<Endpoint> {
     }
 
     let (host, port) = split_authority(authority)?;
-    let addresses = if let Ok(ip) = IpAddr::from_str(host) {
-        if !ip.is_loopback() {
-            return invalid_endpoint("host must be loopback");
-        }
-        vec![SocketAddr::new(ip, port)]
-    } else if host.eq_ignore_ascii_case("localhost") {
-        let resolved = (host, port)
-            .to_socket_addrs()
-            .map_err(|source| Error::ModelTransportIo {
-                operation: "resolving loopback provider",
-                source,
-            })?
-            .collect::<Vec<_>>();
-        if resolved.is_empty() || resolved.iter().any(|address| !address.ip().is_loopback()) {
-            return invalid_endpoint("localhost must resolve exclusively to loopback addresses");
-        }
-        resolved
-    } else {
-        return invalid_endpoint("host must be a loopback address or localhost");
-    };
+    let ip = IpAddr::from_str(host).map_err(|_| Error::InvalidModelTransport {
+        reason: "host must be a numeric loopback address".to_owned(),
+    })?;
+    if !ip.is_loopback() {
+        return invalid_endpoint("host must be a numeric loopback address");
+    }
 
     Ok(Endpoint {
         authority: authority.to_owned(),
-        addresses,
+        addresses: vec![SocketAddr::new(ip, port)],
     })
 }
 
@@ -460,6 +448,26 @@ fn encode_request(
         ),
     );
     root.insert("stream".to_owned(), Value::Bool(stream));
+    if let Some(effort) = request.reasoning_effort {
+        match provider {
+            LocalModelProvider::LlamaServer => {
+                root.insert(
+                    "reasoning_effort".to_owned(),
+                    Value::String(effort.as_str().to_owned()),
+                );
+            }
+            LocalModelProvider::Ollama => {
+                root.insert(
+                    "think".to_owned(),
+                    if effort == crate::ReasoningEffort::None {
+                        Value::Bool(false)
+                    } else {
+                        Value::String(effort.as_str().to_owned())
+                    },
+                );
+            }
+        }
+    }
 
     if request.tool_choice != ToolChoice::None {
         root.insert(
@@ -938,11 +946,13 @@ fn parse_openai_unary(body: &[u8], request: &ModelRequest) -> Result<ModelTurn> 
             reason: "OpenAI-compatible choice has no message".to_owned(),
         })?;
     let text = optional_string(message.get("content"), "message content")?;
+    let reasoning = parse_reasoning(message, &["reasoning_content", "reasoning", "thinking"])?;
     let tool_intents = parse_openai_tool_calls(message.get("tool_calls"))?;
     let finish_reason = parse_finish_reason(choice.get("finish_reason"), !tool_intents.is_empty())?;
 
     Ok(ModelTurn {
         text,
+        reasoning,
         tool_intents,
         finish_reason,
         provider: LocalModelProvider::LlamaServer,
@@ -966,11 +976,13 @@ fn parse_ollama_unary(body: &[u8], request: &ModelRequest) -> Result<ModelTurn> 
             reason: "Ollama response has no message".to_owned(),
         })?;
     let text = optional_string(message.get("content"), "message content")?;
+    let reasoning = parse_reasoning(message, &["thinking", "reasoning"])?;
     let tool_intents = parse_ollama_tool_calls(message.get("tool_calls"), 0)?;
     let finish_reason = parse_finish_reason(root.get("done_reason"), !tool_intents.is_empty())?;
 
     Ok(ModelTurn {
         text,
+        reasoning,
         tool_intents,
         finish_reason,
         provider: LocalModelProvider::Ollama,
@@ -988,6 +1000,7 @@ impl StreamDecoder {
             LocalModelProvider::LlamaServer => StreamState::OpenAi(OpenAiStreamState {
                 requested_model: request.model.clone(),
                 text: String::new(),
+                reasoning: String::new(),
                 calls: BTreeMap::new(),
                 terminal: false,
                 finish_reason: None,
@@ -998,6 +1011,7 @@ impl StreamDecoder {
             LocalModelProvider::Ollama => StreamState::Ollama(OllamaStreamState {
                 requested_model: request.model.clone(),
                 text: String::new(),
+                reasoning: String::new(),
                 tool_intents: Vec::new(),
                 terminal: false,
                 finish_reason: None,
@@ -1136,6 +1150,13 @@ impl OpenAiStreamState {
                 self.text.push_str(fragment);
                 on_event(ModelStreamEvent::TextDelta(fragment.to_owned()))?;
             }
+            if let Some(fragment) =
+                first_string(delta, &["reasoning_content", "reasoning", "thinking"])?
+                && !fragment.is_empty()
+            {
+                self.reasoning.push_str(fragment);
+                on_event(ModelStreamEvent::ReasoningDelta(fragment.to_owned()))?;
+            }
             merge_openai_tool_deltas(delta.get("tool_calls"), &mut self.calls)?;
         }
         Ok(())
@@ -1151,6 +1172,7 @@ impl OpenAiStreamState {
         }
         Ok(ModelTurn {
             text: self.text,
+            reasoning: (!self.reasoning.is_empty()).then_some(self.reasoning),
             finish_reason: self
                 .finish_reason
                 .unwrap_or_else(|| infer_finish_reason(!tool_intents.is_empty())),
@@ -1181,6 +1203,12 @@ impl OllamaStreamState {
         self.model = optional_bounded_string(chunk.get("model"), "model identity", 256)?
             .or(self.model.take());
         if let Some(message) = chunk.get("message").and_then(Value::as_object) {
+            if let Some(fragment) = first_string(message, &["thinking", "reasoning"])?
+                && !fragment.is_empty()
+            {
+                self.reasoning.push_str(fragment);
+                on_event(ModelStreamEvent::ReasoningDelta(fragment.to_owned()))?;
+            }
             if let Some(fragment) = message.get("content").and_then(Value::as_str) {
                 self.text.push_str(fragment);
                 if !fragment.is_empty() {
@@ -1218,6 +1246,7 @@ impl OllamaStreamState {
         }
         Ok(ModelTurn {
             text: self.text,
+            reasoning: (!self.reasoning.is_empty()).then_some(self.reasoning),
             finish_reason: self
                 .finish_reason
                 .unwrap_or_else(|| infer_finish_reason(!self.tool_intents.is_empty())),
@@ -1243,6 +1272,21 @@ fn optional_string(value: Option<&Value>, label: &str) -> Result<String> {
         Some(Value::String(value)) => Ok(value.clone()),
         Some(_) => malformed(&format!("{label} must be text or null")),
     }
+}
+
+fn parse_reasoning(object: &Map<String, Value>, keys: &[&str]) -> Result<Option<String>> {
+    first_string(object, keys).map(|value| value.filter(|text| !text.is_empty()).cloned())
+}
+
+fn first_string<'a>(object: &'a Map<String, Value>, keys: &[&str]) -> Result<Option<&'a String>> {
+    for key in keys {
+        match object.get(*key) {
+            None | Some(Value::Null) => {}
+            Some(Value::String(value)) => return Ok(Some(value)),
+            Some(_) => return malformed(&format!("message {key} must be text or null")),
+        }
+    }
+    Ok(None)
 }
 
 fn optional_bounded_string(

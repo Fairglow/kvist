@@ -32,8 +32,8 @@ and the standards posture in [`docs/standards.md`](docs/standards.md).
 | `kvist task run <COMPONENT_DIR> [TASK_ID]`         | Run the configured external agent for one ready task; see the execution boundary below.      |
 | `kvist task log <COMPONENT_DIR> <TASK_ID>`         | Print the most recent bounded, redacted agent log for a task.                                |
 | `kvist task approve-policy [PROJECT_DIR]`          | Record approval of the complete effective execution policy.                                  |
-| `kvist prompt [PROMPT] --allow-host-execution`     | Run a positional, file, piped, or editor-authored prompt under acknowledged host supervision. |
-| `kvist agent setup`                                | Collect or load a reusable profile and bind it to project or user Kvist roles.                |
+| `kvist prompt [PROMPT] --allow-host-execution`     | Run a prompt with optional role/model/reasoning selection; text output is provider content only. |
+| `kvist agent setup [--force]`                      | Collect, qualify, and bind a reusable profile; force is required to retain failed qualification. |
 
 Delivery is organized into phases. The completed, current, and planned phase
 scope, context, and acceptance criteria are maintained in

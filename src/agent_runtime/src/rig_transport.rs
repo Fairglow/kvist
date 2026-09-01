@@ -352,6 +352,12 @@ fn validate_provider_capabilities(
     provider: LocalModelProvider,
     request: &ModelRequest,
 ) -> Result<()> {
+    if request.reasoning_effort.is_some() {
+        return Err(Error::UnsupportedCapability {
+            provider: "rig-transport",
+            capability: "reasoning effort",
+        });
+    }
     if provider == LocalModelProvider::Ollama && request.tool_choice == ToolChoice::Required {
         return Err(Error::UnsupportedCapability {
             provider: "ollama",
@@ -506,6 +512,7 @@ fn convert_response(
     )?;
     Ok(ModelTurn {
         text,
+        reasoning: None,
         tool_intents,
         finish_reason,
         provider,
@@ -607,6 +614,7 @@ fn turn_from_stream(
     )?;
     Ok(ModelTurn {
         text,
+        reasoning: None,
         finish_reason,
         tool_intents,
         provider,

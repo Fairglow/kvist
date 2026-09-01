@@ -3,7 +3,9 @@ use std::process::ExitCode;
 fn main() -> ExitCode {
     match kvist::run() {
         Ok(output) => {
-            println!("{output}");
+            if !output.is_empty() {
+                println!("{output}");
+            }
             ExitCode::SUCCESS
         }
         Err(error) => {

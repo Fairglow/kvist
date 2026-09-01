@@ -11,6 +11,34 @@ use serde_json::Value;
 
 use crate::Result;
 
+/// Provider-neutral reasoning effort requested for one model turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReasoningEffort {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl ReasoningEffort {
+    /// Returns the stable provider-facing spelling.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+            Self::Max => "max",
+        }
+    }
+}
+
 /// Local HTTP provider protocols supported by the direct transport.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -90,6 +118,9 @@ pub struct ModelRequest {
     pub tools: Vec<ToolDefinition>,
     /// Requested tool selection behavior.
     pub tool_choice: ToolChoice,
+    /// Requested provider reasoning effort, when explicitly supported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
 /// A complete untrusted tool proposal returned by a model.
@@ -137,6 +168,9 @@ pub struct ModelUsage {
 pub struct ModelTurn {
     /// Ordered text content.
     pub text: String,
+    /// Bounded provider-supplied reasoning text or summary, when returned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
     /// Complete untrusted tool proposals.
     pub tool_intents: Vec<ToolIntent>,
     /// Normalized terminal reason.
@@ -160,6 +194,8 @@ pub struct ModelTurn {
 pub enum ModelStreamEvent {
     /// A text fragment in provider order.
     TextDelta(String),
+    /// A provider-supplied reasoning fragment, kept separate from answer text.
+    ReasoningDelta(String),
     /// A complete tool intent after all argument fragments validate.
     ToolIntent(ToolIntent),
 }

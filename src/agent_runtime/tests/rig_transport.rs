@@ -11,7 +11,8 @@ use std::{
 
 use agent_runtime::{
     CancellationToken, FinishReason, LocalModelProvider, ModelMessage, ModelRequest,
-    ModelStreamEvent, ModelTransport, RigModelTransport, ToolChoice, ToolDefinition,
+    ModelStreamEvent, ModelTransport, ReasoningEffort, RigModelTransport, ToolChoice,
+    ToolDefinition,
 };
 use serde_json::{Value, json};
 use tracing_subscriber::fmt::MakeWriter;
@@ -147,6 +148,7 @@ fn request(tool_choice: ToolChoice) -> ModelRequest {
             }),
         }],
         tool_choice,
+        reasoning_effort: None,
     }
 }
 
@@ -311,6 +313,51 @@ fn rig_transport_honors_preflight_cancellation() {
 }
 
 #[test]
+fn rig_transport_rejects_reasoning_effort_before_network_access() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind unused endpoint");
+    let endpoint = format!("http://{}", listener.local_addr().expect("local address"));
+    let transport = transport(LocalModelProvider::Ollama, &endpoint);
+    let mut request = request(ToolChoice::None);
+    request.reasoning_effort = Some(ReasoningEffort::High);
+
+    let error = transport
+        .complete(&request, &CancellationToken::new())
+        .expect_err("Rig cannot silently ignore reasoning effort");
+
+    assert!(error.to_string().contains("reasoning effort"));
+}
+
+#[test]
+fn rig_model_cli_rejects_reasoning_output_before_network_access() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind unused endpoint");
+    let endpoint = format!("http://{}", listener.local_addr().expect("local address"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args([
+            "model",
+            "--transport",
+            "rig",
+            "--provider",
+            "ollama",
+            "--endpoint",
+            &endpoint,
+            "--model",
+            "test-model",
+            "--show-reasoning",
+            "hello",
+        ])
+        .output()
+        .expect("run Rig model command");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("UTF-8 stderr")
+            .contains("provider reasoning output")
+    );
+}
+
+#[test]
 fn rig_transport_rejects_declared_oversized_body_before_reading_it() {
     let response = vec![
         b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 4096\r\nConnection: close\r\n\r\n"
@@ -388,7 +435,7 @@ fn model_cli_selects_the_optional_rig_transport() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "from Rig\n");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "from Rig");
 }
 
 #[test]
@@ -542,6 +589,7 @@ fn rig_tool_result_reuses_the_provider_call_identity() {
         ],
         tools: vec![],
         tool_choice: ToolChoice::None,
+        reasoning_effort: None,
     };
 
     transport
@@ -598,6 +646,7 @@ fn rig_payload_sentinels_do_not_reach_the_callers_tracing_subscriber() {
         messages: vec![ModelMessage::User(PROMPT_SENTINEL.to_owned())],
         tools: Vec::new(),
         tool_choice: ToolChoice::None,
+        reasoning_effort: None,
     };
     let captured = CapturedLogs::default();
     let subscriber = tracing_subscriber::fmt()

@@ -1,15 +1,21 @@
 #[cfg(not(target_os = "linux"))]
 compile_error!("agent-runtime currently supports Linux only");
 
-use std::{io::Write, path::PathBuf, process::ExitCode, time::Duration};
+use std::{
+    io::{IsTerminal, Write},
+    path::PathBuf,
+    process::ExitCode,
+    time::Duration,
+};
 
 #[cfg(feature = "rig-transport")]
 use agent_runtime::RigModelTransport;
 use agent_runtime::{
     CancellationToken, CommandSpec, DirectModelTransport, Error, LocalModelProvider, ModelMessage,
-    ModelRequest, ModelStreamEvent, ModelTransport, SupervisionPolicy, ToolChoice,
-    default_profile_config_path, load_profile, render_command, resolve_prompt, run_setup_wizard,
-    run_supervised,
+    ModelRequest, ModelStreamEvent, ModelTransport, ReasoningEffort, SetupOptions,
+    SupervisionPolicy, ToolChoice, default_profile_config_path, load_profile,
+    render_command_with_reasoning_effort, resolve_prompt, run_setup_wizard_with_options,
+    run_supervised, run_supervised_capture,
 };
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -64,6 +70,17 @@ struct ModelArguments {
 
     #[arg(long, default_value_t = 1_048_576)]
     max_response_bytes: usize,
+
+    #[arg(long, value_enum)]
+    reasoning_effort: Option<ReasoningEffortArgument>,
+
+    /// Show provider-supplied reasoning on stderr while keeping stdout clean.
+    #[arg(long, conflicts_with = "json")]
+    show_reasoning: bool,
+
+    /// Emit one canonical model-turn JSON object.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -78,6 +95,31 @@ enum ModelTransportArgument {
     Direct,
     #[cfg(feature = "rig-transport")]
     Rig,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ReasoningEffortArgument {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl From<ReasoningEffortArgument> for ReasoningEffort {
+    fn from(value: ReasoningEffortArgument) -> Self {
+        match value {
+            ReasoningEffortArgument::None => Self::None,
+            ReasoningEffortArgument::Minimal => Self::Minimal,
+            ReasoningEffortArgument::Low => Self::Low,
+            ReasoningEffortArgument::Medium => Self::Medium,
+            ReasoningEffortArgument::High => Self::High,
+            ReasoningEffortArgument::Xhigh => Self::Xhigh,
+            ReasoningEffortArgument::Max => Self::Max,
+        }
+    }
 }
 
 impl From<ModelProviderArgument> for LocalModelProvider {
@@ -139,6 +181,13 @@ struct RunArguments {
 
     #[arg(long)]
     allow_host_execution: bool,
+
+    #[arg(long, value_enum)]
+    reasoning_effort: Option<ReasoningEffortArgument>,
+
+    /// Emit one JSON object with the captured provider stdout as `content`.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -146,6 +195,10 @@ struct SetupArguments {
     /// Override the Linux user profile configuration path.
     #[arg(long, value_name = "PATH")]
     config: Option<PathBuf>,
+
+    /// Save the profile even when mandatory live qualification fails.
+    #[arg(long)]
+    force: bool,
 }
 
 fn main() -> ExitCode {
@@ -173,6 +226,13 @@ fn model(arguments: ModelArguments) -> agent_runtime::Result<()> {
         arguments.file.as_deref(),
         arguments.editor,
     )?;
+    #[cfg(feature = "rig-transport")]
+    if matches!(arguments.transport, ModelTransportArgument::Rig) && arguments.show_reasoning {
+        return Err(Error::UnsupportedCapability {
+            provider: "rig-transport",
+            capability: "provider reasoning output",
+        });
+    }
     let provider = arguments.provider.into();
     let timeout = Duration::from_secs(arguments.timeout);
     let transport: Box<dyn ModelTransport> = match arguments.transport {
@@ -192,38 +252,57 @@ fn model(arguments: ModelArguments) -> agent_runtime::Result<()> {
     };
     let request = ModelRequest {
         model: arguments.model,
-        messages: vec![ModelMessage::User(prompt)],
+        messages: vec![ModelMessage::User(prompt.clone())],
         tools: Vec::new(),
         tool_choice: ToolChoice::None,
+        reasoning_effort: arguments.reasoning_effort.map(Into::into),
     };
     let cancellation = CancellationToken::new();
     let stdout = std::io::stdout();
     let mut writer = stdout.lock();
 
     if arguments.stream {
-        transport.stream(&request, &cancellation, &mut |event| match event {
-            ModelStreamEvent::TextDelta(text) => writer
-                .write_all(text.as_bytes())
-                .and_then(|()| writer.flush())
+        if arguments.json {
+            let turn = transport.stream(&request, &cancellation, &mut |_| Ok(()))?;
+            write_json(&mut writer, &turn)?;
+        } else {
+            show_initial_prompt(&prompt);
+            let show_reasoning = arguments.show_reasoning;
+            transport.stream(&request, &cancellation, &mut |event| match event {
+                ModelStreamEvent::TextDelta(text) => writer
+                    .write_all(text.as_bytes())
+                    .and_then(|()| writer.flush())
+                    .map_err(|source| Error::Io {
+                        operation: "write model output",
+                        path: PathBuf::from("<stdout>"),
+                        source,
+                    }),
+                ModelStreamEvent::ReasoningDelta(reasoning) if show_reasoning => {
+                    write_stderr(reasoning.as_bytes())
+                }
+                ModelStreamEvent::ReasoningDelta(_) | ModelStreamEvent::ToolIntent(_) => Ok(()),
+            })?;
+        }
+    } else {
+        let turn = transport.complete(&request, &cancellation)?;
+        if arguments.json {
+            write_json(&mut writer, &turn)?;
+        } else {
+            show_initial_prompt(&prompt);
+            if arguments.show_reasoning
+                && let Some(reasoning) = &turn.reasoning
+            {
+                write_stderr(reasoning.as_bytes())?;
+                write_stderr(b"\n")?;
+            }
+            writer
+                .write_all(turn.text.as_bytes())
                 .map_err(|source| Error::Io {
                     operation: "write model output",
                     path: PathBuf::from("<stdout>"),
                     source,
-                }),
-            ModelStreamEvent::ToolIntent(_) => Ok(()),
-        })?;
-        writer.write_all(b"\n").map_err(|source| Error::Io {
-            operation: "write model output",
-            path: PathBuf::from("<stdout>"),
-            source,
-        })?;
-    } else {
-        let turn = transport.complete(&request, &cancellation)?;
-        writeln!(writer, "{}", turn.text).map_err(|source| Error::Io {
-            operation: "write model output",
-            path: PathBuf::from("<stdout>"),
-            source,
-        })?;
+                })?;
+        }
     }
     Ok(())
 }
@@ -257,20 +336,39 @@ fn run(arguments: RunArguments) -> agent_runtime::Result<()> {
         }
     };
 
-    run_supervised(&policy, |context| {
+    let reasoning_effort = arguments.reasoning_effort.map(Into::into);
+    let command_for_attempt = |context: &agent_runtime::AttemptContext| {
         let prompt = match context.retry_notice() {
             Some(notice) => format!("{prompt}\n\n{notice}"),
             None => prompt.clone(),
         };
-        let (program, command_arguments) = render_command(
+        let (program, command_arguments) = render_command_with_reasoning_effort(
             &command_template,
             &prompt,
             &arguments.context_paths,
             &arguments.working_directory,
+            reasoning_effort,
         )?;
         Ok(CommandSpec::new(program, command_arguments)
             .in_directory(arguments.working_directory.clone()))
-    })?;
+    };
+    if arguments.json {
+        let report = run_supervised_capture(&policy, command_for_attempt)?;
+        let content = String::from_utf8_lossy(&report.stdout);
+        writeln!(
+            std::io::stdout(),
+            "{}",
+            serde_json::json!({"content": content})
+        )
+        .map_err(|source| Error::Io {
+            operation: "write JSON prompt output",
+            path: PathBuf::from("<stdout>"),
+            source,
+        })?;
+    } else {
+        show_initial_prompt(&prompt);
+        run_supervised(&policy, command_for_attempt)?;
+    }
     Ok(())
 }
 
@@ -285,8 +383,51 @@ fn setup(arguments: SetupArguments) -> agent_runtime::Result<()> {
     let mut reader = std::io::BufReader::new(stdin.lock());
     let stdout = std::io::stdout();
     let mut writer = stdout.lock();
-    run_setup_wizard(&mut reader, &mut writer, &current_directory, &config_path)?;
+    run_setup_wizard_with_options(
+        &mut reader,
+        &mut writer,
+        &current_directory,
+        &config_path,
+        SetupOptions {
+            force: arguments.force,
+        },
+    )?;
     Ok(())
+}
+
+fn show_initial_prompt(prompt: &str) {
+    if std::io::stderr().is_terminal() {
+        eprintln!("Prompt:\n{prompt}\n\nResponse:");
+    }
+}
+
+fn write_stderr(bytes: &[u8]) -> agent_runtime::Result<()> {
+    let stderr = std::io::stderr();
+    let mut writer = stderr.lock();
+    writer
+        .write_all(bytes)
+        .and_then(|()| writer.flush())
+        .map_err(|source| Error::Io {
+            operation: "write provider reasoning",
+            path: PathBuf::from("<stderr>"),
+            source,
+        })
+}
+
+fn write_json(
+    writer: &mut impl Write,
+    turn: &agent_runtime::ModelTurn,
+) -> agent_runtime::Result<()> {
+    serde_json::to_writer(&mut *writer, turn).map_err(|source| Error::Io {
+        operation: "write JSON model output",
+        path: PathBuf::from("<stdout>"),
+        source: std::io::Error::other(source),
+    })?;
+    writer.write_all(b"\n").map_err(|source| Error::Io {
+        operation: "write JSON model output",
+        path: PathBuf::from("<stdout>"),
+        source,
+    })
 }
 
 fn resolve_config_path(path: Option<PathBuf>) -> agent_runtime::Result<PathBuf> {

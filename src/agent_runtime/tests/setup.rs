@@ -7,7 +7,10 @@ use std::{
     thread,
 };
 
-use agent_runtime::{ModelProfile, collect_profile, render_command, verify_profile};
+use agent_runtime::{
+    ModelProfile, SetupOptions, collect_profile, collect_profile_with_options, render_command,
+    verify_profile,
+};
 use tempfile::TempDir;
 
 fn serve_llama_setup() -> (String, mpsc::Receiver<String>) {
@@ -18,6 +21,7 @@ fn serve_llama_setup() -> (String, mpsc::Receiver<String>) {
         for body in [
             r#"{"status":"ok"}"#,
             r#"{"object":"list","data":[{"id":"small-model"},{"id":"Qwen3.8-9B-Q4_K_M"},{"id":"42"}]}"#,
+            r#"{"choices":[{"message":{"content":"OK"}}]}"#,
         ] {
             let (mut stream, _) = listener.accept().expect("accept setup request");
             let mut request = [0_u8; 4096];
@@ -79,11 +83,16 @@ fn verification_refuses_before_spawning_without_host_acknowledgement() {
 
 #[test]
 fn llama_server_default_json_encodes_the_rendered_prompt() {
-    let mut reader = Cursor::new("2\nhttp://127.0.0.1:1\nmodel\n\n\nn\n");
+    let mut reader = Cursor::new("2\nhttp://127.0.0.1:1\nmodel\n\n\n");
     let mut writer = Vec::new();
 
-    let profile = collect_profile(&mut reader, &mut writer, std::path::Path::new("."))
-        .expect("collect llama-server profile");
+    let profile = collect_profile_with_options(
+        &mut reader,
+        &mut writer,
+        std::path::Path::new("."),
+        SetupOptions { force: true },
+    )
+    .expect("collect llama-server profile");
     let (_, arguments) = render_command(
         &profile.command,
         "Say \"hello\"\nnext",
@@ -136,15 +145,23 @@ fn llama_server_lists_models_and_keeps_profile_name_separate() {
             .expect("models request")
             .starts_with("GET /v1/models ")
     );
+    let qualification = requests.recv().expect("qualification request");
+    assert!(qualification.starts_with("POST /v1/chat/completions "));
+    assert!(qualification.contains(r#""content":"Reply with exactly: OK""#));
 }
 
 #[test]
 fn llama_server_keeps_explicit_default_when_discovery_is_unavailable() {
-    let mut reader = Cursor::new("2\nhttp://127.0.0.1:1\n\nllama-default\n\nn\n");
+    let mut reader = Cursor::new("2\nhttp://127.0.0.1:1\n\nllama-default\n\n");
     let mut writer = Vec::new();
 
-    let profile = collect_profile(&mut reader, &mut writer, std::path::Path::new("."))
-        .expect("collect default llama-server profile");
+    let profile = collect_profile_with_options(
+        &mut reader,
+        &mut writer,
+        std::path::Path::new("."),
+        SetupOptions { force: true },
+    )
+    .expect("collect default llama-server profile");
     let (_, arguments) = render_command(&profile.command, "hello", &[], std::path::Path::new("."))
         .expect("render default llama-server command");
 
@@ -201,11 +218,16 @@ fn llama_server_rejects_template_tokens_in_manual_model_ids() {
 
 #[test]
 fn ollama_default_materializes_the_selected_endpoint() {
-    let mut reader = Cursor::new("3\nhttp://127.0.0.1:1\nllama3.1:8b\n\nn\n");
+    let mut reader = Cursor::new("3\nhttp://127.0.0.1:1\nllama3.1:8b\n\n");
     let mut writer = Vec::new();
 
-    let profile = collect_profile(&mut reader, &mut writer, std::path::Path::new("."))
-        .expect("collect Ollama profile");
+    let profile = collect_profile_with_options(
+        &mut reader,
+        &mut writer,
+        std::path::Path::new("."),
+        SetupOptions { force: true },
+    )
+    .expect("collect Ollama profile");
     let (program, arguments) =
         render_command(&profile.command, "hello", &[], std::path::Path::new("."))
             .expect("render Ollama command");

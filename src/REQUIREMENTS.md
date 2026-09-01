@@ -98,7 +98,24 @@ to unconstrained host execution.
 Kvist MAY invoke configured external agents for explicit prompt or task
 operations. It MUST resolve commands without a shell, treat outputs as
 untrusted and bounded, retain Kvist role and policy authority, and distinguish
-acknowledged host execution from sandboxed task execution.
+acknowledged host execution from sandboxed task execution. Explicit prompts
+MUST allow a configured model to be selected within the chosen role and MAY
+apply a typed reasoning effort only when the selected model command declares
+support. Plain output MUST contain provider content without a synthetic
+completion message; JSON output MUST be one valid object with a `content`
+field. Captured bytes that are not valid UTF-8 MUST be represented with U+FFFD
+replacement characters.
+
+Interactive agent setup MUST automatically qualify a newly generated provider
+command with the fixed minimal prompt `Reply with exactly: OK`. Invoking setup
+MUST count as acknowledgement for that qualification command only and MUST NOT
+authorize later host prompt execution. Failed qualification MUST prevent
+configuration persistence unless the user supplied `--force`; that override
+MAY persist the failed profile only after displaying an explicit warning and
+MUST NOT override cancellation.
+In JSON mode, setup prompts and status MUST be written to standard error,
+qualification output MUST NOT be forwarded, and standard output MUST contain
+exactly one valid result object.
 
 ### REQ-COMPLIANCE
 

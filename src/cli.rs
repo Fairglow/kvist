@@ -1,6 +1,6 @@
 //! Command-line contract and dispatch for Kvist.
 
-use std::path::PathBuf;
+use std::{io::IsTerminal, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -77,6 +77,12 @@ pub enum Command {
         /// The role profile context to use (developer, architect, security-reviewer).
         #[arg(long, default_value = "developer")]
         role: String,
+        /// Select one configured model from the chosen role for this prompt.
+        #[arg(long, value_name = "NAME")]
+        model: Option<String>,
+        /// Apply a supported reasoning effort through the selected command template.
+        #[arg(long, value_enum)]
+        reasoning_effort: Option<ReasoningEffortArgument>,
         /// Idle timeout in seconds before restarting the command if no new output.
         #[arg(long, default_value_t = 900)]
         idle_timeout: u64,
@@ -190,7 +196,36 @@ pub enum ComponentCommand {
 #[derive(Debug, Subcommand)]
 pub enum AgentCommand {
     /// Launch the interactive setup wizard to configure and test new models.
-    Setup,
+    Setup {
+        /// Save a profile even when mandatory live qualification fails.
+        #[arg(long)]
+        force: bool,
+    },
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ReasoningEffortArgument {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl From<ReasoningEffortArgument> for agent_runtime::ReasoningEffort {
+    fn from(value: ReasoningEffortArgument) -> Self {
+        match value {
+            ReasoningEffortArgument::None => Self::None,
+            ReasoningEffortArgument::Minimal => Self::Minimal,
+            ReasoningEffortArgument::Low => Self::Low,
+            ReasoningEffortArgument::Medium => Self::Medium,
+            ReasoningEffortArgument::High => Self::High,
+            ReasoningEffortArgument::Xhigh => Self::Xhigh,
+            ReasoningEffortArgument::Max => Self::Max,
+        }
+    }
 }
 
 /// Task selection and state-transition operations.
@@ -283,6 +318,14 @@ impl CommandOutput {
     fn message(message: impl Into<String>) -> Self {
         Self(message.into())
     }
+
+    fn none() -> Self {
+        Self(String::new())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl std::fmt::Display for CommandOutput {
@@ -337,6 +380,8 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 file,
                 editor,
                 role,
+                model,
+                reasoning_effort,
                 idle_timeout,
                 detect_loops,
                 max_restarts,
@@ -346,13 +391,27 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     return Err(agent_runtime::Error::HostExecutionNotAcknowledged.into());
                 }
                 let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
-                execute_prompt(&resolved_prompt, &role, idle_timeout, detect_loops, max_restarts)?;
-                Ok(CommandOutput::message(
-                    r#"{"status":"success","command":"prompt","message":"prompt execution complete"}"#.to_owned()
-                ))
+                let content = execute_prompt(
+                    &resolved_prompt,
+                    PromptExecutionOptions {
+                        role: &role,
+                        model: model.as_deref(),
+                        reasoning_effort: reasoning_effort.map(Into::into),
+                        idle_timeout,
+                        detect_loops,
+                        max_restarts,
+                        capture: true,
+                    },
+                )?
+                .unwrap_or_default();
+                let mut content_json = String::new();
+                json_string_escape(&mut content_json, &content);
+                Ok(CommandOutput::message(format!(
+                    r#"{{"content":{content_json}}}"#
+                )))
             },
             Command::Agent {
-                command: AgentCommand::Setup,
+                command: AgentCommand::Setup { force },
             } => {
                 let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
                     operation: "determine current project directory",
@@ -360,8 +419,13 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     source,
                 })?;
                 let mut reader = std::io::BufReader::new(std::io::stdin());
-                let mut writer = std::io::BufWriter::new(std::io::stdout());
-                wizard::run_wizard(&mut reader, &mut writer, &current_dir)?;
+                let mut writer = std::io::BufWriter::new(std::io::stderr());
+                wizard::run_wizard_with_force(
+                    &mut reader,
+                    &mut writer,
+                    &current_dir,
+                    force,
+                )?;
                 Ok(CommandOutput::message(
                     r#"{"status":"success","command":"agent-setup","message":"agent setup wizard complete"}"#.to_owned()
                 ))
@@ -603,6 +667,8 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 file,
                 editor,
                 role,
+                model,
+                reasoning_effort,
                 idle_timeout,
                 detect_loops,
                 max_restarts,
@@ -614,17 +680,20 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
                 execute_prompt(
                     &resolved_prompt,
-                    &role,
-                    idle_timeout,
-                    detect_loops,
-                    max_restarts,
+                    PromptExecutionOptions {
+                        role: &role,
+                        model: model.as_deref(),
+                        reasoning_effort: reasoning_effort.map(Into::into),
+                        idle_timeout,
+                        detect_loops,
+                        max_restarts,
+                        capture: false,
+                    },
                 )?;
-                Ok(CommandOutput::message(
-                    "prompt execution complete".to_owned(),
-                ))
+                Ok(CommandOutput::none())
             }
             Command::Agent {
-                command: AgentCommand::Setup,
+                command: AgentCommand::Setup { force },
             } => {
                 let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
                     operation: "determine current project directory",
@@ -633,7 +702,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 })?;
                 let mut reader = std::io::BufReader::new(std::io::stdin());
                 let mut writer = std::io::BufWriter::new(std::io::stdout());
-                wizard::run_wizard(&mut reader, &mut writer, &current_dir)?;
+                wizard::run_wizard_with_force(&mut reader, &mut writer, &current_dir, force)?;
                 Ok(CommandOutput::message(
                     "agent setup wizard complete".to_owned(),
                 ))
@@ -794,13 +863,17 @@ fn json_string_escape(output: &mut String, value: &str) {
     output.push('"');
 }
 
-fn execute_prompt(
-    prompt: &str,
-    role_str: &str,
+struct PromptExecutionOptions<'a> {
+    role: &'a str,
+    model: Option<&'a str>,
+    reasoning_effort: Option<agent_runtime::ReasoningEffort>,
     idle_timeout: u64,
     detect_loops: bool,
     max_restarts: u32,
-) -> Result<()> {
+    capture: bool,
+}
+
+fn execute_prompt(prompt: &str, options: PromptExecutionOptions<'_>) -> Result<Option<String>> {
     let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
         operation: "determine current project directory",
         path: PathBuf::from("."),
@@ -808,7 +881,7 @@ fn execute_prompt(
     })?;
     let config = crate::config::load(&current_dir)?;
 
-    let (profile, role) = match role_str {
+    let (profile, role) = match options.role {
         "developer" => (&config.agent.developer, crate::config::Role::Developer),
         "architect" => (&config.agent.architect, crate::config::Role::Architect),
         "security-reviewer" | "security_reviewer" => (
@@ -817,32 +890,48 @@ fn execute_prompt(
         ),
         _ => {
             return Err(KvistError::ImportFailed {
-                reason: format!("unknown role profile: {role_str}"),
+                reason: format!("unknown role profile: {}", options.role),
             });
         }
     };
 
     let policy = agent_runtime::SupervisionPolicy {
-        idle_timeout: std::time::Duration::from_secs(idle_timeout),
+        idle_timeout: std::time::Duration::from_secs(options.idle_timeout),
         attempt_timeout: None,
-        detect_loops,
-        max_retries: max_restarts,
+        detect_loops: options.detect_loops,
+        max_retries: options.max_restarts,
         max_output_bytes: profile.max_output_bytes,
     };
-    agent_runtime::run_supervised(&policy, |context| {
+    let command_for_attempt = |context: &agent_runtime::AttemptContext| {
         let prompt = match context.retry_notice() {
             Some(notice) => format!("{prompt}\n\n{notice}"),
             None => prompt.to_owned(),
         };
-        let (program, arguments) =
-            crate::agent::get_effective_command(profile, role, &prompt, &[], &current_dir)
-                .map_err(|error| agent_runtime::Error::InvalidCommandTemplate {
-                    reason: error.to_string(),
-                })?;
+        let (program, arguments) = crate::agent::get_effective_command_with_options(
+            profile,
+            role,
+            options.model,
+            options.reasoning_effort,
+            &prompt,
+            &[],
+            &current_dir,
+        )
+        .map_err(|error| agent_runtime::Error::InvalidCommandTemplate {
+            reason: error.to_string(),
+        })?;
         Ok(agent_runtime::CommandSpec::new(program, arguments).in_directory(current_dir.clone()))
-    })?;
+    };
 
-    Ok(())
+    if options.capture {
+        let report = agent_runtime::run_supervised_capture(&policy, command_for_attempt)?;
+        Ok(Some(String::from_utf8_lossy(&report.stdout).into_owned()))
+    } else {
+        if std::io::stderr().is_terminal() {
+            eprintln!("Prompt:\n{prompt}\n\nResponse:");
+        }
+        agent_runtime::run_supervised(&policy, command_for_attempt)?;
+        Ok(None)
+    }
 }
 
 fn validate_component_documents(
