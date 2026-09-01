@@ -1568,3 +1568,86 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "sa-21-write-tests"
+    title: "Define optional Rig promotion tests"
+    description: "Write failing regression and qualification tests for a direct-default build, explicit per-request Rig or direct selection in a Rig-enabled build, both feature modes in CI, and an exact live Ollama and llama-server version/model/template matrix covering unary text, streaming, structured output, tool intent, malformed or truncated responses, cancellation, and deadlines."
+    context: "The integration branch proves the private adapter against deterministic providers, but optional promotion to main must not impose Rig by default or represent unevaluated local deployments as qualified."
+    purpose: "Make the user-selectable experimental boundary and remaining live-provider evidence executable before changing the main-branch default."
+    expected_outcome: "Tests fail until default builds retain the direct adapter, Rig-enabled builds can choose either transport per request, both modes remain covered in CI, and unavailable live combinations are recorded as unevaluated."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-20-compliance-review"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T17:08:25Z"
+      updated_at: "2026-09-01T17:08:25Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-21-implement-code"
+    title: "Expose optional Rig transport"
+    description: "Make Rig an explicit opt-in Cargo feature on main while keeping direct transport as the default even when Rig is compiled, add direct-only and all-feature CI coverage, document exact build and per-prompt selection commands, supported local-provider matrices and limitations, and retain non-automatic fallback semantics."
+    context: "Users should be able to evaluate the contained Rig adapter without changing project profile configuration, enlarging every default build, or mistaking the low-level model command for a complete Kvist agent loop."
+    purpose: "Offer a reversible experimental integration that users can select deliberately while preserving current Kvist task and prompt behavior."
+    expected_outcome: "A documented Rig-enabled build accepts explicit `--transport rig` or `--transport direct` for each model request, normal builds remain direct-only, and no configuration or failure path silently changes transports."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-21-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-01T17:08:25Z"
+      updated_at: "2026-09-01T17:08:25Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-21-security-audit"
+    title: "Audit optional Rig promotion"
+    description: "Independently review feature isolation, per-request transport selection, endpoint routing, live provider conversion, schema and tool-intent handling, malformed streams, cancellation races, tracing and error leakage, CI coverage, dependency advisories, and the retained direct fallback."
+    context: "Opt-in status reduces default exposure but does not make framework parsing, network, resource, or authority defects acceptable for users who enable the feature."
+    purpose: "Prevent the experimental option from weakening Kvist boundaries or making unsafe capability and fallback claims."
+    expected_outcome: "Every high-confidence authority, leakage, routing, deserialization, cancellation, and dependency defect is fixed or retained as an explicit promotion blocker."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-21-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T17:08:25Z"
+      updated_at: "2026-09-01T17:08:25Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-21-compliance-review"
+    title: "Review optional Rig promotion"
+    description: "Compare source-derived default and feature behavior, live-provider results, CI evidence, user documentation, fallback semantics, tool-descriptor scope, and the exact dependency decision matrix with the accepted transport intent."
+    context: "The package-count guideline is advisory rather than a hard gate, but its maintenance and supply-chain cost, all unevaluated provider combinations, and every contract discrepancy still require explicit human arbitration."
+    purpose: "Produce a bounded decision on retaining Rig as a user-selectable experimental transport without promoting it to Kvist's authority or agent-loop layer."
+    expected_outcome: "The review records exact qualified combinations, unsupported behavior, package and binary costs, license and advisory status, resolved or arbitrated contract gaps, and whether optional main-branch promotion is supported."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-21-security-audit"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T17:08:25Z"
+      updated_at: "2026-09-01T17:08:25Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

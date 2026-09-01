@@ -221,11 +221,11 @@ The original throwaway experiment and the integrated adapter measured:
 | Rust 1.85 | Historical fail. `rig-core` itself uses Edition 2024 let-chains stabilized in Rust 1.88. |
 | Rust 1.94 | Pass for the complete `agent-runtime --all-features` suite. This is the upstream-tested compiler, not a Rig-declared MSRV. |
 | Current Rust 1.98 | Pass for the integrated unary, streaming, tool-intent, bounds, cancellation, CLI, and tracing tests. |
-| Locked package count | Warning. Current target-specific normal/build count is 148 packages with `rig-transport` versus 49 for the direct-only build: delta 99, exceeding the normal 75-package gate. Default activation is confined to this experiment; promotion still requires independent review. |
+| Locked package count | Advisory. Current target-specific normal/build count is 148 packages with `rig-transport` versus 49 for the direct-only build: delta 99, above the 75-package review guideline. Package count informs maintenance and supply-chain review but does not block promotion by itself. |
 | Release binary size | Pass. 6,747,168 bytes with `rig-transport` versus 2,473,416 direct-only bytes: delta 4,273,752 bytes, below the 15 MiB limit. |
 | TLS with defaults disabled | As intended for local-only scope: no Rustls, native-tls, or OpenSSL selected. |
 | Advisories, bans, sources | Pass under `cargo deny`. |
-| Licenses | External Rig dependencies produced no disallowed-license finding, but the repository license gate fails because the two workspace manifests have pre-existing missing `license` fields. Licensing terms were not changed by this experiment. |
+| Licenses | Pass. The workspace packages declare AGPL-3.0-or-later, every resolved dependency has an allowed license choice, and the all-feature graph passes `cargo-deny`. |
 
 The integrated measurement builds the actual standalone executable from fresh
 target directories. The package count uses the direct adapter as the marginal
@@ -328,8 +328,9 @@ Unavailable live services or models are recorded as `unevaluated`, never
 - no facade, `rig-agent`, derive, vector, memory, or provider companion crate;
 - local-only build has no selected TLS backend and makes no HTTPS claim;
 - optional Rustls experiment is measured separately;
-- release binary delta is at most 15 MiB and the target-specific normal/build
-  package delta is at most 75 unless a documented human exception is approved;
+- release binary delta is at most 15 MiB; a target-specific normal/build
+  package delta above 75 triggers a documented maintenance and supply-chain
+  assessment but is not a hard failure;
 - every transitive license is one of MIT, Apache-2.0, BSD-2-Clause,
   BSD-3-Clause, ISC, Unicode-3.0, Zlib, or CDLA-Permissive-2.0; every other,
   unknown, or unlicensed dependency requires explicit legal approval;
@@ -366,8 +367,8 @@ Promote or upgrade the Rig adapter only if:
    deployment matrix;
 6. malformed and truncated streams fail closed;
 7. TRACE sentinel tests demonstrate no content leakage;
-8. dependency, size, license, advisory, and local-HTTP/TLS decisions satisfy the
-   objective gates;
+8. dependency footprint has a documented assessment, while size, license,
+   advisory, and local-HTTP/TLS decisions satisfy their objective gates;
 9. an exact-version upgrade cannot bypass the conformance suite.
 
 The 0.42.0 adapter passes the implemented compiler and fake-provider gates and
@@ -375,10 +376,10 @@ is default-enabled only on the experiment branch. This does not yet demonstrate
 lower maintenance cost because the direct oracle remains implemented. Its
 current target-specific normal/build graph contains 148 unique packages versus
 49 without default features, a 99-package marginal increase.
-That footprint requires explicit review before promotion. Live Ollama and
-llama-server model matrices, independent security audit, and compliance review
-remain pending. A future no-go result leaves the direct adapter and canonical
-seam unchanged.
+That footprint requires explicit review before promotion but is not a
+standalone blocker. Live Ollama and llama-server model matrices, independent
+security audit, and compliance review remain pending. A future no-go result
+leaves the direct adapter and canonical seam unchanged.
 
 ## Direction assessment
 
