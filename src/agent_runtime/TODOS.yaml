@@ -264,7 +264,7 @@ tasks:
     purpose: "Create a small stable seam that keeps provider libraries replaceable and leaves authorization, execution, promotion, and compliance evidence with the embedding host."
     expected_outcome: "Public runtime contracts contain no Kvist, Rig, or provider SDK type and cannot directly execute tools, access credentials, broaden resources, promote artifacts, or write canonical compliance evidence."
     kind: implementation
-    status: in-progress
+    status: pending
     depends_on:
       - "sa-08-write-tests"
     requirements:
@@ -272,7 +272,7 @@ tasks:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-08-30T09:28:47Z"
+      updated_at: "2026-09-01T18:57:19Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

@@ -36,7 +36,7 @@ tasks:
     purpose: "Make review occurrence and human acknowledgement enforceable without allowing agent findings to become compliance or veto authority."
     expected_outcome: "Tests distinguish review evidence from review findings and prove component and project acceptance require a configured persistent opt-out, a current acknowledged receipt, or an exact-bundle exception while validation, status, and task readiness remain unchanged."
     kind: test
-    status: pending
+    status: in-progress
     depends_on: []
     requirements:
       - "DESIGN.md#Verification-strategy"
@@ -45,7 +45,7 @@ tasks:
       - "TODO.md#DOC-01"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-08-31T18:50:51Z"
+      updated_at: "2026-09-01T18:57:19Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null
