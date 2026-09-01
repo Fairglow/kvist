@@ -1,161 +1,200 @@
 <!-- kvist-compliance-review-version: 1 -->
-# Agent Runtime Compliance Review
 
-## Review identity and method
+# agent_runtime compliance review
 
-This is an independent, source-blind compliance review of the `agent-runtime`
-component. The reviewer compared the component's approved intent
-(`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`), the immediate parent
-`../CONTRACT.md` (`kvist.engine`), and the global `ROOT_CONTRACT.md` against the
-independently derived `IMPL.md`.
+## Review basis and limits
 
-The reviewer did **not** read source files, tests, `Cargo.toml`/manifests, Git
-history, `TODOS.yaml`, any prior compliance report, prior reviews, architecture
-or vision documents, or chat history. Observed-behavior evidence is taken solely
-from `IMPL.md` plus the bounded verification evidence recorded below. The prior
-report was replaced without being read.
+This review was regenerated as an independent, source-blind comparison using
+only:
 
-## Bounded verification evidence considered
+- `ROOT_CONTRACT.md`
+- `src/agent_runtime/REQUIREMENTS.md`
+- `src/agent_runtime/CONTRACT.md`
+- `src/agent_runtime/DESIGN.md`
+- `src/agent_runtime/IMPL.md`
+- `src/agent_runtime/tests/**/*.rs`
+- `src/agent_runtime/Cargo.toml` for feature interpretation
 
-The following out-of-band verification signals were supplied for this review and
-are treated as static acceptance evidence only:
+No production Rust sources, prior `COMPLIANCE_REVIEW.md`, TODO queues,
+project-level vision or architecture documents, chat/session history, Git
+history, diffs, status, or test execution were used.
 
-- All-feature workspace `fmt`, `check`, and `clippy` clean, and 101 tests
-  passing, prior to the final small CLI addition.
-- After the final CLI addition: the four targeted `models_*` CLI tests and
-  all-feature `agent-runtime` `clippy` passing.
-- Model-catalog, setup, CLI, and root wizard tests passing.
-- Live installed Copilot and Gemini catalogs listed successfully, including the
-  `auto` entry.
-- A final code review reporting no significant issues prior to the final
-  explicit unsupported-provider `models` CLI addition.
+All evidence below is static. Test names and assertions were inspected in
+source, but no tests were run. This document records conformance findings and
+gaps; it is not an execution certificate.
 
-These signals do not include a source-blind reviewer-run test invocation; they
-are accepted as reported. `IMPL.md` itself notes that no test command was run
-while it was derived, so live pass/fail status is asserted from these external
-signals rather than reproduced here.
+## Summary
 
-## Requirement-level assessment
+The allowed evidence supports substantial conformance for:
 
-| Requirement | Verdict | Basis |
+- prompt acquisition and shell-free command rendering
+- plain-text and JSON output presentation
+- Linux process supervision, retry, cancellation, and cleanup
+- bounded profile storage and path resolution
+- setup qualification and bounded model discovery
+- direct Ollama and llama-server transports
+- the default-enabled Rig transport experiment and its explicit fallback rules
+
+The same evidence does **not** support a full compliance claim for the entire
+controlled intent bundle. Three material gaps remain explicit:
+
+1. the planned native runtime boundary is still deferred or at least not
+   evidenced as implemented;
+2. the contract-promised capability/runtime-event surface is not evidenced in
+   the public implementation record or static tests; and
+3. the contract's tool-descriptor semantics are richer than the public
+   `ToolDefinition` surface evidenced by the tests.
+
+Human arbitration is required before treating `agent_runtime` as fully
+compliant with its current requirements and contract.
+
+## Implemented behavior evidenced as aligned
+
+| Intent area | Assessment | Static evidence |
 | --- | --- | --- |
-| AR-REQ-PROMPT-COMMAND | Compliant | `IMPL` resolves exactly one bounded prompt source, renders documented placeholders with a shell-free parser, rebuilds each retry from fresh input with an appended prior-attempt/uncertain-side-effect notice, supports multiple per-`run` selectable named profiles, and fails a requested reasoning effort when the template lacks `{reasoning_effort}` rather than dropping it or converting it to shell text. |
-| AR-REQ-OUTPUT-PRESENTATION | Compliant | Plain text forwards only bounded provider content with no trailer; JSON captures streams and emits one `{"content":...}` object with lossy U+FFFD replacement; direct model mode keeps provider reasoning separate, surfaces it only via `--show-reasoning` (stderr) or canonical JSON, and never labels it hidden chain-of-thought. |
-| AR-REQ-SUPERVISION | Compliant | Bounded streaming, idle/loop detection, cancellation, wall/output limits, process-group termination and reaping before return/retry, and `OutputStreamsRetained` for escaped descendants are all present; only idle timeout and detected stdout repetition retry. |
-| AR-REQ-PROFILES | Compliant | Strict bounded TOML (`schema_version = 1`, 64 KiB, 128 profiles, name/provider/command bounds), full pre- and post-mutation validation, formatting-preserving `toml_edit` upsert, safe XDG/HOME resolution with canonical-over-legacy precedence, and synchronized atomic replace of a real regular non-link file. |
-| AR-REQ-SETUP | Compliant | Terminal-neutral I/O, maintained provider templates, bounded probes, catalog-first numbered selection with manual entry gated behind a synthetic final custom choice, HTTP discovery for Ollama/llama-server and ACP session model lists for Copilot/Gemini, visible discovery-failure fallback plus custom, manual identification for file/wrapper providers, mandatory fixed-prompt qualification (`Reply with exactly: OK`) with no second acknowledgement, non-persistence on failure except `--force`, and bounded non-forwarded qualification output. The standalone `models` command lists the same catalogs non-interactively in text/JSON with time/byte/count/ID bounds, sends no prompt, cleans up helpers, and requires `--allow-host-discovery` for ACP providers. |
-| AR-REQ-MODEL-TRANSPORT | Compliant | `DirectModelTransport` implements bounded unary and streamed Ollama (`/api/chat`) and llama-server (`/v1/chat/completions`) with explicit endpoints, requests, responses, deadlines, cancellation, identities, usage, finish reason, and typed errors, and translates tool intent without executing tools. |
-| AR-REQ-NATIVE-RUNTIME | Approved-deferred | The provider-neutral native loop, typed broker, host-authorization traits, execution backend, and redacted runtime events are described as planned/future in intent and are not implemented. Deferral is explicitly sanctioned by the requirement ("planned") and the design's future-layers note; canonical tool-intent types exist but no effectful path. |
-| AR-REQ-ADAPTER-BOUNDARY | Compliant | The optional `RigModelTransport` is private, exact-pinned, default-disabled, immediately translated to canonical types, registers no tools, converts provider tool calls to untrusted intents, and cannot own policy, authorization, evidence, or public serialized state. |
+| `AR-REQ-PROMPT-COMMAND` | Implemented and statically evidenced | `IMPL.md` sections **Prompt acquisition** and **Command template rendering**; `tests/command.rs` covers placeholder expansion, `{prompt_json}`, repeated `{context_files}`, quote rejection, and `{reasoning_effort}` handling; `tests/cli.rs` covers prompt-file execution and per-prompt reasoning-effort selection. |
+| `AR-REQ-OUTPUT-PRESENTATION` | Implemented and statically evidenced | `IMPL.md` sections **CLI behavior observed in main.rs**, **Direct transport**, and **Streaming behavior**; `tests/model_cli.rs` covers exact streaming preservation; `tests/cli.rs` covers `run --json` shape, lossy UTF-8 replacement, and `model --json` vs `--show-reasoning` exclusivity. |
+| `AR-REQ-SUPERVISION` | Implemented and statically evidenced | `IMPL.md` section **Supervision**; `tests/supervisor.rs` covers success, retry warnings, nonzero exit handling, idle timeout, wall timeout, output exhaustion, descendant cleanup, and retained-output failure; `tests/cli.rs` covers top-level SIGINT cleanup. |
+| `AR-REQ-PROFILES` | Implemented and statically evidenced | `IMPL.md` section **Profile storage**; `tests/profiles.rs` covers create/load, formatting preservation, unchanged invalid config, and invalid-name rejection; `tests/cli.rs` covers canonical-vs-legacy path resolution. |
+| `AR-REQ-SETUP` | Implemented and statically evidenced for current setup surface | `IMPL.md` sections **Setup wizard behavior**, **Model discovery during setup**, **Setup qualification**, and **Catalog discovery**; `tests/setup.rs`, `tests/catalog.rs`, and `tests/cli.rs` cover bounded discovery, fixed qualification prompt, fallback behavior, acknowledgement gates, current-model defaults, and forced persistence semantics. |
+| `AR-REQ-MODEL-TRANSPORT` | Implemented and statically evidenced for direct and Rig transports | `IMPL.md` sections **Model request validation**, **Direct transport**, and **Rig transport**; `tests/model_transport.rs` and feature-gated `tests/rig_transport.rs` cover schema passthrough, endpoint policy, tool-intent mapping, reasoning handling, cancellation, deadlines, response limits, and non-automatic Rig fallback. |
+| `AR-REQ-ADAPTER-BOUNDARY` | Substantially aligned in observed transport behavior | `IMPL.md` documents canonical request validation, explicit error mapping, direct/Rig separation, and no automatic replay; `tests/model_transport.rs` and `tests/rig_transport.rs` statically support rejection-first behavior instead of silent downgrade. |
 
-## Contract-clause assessment
+## Implemented versus planned or deferred behavior
 
-- **Provided CLI surface** (`setup`, `models`, `run`, `model`): Present as
-  specified, including `run`'s exactly-one-of `--command`/`--profile` plus
-  mandatory `--allow-host-execution`, and `model`'s tool-free no-host-execution
-  behavior with Rig rejecting reasoning/effort. Compliant.
-- **Provider input matrix / defaults**: `ollama` `127.0.0.1:11434`,
-  `llama-server` `127.0.0.1:9931`, `copilot`/`gemini` executable defaults, ACP
-  acknowledgement required outside setup, and `--executable`/`--endpoint`
-  cross-rejection all match. Compliant.
-- **Unsupported catalogs**: `llama-cli` and `custom-script` return an explicit
-  `UnsupportedCapability` "provider model catalog" error before any spawn or
-  directory lookup, matching "return an explicit unsupported-catalog error
-  without spawning discovery." This is the final CLI addition and is Compliant.
-- **`models` output shape**: One validated model ID per line (text) and one
-  object with `format_version: 1`, `provider`, nullable `current_model_id`, and
-  ordered `models` (`id`/`name`/optional `description`) with printable-ASCII,
-  brace-free IDs and control-free bounded names/descriptions. Compliant.
-- **Catalog selection semantics**: First-occurrence dedup in provider order,
-  current-model retention only when the exact ID is present else first-model
-  default, empty/wholly-invalid catalog treated as discovery failure, and
-  `Other model ID...` appended only at presentation. Compliant.
-- **Setup qualification/behavior**: Fixed prompt, no test-prompt/second-ack
-  prompts, failure non-persistence except `--force` (non-interactive, visible),
-  bounded captured (not forwarded) qualification output. Compliant.
-- **ACP discovery**: Spawns `<exe> --acp` in a new process group, exchanges only
-  `initialize` (protocol version 1) and `session/new` with absolute `cwd` and
-  empty `mcpServers`, advertises no client fs/terminal/MCP capability, rejects
-  provider-to-client requests and mis-correlated IDs, bounds records/bytes/time,
-  and unconditionally reaps. Matches contract and design. Compliant.
-- **Model/JSON/reasoning presentation**: `--json` is one canonical `ModelTurn`
-  and mutually exclusive with `--show-reasoning`; plain text adds no absent line
-  termination; Rig rejects reasoning presentation. Compliant.
-- **Errors/security/authority**: Redacted HTTP-status errors omit provider
-  bodies; local transports and catalog HTTP enforce numeric-loopback,
-  explicit-port, no-proxy/redirect/TLS/DNS restrictions; host execution named as
-  non-isolated; `--allow-host-execution` / `--allow-host-discovery`
-  acknowledgements present. Compliant.
-- **Tool descriptor data shape** (stable ID/version, input/output schema, effect
-  class, capability/resource scope, timeout/output bounds, retry/idempotency):
-  The full broker-facing descriptor is part of the deferred native runtime.
-  `IMPL` documents model-facing tool *definitions* (name/description/parameters)
-  and untrusted tool *intents*, but not the complete effect-class/capability
-  descriptor. Approved-deferred with the native runtime (see discrepancy D-1).
+### Implemented and evidenced now
 
-## Parent- and root-contract assessment
+- `run`, `model`, `models`, and `setup` CLI surfaces
+- profile persistence and resolution
+- setup qualification with the fixed prompt `Reply with exactly: OK`
+- bounded HTTP catalog discovery for Ollama and llama-server
+- bounded ACP catalog discovery for Copilot and Gemini with explicit
+  `--allow-host-discovery`
+- direct local model transport
+- default-enabled Rig transport experiment with explicit `--transport direct`
+  selection
+- supervision and Linux process-group cleanup
 
-- **Parent (`kvist.engine`) required interface**: The parent requires
-  `agent-runtime.library/v1` for prompt acquisition, command rendering,
-  profiles, setup, process supervision, and model transports. `IMPL` exports all
-  of these. The parent's `agent setup` catalog-first, acknowledgement, and
-  qualification-failure semantics are consistent with the runtime behavior the
-  component exposes. Compliant.
-- **Root contract**: Linux-only executable target (compile-time non-Linux
-  rejection), unsafe forbidden, shell-free direct spawning, explicit one-off host
-  acknowledgement for host execution/discovery, and version-marked artifacts are
-  all honored. Compliant.
+### Planned or deferred, not evidenced as implemented
 
-## Design-conformance assessment
+- the provider-neutral native runtime described in
+  `AR-REQ-NATIVE-RUNTIME`
+- a public typed broker / host-authorization / execution-backend boundary
+- public runtime-event and capability-state surfaces described in the contract
+- rich tool-descriptor semantics beyond the minimal request-time tool
+  definition shape evidenced by tests
 
-Observed structure matches the design's module responsibilities and algorithms:
-shell-free command parsing with `{prompt_json}` full JSON encoding and
-option-elision for empty standalone placeholders; formatting-preserving profile
-mutation with atomic persistence; catalog normalization into a bounded ordered
-`ModelCatalog` with adapter-owned fallbacks used only on discovery failure;
-minimal ACP v1 client; bounded loopback-only direct HTTP with suppressed Rig
-tracing; and narrow idle/loop-only retry with process-group cleanup. No design
-deviation was identified. Compliant.
+## Discrepancies and explicit gaps
 
-## Discrepancy register
+### Finding 1: native runtime boundary remains deferred or not evidenced
 
-- **D-1 (Approved-deferred).** The contract/requirements describe a
-  provider-neutral native runtime with a typed broker and full tool descriptors
-  (effect class, capability/resource scope, timeout/output bounds,
-  retry/idempotency) plus host-authorization backends. `IMPL` implements the
-  canonical types and untrusted tool-intent conversion but not the effectful
-  loop/broker/backend or the complete descriptor shape. Intent explicitly marks
-  this as planned/future; no misrepresentation of it as implemented was found.
-  Not a blocker.
-- **D-2 (Underspecified, non-blocking).** The contract's `models` interface
-  signature enumerates `--provider/--endpoint/--executable/--allow-host-discovery/--json`,
-  while `IMPL` also exposes `--timeout` and `--max-response-bytes`. These flags
-  materialize the requirements' mandated time/output-byte discovery bounds and do
-  not contradict any clause; the contract simply does not enumerate them. Refine
-  the contract interface listing to name these bound controls. Not a blocker.
-- **D-3 (Underspecified, non-blocking).** The contract states Gemini's advertised
-  or fallback `auto` is stored explicitly as `--model auto`. `IMPL` records
-  Gemini's `--model` template and `auto` as the documented Copilot/Gemini
-  discovery fallback, and the bounded evidence confirms live catalogs listed
-  `auto`, but `IMPL` does not restate the exact `--model auto` storage wording.
-  This is an `IMPL` description gap rather than a behavioral conflict. Consider
-  making the `IMPL` note explicit. Not a blocker.
+**Intent**
 
-No mismatched (intent-vs-observed conflicting) discrepancies were identified.
+- `AR-REQ-NATIVE-RUNTIME` says the planned native runtime MUST separate model
+  transport, bounded agent loop, typed tool broker, host authorization,
+  execution backend, and redacted runtime events.
+- `CONTRACT.md` says the component owns reusable capability, loop, broker,
+  execution-backend interface, and runtime event mechanisms, and that the
+  planned native runtime requires embedding-host authority interfaces.
+- `DESIGN.md` describes those runtime layers as future structure.
 
-## Conclusion
+**Observed**
 
-- Requirements AR-REQ-PROMPT-COMMAND, AR-REQ-OUTPUT-PRESENTATION,
-  AR-REQ-SUPERVISION, AR-REQ-PROFILES, AR-REQ-SETUP, AR-REQ-MODEL-TRANSPORT, and
-  AR-REQ-ADAPTER-BOUNDARY are **compliant**.
-- AR-REQ-NATIVE-RUNTIME and the associated full tool-descriptor contract shape
-  are **approved-deferred** consistent with intent (D-1).
-- D-2 and D-3 are **underspecified** documentation-refinement items, not
-  behavioral conflicts.
+- `IMPL.md` documents command rendering, prompt acquisition, profiles, setup,
+  catalog discovery, supervision, direct transport, Rig transport, and
+  canonical model/request types.
+- The observed public library surface in `IMPL.md` does **not** list a native
+  loop coordinator, typed tool broker, host-authorization traits,
+  execution-backend interface, or runtime-event API.
+- The static tests cover command, CLI, setup, catalog, supervision, and model
+  transport behavior, but no test names or observed assertions cover a native
+  runtime loop or host-authorized tool execution path.
 
-**Blocker status: NO BLOCKER.** The implemented, in-scope behavior conforms to
-the requirements, consumer contract, parent contract, root contract, and design.
-The open items are a sanctioned deferral (D-1) and two non-blocking
-documentation refinements (D-2, D-3) recorded here for explicit human
-arbitration rather than silent artifact edits. This review is advisory acceptance
-evidence and does not itself constitute a Kvist review receipt.
+**Assessment**
+
+This is not a minor documentation omission. The controlled intent presents a
+native runtime boundary as a real component concern, while the allowed
+implementation evidence stops at transport, supervision, and untrusted
+tool-intent representation. Treat this scope as **planned/deferred** rather
+than implemented. Full compliance with the total current intent bundle is not
+evidenced.
+
+### Finding 2: capability-state and runtime-event surfaces are not evidenced
+
+**Intent**
+
+- `REQUIREMENTS.md` requires capabilities to be tracked separately as
+  advertised, conformance-tested, and policy-enabled.
+- `CONTRACT.md` says provider-neutral model types represent capabilities and
+  runtime events.
+
+**Observed**
+
+- `IMPL.md` explicitly documents `ReasoningEffort`, `LocalModelProvider`,
+  `ToolChoice`, `ToolIntent`, `ModelUsage`, `ModelTurn`, and `ModelCatalog`.
+- No corresponding capability-state data type or runtime-event shape is
+  described in the implementation record.
+- The static tests exercise capability-related rejection behavior
+  (for example, Rig rejecting reasoning-effort requests and Ollama rejecting
+  `ToolChoice::Required`), but they do not evidence a separate public
+  capability-state model or runtime-event surface.
+
+**Assessment**
+
+This gap may be part of the same deferred native-runtime scope, but it should
+still be recorded explicitly because the contract currently describes these as
+consumer-visible concepts. On the allowed evidence, they are **not presently
+evidenced** as implemented public interfaces.
+
+### Finding 3: the contract overstates the current tool-descriptor surface
+
+**Intent**
+
+`CONTRACT.md` says a tool descriptor records stable ID and version,
+input/output schema, effect class, required capability/resource scope,
+timeout/output bounds, and retry/idempotency semantics.
+
+**Observed**
+
+- `IMPL.md` re-exports `ToolDefinition`, but does not document its shape.
+- In both `tests/model_transport.rs` and feature-gated `tests/rig_transport.rs`,
+  `ToolDefinition` is instantiated with only:
+  - `name`
+  - `description`
+  - `parameters`
+- No allowed evidence shows fields for versioning, effect class, resource
+  scope, timeout/output limits, retry semantics, or output schema on the
+  public descriptor type.
+
+**Assessment**
+
+This is a concrete contract-to-implementation mismatch, not merely a missing
+test. Consumers cannot currently rely on the richer descriptor semantics
+described by `CONTRACT.md` based on the allowed implementation evidence.
+Either the contract needs narrowing in a future intent change or the public
+tool-definition surface needs expansion and evidence.
+
+## Notes on non-discrepancies that remain intentional
+
+The following current behaviors appear intentional and are supported by the
+allowed evidence rather than being compliance failures:
+
+- Rig is the default `model` transport in the default feature set, while
+  `--transport direct` remains explicit and failures are not replayed
+  automatically.
+- Rig rejects reasoning-effort and reasoning-output requests before provider
+  I/O; the contract and design already describe that limitation.
+- `models` intentionally rejects `llama-cli` and custom-wrapper discovery
+  instead of spawning unsupported catalog flows.
+- Setup uses current host authority for bounded discovery and qualification and
+  does not claim sandboxing or isolation.
+
+## Final assessment
+
+`agent_runtime` has strong static conformance evidence for its current
+command/CLI/profile/setup/catalog/supervision/transport implementation.
+However, the allowed evidence does **not** justify a clean full-compliance
+claim against the entire present requirements and contract bundle. The native
+runtime boundary, capability/runtime-event surfaces, and rich tool-descriptor
+contract remain deferred or unsupported by the observed public implementation
+record and static tests.

@@ -27,6 +27,9 @@ release:
 test:
     cargo nextest run --locked --workspace --all-features --test-threads num-cpus
 
+audit:
+    cargo deny --all-features --locked check advisories bans licenses sources
+
 wine:
     @echo "error: Windows support is deferred; Kvist currently supports Linux only" >&2
     @exit 1

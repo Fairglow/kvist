@@ -147,6 +147,9 @@ The component table is the canonical static decomposition view. The lifecycle
 sequence above is the canonical workflow view. Detailed authority and model
 transport views for the child runtime live in
 [`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md).
+Selection guidance for native, Rig-run, containerized Rig-agent, and external
+agent drivers lives in
+[`docs/agent-runtime/runtime-selection.md`](docs/agent-runtime/runtime-selection.md).
 
 Future diagrams should use C4-compatible context, container, component, and
 dynamic concepts only when they answer a named stakeholder concern. Diagram

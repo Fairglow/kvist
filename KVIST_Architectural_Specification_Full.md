@@ -3,7 +3,7 @@
 **Subtitle:** Structured design for autonomous agents.  
 **Project Name:** KVIST (`kvist`)  
 **Target Engine Implementation:** Rust  
-**License:** Business Source License (BSL 1.1) / Dual-licensed for non-commercial open-use  
+**License:** GNU Affero General Public License v3.0 or later, with separate commercial terms available
 **Version:** 0.1.0
 
 **Status:** This is the authoritative detailed product direction, not a claim

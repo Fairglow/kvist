@@ -1,6 +1,7 @@
 # Kvist
 
 [![Rust](https://github.com/Fairglow/kvist/actions/workflows/rust.yml/badge.svg)](https://github.com/Fairglow/kvist/actions/workflows/rust.yml)
+[![License: AGPL v3+](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
 Kvist is a filesystem-native, architecture-driven tool for human-directed AI
 development. Its durable hierarchy is `VISION.md` -> `ARCHITECTURE.md` ->
@@ -237,6 +238,8 @@ consumer boundary, and private realization live in
 [`src/agent_runtime/DESIGN.md`](src/agent_runtime/DESIGN.md).
 The layered runtime decision is documented in
 [`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md),
+the current and planned runtime choices in
+[`docs/agent-runtime/runtime-selection.md`](docs/agent-runtime/runtime-selection.md),
 the direct transport is available for local testing, and the Rig 0.42.0
 adoption decision and contained optional adapter gates are in
 [`docs/agent-runtime/rig-evaluation.md`](docs/agent-runtime/rig-evaluation.md).
@@ -586,6 +589,19 @@ errors. Both are mature, widely maintained Rust ecosystem dependencies. The
 project keeps its dependency graph small and adds dependencies only when their
 security, licensing, maintenance, and operational benefits are justified.
 
+Dependency policy is enforced with
+[`cargo-deny`](https://github.com/EmbarkStudios/cargo-deny):
+
+```bash
+cargo install --locked --version 0.20.2 cargo-deny
+cargo deny --all-features --locked check advisories bans licenses sources
+```
+
+CI rejects known advisories, wildcard requirements, unknown registries or Git
+sources, and licenses outside the reviewed allowlist. Duplicate dependency
+versions remain warnings because the pinned Rig graph currently contains
+legitimate duplicates that are tracked as footprint cost.
+
 The runtime uses [toml](https://crates.io/crates/toml) 1 to validate the
 project-local configuration before reading its component tree.
 The runtime uses [tempfile](https://crates.io/crates/tempfile) 3 for
@@ -722,6 +738,22 @@ This is the only pre-release queue format recognized by the current artifact
 model. Retired fields are rejected rather than aliased or migrated. Future
 compatibility policy must be declared explicitly before release; it is not
 implied by the current version marker.
+
+## License and contributions
+
+Kvist and the in-repository `agent-runtime` crate are copyright (C) 2026
+Stefan Lindblad and licensed under the
+[GNU Affero General Public License, version 3 or later](LICENSE).
+
+The AGPL permits personal, open-source, and commercial use under its terms.
+Organizations that need to distribute, embed, modify, or operate Kvist without
+AGPL obligations may request separate commercial terms as described in
+[`COMMERCIAL-LICENSE.md`](COMMERCIAL-LICENSE.md). No commercial permission is
+granted unless both parties execute a separate written agreement.
+
+External code contributions are not accepted at this stage. Bug reports,
+use-case feedback, and design discussion remain welcome. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Task execution boundary
 

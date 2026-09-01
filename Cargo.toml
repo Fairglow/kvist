@@ -3,6 +3,12 @@ name = "kvist"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.94"
+authors = ["Stefan Lindblad"]
+description = "Architecture-driven workflow and evidence for human-directed AI development"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/Fairglow/kvist"
+homepage = "https://github.com/Fairglow/kvist"
+readme = "README.md"
 
 [workspace]
 members = [".", "src/agent_runtime"]
@@ -23,7 +29,7 @@ thiserror = "2.0"
 hex = "0.4"
 toml = "1.1"
 toml_edit = "0.25.13"
-agent-runtime = { path = "src/agent_runtime" }
+agent-runtime = { version = "=0.1.0", path = "src/agent_runtime" }
 
 [profile.dev]
 debug = "line-tables-only"

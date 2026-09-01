@@ -3,6 +3,12 @@ name = "agent-runtime"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.94"
+authors = ["Stefan Lindblad"]
+description = "Bounded provider and agent runtime mechanisms for Kvist"
+license = "AGPL-3.0-or-later"
+license-file = "../../LICENSE"
+repository = "https://github.com/Fairglow/kvist"
+homepage = "https://github.com/Fairglow/kvist"
 
 [features]
 default = ["rig-transport"]
