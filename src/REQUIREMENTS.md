@@ -84,14 +84,71 @@ Task selection and transition MUST require a current, completely VCS-tracked
 component. Writes MUST use exclusive user-owned locking, legal transitions,
 atomic queue replacement, and append-only prepared/committed attempt evidence.
 Stale locks and ambiguous prepared attempts MUST require explicit recovery.
+Recovery MUST bind a unique attempt, pre-state, intended post-state, approved
+policy, and write scope; it MUST NOT infer rollback, completion, or absence of
+effects from a missing process.
+
+### REQ-PROJECT-LAYOUT
+
+Kvist's target repository layout MUST place the root engine artifacts, Cargo
+workspace manifest and lockfile, engine source, and root integration tests
+inside one `engine/` component directory. `agent-runtime` and
+`sandbox-runner` MUST be complete child components. Project vision,
+architecture, root contract, decisions, licensing, and project documentation
+MUST remain outside the implementation component. The migration MUST NOT retain
+aliases for the retired paths.
 
 ### REQ-EXECUTION-BOUNDARY
 
 Effectful task execution MUST require a complete explicit sandbox policy and an
 independently installed runner outside the selected worktree. Kvist MUST
-validate the exact runner, policy, component mount, network denial,
-environment, time, and output bounds before invocation and MUST NOT fall back
-to unconstrained host execution.
+validate the exact runner, Bubblewrap backend, policy, typed path grants,
+network capability, environment, command, toolchain, time, output, process,
+file, and scratch bounds before invocation and MUST NOT fall back to
+unconstrained host execution.
+
+The unreleased `kvist-sandbox-probe-v1` and
+`kvist-sandbox-request-v1` contracts MUST be redefined in place. The accepted
+version-one request MUST distinguish authoring, dependency acquisition, and
+verification, use an explicit working directory and typed argument vector, and
+represent every read-only, read-write, context, dependency-cache, toolchain,
+and scratch mount. Legacy version-one request semantics MUST be rejected.
+
+Authoring agents MUST NOT receive write access to intent, queues,
+implementation records, approval material, canonical evidence, Git metadata,
+ambient home state, or child and peer implementations. Verification MAY
+receive read-only provider source and workspace metadata required by the build
+without adding those paths to authoring context or write authority.
+
+### REQ-DEPENDENCY-ACQUISITION
+
+Dependency acquisition MUST be a distinct approved phase. Cargo MUST be able to
+resolve and download new or changed dependencies from exact configured
+supported sources into bounded attempt-local writable registry, Git, cache,
+lockfile, and scratch locations without receiving the user's Cargo home.
+Initial source support MUST cover canonical crates.io sparse-index and crate
+download origins. Additional registries MUST declare exact index and download
+origins. Git dependencies MUST initially require an exact approved repository
+URL and immutable revision.
+
+The acquisition phase MUST NOT execute dependency build scripts. Successful
+cache promotion MUST validate source policy, checksums, lockfile changes,
+bounds, paths, links, and concurrent preconditions. Verification MUST run with
+network denied, `--locked`, and approved dependency content mounted read-only.
+
+### REQ-SUPERVISED-EXECUTION
+
+The initial production-runner tier MUST be supervised. It MUST require an
+explicit task ID, disable automatic retry, record a unique reviewable attempt,
+and require a separate human finalization action before completion. Process
+success or verification success alone MUST NOT complete the task. Timeout,
+output breach, runner failure, and ambiguous interruption MUST fence or block
+the attempt with bounded evidence.
+
+Unattended execution MUST remain unavailable until private bounded workspaces,
+deterministic change sets, conflict-checked promotion, crash-recoverable
+multi-file journaling, and cleanup have independent security and compliance
+evidence.
 
 ### REQ-AGENT-INTEGRATION
 
@@ -119,6 +176,11 @@ MUST NOT override cancellation.
 In JSON mode, setup prompts and status MUST be written to standard error,
 qualification output MUST NOT be forwarded, and standard output MUST contain
 exactly one valid result object.
+
+Initial sandboxed task authoring MAY use local agents without model-network or
+credential grants. Future remote model operation MUST keep model transport and
+credential references in a host-owned broker outside the effect sandbox and
+MUST submit only typed authorized tool requests to the runner.
 
 ### REQ-COMPLIANCE
 
@@ -228,6 +290,9 @@ explicitly draft rather than inferred truth.
   deterministic.
 - Inputs and imported content are untrusted and invalid semantics fail
   explicitly rather than being ignored or repaired.
+- Package-source origins, dependency files, archives, manifests, lockfiles,
+  build scripts, and caches are untrusted and require explicit bounds and
+  provenance.
 - The dependency graph remains small and justified for a local single-binary
   CLI.
 

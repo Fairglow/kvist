@@ -29,6 +29,185 @@ tasks:
       completed_at: "2026-08-13T20:20:00Z"
     blocked_reason: null
     recovery_state: null
+  - id: "dogfood-boundary-write-tests"
+    title: "Define dogfooding execution boundary tests"
+    description: "Write failing engine and real-runner tests for the workspace migration, redefined sandbox protocol version 1, typed path grants, protected workflow state, explicit recovery, supervised finalization, mediated Cargo acquisition, offline verification, and fail-closed Bubblewrap enforcement."
+    context: "Kvist cannot safely execute its own tasks until the runner, workspace, network, and lifecycle authority boundaries are executable rather than represented by test fakes."
+    purpose: "Establish complete negative and positive evidence before changing repository layout or enabling any new effectful path."
+    expected_outcome: "Tests cover malformed and legacy requests, path aliasing and links, write-scope escape, hidden state, backend identity, dependency-source policy, cache bounds, process cleanup, ambiguous recovery, human disposition, and absence of host fallback."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "DESIGN.md#Verification-strategy"
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "REQUIREMENTS.md#REQ-PROJECT-LAYOUT"
+      - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "TODO.md#TODO-DOG-01"
+    timestamps:
+      created_at: "2026-09-01T19:57:32Z"
+      updated_at: "2026-09-01T19:57:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "dogfood-layout-implement-code"
+    title: "Align the workspace with component ownership"
+    description: "Move the root Rust workspace and component artifacts to engine, relocate agent-runtime as a complete child, prepare the sandbox-runner child intent and queue before its code, and update configuration, CI, documentation, path dependencies, fixtures, and commands without retaining old-path aliases."
+    context: "The current src component excludes its manifest and integration tests, preventing one coherent component authority and verification boundary."
+    purpose: "Make Kvist's own repository obey the filesystem-native component structure expected from projects it manages."
+    expected_outcome: "The engine component owns its manifest, source, and tests under engine; both child components are complete and current; all supported commands and checks use the new layout only."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "dogfood-boundary-write-tests"
+    requirements:
+      - "ARCHITECTURE.md#Component-model"
+      - "REQUIREMENTS.md#REQ-PROJECT-LAYOUT"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "TODO.md#TODO-DOG-01"
+    timestamps:
+      created_at: "2026-09-01T19:57:32Z"
+      updated_at: "2026-09-01T19:57:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "dogfood-recovery-implement-code"
+    title: "Implement explicit attempt recovery"
+    description: "Add unique attempt identities, pre-state and intended-post-state digests, scoped filesystem preconditions, durable execution phases, fencing, and an explicit recovery and human-disposition surface without destructive VCS rollback."
+    context: "A retained prepared record or interrupted effectful process currently cannot be reconciled safely before another task attempt."
+    purpose: "Prevent ambiguous attempts from being unlocked, retried, completed, or forgotten without durable human arbitration."
+    expected_outcome: "Exact known states can be reconciled deterministically, uncertain source effects remain fenced, and every recovery decision retains bounded authenticated evidence."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "dogfood-layout-implement-code"
+    requirements:
+      - "CONTRACT.md#Errors-and-failure-semantics"
+      - "DESIGN.md#Failure-and-recovery"
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#TODO-DOG-01"
+    timestamps:
+      created_at: "2026-09-01T19:57:32Z"
+      updated_at: "2026-09-01T19:57:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "dogfood-protocol-implement-code"
+    title: "Redefine sandbox protocol version one"
+    description: "Replace the unreleased version-one probe and request with strict typed phase, argv, working-directory, path-grant, network-capability, environment, resource, toolchain, cache, scratch, backend-identity, and policy fields while rejecting the retired shape."
+    context: "The existing request can express only one writable component directory and cannot separate agent context from compiler and dependency authority."
+    purpose: "Give policy approval and an independent runner one complete canonical statement of every permitted effect."
+    expected_outcome: "Engine and runner conformance tests agree on one bounded version-one schema, no legacy fallback exists, and every grant is exact, canonical, digest-bound, and independently validated."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "dogfood-recovery-implement-code"
+    requirements:
+      - "CONTRACT.md#Data-and-schemas"
+      - "DESIGN.md#Planned-dogfooding-execution-boundary"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "TODO.md#TODO-DOG-01"
+    timestamps:
+      created_at: "2026-09-01T19:57:32Z"
+      updated_at: "2026-09-01T19:57:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "dogfood-dependency-fetch-implement-code"
+    title: "Implement mediated Cargo acquisition"
+    description: "Add source-aware Cargo dependency acquisition with canonical crates.io support, exact additional registry and immutable Git-source policy, attempt-local writable Cargo directories, bounded validated cache promotion, and network-denied locked verification."
+    context: "Normal Rust changes need new and updated dependencies, but general task egress and a writable user Cargo home would violate the sandbox authority model."
+    purpose: "Permit practical dependency evolution without granting the authoring agent unrestricted network, credentials, or cross-project cache mutation."
+    expected_outcome: "Approved Cargo acquisition can resolve allowed sources and lockfile changes within bounds, rejects undeclared or mutable sources, executes no build scripts online, and supplies verified read-only content to offline tests."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "dogfood-protocol-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "DESIGN.md#Planned-dogfooding-execution-boundary"
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "TODO.md#TODO-DOG-01"
+    timestamps:
+      created_at: "2026-09-01T19:57:32Z"
+      updated_at: "2026-09-01T19:57:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "dogfood-runner-integrate-code"
+    title: "Integrate supervised Bubblewrap execution"
+    description: "Complete and independently install the sandbox-runner child, bind runner and Bubblewrap identity, integrate phase-specific mounts and limits, add explicit supervised execution and human finalization, and keep remote models and unattended promotion disabled."
+    context: "The engine needs a real enforcement implementation and a reviewable lifecycle before task run can be used on Kvist itself."
+    purpose: "Enable one narrow local-agent dogfooding task without weakening context boundaries or treating process success as human acceptance."
+    expected_outcome: "A local agent can author only an approved task scope, Cargo acquisition and verification use their own grants, all other effects fail closed, and the exact attempt awaits explicit human acceptance or blocking."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "dogfood-dependency-fetch-implement-code"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "DESIGN.md#Planned-dogfooding-execution-boundary"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#TODO-DOG-01"
+    timestamps:
+      created_at: "2026-09-01T19:57:32Z"
+      updated_at: "2026-09-01T19:57:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "dogfood-boundary-security-audit"
+    title: "Audit dogfooding execution security"
+    description: "Independently review runner and Bubblewrap substitution, path and mount confusion, protected-state writes, namespace escape, process cleanup, Cargo source and archive attacks, cache poisoning, credential leakage, network broadening, recovery forgery, and false finalization."
+    context: "The new boundary turns untrusted repository and model input into filesystem, process, package-network, and durable workflow effects."
+    purpose: "Find every high-confidence path to authority escalation, disclosure, cross-project contamination, or forged evidence before Kvist uses the runner on itself."
+    expected_outcome: "All high-confidence vulnerabilities are corrected with native regression tests or retained as explicit blockers; no unsupported isolation or remote-agent claim is promoted."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "dogfood-runner-integrate-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#TODO-DOG-01"
+    timestamps:
+      created_at: "2026-09-01T19:57:32Z"
+      updated_at: "2026-09-01T19:57:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "dogfood-boundary-compliance-review"
+    title: "Review dogfooding execution compliance"
+    description: "Derive the migrated layout, recovery, protocol, dependency acquisition, runner, supervised execution, and finalization behavior from source and native evidence in clean-slate contexts, then compare it with approved intent without reading production source in the review context."
+    context: "The authors of the engine and runner cannot certify the boundary that controls effects and workflow claims."
+    purpose: "Retain an independent disposition for every authority, context, network, recovery, and lifecycle guarantee before DOC-01 resumes."
+    expected_outcome: "The review records satisfied clauses, discrepancies, unsupported tiers, and required arbitration, and permits supervised local dogfooding only if no blocking mismatch remains."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "dogfood-boundary-security-audit"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#REQ-COMPLIANCE"
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#TODO-DOG-01"
+    timestamps:
+      created_at: "2026-09-01T19:57:32Z"
+      updated_at: "2026-09-01T19:57:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "doc-01-write-tests"
     title: "Define advisory document review tests"
     description: "Write failing tests for exact-digest component and project review bundles, bounded redacted reports, explicit acknowledgement, per-bundle exceptions, default-on configuration and project opt-out, unavailable agents, canonical task projections, governed project paths, and stale review evidence."
@@ -36,8 +215,9 @@ tasks:
     purpose: "Make review occurrence and human acknowledgement enforceable without allowing agent findings to become compliance or veto authority."
     expected_outcome: "Tests distinguish review evidence from review findings and prove component and project acceptance require a configured persistent opt-out, a current acknowledged receipt, or an exact-bundle exception while validation, status, and task readiness remain unchanged."
     kind: test
-    status: in-progress
-    depends_on: []
+    status: pending
+    depends_on:
+      - "dogfood-boundary-compliance-review"
     requirements:
       - "DESIGN.md#Verification-strategy"
       - "REQUIREMENTS.md#REQ-ADVISORY-DOCUMENT-REVIEW"
@@ -45,7 +225,7 @@ tasks:
       - "TODO.md#DOC-01"
     timestamps:
       created_at: "2026-08-31T18:50:51Z"
-      updated_at: "2026-09-01T18:57:19Z"
+      updated_at: "2026-09-01T19:23:23Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

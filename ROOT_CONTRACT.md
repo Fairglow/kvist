@@ -23,6 +23,16 @@ constraint set injected into component work.
   use an explicit invocation acknowledgement that states its authority and
   scope; sandboxed task execution requires separately persisted policy
   approval.
+- Keep authoring, dependency acquisition, verification, and promotion as
+  distinct authority phases. Authoring receives only approved writable paths.
+  Dependency acquisition may reach exact configured package sources and may
+  write only attempt-local dependency and workspace state. Verification runs
+  without network access. Agents must not write queues, intent, implementation
+  records, approval state, or canonical evidence.
+- Keep model networking and credentials outside the effect sandbox. Initial
+  task execution may use local agents; future remote agents require a
+  host-owned transport and typed tool broker rather than a mounted user home or
+  raw provider credential.
 - Support executable agent workflows on Linux only until independently tested
   platform backends exist. Keep operating-system enforcement behind explicit
   interfaces so deferred platforms do not leak conditional behavior through
@@ -59,3 +69,6 @@ constraint set injected into component work.
   implemented behavior before it is declared compliant.
 - Record intent-to-implementation discrepancies for explicit
   arbitration; do not silently alter either artifact.
+- Do not treat external process success as human acceptance. Supervised
+  execution records a reviewable attempt, and ambiguous interrupted attempts
+  remain fenced until explicit recovery and disposition.

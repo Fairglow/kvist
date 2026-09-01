@@ -24,8 +24,12 @@ evidence.
 | Agent integration | `agent`, `prompt_input`, `wizard` | Role selection, prompt sources, standalone runtime integration |
 | Onboarding | `init`, `convert`, `import`, `reverse_discovery` | New projects and explicit source-derived drafts |
 
-The child `agent_runtime/` directory is a separately packaged component with
-its own requirements, contract, design, queue, record, tests, and manifest.
+The target `engine/` directory is both the root component and Rust workspace.
+Its `agent_runtime/` and `sandbox_runner/` directories are separately packaged
+child components with their own requirements, contracts, designs, queues,
+records, tests, and manifests. The one-way migration from the current `src/`
+layout is described in
+`docs/decisions/0003-align-rust-workspace-with-components.md`.
 
 ## Interactions and state
 
@@ -49,6 +53,10 @@ Task mutation follows:
 Task execution adds policy approval, runner identity and capability checks,
 read-only root and immediate-parent contract mounts, agent execution, output
 redaction, and implementation test verification.
+
+The target dogfooding path splits this into recovery-safe supervised authoring,
+optional mediated dependency acquisition, isolated verification, and explicit
+human finalization. Each phase receives a separately canonicalized grant set.
 
 ## Algorithms and decisions
 
@@ -95,6 +103,45 @@ and qualification and proceeds directly to role binding.
 
 Significant artifact separation rationale is retained in
 `docs/decisions/0001-separate-component-intent.md`.
+
+### Planned dogfooding execution boundary
+
+The engine replaces the unreleased sandbox protocol's original shape while
+retaining protocol version 1. A request is a closed typed value containing the
+phase, working directory, argv, environment, network capability, resource
+limits, context paths, and mount grants. Each mount identifies its canonical
+source, fixed sandbox destination, access, purpose, and approval-bound
+identity. Unknown fields, purposes, overlaps, aliases, links, special files,
+and paths outside approved roots fail before the runner is probed.
+
+The Bubblewrap runner is a child component but is installed as one regular
+executable outside the worktree. Engine approval binds the descriptor-launched
+runner bytes, Bubblewrap path and digest, kernel capability result, typed
+policy, toolchain, command, sources, and grant plan. The runner independently
+parses the request and cannot import engine types or trust engine path
+validation as a substitute for its own checks.
+
+Authoring and verification use separate filesystem views. Authoring receives
+only local component context and explicit writable implementation/test roots.
+Workflow artifacts and evidence are read-only or absent. Verification can read
+approved workspace metadata, provider source, toolchains, and dependency
+caches needed by the build, but those files are not added to the agent prompt
+or writable set. Nested child implementation paths are masked from a parent
+authoring view unless separately granted.
+
+The dependency phase runs Cargo acquisition without compiling. A
+source-aware network boundary permits only configured registry index/download
+origins or an exact approved Git repository and immutable revision. Cargo uses
+an empty home plus attempt-local registry, Git, cache, lockfile, and scratch
+paths. Valid content may enter a project cache only after bounded traversal,
+checksum, lockfile, source, link, and concurrent-state validation.
+Verification remounts that content read-only and disables network.
+
+Supervised execution records an attempt but leaves completion to a separate
+human disposition bound to its ID, approved pre-state, scoped post-state, and
+verification evidence. It does not retry. The first pilot may write a narrow
+live path such as `tests/`; private snapshots and journaled conflict-checked
+promotion are required before unattended operation.
 
 The approved target workflow adds three planned capabilities without changing
 the current CLI contract:
@@ -189,6 +236,12 @@ The lock identity hashes canonical project and component paths. Drop attempts
 cleanup for in-process failure, but externally retained locks and incomplete
 prepared evidence require explicit recovery rather than guessing.
 
+The target attempt journal adds a unique ID, pre-queue and intended-post-queue
+digests, policy and runner identities, scoped filesystem preconditions, and
+durable phase markers. Recovery finalizes only an exact known state or records
+that execution provably did not begin. Every other case remains fenced and
+requires a human disposition; it never performs a destructive VCS reset.
+
 Sandbox runner launch validates file identity and uses descriptor-bound Linux
 execution to reduce time-of-check/time-of-use substitution. Timeout and output
 overflow terminate the runner process tree and become explicit failures.
@@ -201,8 +254,10 @@ inspection is read-only and preserves non-UTF-8 paths internally.
 
 Project-controlled sandbox configuration cannot approve itself. Approval state
 is authenticated in user-owned storage and bound to exact project, worktree,
-root-contract, runner, and policy identity. Environment inheritance is
-allowlisted, network is denied, and the component is the only writable mount.
+root-contract, runner, Bubblewrap backend, toolchain, source policy, command,
+grant plan, and resource identity. Environment inheritance is allowlisted.
+Authoring and verification deny network. Dependency acquisition has a separate
+source-limited capability and writes only approved attempt-local state.
 
 Direct prompt and setup streams are bounded but are not retained as durable
 evidence by the root component. Task subprocess output is bounded and literal
@@ -225,6 +280,14 @@ must cover all three templates, line-aware diagnostics, no-clobber creation,
 five-artifact discovery, separate staleness causes, parent-contract
 propagation, component context paths, conversion/import/reverse-discovery, and
 independent compliance evidence.
+
+Dogfooding-boundary tests must additionally use the real Bubblewrap runner to
+cover malformed requests, path aliases and links, hidden workflow state,
+read-only intent and child implementations, task-scoped writes, absent home
+and Git state, process-tree cleanup, resource exhaustion, attempt recovery,
+human finalization, source-limited Cargo acquisition, untrusted archives and
+caches, offline locked verification, backend replacement, and refusal to
+degrade or fall back.
 
 Future review work must additionally test stable task projection, exact-digest
 receipt matching, acknowledgement and exception paths, opt-out visibility,

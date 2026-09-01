@@ -1,2 +1,4 @@
 {"phase":"prepared","task_id":"doc-01-write-tests","from_status":"pending","to_status":"in-progress","timestamp":"2026-09-01T18:57:19Z","reason":null}
 {"phase":"committed","task_id":"doc-01-write-tests","from_status":"pending","to_status":"in-progress","timestamp":"2026-09-01T18:57:19Z","reason":null}
+{"phase":"prepared","task_id":"doc-01-write-tests","from_status":"in-progress","to_status":"pending","timestamp":"2026-09-01T19:23:23Z","reason":null}
+{"phase":"committed","task_id":"doc-01-write-tests","from_status":"in-progress","to_status":"pending","timestamp":"2026-09-01T19:23:23Z","reason":null}

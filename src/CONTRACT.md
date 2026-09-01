@@ -89,6 +89,11 @@ documents. `component accept` validates local intent and the immediate parent
 contract, records their exact revisions in the queue, and clears attributable
 stale evidence without changing task definitions or status.
 
+The target dogfooding execution surface additionally provides explicit attempt
+recovery and human finalization operations. Their final command spellings are
+defined by the queued CLI tests before implementation. They are not current
+CLI interfaces.
+
 ## Required interfaces
 
 Kvist requires:
@@ -98,6 +103,8 @@ Kvist requires:
 - a selected Git or Jujutsu repository for durable-artifact tracking checks;
 - an independently installed runner implementing
   `kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` for task execution;
+- canonical supported package-source services for explicitly approved
+  dependency acquisition;
 - operating-system filesystem, process, terminal, and user-state services.
 
 Core inspection does not require any external agent or network interface.
@@ -159,10 +166,23 @@ policy approvals, attempt records, and test verification follow the atomicity,
 locking, and evidence guarantees stated in the requirements.
 
 `prompt` host execution requires `--allow-host-execution`. It is never
-represented as sandboxed. `task run` instead requires the approved runner and
-a writable component-only implementation mount plus read-only root and
-immediate-parent contract mounts; runner failure cannot fall back to host
-execution.
+represented as sandboxed. Current `task run` retains the old component-only
+request and cannot execute Kvist's own root workspace safely. The target
+version-one sandbox request replaces that shape with typed, approval-bound
+authoring, acquisition, verification, context, toolchain, cache, and scratch
+grants. There is no fallback to the legacy request or host execution.
+
+The target supervised tier requires one explicit task and produces a pending
+human disposition after agent and verification results are recorded. A
+separate finalization action binds acceptance or blocking to the exact attempt
+and scoped changes. Automatic selection, retry, and completion are not part of
+that tier.
+
+Dependency acquisition permits Cargo network access only in its distinct
+phase and only to exact configured supported sources. It uses attempt-local
+writable dependency directories and never mounts the user's Cargo home.
+Authoring and verification remain network-denied; verification uses approved
+content with `--locked`.
 
 `agent setup` is the explicit acknowledgement for its single generated
 qualification command. Kvist adds no filesystem, credential, executable, or
@@ -185,7 +205,9 @@ state left on disk for explicit recovery.
 Task execution distinguishes spawn, timeout, output-limit, policy, runner,
 agent, verification, and lifecycle failures. Failed verification blocks the
 task with bounded redacted evidence. Retained locks or a trailing prepared
-record fence further writes until explicit recovery.
+record fence further writes until explicit recovery. Target recovery can
+reconcile only digest-proven state; uncertain source effects remain fenced for
+human disposition.
 
 ## Security and authority
 
@@ -197,10 +219,16 @@ prompt execution inherits the user's full authority only after explicit
 acknowledgment.
 
 Sandbox approval is bound to canonical project/worktree identity, the exact
-bounded `ROOT_CONTRACT.md` digest, runner identity, exact policy bytes, and a
-user-owned authentication secret outside the repository. Runners inside the
-selected worktree are rejected. Task execution allows only the approved
-component mount, denied network, explicit environment, and bounded resources.
+bounded `ROOT_CONTRACT.md` digest, runner and Bubblewrap identity, exact policy
+bytes, typed grants, supported package sources, command and toolchain identity,
+and a user-owned authentication secret outside the repository. Runners inside
+the selected worktree are rejected. Every execution phase receives only its
+approved paths, network capability, environment, and bounded resources.
+
+Model transport and credentials are not dependency-acquisition capabilities.
+Initial task agents are local. A future remote agent uses host-owned model
+transport and credential references plus typed tool requests; mounting ambient
+provider state into the effect sandbox is outside this contract.
 
 Secrets must not be persisted in project configuration, task queues, prompts,
 logs, schemas, or evidence. Configured literal redactions and output bounds
