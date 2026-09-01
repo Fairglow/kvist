@@ -11,9 +11,10 @@ use std::{
 #[cfg(feature = "rig-transport")]
 use agent_runtime::RigModelTransport;
 use agent_runtime::{
-    CancellationToken, CommandSpec, DirectModelTransport, Error, LocalModelProvider, ModelMessage,
-    ModelRequest, ModelStreamEvent, ModelTransport, ReasoningEffort, SetupOptions,
-    SupervisionPolicy, ToolChoice, default_profile_config_path, load_profile,
+    CancellationToken, CatalogProvider, CommandSpec, DirectModelTransport, Error,
+    LocalModelProvider, ModelDiscoveryOptions, ModelMessage, ModelRequest, ModelStreamEvent,
+    ModelTransport, ReasoningEffort, SetupOptions, SupervisionPolicy, ToolChoice,
+    default_profile_config_path, discover_models, load_profile,
     render_command_with_reasoning_effort, resolve_prompt, run_setup_wizard_with_options,
     run_supervised, run_supervised_capture,
 };
@@ -34,9 +35,65 @@ struct Cli {
 enum Command {
     /// Send a text-only request directly to local Ollama or llama-server.
     Model(ModelArguments),
+    /// Discover provider-advertised model identifiers without running inference.
+    Models(ModelsArguments),
     Run(RunArguments),
     /// Interactively create or update a reusable provider profile.
     Setup(SetupArguments),
+}
+
+#[derive(Debug, Args)]
+struct ModelsArguments {
+    #[arg(long, value_enum)]
+    provider: CatalogProviderArgument,
+
+    #[arg(long, value_name = "HTTP_LOOPBACK_URL")]
+    endpoint: Option<String>,
+
+    #[arg(long, value_name = "PATH")]
+    executable: Option<String>,
+
+    /// Acknowledge one no-prompt ACP provider session.
+    #[arg(long)]
+    allow_host_discovery: bool,
+
+    #[arg(long, default_value_t = 5)]
+    timeout: u64,
+
+    #[arg(long, default_value_t = 65_536)]
+    max_response_bytes: usize,
+
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CatalogProviderArgument {
+    Ollama,
+    LlamaServer,
+    Copilot,
+    Gemini,
+    LlamaCli,
+    CustomScript,
+}
+
+impl CatalogProviderArgument {
+    fn catalog_provider(self) -> agent_runtime::Result<CatalogProvider> {
+        match self {
+            Self::Ollama => Ok(CatalogProvider::Ollama),
+            Self::LlamaServer => Ok(CatalogProvider::LlamaServer),
+            Self::Copilot => Ok(CatalogProvider::Copilot),
+            Self::Gemini => Ok(CatalogProvider::Gemini),
+            Self::LlamaCli => Err(Error::UnsupportedCapability {
+                provider: "llama-cli",
+                capability: "provider model catalog",
+            }),
+            Self::CustomScript => Err(Error::UnsupportedCapability {
+                provider: "custom-script",
+                capability: "provider model catalog",
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -215,9 +272,69 @@ fn execute() -> agent_runtime::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Model(arguments) => model(arguments),
+        Command::Models(arguments) => models(arguments),
         Command::Run(arguments) => run(arguments),
         Command::Setup(arguments) => setup(arguments),
     }
+}
+
+fn models(arguments: ModelsArguments) -> agent_runtime::Result<()> {
+    let provider = arguments.provider.catalog_provider()?;
+    match provider {
+        CatalogProvider::Ollama | CatalogProvider::LlamaServer
+            if arguments.executable.is_some() =>
+        {
+            return Err(Error::ModelCatalogInvalid {
+                reason: "--executable is only valid for ACP providers".to_owned(),
+            });
+        }
+        CatalogProvider::Copilot | CatalogProvider::Gemini if arguments.endpoint.is_some() => {
+            return Err(Error::ModelCatalogInvalid {
+                reason: "--endpoint is only valid for HTTP providers".to_owned(),
+            });
+        }
+        _ => {}
+    }
+    let working_directory = std::env::current_dir().map_err(|source| Error::Io {
+        operation: "determine discovery working directory",
+        path: PathBuf::from("."),
+        source,
+    })?;
+    let catalog = discover_models(
+        provider,
+        &ModelDiscoveryOptions {
+            endpoint: arguments.endpoint,
+            executable: arguments.executable,
+            working_directory,
+            timeout: Duration::from_secs(arguments.timeout),
+            max_response_bytes: arguments.max_response_bytes,
+            allow_host_discovery: arguments.allow_host_discovery,
+        },
+        &CancellationToken::new(),
+    )?;
+    let stdout = std::io::stdout();
+    let mut writer = stdout.lock();
+    if arguments.json {
+        serde_json::to_writer(&mut writer, &catalog).map_err(|source| Error::Io {
+            operation: "write JSON model catalog",
+            path: PathBuf::from("<stdout>"),
+            source: std::io::Error::other(source),
+        })?;
+        writer.write_all(b"\n").map_err(|source| Error::Io {
+            operation: "write JSON model catalog",
+            path: PathBuf::from("<stdout>"),
+            source,
+        })?;
+    } else {
+        for model in catalog.models() {
+            writeln!(writer, "{}", model.id()).map_err(|source| Error::Io {
+                operation: "write model catalog",
+                path: PathBuf::from("<stdout>"),
+                source,
+            })?;
+        }
+    }
+    Ok(())
 }
 
 fn model(arguments: ModelArguments) -> agent_runtime::Result<()> {

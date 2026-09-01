@@ -7,7 +7,8 @@ use nix::{
 use std::os::unix::fs::PermissionsExt;
 use std::{
     fs,
-    io::{Cursor, Write},
+    io::{Cursor, Read, Write},
+    net::TcpListener,
     process::{Command, Stdio},
     thread,
     time::{Duration, Instant},
@@ -22,6 +23,25 @@ use kvist::wizard::{run_wizard, run_wizard_with_force, run_wizard_with_profile_c
 fn test_wizard_ollama_local_config() {
     let project = TempDir::new().expect("create temp dir");
     let project_dir = project.path();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake Ollama");
+    let endpoint = format!(
+        "http://{}",
+        listener.local_addr().expect("fake Ollama address")
+    );
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept Ollama tags");
+        let mut request = [0_u8; 2048];
+        let count = stream.read(&mut request).expect("read Ollama tags");
+        assert!(String::from_utf8_lossy(&request[..count]).starts_with("GET /api/tags "));
+        let body = r#"{"models":[{"name":"small"},{"name":"selected:model"}]}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .expect("write Ollama tags");
+    });
 
     // Mock inputs:
     // 1. Choose Ollama (Option 3)
@@ -29,7 +49,7 @@ fn test_wizard_ollama_local_config() {
     // 3. Enter Ollama model name (llama3.1:8b)
     // 4. Choose All Roles (Option 4)
     // 5. Choose Project-local configuration (Option 1)
-    let mock_input = "1\n3\n\nllama3.1:8b\n\n4\n1\n";
+    let mock_input = format!("1\n3\n{endpoint}\n2\nselected-profile\n\n4\n1\n");
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -48,9 +68,23 @@ fn test_wizard_ollama_local_config() {
     assert!(toml_content.contains("[agent.profiles.developer]"));
     assert!(toml_content.contains("[agent.profiles.architect]"));
     assert!(toml_content.contains("[agent.profiles.security-reviewer]"));
-    assert!(toml_content.contains("OLLAMA_HOST=http://localhost:11434"));
+    let exact_command =
+        format!("env \"OLLAMA_HOST={endpoint}\" ollama run \"selected:model\" '{{prompt}}'");
+    let parsed = config::load(project_dir).expect("load selected model configuration");
+    for profile in [
+        &parsed.agent.developer,
+        &parsed.agent.architect,
+        &parsed.agent.security_reviewer,
+    ] {
+        let selected = profile
+            .models
+            .iter()
+            .find(|model| model.name == "selected-profile")
+            .expect("selected model");
+        assert_eq!(selected.command, exact_command);
+    }
     assert!(toml_content.contains("ollama run"));
-    assert!(toml_content.contains("llama3.1:8b"));
+    assert!(toml_content.contains("selected:model"));
 }
 
 #[test]

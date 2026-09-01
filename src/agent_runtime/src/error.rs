@@ -36,6 +36,18 @@ pub enum Error {
     #[error("host execution requires explicit --allow-host-execution acknowledgement")]
     HostExecutionNotAcknowledged,
 
+    /// A standalone ACP discovery omitted the required host-authority warning.
+    #[error("ACP model discovery requires explicit --allow-host-discovery acknowledgement")]
+    HostDiscoveryNotAcknowledged,
+
+    /// A provider model catalog violates its canonical schema or protocol.
+    #[error("invalid provider model catalog: {reason}")]
+    ModelCatalogInvalid { reason: String },
+
+    /// The overall provider model discovery deadline elapsed.
+    #[error("provider model discovery timed out")]
+    ModelDiscoveryTimedOut,
+
     /// A canonical model request violates a size, schema, or identity invariant.
     #[error("invalid model request: {reason}")]
     InvalidModelRequest { reason: String },

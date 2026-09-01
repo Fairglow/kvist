@@ -184,11 +184,36 @@ cargo run --locked -p agent-runtime --bin agent-run --features rig-transport -- 
 It currently supports only numeric-loopback Ollama and llama-server endpoints.
 The direct adapter remains the default and fallback.
 
-During `agent-run setup`, llama-server defaults to
-`http://127.0.0.1:9931`, probes `/health`, and lists bounded model IDs from
-`/v1/models`. Select a listed number, enter an exact model ID, or retain the
-literal `default` when the server defines that alias. The reusable profile name
-is selected separately from the provider model ID.
+List provider-advertised model IDs without running inference:
+
+```bash
+cargo run --locked -p agent-runtime --bin agent-run -- models \
+  --provider ollama
+cargo run --locked -p agent-runtime --bin agent-run -- models \
+  --provider copilot \
+  --allow-host-discovery
+cargo run --locked -p agent-runtime --bin agent-run -- models \
+  --provider gemini \
+  --allow-host-discovery \
+  --json
+```
+
+Ollama and llama-server use bounded numeric-loopback HTTP catalogs at
+`/api/tags` and `/v1/models`. Copilot and Gemini use their account-aware ACP
+catalogs. ACP discovery starts the selected CLI with the caller's host
+authority but sends no model prompt, so standalone use requires
+`--allow-host-discovery`. Text output is one model ID per line; `--json`
+returns the ordered descriptors and advertised current model.
+`llama-cli` and custom wrappers have no provider inventory; `models` reports
+that capability as unsupported and their setup paths remain manual.
+
+During `agent-run setup`, each catalog-capable provider presents numbered
+choices and uses its advertised current model, or first model, as the default.
+Manual entry is available only through the final `Other model ID...` choice.
+If discovery fails visibly, setup offers the provider fallback (`auto` for
+Copilot and Gemini, `default` for llama-server, or `llama3.1:8b` for Ollama)
+and the custom choice. The reusable profile name is selected separately from
+the provider model ID.
 
 Standalone profiles are stored at
 `$XDG_CONFIG_HOME/agent-runtime/config.toml`, falling back to
@@ -219,8 +244,10 @@ notices, and backups likewise do not restrict an agent's authority.
 
 Setup probes the conventional `llama-cli`, `gemini`, or `copilot` executable
 with `--version`. If that fails, it asks for a direct executable or compatible
-wrapper while retaining the selected provider. It then offers to run the exact
-generated command before saving. Maintained Linux templates are:
+wrapper while retaining the selected provider. It automatically qualifies the
+exact generated command with the fixed prompt `Reply with exactly: OK` before
+saving; `--force` is required to retain a failed qualification. Maintained
+Linux templates are:
 
 ```text
 llama-cli --model /path/model.gguf --prompt '{prompt}' --single-turn \

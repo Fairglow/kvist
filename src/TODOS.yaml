@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:468bbdc6b10ce05b04ce315d8b81f20715ae6dc5b85a7a22f812e8232436ef96"
-  contract_revision: "sha256:ec6fb1a64df19b7d8f04edbe3d38688d7b15bf4cc01dd3e7ef773f8ad631298e"
-  design_revision: "sha256:e320c0cd0466aa0e3a1113999a8e625f08baf9891b67dc438be4d75137ff48dd"
+  requirements_revision: "sha256:7f6ef8a456268508e8da2fbdd1cf796d830a7521da608c7e06bcdfb5a4e15c97"
+  contract_revision: "sha256:5e8f49fc7d151c87933d7ba366d4f1ff54de41cb7ba6cbf45c8c1f14eb7d3102"
+  design_revision: "sha256:975365178bb9992fdc107e8d7f8e0eba60c40ea0bb63c208c87647d360a13646"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-08-31T23:29:25Z"
+    checked_at: "2026-09-01T07:15:25Z"
     stale_since: null
     causes: []
 tasks:
@@ -1404,5 +1404,86 @@ tasks:
       created_at: "2026-08-31T19:53:23Z"
       updated_at: "2026-08-31T23:28:28Z"
       completed_at: "2026-08-31T23:28:28Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agn-model-discovery-write-tests"
+    title: "Define root assisted-model setup tests"
+    description: "Write failing root wizard tests proving provider model choices flow through role binding without requiring exact identifier recall."
+    context: "Kvist consumes runtime profile collection and must preserve its assisted selection and qualification semantics."
+    purpose: "Specify the root integration before accepting the child catalog behavior."
+    expected_outcome: "Root tests fail until selected provider models are materialized exactly into the chosen role configuration."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T06:27:02Z"
+      updated_at: "2026-09-01T07:01:22Z"
+      completed_at: "2026-09-01T07:01:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agn-model-discovery-implement-code"
+    title: "Integrate assisted model setup"
+    description: "Adopt the runtime model catalog selection in the Kvist wizard and preserve exact selected commands during role materialization."
+    context: "The child runtime owns discovery while Kvist owns roles and durable project configuration."
+    purpose: "Give root CLI users the same provider-aware selection without duplicating provider logic."
+    expected_outcome: "Kvist setup presents runtime choices, qualifies the selection, and stores the exact selected model for requested roles."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agn-model-discovery-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-01T06:27:02Z"
+      updated_at: "2026-09-01T07:01:22Z"
+      completed_at: "2026-09-01T07:01:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agn-model-discovery-security-audit"
+    title: "Audit assisted model setup integration"
+    description: "Review provider choice propagation, role binding, command preservation, setup authority, and configuration persistence."
+    context: "Untrusted provider model identifiers cross the runtime-to-root boundary and become durable commands."
+    purpose: "Prevent catalog selection from broadening authority or corrupting role configuration."
+    expected_outcome: "High-confidence integration findings are fixed or retained as explicit blockers."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "agn-model-discovery-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T06:27:02Z"
+      updated_at: "2026-09-01T07:01:22Z"
+      completed_at: "2026-09-01T07:01:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agn-model-discovery-compliance-review"
+    title: "Review assisted model setup compliance"
+    description: "Independently compare selected catalog model propagation and root setup presentation with root intent and runtime contract evidence."
+    context: "The root integrator cannot certify preservation of the child model-selection contract."
+    purpose: "Retain independent evidence for the assisted setup consumer boundary."
+    expected_outcome: "Every integration discrepancy and provider limitation is recorded before promotion."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "agn-model-discovery-security-audit"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T06:27:02Z"
+      updated_at: "2026-09-01T07:01:22Z"
+      completed_at: "2026-09-01T07:01:22Z"
     blocked_reason: null
     recovery_state: null

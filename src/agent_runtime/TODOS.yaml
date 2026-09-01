@@ -1,14 +1,14 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:b5f701ec8fe7e2d366086c2314ecec56c50397198fd0bd034197c8322caad2cf"
-  contract_revision: "sha256:29470452d699f5a3ad2ae3261e54bc0b0df248aa1388ebf1dac25170ff115a6f"
-  design_revision: "sha256:3ac52dfabdb18cf5be0c8c7d14bda1386e04a36d456cddb5b2b9783bd73539c3"
+  requirements_revision: "sha256:14fc968bd63493c7683ea684dc2ba6137b19e5cb6a8b2b31e99e73291fff65b7"
+  contract_revision: "sha256:8f2013019e6a753dc6617347f47bcd1d62bd8772a1888a25f0ce8feb2db47369"
+  design_revision: "sha256:5648cabedd920f571097cb5ec9186da3c130e37855a65da295e12f43de95dc8f"
   parent_contract:
     path: "../CONTRACT.md"
-    revision: "sha256:ec6fb1a64df19b7d8f04edbe3d38688d7b15bf4cc01dd3e7ef773f8ad631298e"
+    revision: "sha256:5e8f49fc7d151c87933d7ba366d4f1ff54de41cb7ba6cbf45c8c1f14eb7d3102"
   revalidation:
     state: current
-    checked_at: "2026-08-31T23:29:25Z"
+    checked_at: "2026-09-01T07:15:43Z"
     stale_since: null
     causes: []
 tasks:
@@ -1405,5 +1405,86 @@ tasks:
       created_at: "2026-08-31T19:53:23Z"
       updated_at: "2026-08-31T23:28:28Z"
       completed_at: "2026-08-31T23:28:28Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-19-write-tests"
+    title: "Define provider model discovery tests"
+    description: "Write failing tests for bounded Ollama, llama-server, Copilot ACP, and Gemini ACP catalogs, numbered selection, current-model defaults, explicit custom fallback, deterministic list output, host acknowledgement, wrong IDs, unsolicited requests, empty or inconsistent state, oversized records, timeout, and helper cleanup."
+    context: "Setup requires users to type provider model identifiers even when providers expose account-aware catalogs."
+    purpose: "Make assisted selection and non-interactive model listing executable before adding discovery processes."
+    expected_outcome: "Tests fail until every catalog-capable provider offers bounded choices and free-form input is gated behind the final custom entry."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#AR-REQ-SETUP"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T06:27:02Z"
+      updated_at: "2026-09-01T07:01:22Z"
+      completed_at: "2026-09-01T07:01:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-19-implement-code"
+    title: "Implement provider model discovery"
+    description: "Add canonical bounded catalogs, HTTP and ACP discovery adapters, numbered setup choices with a final custom fallback, explicit Gemini Auto selection, and standalone text/JSON listing."
+    context: "The failing catalog tests define provider discovery without hardcoded account-specific model lists or prompt inference."
+    purpose: "Remove exact-model spelling as a prerequisite for configuring supported providers."
+    expected_outcome: "Setup and the runtime list command expose provider-advertised models safely and qualify the selected exact model."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-19-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-SETUP"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-01T06:27:02Z"
+      updated_at: "2026-09-01T07:01:22Z"
+      completed_at: "2026-09-01T07:01:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-19-security-audit"
+    title: "Audit provider model discovery"
+    description: "Review ACP process authority and cleanup, HTTP endpoint handling, catalog bounds, untrusted identifiers and labels, custom selection gating, and structured output."
+    context: "Model discovery starts provider helpers and parses untrusted account-specific metadata before qualification."
+    purpose: "Prevent assisted setup from introducing process leaks, injection, unbounded data, hidden authority, or misleading availability claims."
+    expected_outcome: "High-confidence discovery vulnerabilities are fixed or retained as explicit blockers."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "sa-19-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T06:27:02Z"
+      updated_at: "2026-09-01T07:01:22Z"
+      completed_at: "2026-09-01T07:01:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-19-compliance-review"
+    title: "Review provider model discovery compliance"
+    description: "Independently derive catalog, selection, fallback, output, and cleanup behavior and compare it with the runtime intent."
+    context: "The discovery implementer cannot certify that every advertised choice is bounded, provider-derived, and applied exactly."
+    purpose: "Retain independent evidence for the model-discovery and setup-selection guarantees."
+    expected_outcome: "The review records every satisfied clause, discrepancy, and provider limitation before promotion."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "sa-19-security-audit"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#AR-REQ-SETUP"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T06:27:02Z"
+      updated_at: "2026-09-01T07:01:22Z"
+      completed_at: "2026-09-01T07:01:22Z"
     blocked_reason: null
     recovery_state: null

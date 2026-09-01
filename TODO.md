@@ -304,6 +304,10 @@ audit and compliance review remain pending.
 
 - Add command `kvist agent setup` to launch an interactive CLI wizard.
 - Wizard automatically queries Ollama's model tags or searches the shell `PATH` for standard binaries.
+- For providers with machine-readable model catalogs, present bounded numbered
+  model choices and put free-form model entry behind a final custom choice.
+  Use Ollama and llama-server HTTP catalogs and Copilot/Gemini ACP session
+  model lists; file-backed and custom wrappers remain explicit manual paths.
 - Supports user-provided script wrappers (like `~/bin/llama-cli.sh`) by checking execute permissions and setting up custom templates.
 - Runs a non-destructive verification test prompt and streams output to verify the connection.
 - Prompts for the provider's model configuration name and exact command

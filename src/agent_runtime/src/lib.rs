@@ -9,6 +9,7 @@
 #[cfg(not(target_os = "linux"))]
 compile_error!("agent-runtime currently supports Linux only");
 
+mod catalog;
 mod command;
 mod direct_transport;
 mod error;
@@ -20,6 +21,9 @@ mod rig_transport;
 mod setup;
 mod supervisor;
 
+pub use catalog::{
+    CatalogProvider, ModelCatalog, ModelDiscoveryOptions, ProviderModel, discover_models,
+};
 pub use command::{render_command, render_command_with_reasoning_effort, split_raw_command};
 pub use direct_transport::DirectModelTransport;
 pub use error::{Error, Result};

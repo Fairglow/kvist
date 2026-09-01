@@ -78,14 +78,32 @@ configuration locations, and persist through synchronized atomic replacement.
 
 Setup MUST use caller-provided terminal-neutral I/O, maintained provider
 templates, bounded advisory probes, and explicit executable/model selection.
+Before accepting a provider model identifier, setup MUST obtain the provider's
+bounded model catalog when a machine-readable catalog is available, present
+numbered choices, and place manual entry behind a final explicit custom-model
+choice. Ollama and llama-server MUST use their HTTP model-list interfaces;
+Copilot and Gemini CLI MUST use their account-aware ACP session model lists.
+Discovery failure MUST be visible and MAY fall back only to a documented
+provider default plus the explicit custom-model choice. File-backed and custom
+wrapper providers, which expose no model catalog, MUST identify their path or
+wrapper selection as manual.
+
+The standalone runtime MUST provide a non-interactive command that lists the
+same discovered provider models in deterministic text or JSON form. Discovery
+MUST be bounded by time, output bytes, model count, and model-identifier size,
+must not invoke a model prompt, and must clean up every helper process.
+ACP-backed standalone discovery MUST require an explicit
+`--allow-host-discovery` acknowledgement for that one provider session.
+
 It MUST qualify the generated command automatically with one fixed, minimal,
 nonblank test prompt rather than asking the user to supply a prompt or repeat a
 host-authority acknowledgement. The setup action itself is the acknowledgement
-for that exact qualification command. Failed qualification MUST prevent
-persistence without offering an interactive bypass; an explicit `--force` MAY
-persist the failed profile with a warning. Qualification uses current host
-authority and does not claim tool or filesystem isolation. Qualification
-output MUST remain bounded and MUST NOT be forwarded as setup presentation.
+for the bounded provider discovery and exact qualification commands. Failed
+qualification MUST prevent persistence without offering an interactive bypass;
+an explicit `--force` MAY persist the failed profile with a warning.
+Qualification and discovery use current host authority and do not claim tool
+or filesystem isolation. Qualification output MUST remain bounded and MUST NOT
+be forwarded as setup presentation.
 
 ### AR-REQ-MODEL-TRANSPORT
 
@@ -123,6 +141,8 @@ evidence, or public serialized state.
   arguments, not an access-control boundary.
 - Local HTTP adapters reject proxies, redirects, TLS, non-loopback or
   non-numeric endpoints, oversized payloads, and unbounded responses.
+- Setup and standalone HTTP model discovery use the same numeric-loopback,
+  explicit-port endpoint restriction as local model transports.
 - Capabilities are tracked separately as advertised, conformance-tested, and
   policy-enabled.
 

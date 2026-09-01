@@ -30,6 +30,8 @@ messages/turns, local direct transports, and optional Rig transport adapters.
 The standalone `agent-run` CLI provides:
 
 - `setup [--force]` for profile creation, automatic qualification, and update;
+- `models --provider PROVIDER [--endpoint URL] [--executable PATH]
+  [--allow-host-discovery] [--json]` for bounded provider-model discovery;
 - `run` for supervised provider command execution from positional, file,
   editor, or redirected prompt input, with named profile selection,
   `--reasoning-effort`, and optional `--json` output; and
@@ -117,6 +119,46 @@ prompt is offered. Qualification command output is captured within the
 supervision bound rather than forwarded; setup reports only qualification
 status.
 
+For Ollama and llama-server, setup obtains model identifiers from `/api/tags`
+and `/v1/models` respectively using numeric-loopback HTTP endpoints with
+explicit ports. For Copilot and Gemini CLI, setup starts the selected
+executable in ACP mode, initializes protocol version 1, and creates a no-prompt
+session in the setup working directory with an empty MCP-server list and no
+client-provided filesystem, terminal, or MCP bridges. The provider remains an
+opaque host-authority process. Setup consumes `models.availableModels` from the
+correlated `session/new` response.
+
+The catalog preserves the first valid occurrence of each model ID in provider
+order. Its current model is retained only when that exact ID is in the list;
+otherwise the first model is the default selection. An empty or wholly invalid
+catalog is a discovery failure. Setup appends `Other model ID...` after every
+successful or fallback list and requests free-form input only after that entry
+is selected. Discovery failure is visible and offers `auto` for Copilot or
+Gemini, `default` for llama-server, or `llama3.1:8b` for Ollama before the
+custom entry. Gemini's advertised or fallback `auto` is stored explicitly as
+`--model auto`.
+
+`models` exposes the same catalogs without running inference. Text output is
+one validated model ID per line. JSON output is one object with
+`format_version: 1`, `provider`, nullable `current_model_id`, and ordered
+`models`; each model has `id`, `name`, and optional `description`. IDs are
+1–256 printable ASCII bytes excluding braces. Names and descriptions are
+bounded UTF-8 without control characters. JSON success is one object on stdout;
+failures use stderr and nonzero status.
+
+The provider input matrix is:
+
+| Provider | Discovery input | Default |
+| --- | --- | --- |
+| `ollama` | numeric-loopback HTTP endpoint, default `http://127.0.0.1:11434` | first advertised model |
+| `llama-server` | numeric-loopback HTTP endpoint, default `http://127.0.0.1:9931` | first advertised model |
+| `copilot` | executable, default `copilot`; ACP host acknowledgement required outside setup | advertised current model |
+| `gemini` | executable, default `gemini`; ACP host acknowledgement required outside setup | advertised current model |
+
+`llama-cli` and custom wrappers return an explicit unsupported-catalog error
+without spawning discovery. Their setup paths request an explicit file or
+wrapper because neither exposes a provider model inventory.
+
 Model transports return canonical output or explicit typed failure and never
 authorize or execute tools. Unsupported capability fails rather than silently
 degrading. External agents remain opaque whole processes.
@@ -137,10 +179,14 @@ component does not claim authority it cannot enforce.
 
 Host execution inherits the caller's filesystem, credential, executable, and
 network authority. The standalone `run` CLI requires explicit acknowledgment
-and the library names this mode directly. Setup qualification treats the
-explicit setup action as acknowledgement for the exact generated test command;
-this convenience is not isolation and does not authorize any later `run`.
-Context paths do not restrict access.
+and the library names this mode directly. Standalone ACP model discovery
+requires `--allow-host-discovery` for one no-prompt provider session. Setup
+qualification treats the explicit setup action as acknowledgement for the
+bounded provider-discovery commands and exact generated test command; this
+convenience is not isolation and does not authorize any later `run`. ACP
+discovery may initialize the selected CLI's configured provider session under
+that inherited authority but does not send a prompt. Context paths do not
+restrict access.
 
 Endpoint probes are advisory and bounded. Local transports disable proxies and
 redirects, allow only numeric loopback HTTP endpoints, bound request/response

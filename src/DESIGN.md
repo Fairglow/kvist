@@ -75,9 +75,15 @@ the command's structured response.
 
 Agent setup delegates provider collection and mandatory qualification to the
 runtime with a typed force option. The setup invocation supplies authority for
-the runtime's fixed-prompt qualification only. A successful qualification
-continues to role selection and atomic configuration persistence; a failed
-qualification exits before those steps unless `--force` was supplied.
+the runtime's bounded provider discovery and fixed-prompt qualification only.
+The runtime returns numbered provider model choices with a final custom-entry
+escape hatch before constructing the command profile. A successful
+qualification continues to role selection and atomic configuration
+persistence; a failed qualification exits before those steps unless `--force`
+was supplied.
+Kvist treats the catalog and selection as child-owned interaction and consumes
+only the validated resulting profile, preserving its command bytes during role
+materialization.
 Forced persistence retains a visible warning, while cancellation remains
 terminal. No separate test prompt, host-authority question, or
 save-after-failure question is part of the root wizard state machine.

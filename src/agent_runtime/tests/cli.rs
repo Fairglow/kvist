@@ -32,6 +32,179 @@ fn host_execution_requires_explicit_acknowledgement() {
 }
 
 #[test]
+fn models_http_text_and_json_outputs_are_deterministic() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind catalog server");
+    let endpoint = format!("http://{}", listener.local_addr().expect("catalog address"));
+    thread::spawn(move || {
+        for _ in 0..2 {
+            let (mut stream, _) = listener.accept().expect("accept models request");
+            let mut request = [0_u8; 1024];
+            let count = stream.read(&mut request).expect("read models request");
+            assert!(count > 0, "models request must not be empty");
+            let body = r#"{"data":[{"id":"b"},{"id":"a"}]}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("write models response");
+        }
+    });
+
+    let text = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args([
+            "models",
+            "--provider",
+            "llama-server",
+            "--endpoint",
+            &endpoint,
+        ])
+        .output()
+        .expect("list text models");
+    assert!(
+        text.status.success(),
+        "{}",
+        String::from_utf8_lossy(&text.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(text.stdout).expect("UTF-8 model IDs"),
+        "b\na\n"
+    );
+
+    let json = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args([
+            "models",
+            "--provider",
+            "llama-server",
+            "--endpoint",
+            &endpoint,
+            "--json",
+        ])
+        .output()
+        .expect("list JSON models");
+    assert!(
+        json.status.success(),
+        "{}",
+        String::from_utf8_lossy(&json.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&json.stdout).expect("one catalog object"),
+        serde_json::json!({
+            "format_version": 1,
+            "provider": "llama-server",
+            "current_model_id": null,
+            "models": [{"id":"b","name":"b"},{"id":"a","name":"a"}]
+        })
+    );
+}
+
+#[test]
+fn models_reports_manual_providers_as_unsupported_without_spawning() {
+    let workspace = TempDir::new().expect("workspace");
+    let marker = workspace.path().join("spawned");
+    let executable = workspace.path().join("provider");
+    fs::write(
+        &executable,
+        format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+    )
+    .expect("write provider");
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    for provider in ["llama-cli", "custom-script"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+            .args(["models", "--provider", provider, "--executable"])
+            .arg(&executable)
+            .output()
+            .expect("request unsupported catalog");
+
+        assert!(!output.status.success());
+        assert!(
+            String::from_utf8(output.stderr)
+                .expect("UTF-8 unsupported-catalog error")
+                .contains("provider model catalog")
+        );
+        assert!(!marker.exists());
+    }
+}
+
+#[test]
+fn models_acp_requires_host_discovery_acknowledgement_before_spawn() {
+    let workspace = TempDir::new().expect("workspace");
+    let marker = workspace.path().join("started");
+    let provider = workspace.path().join("provider");
+    fs::write(
+        &provider,
+        format!("#!/bin/sh\ntouch '{}'\n", marker.display()),
+    )
+    .expect("write provider");
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args(["models", "--provider", "copilot", "--executable"])
+        .arg(provider)
+        .output()
+        .expect("run refused ACP discovery");
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8(output.stderr)
+            .expect("UTF-8 error")
+            .contains("--allow-host-discovery")
+    );
+    assert!(!marker.exists());
+}
+
+#[test]
+fn models_acp_lists_correlated_provider_ids() {
+    let workspace = TempDir::new().expect("workspace");
+    let provider = workspace.path().join("provider");
+    fs::write(
+        &provider,
+        r#"#!/bin/sh
+test "$1" = --acp || exit 20
+IFS= read -r initialize || exit 21
+printf '%s\n' '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}'
+IFS= read -r session || exit 22
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"models":{"availableModels":[{"modelId":"account-current","name":"Current"},{"modelId":"account-other","name":"Other"}],"currentModelId":"account-current"}}}'
+"#,
+    )
+    .expect("write ACP provider");
+    fs::set_permissions(&provider, fs::Permissions::from_mode(0o700))
+        .expect("make ACP provider executable");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .current_dir(workspace.path())
+        .args([
+            "models",
+            "--provider",
+            "gemini",
+            "--allow-host-discovery",
+            "--executable",
+        ])
+        .arg(provider)
+        .args(["--json"])
+        .output()
+        .expect("list ACP models");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let catalog =
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).expect("catalog JSON");
+    assert_eq!(catalog["current_model_id"], "account-current");
+    assert_eq!(catalog["models"][0]["id"], "account-current");
+    assert_eq!(catalog["models"][1]["id"], "account-other");
+}
+
+#[test]
 fn invalid_xdg_config_home_falls_back_to_absolute_home() {
     let workspace = TempDir::new().expect("workspace");
     let expected = workspace.path().join(".config/agent-runtime/config.toml");
@@ -511,11 +684,12 @@ fn installed_gemini_and_copilot_use_noninteractive_templates() {
         .expect("write executable");
         fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).expect("make executable");
     }
+
     let configuration = workspace.path().join("profiles.toml");
 
     for (answers, profile_name) in [
-        ("5\ngemini-2.5-pro\ngemini-pro\n\nn\n", "gemini-pro"),
-        ("4\ngpt-5.4\ncopilot-pro\n\nn\n", "copilot-pro"),
+        ("5\n1\ngemini-auto\n\n", "gemini-auto"),
+        ("4\n2\ngpt-5.4\ncopilot-pro\n\n", "copilot-pro"),
     ] {
         let mut setup = Command::new(env!("CARGO_BIN_EXE_agent-run"))
             .current_dir(workspace.path())
@@ -546,7 +720,7 @@ fn installed_gemini_and_copilot_use_noninteractive_templates() {
             assert!(profile.command.contains("--output-format text"));
             assert!(profile.command.contains("--approval-mode yolo"));
             assert!(profile.command.contains("--model"));
-            assert!(profile.command.contains("gemini-2.5-pro"));
+            assert!(profile.command.contains("auto"));
             assert!(!profile.command.contains("--files"));
         } else {
             assert_eq!(profile.provider, "copilot");
@@ -561,6 +735,66 @@ fn installed_gemini_and_copilot_use_noninteractive_templates() {
             assert!(!profile.command.contains("copilot chat"));
         }
     }
+}
+
+#[test]
+fn setup_uses_the_acp_current_model_as_the_numbered_default() {
+    let workspace = TempDir::new().expect("workspace");
+    let bin = workspace.path().join("bin");
+    fs::create_dir(&bin).expect("create bin");
+    let gemini = bin.join("gemini");
+    fs::write(
+        &gemini,
+        r#"#!/bin/sh
+if [ "$1" = --version ]; then
+  printf '1.0\n'
+  exit 0
+fi
+if [ "$1" = --acp ]; then
+  IFS= read -r initialize || exit 21
+  printf '%s\n' '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":1}}'
+  IFS= read -r session || exit 22
+  printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"models":{"availableModels":[{"modelId":"first","name":"First"},{"modelId":"current","name":"Current"}],"currentModelId":"current"}}}'
+  exec /bin/sleep 30
+fi
+exit 0
+"#,
+    )
+    .expect("write Gemini provider");
+    fs::set_permissions(&gemini, fs::Permissions::from_mode(0o700))
+        .expect("make Gemini executable");
+    let configuration = workspace.path().join("profiles.toml");
+
+    let mut setup = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .current_dir(workspace.path())
+        .env("PATH", &bin)
+        .args(["setup", "--config"])
+        .arg(&configuration)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start setup");
+    use std::io::Write;
+    setup
+        .stdin
+        .take()
+        .expect("setup stdin")
+        .write_all(b"5\n\n\n\n")
+        .expect("select current ACP model and defaults");
+    let output = setup.wait_with_output().expect("wait for setup");
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let profile = load_profile(&configuration, "gemini").expect("load Gemini profile");
+    assert!(profile.command.contains("--model \"current\""));
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 setup output");
+    assert!(stdout.contains("2) current"));
+    assert!(stdout.contains("3) Other model ID..."));
+    assert!(stdout.contains("no-prompt ACP model discovery"));
 }
 
 #[test]

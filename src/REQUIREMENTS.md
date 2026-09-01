@@ -108,7 +108,10 @@ replacement characters.
 
 Interactive agent setup MUST automatically qualify a newly generated provider
 command with the fixed minimal prompt `Reply with exactly: OK`. Invoking setup
-MUST count as acknowledgement for that qualification command only and MUST NOT
+MUST first present bounded provider-advertised model choices when the selected
+runtime provider exposes them, with manual model entry available only through
+an explicit final custom choice. Invoking setup MUST count as acknowledgement
+for those bounded discovery commands and the qualification command only and MUST NOT
 authorize later host prompt execution. Failed qualification MUST prevent
 configuration persistence unless the user supplied `--force`; that override
 MAY persist the failed profile only after displaying an explicit warning and

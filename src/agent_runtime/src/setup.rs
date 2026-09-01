@@ -1,25 +1,19 @@
 use std::{
-    collections::BTreeSet,
     fs,
     io::{BufRead, Write},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
     time::Duration,
 };
 
-use serde_json::Value;
-
 use crate::{
-    CommandSpec, Error, ModelProfile, Result, SupervisionPolicy, command::json_string,
-    profile::is_valid_profile_name, render_command, run_supervised, run_supervised_capture,
-    upsert_profile,
+    CancellationToken, CatalogProvider, CommandSpec, Error, ModelCatalog, ModelDiscoveryOptions,
+    ModelProfile, Result, SupervisionPolicy, command::json_string, discover_models,
+    profile::is_valid_profile_name, render_command, run_supervised_capture, upsert_profile,
 };
 
+const OLLAMA_DEFAULT_URL: &str = "http://127.0.0.1:11434";
 const LLAMA_SERVER_DEFAULT_URL: &str = "http://127.0.0.1:9931";
-const MAX_DISCOVERY_BYTES: usize = 64 * 1024;
-const MAX_DISCOVERED_MODELS: usize = 128;
-const MAX_MODEL_ID_BYTES: usize = 256;
 const SETUP_TEST_PROMPT: &str = "Reply with exactly: OK";
 
 /// Controls the non-interactive qualification decision made by setup.
@@ -50,7 +44,7 @@ pub fn collect_profile_with_options<R: BufRead, W: Write>(
         "Select model provider:\n\
            1) Local llama-cli (direct binary execution)\n\
            2) Local llama-server (HTTP API - default 127.0.0.1:9931)\n\
-           3) Ollama (HTTP API - default localhost:11434)\n\
+           3) Ollama (HTTP API - default 127.0.0.1:11434)\n\
            4) Copilot (CLI wrapper)\n\
            5) Gemini (CLI wrapper)\n\
            6) Custom Wrapper Script (e.g., ~/bin/llama-cli.sh)\n\
@@ -66,7 +60,7 @@ pub fn collect_profile_with_options<R: BufRead, W: Write>(
     };
     write_output(writer, &format!("\nConfiguring provider: {provider}\n"))?;
 
-    let profile = configure_profile(provider, reader, writer)?;
+    let profile = configure_profile(provider, reader, writer, working_directory)?;
     write_output(
         writer,
         &format!("Generated command template: {}\n", profile.command),
@@ -174,6 +168,7 @@ fn configure_profile<R: BufRead, W: Write>(
     provider: &str,
     reader: &mut R,
     writer: &mut W,
+    working_directory: &Path,
 ) -> Result<ModelProfile> {
     let (name, command) = match provider {
         "llama-cli" => {
@@ -207,10 +202,18 @@ fn configure_profile<R: BufRead, W: Write>(
                 "llama-server base URL",
                 LLAMA_SERVER_DEFAULT_URL,
             )?;
-            validate_probe_url(&url)?;
             let url = url.trim_end_matches('/');
-            probe_and_report(&format!("{url}/health"), writer)?;
-            let model = select_llama_server_model(reader, writer, url)?;
+            let model = select_discovered_model(
+                reader,
+                writer,
+                CatalogProvider::LlamaServer,
+                ModelDiscoveryOptions {
+                    endpoint: Some(url.to_owned()),
+                    working_directory: working_directory.to_path_buf(),
+                    ..setup_discovery_options()
+                },
+                "default",
+            )?;
             let profile_default = if is_valid_profile_name(&model) {
                 model.as_str()
             } else {
@@ -231,20 +234,29 @@ fn configure_profile<R: BufRead, W: Write>(
             (name, command)
         }
         "ollama" => {
-            let url =
-                prompt_with_default(reader, writer, "Ollama base URL", "http://localhost:11434")?;
-            validate_probe_url(&url)?;
-            probe_and_report(&format!("{url}/api/tags"), writer)?;
-            let name = prompt_with_default(
+            let url = prompt_with_default(reader, writer, "Ollama base URL", OLLAMA_DEFAULT_URL)?;
+            let url = url.trim_end_matches('/');
+            let model = select_discovered_model(
                 reader,
                 writer,
-                "Ollama model and profile name",
+                CatalogProvider::Ollama,
+                ModelDiscoveryOptions {
+                    endpoint: Some(url.to_owned()),
+                    working_directory: working_directory.to_path_buf(),
+                    ..setup_discovery_options()
+                },
                 "llama3.1:8b",
             )?;
+            let profile_default = if is_valid_profile_name(&model) {
+                model.as_str()
+            } else {
+                "ollama"
+            };
+            let name = prompt_with_default(reader, writer, "Profile name", profile_default)?;
             let default = format!(
                 "env {} ollama run {} '{{prompt}}'",
                 command_argument(&format!("OLLAMA_HOST={url}")),
-                command_argument(&name)
+                command_argument(&model)
             );
             let command = prompt_with_default(reader, writer, "Command template", &default)?;
             (name, command)
@@ -256,18 +268,29 @@ fn configure_profile<R: BufRead, W: Write>(
                 "copilot",
                 "Path to the Copilot CLI or a compatible wrapper executable: ",
             )?;
-            let model =
-                prompt_optional(reader, writer, "Copilot model (blank uses CLI default): ")?;
+            write_output(
+                writer,
+                "Starting bounded no-prompt ACP model discovery with current host permissions.\n",
+            )?;
+            let model = select_discovered_model(
+                reader,
+                writer,
+                CatalogProvider::Copilot,
+                ModelDiscoveryOptions {
+                    executable: Some(binary.clone()),
+                    working_directory: working_directory.to_path_buf(),
+                    allow_host_discovery: true,
+                    ..setup_discovery_options()
+                },
+                "auto",
+            )?;
             let name = prompt_with_default(reader, writer, "Profile name", "copilot")?;
-            let mut default = format!(
+            let default = format!(
                 "{} --prompt '{{prompt}}' --silent --allow-all-tools --no-ask-user \
-                 --reasoning-effort '{{reasoning_effort}}'",
-                command_argument(&binary)
+                 --reasoning-effort '{{reasoning_effort}}' --model {}",
+                command_argument(&binary),
+                command_argument(&model)
             );
-            if let Some(model) = model {
-                default.push_str(" --model ");
-                default.push_str(&command_argument(&model));
-            }
             let command = prompt_with_default(reader, writer, "Command template", &default)?;
             (name, command)
         }
@@ -278,16 +301,29 @@ fn configure_profile<R: BufRead, W: Write>(
                 "gemini",
                 "Path to the Gemini CLI or a compatible wrapper executable: ",
             )?;
-            let model = prompt_optional(reader, writer, "Gemini model (blank uses CLI default): ")?;
+            write_output(
+                writer,
+                "Starting bounded no-prompt ACP model discovery with current host permissions.\n",
+            )?;
+            let model = select_discovered_model(
+                reader,
+                writer,
+                CatalogProvider::Gemini,
+                ModelDiscoveryOptions {
+                    executable: Some(binary.clone()),
+                    working_directory: working_directory.to_path_buf(),
+                    allow_host_discovery: true,
+                    ..setup_discovery_options()
+                },
+                "auto",
+            )?;
             let name = prompt_with_default(reader, writer, "Profile name", "gemini")?;
-            let mut default = format!(
-                "{} --prompt '{{prompt}}' --output-format text --approval-mode yolo --skip-trust",
-                command_argument(&binary)
+            let default = format!(
+                "{} --prompt '{{prompt}}' --output-format text --approval-mode yolo --skip-trust \
+                 --model {}",
+                command_argument(&binary),
+                command_argument(&model)
             );
-            if let Some(model) = model {
-                default.push_str(" --model ");
-                default.push_str(&command_argument(&model));
-            }
             let command = prompt_with_default(reader, writer, "Command template", &default)?;
             (name, command)
         }
@@ -412,7 +448,7 @@ fn probe_cli_version(executable: &str) -> Result<()> {
         max_retries: 0,
         max_output_bytes: 64 * 1024,
     };
-    run_supervised(&policy, |_| Ok(CommandSpec::new(executable, ["--version"])))?;
+    run_supervised_capture(&policy, |_| Ok(CommandSpec::new(executable, ["--version"])))?;
     Ok(())
 }
 
@@ -427,171 +463,123 @@ fn resolve_setup_file(path: &Path, description: &str) -> Result<PathBuf> {
     Ok(resolved)
 }
 
-fn probe_and_report<W: Write>(url: &str, writer: &mut W) -> Result<()> {
-    write_output(writer, &format!("Probing `{url}`...\n"))?;
-    let responsive = Command::new("curl")
-        .args([
-            "--disable",
-            "--silent",
-            "--fail",
-            "--max-time",
-            "2",
-            "--",
-            url,
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success());
-    write_output(
-        writer,
-        if responsive {
-            "Endpoint is responsive.\n"
-        } else {
-            "Warning: endpoint probe failed; the model test can verify the full command.\n"
-        },
-    )
+fn setup_discovery_options() -> ModelDiscoveryOptions {
+    ModelDiscoveryOptions {
+        timeout: Duration::from_secs(5),
+        max_response_bytes: 64 * 1024,
+        ..ModelDiscoveryOptions::default()
+    }
 }
 
-fn select_llama_server_model<R: BufRead, W: Write>(
+fn select_discovered_model<R: BufRead, W: Write>(
     reader: &mut R,
     writer: &mut W,
-    base_url: &str,
+    provider: CatalogProvider,
+    options: ModelDiscoveryOptions,
+    fallback: &str,
 ) -> Result<String> {
-    let models = match discover_llama_server_models(base_url) {
-        Ok(models) => models,
-        Err(reason) => {
+    let catalog = match discover_models(provider, &options, &CancellationToken::new()) {
+        Ok(catalog) => Some(catalog),
+        Err(error @ (Error::ModelTransportCancelled | Error::InvalidModelTransport { .. })) => {
+            return Err(error);
+        }
+        Err(error) => {
             write_output(
                 writer,
                 &format!(
-                    "Warning: could not list llama-server models ({reason}); \
-                     enter a model ID manually.\n"
+                    "Warning: {} model discovery failed: {error}\n\
+                     Offering the documented fallback and an explicit custom choice.\n",
+                    provider.as_str()
                 ),
             )?;
-            Vec::new()
+            None
         }
     };
 
-    let model = if models.is_empty() {
-        prompt_with_default(reader, writer, "Model ID", "default")?
+    let (models, default_index) = match &catalog {
+        Some(catalog) => {
+            write_catalog(writer, catalog)?;
+            let default_index = catalog
+                .models()
+                .iter()
+                .position(|model| model.id() == catalog.default_model_id())
+                .unwrap_or(0);
+            (
+                catalog
+                    .models()
+                    .iter()
+                    .map(|model| model.id().to_owned())
+                    .collect::<Vec<_>>(),
+                default_index,
+            )
+        }
+        None => {
+            write_output(
+                writer,
+                &format!(
+                    "Available {} model choices:\n  1) {fallback}\n",
+                    provider.as_str()
+                ),
+            )?;
+            (vec![fallback.to_owned()], 0)
+        }
+    };
+    let custom_index = models.len() + 1;
+    write_output(writer, &format!("  {custom_index}) Other model ID...\n"))?;
+    let selection = prompt_with_default(
+        reader,
+        writer,
+        "Select model by number",
+        &(default_index + 1).to_string(),
+    )?;
+    let selected_index = selection
+        .parse::<usize>()
+        .ok()
+        .filter(|index| (1..=custom_index).contains(index))
+        .ok_or_else(|| invalid_model_selection(custom_index))?;
+    let model = if selected_index == custom_index {
+        prompt_required(reader, writer, "Other model ID: ")?
     } else {
-        write_output(writer, "Available llama-server models:\n")?;
-        for (index, model) in models.iter().enumerate() {
-            write_output(writer, &format!("  {}) {model}\n", index + 1))?;
-        }
-        let selection = prompt_with_default(
-            reader,
-            writer,
-            "Select model by number, #number, or enter an exact model ID",
-            "default",
-        )?;
-        if models.iter().any(|model| model == &selection) {
-            selection
-        } else if let Some(index) = selection
-            .strip_prefix('#')
-            .and_then(|value| value.parse::<usize>().ok())
-        {
-            if (1..=models.len()).contains(&index) {
-                models[index - 1].clone()
-            } else {
-                return Err(invalid_model_selection(models.len()));
-            }
-        } else {
-            match selection.parse::<usize>() {
-                Ok(index) if (1..=models.len()).contains(&index) => models[index - 1].clone(),
-                Ok(_) => return Err(invalid_model_selection(models.len())),
-                Err(_) => selection,
-            }
-        }
+        models[selected_index - 1].clone()
     };
     validate_model_id(&model)?;
     Ok(model)
 }
 
-fn invalid_model_selection(model_count: usize) -> Error {
-    Error::ProfileSetup {
-        reason: format!(
-            "model selection must be an advertised exact ID, a number from 1 to {model_count}, \
-             # followed by such a number, or another exact model ID"
-        ),
-    }
-}
-
-fn discover_llama_server_models(base_url: &str) -> std::result::Result<Vec<String>, &'static str> {
-    let url = format!("{base_url}/v1/models");
-    let output = Command::new("curl")
-        .args([
-            "--disable",
-            "--silent",
-            "--fail",
-            "--max-time",
-            "5",
-            "--max-filesize",
-            &MAX_DISCOVERY_BYTES.to_string(),
-            "--",
-            &url,
-        ])
-        .stderr(Stdio::null())
-        .output()
-        .map_err(|_| "curl could not be executed")?;
-    if !output.status.success() {
-        return Err("the model-list endpoint returned a failure");
-    }
-    if output.stdout.len() > MAX_DISCOVERY_BYTES {
-        return Err("the model-list response exceeded 65536 bytes");
-    }
-
-    let root = serde_json::from_slice::<Value>(&output.stdout)
-        .map_err(|_| "the model-list response was not valid JSON")?;
-    let data = root
-        .get("data")
-        .and_then(Value::as_array)
-        .ok_or("the model-list response had no data array")?;
-    let mut seen = BTreeSet::new();
-    let mut models = Vec::new();
-    for entry in data {
-        let model = entry
-            .get("id")
-            .and_then(Value::as_str)
-            .ok_or("a model-list entry had no string id")?;
-        validate_discovered_model_id(model)?;
-        if seen.insert(model.to_owned()) {
-            if models.len() >= MAX_DISCOVERED_MODELS {
-                return Err("the model-list response exceeded 128 unique models");
-            }
-            models.push(model.to_owned());
+fn write_catalog<W: Write>(writer: &mut W, catalog: &ModelCatalog) -> Result<()> {
+    write_output(
+        writer,
+        &format!("Available {} models:\n", catalog.provider().as_str()),
+    )?;
+    for (index, model) in catalog.models().iter().enumerate() {
+        let mut label = if model.name() == model.id() {
+            model.id().to_owned()
+        } else {
+            format!("{} - {}", model.id(), model.name())
+        };
+        if let Some(description) = model.description() {
+            label.push_str(&format!(" ({description})"));
         }
-    }
-    Ok(models)
-}
-
-fn validate_discovered_model_id(model: &str) -> std::result::Result<(), &'static str> {
-    if model.is_empty()
-        || model.len() > MAX_MODEL_ID_BYTES
-        || !model
-            .bytes()
-            .all(|byte| byte.is_ascii_graphic() && !matches!(byte, b'{' | b'}'))
-    {
-        return Err("a model ID was not 1-256 printable ASCII bytes without braces");
+        write_output(writer, &format!("  {}) {label}\n", index + 1))?;
     }
     Ok(())
 }
 
-fn validate_model_id(model: &str) -> Result<()> {
-    validate_discovered_model_id(model).map_err(|reason| Error::ProfileSetup {
-        reason: format!("invalid llama-server model ID: {reason}"),
-    })
+fn invalid_model_selection(choice_count: usize) -> Error {
+    Error::ProfileSetup {
+        reason: format!("model selection must be a number from 1 to {choice_count}"),
+    }
 }
 
-fn validate_probe_url(url: &str) -> Result<()> {
-    if url.len() > 2_048
-        || !(url.starts_with("http://") || url.starts_with("https://"))
-        || url.chars().any(char::is_whitespace)
-        || url.chars().any(char::is_control)
+fn validate_model_id(model: &str) -> Result<()> {
+    if model.is_empty()
+        || model.len() > 256
+        || !model
+            .bytes()
+            .all(|byte| (b' '..=b'~').contains(&byte) && !matches!(byte, b'{' | b'}'))
     {
         return Err(Error::ProfileSetup {
-            reason: "provider base URL must be a bounded HTTP or HTTPS URL without whitespace"
-                .to_owned(),
+            reason: "model ID must be 1-256 printable ASCII bytes without braces".to_owned(),
         });
     }
     Ok(())
@@ -646,16 +634,6 @@ fn prompt_required<R: BufRead, W: Write>(
         });
     }
     Ok(value)
-}
-
-fn prompt_optional<R: BufRead, W: Write>(
-    reader: &mut R,
-    writer: &mut W,
-    prompt: &str,
-) -> Result<Option<String>> {
-    write_output(writer, prompt)?;
-    let value = read_input(reader)?;
-    Ok((!value.is_empty()).then_some(value))
 }
 
 fn command_argument(value: &str) -> String {

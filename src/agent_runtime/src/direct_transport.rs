@@ -102,6 +102,7 @@ impl DirectModelTransport {
                 reason: "deadline must be between one nanosecond and 24 hours".to_owned(),
             });
         }
+
         if max_response_bytes == 0 || max_response_bytes > MAX_RESPONSE_BYTES {
             return Err(Error::InvalidModelTransport {
                 reason: format!("response limit must be between 1 and {MAX_RESPONSE_BYTES} bytes"),
@@ -164,37 +165,91 @@ impl DirectModelTransport {
     }
 
     fn connect(&self, cancellation: &CancellationToken, deadline: Instant) -> Result<TcpStream> {
-        let mut last_error = None;
-        for address in &self.endpoint.addresses {
-            check_cancelled(cancellation)?;
-            let timeout = remaining_poll_timeout(deadline)?;
-            match TcpStream::connect_timeout(address, timeout) {
-                Ok(stream) => {
-                    stream
-                        .set_read_timeout(Some(IO_POLL_INTERVAL))
-                        .map_err(|source| Error::ModelTransportIo {
-                            operation: "configuring socket reads",
-                            source,
-                        })?;
-                    stream
-                        .set_write_timeout(Some(IO_POLL_INTERVAL))
-                        .map_err(|source| Error::ModelTransportIo {
-                            operation: "configuring socket writes",
-                            source,
-                        })?;
-                    return Ok(stream);
-                }
-                Err(source) => last_error = Some(source),
-            }
-        }
-
-        Err(Error::ModelTransportIo {
-            operation: "connecting to local provider",
-            source: last_error.unwrap_or_else(|| {
-                io::Error::new(io::ErrorKind::AddrNotAvailable, "no loopback address")
-            }),
-        })
+        connect_endpoint(&self.endpoint, cancellation, deadline)
     }
+}
+
+pub(crate) fn get_bounded(
+    endpoint: &str,
+    path: &str,
+    deadline: Duration,
+    max_response_bytes: usize,
+    cancellation: &CancellationToken,
+) -> Result<Vec<u8>> {
+    if deadline.is_zero() || deadline > MAX_DEADLINE {
+        return Err(Error::InvalidModelTransport {
+            reason: "deadline must be between one nanosecond and 24 hours".to_owned(),
+        });
+    }
+    if max_response_bytes == 0 || max_response_bytes > MAX_RESPONSE_BYTES {
+        return Err(Error::InvalidModelTransport {
+            reason: format!("response limit must be between 1 and {MAX_RESPONSE_BYTES} bytes"),
+        });
+    }
+    if !path.starts_with('/')
+        || !path.is_ascii()
+        || path.bytes().any(|byte| byte.is_ascii_control())
+    {
+        return Err(Error::InvalidModelTransport {
+            reason: "HTTP request path is invalid".to_owned(),
+        });
+    }
+    let endpoint = parse_endpoint(endpoint)?;
+    let expires = Instant::now() + deadline;
+    let mut socket = connect_endpoint(&endpoint, cancellation, expires)?;
+    let head = format!(
+        "GET {path} HTTP/1.1\r\nHost: {}\r\nAccept: application/json\r\nConnection: close\r\n\r\n",
+        endpoint.authority
+    );
+    write_checked(&mut socket, head.as_bytes(), cancellation, expires)?;
+    let mut body = Vec::new();
+    read_response(
+        socket,
+        cancellation,
+        expires,
+        max_response_bytes,
+        &mut |chunk| {
+            body.extend_from_slice(chunk);
+            Ok(())
+        },
+    )?;
+    Ok(body)
+}
+
+fn connect_endpoint(
+    endpoint: &Endpoint,
+    cancellation: &CancellationToken,
+    deadline: Instant,
+) -> Result<TcpStream> {
+    let mut last_error = None;
+    for address in &endpoint.addresses {
+        check_cancelled(cancellation)?;
+        let timeout = remaining_poll_timeout(deadline)?;
+        match TcpStream::connect_timeout(address, timeout) {
+            Ok(stream) => {
+                stream
+                    .set_read_timeout(Some(IO_POLL_INTERVAL))
+                    .map_err(|source| Error::ModelTransportIo {
+                        operation: "configuring socket reads",
+                        source,
+                    })?;
+                stream
+                    .set_write_timeout(Some(IO_POLL_INTERVAL))
+                    .map_err(|source| Error::ModelTransportIo {
+                        operation: "configuring socket writes",
+                        source,
+                    })?;
+                return Ok(stream);
+            }
+            Err(source) => last_error = Some(source),
+        }
+    }
+    Err(Error::ModelTransportIo {
+        operation: "connecting to local provider",
+        source: last_error.unwrap_or_else(|| {
+            io::Error::new(io::ErrorKind::AddrNotAvailable, "no loopback address")
+        }),
+    })
 }
 
 impl ModelTransport for DirectModelTransport {

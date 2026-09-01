@@ -1,215 +1,513 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
-## Scope and build
+## Observation basis
 
-`agent-runtime` is a Linux-only Rust 2024 crate (`rust-version = 1.94`) with a
-library and the `agent-run` binary. Unsafe Rust is forbidden. The optional
-`rig-transport` feature adds the Rig/reqwest/tokio-backed transport; without
-that feature, only the direct transport is selectable.
+This record was derived from the component's Rust sources, integration tests,
+component `Cargo.toml`, and the workspace `Cargo.toml`. It describes observed
+implementation behavior and static test evidence. No test command was run while
+producing this record.
 
-The public library exposes prompt acquisition, shell-free command rendering,
-profile storage, setup, supervised execution, a canonical local-model request
-model, and direct model transport. Its errors are a non-exhaustive typed
-`Error` enum covering validation, profile, I/O, process, cancellation,
-transport, provider-status, response-limit, malformed-response, and duplicate
-tool-call failures.
+## Build and platform shape
 
-## Command rendering and prompt input
+- The package is `agent-runtime` version `0.1.0`, Rust edition 2024, with
+  `rust-version = 1.94`.
+- It builds the `agent_runtime` library and the `agent-run` binary.
+- Both library and binary reject non-Linux targets at compile time.
+- The crate forbids unsafe code.
+- Default features are empty. Optional feature `rig-transport` adds the
+  Rig/Reqwest/Tokio transport and exposes `RigModelTransport`; it also adds the
+  CLI `--transport rig` value.
+- The library exports prompt resolution, shell-free command rendering, profile
+  storage/setup, model catalog discovery, direct and optional Rig transports,
+  canonical model types, cancellation, and host-process supervision.
+- The crate describes supervision as host execution, not as a filesystem,
+  credential, network, or general sandbox boundary.
 
-Commands are parsed into a program and argument vector, without a shell or
-interpolation. Single and double quotes group arguments; a backslash only
-escapes the active quote or another backslash inside quotes. Unterminated
-quotes and an absent program fail.
+## `agent-run` command surface
 
-`{prompt}`, `{prompt_json}`, `{target_directory}`, `{context_files}`, and
-`{reasoning_effort}` are substituted in arguments, never in the executable.
-`{prompt_json}` is a complete JSON string with JSON escapes. Each context path
-expands a context-bearing argument once. If no context paths are supplied, an
-otherwise standalone context placeholder and immediately preceding
-dash-prefixed option are removed. The same removal rule applies to a
-standalone reasoning-effort placeholder when no effort was requested. A
-requested effort requires a `{reasoning_effort}` placeholder.
+The binary uses Clap and has four subcommands: `model`, `models`, `run`, and
+`setup`. Successful domain execution returns exit status 0. Domain failures are
+printed to stderr as `error: <displayed error>` and return failure status.
+Argument conflicts and missing required arguments are handled by Clap.
 
-Prompts may come from a value, regular non-link file, standard input, or an
-editor. File opening uses `O_NOFOLLOW | O_NONBLOCK`; prompt input must be
-nonblank UTF-8 and no more than 1 MiB. With no supplied source, non-terminal
-stdin is read; terminal stdin offers the editor, then can accept EOF-terminated
-input. Editor selection is `VISUAL`, then `EDITOR`, then `vi`; it uses a
-temporary prompt file and requires a successful editor exit.
+### `agent-run models`
 
-## Profiles and setup
+Observed arguments:
 
-A profile contains a case-sensitive name, provider identifier, and command
-template. Names are 1--128 ASCII letters, digits, `.`, `_`, `-`, or `:`;
-providers are nonblank 1--128-byte ASCII alphanumeric/`. _ -` identifiers;
-commands are nonblank after trimming, at most 16 KiB, and must parse as a
-command. TOML storage requires `schema_version = 1`, permits at most 128
-profiles, rejects duplicate names and non-regular/symlink configuration files,
-and limits configuration content to 64 KiB of UTF-8. Updates retain unrelated
-TOML formatting/comments and existing profiles, validate before persistence,
-write and sync a temporary file in the destination directory, replace or
-create without clobbering as appropriate, then sync the directory.
+- Required `--provider`: `ollama`, `llama-server`, `copilot`, `gemini`,
+  `llama-cli`, or `custom-script`.
+- Optional `--endpoint HTTP_LOOPBACK_URL`.
+- Optional `--executable PATH`.
+- Optional `--allow-host-discovery`.
+- `--timeout`, default 5 seconds.
+- `--max-response-bytes`, default 65,536.
+- Optional `--json`.
 
-The default configuration is an absolute `XDG_CONFIG_HOME/agent-runtime/config.toml`,
-or `HOME/.config/agent-runtime/config.toml`. If the canonical path is absent
-and `supervised-agent/config.toml` exists, the legacy path is selected.
-Nonabsolute or empty environment paths are ignored.
+Provider behavior:
 
-The setup wizard communicates prompts, probe warnings, qualification status,
-and save status only through its caller-provided `Write` object. It supports
-llama-cli, llama-server, Ollama, Copilot, Gemini, and a custom executable.
-Setup validates regular non-link executable/model paths, expands a leading
-`~/`, probes conventional CLI executables with `--version`, and offers a
-validated direct executable when that probe fails. A cancellation during that
-probe is returned directly and does not prompt for fallback.
+- Ollama performs bounded HTTP GET discovery at `/api/tags`, defaulting to
+  `http://127.0.0.1:11434`.
+- llama-server performs bounded HTTP GET discovery at `/v1/models`, defaulting
+  to `http://127.0.0.1:9931`.
+- Copilot and Gemini perform one ACP subprocess session, using `copilot` or
+  `gemini` by default, or the supplied executable.
+- `--executable` is rejected for the HTTP providers.
+- `--endpoint` is rejected for the ACP providers.
+- Copilot and Gemini require `--allow-host-discovery` before any subprocess is
+  started.
+- `llama-cli` and `custom-script` are accepted CLI provider spellings but have
+  no model-catalog implementation. They fail immediately with
+  `UnsupportedCapability`, respectively displayed as:
+  ``unsupported capability `provider model catalog` for provider `llama-cli```
+  and
+  ``unsupported capability `provider model catalog` for provider `custom-script```.
+  Provider conversion happens before current-directory lookup or discovery, so
+  an executable supplied with either unsupported provider is not spawned.
+- Text output writes one model ID per line in retained provider order. JSON
+  output writes one newline-terminated catalog object.
 
-Llama-server URL probes accept bounded (2,048-character) HTTP/HTTPS URLs
-without whitespace/control characters, probe `/health`, and attempt a bounded
-64 KiB `/v1/models` discovery. Discovery accepts at most 128 distinct,
-1--256-byte printable ASCII IDs without braces; advertised numeric IDs can be
-selected, while an explicit numeric selection must be in range. Ollama's
-default template materializes the chosen base URL. Generated Copilot and
-Gemini templates use noninteractive flags; the Copilot template includes the
-reasoning-effort placeholder. The llama-cli template uses
-`--single-turn --simple-io --no-display-prompt --predict 4096`.
+Static CLI evidence includes
+`models_http_text_and_json_outputs_are_deterministic`,
+`models_reports_manual_providers_as_unsupported_without_spawning`,
+`models_acp_requires_host_discovery_acknowledgement_before_spawn`, and
+`models_acp_lists_correlated_provider_ids` in `tests/cli.rs`.
 
-Every generated profile is live-qualified with the fixed prompt
-`Reply with exactly: OK`, host execution acknowledged, a 30-second idle
-timeout, 300-second attempt timeout, no retry, loop detection, and a 64 KiB
-combined-output limit. Qualification runs with `run_supervised_capture`:
-provider stdout and stderr are captured rather than forwarded. Thus provider
-output is not mixed into setup output; setup reports its own status through the
-provided writer. A qualification failure prevents saving by default and is
-reported as a profile-setup error. `SetupOptions { force: true }` reports the
-failure through that writer and saves anyway. A cancellation is returned
-unchanged even when force is enabled, so no profile is saved from that path.
-Qualification also refuses before spawning when host execution was not
-acknowledged.
+### `agent-run model`
 
-## Process supervision
+Observed arguments:
 
-`run_supervised` forwards child stdout/stderr; `run_supervised_capture` retains
-them separately and returns only output from the successful attempt. Both run
-the program directly with null stdin, piped stdout/stderr, an optional working
-directory, and a separate Linux process group. Policies require an idle
-timeout of 1 second through 1 hour, an optional attempt timeout through 24
-hours, at most 10 retries, and a combined output limit of 1 through 16 MiB.
+- Prompt may be positional, `--file/-f`, or `--editor`; these conflict.
+- Required `--provider`: `ollama` or `llama-server`.
+- `--transport`, default `direct`; `rig` exists only with `rig-transport`.
+- Required `--endpoint` and `--model`.
+- Optional `--stream`.
+- `--timeout`, default 300 seconds.
+- `--max-response-bytes`, default 1,048,576.
+- Optional `--reasoning-effort`: `none`, `minimal`, `low`, `medium`, `high`,
+  `xhigh`, or `max`.
+- Optional `--show-reasoning`, conflicting with `--json`.
+- Optional `--json`.
 
-Reader threads poll nonblocking output, apply the shared byte limit, and drain
-for up to one second after termination. Output forwarding waits at most one
-second for a writable destination. SIGINT and SIGTERM request cancellation;
-the process group is killed and awaited. Attempts are also killed on exit,
-idle/repetition retry, limit failure, and other terminal paths. Escaped
-descendants that retain pipes cause `OutputStreamsRetained` rather than an
-indefinite wait.
+The command constructs a single user-message request with no tools and
+`ToolChoice::None`.
 
-Only idle timeout and detected stdout repetition retry. Repetition is either
-three identical adjacent byte substrings of 10--512 bytes in the last 4 KiB of
-lossily decoded stdout, four repeated trimmed lines, or three repetitions of a
-two-line suffix. A retry receives a one-based context and a notice that prior
-side effects may have occurred. A nonzero exit, output limit, attempt timeout,
-I/O failure, and cancellation are terminal. Retry messages are written to
-process stderr.
+- Direct non-streaming mode returns provider answer text exactly on stdout.
+- Direct streaming mode forwards text deltas to stdout and flushes each delta.
+- Provider reasoning remains separate from answer text. With
+  `--show-reasoning`, direct transport reasoning is written to stderr; otherwise
+  it is suppressed in text mode.
+- JSON mode emits one newline-terminated canonical `ModelTurn`. Streaming JSON
+  consumes stream events silently and emits only the assembled terminal turn.
+- When stderr is a terminal, non-JSON model execution prints the initial prompt
+  and `Response:` heading to stderr. It does not do so for redirected stderr.
+- Rig mode rejects `--show-reasoning` before transport execution because the
+  Rig adapter does not expose provider reasoning.
 
-## Canonical model types and direct transport
+Static CLI evidence includes both tests in `tests/model_cli.rs`,
+`model_json_rejects_separate_reasoning_presentation` in `tests/cli.rs`, and the
+Rig CLI tests in `tests/rig_transport.rs`.
 
-Canonical requests contain an ASCII model name, ordered system/user/assistant
-and tool-result messages, tool definitions, tool choice, and optional effort.
-Validation requires 1--1,024 messages, at most 128 tools, at most 8 MiB total
-message text, unique valid tool names, valid tool identities/arguments, and
-object tool schemas. Model names are nonblank ASCII up to 256 bytes; tool names
-are 1--128 ASCII alphanumeric/`_`/`-`/`.`; identities are nonblank,
-non-control, and at most 256 bytes. Tool choice other than `None` requires
-tools.
+### `agent-run run`
 
-`DirectModelTransport` connects by TCP only to `http://` numeric loopback
-addresses with an explicit nonzero port. It rejects hostnames, non-loopback
-IPs, HTTPS, credentials, query/fragment, and caller-selected paths; IPv6 must
-be bracketed. The same numeric-loopback-only/explicit-port restriction is
-implemented by the Rig endpoint validator. Direct requests go to
-`/api/chat` for Ollama and `/v1/chat/completions` for llama-server. Deadlines
-are greater than zero and at most 24 hours; response limits are 1 through
-16 MiB. Requests are limited to 2 MiB, headers to 64 KiB, and stream records
-to 1 MiB.
+Observed arguments:
 
-The direct HTTP implementation checks cancellation and deadline during
-connect, reads, writes, event delivery, and after callbacks return. It accepts
-HTTP/1.0 or 1.1 success responses with content-length, chunked, or
-close-delimited framing, rejects invalid/conflicting framing, and never
-includes provider error bodies in status errors. Non-success responses become
-typed status errors. Oversized declared or received bodies fail before
-decoding; a close-delimited oversized streamed body is rejected before it
-emits events.
+- Prompt acquisition is positional, `--file/-f`, or `--editor`.
+- Exactly one of `--command TEMPLATE` and `--profile NAME` is required.
+- Optional `--config PATH`.
+- Repeatable `--context PATH`.
+- `--working-directory`, default `.`.
+- `--idle-timeout`, default 900 seconds.
+- Optional `--detect-loops`, disabled by default.
+- `--max-retries`, default 3.
+- `--max-output-bytes`, default 1,048,576.
+- Required authority acknowledgement `--allow-host-execution`.
+- Optional typed `--reasoning-effort`.
+- Optional `--json`.
 
-Ollama uses native messages, optional `tools`, and no tool-choice field;
-required tool choice is rejected. Llama-server uses OpenAI-compatible
-messages, tools, and `none`/`auto`/`required` tool choice. Assistant tool
-arguments are object values for Ollama and JSON text for llama-server. Tool
-results use the provider-specific fields. `none`, `minimal`, `low`, `medium`,
-`high`, `xhigh`, and `max` map to llama-server `reasoning_effort`; on Ollama,
-`none` maps to `think: false` and the other six map to a `think` string.
-Tests exercise all seven mappings on both direct providers.
+The host-execution acknowledgement is checked before prompt acquisition or
+provider command construction. A named profile supplies its stored command;
+otherwise the literal template is used. Each attempt renders the prompt,
+context paths, target directory, and optional reasoning effort without a shell,
+then executes the resulting program and argument vector in the requested
+working directory.
 
-Unary and streamed responses normalize text, separate reasoning, tool intents,
-finish reason, provider/model identifiers, response identifiers where present,
-and usage. Plain `agent-run model` output writes provider text exactly: it
-does not add a newline or other framing. Streaming emits text and reasoning
-deltas in received order and emits complete tool intents after assembly;
-terminal records are required. The model CLI can direct reasoning to stderr
-with `--show-reasoning`; it conflicts with JSON output. JSON output writes one
-serialized turn followed by a newline.
+On retry, a supervisor notice is appended to the original prompt. It identifies
+the attempt and retry cause, warns that the prior attempt may have changed files
+or external systems, and asks the provider to inspect and reconcile current
+state before repeating non-idempotent actions.
 
-Tool calls must have unique identities, valid names, and JSON-object
-arguments. OpenAI streaming assembles indexed argument fragments; Ollama
-creates deterministic `ollama-call-N` identities when no provider identity is
-present. Missing/invalid terminal data, metadata, JSON, usage, tool calls, and
-finish values are malformed-response failures. `stop` with tool calls
-normalizes to `ToolCalls`, while explicit `length` is retained. Provider
-reasoning fields remain separate from answer text.
+- Non-JSON mode forwards supervised stdout and stderr.
+- JSON mode captures both streams, discards captured stderr at the CLI layer,
+  converts stdout with lossy UTF-8 replacement, and emits one object
+  `{"content":"..."}` followed by a newline.
+- A supervised provider receives null stdin and cannot consume caller stdin.
+- Terminal stderr receives an initial prompt display before non-JSON execution.
 
-## Rig transport
+Static evidence includes the standalone run, JSON, reasoning-effort, stdin, and
+interrupt tests in `tests/cli.rs`.
 
-With `rig-transport`, `RigModelTransport` converts canonical messages and
-tools through Rig but never registers executable tools. It uses a
-redirect-disabled, no-proxy reqwest client, bounds serialized requests at
-2 MiB and responses at the configured 1--16 MiB limit, and rejects multipart
-requests. It refuses use inside an existing Tokio runtime. A fresh
-single-thread runtime applies its deadline and polls cancellation every
-10 ms; tracing is suppressed for the Rig call so request and response payloads
-do not reach a caller-installed tracing subscriber.
+### `agent-run setup`
 
-Rig validates the canonical request and provider capabilities before creating
-the runtime or performing provider I/O. It rejects every requested reasoning
-effort rather than silently dropping it, and rejects Ollama required tool
-choice. Rig does not expose provider reasoning: received reasoning/non-text
-content is a malformed-response error, and the model CLI rejects
-`--transport rig --show-reasoning` before transport construction. Rig preserves
-complete text/tool intents, validates metadata and tool values, reuses a prior
-provider tool-call identity for its related tool result, requires terminal
-Ollama unary responses, and detects Ollama usage overflow.
+Observed arguments are optional `--config PATH` and `--force`. Setup reads
+answers from stdin, writes and flushes prompts to stdout, resolves the current
+directory, collects a profile, performs mandatory live qualification, and then
+upserts the profile.
 
-## Binary behavior
+The fixed qualification prompt is `Reply with exactly: OK`. Qualification uses
+host execution with a 30-second idle timeout, 300-second attempt timeout, loop
+detection, no retries, and a 65,536-byte output limit. A failed qualification
+does not persist the profile unless `--force` was supplied. Cancellation is
+never converted into a force-save path.
 
-`agent-run model` accepts exactly one prompt source, a provider, endpoint,
-model, optional direct/Rig transport, stream mode, response limit, timeout,
-effort, reasoning display, and JSON mode. `agent-run run` requires explicit
-`--allow-host-execution`, uses either a raw command or stored profile, and
-offers context paths, working directory, timeout/retry/loop/output controls,
-effort, and JSON mode. Its JSON mode uses captured stdout as `{"content": ...}`
-and suppresses captured stderr; invalid UTF-8 stdout is decoded with
-`String::from_utf8_lossy`, so each invalid sequence is represented with
-U+FFFD. `agent-run setup` delegates its standard input/output locks and setup
-options to the wizard. The binary prints top-level errors as `error: ...` on
-stderr and returns failure.
+Provider choices and generated defaults:
 
-## Observed test coverage and limits
+- `llama-cli`: probes `llama-cli --version`, or validates and probes a supplied
+  regular executable; requires a regular GGUF model file; default template uses
+  `--model`, `--prompt`, `--single-turn`, `--simple-io`,
+  `--no-display-prompt`, and `--predict 4096`. It does not add context or format
+  flags.
+- `llama-server`: discovers models from the selected loopback endpoint and
+  generates a `curl --disable --silent --show-error --fail-with-body --request
+  POST --json ... -- <endpoint>/v1/chat/completions` template. The prompt is
+  inserted as a complete JSON string. Discovery fallback model is `default`.
+- Ollama: discovers models and generates
+  `env OLLAMA_HOST=<url> ollama run <model> '{prompt}'`. Discovery fallback is
+  `llama3.1:8b`.
+- Copilot: probes the CLI, performs acknowledged no-prompt ACP discovery, and
+  generates a noninteractive template using `--prompt`, `--silent`,
+  `--allow-all-tools`, `--no-ask-user`, `--reasoning-effort
+  '{reasoning_effort}'`, and `--model`.
+- Gemini: probes the CLI, performs acknowledged no-prompt ACP discovery, and
+  generates a template using `--prompt`, `--output-format text`,
+  `--approval-mode yolo`, `--skip-trust`, and `--model`.
+- Custom wrapper: requires a regular non-link executable and generates a
+  template with `--prompt '{prompt}' --context '{context_files}'`.
 
-Runtime tests cover command rendering; profile persistence; setup selection,
-qualification, force, cancellation, and input validation; supervisor retries,
-limits, descendants, and cancellation; direct HTTP unary/streaming framing,
-tool conversion, limits, cancellation, and deadlines; model CLI exact output;
-and Rig conversion, bounds, privacy, capability rejection, cancellation, and
-runtime nesting. Tests use local listeners and process fixtures. They do not
-demonstrate behavior against real provider installations, non-Linux targets,
-or arbitrary third-party CLI implementations.
+Discovery results are numbered from 1 and followed by `Other model ID...`.
+Provider `currentModelId`, when valid and present in the catalog, selects the
+default number. Discovery failures other than cancellation or an invalid
+transport endpoint produce a warning and offer the documented fallback plus a
+custom choice. Manual model IDs use 1–256 printable ASCII bytes and cannot
+contain braces.
+
+## Prompt acquisition
+
+`resolve_prompt` applies this source order: supplied string, supplied file,
+editor, non-terminal stdin, or terminal interaction.
+
+- Every prompt is valid UTF-8, nonblank after trimming, and at most 1,048,576
+  bytes. Returned content is otherwise not trimmed or normalized.
+- File path `-` means stdin.
+- Prompt files must be regular non-link files. The implementation checks with
+  `symlink_metadata`, opens with `O_NOFOLLOW | O_NONBLOCK`, rechecks the opened
+  file, rejects sockets and other non-regular files, checks metadata length,
+  and performs a bounded read.
+- Terminal fallback asks whether to open an editor, defaulting to yes. A `n` or
+  `no` response instead requests multiline stdin until EOF.
+- Editor selection uses `VISUAL`, then `EDITOR`, then `vi`. A direct file path
+  is used as the executable; otherwise the same shell-free command parser is
+  used. The editor receives a temporary `prompt.md`; nonzero editor status is
+  an invalid-prompt failure.
+
+## Shell-free command rendering
+
+Command templates are parsed internally and are never passed to a shell.
+Whitespace separates arguments outside quotes. Single and double quotes group
+arguments and are removed. Within an active quote, backslash escapes only the
+active quote or another backslash; other backslashes are preserved. Empty
+quoted arguments are retained. Unterminated quotes fail.
+
+Supported substitutions in arguments are:
+
+- `{prompt}`: exact prompt text.
+- `{prompt_json}`: one complete JSON string literal with quotes, slashes,
+  controls, and line breaks escaped.
+- `{target_directory}`: UTF-8 target path.
+- `{context_files}`: repeats the containing argument once per context path.
+- `{reasoning_effort}`: stable lowercase typed effort.
+
+The executable is the first parsed argument. `{reasoning_effort}` cannot select
+the executable. Requested reasoning fails if the template lacks its
+placeholder. If a standalone `{context_files}` or `{reasoning_effort}` is empty
+and the preceding rendered argument starts with `-`, that preceding option is
+also removed. Non-UTF-8 context or target paths fail.
+
+## Profile storage
+
+Profiles contain case-sensitive `name`, `provider`, and shell-free `command`.
+The TOML store requires integer `schema_version = 1`; absent `profiles` means
+an empty list.
+
+Bounds and validation:
+
+- Configuration: at most 65,536 encoded bytes.
+- Profiles: at most 128.
+- Name: 1–128 ASCII letters, digits, `.`, `_`, `-`, or `:`.
+- Provider: 1–128 ASCII letters, digits, `.`, `_`, or `-`.
+- Command: 1–16,384 bytes, nonblank, and accepted by the command parser.
+- Duplicate profile names are rejected.
+- Missing/non-string required fields, malformed TOML, unsupported schema, or an
+  absent requested profile are typed failures.
+
+Configuration reads reject symlinks and non-regular files, use
+`O_NOFOLLOW | O_NONBLOCK`, recheck the opened file and bound, and require UTF-8.
+Upsert validates the entire existing document before changing it. Existing
+comments, unrelated top-level values, and other profiles are retained by
+`toml_edit`; matching profiles have provider and command replaced. Persistence
+uses a temporary file in the destination directory, flushes and syncs it,
+atomically replaces an existing path or uses no-clobber creation, then syncs the
+parent directory. The parent must be a real directory rather than a symlink.
+
+Default configuration resolution accepts only absolute, nonempty
+`XDG_CONFIG_HOME`, otherwise absolute `HOME/.config`. The canonical path is
+`agent-runtime/config.toml`. If it does not exist but
+`supervised-agent/config.toml` exists, that legacy location is selected; an
+existing canonical path takes precedence.
+
+## Model catalog
+
+The canonical serialized catalog has `format_version: 1`, provider,
+`current_model_id`, and ordered `models`. A model has `id`, `name`, and optional
+`description`.
+
+- At least one model and at most 128 unique model IDs are required.
+- Duplicate IDs retain the first descriptor.
+- IDs are 1–256 printable ASCII bytes without `{` or `}`.
+- Names are nonempty UTF-8 without control characters, at most 1,024 bytes.
+- Descriptions may be empty but contain no control characters and are at most
+  4,096 bytes.
+- An advertised current ID not retained in the catalog is discarded.
+- Default selection is the valid current ID, otherwise the first model.
+- Discovery timeout must be positive and at most 30 seconds.
+- Discovery response bound must be 1–1,048,576 bytes.
+
+Ollama expects a `models` array and uses each string `name` as ID and display
+name. If present, string detail fields are formatted in order as family,
+parameters, quantization, and format. llama-server expects a `data` array with
+string `id` values.
+
+ACP discovery canonicalizes the working directory, starts `<executable> --acp`
+in a new process group with null stderr, and uses newline-delimited JSON-RPC
+2.0. It sends correlated `initialize` ID 0 with protocol version 1, then
+`session/new` ID 1 with the absolute `cwd` and empty `mcpServers`. It requires
+the initialize result to confirm protocol version 1. Notifications may occur
+between responses and are ignored; provider-to-client requests, wrong or
+missing numeric IDs, protocol errors, malformed JSON, and premature EOF fail.
+ACP records are capped at 65,536 bytes, total stdout uses the configured
+discovery bound, and polling observes cancellation and the overall deadline.
+The process group is killed and reaped after discovery, then stdout is drained
+for at most one second; retained output pipes fail as `OutputStreamsRetained`.
+
+## Canonical model API
+
+The public model types represent ordered system, user, assistant, and tool
+result messages; model-facing tool definitions; `none`, `auto`, and `required`
+tool choice; optional reasoning effort; normalized turns, usage, finish reason,
+tool intents, and streaming events.
+
+`CancellationToken` is cloneable and backed by a shared atomic boolean.
+Transports check it before and during work and return
+`ModelTransportCancelled`.
+
+Canonical request validation shared by transports enforces:
+
+- Model: nonblank ASCII, at most 256 bytes.
+- Messages: 1–1,024.
+- Combined message text/content: at most 8,388,608 bytes.
+- Tools: at most 128 with unique names.
+- Tool names: 1–128 ASCII letters, digits, `_`, `-`, or `.`.
+- Tool description: at most 16,384 bytes.
+- Tool parameters and tool-call arguments: JSON objects.
+- Tool/call identities: nonblank, at most 256 bytes, no control characters.
+- Non-`none` tool choice requires at least one tool.
+- Repeated call identities in one validated intent collection fail as
+  `DuplicateToolCall`.
+
+Finish reasons normalize stop, length, tool calls, content filter, and bounded
+provider-specific text. A stop or absent reason with tool intents becomes
+`tool-calls`. Usage is optional.
+
+## Direct local HTTP transport
+
+`DirectModelTransport` supports Ollama `/api/chat` and llama-server
+`/v1/chat/completions`.
+
+Transport construction and protocol bounds:
+
+- Deadline: greater than zero and no more than 24 hours.
+- Configured response limit: 1–16,777,216 bytes.
+- Serialized request: at most 2,097,152 bytes.
+- HTTP headers/trailers: at most 65,536 bytes.
+- One streaming record or accumulated streamed tool-argument record: at most
+  1,048,576 bytes.
+- Only ASCII `http://` endpoints with a numeric loopback IPv4 or bracketed IPv6
+  address and explicit nonzero port are accepted.
+- Endpoint paths, user information, queries, fragments, whitespace, HTTPS, DNS
+  names, and non-loopback addresses are rejected.
+
+The transport opens TCP directly, uses 100 ms read/write polling intervals, and
+checks the shared deadline and cancellation during connection, writes, reads,
+stream decoding, and before and after each stream callback. Requests use
+HTTP/1.1, JSON, a fixed provider path, explicit content length, and connection
+close.
+
+Responses accept HTTP/1.0 or HTTP/1.1 with chunked, single Content-Length, or
+close-delimited framing. Duplicate or invalid lengths, unsupported transfer
+encoding, conflicting framing, premature termination, excess bytes, malformed
+chunks, and oversized bodies fail. Non-2xx status becomes
+`ModelProviderStatus` and intentionally omits the response body from the error.
+Response Content-Type is not inspected by this direct implementation.
+
+Provider mapping:
+
+- llama-server uses OpenAI-compatible messages, stringified JSON tool
+  arguments, explicit `tool_choice`, `reasoning_effort`, unary choices, and SSE
+  streaming terminated by `[DONE]`.
+- Ollama uses native messages, object tool arguments, `think` (`false` for
+  effort `none`, otherwise the effort spelling), unary records requiring
+  `done: true`, and NDJSON streaming requiring a terminal `done: true` record.
+- Ollama rejects required tool choice before network access.
+- Provider reasoning keys are collected separately from answer text.
+- OpenAI tool-call fragments are accumulated by numeric index and emitted only
+  after complete object arguments and identities validate.
+- Ollama calls lacking provider IDs receive deterministic
+  `ollama-call-<index>` IDs. Duplicate supplied IDs fail.
+- OpenAI response/model IDs and model identity are bounded to 256 bytes.
+- OpenAI usage reads prompt/completion counts and accepts provider total or a
+  saturating derived total. Ollama requires paired prompt/evaluation counts and
+  rejects checked-add overflow.
+- Streaming rejects data after a terminal marker and rejects streams without a
+  terminal record.
+
+## Optional Rig transport
+
+`RigModelTransport` is compiled only with `rig-transport`. It uses the same
+canonical request validation and the same numeric-loopback, explicit-port,
+pathless HTTP restriction, 24-hour maximum deadline, 2,097,152-byte request
+bound, and 16,777,216-byte maximum response configuration.
+
+- Reqwest redirects and proxy use are disabled.
+- Calls are synchronous at the public boundary and create a current-thread
+  Tokio runtime. Invocation from an existing Tokio runtime fails as a typed
+  framework error rather than nesting runtimes.
+- Cancellation is polled every 10 ms and races the overall timeout.
+- A no-subscriber tracing dispatch is installed around Rig execution so
+  provider payload/error sentinels are not forwarded to the caller's tracing
+  subscriber.
+- Reasoning effort is unsupported for every Rig request.
+- Rig reasoning, images, unknown streamed content, and other unsupported
+  non-text provider content are malformed-response failures; returned
+  `ModelTurn.reasoning` is always absent.
+- Ollama required tool choice is rejected. For accepted Ollama tool choices,
+  the adapter omits Rig's tool-choice field rather than silently mapping
+  `required`; llama-server preserves none/auto/required.
+- Tool implementations are never registered with Rig. Returned tool calls are
+  converted to untrusted intents. Provider IDs are retained and reused when a
+  later canonical tool result is converted.
+- Response text plus serialized tool intent data is bounded by the configured
+  response maximum. Metadata and identities are validated and duplicate calls
+  fail.
+- The bounded HTTP adapter rejects declared or streamed oversize bodies,
+  serialized oversize requests, non-success status, and multipart requests.
+- Ollama unary responses must be terminal. Ollama token-count overflow is
+  detected for unary and streaming records before Rig can normalize it.
+- Framework/provider errors are mapped to redacted domain errors rather than
+  returning provider payloads.
+
+## Host-process supervision
+
+`SupervisionPolicy` bounds:
+
+- Idle timeout: greater than zero and at most 3,600 seconds.
+- Optional per-attempt timeout: greater than zero and at most 86,400 seconds.
+- Retries after the initial attempt: at most 10.
+- Combined stdout and stderr per attempt: 1–16,777,216 bytes.
+
+Each attempt:
+
+- Builds a fresh `CommandSpec` from the caller's `AttemptContext`.
+- Rejects a blank program.
+- Spawns directly without a shell, with null stdin, piped stdout/stderr, an
+  optional working directory, and a new process group.
+- Reads both streams on dedicated nonblocking threads in 4,096-byte chunks
+  through a bounded channel.
+- Applies one atomic combined-stream output budget.
+- Either forwards and flushes output or captures streams separately.
+- Kills and reaps the complete process group at attempt completion or failure.
+- Allows one second for output streams to drain; escaped descendants retaining
+  pipes produce `OutputStreamsRetained`.
+
+Only idle timeout and detected stdout repetition are retryable. Nonzero exit,
+attempt timeout, cancellation, output limit, stream I/O failure, and command
+construction failure are terminal. A successful captured run returns output
+only from the successful attempt because captured buffers are reset before each
+retry.
+
+Loop detection retains the latest 4,096 lossy-UTF-8 stdout bytes. It detects
+three identical adjacent byte sequences of length 10–512, four identical
+nonblank trimmed lines, or a repeated two-line sequence appearing three times.
+
+SIGINT and SIGTERM set cooperative cancellation. Cancellation terminates the
+current process group. Forwarding polls stdout/stderr for writability for up to
+one second per write and reports an I/O timeout if the destination remains
+blocked.
+
+## Error model
+
+The non-exhaustive public `Error` enum distinguishes invalid command templates,
+prompt input, supervision policy, profile setup/configuration, missing
+profiles, missing host acknowledgements, invalid catalogs, discovery timeout,
+invalid requests/transports, unsupported capabilities, cancellation, transport
+timeout, redacted HTTP status, response bounds, malformed responses, duplicate
+tool calls, transport I/O/framework failures, nonzero processes, exhausted
+retries, output/attempt/drain limits, cancellation, and contextual filesystem or
+stream I/O.
+
+Paths and operation labels are retained for local filesystem/process errors.
+Provider error response bodies are intentionally not included in HTTP-status
+errors.
+
+## Static evidence inventory
+
+Observed integration tests are organized as follows:
+
+- `tests/command.rs`: quoting, substitution, context expansion/removal, JSON
+  prompt encoding, and reasoning-effort rules.
+- `tests/profiles.rs`: create/load, formatting-preserving update, unchanged
+  invalid input, and pre-write validation.
+- `tests/setup.rs`: endpoint rejection, host acknowledgement, discovered and
+  fallback model selection, JSON prompt generation, numeric IDs, invalid
+  selections, and Ollama endpoint materialization.
+- `tests/catalog.rs`: catalog bounds/deduplication/versioning, HTTP parsing, ACP
+  correlation/notifications/acknowledgement, cleanup, timeout, and cancellation.
+- `tests/model_transport.rs`: endpoint restrictions, unary/stream provider
+  mapping, every reasoning-effort value, reasoning separation, tool fragments,
+  callback deadlines, chunking, terminal requirements, duplicates, malformed
+  arguments, bounds, cancellation, redacted status, and stalled providers.
+- `tests/rig_transport.rs`: endpoint restrictions, message/tool conversion,
+  streaming, cancellation, unsupported reasoning, CLI selection, request and
+  response limits, provider identity reuse, metadata bounds, tracing
+  suppression, Ollama terminal/usage validation, and nested-runtime refusal.
+- `tests/supervisor.rs`: success, retry context, terminal nonzero exit, idle and
+  attempt timeouts, policy bounds, output limits, descendant cleanup, and
+  retained pipes.
+- `tests/model_cli.rs`: non-streaming and streaming Ollama CLI output.
+- `tests/cli.rs`: authority acknowledgements, catalog text/JSON and unsupported
+  providers, ACP listing, profile path selection, run/JSON behavior, setup
+  qualification/force behavior, generated provider templates, ACP current-model
+  selection, probe failures/cancellation, and process-group interruption.
+
+## Uncertainty and unverified runtime conditions
+
+- This record is based on static source and test inspection; the tests were not
+  executed during documentation, so their current pass/fail status is unknown.
+- Optional Rig behavior was inspected in feature-gated source and tests, but no
+  feature-enabled build was performed.
+- Live compatibility with particular Ollama, llama-server, Copilot, Gemini,
+  llama-cli, curl, or wrapper versions was not exercised.
+- Terminal-only prompt display/editor interaction, signal timing, blocked output
+  destinations, filesystem races, and unusual process-tree behavior remain
+  environment-dependent beyond the observed implementation and static tests.
+- Clap-generated help text and exact parser exit statuses were not captured;
+  the argument structure above comes from the derive declarations.

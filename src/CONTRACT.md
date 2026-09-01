@@ -62,11 +62,17 @@ only to standard error; standard output remains provider content.
 
 `agent setup` always runs the generated provider command with the fixed prompt
 `Reply with exactly: OK` before role configuration is persisted. The explicit
-setup invocation acknowledges current host authority for that qualification
-command only; it does not authorize a later `prompt`. Qualification failure
-returns without persisting the new model. `--force` still runs qualification
-but permits a non-cancellation failure to be persisted after a visible warning;
-setup never offers an interactive save-after-failure bypass.
+setup invocation first presents the runtime's bounded provider model catalog
+when available and places manual entry behind a final custom choice. It
+acknowledges current host authority for those discovery commands and the
+qualification command only; it does not authorize a later `prompt`.
+Kvist does not parse or reinterpret provider catalog descriptors; it receives
+the runtime's validated rendered profile and stores that exact selected command
+for the requested roles.
+Qualification failure returns without persisting the new model. `--force`
+still runs qualification but permits a non-cancellation failure to be persisted
+after a visible warning; setup never offers an interactive save-after-failure
+bypass.
 With global `--json`, setup writes its interactive transcript and status to
 standard error, suppresses qualification-command output, and writes exactly one
 result object to standard output.

@@ -24,7 +24,7 @@ use signal_hook::{
     iterator::{Handle as SignalHandle, Signals},
 };
 
-use crate::{Error, Result};
+use crate::{CancellationToken, Error, Result};
 
 const MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(3_600);
 const MAX_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(86_400);
@@ -191,8 +191,8 @@ enum AttemptEvent {
     Retry(RetryCause),
 }
 
-struct SignalCancellation {
-    requested: Arc<AtomicBool>,
+pub(crate) struct SignalCancellation {
+    requested: CancellationToken,
     handle: SignalHandle,
     listener: Option<JoinHandle<()>>,
 }
@@ -241,17 +241,20 @@ impl OutputDestination {
 
 impl SignalCancellation {
     fn new() -> Result<Self> {
+        Self::new_with_token(CancellationToken::new())
+    }
+
+    pub(crate) fn new_with_token(requested: CancellationToken) -> Result<Self> {
         let mut signals = Signals::new([SIGINT, SIGTERM]).map_err(|source| Error::Io {
             operation: "install supervision signal handlers",
             path: PathBuf::from("process signals"),
             source,
         })?;
         let handle = signals.handle();
-        let requested = Arc::new(AtomicBool::new(false));
-        let listener_flag = Arc::clone(&requested);
+        let listener_flag = requested.clone();
         let listener = std::thread::spawn(move || {
             if signals.forever().next().is_some() {
-                listener_flag.store(true, Ordering::Release);
+                listener_flag.cancel();
             }
         });
         Ok(Self {
@@ -262,7 +265,7 @@ impl SignalCancellation {
     }
 
     fn requested(&self) -> bool {
-        self.requested.load(Ordering::Acquire)
+        self.requested.is_cancelled()
     }
 }
 

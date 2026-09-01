@@ -21,6 +21,7 @@ supported as opaque processes constrained by an outer execution backend.
 | `prompt` | Positional, file, standard-input, terminal, and editor acquisition |
 | `profile` | Strict bounded profile parsing and formatting-preserving persistence |
 | `setup` | Provider selection, probes, model/executable collection, qualification |
+| `catalog` | Bounded HTTP, ACP, and fallback provider-model discovery |
 | `supervisor` | Process groups, forward-or-capture streams, idle/loop/wall/output limits, retry, cancellation |
 | `direct_transport` | Bounded loopback Ollama and llama-server HTTP adapters |
 | `rig_transport` | Pinned non-default private Rig adapter to canonical types |
@@ -72,6 +73,25 @@ Profile mutation parses the complete TOML document, locates or appends one
 profile table while preserving formatting, validates the edited document and
 bound, then performs synchronized atomic persistence.
 
+Provider-model selection normalizes all discoverable providers into an ordered
+`ModelCatalog` of bounded descriptors and an optional current model. Ollama and
+llama-server parse their bounded JSON list endpoints. Copilot and Gemini use a
+minimal ACP v1 client: spawn one process group, exchange only `initialize` and
+`session/new`, advertise no client filesystem, terminal, or MCP capabilities,
+send an empty MCP-server list, correlate numeric response IDs, reject
+provider-to-client requests, parse newline-delimited JSON within one deadline
+and byte budget, then terminate and reap the complete process group on every
+outcome. The external CLI may still initialize its own configured processes,
+credentials, filesystem access, or network activity and remains opaque.
+
+`ModelCatalog` contains a provider identifier, nullable validated current model,
+and at most 128 `ProviderModel` values with bounded ID, display name, and
+optional description. Duplicate IDs retain the first occurrence. Invalid
+descriptors fail discovery rather than being omitted silently. Setup appends a
+synthetic custom choice only at presentation time, so unadvertised text cannot
+be mistaken for a catalog entry. Provider defaults are adapter-owned fallbacks
+used only when discovery cannot complete.
+
 Setup qualification is mandatory and uses `Reply with exactly: OK` to minimize
 tokens while testing the complete rendered command. Starting setup acknowledges
 host execution for only this qualification attempt. Failure returns before
@@ -119,6 +139,12 @@ addresses, oversized request/response bodies, and unbounded streaming. Rig
 payload tracing is suppressed and raw provider bodies do not enter canonical
 errors.
 
+Catalog HTTP requests reuse the numeric-loopback endpoint parser and
+component-owned direct HTTP restrictions rather than curl, while ACP discovery
+inherits the explicitly selected provider CLI's host authority. ACP output,
+identifiers, display names, descriptions, counts, and elapsed time are bounded;
+stderr is discarded, no prompt is sent, and cleanup is unconditional.
+
 The broker cannot broaden host grants. Capability states distinguish
 advertised, conformance-tested, and policy-enabled behavior. Provider
 permission flags are defense in depth rather than proof of isolation.
@@ -133,7 +159,11 @@ loopback HTTP, streaming, malformed provider data, and optional Rig parity.
 Focused output tests distinguish live text forwarding from captured JSON,
 verify that no success trailer contaminates content, and cover reasoning-event
 separation, per-prompt profile/model/effort selection, the fixed setup prompt,
-failed qualification, and forced persistence.
+failed qualification, forced persistence, HTTP and ACP model catalogs,
+current-model defaults, custom fallback gating, process cleanup, and
+deterministic list output. Negative ACP cases cover wrong response IDs,
+unsolicited requests, incomplete initialization, empty or inconsistent model
+state, oversized records, timeout, cancellation, and retained descendants.
 
 Conformance tests compare canonical behavior across direct Ollama,
 llama-server, and optional Rig adapters. Platform support requires native
