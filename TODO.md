@@ -49,6 +49,14 @@ prepared attempts have no reconciliation command.
   defer remote agents to host-owned model transport and typed tool brokering.
 - Add supervised execution with an explicit task ID, no automatic retry, and
   separate human finalization.
+- Give component, project, and task acceptance an explicit local-commit option
+  that commits only the canonical accepted set. Preserve unrelated worktree and
+  index state, disable hooks by default, honor signing policy, never push, and
+  retain accepted-but-uncommitted recovery state.
+- Implement exact Git commit automation first through an isolated index and
+  expected-head update. Defer Jujutsu commit automation until its distinct
+  working-copy and operation-log semantics are independently designed and
+  promoted.
 - Protect intent, queues, implementation records, approval material, canonical
   evidence, Git state, credentials, ambient home state, and child
   implementations from agent writes.

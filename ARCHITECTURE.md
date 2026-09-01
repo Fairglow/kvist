@@ -118,6 +118,12 @@ independently observed behavior.
 same-directory temporary files, synchronization where supported, and explicit
 no-clobber or atomic-replacement behavior.
 
+**Accepted-change commits:** human acceptance and VCS commit creation are
+distinct durable states. An optional local commit contains only the exact
+digest-bound acceptance set and engine-written workflow evidence. It preserves
+unrelated worktree and index state, never pushes, and remains recoverable when
+commit creation fails.
+
 **Security and authority:** model tool intent and repository content are
 untrusted proposals. Kvist owns task policy, typed path and network grants,
 approved resource and credential references, execution-tier selection,
@@ -185,16 +191,17 @@ The nonbinding review gate and its separation from compliance are recorded in
 
 The immediate prerequisite risks are repository-layout migration, explicit
 attempt recovery, the production Bubblewrap runner, typed sandbox grants,
-mediated dependency acquisition, and supervised finalization. Unattended
-execution remains disabled until private workspaces and conflict-checked
-promotion are complete and independently reviewed. Other deferred risks are
-advisory-review and project-level acceptance automation, remote model brokering,
-observed-intent proposal and comparison, contract-clause traceability, general
-cross-component contract graph resolution, schema-compatibility analysis,
-architecture-model interchange, and automated materialization of explicitly
-declared provider contracts. Deferral must not discard stable IDs, exact
-schema versions, dependency direction, or revision provenance needed to
-implement the remaining capabilities later.
+mediated dependency acquisition, supervised finalization, and exact
+accepted-change Git commits. Unattended execution remains disabled until
+private workspaces and conflict-checked promotion are complete and
+independently reviewed. Jujutsu commit automation, advisory-review and
+project-level acceptance automation, remote model brokering, observed-intent
+proposal and comparison, contract-clause traceability, general cross-component
+contract graph resolution, schema-compatibility analysis, architecture-model
+interchange, and automated materialization of explicitly declared provider
+contracts remain deferred. Deferral must not discard stable IDs, exact schema
+versions, dependency direction, or revision provenance needed to implement the
+remaining capabilities later.
 
 ## Standards and interoperability
 

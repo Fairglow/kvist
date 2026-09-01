@@ -143,6 +143,37 @@ verification evidence. It does not retry. The first pilot may write a narrow
 live path such as `tests/`; private snapshots and journaled conflict-checked
 promotion are required before unattended operation.
 
+Human acceptance creates a canonical acceptance manifest before optional VCS
+work. It records accepted path operations and exact pre/post blobs, queue and
+evidence outputs, the acceptance source, expected repository head and selected
+backend, message bytes, signing mode, and transaction phase. Files not named by
+the manifest are never candidates for the commit.
+
+The Git implementation creates a private temporary index outside the worktree,
+initializes it from the expected head, stages exact accepted paths including
+deletions, and constructs one commit without modifying the user's index.
+Before updating the branch it verifies the complete commit tree against the
+expected head plus acceptance set and rechecks accepted paths, index overlap,
+worktree identity, and head identity. The ref update uses the expected old
+object as a compare-and-swap precondition. Temporary index cleanup never
+removes user state.
+
+Commit messages are derived from trusted bounded task or document metadata and
+include stable acceptance and task trailers. Model output may be offered only
+as an explicitly selected user override. Hooks are skipped by default because
+they can execute repository code or mutate the worktree; any future hook mode
+uses separately approved sandbox execution and revalidates the acceptance set.
+Signing uses an explicit off, optional, or required policy. Required signing
+failure leaves the accepted set pending commit.
+
+If commit construction, signing, tree verification, or ref update fails after
+acceptance, the acceptance manifest advances to a recoverable commit-pending
+state. `vcs commit-accepted` revalidates and retries the same manifest; it does
+not rerun review, finalization, or promotion. Multiple acceptance sets are not
+combined by default. Git is promoted first, while Jujutsu returns a typed
+unsupported-backend error until its operation-log and working-copy semantics
+have a separate design and evidence chain.
+
 The approved target workflow adds three planned capabilities without changing
 the current CLI contract:
 
@@ -242,6 +273,11 @@ durable phase markers. Recovery finalizes only an exact known state or records
 that execution provably did not begin. Every other case remains fenced and
 requires a human disposition; it never performs a destructive VCS reset.
 
+Acceptance and commit journals are separate. Acceptance does not become false
+because the VCS operation failed. Recovery reports the accepted-but-uncommitted
+state and exact retry command without silently committing a broadened or
+changed set.
+
 Sandbox runner launch validates file identity and uses descriptor-bound Linux
 execution to reduce time-of-check/time-of-use substitution. Timeout and output
 overflow terminate the runner process tree and become explicit failures.
@@ -287,7 +323,11 @@ read-only intent and child implementations, task-scoped writes, absent home
 and Git state, process-tree cleanup, resource exhaustion, attempt recovery,
 human finalization, source-limited Cargo acquisition, untrusted archives and
 caches, offline locked verification, backend replacement, and refusal to
-degrade or fall back.
+degrade or fall back. Accepted-change tests must cover exact path sets,
+creations, deletions, renames, unrelated dirty and staged state, overlap,
+concurrent head movement, detached head, isolated index preservation, commit
+tree equality, message bounds, hook suppression, signing failure, commit
+journal recovery, no push, and unsupported Jujutsu behavior.
 
 Future review work must additionally test stable task projection, exact-digest
 receipt matching, acknowledgement and exception paths, opt-out visibility,

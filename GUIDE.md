@@ -321,6 +321,22 @@ evidence.
 Command names and syntax for these planned workflows are provisional and are
 not current interfaces.
 
+## Planned accepted-change commits
+
+Target acceptance operations offer an explicit `--commit` option. It commits
+only the canonical acceptance set: exact accepted files, queue transitions,
+and engine-written evidence bound to the accepted review or task attempt.
+Unrelated staged, unstaged, and untracked work remains untouched, and any
+overlap or concurrent head change refuses the commit.
+
+Acceptance remains valid if local commit creation fails. Kvist retains a
+versioned pending-commit journal and reports an acceptance ID that a planned
+`vcs commit-accepted ACCEPTANCE_ID` command can retry without repeating review
+or acceptance. Commit automation never pushes, stashes, resets, cleans, or
+amends. Git is the initial backend and uses an isolated index; Jujutsu commit
+automation remains deferred until separately designed and reviewed. These
+commands and flags are planned and are not part of the current CLI.
+
 ## Documentation and review discipline
 
 `IMPL.md` is an observed implementation record, not user-facing documentation.

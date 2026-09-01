@@ -150,6 +150,30 @@ deterministic change sets, conflict-checked promotion, crash-recoverable
 multi-file journaling, and cleanup have independent security and compliance
 evidence.
 
+### REQ-ACCEPTED-VCS-COMMIT
+
+Every human acceptance operation MUST produce a canonical acceptance set
+binding exact accepted paths, creations and deletions, pre- and post-digests,
+queue and evidence changes, review or attempt identity, expected VCS head, and
+a bounded commit message. Component, project, and supervised-task acceptance
+MUST offer an explicit option to create a local commit containing exactly that
+set. Commit automation MUST NOT implicitly stage all files, push, stash, reset,
+clean, amend, or include unrelated user changes.
+
+The Git backend MUST preserve the user's real index, permit unrelated dirty
+state only when it does not overlap the acceptance set, reject concurrent head
+or accepted-path changes, construct the commit through an isolated index,
+verify the exact resulting tree, and compare-and-swap the intended branch.
+Repository hooks MUST be disabled by default and may run only through a later
+explicit approved execution policy. Required signing MUST fail rather than
+silently creating an unsigned commit.
+
+Acceptance MUST remain durable if commit creation fails. Kvist MUST retain a
+versioned recovery journal and allow the exact pending set to be committed
+later without repeating acceptance. One commit per acceptance MUST be the
+default. Jujutsu and other write-capable VCS backends MUST fail as unsupported
+until independently implemented and promoted.
+
 ### REQ-AGENT-INTEGRATION
 
 Kvist MAY invoke configured external agents for explicit prompt or task
@@ -293,6 +317,8 @@ explicitly draft rather than inferred truth.
 - Package-source origins, dependency files, archives, manifests, lockfiles,
   build scripts, and caches are untrusted and require explicit bounds and
   provenance.
+- VCS paths, refs, index state, commit messages, signing configuration, hooks,
+  and concurrent repository changes are untrusted execution inputs.
 - The dependency graph remains small and justified for a local single-binary
   CLI.
 

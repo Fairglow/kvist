@@ -72,3 +72,8 @@ constraint set injected into component work.
 - Do not treat external process success as human acceptance. Supervised
   execution records a reviewable attempt, and ambiguous interrupted attempts
   remain fenced until explicit recovery and disposition.
+- Keep acceptance distinct from VCS publication. An explicit commit option may
+  create a local commit containing only the exact accepted paths and
+  engine-written evidence. It must preserve unrelated worktree and index state,
+  never push, and retain accepted state for explicit recovery if commit
+  creation fails.

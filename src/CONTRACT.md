@@ -91,8 +91,10 @@ stale evidence without changing task definitions or status.
 
 The target dogfooding execution surface additionally provides explicit attempt
 recovery and human finalization operations. Their final command spellings are
-defined by the queued CLI tests before implementation. They are not current
-CLI interfaces.
+defined by the queued CLI tests before implementation. Acceptance operations
+also gain an explicit `--commit` option, and a planned
+`vcs commit-accepted ACCEPTANCE_ID` operation retries a commit for an already
+accepted set. They are not current CLI interfaces.
 
 ## Required interfaces
 
@@ -178,6 +180,13 @@ separate finalization action binds acceptance or blocking to the exact attempt
 and scoped changes. Automatic selection, retry, and completion are not part of
 that tier.
 
+An acceptance with `--commit` creates one local commit from a canonical set of
+accepted paths and engine-written state. It leaves unrelated staged, unstaged,
+and untracked paths unchanged and refuses any overlap or concurrent head
+change. Commit automation does not push or amend. A commit failure does not
+reverse acceptance; it returns the acceptance ID and leaves a retryable
+versioned journal for `vcs commit-accepted`.
+
 Dependency acquisition permits Cargo network access only in its distinct
 phase and only to exact configured supported sources. It uses attempt-local
 writable dependency directories and never mounts the user's Cargo home.
@@ -209,6 +218,11 @@ record fence further writes until explicit recovery. Target recovery can
 reconcile only digest-proven state; uncertain source effects remain fenced for
 human disposition.
 
+Commit recovery operates only on an already accepted canonical set. A changed
+accepted path, expected head, signing policy, backend identity, or repository
+selection prevents commit creation without altering the accepted files or
+acceptance record.
+
 ## Security and authority
 
 Repository files, schemas, prompts, configuration, paths, environment values,
@@ -229,6 +243,12 @@ Model transport and credentials are not dependency-acquisition capabilities.
 Initial task agents are local. A future remote agent uses host-owned model
 transport and credential references plus typed tool requests; mounting ambient
 provider state into the effect sandbox is outside this contract.
+
+Git commit creation uses an isolated index and verifies the resulting tree
+before an atomic expected-head branch update. Repository-controlled hooks are
+not invoked by default. Signing is explicit and a required signature cannot
+degrade to unsigned output. Unsupported write-capable VCS backends, including
+initial Jujutsu support, fail before changing repository state.
 
 Secrets must not be persisted in project configuration, task queues, prompts,
 logs, schemas, or evidence. Configured literal redactions and output bounds
