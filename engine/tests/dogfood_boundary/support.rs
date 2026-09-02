@@ -334,6 +334,7 @@ max_output_bytes = 65536
 [sandbox]
 schema_version = 1
 runner = "{}"
+backend = "/usr/bin/true"
 network = "deny"
 environment_allowlist = ["PATH"]
 mount = "component"

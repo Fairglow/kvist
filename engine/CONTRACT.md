@@ -106,7 +106,9 @@ Kvist requires:
   profiles, setup, process supervision, and model transports;
 - a selected Git or Jujutsu repository for durable-artifact tracking checks;
 - an independently installed runner implementing
-  `kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` for task execution;
+  `kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` for task execution,
+  together with an approval-bound enforcement backend executable configured as
+  an absolute `[sandbox] backend` path;
 - canonical supported package-source services for explicitly approved
   dependency acquisition;
 - operating-system filesystem, process, terminal, and user-state services.
@@ -175,11 +177,32 @@ historical evidence after the recovered queue digest has been verified, so
 later legal queue updates do not re-fence it.
 
 `prompt` host execution requires `--allow-host-execution`. It is never
-represented as sandboxed. Current `task run` retains the old component-only
-request and cannot execute Kvist's own root workspace safely. The target
-version-one sandbox request replaces that shape with typed, approval-bound
-authoring, acquisition, verification, context, toolchain, cache, and scratch
-grants. There is no fallback to the legacy request or host execution.
+represented as sandboxed. `task run` now emits the redefined version-one
+sandbox request: a closed, typed value with an explicit phase, argument vector,
+working directory, environment, network capability, resource limits, and
+approval-bound grants. Before serialization the engine resolves `argv[0]` to a
+canonical, non-symlink executable (a bare name only against an explicitly
+present request `PATH`, with no ambient host fallback) and replaces `argv[0]`
+with that canonical path; every grant source is canonical; the request policy
+identity is the authenticated execution-approval digest; the toolchain identity
+is the content digest of the exact resolved `argv[0]` executable, exposed as a
+narrow read-only toolchain grant for that executable (a full immutable
+toolchain-set approval is later work); and resource limits use bounded defaults
+and options that never exceed fixed safe maxima, failing closed on overflow
+rather than saturating. An authoring request grants read-write access only to the
+component's explicit implementation and test roots and mounts each component
+intent and record document (`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`,
+`TODOS.yaml`, `IMPL.md`) as read-only context at a disjoint destination; the
+component root, `.kvist`, `.git`, and child or peer implementation are never
+exposed under a writable ancestor. When no safe authoring root exists, `task
+run` fails closed rather than granting the component root. It emits none of the
+retired `program`, `arguments`, `mounts`, or `context_files` fields. The
+independently installed runner strictly parses and validates this request and
+rejects the retired shape, but Bubblewrap enforcement is not yet integrated, so
+a valid request fails closed and `task run` still cannot execute Kvist's own
+root workspace safely. There is no fallback to the legacy request or host
+execution. Dependency-acquisition grants and supervised finalization remain
+later work.
 
 The target supervised tier requires one explicit task and produces a pending
 human disposition after agent and verification results are recorded. A
@@ -242,10 +265,15 @@ prompt execution inherits the user's full authority only after explicit
 acknowledgment.
 
 Sandbox approval is bound to canonical project/worktree identity, the exact
-bounded `ROOT_CONTRACT.md` digest, runner and Bubblewrap identity, exact policy
-bytes, typed grants, supported package sources, command and toolchain identity,
-and a user-owned authentication secret outside the repository. Runners inside
-the selected worktree are rejected. Every execution phase receives only its
+bounded `ROOT_CONTRACT.md` digest, runner identity, and the canonical path and
+content digest of the approval-bound Bubblewrap enforcement backend, exact
+policy bytes, typed grants, supported package sources, command and toolchain
+identity, and a user-owned authentication secret outside the repository. The
+availability probe must report the approved runner digest and the exact backend
+kind, path, and digest, and the backend bytes are rehashed and revalidated
+immediately before execution. Runners and enforcement backends inside the
+selected worktree or project root are rejected. Every execution phase receives
+only its
 approved paths, network capability, environment, and bounded resources.
 
 Model transport and credentials are not dependency-acquisition capabilities.

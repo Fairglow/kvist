@@ -1,12 +1,12 @@
 schema_version: 1
 component:
   requirements_revision: "sha256:31879c02266ed8f24ef353818871e2adef67913854de3a279e1ad865991bcea0"
-  contract_revision: "sha256:771ba2a3e5dfd359f482f8a47528bbb78439b995c93d6d6633bf5f95c193151a"
-  design_revision: "sha256:72fa5c67542d450f4fe9abb2e0ea7a1da7da89952ad625289a0dffd8235afc18"
+  contract_revision: "sha256:9772c55be0107de462f33813ab31a207aa18eb8c463f28281cccaf31a0d82a58"
+  design_revision: "sha256:c78acc0ebb0d33e14af4bb3a3eaecb41f825a073b1dd45afc2f3d6aff4d680a9"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-01T22:31:53Z"
+    checked_at: "2026-09-02T06:22:59Z"
     stale_since: null
     causes: []
 tasks:
@@ -104,7 +104,7 @@ tasks:
     purpose: "Give policy approval and an independent runner one complete canonical statement of every permitted effect."
     expected_outcome: "Engine and runner conformance tests agree on one bounded version-one schema, no legacy fallback exists, and every grant is exact, canonical, digest-bound, and independently validated."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "dogfood-recovery-implement-code"
     requirements:
@@ -115,8 +115,8 @@ tasks:
       - "TODO.md#TODO-DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
-      updated_at: "2026-09-01T19:57:32Z"
-      completed_at: null
+      updated_at: "2026-09-02T06:23:09Z"
+      completed_at: "2026-09-02T06:23:09Z"
     blocked_reason: null
     recovery_state: null
   - id: "dogfood-dependency-fetch-implement-code"

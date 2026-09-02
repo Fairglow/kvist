@@ -102,10 +102,10 @@ fn execute_agent_captures_stdout_and_stderr_in_log_file() {
 
     // We use a basic command available on standard platforms like 'echo'
     let profile = AgentProfile {
-        command_template: "echo '{prompt}'".to_owned(),
+        command_template: "/usr/bin/echo '{prompt}'".to_owned(),
         models: vec![Model {
             name: "default".to_owned(),
-            command: "echo '{prompt}'".to_owned(),
+            command: "/usr/bin/echo '{prompt}'".to_owned(),
             system_prompt: None,
         }],
         default_model: "default".to_owned(),
@@ -122,40 +122,62 @@ fn execute_agent_captures_stdout_and_stderr_in_log_file() {
     let task_id = "test-task";
     let runner_workspace = TempDir::new().expect("external runner workspace");
     let runner = runner_workspace.path().join("fake-sandbox-runner");
-    fs::create_dir_all(&runner).expect("create runner directory");
-    // Probe handler: returns network=deny; mount=component isolation confirmation
+    // Single-file runner: emits the version-one JSON probe on the probe argument
+    // and a deterministic response for a request. It ignores the request body.
     fs::write(
-        runner.join("probe.sh"),
-        r#"#!/bin/sh
-printf 'kvist-sandbox-probe-v1: network=deny; mount=component\n'"#,
-    )
-    .expect("write probe handler");
-    // Execute handler: discards all input and writes a deterministic response
-    fs::write(
-        runner.join("execute.sh"),
-        r#"#!/bin/sh
+        &runner,
+        r#"#!/usr/bin/bash
+set -eu
+if [ "${1-}" = "--kvist-sandbox-probe-v1" ]; then
+  runner_digest=$(sha256sum "$0" | cut -d' ' -f1)
+  backend_digest=$(sha256sum /usr/bin/true | cut -d' ' -f1)
+  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"/usr/bin/true","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend_digest"
+  exit 0
+fi
 cat >/dev/null
-printf 'sandboxed agent output\n'"#,
+printf 'sandboxed agent output\n'
+"#,
     )
-    .expect("write execute handler");
+    .expect("write runner");
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(&runner, fs::Permissions::from_mode(0o755))
-        .expect("make runner directory executable");
-    fs::set_permissions(runner.join("probe.sh"), fs::Permissions::from_mode(0o755))
-        .expect("make probe handler executable");
-    fs::set_permissions(runner.join("execute.sh"), fs::Permissions::from_mode(0o755))
-        .expect("make execute handler executable");
+        .expect("make runner executable");
     let sandbox = SandboxConfig {
         runner: runner.to_string_lossy().into_owned(),
+        backend: "/usr/bin/true".to_owned(),
         environment_allowlist: vec![],
     };
+    // The secure authoring boundary grants only explicit writable roots.
+    fs::create_dir_all(target_dir.join("tests")).expect("create authoring test root");
+    for document in [
+        "REQUIREMENTS.md",
+        "CONTRACT.md",
+        "DESIGN.md",
+        "TODOS.yaml",
+        "IMPL.md",
+    ] {
+        fs::write(target_dir.join(document), format!("fixture {document}\n"))
+            .expect("write component context document");
+    }
     let runner_identity = kvist::sandbox::runner_identity(&sandbox, target_dir, VcsSelection::Git)
         .expect("runner identity");
+    let backend_identity =
+        kvist::sandbox::backend_identity(&sandbox, target_dir, VcsSelection::Git)
+            .expect("backend identity");
+    let probe = kvist::sandbox::ensure_available(
+        &sandbox,
+        target_dir,
+        VcsSelection::Git,
+        &runner_identity,
+        &backend_identity,
+    )
+    .expect("sandbox probe");
 
     let result = execute_agent(
         &profile,
         &sandbox,
         &runner_identity,
+        &probe,
         kvist::agent::AgentExecutionRequest {
             project_root: target_dir,
             vcs_selection: VcsSelection::Git,
@@ -166,6 +188,7 @@ printf 'sandboxed agent output\n'"#,
             task_id,
             stream_output: false,
             role: Role::Developer,
+            policy_identity: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
         },
     )
     .expect("agent execution success");
@@ -178,4 +201,107 @@ printf 'sandboxed agent output\n'"#,
     assert!(result.log_path.exists());
     let log_contents = fs::read_to_string(&result.log_path).expect("read log contents");
     assert!(log_contents.contains("sandboxed agent output"));
+}
+
+#[cfg(target_os = "linux")]
+fn probe_test_workspace(probe_body: &str) -> (TempDir, TempDir, SandboxConfig) {
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    let workspace = TempDir::new().expect("probe workspace");
+    assert!(
+        Command::new("git")
+            .arg("init")
+            .current_dir(workspace.path())
+            .status()
+            .expect("git init")
+            .success()
+    );
+    let runner_workspace = TempDir::new().expect("runner workspace");
+    let runner = runner_workspace.path().join("fake-probe-runner");
+    fs::write(&runner, probe_body).expect("write probe runner");
+    fs::set_permissions(&runner, fs::Permissions::from_mode(0o755))
+        .expect("make runner executable");
+    let sandbox = SandboxConfig {
+        runner: runner.to_string_lossy().into_owned(),
+        backend: "/usr/bin/true".to_owned(),
+        environment_allowlist: vec![],
+    };
+    (workspace, runner_workspace, sandbox)
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn ensure_available_rejects_a_probe_that_overflows_the_output_bound() {
+    // The probe emits far more than the 64 KiB probe bound on standard output
+    // and exits success; the bounded probe must reject it without an unbounded
+    // capture.
+    let (workspace, _runner_workspace, sandbox) = probe_test_workspace(
+        r#"#!/usr/bin/bash
+set -eu
+if [ "${1-}" = "--kvist-sandbox-probe-v1" ]; then
+  i=0
+  while [ "$i" -lt 200000 ]; do
+    printf 'AAAAAAAAAAAAAAAA'
+    i=$((i + 1))
+  done
+  exit 0
+fi
+exit 3
+"#,
+    );
+    let target = workspace.path();
+    let runner_identity =
+        kvist::sandbox::runner_identity(&sandbox, target, VcsSelection::Git).expect("runner id");
+    let backend_identity =
+        kvist::sandbox::backend_identity(&sandbox, target, VcsSelection::Git).expect("backend id");
+    let error = kvist::sandbox::ensure_available(
+        &sandbox,
+        target,
+        VcsSelection::Git,
+        &runner_identity,
+        &backend_identity,
+    )
+    .expect_err("an overflowing probe must be rejected");
+    assert!(
+        error.to_string().contains("size bound"),
+        "diagnostic must be actionable: {error}"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn ensure_available_rejects_a_successful_probe_that_writes_standard_error() {
+    // A confirmed probe must emit only its JSON on standard output; a success
+    // that also writes standard error is rejected.
+    let (workspace, _runner_workspace, sandbox) = probe_test_workspace(
+        r#"#!/usr/bin/bash
+set -eu
+if [ "${1-}" = "--kvist-sandbox-probe-v1" ]; then
+  runner_digest=$(sha256sum "$0" | cut -d' ' -f1)
+  backend_digest=$(sha256sum /usr/bin/true | cut -d' ' -f1)
+  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"/usr/bin/true","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend_digest"
+  printf 'unexpected diagnostic\n' >&2
+  exit 0
+fi
+exit 3
+"#,
+    );
+    let target = workspace.path();
+    let runner_identity =
+        kvist::sandbox::runner_identity(&sandbox, target, VcsSelection::Git).expect("runner id");
+    let backend_identity =
+        kvist::sandbox::backend_identity(&sandbox, target, VcsSelection::Git).expect("backend id");
+    let error = kvist::sandbox::ensure_available(
+        &sandbox,
+        target,
+        VcsSelection::Git,
+        &runner_identity,
+        &backend_identity,
+    )
+    .expect_err("a probe that writes stderr on success must be rejected");
+    assert!(
+        error.to_string().contains("standard error"),
+        "diagnostic must be actionable: {error}"
+    );
 }

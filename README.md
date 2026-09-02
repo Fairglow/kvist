@@ -326,24 +326,34 @@ project must opt in with this versioned, project-local configuration:
 [sandbox]
 schema_version = 1
 runner = "/absolute/path/to/separately-installed-sandbox-runner"
+backend = "/absolute/path/to/bubblewrap-executable"
 network = "deny"
 environment_allowlist = ["PATH"]
 mount = "component"
 ```
 
 `runner` must be an absolute path to a regular, non-symlink executable outside
-both the project root and the selected Git/jj worktree root. Repository-
-controlled runners, including siblings of a nested Kvist project, are forbidden
-even when they self-attest. Kvist refuses execution if it cannot resolve the
-selected worktree root. The runner is spawned without a shell. It must acknowledge
-`--kvist-sandbox-probe-v1` by writing exactly
-`kvist-sandbox-probe-v1: network=deny; mount=component` and accept one JSON
-request on stdin when passed `--kvist-sandbox-request-v1`. Request version 1
-contains the target program/arguments, a `/workspace/component` working
-directory and writable component mount, denied network, allowed environment,
-and read-only context mounts. `ROOT_CONTRACT.md` is materialized at
-`/workspace/context/ROOT_CONTRACT.md`; a child component's nearest ancestor
-component contract is materialized at
+both the project root and the selected Git/jj worktree root. `backend` must
+likewise be an absolute path to a regular, non-symlink enforcement-backend
+(Bubblewrap) executable outside the project root and worktree; its content
+digest is approval-bound. Repository-controlled runners or backends, including
+siblings of a nested Kvist project, are forbidden even when they self-attest.
+Kvist refuses execution if it cannot resolve the selected worktree root. The
+runner is spawned without a shell. It must answer `--kvist-sandbox-probe-v1`
+with the closed `kvist-sandbox-probe-v1` JSON object reporting its runner
+identity and the enforcement backend kind, path, and digest, and accept one
+JSON request on stdin when passed `--kvist-sandbox-request-v1`. The probe must
+report the approved runner digest and the exact configured backend identity,
+and the backend bytes are rehashed and revalidated immediately before
+execution. Request version 1 is a closed, typed value with an explicit phase,
+argument vector, a `/workspace/component` working directory, denied network
+(or exact package sources during mediated acquisition), allowed environment,
+resource bounds, approval-bound identities, and typed grants. An authoring
+request grants read-write access only to the component's explicit
+implementation and test roots and mounts each intent and record document
+read-only at a disjoint destination; the component root is never writable.
+`ROOT_CONTRACT.md` is materialized at `/workspace/context/ROOT_CONTRACT.md`; a
+child component's nearest ancestor component contract is materialized at
 `/workspace/context/PARENT_CONTRACT.md`. The runner must enforce those values
 and proxy its sandboxed child result. Missing configuration, an unavailable
 runner, or a failed probe refuses `task run` before any task transition; Kvist
@@ -361,8 +371,9 @@ rejected. The record covers both effective agent templates, token limits,
 timeouts, combined-output caps, and redaction policies,
 the selected agent-config source path and digest, the exact bounded
 `ROOT_CONTRACT.md` digest, parsed sandbox configuration, canonical runner path
-and digest, test policy (including absence), and relevant schema/protocol
-versions. Any missing, malformed, or changed input causes `task run` to refuse
+and digest, canonical enforcement-backend path and digest, test policy
+(including absence), and relevant schema/protocol versions. Any missing,
+malformed, or changed input causes `task run` to refuse
 without probing, host fallback, or task mutation. On Linux, each probe and
 request launches a private descriptor-bound copy of freshly verified runner
 bytes, so replacement after validation cannot alter what executes. Platforms

@@ -2704,7 +2704,12 @@ fn load_and_interpolate_template(
 }
 
 enum TaskRunApproval {
-    Ready(crate::sandbox::RunnerIdentity),
+    Ready {
+        runner: crate::sandbox::RunnerIdentity,
+        /// The authenticated execution-approval digest bound as the request
+        /// policy identity.
+        policy_identity: String,
+    },
     DescriptorUnavailable {
         approval: Box<ExecutionApproval>,
         secret: Vec<u8>,
@@ -2732,7 +2737,10 @@ fn task_run_approval(
         Ok(runner) => {
             let current = build_execution_approval_for_runner(project_dir, config, &runner)?;
             ensure_approval_matches(&approved, &current)?;
-            Ok(TaskRunApproval::Ready(runner))
+            Ok(TaskRunApproval::Ready {
+                runner,
+                policy_identity: approved.approval_digest.clone(),
+            })
         }
         Err(error) => {
             let runner = crate::sandbox::RunnerIdentity {
@@ -3162,8 +3170,11 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
             reason: "test policy is absent".to_owned(),
         });
     }
-    let approved_runner = match task_approval {
-        TaskRunApproval::Ready(runner) => runner,
+    let (approved_runner, policy_identity) = match task_approval {
+        TaskRunApproval::Ready {
+            runner,
+            policy_identity,
+        } => (runner, policy_identity),
         TaskRunApproval::DescriptorUnavailable {
             approval,
             secret,
@@ -3188,7 +3199,15 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
             runner: "<unconfigured>".to_owned(),
             reason: "task execution requires a project-local [sandbox] configuration".to_owned(),
         })?;
-    crate::sandbox::ensure_available(sandbox_config, &project_dir, config.vcs, &approved_runner)?;
+    let approved_backend =
+        crate::sandbox::backend_identity(sandbox_config, &project_dir, config.vcs)?;
+    let sandbox_probe = crate::sandbox::ensure_available(
+        sandbox_config,
+        &project_dir,
+        config.vcs,
+        &approved_runner,
+        &approved_backend,
+    )?;
     let context = validate_context(component_path)?;
     let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     // This single lock covers selection, execution, evidence, and the terminal
@@ -3287,6 +3306,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
             agent_profile,
             sandbox_config,
             &approved_runner,
+            &sandbox_probe,
             crate::agent::AgentExecutionRequest {
                 project_root: &project_dir,
                 vcs_selection: config.vcs,
@@ -3297,6 +3317,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                 task_id: &task_id,
                 stream_output: stream,
                 role,
+                policy_identity: &policy_identity,
             },
         )?;
         let agent_timestamp =
@@ -3320,7 +3341,14 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
         if run_result.success {
             if task.kind == TaskKind::Implementation {
                 println!("Running test-command verification...");
-                match verify_task(component_path, &task_id, &project_dir, &config) {
+                match verify_task(
+                    component_path,
+                    &task_id,
+                    &project_dir,
+                    &config,
+                    &sandbox_probe,
+                    &policy_identity,
+                ) {
                     Ok(verify_res) => {
                         if verify_res.success {
                             let transition_at = Timestamp::now()
@@ -3663,6 +3691,8 @@ struct ExecutionApprovalMaterial {
     sandbox_digest: String,
     runner_path: String,
     runner_digest: String,
+    backend_path: String,
+    backend_digest: String,
     test_policy_schema_version: Option<i64>,
     test_policy_digest: Option<String>,
 }
@@ -3744,6 +3774,7 @@ fn build_execution_approval_for_runner(
         .ok_or_else(|| KvistError::UnapprovedExecutionPolicy {
             reason: "sandbox configuration is absent".to_owned(),
         })?;
+    let backend = crate::sandbox::backend_identity(sandbox, project_dir, config.vcs)?;
     let (canonical_project, canonical_worktree) =
         project_worktree_identity(project_dir, config.vcs)?;
     let material = ExecutionApprovalMaterial {
@@ -3797,6 +3828,8 @@ fn build_execution_approval_for_runner(
         })?),
         runner_path: runner.canonical_path.clone(),
         runner_digest: runner.digest.clone(),
+        backend_path: backend.path.clone(),
+        backend_digest: backend.digest.clone(),
         test_policy_schema_version: config
             .test_policy
             .as_ref()
@@ -4389,6 +4422,10 @@ fn execution_approval_difference(
         || approved.runner_digest != current.runner_digest
     {
         "sandbox runner identity or content has changed".to_owned()
+    } else if approved.backend_path != current.backend_path
+        || approved.backend_digest != current.backend_digest
+    {
+        "sandbox enforcement backend identity or content has changed".to_owned()
     } else if approved.sandbox_digest != current.sandbox_digest {
         "sandbox configuration has changed".to_owned()
     } else if approved.test_policy_digest != current.test_policy_digest
@@ -4478,6 +4515,8 @@ pub fn verify_task(
     task_id: &str,
     project_dir: &Path,
     config: &crate::config::ProjectConfig,
+    probe: &crate::sandbox::SandboxProbe,
+    policy_identity: &str,
 ) -> Result<VerificationResult> {
     let approved_runner = check_execution_approved(project_dir, config)?;
     let policy =
@@ -4529,14 +4568,16 @@ pub fn verify_task(
             project_root: project_dir,
             vcs_selection: config.vcs,
             component_dir: &context.component_dir,
+            phase: crate::sandbox::ExecutionPhase::Verification,
             program,
             arguments: &args,
             environment: crate::sandbox::allowed_environment(
                 sandbox_config,
                 Some(&policy.environment_allowlist),
             ),
-            context_files: &[],
             read_only_mounts: &[],
+            backend: &probe.backend,
+            policy_identity,
         },
         crate::sandbox::ExecutionOptions {
             timeout: Some(std::time::Duration::from_secs(policy.timeout_seconds)),

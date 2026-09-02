@@ -16,3 +16,11 @@ name = "kvist_sandbox_runner"
 [[bin]]
 name = "kvist-sandbox-runner"
 path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[dev-dependencies]
+sha2 = "0.11"
+hex = "0.4"

@@ -743,6 +743,7 @@ dependencies = [
  "clap_complete",
  "getrandom",
  "hex",
+ "kvist-sandbox-runner",
  "nix",
  "serde",
  "serde_json",
@@ -757,6 +758,12 @@ dependencies = [
 [[package]]
 name = "kvist-sandbox-runner"
 version = "0.1.0"
+dependencies = [
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+]
 
 [[package]]
 name = "lazy_static"

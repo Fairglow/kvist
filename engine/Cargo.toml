@@ -31,5 +31,8 @@ toml = "1.1"
 toml_edit = "0.25.13"
 agent-runtime = { version = "=0.1.0", path = "agent_runtime" }
 
+[dev-dependencies]
+kvist-sandbox-runner = { version = "=0.1.0", path = "sandbox_runner" }
+
 [profile.dev]
 debug = "line-tables-only"

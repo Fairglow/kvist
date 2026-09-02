@@ -63,7 +63,9 @@ fn configure_fake_sandbox(project: &TempDir) {
         &runner,
         r#"#!/bin/sh
 if [ "$1" = "--kvist-sandbox-probe-v1" ]; then
-  printf 'kvist-sandbox-probe-v1: network=deny; mount=component\n'
+  runner_digest=$(sha256sum "$0" | cut -d' ' -f1)
+  backend_digest=$(sha256sum /usr/bin/true | cut -d' ' -f1)
+  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"/usr/bin/true","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend_digest"
   exit 0
 fi
 request=$(cat)
@@ -75,7 +77,7 @@ case "$request" in
     ;;
 esac
 case "$request" in
-  *'"program":"false"'*) exit 1 ;;
+  *'"argv":["/usr/bin/false"'*) exit 1 ;;
   *'agent-overflow'*)
     i=0
     while [ "$i" -lt 10000 ]; do
@@ -121,12 +123,15 @@ printf 'fake sandbox runner\n'
         fs::write(
             config_path,
             format!(
-                "{config}\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+                "{config}\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"/usr/bin/true\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
                 runner.display()
             ),
         )
         .expect("configure sandbox");
     }
+    // The secure authoring boundary grants only explicit writable roots, so the
+    // component needs a real test directory to author into.
+    let _ = fs::create_dir_all(project.path().join("src/tests"));
 }
 
 fn queue() -> String {
@@ -532,7 +537,7 @@ fn task_run_executes_successfully_and_transitions_completed() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo 'mocking execute' {context_files}"
+command_template = "/usr/bin/echo 'mocking execute' {context_files}"
 
 [test_policy]
 schema_version = 1
@@ -542,7 +547,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo 'mocking verify'"
+command = "/usr/bin/echo 'mocking verify'"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -580,14 +585,27 @@ command = "echo 'mocking verify'"
     assert!(queue_contents.contains("status: completed"));
     let manifest = fs::read_to_string(project.path().join("agent-sandbox-request.json"))
         .expect("read agent sandbox manifest");
+    assert!(manifest.contains("\"protocol\":\"kvist-sandbox-request-v1\""));
     assert!(manifest.contains("\"protocol_version\":1"));
-    assert!(manifest.contains("\"network\":\"deny\""));
-    assert!(manifest.contains("\"destination\":\"/workspace/component\""));
+    assert!(manifest.contains("\"phase\":\"authoring\""));
+    assert!(manifest.contains("\"network\":{\"mode\":\"deny\",\"allowed_sources\":[]}"));
+    // The whole component is never granted; only explicit authoring roots are
+    // writable and intent documents are read-only context at disjoint paths.
+    assert!(!manifest.contains("\"destination\":\"/workspace/component\","));
+    assert!(manifest.contains("\"destination\":\"/workspace/component/tests\""));
+    assert!(manifest.contains("\"destination\":\"/workspace/component/REQUIREMENTS.md\""));
+    assert!(manifest.contains("\"access\":\"read-write\""));
+    assert!(manifest.contains("\"purpose\":\"authoring\""));
     assert!(manifest.contains("\"destination\":\"/workspace/context/ROOT_CONTRACT.md\""));
     assert!(manifest.contains("\"access\":\"read-only\""));
-    assert!(manifest.contains("\"context_files\":[\"/workspace/component/REQUIREMENTS.md\""));
+    assert!(manifest.contains("\"purpose\":\"context\""));
     assert!(manifest.contains("\"/workspace/context/ROOT_CONTRACT.md\""));
     assert!(manifest.contains("\"working_directory\":\"/workspace/component\""));
+    // Producer -> parser conformance: the exact request the engine serialized
+    // must satisfy the independent runner parser and validator without coupling
+    // the production crates (the runner is only a dev-dependency here).
+    kvist_sandbox_runner::validation::parse_and_validate(manifest.as_bytes())
+        .expect("engine-produced authoring request must satisfy the runner parser");
     assert_eq!(
         fs::read_to_string(project.path().join("runner-ambient-env.txt"))
             .expect("read runner environment evidence"),
@@ -611,6 +629,7 @@ fn child_task_run_mounts_the_nearest_parent_contract_read_only() {
         )
         .expect("copy component artifact");
     }
+    fs::create_dir_all(child_dir.join("tests")).expect("create child test root");
     let child_queue = queue().replace(
         "  parent_contract: null",
         &format!(
@@ -622,7 +641,7 @@ fn child_task_run_mounts_the_nearest_parent_contract_read_only() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo 'mocking execute' {context_files}"
+command_template = "/usr/bin/echo 'mocking execute' {context_files}"
 
 [test_policy]
 schema_version = 1
@@ -632,7 +651,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "ordinary/component"
-command = "echo 'mocking verify'"
+command = "/usr/bin/echo 'mocking verify'"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -676,7 +695,7 @@ fn approval_record_is_deterministic_and_rejects_changed_agent_template_before_pr
         r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo approved-agent"
+command_template = "/usr/bin/echo approved-agent"
 token_limit = 42
 [test_policy]
 schema_version = 1
@@ -686,7 +705,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#,
     )
     .expect("write config");
@@ -736,7 +755,7 @@ fn approval_rejects_changed_root_contract_before_sandbox_probe() {
         r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo approved-agent"
+command_template = "/usr/bin/echo approved-agent"
 [test_policy]
 schema_version = 1
 working_directory = "component"
@@ -745,7 +764,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#,
     )
     .expect("write config");
@@ -782,7 +801,7 @@ fn approval_rejects_changed_agent_source_and_runner_content_before_mutation() {
     fs::create_dir_all(project.path().join(".kvist")).expect("create local config directory");
     fs::write(
         project.path().join(".kvist/config.toml"),
-        "[agent.profiles.developer]\ncommand_template = \"echo local-agent\"\ntimeout_seconds = 5\nmax_output_bytes = 1000\n",
+        "[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo local-agent\"\ntimeout_seconds = 5\nmax_output_bytes = 1000\n",
     )
     .expect("write local agent config");
     fs::write(
@@ -797,7 +816,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#,
     )
     .expect("write project config");
@@ -810,7 +829,7 @@ command = "echo verify"
 
     fs::write(
         project.path().join(".kvist/config.toml"),
-        "[agent.profiles.developer]\ncommand_template = \"echo changed-local-agent\"\n",
+        "[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo changed-local-agent\"\n",
     )
     .expect("change local agent config");
     let before = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
@@ -824,7 +843,7 @@ command = "echo verify"
 
     fs::write(
         project.path().join(".kvist/config.toml"),
-        "[agent.profiles.developer]\ncommand_template = \"echo local-agent\"\ntimeout_seconds = 5\nmax_output_bytes = 1000\n",
+        "[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo local-agent\"\ntimeout_seconds = 5\nmax_output_bytes = 1000\n",
     )
     .expect("restore local agent config");
     assert!(
@@ -849,7 +868,7 @@ fn approval_records_absent_test_policy_but_task_run_refuses_it_before_mutation()
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
-    let config = "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"echo agent\"\n";
+    let config = "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo agent\"\n";
     fs::write(project.path().join("kvist.toml"), config).expect("write config");
     track_project(&project);
 
@@ -879,7 +898,7 @@ fn repository_forged_approval_record_cannot_probe_or_execute() {
         r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo forged"
+command_template = "/usr/bin/echo forged"
 [test_policy]
 schema_version = 1
 working_directory = "component"
@@ -888,7 +907,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#,
     )
     .expect("write forged config");
@@ -950,7 +969,7 @@ fn runner_changed_after_probe_is_not_spawned_for_request() {
         r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo agent"
+command_template = "/usr/bin/echo agent"
 [test_policy]
 schema_version = 1
 working_directory = "component"
@@ -959,7 +978,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#,
     )
     .expect("write config");
@@ -975,7 +994,9 @@ printf 'untrusted request runner\n' > sandbox-request.json
 exit 1
 EOF
   chmod 755 "{}"
-  printf 'kvist-sandbox-probe-v1: network=deny; mount=component\n'
+  runner_digest=$(sha256sum "$0" | cut -d' ' -f1)
+  backend_digest=$(sha256sum /usr/bin/true | cut -d' ' -f1)
+  printf '{{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{{"path":"%s","digest":"sha256:%s"}},"backend":{{"kind":"bubblewrap","path":"/usr/bin/true","digest":"sha256:%s"}},"capabilities":{{"namespaces":{{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true}},"new_session":true,"parent_death_signal":true}}}}\n' "$0" "$runner_digest" "$backend_digest"
   exit 0
 fi
 printf 'approved request runner\n' > sandbox-request.json
@@ -992,7 +1013,7 @@ printf 'approved request runner\n' > sandbox-request.json
     fs::write(
         config_path,
         format!(
-            "{config}\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+            "{config}\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"/usr/bin/true\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
             runner.display()
         ),
     )
@@ -1031,7 +1052,7 @@ fn approval_rejects_changed_agent_limit_before_sandbox_probe() {
     fs::create_dir_all(project.path().join(".kvist")).expect("create local config directory");
     fs::write(
         project.path().join(".kvist/config.toml"),
-        "[agent.profiles.developer]\ncommand_template = \"echo local-agent\"\ntimeout_seconds = 5\nmax_output_bytes = 1000\n",
+        "[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo local-agent\"\ntimeout_seconds = 5\nmax_output_bytes = 1000\n",
     )
     .expect("write local agent config");
     fs::write(
@@ -1046,7 +1067,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#,
     )
     .expect("write config");
@@ -1085,7 +1106,9 @@ fn task_run_refuses_missing_sandbox_before_transition() {
     let config = fs::read_to_string(project.path().join("kvist.toml")).expect("read config");
     fs::write(
         project.path().join("kvist.toml"),
-        format!("{config}\n[agent.profiles.developer]\ncommand_template = \"echo agent\"\n"),
+        format!(
+            "{config}\n[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo agent\"\n"
+        ),
     )
     .expect("write config");
     let status = Command::new("git")
@@ -1132,7 +1155,7 @@ fn task_run_refuses_a_project_local_sandbox_runner_before_transition() {
     fs::write(
         project.path().join("kvist.toml"),
         format!(
-            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"echo agent\"\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo agent\"\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"/usr/bin/true\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
             runner.display()
         ),
     )
@@ -1185,7 +1208,7 @@ fn task_run_refuses_a_sibling_runner_in_the_selected_worktree() {
     fs::write(
         project.join("kvist.toml"),
         format!(
-            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"echo agent\"\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo agent\"\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"/usr/bin/true\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
             runner.display()
         ),
     )
@@ -1232,7 +1255,7 @@ fn task_run_auto_selects_and_executes_next_ready_task() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo 'mock auto select'"
+command_template = "/usr/bin/echo 'mock auto select'"
 
 [test_policy]
 schema_version = 1
@@ -1242,7 +1265,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo 'mocking verify'"
+command = "/usr/bin/echo 'mocking verify'"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -1273,7 +1296,7 @@ fn task_run_transitions_to_blocked_on_agent_failure() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "false"
+command_template = "/usr/bin/false"
 
 [test_policy]
 schema_version = 1
@@ -1283,7 +1306,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -1315,7 +1338,7 @@ fn task_run_cancels_agent_output_and_persists_redacted_bounded_evidence() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "agent-overflow"
+command_template = "/usr/bin/echo agent-overflow"
 timeout_seconds = 5
 max_output_bytes = 64
 [agent.profiles.developer.redaction]
@@ -1329,7 +1352,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -1376,7 +1399,7 @@ fn task_run_cancels_agent_timeout_with_durable_evidence() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "agent-sleep"
+command_template = "/usr/bin/echo agent-sleep"
 timeout_seconds = 1
 max_output_bytes = 1024
 
@@ -1388,7 +1411,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -1422,7 +1445,7 @@ fn task_run_redacts_a_secret_split_across_streams_before_log_and_streaming() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "split-secret"
+command_template = "/usr/bin/echo split-secret"
 timeout_seconds = 5
 max_output_bytes = 1024
 [agent.profiles.developer.redaction]
@@ -1436,7 +1459,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -1480,13 +1503,14 @@ fn task_run_redacts_all_verification_evidence_blockers_and_cli_output() {
         r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo agent"
+command_template = "/usr/bin/echo agent"
 [agent.profiles.developer.redaction]
 values = ["agent-redaction-secret"]
 
 [sandbox]
 schema_version = 1
 runner = "REPLACED_BY_TEST"
+backend = "/usr/bin/true"
 network = "deny"
 environment_allowlist = ["KVIST_TEST_SECRET"]
 mount = "component"
@@ -1499,7 +1523,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "verification-secret"
+command = "/usr/bin/echo verification-secret"
 "#,
     )
     .expect("write config");
@@ -1562,7 +1586,7 @@ fn task_run_lifecycle_lock_survives_agent_component_lock_deletion() {
         r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "delete-lock"
+command_template = "/usr/bin/echo delete-lock"
 timeout_seconds = 5
 [test_policy]
 schema_version = 1
@@ -1572,7 +1596,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#,
     )
     .expect("write config");
@@ -1645,7 +1669,7 @@ fn task_log_reads_and_outputs_the_most_recent_log_file() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo 'my expected log output'"
+command_template = "/usr/bin/echo 'my expected log output'"
 
 [test_policy]
 schema_version = 1
@@ -1655,7 +1679,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo 'mocking verify'"
+command = "/usr/bin/echo 'mocking verify'"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -1698,7 +1722,7 @@ fn task_run_fails_with_unapproved_test_policy() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo 'mocking execute' {context_files}"
+command_template = "/usr/bin/echo 'mocking execute' {context_files}"
 
 [test_policy]
 schema_version = 1
@@ -1708,7 +1732,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo 'mocking verify'"
+command = "/usr/bin/echo 'mocking verify'"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -1734,7 +1758,7 @@ fn task_run_fails_with_missing_test_command() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo 'mocking execute' {context_files}"
+command_template = "/usr/bin/echo 'mocking execute' {context_files}"
 
 [test_policy]
 schema_version = 1
@@ -1776,7 +1800,7 @@ fn task_run_fails_when_test_command_fails() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo 'mocking execute' {context_files}"
+command_template = "/usr/bin/echo 'mocking execute' {context_files}"
 
 [test_policy]
 schema_version = 1
@@ -1786,7 +1810,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "false"
+command = "/usr/bin/false"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -1820,7 +1844,7 @@ fn task_run_handles_test_command_timeout() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo 'mocking execute' {context_files}"
+command_template = "/usr/bin/echo 'mocking execute' {context_files}"
 
 [test_policy]
 schema_version = 1
@@ -1830,7 +1854,7 @@ timeout_seconds = 1
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "sleep 5"
+command = "/usr/bin/sleep 5"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -1870,7 +1894,7 @@ fn task_run_caps_test_command_output_and_records_persistence() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "echo 'mocking execute' {context_files}"
+command_template = "/usr/bin/echo 'mocking execute' {context_files}"
 
 [test_policy]
 schema_version = 1
@@ -1880,7 +1904,7 @@ timeout_seconds = 5
 max_output_bytes = 10
 [[test_policy.commands]]
 component = "."
-command = "sh ./emit-and-fail.sh"
+command = "/usr/bin/echo emit-and-fail"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -1924,7 +1948,7 @@ fn task_unlock_removes_orphaned_locks() {
     let config_toml = r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "sleep 10"
+command_template = "/usr/bin/sleep 10"
 timeout_seconds = 10
 
 [test_policy]
@@ -1935,7 +1959,7 @@ timeout_seconds = 10
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#;
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
@@ -2016,6 +2040,7 @@ kind = "auto"
 [sandbox]
 schema_version = 1
 runner = "{}"
+backend = "/usr/bin/true"
 network = "deny"
 mount = "component"
 environment_allowlist = []
@@ -2067,7 +2092,9 @@ fn test_language_specific_prompt_templates() {
         &runner,
         r#"#!/bin/sh
 if [ "$1" = "--kvist-sandbox-probe-v1" ]; then
-  printf 'kvist-sandbox-probe-v1: network=deny; mount=component\n'
+  runner_digest=$(sha256sum "$0" | cut -d' ' -f1)
+  backend_digest=$(sha256sum /usr/bin/true | cut -d' ' -f1)
+  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"/usr/bin/true","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend_digest"
   exit 0
 fi
 request=$(cat)
@@ -2096,12 +2123,13 @@ kind = "auto"
 [sandbox]
 schema_version = 1
 runner = "{}"
+backend = "/usr/bin/true"
 network = "deny"
 mount = "component"
 environment_allowlist = []
 
 [agent.profiles.developer]
-command_template = "echo 'Prompt: {{prompt}}'"
+command_template = "/usr/bin/echo 'Prompt: {{prompt}}'"
 
 [test_policy]
 schema_version = 1
@@ -2111,7 +2139,7 @@ timeout_seconds = 5
 max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
-command = "echo verify"
+command = "/usr/bin/echo verify"
 "#,
         runner.display().to_string().replace('\\', "/")
     );

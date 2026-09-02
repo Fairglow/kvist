@@ -12,6 +12,11 @@ use crate::{KvistError, Result, artifacts::CONFIGURATION_VERSION, filesystem::is
 
 /// Maximum supported size of `kvist.toml`.
 pub const MAX_CONFIGURATION_BYTES: u64 = 64 * 1024;
+/// Runner-compatible bounds for `[sandbox].environment_allowlist`. These are
+/// deliberately kept with configuration parsing so an invalid environment name
+/// never reaches request construction.
+pub const MAX_SANDBOX_ENVIRONMENT_ENTRIES: usize = 256;
+pub const MAX_SANDBOX_ENVIRONMENT_NAME_BYTES: usize = 4096;
 
 /// Bounded, deterministic limits applied while discovering components.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -282,6 +287,9 @@ pub struct ProjectConfig {
 pub struct SandboxConfig {
     /// Executable invoked directly, never through a shell.
     pub runner: String,
+    /// Approval-bound absolute path to the canonical enforcement backend
+    /// executable (Bubblewrap). Its identity is verified and bound by approval.
+    pub backend: String,
     /// Environment names inherited by the runner and declared for its child.
     pub environment_allowlist: Vec<String>,
 }
@@ -459,6 +467,16 @@ fn parse_sandbox_config(
                 "`sandbox.runner` must be a nonblank absolute executable path",
             )
         })?;
+    let backend = sandbox
+        .get("backend")
+        .and_then(toml::Value::as_str)
+        .filter(|value| !value.trim().is_empty() && Path::new(value).is_absolute())
+        .ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`sandbox.backend` must be a nonblank absolute enforcement-backend executable path",
+            )
+        })?;
     let network = sandbox
         .get("network")
         .and_then(toml::Value::as_str)
@@ -488,12 +506,26 @@ fn parse_sandbox_config(
                 "`sandbox.environment_allowlist` must be an array of nonblank strings",
             )
         })?;
+    if values.len() > MAX_SANDBOX_ENVIRONMENT_ENTRIES {
+        return Err(invalid_configuration(
+            config_path,
+            "`sandbox.environment_allowlist` exceeds the 256-entry runner limit",
+        ));
+    }
     let mut environment_allowlist = Vec::with_capacity(values.len());
     for value in values {
         let name = value
             .as_str()
-            .filter(|name| !name.is_empty() && name.bytes().all(|byte| byte == b'_' || byte.is_ascii_alphanumeric()))
-            .ok_or_else(|| invalid_configuration(config_path, "`sandbox.environment_allowlist` must contain only nonblank ASCII environment names"))?;
+            .filter(|name| {
+                name.len() <= MAX_SANDBOX_ENVIRONMENT_NAME_BYTES
+                    && is_portable_environment_name(name)
+            })
+            .ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "`sandbox.environment_allowlist` must contain portable identifiers no longer than 4096 bytes",
+                )
+            })?;
         if environment_allowlist
             .iter()
             .any(|existing| existing == name)
@@ -507,8 +539,15 @@ fn parse_sandbox_config(
     }
     Ok(Some(SandboxConfig {
         runner: runner.to_owned(),
+        backend: backend.to_owned(),
         environment_allowlist,
     }))
+}
+
+fn is_portable_environment_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    matches!(bytes.next(), Some(byte) if byte == b'_' || byte.is_ascii_alphabetic())
+        && bytes.all(|byte| byte == b'_' || byte.is_ascii_alphanumeric())
 }
 
 fn parse_vcs_selection(

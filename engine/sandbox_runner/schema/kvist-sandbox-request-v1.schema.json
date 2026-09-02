@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kvist.dev/schema/kvist-sandbox-request-v1.schema.json",
+  "title": "kvist-sandbox-request-v1",
+  "description": "Closed version-one execution request accepted by the Kvist sandbox runner. This schema structurally mirrors the runner's Rust types in src/protocol.rs (including the typed Cargo toolchain, package sources, and dependency-cache shapes) and encodes the feasible semantic constraints of network mode/source emptiness. The Rust parser in src/validation.rs remains authoritative for all semantic invariants (per-phase purpose/access rules, canonical paths, immutable source and cache-promotion policy); where this schema and the Rust parser disagree, the Rust parser governs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "protocol_version",
+    "phase",
+    "argv",
+    "working_directory",
+    "environment",
+    "network",
+    "resources",
+    "identities",
+    "grants",
+    "toolchain",
+    "cache",
+    "scratch"
+  ],
+  "properties": {
+    "protocol": { "const": "kvist-sandbox-request-v1" },
+    "protocol_version": { "const": 1 },
+    "phase": { "enum": ["authoring", "verification", "dependency-acquisition"] },
+    "argv": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1024,
+      "items": { "type": "string", "maxLength": 4096 }
+    },
+    "working_directory": { "$ref": "#/$defs/absolutePath" },
+    "environment": {
+      "type": "object",
+      "maxProperties": 256,
+      "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+      "additionalProperties": { "type": "string", "maxLength": 4096 }
+    },
+    "network": { "$ref": "#/$defs/network" },
+    "resources": { "$ref": "#/$defs/resources" },
+    "identities": { "$ref": "#/$defs/identities" },
+    "grants": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": { "$ref": "#/$defs/grant" }
+    },
+    "toolchain": { "$ref": "#/$defs/toolchain" },
+    "cache": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/cache" }] },
+    "scratch": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/scratch" }] }
+  },
+  "$defs": {
+  "absolutePath": {
+    "type": "string",
+    "pattern": "^/(?:[^/\\u0000]+(?:/[^/\\u0000]+)*)?$",
+    "maxLength": 4096
+  },
+  "relativePath": {
+    "type": "string",
+    "pattern": "^[^/\\u0000]+(?:/[^/\\u0000]+)*$",
+    "maxLength": 4096
+  },
+  "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+  "network": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["mode", "allowed_sources"],
+    "properties": {
+      "mode": { "enum": ["deny", "package-sources"] },
+      "allowed_sources": {
+        "type": "array",
+        "maxItems": 64,
+        "items": { "$ref": "#/$defs/allowedSource" }
+      }
+    },
+    "allOf": [
+      {
+        "if": { "properties": { "mode": { "const": "deny" } } },
+        "then": { "properties": { "allowed_sources": { "maxItems": 0 } } }
+      },
+      {
+        "if": { "properties": { "mode": { "const": "package-sources" } } },
+        "then": { "properties": { "allowed_sources": { "minItems": 1 } } }
+      }
+    ]
+  },
+  "allowedSource": {
+    "oneOf": [
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "name", "index_origin", "identity"],
+        "properties": {
+          "kind": { "const": "cargo-registry" },
+          "name": { "type": "string", "maxLength": 4096 },
+          "index_origin": { "type": "string", "maxLength": 4096 },
+          "download_origin": { "type": "string", "maxLength": 4096 },
+          "identity": { "$ref": "#/$defs/digest" }
+        }
+      },
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "identity"],
+        "properties": {
+          "kind": { "const": "cargo-git" },
+          "repository": { "type": "string", "maxLength": 4096 },
+          "branch": { "type": "string", "maxLength": 4096 },
+          "revision": { "type": "string", "maxLength": 4096 },
+          "identity": { "$ref": "#/$defs/digest" }
+        }
+      }
+    ]
+  },
+  "resources": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "wall_time_ms",
+      "max_output_bytes",
+      "max_processes",
+      "max_files",
+      "max_file_bytes",
+      "max_scratch_bytes"
+    ],
+    "properties": {
+      "wall_time_ms": { "type": "integer", "minimum": 1, "maximum": 86400000 },
+      "max_output_bytes": { "type": "integer", "minimum": 1, "maximum": 268435456 },
+      "max_processes": { "type": "integer", "minimum": 1, "maximum": 4096 },
+      "max_files": { "type": "integer", "minimum": 1, "maximum": 1048576 },
+      "max_file_bytes": { "type": "integer", "minimum": 1, "maximum": 8589934592 },
+      "max_scratch_bytes": { "type": "integer", "minimum": 1, "maximum": 68719476736 },
+      "max_cache_bytes": { "type": "integer", "minimum": 1, "maximum": 68719476736 }
+    }
+  },
+  "backendIdentity": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["kind", "path", "digest"],
+    "properties": {
+      "kind": { "const": "bubblewrap" },
+      "path": { "$ref": "#/$defs/absolutePath" },
+      "digest": { "$ref": "#/$defs/digest" }
+    }
+  },
+  "identities": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["runner", "backend", "policy", "toolchain", "command", "mount_plan"],
+    "properties": {
+      "runner": { "$ref": "#/$defs/digest" },
+      "backend": { "$ref": "#/$defs/backendIdentity" },
+      "policy": { "$ref": "#/$defs/digest" },
+      "toolchain": { "$ref": "#/$defs/digest" },
+      "command": { "$ref": "#/$defs/digest" },
+      "mount_plan": { "$ref": "#/$defs/digest" }
+    }
+  },
+  "grant": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["source", "destination", "access", "purpose", "identity"],
+    "properties": {
+      "source": { "$ref": "#/$defs/absolutePath" },
+      "destination": { "$ref": "#/$defs/absolutePath" },
+      "access": { "enum": ["read-only", "read-write"] },
+      "purpose": {
+        "enum": [
+          "context",
+          "authoring",
+          "verification",
+          "toolchain",
+          "scratch",
+          "dependency-cache"
+        ]
+      },
+      "identity": { "$ref": "#/$defs/digest" }
+    }
+  },
+  "toolchain": {
+    "oneOf": [
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "identity", "root"],
+        "properties": {
+          "kind": { "const": "system" },
+          "identity": { "$ref": "#/$defs/digest" },
+          "root": { "$ref": "#/$defs/absolutePath" }
+        }
+      },
+      {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "identity", "cargo"],
+        "properties": {
+          "kind": { "const": "cargo" },
+          "identity": { "$ref": "#/$defs/digest" },
+          "cargo": { "$ref": "#/$defs/absolutePath" }
+        }
+      }
+    ]
+  },
+  "cacheEndpoint": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["destination", "identity"],
+    "properties": {
+      "destination": { "$ref": "#/$defs/absolutePath" },
+      "identity": { "$ref": "#/$defs/digest" }
+    }
+  },
+  "cacheManifestEntry": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["path", "size", "checksum"],
+    "properties": {
+      "path": { "$ref": "#/$defs/relativePath" },
+      "size": { "type": "integer", "minimum": 0 },
+      "checksum": { "$ref": "#/$defs/digest" }
+    }
+  },
+  "cachePromotion": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["enabled", "source", "destination", "expected_destination_identity", "manifest"],
+    "properties": {
+      "enabled": { "type": "boolean" },
+      "source": { "$ref": "#/$defs/absolutePath" },
+      "destination": { "$ref": "#/$defs/absolutePath" },
+      "expected_destination_identity": { "$ref": "#/$defs/digest" },
+      "manifest": {
+        "type": "array",
+        "maxItems": 4096,
+        "items": { "$ref": "#/$defs/cacheManifestEntry" }
+      }
+    }
+  },
+  "cache": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["cargo_home", "registry", "git"],
+    "properties": {
+      "cargo_home": { "$ref": "#/$defs/absolutePath" },
+      "registry": { "$ref": "#/$defs/absolutePath" },
+      "git": { "$ref": "#/$defs/absolutePath" },
+      "attempt": { "$ref": "#/$defs/cacheEndpoint" },
+      "approved": { "$ref": "#/$defs/cacheEndpoint" },
+      "promotion": { "$ref": "#/$defs/cachePromotion" }
+    }
+  },
+  "scratch": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["destination", "identity"],
+    "properties": {
+      "destination": { "$ref": "#/$defs/absolutePath" },
+      "identity": { "$ref": "#/$defs/digest" }
+    }
+  }
+  }
+}

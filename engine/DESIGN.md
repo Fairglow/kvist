@@ -50,9 +50,10 @@ Task mutation follows:
 8. append `committed` evidence; and
 9. release the lock.
 
-Task execution adds policy approval, runner identity and capability checks,
-read-only root and immediate-parent contract mounts, agent execution, output
-redaction, and implementation test verification.
+Task execution adds policy approval, runner and enforcement-backend identity and
+capability checks, explicit authoring implementation and test roots with
+read-only intent, root, and immediate-parent contract mounts, agent execution,
+output redaction, and implementation test verification.
 
 The target dogfooding path splits this into recovery-safe supervised authoring,
 optional mediated dependency acquisition, isolated verification, and explicit
@@ -109,17 +110,44 @@ Significant artifact separation rationale is retained in
 The engine replaces the unreleased sandbox protocol's original shape while
 retaining protocol version 1. A request is a closed typed value containing the
 phase, working directory, argv, environment, network capability, resource
-limits, context paths, and mount grants. Each mount identifies its canonical
-source, fixed sandbox destination, access, purpose, and approval-bound
-identity. Unknown fields, purposes, overlaps, aliases, links, special files,
-and paths outside approved roots fail before the runner is probed.
+limits, and mount grants. Each mount identifies its canonical source, fixed
+sandbox destination, access, purpose, and approval-bound identity. Before the
+request is serialized the engine resolves `argv[0]` to an exact executable: a
+bare program name is resolved only against a `PATH` explicitly present in the
+request environment (no ambient host fallback), an absolute program path is used
+directly, the target must be a regular non-symlink executable, and it is
+canonicalized and content-hashed. That canonical path replaces `argv[0]`. All
+grant source paths are canonicalized so the producer never emits a non-canonical
+path the runner would reject. Resource limits use bounded defaults and options
+that never exceed the runner's explicit safe maxima; a converted limit that
+overflows or exceeds a maximum fails closed rather than saturating. Unknown
+fields, purposes, overlaps, aliases, links, special files, and paths outside
+approved roots fail before the runner is probed.
+Before request serialization or runner execution, the producer also enforces
+the runner's lexical argv and environment bounds: 1–1024 argv entries, and at
+most 4096 bytes with no NUL per argv entry, environment name, or environment
+value; environment has at most 256 entries and names are portable identifiers.
+Configuration applies the same count and name restrictions to its environment
+allowlist.
 
 The Bubblewrap runner is a child component but is installed as one regular
 executable outside the worktree. Engine approval binds the descriptor-launched
 runner bytes, Bubblewrap path and digest, kernel capability result, typed
-policy, toolchain, command, sources, and grant plan. The runner independently
-parses the request and cannot import engine types or trust engine path
-validation as a substitute for its own checks.
+policy, toolchain, command, sources, and grant plan. The request `identities`
+bind the exact command bytes, the toolchain identity derived from the exact
+resolved `argv[0]` executable bytes (a narrow, internally consistent toolchain
+grant for that exact executable; a full immutable toolchain-set approval is
+deferred to the later runner integration), and the request policy identity,
+which is the authenticated execution-approval digest rather than a locally
+computed unapproved hash. The availability probe itself runs under a fixed short
+deadline and combined-output cap with process-group termination, never an
+unbounded capture. The runner independently parses the request and cannot import
+engine types or trust engine path validation as a substitute for its own checks.
+The engine drains runner stdout and stderr nonblockingly and fairly under that
+single combined cap, polling direct-child status until both streams reach EOF.
+The deadline and cap remain active after direct-child exit; either breach kills
+the process group, reaps the direct child when necessary, and returns bounded
+captured output without waiting for descendants that retained a pipe descriptor.
 
 Authoring and verification use separate filesystem views. Authoring receives
 only local component context and explicit writable implementation/test roots.

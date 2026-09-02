@@ -47,6 +47,9 @@ pub struct AgentExecutionRequest<'a> {
     pub stream_output: bool,
     /// The agent role (architect or developer) for which the model was selected.
     pub role: super::config::Role,
+    /// The authenticated execution-approval digest bound as the request policy
+    /// identity.
+    pub policy_identity: &'a str,
 }
 
 /// Run-record schema parsed from the agent's run metadata file.
@@ -137,6 +140,7 @@ pub fn execute_agent(
     profile: &AgentProfile,
     sandbox_config: &SandboxConfig,
     expected_runner: &RunnerIdentity,
+    probe: &sandbox::SandboxProbe,
     request: AgentExecutionRequest<'_>,
 ) -> Result<AgentRunResult> {
     let (program, args) = get_effective_command(
@@ -166,11 +170,6 @@ pub fn execute_agent(
             source,
         })?;
 
-    let context_files = request
-        .context_paths
-        .iter()
-        .map(|path| path.to_string_lossy().into_owned())
-        .collect::<Vec<_>>();
     let sandbox::ExecutionResult {
         output,
         timed_out,
@@ -181,11 +180,13 @@ pub fn execute_agent(
             project_root: request.project_root,
             vcs_selection: request.vcs_selection,
             component_dir: request.target_dir,
+            phase: sandbox::ExecutionPhase::Authoring,
             program: &program,
             arguments: &args,
             environment: sandbox::allowed_environment(sandbox_config, None),
-            context_files: &context_files,
             read_only_mounts: request.read_only_mounts,
+            backend: &probe.backend,
+            policy_identity: request.policy_identity,
         },
         sandbox::ExecutionOptions {
             timeout: Some(Duration::from_secs(profile.timeout_seconds)),

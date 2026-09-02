@@ -344,6 +344,7 @@ fn sandbox_configuration_requires_explicit_deny_network_component_mount_and_envi
         r#"[sandbox]
     schema_version = 1
     runner = "{runner}"
+    backend = "/usr/bin/true"
     network = "deny"
     environment_allowlist = ["PATH"]
     mount = "component"
@@ -368,5 +369,47 @@ fn sandbox_configuration_requires_explicit_deny_network_component_mount_and_envi
         )
         .expect("write invalid config");
         assert!(config::load(project.path()).is_err(), "{invalid}");
+    }
+}
+
+#[test]
+fn sandbox_environment_allowlist_uses_runner_compatible_bounds_and_names() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    let base = "schema_version = 1\ncomponent_root = \"src\"\n";
+    let runner = project.path().join("runner").display().to_string();
+    let sandbox = |allowlist: String| {
+        format!(
+            r#"[sandbox]
+schema_version = 1
+runner = "{runner}"
+backend = "/usr/bin/true"
+network = "deny"
+environment_allowlist = [{allowlist}]
+mount = "component"
+"#
+        )
+    };
+    let too_many = (0..=config::MAX_SANDBOX_ENVIRONMENT_ENTRIES)
+        .map(|index| format!("\"ENV_{index}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    for allowlist in [
+        too_many,
+        "\"9INVALID\"".to_owned(),
+        format!(
+            "\"{}\"",
+            "A".repeat(config::MAX_SANDBOX_ENVIRONMENT_NAME_BYTES + 1)
+        ),
+    ] {
+        fs::write(
+            project.path().join("kvist.toml"),
+            format!("{base}{}", sandbox(allowlist)),
+        )
+        .expect("write invalid sandbox configuration");
+        assert!(
+            config::load(project.path()).is_err(),
+            "runner-invalid environment allowlist must fail configuration parsing"
+        );
     }
 }
