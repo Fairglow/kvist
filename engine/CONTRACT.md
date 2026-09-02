@@ -201,8 +201,18 @@ independently installed runner strictly parses and validates this request and
 rejects the retired shape, but Bubblewrap enforcement is not yet integrated, so
 a valid request fails closed and `task run` still cannot execute Kvist's own
 root workspace safely. There is no fallback to the legacy request or host
-execution. Dependency-acquisition grants and supervised finalization remain
-later work.
+execution. The engine builds fallible typed mediated-acquisition and offline-verification
+plans with distinct canonical UTF-8 host sources and fixed sandbox
+destinations. Acquisition is exactly `cargo fetch` using a real writable
+attempt-local `CARGO_HOME`, an isolated writable lockfile workspace, and
+separate scratch; it records lockfile before/after content identities for an
+immutable-generation promotion result. Verification is exactly
+`cargo test --locked` with denied network, `CARGO_NET_OFFLINE=true`, an
+approved generation mounted read-only at `CARGO_HOME`, and separate target
+scratch. Strict `[sandbox.acquisition]` configuration is approval-bound. The
+runner validates these values but live `task run` acquisition wiring, OS mount,
+process, DNS/address-pinning, redirect, and network enforcement, and final
+project-cache generation selection remain later work.
 
 The target supervised tier requires one explicit task and produces a pending
 human disposition after agent and verification results are recorded. A
@@ -217,11 +227,13 @@ change. Commit automation does not push or amend. A commit failure does not
 reverse acceptance; it returns the acceptance ID and leaves a retryable
 versioned journal for `vcs commit-accepted`.
 
-Dependency acquisition permits Cargo network access only in its distinct
-phase and only to exact configured supported sources. It uses attempt-local
-writable dependency directories and never mounts the user's Cargo home.
-Authoring and verification remain network-denied; verification uses approved
-content with `--locked`.
+Dependency acquisition permits Cargo network access only in its distinct phase
+and only to exact configured supported sources. It uses a real attempt-local
+writable `CARGO_HOME`, an isolated writable lockfile workspace, and separate
+target scratch, and never mounts the user's Cargo home. `cargo fetch` may
+update that workspace's lockfile. Authoring and verification remain
+network-denied; verification uses a selected approved immutable Cargo-home
+generation read-only with `cargo test --locked` and offline true.
 
 `agent setup` is the explicit acknowledgement for its single generated
 qualification command. Kvist adds no filesystem, credential, executable, or

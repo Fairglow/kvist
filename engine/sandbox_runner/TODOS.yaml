@@ -1,11 +1,11 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:a66b02640151cfdcdbf25bcdad6f9ccd3142facb608e372b80598842ec3b5c70"
-  contract_revision: "sha256:f926a7eacc1a4ce8c1a875e4b550036a26d00416ea076b341f3f42dc08d55ec6"
-  design_revision: "sha256:76df24286f49c75a2c820322208f167011c4a9d07b52ee52cd232add4906bb59"
+  requirements_revision: "sha256:fd851bdf9d703c6928d359afd01d4bc81b99bc95c66794010c6b8dbe77482363"
+  contract_revision: "sha256:66834c5a7bd55bc949c885240105989a06a4141b1fa2074f2501dbfbf42990ed"
+  design_revision: "sha256:f914c25425863857b5bbc3807f7b462c9b38e791c8679b5f2c18d47020f4964c"
   parent_contract:
     path: "../CONTRACT.md"
-    revision: "sha256:9772c55be0107de462f33813ab31a207aa18eb8c463f28281cccaf31a0d82a58"
+    revision: "sha256:97e29ab932fa292248f6fa87d99b3efca1b5859ae0555bdcd19b8398ddc483c3"
   revalidation:
     state: current
     checked_at: "2026-09-02T06:23:00Z"
@@ -19,7 +19,7 @@ tasks:
     purpose: "Establish executable negative and positive evidence before any request can cause effects."
     expected_outcome: "Tests reject malformed and retired requests, aliases, links, overlapping grants, backend substitution, resource escape, and host fallback while defining the accepted Bubblewrap path."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "../CONTRACT.md#Required-interfaces"
@@ -29,8 +29,8 @@ tasks:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-09-01T21:04:20Z"
-      updated_at: "2026-09-01T21:04:20Z"
-      completed_at: null
+      updated_at: "2026-09-02T08:00:00Z"
+      completed_at: "2026-09-02T08:00:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "sandbox-runner-implement-code"
@@ -40,7 +40,7 @@ tasks:
     purpose: "Provide the independently installed enforcement boundary required for supervised Kvist execution."
     expected_outcome: "The runner satisfies the preceding native tests and never degrades to the host or retired request shape."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "sandbox-runner-write-tests"
     requirements:
@@ -51,8 +51,8 @@ tasks:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-09-01T21:04:20Z"
-      updated_at: "2026-09-01T21:04:20Z"
-      completed_at: null
+      updated_at: "2026-09-02T08:00:00Z"
+      completed_at: "2026-09-02T08:00:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "sandbox-runner-security-audit"

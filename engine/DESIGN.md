@@ -157,13 +157,32 @@ caches needed by the build, but those files are not added to the agent prompt
 or writable set. Nested child implementation paths are masked from a parent
 authoring view unless separately granted.
 
-The dependency phase runs Cargo acquisition without compiling. A
-source-aware network boundary permits only configured registry index/download
-origins or an exact approved Git repository and immutable revision. Cargo uses
-an empty home plus attempt-local registry, Git, cache, lockfile, and scratch
-paths. Valid content may enter a project cache only after bounded traversal,
-checksum, lockfile, source, link, and concurrent-state validation.
-Verification remounts that content read-only and disables network.
+The dependency phase plans Cargo acquisition without compiling. A future
+source-aware network boundary will reauthorize every outbound URL and redirect
+against configured registry index/download origins or an exact approved Git
+repository and immutable revision, pin trusted resolution, and reject
+private/link-local/loopback production addresses. Cargo uses a real
+attempt-local `CARGO_HOME`, a distinct writable lockfile workspace, and
+separate scratch. Valid content may become one new immutable generation beneath
+a trusted provider-owned parent only after bounded descriptor-relative
+traversal, checksum, lockfile before/after, source, and link validation.
+Verification mounts a selected generation read-only as its `CARGO_HOME`, uses
+separate target scratch, and disables network.
+
+The engine implements this as typed, bounded, fallible planning in
+`acquisition`: private plan fields expose only validated host-path and
+sandbox-path getters. It derives the real attempt-local Cargo home,
+lockfile workspace, phase-specific scratch, exact Cargo identity,
+domain-separated source identities, and exact Cargo environments. Acquisition
+is `cargo fetch` (without `--locked`) so its result binds the old and new
+lockfile identities; verification is `cargo test --locked` with
+`CARGO_NET_OFFLINE=true`. Supported package sources and bounds are strict
+project configuration under `[sandbox.acquisition]`; complete built-in plus
+extra name, identity, count, and origin-overlap validation occurs both during
+configuration parsing and plan construction. The runner independently
+revalidates protocol data. OS mounts, processes, transport enforcement, final
+generation selection, and live `task run` wiring remain deferred and valid
+requests fail closed.
 
 Supervised execution records an attempt but leaves completion to a separate
 human disposition bound to its ID, approved pre-state, scoped post-state, and

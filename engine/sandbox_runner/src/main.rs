@@ -68,15 +68,7 @@ fn run_request() -> ExitCode {
     }
 
     match validation::parse_and_validate(&buffer) {
-        Ok(_request) => {
-            // The request is a well-formed, valid version-one request, but the
-            // runner cannot enforce it yet. Fail closed without host fallback.
-            eprintln!(
-                "kvist-sandbox-runner: {}",
-                kvist_sandbox_runner::ENFORCEMENT_UNAVAILABLE
-            );
-            ExitCode::from(3)
-        }
+        Ok(request) => kvist_sandbox_runner::enforcement::run(request),
         Err(error) => {
             eprintln!("kvist-sandbox-runner: {error}");
             ExitCode::from(2)

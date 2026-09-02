@@ -1888,6 +1888,7 @@ mod tests {
             runner: "/runner".to_owned(),
             backend: "/usr/bin/true".to_owned(),
             environment_allowlist: Vec::new(),
+            acquisition: crate::config::AcquisitionConfig::default(),
         };
         assert!(
             validate_probe_digest(&config, &format!("sha256:{}", "a".repeat(64)), "runner").is_ok()
@@ -1905,6 +1906,7 @@ mod tests {
             runner: "/runner-not-started".to_owned(),
             backend: "/backend-not-started".to_owned(),
             environment_allowlist: Vec::new(),
+            acquisition: crate::config::AcquisitionConfig::default(),
         };
         assert!(
             validate_request_inputs(
@@ -1970,6 +1972,7 @@ mod tests {
             runner: runner.to_string_lossy().into_owned(),
             backend: "/usr/bin/true".to_owned(),
             environment_allowlist: Vec::new(),
+            acquisition: crate::config::AcquisitionConfig::default(),
         };
         let launch = VerifiedRunnerLaunch::create(&identity).expect("create verified launch");
         (directory, config, launch)

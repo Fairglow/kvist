@@ -112,7 +112,8 @@ The unreleased `kvist-sandbox-probe-v1` and
 version-one request MUST distinguish authoring, dependency acquisition, and
 verification, use an explicit working directory and typed argument vector, and
 represent every read-only, read-write, context, dependency-cache, toolchain,
-and scratch mount. Legacy version-one request semantics MUST be rejected.
+scratch, and isolated-lockfile-workspace mount. Legacy version-one request
+semantics MUST be rejected.
 
 Authoring agents MUST NOT receive write access to intent, queues,
 implementation records, approval material, canonical evidence, Git metadata,
@@ -124,8 +125,11 @@ without adding those paths to authoring context or write authority.
 
 Dependency acquisition MUST be a distinct approved phase. Cargo MUST be able to
 resolve and download new or changed dependencies from exact configured
-supported sources into bounded attempt-local writable registry, Git, cache,
-lockfile, and scratch locations without receiving the user's Cargo home.
+supported sources into a real bounded attempt-local writable `CARGO_HOME`, an
+isolated writable lockfile workspace, and separate target scratch without
+receiving the user's Cargo home. Acquisition is exactly non-compiling
+`cargo fetch`, not `cargo fetch --locked`; a changed lockfile is an expected
+result and its exact before/after content identities are bound to promotion.
 Initial source support MUST cover canonical crates.io sparse-index and crate
 download origins. Additional registries MUST declare exact index and download
 origins. Git dependencies MUST initially require an exact approved repository
@@ -133,8 +137,20 @@ URL and immutable revision.
 
 The acquisition phase MUST NOT execute dependency build scripts. Successful
 cache promotion MUST validate source policy, checksums, lockfile changes,
-bounds, paths, links, and concurrent preconditions. Verification MUST run with
-network denied, `--locked`, and approved dependency content mounted read-only.
+bounds, paths, links, and concurrent preconditions. It MUST construct a new
+immutable cache generation beneath a trusted provider-owned parent rather than
+mutating an arbitrary project-cache pathname. Verification MUST run exactly
+`cargo test --locked`, with network denied and offline true, using the approved
+generation as a read-only `CARGO_HOME` and separate writable target scratch.
+
+Current implementation status: the engine implements typed, bounded planning
+with distinct host and sandbox paths, full source-config parity, and
+attempt-local lockfile identities. The independently installed runner validates
+the exact Cargo phase shapes, independently derives source identities, and
+provides an immutable-generation primitive and transport-policy value types.
+These are primitives only: OS mount, process, DNS/address-pinning, redirect,
+and network enforcement, live `task run` wiring, and final project-cache
+generation selection remain deferred. An otherwise valid request fails closed.
 
 ### REQ-SUPERVISED-EXECUTION
 

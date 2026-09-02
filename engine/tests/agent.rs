@@ -146,6 +146,7 @@ printf 'sandboxed agent output\n'
         runner: runner.to_string_lossy().into_owned(),
         backend: "/usr/bin/true".to_owned(),
         environment_allowlist: vec![],
+        acquisition: kvist::config::AcquisitionConfig::default(),
     };
     // The secure authoring boundary grants only explicit writable roots.
     fs::create_dir_all(target_dir.join("tests")).expect("create authoring test root");
@@ -226,6 +227,7 @@ fn probe_test_workspace(probe_body: &str) -> (TempDir, TempDir, SandboxConfig) {
         runner: runner.to_string_lossy().into_owned(),
         backend: "/usr/bin/true".to_owned(),
         environment_allowlist: vec![],
+        acquisition: kvist::config::AcquisitionConfig::default(),
     };
     (workspace, runner_workspace, sandbox)
 }

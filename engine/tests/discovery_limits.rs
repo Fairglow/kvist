@@ -373,6 +373,186 @@ fn sandbox_configuration_requires_explicit_deny_network_component_mount_and_envi
 }
 
 #[test]
+fn sandbox_acquisition_policy_defaults_and_validates_sources_and_bounds() {
+    use kvist::config::PackageSource;
+
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    let base = "schema_version = 1\ncomponent_root = \"src\"\n";
+    let runner = project
+        .path()
+        .join("trusted-sandbox-runner")
+        .to_string_lossy()
+        .replace('\\', "\\\\");
+    let sandbox = |extra: &str| {
+        format!(
+            r#"[sandbox]
+schema_version = 1
+runner = "{runner}"
+backend = "/usr/bin/true"
+network = "deny"
+environment_allowlist = ["PATH"]
+mount = "component"
+{extra}"#
+        )
+    };
+
+    // Absent acquisition policy defaults to canonical crates.io only.
+    fs::write(
+        project.path().join("kvist.toml"),
+        format!("{base}{}", sandbox("")),
+    )
+    .expect("write config");
+    let default = config::load(project.path())
+        .expect("default acquisition")
+        .sandbox
+        .expect("sandbox")
+        .acquisition;
+    assert!(default.additional_sources.is_empty());
+    assert_eq!(
+        default.cache_bounds.max_cache_bytes,
+        config::DEFAULT_ACQUISITION_MAX_CACHE_BYTES
+    );
+
+    // A valid additional registry, Git source, and explicit bounds.
+    let valid = r#"[sandbox.acquisition]
+max_cache_files = 4096
+max_cache_bytes = 1073741824
+
+[[sandbox.acquisition.registry]]
+name = "private"
+index_origin = "https://registry.example.invalid/index/"
+download_origin = "https://registry.example.invalid/crates/"
+
+[[sandbox.acquisition.git]]
+repository = "https://git.example.invalid/dependency.git"
+revision = "0123456789abcdef0123456789abcdef01234567"
+"#;
+    fs::write(
+        project.path().join("kvist.toml"),
+        format!("{base}{}", sandbox(valid)),
+    )
+    .expect("write config");
+    let acquisition = config::load(project.path())
+        .expect("valid acquisition")
+        .sandbox
+        .expect("sandbox")
+        .acquisition;
+    assert_eq!(acquisition.cache_bounds.max_files, 4096);
+    assert_eq!(acquisition.additional_sources.len(), 2);
+    assert!(matches!(
+        &acquisition.additional_sources[0],
+        PackageSource::CargoRegistry { name, .. } if name == "private"
+    ));
+
+    // Invalid sources and out-of-bound values must fail configuration parsing.
+    let invalid_cases = [
+        // Non-canonical (credentialed) registry origin.
+        r#"[[sandbox.acquisition.registry]]
+name = "creds"
+index_origin = "https://user:pass@registry.example.invalid/index/"
+download_origin = "https://registry.example.invalid/crates/"
+"#,
+        // Registry impersonating crates.io.
+        r#"[[sandbox.acquisition.registry]]
+name = "impersonator"
+index_origin = "https://index.crates.io/"
+download_origin = "https://static.crates.io/"
+"#,
+        // Redefining the built-in crates-io name.
+        r#"[[sandbox.acquisition.registry]]
+name = "crates-io"
+index_origin = "https://index.crates.io/"
+download_origin = "https://static.crates.io/"
+"#,
+        // Mutable Git revision.
+        r#"[[sandbox.acquisition.git]]
+repository = "https://git.example.invalid/dependency.git"
+revision = "main"
+"#,
+        // Cache bound exceeding the runner maximum.
+        "[sandbox.acquisition]\nmax_cache_bytes = 999999999999999\n",
+    ];
+    for invalid in invalid_cases {
+        fs::write(
+            project.path().join("kvist.toml"),
+            format!("{base}{}", sandbox(invalid)),
+        )
+        .expect("write invalid acquisition config");
+        assert!(
+            config::load(project.path()).is_err(),
+            "invalid acquisition policy must fail parsing: {invalid}"
+        );
+    }
+}
+
+#[test]
+fn sandbox_acquisition_configuration_enforces_full_source_set_parity() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    let runner = project.path().join("runner").display().to_string();
+    let base = format!(
+        r#"schema_version = 1
+component_root = "src"
+[sandbox]
+schema_version = 1
+runner = "{runner}"
+backend = "/usr/bin/true"
+network = "deny"
+environment_allowlist = ["PATH"]
+mount = "component"
+"#
+    );
+
+    // An extra Git origin may not overlap either canonical built-in crates.io
+    // origin, even though its derived identity differs.
+    let overlap = r#"
+[[sandbox.acquisition.git]]
+repository = "https://index.crates.io/repository.git"
+revision = "0123456789abcdef0123456789abcdef01234567"
+"#;
+    fs::write(
+        project.path().join("kvist.toml"),
+        format!("{base}{overlap}"),
+    )
+    .expect("write overlap config");
+    assert!(config::load(project.path()).is_err());
+
+    // Parser input must reject 64 extras because crates.io already occupies
+    // one of the 64 permitted source positions.
+    let extras = (0..64)
+        .map(|index| {
+            format!(
+                r#"
+[[sandbox.acquisition.git]]
+repository = "https://git{index}.example.invalid/dependency.git"
+revision = "0123456789abcdef0123456789abcdef01234567"
+"#
+            )
+        })
+        .collect::<String>();
+    fs::write(project.path().join("kvist.toml"), format!("{base}{extras}"))
+        .expect("write too-many config");
+    assert!(config::load(project.path()).is_err());
+
+    let too_long = "x".repeat(4097);
+    let oversized = format!(
+        r#"
+[[sandbox.acquisition.registry]]
+name = "{too_long}"
+index_origin = "https://registry.example.invalid/index/"
+download_origin = "https://registry.example.invalid/crates/"
+"#
+    );
+    fs::write(
+        project.path().join("kvist.toml"),
+        format!("{base}{oversized}"),
+    )
+    .expect("write oversized config");
+    assert!(config::load(project.path()).is_err());
+}
+
+#[test]
 fn sandbox_environment_allowlist_uses_runner_compatible_bounds_and_names() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");

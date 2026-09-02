@@ -1,8 +1,8 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:31879c02266ed8f24ef353818871e2adef67913854de3a279e1ad865991bcea0"
-  contract_revision: "sha256:9772c55be0107de462f33813ab31a207aa18eb8c463f28281cccaf31a0d82a58"
-  design_revision: "sha256:c78acc0ebb0d33e14af4bb3a3eaecb41f825a073b1dd45afc2f3d6aff4d680a9"
+  requirements_revision: "sha256:cae723b95c0194269dbb8b7cca637774083739d88cb63293ca2cba4219f05160"
+  contract_revision: "sha256:97e29ab932fa292248f6fa87d99b3efca1b5859ae0555bdcd19b8398ddc483c3"
+  design_revision: "sha256:b2de09fc64cb11a7138620d52f922fb618a0c52a47ce1362ec73aefba46ae5cb"
   parent_contract: null
   revalidation:
     state: current
@@ -126,7 +126,7 @@ tasks:
     purpose: "Permit practical dependency evolution without granting the authoring agent unrestricted network, credentials, or cross-project cache mutation."
     expected_outcome: "Approved Cargo acquisition can resolve allowed sources and lockfile changes within bounds, rejects undeclared or mutable sources, executes no build scripts online, and supplies verified read-only content to offline tests."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "dogfood-protocol-implement-code"
     requirements:
@@ -137,8 +137,8 @@ tasks:
       - "TODO.md#TODO-DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
-      updated_at: "2026-09-01T19:57:32Z"
-      completed_at: null
+      updated_at: "2026-09-02T07:15:00Z"
+      completed_at: "2026-09-02T07:15:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "dogfood-runner-integrate-code"
@@ -148,7 +148,7 @@ tasks:
     purpose: "Enable one narrow local-agent dogfooding task without weakening context boundaries or treating process success as human acceptance."
     expected_outcome: "A local agent can author only an approved task scope, Cargo acquisition and verification use their own grants, all other effects fail closed, and the exact attempt awaits explicit human acceptance or blocking."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "dogfood-dependency-fetch-implement-code"
     requirements:
@@ -160,8 +160,8 @@ tasks:
       - "TODO.md#TODO-DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
-      updated_at: "2026-09-01T19:57:32Z"
-      completed_at: null
+      updated_at: "2026-09-02T08:15:00Z"
+      completed_at: "2026-09-02T08:15:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "dogfood-vcs-commit-implement-code"

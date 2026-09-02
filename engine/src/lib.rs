@@ -9,6 +9,7 @@
 #[cfg(not(target_os = "linux"))]
 compile_error!("Kvist currently supports Linux only");
 
+pub mod acquisition;
 pub mod agent;
 pub mod artifacts;
 pub mod cli;

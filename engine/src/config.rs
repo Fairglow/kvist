@@ -292,6 +292,86 @@ pub struct SandboxConfig {
     pub backend: String,
     /// Environment names inherited by the runner and declared for its child.
     pub environment_allowlist: Vec<String>,
+    /// Mediated Cargo dependency-acquisition policy. Canonical crates.io is
+    /// always available; additional registries and Git sources are explicit.
+    pub acquisition: AcquisitionConfig,
+}
+
+/// Bounded, deterministic mediated dependency-acquisition policy.
+///
+/// The canonical crates.io source is always available and is not represented in
+/// [`AcquisitionConfig::additional_sources`]. Any additional registry or Git
+/// source is explicit, exact, and bounded, mirroring the sandbox runner's own
+/// acquisition source policy. This is part of the serialized sandbox
+/// configuration, so it is bound into the authenticated execution approval.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Default)]
+pub struct AcquisitionConfig {
+    /// Bounds enforced on a promoted cache.
+    pub cache_bounds: AcquisitionCacheBounds,
+    /// Additional exact, bounded package sources beyond canonical crates.io.
+    pub additional_sources: Vec<PackageSource>,
+}
+
+/// Bounds enforced on a mediated dependency cache during inspection and
+/// promotion. Each value is nonzero and never exceeds the runner's safe maxima.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct AcquisitionCacheBounds {
+    /// Maximum number of files eligible for promotion.
+    pub max_files: u64,
+    /// Maximum size in bytes of any single promoted file.
+    pub max_file_bytes: u64,
+    /// Maximum aggregate size in bytes of a promoted cache.
+    pub max_cache_bytes: u64,
+}
+
+/// Default cache file count. Reconciled with the protocol promotion-manifest
+/// maximum of 4096 entries, which bounds how many files a generation may hold.
+pub const DEFAULT_ACQUISITION_MAX_FILES: u64 = 4096;
+/// Default per-file size bound (256 MiB).
+pub const DEFAULT_ACQUISITION_MAX_FILE_BYTES: u64 = 256 * 1024 * 1024;
+/// Default aggregate cache size bound (2 GiB).
+pub const DEFAULT_ACQUISITION_MAX_CACHE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+
+/// Runner safe maxima the configured bounds must never exceed. `max_cache_files`
+/// is bounded by the protocol promotion-manifest maximum (4096 entries), so a
+/// configured file count can never exceed the number of manifest entries the
+/// runner admits; the byte bounds mirror the runner's `MAX_*` resource ceilings.
+const RUNNER_MAX_FILES: u64 = 4096;
+const RUNNER_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+const RUNNER_MAX_CACHE_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+
+impl Default for AcquisitionCacheBounds {
+    fn default() -> Self {
+        AcquisitionCacheBounds {
+            max_files: DEFAULT_ACQUISITION_MAX_FILES,
+            max_file_bytes: DEFAULT_ACQUISITION_MAX_FILE_BYTES,
+            max_cache_bytes: DEFAULT_ACQUISITION_MAX_CACHE_BYTES,
+        }
+    }
+}
+
+/// One explicit, exact mediated dependency source beyond canonical crates.io.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum PackageSource {
+    /// An additional Cargo registry with exact canonical index and download
+    /// origins.
+    CargoRegistry {
+        /// The registry name (never `crates-io`).
+        name: String,
+        /// The exact canonical index origin URL.
+        index_origin: String,
+        /// The exact canonical download origin URL.
+        download_origin: String,
+    },
+    /// A Cargo Git dependency pinned to an exact repository and immutable
+    /// revision.
+    CargoGit {
+        /// The exact canonical HTTPS repository URL.
+        repository: String,
+        /// The immutable 40-hex revision.
+        revision: String,
+    },
 }
 
 /// Supported VCS selection for durable-artifact tracking inspection.
@@ -537,11 +617,190 @@ fn parse_sandbox_config(
         }
         environment_allowlist.push(name.to_owned());
     }
+    let acquisition = parse_acquisition_config(config_path, sandbox)?;
     Ok(Some(SandboxConfig {
         runner: runner.to_owned(),
         backend: backend.to_owned(),
         environment_allowlist,
+        acquisition,
     }))
+}
+
+/// Parses the optional `[sandbox.acquisition]` mediated dependency policy.
+///
+/// Canonical crates.io is always available and is never listed. Additional
+/// registries and Git sources are exact and bounded; each origin and revision
+/// is validated with the same rules the sandbox runner enforces so an approved
+/// policy cannot describe a source the runner would reject.
+fn parse_acquisition_config(
+    config_path: &Path,
+    sandbox: &toml::map::Map<String, toml::Value>,
+) -> Result<AcquisitionConfig> {
+    let Some(value) = sandbox.get("acquisition") else {
+        return Ok(AcquisitionConfig::default());
+    };
+    let table = value.as_table().ok_or_else(|| {
+        invalid_configuration(config_path, "`sandbox.acquisition` must be a TOML table")
+    })?;
+
+    let cache_bounds = AcquisitionCacheBounds {
+        max_files: bounded_acquisition_limit(
+            config_path,
+            table,
+            "max_cache_files",
+            DEFAULT_ACQUISITION_MAX_FILES,
+            RUNNER_MAX_FILES,
+        )?,
+        max_file_bytes: bounded_acquisition_limit(
+            config_path,
+            table,
+            "max_cache_file_bytes",
+            DEFAULT_ACQUISITION_MAX_FILE_BYTES,
+            RUNNER_MAX_FILE_BYTES,
+        )?,
+        max_cache_bytes: bounded_acquisition_limit(
+            config_path,
+            table,
+            "max_cache_bytes",
+            DEFAULT_ACQUISITION_MAX_CACHE_BYTES,
+            RUNNER_MAX_CACHE_BYTES,
+        )?,
+    };
+
+    let mut additional_sources = Vec::new();
+    let mut seen_names: Vec<String> = Vec::new();
+    if let Some(registries) = table.get("registry") {
+        let registries = registries.as_array().ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`sandbox.acquisition.registry` must be an array of tables",
+            )
+        })?;
+        for registry in registries {
+            let registry = registry.as_table().ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "each `sandbox.acquisition.registry` entry must be a table",
+                )
+            })?;
+            let name = acquisition_string(config_path, registry, "registry", "name")?;
+            let index_origin =
+                acquisition_string(config_path, registry, "registry", "index_origin")?;
+            let download_origin =
+                acquisition_string(config_path, registry, "registry", "download_origin")?;
+            let source = PackageSource::CargoRegistry {
+                name: name.clone(),
+                index_origin,
+                download_origin,
+            };
+            crate::acquisition::validate_package_source(&source)
+                .map_err(|reason| invalid_configuration(config_path, &reason))?;
+            if name == crate::acquisition::CANONICAL_CRATES_IO_NAME {
+                return Err(invalid_configuration(
+                    config_path,
+                    "`sandbox.acquisition.registry` must not redefine the built-in `crates-io` source",
+                ));
+            }
+            if seen_names.contains(&name) {
+                return Err(invalid_configuration(
+                    config_path,
+                    "`sandbox.acquisition.registry` names must be unique",
+                ));
+            }
+            seen_names.push(name);
+            additional_sources.push(source);
+        }
+    }
+    if let Some(gits) = table.get("git") {
+        let gits = gits.as_array().ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                "`sandbox.acquisition.git` must be an array of tables",
+            )
+        })?;
+        for git in gits {
+            let git = git.as_table().ok_or_else(|| {
+                invalid_configuration(
+                    config_path,
+                    "each `sandbox.acquisition.git` entry must be a table",
+                )
+            })?;
+            let repository = acquisition_string(config_path, git, "git", "repository")?;
+            let revision = acquisition_string(config_path, git, "git", "revision")?;
+            let source = PackageSource::CargoGit {
+                repository,
+                revision,
+            };
+            crate::acquisition::validate_package_source(&source)
+                .map_err(|reason| invalid_configuration(config_path, &reason))?;
+            additional_sources.push(source);
+        }
+    }
+
+    let acquisition = AcquisitionConfig {
+        cache_bounds,
+        additional_sources,
+    };
+    crate::acquisition::validate_acquisition_config(&acquisition)
+        .map_err(|reason| invalid_configuration(config_path, &reason.to_string()))?;
+    Ok(acquisition)
+}
+
+fn bounded_acquisition_limit(
+    config_path: &Path,
+    table: &toml::map::Map<String, toml::Value>,
+    key: &str,
+    default: u64,
+    maximum: u64,
+) -> Result<u64> {
+    let Some(value) = table.get(key) else {
+        return Ok(default);
+    };
+    let integer = value
+        .as_integer()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                &format!("`sandbox.acquisition.{key}` must be a positive integer"),
+            )
+        })?;
+    let integer = u64::try_from(integer).map_err(|_| {
+        invalid_configuration(
+            config_path,
+            &format!("`sandbox.acquisition.{key}` must be a positive integer"),
+        )
+    })?;
+    if integer > maximum {
+        return Err(invalid_configuration(
+            config_path,
+            &format!(
+                "`sandbox.acquisition.{key}` of {integer} exceeds the runner maximum of {maximum}"
+            ),
+        ));
+    }
+    Ok(integer)
+}
+
+fn acquisition_string(
+    config_path: &Path,
+    table: &toml::map::Map<String, toml::Value>,
+    section: &str,
+    key: &str,
+) -> Result<String> {
+    table
+        .get(key)
+        .and_then(toml::Value::as_str)
+        .filter(|value| !value.trim().is_empty() && value.len() <= 4096)
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            invalid_configuration(
+                config_path,
+                &format!(
+                    "`sandbox.acquisition.{section}.{key}` must be a nonblank string no longer than 4096 bytes"
+                ),
+            )
+        })
 }
 
 fn is_portable_environment_name(name: &str) -> bool {

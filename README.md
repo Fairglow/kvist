@@ -360,6 +360,46 @@ runner, or a failed probe refuses `task run` before any task transition; Kvist
 never falls back to host execution. A version-1 sandbox cannot run a
 `test_policy` with `working_directory = "project"`.
 
+Mediated Cargo dependency acquisition is configured, per project, under
+`[sandbox.acquisition]`. The canonical crates.io source is built in and is
+never listed. Additional registries and Git sources are explicit, exact, and
+bounded, and are validated with the same rules the sandbox runner enforces:
+
+```toml
+[sandbox.acquisition]
+# Optional cache-promotion bounds; each defaults conservatively and may never
+# exceed the runner's safe maxima.
+max_cache_files = 65536
+max_cache_file_bytes = 268435456
+max_cache_bytes = 2147483648
+
+# Zero or more additional registries. Production origins must be exact
+# canonical HTTPS with no credentials, query, fragment, percent aliases, or
+# private/link-local/loopback literal address, and must not impersonate crates.io.
+[[sandbox.acquisition.registry]]
+name = "private"
+index_origin = "https://registry.example.invalid/index/"
+download_origin = "https://registry.example.invalid/crates/"
+
+# Zero or more Git sources pinned to an immutable 40-hex revision on an exact
+# canonical HTTPS repository. Moving branches are rejected.
+[[sandbox.acquisition.git]]
+repository = "https://git.example.invalid/dependency.git"
+revision = "0123456789abcdef0123456789abcdef01234567"
+```
+
+No credential or token belongs in this configuration. Acquisition is exactly
+`cargo fetch` (without `--locked`), so new or changed dependencies can resolve
+in a real attempt-local writable `CARGO_HOME` and an isolated writable lockfile
+workspace without mounting the user's Cargo home. Its lockfile before/after
+identities and derived source identities are bound to its immutable cache
+generation result. Verification is exactly `cargo test --locked`, offline
+(`CARGO_NET_OFFLINE=true`), with an approved immutable Cargo-home generation
+mounted read-only and separate target scratch. The engine plans and runner
+validates these semantics; OS mounts, process execution, network transport,
+DNS/address pinning, redirects, live task wiring, and final project-cache
+generation selection remain deferred, so requests still fail closed.
+
 Before `task run` probes a runner or changes a task, run
 `kvist task approve-policy`. It atomically writes a versioned, deterministic,
 non-secret record in
@@ -393,10 +433,15 @@ transport dependency. CI tests Rust 1.94 and current stable on Linux.
 `--locked`. Kvist's own repository dogfoods the component model: the root Rust
 workspace and package live in `engine/`, with `agent_runtime/` and
 `sandbox_runner/` as complete child component boundaries. The
-[`sandbox_runner` intent](engine/sandbox_runner/REQUIREMENTS.md) is present, but
-its package remains an explicit fail-closed scaffold; the Bubblewrap protocol
-is assigned to later tasks. Newly initialized projects retain their configured
-component root and currently default to `src/`.
+[`sandbox_runner` intent](engine/sandbox_runner/REQUIREMENTS.md) is present, and
+its package now validates the version-one protocol and mediated-Cargo plan
+semantics, independently derives source identities, and builds immutable
+Cargo-home cache generations with descriptor-relative Linux operations. It
+still fails closed for every execution request: Bubblewrap mounts and process
+enforcement, network transport/DNS/address pinning/redirect enforcement, and
+final project-cache generation selection are later work. Newly initialized
+projects retain their configured component root and currently default to
+`src/`.
 
 The portable default quality gate uses only Cargo:
 

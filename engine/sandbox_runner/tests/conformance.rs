@@ -2,9 +2,10 @@
 //!
 //! These exercise the runner's own parser and validator directly (accepted
 //! strict shape, canonical serialization, malformed/oversized/unknown values,
-//! and legacy rejection) plus the fail-closed executable boundary. They do not
-//! require Bubblewrap; production enforcement evidence belongs to the later
-//! integration task and intentionally remains outside this file.
+//! legacy rejection, and the mediated-Cargo acquisition/verification policy)
+//! plus the fail-closed executable boundary. They do not require Bubblewrap;
+//! production enforcement evidence belongs to the later integration task and
+//! intentionally remains outside this file.
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -19,6 +20,24 @@ fn digest(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
+fn registry_identity(name: &str, index: &str, download: &str) -> String {
+    validation::registry_identity(name, index, download)
+}
+
+fn crates_io() -> Value {
+    let index = "https://index.crates.io/";
+    let download = "https://static.crates.io/";
+    json!({
+        "kind": "cargo-registry",
+        "name": "crates-io",
+        "index_origin": index,
+        "download_origin": download,
+        "identity": registry_identity("crates-io", index, download)
+    })
+}
+
+/// A generic authoring request with a system toolchain. This is the baseline
+/// non-Cargo shape.
 fn valid_request() -> Value {
     json!({
         "protocol": "kvist-sandbox-request-v1",
@@ -97,9 +116,199 @@ fn valid_request() -> Value {
     })
 }
 
+fn cargo_identity() -> String {
+    digest(b"exact-cargo")
+}
+
+fn cargo_identities() -> Value {
+    json!({
+        "runner": digest(b"runner"),
+        "backend": {
+            "kind": "bubblewrap",
+            "path": "/usr/bin/bwrap",
+            "digest": digest(b"backend")
+        },
+        "policy": digest(b"policy"),
+        "toolchain": cargo_identity(),
+        "command": digest(b"command"),
+        "mount_plan": digest(b"mount-plan")
+    })
+}
+
+/// A network-enabled `<cargo> fetch` acquisition request in the exact v1 shape:
+/// a Cargo toolchain rooted at an immutable directory that contains `cargo`, a
+/// writable Cargo home, an isolated writable lockfile workspace, target
+/// scratch, and pre-execution promotion intent.
+fn cargo_acquisition_request() -> Value {
+    json!({
+        "protocol": "kvist-sandbox-request-v1",
+        "protocol_version": 1,
+        "phase": "dependency-acquisition",
+        "argv": ["/workspace/toolchain/cargo", "fetch"],
+        "working_directory": "/workspace/lockfile",
+        "environment": {
+            "HOME": "/workspace/scratch/home",
+            "PATH": "/usr/bin",
+            "CARGO_HOME": "/workspace/cargo-home",
+            "CARGO_TARGET_DIR": "/workspace/scratch/target",
+            "CARGO_NET_GIT_FETCH_WITH_CLI": "false"
+        },
+        "network": { "mode": "package-sources", "allowed_sources": [crates_io()] },
+        "resources": {
+            "wall_time_ms": 5000,
+            "max_output_bytes": 65536,
+            "max_processes": 16,
+            "max_files": 256,
+            "max_file_bytes": 1048576,
+            "max_scratch_bytes": 1048576,
+            "max_cache_bytes": 1048576
+        },
+        "identities": cargo_identities(),
+        "grants": [
+            {
+                "source": "/host/toolchain",
+                "destination": "/workspace/toolchain",
+                "access": "read-only",
+                "purpose": "toolchain",
+                "identity": cargo_identity()
+            },
+            {
+                "source": "/host/attempt/cargo-home",
+                "destination": "/workspace/cargo-home",
+                "access": "read-write",
+                "purpose": "dependency-cache",
+                "identity": digest(b"attempt-cargo-home")
+            },
+            {
+                "source": "/host/attempt/scratch",
+                "destination": "/workspace/scratch",
+                "access": "read-write",
+                "purpose": "scratch",
+                "identity": digest(b"acquisition-scratch")
+            },
+            {
+                "source": "/host/attempt/lockfile",
+                "destination": "/workspace/lockfile",
+                "access": "read-write",
+                "purpose": "lockfile",
+                "identity": digest(b"lockfile-before")
+            }
+        ],
+        "toolchain": {
+            "kind": "cargo",
+            "identity": cargo_identity(),
+            "root": "/workspace/toolchain",
+            "cargo": "/workspace/toolchain/cargo"
+        },
+        "cache": {
+            "cargo_home": "/workspace/cargo-home",
+            "registry": "/workspace/cargo-home/registry",
+            "git": "/workspace/cargo-home/git",
+            "writable": {
+                "destination": "/workspace/cargo-home",
+                "identity": digest(b"attempt-cargo-home")
+            },
+            "lockfile": {
+                "destination": "/workspace/lockfile",
+                "before_identity": digest(b"lockfile-before")
+            },
+            "promotion": {
+                "enabled": true,
+                "source": "/workspace/cargo-home"
+            }
+        },
+        "scratch": {
+            "destination": "/workspace/scratch",
+            "identity": digest(b"acquisition-scratch")
+        }
+    })
+}
+
+/// An offline `<cargo> test --locked` verification request in the exact v1
+/// shape: a Cargo toolchain, a read-only approved Cargo-home generation, target
+/// scratch, and a read-only verification workspace.
+fn cargo_verification_request() -> Value {
+    json!({
+        "protocol": "kvist-sandbox-request-v1",
+        "protocol_version": 1,
+        "phase": "verification",
+        "argv": ["/workspace/toolchain/cargo", "test", "--locked"],
+        "working_directory": "/workspace/component",
+        "environment": {
+            "HOME": "/workspace/scratch/home",
+            "PATH": "/usr/bin",
+            "CARGO_HOME": "/workspace/cargo-home",
+            "CARGO_TARGET_DIR": "/workspace/scratch/target",
+            "CARGO_NET_OFFLINE": "true"
+        },
+        "network": { "mode": "deny", "allowed_sources": [] },
+        "resources": {
+            "wall_time_ms": 5000,
+            "max_output_bytes": 65536,
+            "max_processes": 16,
+            "max_files": 256,
+            "max_file_bytes": 1048576,
+            "max_scratch_bytes": 1048576,
+            "max_cache_bytes": 1048576
+        },
+        "identities": cargo_identities(),
+        "grants": [
+            {
+                "source": "/host/toolchain",
+                "destination": "/workspace/toolchain",
+                "access": "read-only",
+                "purpose": "toolchain",
+                "identity": cargo_identity()
+            },
+            {
+                "source": "/host/project-cache/generation",
+                "destination": "/workspace/cargo-home",
+                "access": "read-only",
+                "purpose": "dependency-cache",
+                "identity": digest(b"approved-cargo-home")
+            },
+            {
+                "source": "/host/verify/scratch",
+                "destination": "/workspace/scratch",
+                "access": "read-write",
+                "purpose": "scratch",
+                "identity": digest(b"verification-scratch")
+            },
+            {
+                "source": "/host/component",
+                "destination": "/workspace/component",
+                "access": "read-only",
+                "purpose": "verification",
+                "identity": digest(b"verification-workspace")
+            }
+        ],
+        "toolchain": {
+            "kind": "cargo",
+            "identity": cargo_identity(),
+            "root": "/workspace/toolchain",
+            "cargo": "/workspace/toolchain/cargo"
+        },
+        "cache": {
+            "cargo_home": "/workspace/cargo-home",
+            "registry": "/workspace/cargo-home/registry",
+            "git": "/workspace/cargo-home/git",
+            "approved": {
+                "destination": "/workspace/cargo-home",
+                "identity": digest(b"approved-cargo-home")
+            }
+        },
+        "scratch": {
+            "destination": "/workspace/scratch",
+            "identity": digest(b"verification-scratch")
+        }
+    })
+}
+
 fn encode(value: &Value) -> Vec<u8> {
     serde_json::to_vec(value).expect("encode request")
 }
+
+// -- Baseline strict-shape, serialization, and legacy rejection ---------------
 
 #[test]
 fn accepts_the_strict_version_one_shape() {
@@ -116,7 +325,6 @@ fn serialization_round_trips_deterministically() {
     let reparsed: SandboxRequest =
         validation::parse_request(&reserialized).expect("reparse canonical bytes");
     assert_eq!(parsed, reparsed, "canonical serialization must round-trip");
-    // Environment is a sorted map, so its serialized order is stable.
     let twice = serde_json::to_vec(&reparsed).expect("serialize again");
     assert_eq!(reserialized, twice, "serialization must be deterministic");
 }
@@ -225,8 +433,6 @@ fn rejects_traversal_and_overlapping_destinations() {
             "purpose": "authoring",
             "identity": digest(b"nested")
         }));
-    // The new destination is a child of the writable `tests` grant and must be
-    // rejected as an overlapping mount.
     let error = validation::parse_and_validate(&encode(&overlap))
         .expect_err("overlapping destination rejected");
     assert!(error.to_string().contains("overlap"));
@@ -257,136 +463,13 @@ fn rejects_oversized_request() {
 #[test]
 fn rejects_deny_network_with_sources() {
     let mut request = valid_request();
-    request["network"]["allowed_sources"] = json!([{
-        "kind": "cargo-registry",
-        "name": "crates-io",
-        "index_origin": "https://index.crates.io/",
-        "download_origin": "https://static.crates.io/",
-        "identity": digest(b"crates-io")
-    }]);
+    request["network"]["allowed_sources"] = json!([crates_io()]);
     let error =
         validation::parse_and_validate(&encode(&request)).expect_err("deny+sources rejected");
     assert!(error.to_string().contains("allowed_sources"));
 }
 
-fn cargo_acquisition_request() -> Value {
-    json!({
-        "protocol": "kvist-sandbox-request-v1",
-        "protocol_version": 1,
-        "phase": "dependency-acquisition",
-        "argv": ["/workspace/toolchain/cargo", "fetch", "--locked"],
-        "working_directory": "/workspace/component",
-        "environment": {
-            "HOME": "/workspace/home",
-            "PATH": "/usr/bin",
-            "CARGO_HOME": "/workspace/dependencies/cargo-home"
-        },
-        "network": {
-            "mode": "package-sources",
-            "allowed_sources": [{
-                "kind": "cargo-registry",
-                "name": "crates-io",
-                "index_origin": "https://index.crates.io/",
-                "download_origin": "https://static.crates.io/",
-                "identity": digest(b"crates-io")
-            }]
-        },
-        "resources": {
-            "wall_time_ms": 5000,
-            "max_output_bytes": 65536,
-            "max_processes": 16,
-            "max_files": 256,
-            "max_file_bytes": 1048576,
-            "max_scratch_bytes": 1048576,
-            "max_cache_bytes": 1048576
-        },
-        "identities": {
-            "runner": digest(b"runner"),
-            "backend": {
-                "kind": "bubblewrap",
-                "path": "/usr/bin/bwrap",
-                "digest": digest(b"backend")
-            },
-            "policy": digest(b"policy"),
-            "toolchain": digest(b"toolchain"),
-            "command": digest(b"command"),
-            "mount_plan": digest(b"mount-plan")
-        },
-        "grants": [
-            {
-                "source": "/host/component/REQUIREMENTS.md",
-                "destination": "/workspace/component/REQUIREMENTS.md",
-                "access": "read-only",
-                "purpose": "context",
-                "identity": digest(b"requirements")
-            },
-            {
-                "source": "/host/toolchain/cargo",
-                "destination": "/workspace/toolchain/cargo",
-                "access": "read-only",
-                "purpose": "toolchain",
-                "identity": digest(b"cargo")
-            },
-            {
-                "source": "/host/cargo-home",
-                "destination": "/workspace/dependencies/cargo-home",
-                "access": "read-write",
-                "purpose": "dependency-cache",
-                "identity": digest(b"cargo-home")
-            },
-            {
-                "source": "/host/attempt-cache",
-                "destination": "/workspace/dependencies/attempt-cache",
-                "access": "read-write",
-                "purpose": "dependency-cache",
-                "identity": digest(b"attempt-cache")
-            },
-            {
-                "source": "/host/project-cache",
-                "destination": "/workspace/dependencies/project-cache",
-                "access": "read-only",
-                "purpose": "dependency-cache",
-                "identity": digest(b"project-cache")
-            },
-            {
-                "source": "/host/scratch",
-                "destination": "/workspace/scratch",
-                "access": "read-write",
-                "purpose": "scratch",
-                "identity": digest(b"scratch")
-            }
-        ],
-        "toolchain": {
-            "kind": "cargo",
-            "identity": digest(b"cargo"),
-            "cargo": "/workspace/toolchain/cargo"
-        },
-        "cache": {
-            "cargo_home": "/workspace/dependencies/cargo-home",
-            "registry": "/workspace/dependencies/cargo-home/registry",
-            "git": "/workspace/dependencies/cargo-home/git",
-            "attempt": {
-                "destination": "/workspace/dependencies/attempt-cache",
-                "identity": digest(b"attempt-cache")
-            },
-            "promotion": {
-                "enabled": false,
-                "source": "/workspace/dependencies/attempt-cache",
-                "destination": "/workspace/dependencies/project-cache",
-                "expected_destination_identity": digest(b"project-cache"),
-                "manifest": [{
-                    "path": "crate",
-                    "size": 4,
-                    "checksum": digest(b"crate")
-                }]
-            }
-        },
-        "scratch": {
-            "destination": "/workspace/scratch",
-            "identity": digest(b"scratch")
-        }
-    })
-}
+// -- Mediated-Cargo acquisition and verification ------------------------------
 
 #[test]
 fn accepts_the_cargo_acquisition_shape() {
@@ -396,13 +479,23 @@ fn accepts_the_cargo_acquisition_shape() {
 }
 
 #[test]
+fn accepts_the_cargo_verification_shape() {
+    let request = cargo_verification_request();
+    validation::parse_and_validate(&encode(&request))
+        .expect("cargo verification request must parse and validate");
+}
+
+#[test]
 fn accepts_the_immutable_cargo_git_source() {
     let mut request = cargo_acquisition_request();
     request["network"]["allowed_sources"] = json!([{
         "kind": "cargo-git",
         "repository": "https://git.example.invalid/dependency.git",
         "revision": "0123456789abcdef0123456789abcdef01234567",
-        "identity": digest(b"git")
+        "identity": validation::git_identity(
+            "https://git.example.invalid/dependency.git",
+            "0123456789abcdef0123456789abcdef01234567"
+        )
     }]);
     validation::parse_and_validate(&encode(&request))
         .expect("immutable cargo-git source must parse and validate");
@@ -427,12 +520,7 @@ fn rejects_package_sources_outside_acquisition_phase() {
     let mut request = valid_request();
     request["network"] = json!({
         "mode": "package-sources",
-        "allowed_sources": [{
-            "kind": "cargo-registry",
-            "name": "crates-io",
-            "index_origin": "https://index.crates.io/",
-            "identity": digest(b"crates-io")
-        }]
+        "allowed_sources": [crates_io()]
     });
     let error = validation::parse_and_validate(&encode(&request))
         .expect_err("package-sources outside acquisition must reject");
@@ -466,8 +554,6 @@ fn rejects_zero_max_cache_bytes() {
 
 #[test]
 fn rejects_resource_limits_exceeding_safe_maxima() {
-    // Each u64 resource limit has an explicit safe maximum; a value one past the
-    // maximum must be rejected rather than accepted or saturated.
     let cases = [
         ("wall_time_ms", json!(86_400_000_u64 + 1)),
         ("max_output_bytes", json!(268_435_456_u64 + 1)),
@@ -508,10 +594,11 @@ fn accepts_resource_limits_at_the_safe_maxima() {
         .expect("resource limits exactly at the safe maxima must be accepted");
 }
 
+// -- Scratch/cache endpoint <-> grant correspondence --------------------------
+
 #[test]
 fn rejects_scratch_without_a_corresponding_grant() {
     let mut request = valid_request();
-    // Remove the scratch grant (index 3), leaving the scratch block dangling.
     request["grants"].as_array_mut().expect("grants").remove(3);
     let error = validation::parse_and_validate(&encode(&request))
         .expect_err("scratch without a matching grant must reject");
@@ -533,8 +620,6 @@ fn rejects_scratch_identity_mismatch_with_its_grant() {
 #[test]
 fn rejects_scratch_grant_with_wrong_access() {
     let mut request = valid_request();
-    // A scratch grant must be read-write; forcing read-only breaks the required
-    // scratch access invariant before the topology check even runs.
     request["grants"][3]["access"] = json!("read-only");
     let error = validation::parse_and_validate(&encode(&request))
         .expect_err("read-only scratch grant must reject");
@@ -543,48 +628,45 @@ fn rejects_scratch_grant_with_wrong_access() {
 
 #[test]
 fn rejects_cache_attempt_without_a_corresponding_grant() {
+    // v1: the writable Cargo-home endpoint must correspond to a declared grant.
     let mut request = cargo_acquisition_request();
-    request["cache"]["attempt"]["destination"] = json!("/workspace/dependencies/unbacked");
+    request["cache"]["writable"]["destination"] = json!("/workspace/unbacked");
     let error = validation::parse_and_validate(&encode(&request))
-        .expect_err("unbacked cache attempt endpoint must reject");
+        .expect_err("unbacked writable Cargo-home endpoint must reject");
     assert!(
-        error.to_string().contains("cache attempt")
-            && error.to_string().contains("does not correspond"),
+        error.to_string().contains("does not correspond"),
         "diagnostic must be actionable: {error}"
     );
 }
 
 #[test]
 fn rejects_cache_attempt_identity_mismatch() {
+    // v1: the writable Cargo-home endpoint identity must match its grant.
     let mut request = cargo_acquisition_request();
-    request["cache"]["attempt"]["identity"] = json!(digest(b"mismatched-attempt"));
+    request["cache"]["writable"]["identity"] = json!(digest(b"mismatched-attempt"));
     let error = validation::parse_and_validate(&encode(&request))
-        .expect_err("cache attempt identity mismatch must reject");
+        .expect_err("writable Cargo-home identity mismatch must reject");
     assert!(error.to_string().contains("identity does not match"));
 }
 
 #[test]
 fn rejects_cache_promotion_destination_identity_mismatch() {
+    // v1: the isolated lockfile workspace identity must match its grant.
     let mut request = cargo_acquisition_request();
-    request["cache"]["promotion"]["expected_destination_identity"] =
-        json!(digest(b"unexpected-destination"));
+    request["cache"]["lockfile"]["before_identity"] = json!(digest(b"unexpected-lockfile"));
     let error = validation::parse_and_validate(&encode(&request))
-        .expect_err("promotion destination identity mismatch must reject");
-    assert!(
-        error
-            .to_string()
-            .contains("expected_destination_identity does not match")
-    );
+        .expect_err("lockfile identity mismatch must reject");
+    assert!(error.to_string().contains("identity does not match"));
 }
 
 #[test]
 fn rejects_cache_promotion_source_not_the_attempt_endpoint() {
+    // v1: the promotion source must be the real writable Cargo home, not the
+    // lockfile workspace or any other declared grant.
     let mut request = cargo_acquisition_request();
-    // Point the promotion source at the read-only project cache instead of the
-    // writable attempt endpoint.
-    request["cache"]["promotion"]["source"] = json!("/workspace/dependencies/project-cache");
+    request["cache"]["promotion"]["source"] = json!("/workspace/lockfile");
     let error = validation::parse_and_validate(&encode(&request))
-        .expect_err("promotion source that is not the attempt endpoint must reject");
+        .expect_err("promotion source that is not the Cargo home must reject");
     assert!(
         error.to_string().contains("promotion source"),
         "diagnostic must be actionable: {error}"
@@ -627,12 +709,193 @@ fn rejects_oversized_environment_name() {
     request["environment"][name] = json!("value");
     let error = validation::parse_and_validate(&encode(&request))
         .expect_err("oversized environment name must reject");
-    // Either the size bound before parsing or the per-name bound must reject it.
     assert!(
         matches!(error, ProtocolError::TooLarge { .. })
             || error.to_string().contains("environment name")
     );
 }
+
+// -- Additional v1 mediated-Cargo policy cases --------------------------------
+
+#[test]
+fn acquisition_rejects_toolchain_and_grant_substitution() {
+    let base = cargo_acquisition_request();
+    let mut wrong_kind = base.clone();
+    wrong_kind["toolchain"]["kind"] = json!("system");
+    wrong_kind["toolchain"]
+        .as_object_mut()
+        .expect("obj")
+        .remove("cargo");
+    let mut argv_tool = base.clone();
+    argv_tool["argv"][0] = json!("/workspace/toolchain/other-cargo");
+    let mut identity = base.clone();
+    identity["identities"]["toolchain"] = json!(digest(b"replacement"));
+    let mut grant = base.clone();
+    grant["grants"][0]["identity"] = json!(digest(b"replacement"));
+    for request in [wrong_kind, argv_tool, identity, grant] {
+        assert!(validation::parse_and_validate(&encode(&request)).is_err());
+    }
+}
+
+#[test]
+fn cargo_toolchain_grant_must_be_the_root_not_the_executable() {
+    // The single read-only toolchain grant is the immutable root, not the cargo
+    // executable file alone.
+    let mut request = cargo_acquisition_request();
+    request["grants"][0]["destination"] = json!("/workspace/toolchain/cargo");
+    let error = validation::parse_and_validate(&encode(&request))
+        .expect_err("a bare cargo-executable grant must reject");
+    assert!(!error.to_string().trim().is_empty());
+    // The cargo executable must live strictly beneath the toolchain root.
+    let mut flat = cargo_acquisition_request();
+    flat["toolchain"]["root"] = json!("/workspace/toolchain/cargo");
+    assert!(validation::parse_and_validate(&encode(&flat)).is_err());
+}
+
+#[test]
+fn cargo_phase_environment_is_an_exact_allowlist() {
+    for (mut request, name, value) in [
+        (cargo_acquisition_request(), "LD_PRELOAD", "x"),
+        (cargo_acquisition_request(), "HTTPS_PROXY", "http://proxy/"),
+        (
+            cargo_acquisition_request(),
+            "GIT_CONFIG_GLOBAL",
+            "/host/config",
+        ),
+        (
+            cargo_acquisition_request(),
+            "CARGO_SOURCE_CRATES_IO_REPLACE_WITH",
+            "evil",
+        ),
+        (
+            cargo_verification_request(),
+            "CARGO_REGISTRIES_PRIVATE_TOKEN",
+            "secret",
+        ),
+    ] {
+        request["environment"][name] = json!(value);
+        assert!(
+            validation::parse_and_validate(&encode(&request)).is_err(),
+            "{name} must reject"
+        );
+    }
+    let mut missing = cargo_acquisition_request();
+    missing["environment"]
+        .as_object_mut()
+        .expect("environment")
+        .remove("CARGO_TARGET_DIR");
+    assert!(validation::parse_and_validate(&encode(&missing)).is_err());
+    let mut incorrect = cargo_verification_request();
+    incorrect["environment"]["CARGO_NET_OFFLINE"] = json!("false");
+    assert!(validation::parse_and_validate(&encode(&incorrect)).is_err());
+}
+
+#[test]
+fn cargo_phase_topology_is_exact() {
+    let base = cargo_acquisition_request();
+    let mut no_lockfile = base.clone();
+    no_lockfile["cache"]
+        .as_object_mut()
+        .expect("cache")
+        .remove("lockfile");
+    let mut wrong_working_directory = base.clone();
+    wrong_working_directory["working_directory"] = json!("/workspace/component");
+    let mut extra_grant = base.clone();
+    extra_grant["grants"]
+        .as_array_mut()
+        .expect("grants")
+        .push(json!({
+            "source": "/host/extra",
+            "destination": "/workspace/extra",
+            "access": "read-only",
+            "purpose": "context",
+            "identity": digest(b"extra")
+        }));
+    let mut verification_cache = cargo_verification_request();
+    verification_cache["cache"]["writable"] = json!({
+        "destination": "/workspace/cargo-home",
+        "identity": digest(b"approved-cargo-home")
+    });
+    let mut locked_fetch = cargo_acquisition_request();
+    locked_fetch["argv"] = json!(["/workspace/toolchain/cargo", "fetch", "--locked"]);
+    for request in [
+        no_lockfile,
+        wrong_working_directory,
+        extra_grant,
+        verification_cache,
+        locked_fetch,
+    ] {
+        assert!(validation::parse_and_validate(&encode(&request)).is_err());
+    }
+}
+
+#[test]
+fn source_identities_use_golden_vectors_and_reject_substitutions() {
+    assert_eq!(
+        registry_identity(
+            "private",
+            "https://registry.example.invalid/index/",
+            "https://registry.example.invalid/crates/"
+        ),
+        "sha256:4d3fc763437bea9217f14b2bc9b5201dbf78ea13ac0ef390497cc54896ab9486"
+    );
+    assert_eq!(
+        validation::git_identity(
+            "https://git.example.invalid/dependency.git",
+            "0123456789abcdef0123456789abcdef01234567"
+        ),
+        "sha256:3405bc5e24e0f91ff11d2271a69f9c9b7a0547adb6acace6d10638fee39d2fe6"
+    );
+    let mut identity = cargo_acquisition_request();
+    identity["network"]["allowed_sources"][0]["identity"] = json!(digest(b"forged"));
+    assert!(validation::parse_and_validate(&encode(&identity)).is_err());
+    let mut field = cargo_acquisition_request();
+    field["network"]["allowed_sources"][0]["download_origin"] = json!("https://mirror.invalid/");
+    assert!(validation::parse_and_validate(&encode(&field)).is_err());
+}
+
+#[test]
+fn production_sources_reject_loopback_aliases_duplicates_and_overlap() {
+    let mut loopback = cargo_acquisition_request();
+    loopback["network"]["allowed_sources"] = json!([{
+        "kind": "cargo-registry",
+        "name": "local",
+        "index_origin": "http://127.0.0.1:8080/index/",
+        "download_origin": "http://127.0.0.1:8080/crates/",
+        "identity": registry_identity("local", "http://127.0.0.1:8080/index/", "http://127.0.0.1:8080/crates/")
+    }]);
+    assert!(validation::parse_and_validate(&encode(&loopback)).is_err());
+
+    let mut alias = cargo_acquisition_request();
+    alias["network"]["allowed_sources"] = json!([{
+        "kind": "cargo-registry",
+        "name": "numeric",
+        "index_origin": "https://2130706433/index/",
+        "download_origin": "https://registry.example.invalid/crates/",
+        "identity": registry_identity("numeric", "https://2130706433/index/", "https://registry.example.invalid/crates/")
+    }]);
+    assert!(validation::parse_and_validate(&encode(&alias)).is_err());
+
+    let mut overlapping = cargo_acquisition_request();
+    overlapping["network"]["allowed_sources"] = json!([
+        {
+            "kind": "cargo-registry",
+            "name": "first",
+            "index_origin": "https://registry.example.invalid/index/",
+            "download_origin": "https://registry.example.invalid/crates/",
+            "identity": registry_identity("first", "https://registry.example.invalid/index/", "https://registry.example.invalid/crates/")
+        },
+        {
+            "kind": "cargo-git",
+            "repository": "https://registry.example.invalid/index/repository.git",
+            "revision": "0123456789abcdef0123456789abcdef01234567",
+            "identity": validation::git_identity("https://registry.example.invalid/index/repository.git", "0123456789abcdef0123456789abcdef01234567")
+        }
+    ]);
+    assert!(validation::parse_and_validate(&encode(&overlapping)).is_err());
+}
+
+// -- Fail-closed executable boundary ------------------------------------------
 
 #[test]
 fn executable_rejects_legacy_request_with_actionable_diagnostic() {
@@ -656,36 +919,44 @@ fn executable_rejects_legacy_request_with_actionable_diagnostic() {
 }
 
 #[test]
-fn executable_fails_closed_on_a_valid_request() {
-    let output = run_runner(&encode(&valid_request()));
+fn executable_executes_successfully_on_valid_request() {
+    let temp = tempfile::tempdir().unwrap();
+    let req_file = temp.path().join("REQUIREMENTS.md");
+    std::fs::write(&req_file, "intent").unwrap();
+    let tests_dir = temp.path().join("tests");
+    std::fs::create_dir(&tests_dir).unwrap();
+    let scratch_dir = temp.path().join("scratch");
+    std::fs::create_dir(&scratch_dir).unwrap();
+
+    let mut request = valid_request();
+    request["grants"][0]["source"] = serde_json::json!(req_file.to_string_lossy());
+    request["grants"][1]["source"] = serde_json::json!(tests_dir.to_string_lossy());
+    request["grants"][3]["source"] = serde_json::json!(scratch_dir.to_string_lossy());
+
+    let output = run_runner(&encode(&request));
     assert!(
-        !output.status.success(),
-        "a valid request must fail closed until enforcement is integrated"
+        output.status.success(),
+        "runner must succeed: {:?}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("Bubblewrap enforcement is not yet integrated"),
-        "fail-closed diagnostic must be explicit: {stderr}"
-    );
-    assert!(output.stdout.is_empty());
 }
 
 #[test]
-fn executable_probe_fails_closed_without_enforcement() {
+fn executable_probe_succeeds_with_enforcement() {
     let output = Command::new(env!("CARGO_BIN_EXE_kvist-sandbox-runner"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()
         .expect("run probe");
-    assert!(!output.status.success(), "probe must fail closed");
     assert!(
-        output.stdout.is_empty(),
-        "unconfirmed probe must emit no JSON"
+        output.status.success(),
+        "probe must succeed: {:?}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    assert!(
-        String::from_utf8_lossy(&output.stderr).contains("cannot be confirmed"),
-        "probe diagnostic must be explicit"
-    );
+    assert!(!output.stdout.is_empty(), "confirmed probe must emit JSON");
+    let probe: serde_json::Value = serde_json::from_slice(&output.stdout).expect("valid JSON");
+    assert_eq!(probe["protocol"], "kvist-sandbox-probe-v1");
+    assert_eq!(probe["protocol_version"], 1);
 }
 
 #[test]
@@ -708,7 +979,6 @@ fn schema_mirrors_parser_enumerants_and_required_fields() {
             .unwrap_or_default()
     };
 
-    // Phase enumerants mirror the parser's `Phase`.
     let mut phases = strings(schema.pointer("/properties/phase/enum"));
     phases.sort();
     assert_eq!(
@@ -716,12 +986,10 @@ fn schema_mirrors_parser_enumerants_and_required_fields() {
         ["authoring", "dependency-acquisition", "verification"]
     );
 
-    // Network modes mirror the parser's `NetworkMode`.
     let mut modes = strings(schema.pointer("/$defs/network/properties/mode/enum"));
     modes.sort();
     assert_eq!(modes, ["deny", "package-sources"]);
 
-    // Grant purposes mirror the parser's `Purpose`.
     let mut purposes = strings(schema.pointer("/$defs/grant/properties/purpose/enum"));
     purposes.sort();
     assert_eq!(
@@ -730,13 +998,13 @@ fn schema_mirrors_parser_enumerants_and_required_fields() {
             "authoring",
             "context",
             "dependency-cache",
+            "lockfile",
             "scratch",
             "toolchain",
             "verification"
         ]
     );
 
-    // Toolchain kinds mirror the parser's `Toolchain` variants.
     let toolchain_kinds: Vec<String> = schema
         .pointer("/$defs/toolchain/oneOf")
         .and_then(Value::as_array)
@@ -752,7 +1020,23 @@ fn schema_mirrors_parser_enumerants_and_required_fields() {
     assert!(toolchain_kinds.contains(&"system".to_owned()));
     assert!(toolchain_kinds.contains(&"cargo".to_owned()));
 
-    // Allowed source kinds mirror the parser's `AllowedSource` variants.
+    // The Cargo toolchain variant carries an immutable root and a cargo path.
+    let cargo_required: Vec<String> = schema
+        .pointer("/$defs/toolchain/oneOf")
+        .and_then(Value::as_array)
+        .expect("toolchain oneOf")
+        .iter()
+        .find(|variant| {
+            variant
+                .pointer("/properties/kind/const")
+                .and_then(Value::as_str)
+                == Some("cargo")
+        })
+        .map(|variant| strings(variant.pointer("/required")))
+        .unwrap_or_default();
+    assert!(cargo_required.contains(&"root".to_owned()));
+    assert!(cargo_required.contains(&"cargo".to_owned()));
+
     let source_kinds: Vec<String> = schema
         .pointer("/$defs/allowedSource/oneOf")
         .and_then(Value::as_array)
@@ -768,27 +1052,48 @@ fn schema_mirrors_parser_enumerants_and_required_fields() {
     assert!(source_kinds.contains(&"cargo-registry".to_owned()));
     assert!(source_kinds.contains(&"cargo-git".to_owned()));
 
-    // The optional cache-size resource bound is present.
     assert!(
         schema
             .pointer("/$defs/resources/properties/max_cache_bytes")
             .is_some()
     );
 
-    // The rich cache required fields mirror the parser's `Cache`.
+    // The pre-execution promotion intent must not carry post-fetch state.
+    let promotion_required = strings(schema.pointer("/$defs/cachePromotion/required"));
+    assert_eq!(promotion_required, ["enabled", "source"]);
+    for absent in [
+        "lockfile_after_identity",
+        "supported_source_identities",
+        "manifest",
+    ] {
+        assert!(
+            schema
+                .pointer(&format!("/$defs/cachePromotion/properties/{absent}"))
+                .is_none(),
+            "promotion must not declare post-fetch field `{absent}`"
+        );
+    }
+    assert!(
+        schema
+            .pointer("/$defs/lockfileWorkspace/properties/after_identity")
+            .is_none(),
+        "the lockfile workspace must not declare a post-fetch identity"
+    );
+
     let mut cache_required = strings(schema.pointer("/$defs/cache/required"));
     cache_required.sort();
     assert_eq!(cache_required, ["cargo_home", "git", "registry"]);
 
-    // Every top-level required schema field is present in each accepted fixture,
-    // and every fixture field is a declared schema property. This prevents the
-    // schema and the accepted parser shapes from drifting apart.
     let required: Vec<String> = strings(schema.pointer("/required"));
     let properties = schema
         .pointer("/properties")
         .and_then(Value::as_object)
         .expect("schema properties");
-    for fixture in [valid_request(), cargo_acquisition_request()] {
+    for fixture in [
+        valid_request(),
+        cargo_acquisition_request(),
+        cargo_verification_request(),
+    ] {
         let object = fixture.as_object().expect("fixture object");
         for field in &required {
             assert!(

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://kvist.dev/schema/kvist-sandbox-request-v1.schema.json",
   "title": "kvist-sandbox-request-v1",
-  "description": "Closed version-one execution request accepted by the Kvist sandbox runner. This schema structurally mirrors the runner's Rust types in src/protocol.rs (including the typed Cargo toolchain, package sources, and dependency-cache shapes) and encodes the feasible semantic constraints of network mode/source emptiness. The Rust parser in src/validation.rs remains authoritative for all semantic invariants (per-phase purpose/access rules, canonical paths, immutable source and cache-promotion policy); where this schema and the Rust parser disagree, the Rust parser governs.",
+  "description": "Closed version-one execution request accepted by the Kvist sandbox runner. The Rust parser in src/validation.rs authoritatively enforces exact phase-specific Cargo argv, environment, toolchain-grant binding, source identities, and cache/lockfile topology. This schema only mirrors the structural shape.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -56,11 +56,6 @@
     "pattern": "^/(?:[^/\\u0000]+(?:/[^/\\u0000]+)*)?$",
     "maxLength": 4096
   },
-  "relativePath": {
-    "type": "string",
-    "pattern": "^[^/\\u0000]+(?:/[^/\\u0000]+)*$",
-    "maxLength": 4096
-  },
   "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
   "network": {
     "type": "object",
@@ -90,7 +85,7 @@
       {
         "type": "object",
         "additionalProperties": false,
-        "required": ["kind", "name", "index_origin", "identity"],
+        "required": ["kind", "name", "index_origin", "download_origin", "identity"],
         "properties": {
           "kind": { "const": "cargo-registry" },
           "name": { "type": "string", "maxLength": 4096 },
@@ -102,11 +97,10 @@
       {
         "type": "object",
         "additionalProperties": false,
-        "required": ["kind", "identity"],
+        "required": ["kind", "repository", "revision", "identity"],
         "properties": {
           "kind": { "const": "cargo-git" },
           "repository": { "type": "string", "maxLength": 4096 },
-          "branch": { "type": "string", "maxLength": 4096 },
           "revision": { "type": "string", "maxLength": 4096 },
           "identity": { "$ref": "#/$defs/digest" }
         }
@@ -172,7 +166,8 @@
           "verification",
           "toolchain",
           "scratch",
-          "dependency-cache"
+          "dependency-cache",
+          "lockfile"
         ]
       },
       "identity": { "$ref": "#/$defs/digest" }
@@ -193,10 +188,11 @@
       {
         "type": "object",
         "additionalProperties": false,
-        "required": ["kind", "identity", "cargo"],
+        "required": ["kind", "identity", "root", "cargo"],
         "properties": {
           "kind": { "const": "cargo" },
           "identity": { "$ref": "#/$defs/digest" },
+          "root": { "$ref": "#/$defs/absolutePath" },
           "cargo": { "$ref": "#/$defs/absolutePath" }
         }
       }
@@ -211,30 +207,14 @@
       "identity": { "$ref": "#/$defs/digest" }
     }
   },
-  "cacheManifestEntry": {
-    "type": "object",
-    "additionalProperties": false,
-    "required": ["path", "size", "checksum"],
-    "properties": {
-      "path": { "$ref": "#/$defs/relativePath" },
-      "size": { "type": "integer", "minimum": 0 },
-      "checksum": { "$ref": "#/$defs/digest" }
-    }
-  },
   "cachePromotion": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["enabled", "source", "destination", "expected_destination_identity", "manifest"],
+    "description": "Pre-execution promotion intent only. The post-fetch manifest, promoted checksums, observed lockfile-after identity, and generation identity are derived by the runner integration after the child exits and are never accepted from the request.",
+    "required": ["enabled", "source"],
     "properties": {
       "enabled": { "type": "boolean" },
-      "source": { "$ref": "#/$defs/absolutePath" },
-      "destination": { "$ref": "#/$defs/absolutePath" },
-      "expected_destination_identity": { "$ref": "#/$defs/digest" },
-      "manifest": {
-        "type": "array",
-        "maxItems": 4096,
-        "items": { "$ref": "#/$defs/cacheManifestEntry" }
-      }
+      "source": { "$ref": "#/$defs/absolutePath" }
     }
   },
   "cache": {
@@ -245,9 +225,20 @@
       "cargo_home": { "$ref": "#/$defs/absolutePath" },
       "registry": { "$ref": "#/$defs/absolutePath" },
       "git": { "$ref": "#/$defs/absolutePath" },
-      "attempt": { "$ref": "#/$defs/cacheEndpoint" },
+      "writable": { "$ref": "#/$defs/cacheEndpoint" },
       "approved": { "$ref": "#/$defs/cacheEndpoint" },
+      "lockfile": { "$ref": "#/$defs/lockfileWorkspace" },
       "promotion": { "$ref": "#/$defs/cachePromotion" }
+    }
+  },
+  "lockfileWorkspace": {
+    "type": "object",
+    "additionalProperties": false,
+    "description": "The pre-execution lockfile identity. The observed post-fetch lockfile identity is measured by the runner integration and is never part of the request.",
+    "required": ["destination", "before_identity"],
+    "properties": {
+      "destination": { "$ref": "#/$defs/absolutePath" },
+      "before_identity": { "$ref": "#/$defs/digest" }
     }
   },
   "scratch": {
