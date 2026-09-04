@@ -7,5 +7,11 @@ members = [
 default-members = ["engine"]
 resolver = "3"
 
+[profile.release]
+codegen-units = 1
+opt-level = 3
+lto = true
+
 [profile.dev]
 debug = "line-tables-only"
+opt-level = 1
