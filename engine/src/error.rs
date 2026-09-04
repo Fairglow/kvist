@@ -19,6 +19,9 @@ pub enum KvistError {
     /// A command-line syntax or help error produced by the parser.
     #[error(transparent)]
     ArgumentParsing(#[from] clap::Error),
+    /// VCS-specific errors from Git operations.
+    #[error("VCS operation failed: {reason}")]
+    VcsUnavailable { reason: String },
     /// The requested project location is not a real directory.
     #[error("project directory `{path}` must be a directory")]
     ProjectPathNotDirectory {
@@ -331,6 +334,12 @@ pub enum KvistError {
     TaskComponentPathInvalid {
         /// User-supplied component path.
         path: PathBuf,
+    },
+    /// A Git commit creation or isolated index update failed.
+    #[error("VCS commit automation failed: {reason}")]
+    VcsCommitFailed {
+        /// A descriptive failure reason.
+        reason: String,
     },
     /// A task command can only run from a complete current project.
     #[error(

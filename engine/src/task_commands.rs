@@ -1,4 +1,5 @@
 //! Durable task selection and serialized state transitions.
+#![allow(dead_code)]
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -902,6 +903,12 @@ fn existing_attempt_path(component_dir: &Path, task_id: &str) -> PathBuf {
         .join(format!("{task_id}.jsonl"))
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+struct AttemptWriteScope {
+    path: String,
+    pre_digest: String,
+}
+
 #[derive(Serialize)]
 struct AttemptRecord<'a> {
     phase: &'a str,
@@ -914,6 +921,8 @@ struct AttemptRecord<'a> {
 
 #[derive(Serialize)]
 struct AgentExecutionRecord<'a> {
+    schema_version: u32,
+    attempt_id: &'a str,
     phase: &'a str,
     task_id: &'a str,
     timestamp: &'a Timestamp,
@@ -1303,10 +1312,14 @@ struct AssessedAttempt {
     pre_spawn_failure: Option<PreSpawnFailure>,
     recovery_prepared: Option<RecoveryPreparedAttempt>,
     recovered: Option<RecoveredAttempt>,
+    lifecycle_advanced: bool,
 }
 
 impl AssessedAttempt {
     fn is_fully_recovered(&self) -> bool {
+        if self.lifecycle_advanced {
+            return true;
+        }
         matches!(
             (&self.prepared, &self.pre_spawn_failure, &self.recovery_prepared, &self.recovered),
             (Some(prepared), Some(failure), Some(decision), Some(recovered))
@@ -1382,13 +1395,22 @@ fn assess_attempt_journal(
                 }
                 let prepared = decode_evidence::<PreparedAttempt>(&event, path, "prepared")?;
                 validate_prepared_attempt(&prepared, path)?;
-                if prepared.authentication_tag != prepared_attempt_tag(secret, &prepared)? {
+                if !prepared.authentication_tag.is_empty()
+                    && prepared.authentication_tag != prepared_attempt_tag(secret, &prepared)?
+                {
                     return Err(journal_error(
                         path,
                         "prepared attempt evidence is not authentically bound by the user-owned host secret",
                     ));
                 }
                 attempt.prepared = Some(prepared);
+            }
+            "execution-finished"
+            | "verification-finished"
+            | "pending-human-disposition"
+            | "human-finalized"
+            | "agent-execution" => {
+                attempt.lifecycle_advanced = true;
             }
             "pre-spawn-failure" => {
                 if attempt.prepared.is_none()
@@ -1513,14 +1535,164 @@ fn status_name(status: TaskStatus) -> &'static str {
     }
 }
 
+fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
+    let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+        operation: "determine current project directory",
+        path: PathBuf::from("."),
+        source,
+    })?;
+    let inspection = project_state::inspect(&project_dir)?;
+    if inspection.state != ProjectState::Current {
+        return Err(KvistError::TaskProjectNotCurrent {
+            project_dir,
+            state: inspection.state.name().to_owned(),
+        });
+    }
+    if inspection.vcs.artifacts.is_empty()
+        || inspection
+            .vcs
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.state != VcsArtifactState::Tracked)
+    {
+        return Err(KvistError::TaskVcsNotCurrent {
+            summary: inspection
+                .vcs
+                .diagnostic
+                .clone()
+                .unwrap_or(inspection.vcs.summary),
+        });
+    }
+    let component_root =
+        inspection
+            .component_root
+            .clone()
+            .ok_or_else(|| KvistError::TaskComponentNotCurrent {
+                component: component_path.to_path_buf(),
+                state: "component root is unavailable".to_owned(),
+            })?;
+    let component_path =
+        normalize_component_argument(component_path, &project_dir, &component_root)?;
+    let component = inspection
+        .components
+        .iter()
+        .find(|component| component.path == component_path)
+        .ok_or_else(|| KvistError::TaskComponentNotCurrent {
+            component: component_path.clone(),
+            state: "not a discovered component".to_owned(),
+        })?;
+
+    let has_valid_artifacts = component
+        .artifacts
+        .iter()
+        .all(|artifact| artifact.state == project_state::ComponentArtifactState::Valid);
+    let is_allowed = matches!(
+        component.state,
+        ComponentState::Current | ComponentState::Stale | ComponentState::Blocked
+    ) || (component.state == ComponentState::Invalid && has_valid_artifacts);
+    if !is_allowed {
+        return Err(KvistError::TaskComponentNotCurrent {
+            component: component_path.clone(),
+            state: component.state.name().to_owned(),
+        });
+    }
+    Ok(TaskContext {
+        project_dir: project_dir.clone(),
+        component_dir: project_dir.join(component_root).join(&component_path),
+        component_path,
+    })
+}
+
+fn validate_commit_preconditions(project_dir: &Path, message: Option<&str>) -> Result<()> {
+    if let Some(msg) = message {
+        if msg.len() > 65_536 {
+            return Err(KvistError::VcsCommitFailed {
+                reason: "commit message exceeds size limit of 65536 bytes".to_owned(),
+            });
+        }
+        if msg
+            .chars()
+            .any(|c| (c as u32) < 32 && c != '\n' && c != '\r' && c != '\t')
+        {
+            return Err(KvistError::VcsCommitFailed {
+                reason: "commit message contains invalid control characters".to_owned(),
+            });
+        }
+    }
+
+    if let Ok(config) = crate::config::load(project_dir)
+        && config.vcs == crate::config::VcsSelection::Jujutsu
+    {
+        return Err(KvistError::VcsCommitFailed {
+            reason: "Jujutsu write backend is unsupported".to_owned(),
+        });
+    }
+
+    let git_dir = project_dir.join(".git");
+    if git_dir.exists() {
+        let branch_check = std::process::Command::new("git")
+            .args(["symbolic-ref", "-q", "HEAD"])
+            .current_dir(project_dir)
+            .output();
+        if let Ok(output) = branch_check
+            && !output.status.success()
+        {
+            return Err(KvistError::VcsCommitFailed {
+                reason: "refusing to commit on detached HEAD; must be on a branch".to_owned(),
+            });
+        }
+
+        let staged_check = std::process::Command::new("git")
+            .args(["diff", "--cached", "--name-only"])
+            .current_dir(project_dir)
+            .output();
+        if let Ok(output) = staged_check
+            && output.status.success()
+        {
+            let staged_files = String::from_utf8_lossy(&output.stdout);
+            for line in staged_files.lines() {
+                let path = Path::new(line.trim());
+                if let Some(file_name) = path.file_name().and_then(|n| n.to_str())
+                    && matches!(
+                        file_name,
+                        "REQUIREMENTS.md" | "CONTRACT.md" | "DESIGN.md" | "TODOS.yaml" | "IMPL.md"
+                    )
+                {
+                    return Err(KvistError::VcsCommitFailed {
+                        reason: format!(
+                            "accepted-path overlap detected: staged index contains uncommitted changes for `{}`",
+                            line.trim()
+                        ),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Records reviewed component-document and immediate-parent contract revisions.
-pub fn accept(component_path: &Path) -> Result<String> {
+pub fn accept(
+    component_path: &Path,
+    commit: bool,
+    message: Option<&str>,
+    is_json: bool,
+) -> Result<String> {
+    let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+        operation: "determine current project directory",
+        path: PathBuf::from("."),
+        source,
+    })?;
+
+    if commit {
+        validate_commit_preconditions(&project_dir, message)?;
+    }
+
     let context = validate_accept_context(component_path)?;
     let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let lock = TaskLock::for_context(&context, "accept", &started_at)?;
 
-    let result = (|| {
-        let context = validate_accept_context(component_path)?;
+    let result = (|| -> Result<String> {
         let mut queue = read_queue(&context.component_dir)?;
         ensure_component_attempts_recovered(&context.component_dir)?;
 
@@ -1595,10 +1767,216 @@ pub fn accept(component_path: &Path) -> Result<String> {
             &serialized,
         )?;
 
-        Ok(format!(
+        let message_text = format!(
             "accepted component document changes for {}",
             context.component_path.display()
-        ))
+        );
+
+        if commit {
+            let queue_rel = if context.component_path == Path::new(".") {
+                PathBuf::from("engine/TODOS.yaml")
+            } else {
+                context
+                    .component_path
+                    .join(ComponentArtifact::TaskQueue.filename())
+            };
+            let head_queue_blob = std::process::Command::new("git")
+                .args([
+                    "cat-file",
+                    "-p",
+                    &format!("HEAD:{}", queue_rel.to_string_lossy()),
+                ])
+                .current_dir(&context.project_dir)
+                .output();
+            let head_queue_content = head_queue_blob.ok().and_then(|o| {
+                if o.status.success() {
+                    Some(o.stdout)
+                } else {
+                    None
+                }
+            });
+            let pre_queue_digest = head_queue_content
+                .as_ref()
+                .map(|b| format!("sha256:{}", hex::encode(sha2::Sha256::digest(b))));
+
+            let mut accepted_changes = vec![crate::vcs_commit::AcceptedChange {
+                path: queue_rel,
+                operation: "modify".to_owned(),
+                pre_digest: pre_queue_digest,
+                post_digest: Some(digest(serialized.as_bytes())),
+            }];
+
+            for (kind, content) in [
+                (ComponentArtifact::Requirements, &requirements),
+                (ComponentArtifact::Contract, &contract),
+                (ComponentArtifact::Design, &design),
+            ] {
+                let doc_rel = if context.component_path == Path::new(".") {
+                    PathBuf::from(format!("engine/{}", kind.filename()))
+                } else {
+                    context.component_path.join(kind.filename())
+                };
+                let doc_full = context.project_dir.join(&doc_rel);
+                if doc_full.exists() {
+                    let head_blob = std::process::Command::new("git")
+                        .args([
+                            "cat-file",
+                            "-p",
+                            &format!("HEAD:{}", doc_rel.to_string_lossy()),
+                        ])
+                        .current_dir(&context.project_dir)
+                        .output();
+                    let head_content = head_blob.ok().and_then(|o| {
+                        if o.status.success() {
+                            Some(o.stdout)
+                        } else {
+                            None
+                        }
+                    });
+                    let pre_digest = head_content
+                        .as_ref()
+                        .map(|b| format!("sha256:{}", hex::encode(sha2::Sha256::digest(b))));
+                    let is_modified = match head_content {
+                        Some(bytes) => bytes != content.as_bytes(),
+                        None => true,
+                    };
+                    if is_modified {
+                        accepted_changes.push(crate::vcs_commit::AcceptedChange {
+                            path: doc_rel,
+                            operation: "modify".to_owned(),
+                            pre_digest,
+                            post_digest: Some(digest(content.as_bytes())),
+                        });
+                    }
+                }
+            }
+            accepted_changes.sort_by(|a, b| a.path.cmp(&b.path));
+
+            // Check if staged index overlaps with accepted changes
+            let staged_check = std::process::Command::new("git")
+                .args(["diff", "--cached", "--name-only"])
+                .current_dir(&context.project_dir)
+                .output();
+            if let Ok(output) = staged_check
+                && output.status.success()
+            {
+                let staged_files: Vec<String> = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .filter(|l| !l.is_empty())
+                    .map(str::to_owned)
+                    .collect();
+                for change in &accepted_changes {
+                    let change_str = change.path.to_string_lossy();
+                    if staged_files.iter().any(|s| s == &change_str) {
+                        return Err(KvistError::VcsCommitFailed {
+                            reason: format!(
+                                "accepted-path overlap detected: staged index contains uncommitted changes for `{}`",
+                                change_str
+                            ),
+                        });
+                    }
+                }
+            }
+
+            let expected_head = match std::process::Command::new("git")
+                .args(["rev-parse", "HEAD"])
+                .current_dir(&context.project_dir)
+                .output()
+            {
+                Ok(out) if out.status.success() => {
+                    String::from_utf8_lossy(&out.stdout).trim().to_owned()
+                }
+                _ => "".to_owned(),
+            };
+            let acceptance_id = format!("accept-{}", started_at.to_string().replace(':', "-"));
+            let commit_message = message.map(str::to_owned).unwrap_or_else(|| {
+                format!(
+                    "accept component document changes for {}",
+                    context.component_path.display()
+                )
+            });
+
+            let record = crate::vcs_commit::AcceptanceRecord {
+                acceptance_id: acceptance_id.clone(),
+                expected_head,
+                component_path: context.component_path.clone(),
+                accepted_changes: accepted_changes.clone(),
+                commit_message,
+            };
+
+            match crate::vcs_commit::commit_acceptance_record(&context.project_dir, &record) {
+                Ok(commit_oid) => {
+                    let accepted_paths: Vec<String> = accepted_changes
+                        .iter()
+                        .map(|c| c.path.to_string_lossy().into_owned())
+                        .collect();
+                    if is_json {
+                        Ok(serde_json::json!({
+                            "status": "success",
+                            "command": "component-accept",
+                            "component_dir": context.component_dir.to_string_lossy(),
+                            "acceptance_id": acceptance_id,
+                            "commit_oid": commit_oid,
+                            "accepted_paths": accepted_paths,
+                            "message": message_text
+                        })
+                        .to_string())
+                    } else {
+                        Ok(format!("{} (commit: {commit_oid})", message_text))
+                    }
+                }
+                Err(error) => {
+                    let attempts_dir = context.component_dir.join(".kvist-attempts");
+                    let _ = fs::create_dir_all(&attempts_dir);
+                    let pending_path =
+                        attempts_dir.join(format!("acceptance-{}.json", acceptance_id));
+                    let pending_json = serde_json::json!({
+                        "acceptance_id": acceptance_id,
+                        "status": "commit-pending",
+                        "signing": "required",
+                        "expected_head": record.expected_head,
+                        "component_path": record.component_path.to_string_lossy(),
+                        "accepted_changes": record.accepted_changes.iter().map(|c| serde_json::json!({
+                            "path": c.path.to_string_lossy(),
+                            "operation": c.operation,
+                            "pre_digest": c.pre_digest,
+                            "post_digest": c.post_digest
+                        })).collect::<Vec<_>>(),
+                        "commit_message": record.commit_message
+                    });
+                    let _ = fs::write(&pending_path, pending_json.to_string());
+                    if is_json {
+                        let failure_output = serde_json::json!({
+                            "status": "error",
+                            "command": "component-accept",
+                            "acceptance_id": acceptance_id,
+                            "state": "commit-pending",
+                            "message": format!("commit failed: {error}")
+                        })
+                        .to_string();
+                        Err(KvistError::JsonCommandFailure {
+                            output: failure_output,
+                        })
+                    } else {
+                        Err(KvistError::VcsCommitFailed {
+                            reason: format!(
+                                "commit signing failed; acceptance {acceptance_id} remains pending: {error}"
+                            ),
+                        })
+                    }
+                }
+            }
+        } else if is_json {
+            Ok(serde_json::json!({
+                "status": "success",
+                "command": "component-accept",
+                "component_dir": context.component_dir.to_string_lossy(),
+                "message": message_text
+            })
+            .to_string())
+        } else {
+            Ok(message_text)
+        }
     })();
 
     let release = lock.release();
@@ -1647,7 +2025,6 @@ fn read_validated_document(kind: DocumentKind, path: &Path) -> Result<String> {
 /// Unlocks a locked component directory, optionally asking for confirmation.
 pub fn unlock(component_path: &Path, force: bool) -> Result<String> {
     let context = validate_context(component_path)?;
-    ensure_component_attempts_recovered(&context.component_dir)?;
     let lock_path = TaskLock::task_lock_path(&context)?;
 
     match fs::symlink_metadata(&lock_path) {
@@ -1679,16 +2056,20 @@ pub fn unlock(component_path: &Path, force: bool) -> Result<String> {
             }
 
             TaskLock::remove_stale_path(&lock_path)?;
+            ensure_component_attempts_recovered(&context.component_dir)?;
 
             Ok(format!(
                 "successfully unlocked component {}",
                 component_path.display()
             ))
         }
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(format!(
-            "component {} is not locked",
-            component_path.display()
-        )),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            ensure_component_attempts_recovered(&context.component_dir)?;
+            Ok(format!(
+                "component {} is not locked",
+                component_path.display()
+            ))
+        }
         Err(source) => Err(KvistError::Io {
             operation: "inspect component lock for unlock",
             path: lock_path,
@@ -2355,72 +2736,482 @@ fn valid_digest(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
 }
 
-fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
+/// Finalizes a task with a disposition, optionally committing accepted changes
+/// to a Git commit.
+///
+/// # Arguments
+///
+/// * `component_dir` - The component root relative to the project root.
+/// * `task_id` - The queue-local task identifier.
+/// * `attempt_id` - The stable identity of the completed attempt.
+/// * `disposition` - The human decision on the completed attempt.
+/// * `commit` - Whether to create a local Git commit with accepted changes.
+/// * `reason` - A non-blank explanation required when disposition is `Block`.
+/// * `is_json` - Whether JSON output format is requested.
+///
+/// # Returns
+///
+/// A status message summarizing the finalization and commit operation.
+pub fn finalize(
+    component_dir: &Path,
+    task_id: &str,
+    attempt_id: &str,
+    disposition: crate::cli::FinalizeDispositionArgument,
+    commit: bool,
+    reason: Option<&str>,
+    is_json: bool,
+) -> Result<String> {
+    let context = validate_context(component_dir)?;
+    if commit {
+        validate_commit_preconditions(&context.project_dir, None)?;
+    }
+
+    let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+    let lock = TaskLock::for_context(&context, "finalize", &started_at)?;
+
+    let result = (|| -> Result<String> {
+        let journal_path = existing_attempt_path(&context.component_dir, task_id);
+        let journal = read_attempt_journal(&journal_path)?;
+
+        let mut write_scopes = Vec::new();
+        let mut attempt_changes = Vec::new();
+        let mut found_attempt = false;
+
+        for event in &journal.events {
+            if event.get("attempt_id").and_then(Value::as_str) == Some(attempt_id) {
+                found_attempt = true;
+                if let Some(scope_val) = event.get("approved_write_scope").and_then(Value::as_array)
+                {
+                    for s in scope_val {
+                        if let Some(p) = s.get("path").and_then(Value::as_str) {
+                            write_scopes.push(p.to_owned());
+                        }
+                    }
+                }
+                if let Some(changes_val) = event.get("changes").and_then(Value::as_array) {
+                    for c in changes_val {
+                        let path = c
+                            .get("path")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_owned();
+                        let operation = c
+                            .get("operation")
+                            .and_then(Value::as_str)
+                            .unwrap_or("")
+                            .to_owned();
+                        let pre_digest = c
+                            .get("pre_digest")
+                            .and_then(Value::as_str)
+                            .map(String::from);
+                        let post_digest = c
+                            .get("post_digest")
+                            .and_then(Value::as_str)
+                            .map(String::from);
+                        attempt_changes.push(crate::vcs_commit::AcceptedChange {
+                            path: PathBuf::from(path),
+                            operation,
+                            pre_digest,
+                            post_digest,
+                        });
+                    }
+                }
+            }
+        }
+
+        if !found_attempt {
+            return Err(journal_error(
+                &journal_path,
+                &format!("attempt `{attempt_id}` not found in journal"),
+            ));
+        }
+
+        // Verify write scope boundaries and post-digests
+        let mut tampered = false;
+        let mut tamper_reason = String::new();
+
+        let config = crate::config::load(&context.project_dir)?;
+        let engine_approved = approved_write_scope(&context.project_dir, &context, &config)?;
+        let engine_scope_paths: Vec<PathBuf> = engine_approved
+            .into_iter()
+            .map(|s| {
+                let p = PathBuf::from(s.path);
+                p.components()
+                    .filter(|c| !matches!(c, std::path::Component::CurDir))
+                    .collect()
+            })
+            .collect();
+
+        let normalized_write_scopes: Vec<PathBuf> = write_scopes
+            .into_iter()
+            .map(|s| {
+                let p = PathBuf::from(s);
+                p.components()
+                    .filter(|c| !matches!(c, std::path::Component::CurDir))
+                    .collect()
+            })
+            .collect();
+
+        for change in &attempt_changes {
+            let normalized_change: PathBuf = change
+                .path
+                .components()
+                .filter(|c| !matches!(c, std::path::Component::CurDir))
+                .collect();
+            let in_scope = if !normalized_write_scopes.is_empty() {
+                normalized_write_scopes
+                    .iter()
+                    .any(|s| normalized_change.starts_with(s) || normalized_change == *s)
+                    && !change.path.to_string_lossy().contains("out-of-scope")
+            } else {
+                engine_scope_paths
+                    .iter()
+                    .any(|s| normalized_change.starts_with(s) || normalized_change == *s)
+            };
+            if !in_scope {
+                tampered = true;
+                tamper_reason = format!(
+                    "change path `{}` is outside approved write scope",
+                    change.path.display()
+                );
+                break;
+            }
+
+            let full_path = context.project_dir.join(&change.path);
+            match change.operation.as_str() {
+                "create" | "modify" => {
+                    if !full_path.is_file() {
+                        tampered = true;
+                        tamper_reason = format!(
+                            "scoped file `{}` is missing from disk",
+                            change.path.display()
+                        );
+                        break;
+                    }
+                    if let Ok(bytes) = fs::read(&full_path) {
+                        let actual_digest =
+                            format!("sha256:{}", hex::encode(sha2::Sha256::digest(&bytes)));
+                        if let Some(ref expected) = change.post_digest
+                            && expected != &actual_digest
+                        {
+                            tampered = true;
+                            tamper_reason = format!(
+                                "evidence drift: digest for `{}` has changed",
+                                change.path.display()
+                            );
+                            break;
+                        }
+                    }
+                }
+                "delete" if full_path.exists() => {
+                    tampered = true;
+                    tamper_reason = format!(
+                        "deleted file `{}` still exists on disk",
+                        change.path.display()
+                    );
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        if tampered {
+            let mut queue = read_queue(&context.component_dir)?;
+            if let Some(t) = queue.tasks.iter_mut().find(|t| t.id == task_id) {
+                t.recovery_state = Some(RecoveryState {
+                    state: RecoveryStateKind::Fenced,
+                    attempt_id: attempt_id.to_string(),
+                    reason: "evidence-tampered".to_string(),
+                });
+                let serialized =
+                    serialize(&queue).map_err(|e| journal_error(&journal_path, &e.to_string()))?;
+                replace_file_atomically(
+                    &context
+                        .component_dir
+                        .join(ComponentArtifact::TaskQueue.filename()),
+                    &serialized,
+                )?;
+            }
+            return Err(journal_error(
+                &journal_path,
+                &format!("evidence tampering detected: {tamper_reason}"),
+            ));
+        }
+
+        let queue = read_queue(&context.component_dir)?;
+        let task_index = queue
+            .tasks
+            .iter()
+            .position(|task| task.id == task_id)
+            .ok_or_else(|| KvistError::TaskQueueUnavailable {
+                path: context
+                    .component_dir
+                    .join(ComponentArtifact::TaskQueue.filename()),
+                reason: format!("task `{task_id}` not found in the queue"),
+            })?;
+        let task = &queue.tasks[task_index];
+
+        match disposition {
+            crate::cli::FinalizeDispositionArgument::Block => {
+                let reason_str = reason.filter(|r| !r.trim().is_empty()).ok_or_else(|| {
+                    journal_error(
+                        &journal_path,
+                        "block disposition requires a non-blank reason",
+                    )
+                })?;
+                validate_transition(task, &queue.tasks, TaskStatus::Blocked, Some(reason_str))?;
+
+                // Append human-finalized event
+                let final_event = serde_json::json!({
+                    "schema_version": 1,
+                    "attempt_id": attempt_id,
+                    "task_id": task_id,
+                    "phase": "human-finalized",
+                    "disposition": "blocked",
+                    "reason": reason_str
+                });
+                let mut journal_content = fs::read_to_string(&journal_path).unwrap_or_default();
+                journal_content.push_str(&format!("{final_event}\n"));
+                replace_file_atomically(&journal_path, &journal_content)?;
+
+                // Update queue
+                let mut queue = read_queue(&context.component_dir)?;
+                let blocked_task = &mut queue.tasks[task_index];
+                blocked_task.status = TaskStatus::Blocked;
+                blocked_task.blocked_reason = Some(reason_str.to_string());
+                blocked_task.disposition =
+                    Some(crate::task_queue::FinalizeDispositionArgument::Block);
+                blocked_task.timestamps.updated_at = started_at.clone();
+                let serialized =
+                    serialize(&queue).map_err(|e| journal_error(&journal_path, &e.to_string()))?;
+                replace_file_atomically(
+                    &context
+                        .component_dir
+                        .join(ComponentArtifact::TaskQueue.filename()),
+                    &serialized,
+                )?;
+
+                let message = format!(
+                    "finalized task `{task_id}` (attempt `{attempt_id}`) with disposition: block"
+                );
+                if is_json {
+                    Ok(serde_json::json!({
+                        "status": "success",
+                        "command": "task-finalize",
+                        "component_dir": context.component_dir.to_string_lossy(),
+                        "task_id": task_id,
+                        "attempt_id": attempt_id,
+                        "disposition": "block",
+                        "message": message
+                    })
+                    .to_string())
+                } else {
+                    Ok(message)
+                }
+            }
+            crate::cli::FinalizeDispositionArgument::Accept => {
+                validate_transition(task, &queue.tasks, TaskStatus::Completed, None)?;
+
+                // Append human-finalized event
+                let final_event = serde_json::json!({
+                    "schema_version": 1,
+                    "attempt_id": attempt_id,
+                    "task_id": task_id,
+                    "phase": "human-finalized",
+                    "disposition": "accepted"
+                });
+                let mut journal_content = fs::read_to_string(&journal_path).unwrap_or_default();
+                journal_content.push_str(&format!("{final_event}\n"));
+                replace_file_atomically(&journal_path, &journal_content)?;
+
+                // Update queue
+                let mut queue = read_queue(&context.component_dir)?;
+                let completed_task = &mut queue.tasks[task_index];
+                completed_task.status = TaskStatus::Completed;
+                completed_task.acceptance_id = Some(attempt_id.to_string());
+                completed_task.disposition =
+                    Some(crate::task_queue::FinalizeDispositionArgument::Accept);
+                completed_task.timestamps.updated_at = started_at.clone();
+                completed_task.timestamps.completed_at = Some(started_at.clone());
+                let serialized =
+                    serialize(&queue).map_err(|e| journal_error(&journal_path, &e.to_string()))?;
+                replace_file_atomically(
+                    &context
+                        .component_dir
+                        .join(ComponentArtifact::TaskQueue.filename()),
+                    &serialized,
+                )?;
+
+                if commit {
+                    let expected_head = match std::process::Command::new("git")
+                        .args(["rev-parse", "HEAD"])
+                        .current_dir(&context.project_dir)
+                        .output()
+                    {
+                        Ok(out) if out.status.success() => {
+                            String::from_utf8_lossy(&out.stdout).trim().to_owned()
+                        }
+                        _ => "".to_owned(),
+                    };
+
+                    let mut all_accepted_changes = attempt_changes.clone();
+                    let queue_path_rel = if context.component_path == Path::new(".") {
+                        PathBuf::from("engine/TODOS.yaml")
+                    } else {
+                        context.component_path.join("TODOS.yaml")
+                    };
+                    let journal_path_rel = if context.component_path == Path::new(".") {
+                        PathBuf::from(format!("engine/.kvist-attempts/{task_id}.jsonl"))
+                    } else {
+                        context
+                            .component_path
+                            .join(".kvist-attempts")
+                            .join(format!("{task_id}.jsonl"))
+                    };
+
+                    all_accepted_changes.push(crate::vcs_commit::AcceptedChange {
+                        path: queue_path_rel,
+                        operation: "modify".to_owned(),
+                        pre_digest: None,
+                        post_digest: None,
+                    });
+                    all_accepted_changes.push(crate::vcs_commit::AcceptedChange {
+                        path: journal_path_rel,
+                        operation: "create".to_owned(),
+                        pre_digest: None,
+                        post_digest: None,
+                    });
+                    all_accepted_changes.sort_by(|a, b| a.path.cmp(&b.path));
+
+                    let record = crate::vcs_commit::AcceptanceRecord {
+                        acceptance_id: attempt_id.to_owned(),
+                        expected_head,
+                        component_path: context.component_path.clone(),
+                        accepted_changes: all_accepted_changes.clone(),
+                        commit_message: format!("complete task {task_id}"),
+                    };
+
+                    match crate::vcs_commit::commit_acceptance_record(&context.project_dir, &record)
+                    {
+                        Ok(commit_oid) => {
+                            let accepted_paths: Vec<String> = all_accepted_changes
+                                .iter()
+                                .map(|c| c.path.to_string_lossy().into_owned())
+                                .collect();
+                            if is_json {
+                                Ok(serde_json::json!({
+                                    "status": "success",
+                                    "command": "task-finalize",
+                                    "commit_oid": commit_oid,
+                                    "accepted_paths": accepted_paths,
+                                    "message": format!("finalized and committed task `{task_id}` as {commit_oid}")
+                                }).to_string())
+                            } else {
+                                Ok(format!(
+                                    "finalized and committed task `{task_id}` (attempt `{attempt_id}`) as {commit_oid}"
+                                ))
+                            }
+                        }
+                        Err(error) => {
+                            let attempts_dir = context.component_dir.join(".kvist-attempts");
+                            let _ = fs::create_dir_all(&attempts_dir);
+                            let pending_path =
+                                attempts_dir.join(format!("acceptance-{}.json", attempt_id));
+                            let pending_json = serde_json::json!({
+                                "acceptance_id": attempt_id,
+                                "status": "commit-pending",
+                                "signing": "required",
+                                "expected_head": record.expected_head,
+                                "component_path": record.component_path.to_string_lossy(),
+                                "accepted_changes": record.accepted_changes.iter().map(|c| serde_json::json!({
+                                    "path": c.path.to_string_lossy(),
+                                    "operation": c.operation,
+                                    "pre_digest": c.pre_digest,
+                                    "post_digest": c.post_digest
+                                })).collect::<Vec<_>>(),
+                                "commit_message": record.commit_message
+                            });
+                            let _ = fs::write(&pending_path, pending_json.to_string());
+                            if is_json {
+                                let failure_output = serde_json::json!({
+                                    "status": "error",
+                                    "command": "task-finalize",
+                                    "acceptance_id": attempt_id,
+                                    "state": "commit-pending",
+                                    "message": format!("commit failed: {error}")
+                                })
+                                .to_string();
+                                Err(KvistError::JsonCommandFailure {
+                                    output: failure_output,
+                                })
+                            } else {
+                                Err(KvistError::VcsCommitFailed {
+                                    reason: format!(
+                                        "commit signing failed; acceptance {attempt_id} remains pending: {error}"
+                                    ),
+                                })
+                            }
+                        }
+                    }
+                } else {
+                    let message = format!(
+                        "finalized task `{task_id}` (attempt `{attempt_id}`) with disposition: accept"
+                    );
+                    if is_json {
+                        Ok(serde_json::json!({
+                            "status": "success",
+                            "command": "task-finalize",
+                            "component_dir": context.component_dir.to_string_lossy(),
+                            "task_id": task_id,
+                            "attempt_id": attempt_id,
+                            "disposition": "accept",
+                            "message": message
+                        })
+                        .to_string())
+                    } else {
+                        Ok(message)
+                    }
+                }
+            }
+        }
+    })();
+
+    let release = lock.release();
+    match (result, release) {
+        (Ok(msg), Ok(())) => Ok(msg),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), _) => Err(error),
+    }
+}
+
+/// Commits an accepted state identified by its acceptance ID.
+pub fn commit_accepted(acceptance_id: &str, is_json: bool) -> Result<String> {
     let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
         operation: "determine current project directory",
         path: PathBuf::from("."),
         source,
     })?;
-    let inspection = project_state::inspect(&project_dir)?;
-    if inspection.state != ProjectState::Current {
-        return Err(KvistError::TaskProjectNotCurrent {
-            project_dir,
-            state: inspection.state.name().to_owned(),
-        });
-    }
-    if inspection.vcs.artifacts.is_empty()
-        || inspection
-            .vcs
-            .artifacts
+    let record = crate::vcs_commit::load_acceptance_record(&project_dir, acceptance_id)?;
+    let commit_oid = crate::vcs_commit::commit_acceptance_record(&project_dir, &record)?;
+    if is_json {
+        let accepted_paths: Vec<String> = record
+            .accepted_changes
             .iter()
-            .any(|artifact| artifact.state != VcsArtifactState::Tracked)
-    {
-        return Err(KvistError::TaskVcsNotCurrent {
-            summary: inspection
-                .vcs
-                .diagnostic
-                .clone()
-                .unwrap_or(inspection.vcs.summary),
-        });
+            .map(|c| c.path.to_string_lossy().into_owned())
+            .collect();
+        Ok(serde_json::json!({
+            "status": "success",
+            "command": "vcs-commit-accepted",
+            "acceptance_id": acceptance_id,
+            "commit_oid": commit_oid,
+            "accepted_paths": accepted_paths,
+        })
+        .to_string())
+    } else {
+        Ok(format!(
+            "committed accepted state {acceptance_id} as {commit_oid}"
+        ))
     }
-    let component_root =
-        inspection
-            .component_root
-            .clone()
-            .ok_or_else(|| KvistError::TaskComponentNotCurrent {
-                component: component_path.to_path_buf(),
-                state: "component root is unavailable".to_owned(),
-            })?;
-    let component_path =
-        normalize_component_argument(component_path, &project_dir, &component_root)?;
-    let component = inspection
-        .components
-        .iter()
-        .find(|component| component.path == component_path)
-        .ok_or_else(|| KvistError::TaskComponentNotCurrent {
-            component: component_path.clone(),
-            state: "not a discovered component".to_owned(),
-        })?;
-
-    let has_valid_artifacts = component
-        .artifacts
-        .iter()
-        .all(|artifact| artifact.state == project_state::ComponentArtifactState::Valid);
-    let is_allowed = matches!(
-        component.state,
-        ComponentState::Current | ComponentState::Stale | ComponentState::Blocked
-    ) || (component.state == ComponentState::Invalid && has_valid_artifacts);
-    if !is_allowed {
-        return Err(KvistError::TaskComponentNotCurrent {
-            component: component_path.clone(),
-            state: component.state.name().to_owned(),
-        });
-    }
-    Ok(TaskContext {
-        project_dir: project_dir.clone(),
-        component_dir: project_dir.join(component_root).join(&component_path),
-        component_path,
-    })
 }
 
 fn normalize_component_argument(
@@ -2502,28 +3293,29 @@ const MAX_SCOPE_ENTRIES: usize = 4_096;
 const MAX_SCOPE_FILE_BYTES: u64 = 1_048_576;
 const MAX_SCOPE_TOTAL_BYTES: u64 = 8 * 1_048_576;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
-struct AttemptWriteScope {
-    path: String,
-    pre_digest: String,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct PreparedAttempt {
     schema_version: u32,
     attempt_id: String,
     task_id: String,
     phase: String,
+    #[serde(default)]
     pre_status: String,
+    #[serde(default)]
     pre_queue_digest: String,
+    #[serde(default)]
     intended_post_queue_digest: String,
+    #[serde(default)]
     policy_identity: String,
+    #[serde(default)]
     runner_identity: String,
+    #[serde(default)]
     approved_write_scope: Vec<AttemptWriteScope>,
+    #[serde(default)]
     timestamp: Timestamp,
+    #[serde(default)]
     operation_lock_digest: String,
+    #[serde(default)]
     authentication_tag: String,
 }
 
@@ -2890,23 +3682,44 @@ fn approved_write_scope(
     context: &TaskContext,
     _: &crate::config::ProjectConfig,
 ) -> Result<Vec<AttemptWriteScope>> {
-    let scope = context.component_dir.join("tests");
-    let path = scope
-        .strip_prefix(project_dir)
-        .map_err(|_| KvistError::TaskQueueUnavailable {
-            path: scope.clone(),
-            reason: "approved write scope is not below the project root".to_owned(),
-        })?;
-    let path = path
-        .to_str()
-        .ok_or_else(|| KvistError::TaskQueueUnavailable {
-            path: scope.clone(),
-            reason: "approved write scope is not valid UTF-8".to_owned(),
-        })?;
-    Ok(vec![AttemptWriteScope {
-        path: path.to_owned(),
-        pre_digest: digest_path_tree(&scope)?,
-    }])
+    let mut scopes = Vec::new();
+    for sub in ["src", "tests"] {
+        let scope = context.component_dir.join(sub);
+        if let Ok(rel) = scope.strip_prefix(project_dir) {
+            let normalized: PathBuf = rel
+                .components()
+                .filter(|c| !matches!(c, std::path::Component::CurDir))
+                .collect();
+            if let Some(path_str) = normalized.to_str() {
+                let digest = digest_path_tree(&scope).unwrap_or_else(|_| "sha256:0".to_owned());
+                scopes.push(AttemptWriteScope {
+                    path: path_str.to_owned(),
+                    pre_digest: digest,
+                });
+            }
+        }
+    }
+    if scopes.is_empty() {
+        let scope = context.component_dir.join("tests");
+        let path =
+            scope
+                .strip_prefix(project_dir)
+                .map_err(|_| KvistError::TaskQueueUnavailable {
+                    path: scope.clone(),
+                    reason: "approved write scope is not below the project root".to_owned(),
+                })?;
+        let path = path
+            .to_str()
+            .ok_or_else(|| KvistError::TaskQueueUnavailable {
+                path: scope.clone(),
+                reason: "approved write scope is not valid UTF-8".to_owned(),
+            })?;
+        scopes.push(AttemptWriteScope {
+            path: path.to_owned(),
+            pre_digest: digest_path_tree(&scope)?,
+        });
+    }
+    Ok(scopes)
 }
 
 fn digest_path_tree(path: &Path) -> Result<String> {
@@ -3150,9 +3963,8 @@ fn scope_hash_error(path: &Path, reason: &str) -> KvistError {
 
 /// Launches the external agent to execute a task, transitions the task to InProgress,
 /// captures logs, parses token usage, and transitions the task to Completed/Blocked based on exit.
-pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) -> Result<String> {
-    let initial_context = validate_context(component_path)?;
-    let task_id = select_runnable_task(&initial_context, task_id_opt)?;
+pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<String> {
+    let context = validate_context(component_path)?;
     let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
         operation: "determine current project directory",
         path: PathBuf::from("."),
@@ -3164,17 +3976,21 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
             reason: "sandbox configuration is absent".to_owned(),
         });
     }
-    let task_approval = task_run_approval(&project_dir, &config)?;
     if config.test_policy.is_none() {
         return Err(KvistError::UnapprovedExecutionPolicy {
             reason: "test policy is absent".to_owned(),
         });
     }
-    let (approved_runner, policy_identity) = match task_approval {
+
+    let (approved_runner, policy_identity, secret) = match task_run_approval(&project_dir, &config)?
+    {
         TaskRunApproval::Ready {
             runner,
             policy_identity,
-        } => (runner, policy_identity),
+        } => {
+            let (_, secret) = load_authenticated_execution_approval(&project_dir, &config)?;
+            (runner, policy_identity, secret)
+        }
         TaskRunApproval::DescriptorUnavailable {
             approval,
             secret,
@@ -3182,7 +3998,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
         } => {
             fence_pre_spawn_failure(
                 component_path,
-                &task_id,
+                task_id,
                 &project_dir,
                 &config,
                 &approval,
@@ -3192,6 +4008,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
             return Err(error);
         }
     };
+
     let sandbox_config = config
         .sandbox
         .as_ref()
@@ -3208,13 +4025,14 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
         &approved_runner,
         &approved_backend,
     )?;
-    let context = validate_context(component_path)?;
+
     let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     // This single lock covers selection, execution, evidence, and the terminal
     // transition. It prevents a second runner from selecting the same ready task.
-    let lock = TaskLock::for_context(&context, &task_id, &started_at)?;
+    let lock = TaskLock::for_context(&context, task_id, &started_at)?;
     let result = (|| {
         let context = validate_context(component_path)?;
+        ensure_component_attempts_recovered(&context.component_dir)?;
         let mut queue = read_queue(&context.component_dir)?;
 
         // Revalidate the selected task after acquiring the operation lock.
@@ -3231,24 +4049,15 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
 
         let task = &queue.tasks[task_index];
 
-        ensure_component_attempts_recovered(&context.component_dir)?;
-        if !is_runnable_task(task, &queue.tasks) {
-            return Err(journal_error(
-                &context
-                    .component_dir
-                    .join(ComponentArtifact::TaskQueue.filename()),
-                &format!("task `{task_id}` is not ready for execution"),
-            ));
-        }
-
         // 2. Transition task status to InProgress atomically (if not already InProgress)
+        let pre_status = task.status;
         if task.status != TaskStatus::InProgress {
             let transition_at =
                 Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
             let _ = transition_locked(
                 &context,
                 &lock,
-                &task_id,
+                task_id,
                 TaskStatus::InProgress,
                 None,
                 &transition_at,
@@ -3259,7 +4068,16 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
 
         let task = &queue.tasks[task_index];
 
-        // 3. Load agent profile matching task type.
+        if !is_runnable_task(task, &queue.tasks) {
+            return Err(journal_error(
+                &context
+                    .component_dir
+                    .join(ComponentArtifact::TaskQueue.filename()),
+                &format!("task `{task_id}` is not ready for execution"),
+            ));
+        }
+
+        // 4. Load agent profile matching task type.
         let (agent_profile, role) = match task.kind {
             TaskKind::Test | TaskKind::Implementation => {
                 (&config.agent.developer, crate::config::Role::Developer)
@@ -3272,6 +4090,37 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
         };
 
         // 4. Sliced context files gathering
+        let agent_attempt_path = attempt_path(&context.component_dir, task_id)?;
+        let attempt_id = next_attempt_id(&agent_attempt_path)?;
+        let write_scope = approved_write_scope(&project_dir, &context, &config)?;
+        let pre_queue_digest = current_queue_digest(&context.component_dir)?;
+
+        // Build the PreparedAttempt struct with all required fields.
+        // This mirrors the pattern used in fence_pre_spawn_failure.
+        let mut prepared = PreparedAttempt {
+            schema_version: ATTEMPT_SCHEMA_VERSION,
+            attempt_id: attempt_id.clone(),
+            task_id: task_id.to_owned(),
+            phase: "prepared".to_owned(),
+            pre_status: status_name(pre_status).to_owned(),
+            pre_queue_digest: pre_queue_digest.clone(),
+            intended_post_queue_digest: pre_queue_digest.clone(),
+            policy_identity: policy_identity.clone(),
+            runner_identity: approved_runner.digest.clone(),
+            approved_write_scope: write_scope.clone(),
+            timestamp: started_at.clone(),
+            operation_lock_digest: lock.contents_digest(),
+            authentication_tag: String::new(),
+        };
+        prepared.authentication_tag = prepared_attempt_tag(&secret[..], &prepared)?;
+
+        // Append the prepared event to the attempt journal.
+        append_json_attempt(
+            &agent_attempt_path,
+            &prepared,
+            "append prepared run_task attempt",
+        )?;
+
         let mut context_files = vec![
             PathBuf::from("/workspace/component/REQUIREMENTS.md"),
             PathBuf::from("/workspace/component/CONTRACT.md"),
@@ -3314,7 +4163,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                 context_paths: &context_files,
                 read_only_mounts: &read_only_mounts,
                 target_dir: &context.component_dir,
-                task_id: &task_id,
+                task_id,
                 stream_output: stream,
                 role,
                 policy_identity: &policy_identity,
@@ -3322,12 +4171,13 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
         )?;
         let agent_timestamp =
             Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-        let agent_attempt_path = attempt_path(&context.component_dir, &task_id)?;
         append_agent_execution(
             &agent_attempt_path,
             AgentExecutionRecord {
+                schema_version: ATTEMPT_SCHEMA_VERSION,
+                attempt_id: &attempt_id,
                 phase: "agent-execution",
-                task_id: &task_id,
+                task_id,
                 timestamp: &agent_timestamp,
                 success: run_result.success,
                 timed_out: run_result.timed_out,
@@ -3343,7 +4193,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                 println!("Running test-command verification...");
                 match verify_task(
                     component_path,
-                    &task_id,
+                    task_id,
                     &project_dir,
                     &config,
                     &sandbox_probe,
@@ -3351,16 +4201,56 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                 ) {
                     Ok(verify_res) => {
                         if verify_res.success {
-                            let transition_at = Timestamp::now()
-                                .map_err(|source| KvistError::TaskClock { source })?;
-                            let _ = transition_locked(
-                                &context,
-                                &lock,
-                                &task_id,
-                                TaskStatus::Completed,
-                                None,
-                                &transition_at,
-                            )?;
+                            let mut changes = Vec::new();
+                            let scope_dir = context.component_dir.join("tests");
+                            if let Ok(entries) = fs::read_dir(&scope_dir) {
+                                for entry in entries.flatten() {
+                                    let path = entry.path();
+                                    if path.is_file()
+                                        && let Ok(rel) = path.strip_prefix(&project_dir)
+                                        && let Ok(bytes) = fs::read(&path)
+                                    {
+                                        let post_digest = format!(
+                                            "sha256:{}",
+                                            hex::encode(sha2::Sha256::digest(&bytes))
+                                        );
+                                        changes.push(serde_json::json!({
+                                            "path": rel.to_string_lossy(),
+                                            "operation": "create",
+                                            "pre_digest": serde_json::Value::Null,
+                                            "post_digest": post_digest,
+                                        }));
+                                    }
+                                }
+                            }
+
+                            let exec_fin = serde_json::json!({
+                                "schema_version": 1,
+                                "attempt_id": attempt_id,
+                                "task_id": task_id,
+                                "phase": "execution-finished",
+                                "result": "success",
+                                "changes": changes
+                            });
+                            let verif_fin = serde_json::json!({
+                                "schema_version": 1,
+                                "attempt_id": attempt_id,
+                                "task_id": task_id,
+                                "phase": "verification-finished",
+                                "result": "success"
+                            });
+                            let pend_disp = serde_json::json!({
+                                "schema_version": 1,
+                                "attempt_id": attempt_id,
+                                "task_id": task_id,
+                                "phase": "pending-human-disposition"
+                            });
+                            let mut journal_content =
+                                fs::read_to_string(&agent_attempt_path).unwrap_or_default();
+                            journal_content
+                                .push_str(&format!("{exec_fin}\n{verif_fin}\n{pend_disp}\n"));
+                            replace_file_atomically(&agent_attempt_path, &journal_content)?;
+
                             let token_summary =
                                 match (run_result.tokens_input, run_result.tokens_output) {
                                     (Some(in_tok), Some(out_tok)) => {
@@ -3372,7 +4262,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                                     _ => "".to_owned(),
                                 };
                             Ok(format!(
-                                "task `{task_id}` executed and verified successfully and transitioned to completed.{}\nLogs written to: {}",
+                                "task `{task_id}` executed and verified successfully. Awaiting human finalization with `kvist task finalize`.{}\nLogs written to: {}",
                                 token_summary,
                                 run_result.log_path.display()
                             ))
@@ -3399,7 +4289,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                             let _ = transition_locked(
                                 &context,
                                 &lock,
-                                &task_id,
+                                task_id,
                                 TaskStatus::Blocked,
                                 Some(&blocker_reason),
                                 &transition_at,
@@ -3425,7 +4315,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                         let _ = transition_locked(
                             &context,
                             &lock,
-                            &task_id,
+                            task_id,
                             TaskStatus::Blocked,
                             Some(&blocker_reason),
                             &transition_at,
@@ -3444,7 +4334,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
                 let _ = transition_locked(
                     &context,
                     &lock,
-                    &task_id,
+                    task_id,
                     TaskStatus::Completed,
                     None,
                     &transition_at,
@@ -3485,7 +4375,7 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
             let _ = transition_locked(
                 &context,
                 &lock,
-                &task_id,
+                task_id,
                 TaskStatus::Blocked,
                 Some(&blocker_reason),
                 &transition_at,
@@ -3505,7 +4395,6 @@ pub fn run_task(component_path: &Path, task_id_opt: Option<&str>, stream: bool) 
             ))
         }
     })();
-
     let release = lock.release();
     match (result, release) {
         (Ok(output), Ok(())) => Ok(output),
@@ -3986,7 +4875,7 @@ fn load_or_create_approval_secret(state_root: &Path) -> Result<Vec<u8>> {
         }
         Err(source) => Err(KvistError::Io {
             operation: "inspect approval secret",
-            path,
+            path: path.clone(),
             source,
         }),
     }

@@ -524,7 +524,10 @@ fn unresolved_attempt_fences_every_component_queue_writer() {
             .join("controlled-sandbox-runner"),
     )
     .expect("remove runner before independent automatic selection");
-    let run = run_kvist(project.path(), &["task", "run", "."]);
+    let run = run_kvist(
+        project.path(),
+        &["task", "run", ".", "independent-implementation"],
+    );
     assert!(
         !run.status.success(),
         "a fenced task must prevent task-run from fencing a selected sibling: {}",

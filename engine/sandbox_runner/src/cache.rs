@@ -131,10 +131,12 @@ fn open_root(path: &Path, label: &'static str) -> Result<(PathBuf, OwnedFd), Cac
         Mode::empty(),
     )
     .map_err(|error| nix_error("open filesystem root", Path::new("/"), error))?;
-    let relative = text.strip_prefix('/').ok_or_else(|| CacheError::InvalidRoot {
-        label,
-        path: path.to_path_buf(),
-    })?;
+    let relative = text
+        .strip_prefix('/')
+        .ok_or_else(|| CacheError::InvalidRoot {
+            label,
+            path: path.to_path_buf(),
+        })?;
     let relative = if relative.is_empty() { "." } else { relative };
     let descriptor = open_beneath_no_symlinks(filesystem_root.as_fd(), relative, path)?;
     let stat = stat::fstat(&descriptor).map_err(|error| nix_error("inspect", path, error))?;
@@ -155,7 +157,7 @@ fn open_root(path: &Path, label: &'static str) -> Result<(PathBuf, OwnedFd), Cac
 /// Opens a directory strictly beneath `start` without following any symlink.
 ///
 /// It prefers `openat2` with `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS` (Linux
-/// >= 5.6). When the kernel lacks `openat2` (`ENOSYS`), it falls back to a
+/// 5.6+). When the kernel lacks `openat2` (`ENOSYS`), it falls back to a
 /// componentwise walk that opens each already-canonical component with
 /// `O_NOFOLLOW | O_DIRECTORY`, which refuses any symlink component with `ELOOP`
 /// and never escapes the starting directory. The relative path is validated
@@ -300,38 +302,103 @@ pub enum Durability {
 /// A precise reason inspection or immutable publication was refused.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CacheError {
-    NonAbsoluteRoot { path: PathBuf },
-    NonCanonicalRoot { path: PathBuf },
-    NonUtf8Root { path: PathBuf },
-    RootTooLong { path: PathBuf, limit: usize },
-    InvalidRoot { label: &'static str, path: PathBuf },
-    SymlinkRoot { path: PathBuf },
-    RootNotDirectory { path: PathBuf },
-    RootReplaced { path: PathBuf },
+    NonAbsoluteRoot {
+        path: PathBuf,
+    },
+    NonCanonicalRoot {
+        path: PathBuf,
+    },
+    NonUtf8Root {
+        path: PathBuf,
+    },
+    RootTooLong {
+        path: PathBuf,
+        limit: usize,
+    },
+    InvalidRoot {
+        label: &'static str,
+        path: PathBuf,
+    },
+    SymlinkRoot {
+        path: PathBuf,
+    },
+    RootNotDirectory {
+        path: PathBuf,
+    },
+    RootReplaced {
+        path: PathBuf,
+    },
     RootsOverlap,
-    ZeroBound { name: &'static str },
-    BoundExceeds { name: &'static str, maximum: u64 },
-    ManifestPath { path: String },
-    ManifestDuplicate { path: String },
-    Digest { detail: String },
-    SourceSymlink { path: String },
-    SourceHardLink { path: String, links: u64 },
-    SourceNonRegular { path: String },
-    SourceReplaced { path: String },
-    DirectoryCount { limit: u64 },
-    DirectoryDepth { limit: u32 },
-    FileCount { limit: u64 },
-    FileSize { path: String, limit: u64 },
-    AggregateSize { limit: u64 },
-    UnlistedFile { path: String },
-    MissingFile { path: String },
-    SizeMismatch { path: String },
-    ChecksumMismatch { path: String },
-    StagedChecksumMismatch { path: String },
-    GenerationCollision { name: String },
-    GenerationMismatch { name: String },
+    ZeroBound {
+        name: &'static str,
+    },
+    BoundExceeds {
+        name: &'static str,
+        maximum: u64,
+    },
+    ManifestPath {
+        path: String,
+    },
+    ManifestDuplicate {
+        path: String,
+    },
+    Digest {
+        detail: String,
+    },
+    SourceSymlink {
+        path: String,
+    },
+    SourceHardLink {
+        path: String,
+        links: u64,
+    },
+    SourceNonRegular {
+        path: String,
+    },
+    SourceReplaced {
+        path: String,
+    },
+    DirectoryCount {
+        limit: u64,
+    },
+    DirectoryDepth {
+        limit: u32,
+    },
+    FileCount {
+        limit: u64,
+    },
+    FileSize {
+        path: String,
+        limit: u64,
+    },
+    AggregateSize {
+        limit: u64,
+    },
+    UnlistedFile {
+        path: String,
+    },
+    MissingFile {
+        path: String,
+    },
+    SizeMismatch {
+        path: String,
+    },
+    ChecksumMismatch {
+        path: String,
+    },
+    StagedChecksumMismatch {
+        path: String,
+    },
+    GenerationCollision {
+        name: String,
+    },
+    GenerationMismatch {
+        name: String,
+    },
     StagingExhausted,
-    Cleanup { detail: String },
+    Cleanup {
+        detail: String,
+    },
     Io {
         operation: &'static str,
         path: PathBuf,
@@ -456,7 +523,11 @@ fn validate_plan(plan: &PromotionPlan<'_>) -> Result<(), CacheError> {
     for (name, value, maximum) in [
         ("max_files", plan.bounds.max_files, MAX_FILES),
         ("max_file_bytes", plan.bounds.max_file_bytes, MAX_FILE_BYTES),
-        ("max_cache_bytes", plan.bounds.max_cache_bytes, MAX_CACHE_BYTES),
+        (
+            "max_cache_bytes",
+            plan.bounds.max_cache_bytes,
+            MAX_CACHE_BYTES,
+        ),
     ] {
         if value == 0 {
             return Err(CacheError::ZeroBound { name });
@@ -534,9 +605,12 @@ fn validate_manifest(manifest: &[ManifestEntry]) -> Result<(), CacheError> {
                 path: entry.path.clone(),
             });
         }
-        declared_total = declared_total.checked_add(entry.size).ok_or(CacheError::AggregateSize {
-            limit: MAX_CACHE_BYTES,
-        })?;
+        declared_total =
+            declared_total
+                .checked_add(entry.size)
+                .ok_or(CacheError::AggregateSize {
+                    limit: MAX_CACHE_BYTES,
+                })?;
         if entry.size > MAX_FILE_BYTES || declared_total > MAX_CACHE_BYTES {
             return Err(CacheError::AggregateSize {
                 limit: MAX_CACHE_BYTES,
@@ -625,7 +699,9 @@ fn collect_source(
         total: 0,
     };
     collect_directory(root, "", bounds, &mut state, 0)?;
-    state.entries.sort_by(|left, right| left.path.cmp(&right.path));
+    state
+        .entries
+        .sort_by(|left, right| left.path.cmp(&right.path));
     Ok(state.entries)
 }
 
@@ -642,11 +718,12 @@ fn reconcile_manifest(
         }
     }
     for declared in manifest {
-        let (size, checksum) = collected.get(declared.path.as_str()).ok_or_else(|| {
-            CacheError::MissingFile {
-                path: declared.path.clone(),
-            }
-        })?;
+        let (size, checksum) =
+            collected
+                .get(declared.path.as_str())
+                .ok_or_else(|| CacheError::MissingFile {
+                    path: declared.path.clone(),
+                })?;
         if *size != declared.size {
             return Err(CacheError::SizeMismatch {
                 path: declared.path.clone(),
@@ -775,13 +852,12 @@ fn collect_directory(
                         limit: bounds.max_file_bytes,
                     });
                 }
-                state.total =
-                    state
-                        .total
-                        .checked_add(size)
-                        .ok_or(CacheError::AggregateSize {
-                            limit: bounds.max_cache_bytes,
-                        })?;
+                state.total = state
+                    .total
+                    .checked_add(size)
+                    .ok_or(CacheError::AggregateSize {
+                        limit: bounds.max_cache_bytes,
+                    })?;
                 if state.total > bounds.max_cache_bytes {
                     return Err(CacheError::AggregateSize {
                         limit: bounds.max_cache_bytes,
@@ -913,8 +989,8 @@ fn build_and_publish(
             let existing =
                 existing_generation(plan.generation_parent.descriptor.as_fd(), &generation_name)?
                     .ok_or_else(|| CacheError::GenerationCollision {
-                        name: generation_name.clone(),
-                    })?;
+                    name: generation_name.clone(),
+                })?;
             return reuse_or_collision(plan, existing, &generation_name, &identity);
         }
         Err(error) => {
@@ -1059,8 +1135,8 @@ fn make_immutable_tree(root: std::os::fd::BorrowedFd<'_>) -> Result<(), CacheErr
     .map_err(|error| nix_error("open staged directory", Path::new("staging"), error))?;
     let mut names = Vec::new();
     for entry in directory.iter() {
-        let entry =
-            entry.map_err(|error| nix_error("read staged directory", Path::new("staging"), error))?;
+        let entry = entry
+            .map_err(|error| nix_error("read staged directory", Path::new("staging"), error))?;
         let name = entry
             .file_name()
             .to_str()
@@ -1158,7 +1234,8 @@ fn copy_to_staging(
     executable: bool,
     bounds: CacheBounds,
 ) -> Result<(), CacheError> {
-    let (source_parent, source_name) = open_parent(source_root, relative, false, Path::new("attempt"))?;
+    let (source_parent, source_name) =
+        open_parent(source_root, relative, false, Path::new("attempt"))?;
     let source_stat = stat::fstatat(
         source_parent.as_fd(),
         source_name.as_str(),
@@ -1199,25 +1276,31 @@ fn copy_to_staging(
     let mut written = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
     loop {
-        let count = source
-            .read(&mut buffer)
-            .map_err(|error| io_error("read attempt source", Path::new(relative), error.to_string()))?;
+        let count = source.read(&mut buffer).map_err(|error| {
+            io_error(
+                "read attempt source",
+                Path::new(relative),
+                error.to_string(),
+            )
+        })?;
         if count == 0 {
             break;
         }
-        written = written.checked_add(count as u64).ok_or(CacheError::FileSize {
-            path: relative.to_owned(),
-            limit: bounds.max_file_bytes,
-        })?;
+        written = written
+            .checked_add(count as u64)
+            .ok_or(CacheError::FileSize {
+                path: relative.to_owned(),
+                limit: bounds.max_file_bytes,
+            })?;
         if written > bounds.max_file_bytes {
             return Err(CacheError::FileSize {
                 path: relative.to_owned(),
                 limit: bounds.max_file_bytes,
             });
         }
-        destination
-            .write_all(&buffer[..count])
-            .map_err(|error| io_error("write staged file", Path::new(relative), error.to_string()))?;
+        destination.write_all(&buffer[..count]).map_err(|error| {
+            io_error("write staged file", Path::new(relative), error.to_string())
+        })?;
         hasher.update(&buffer[..count]);
     }
     destination
@@ -1321,10 +1404,12 @@ fn hash_descriptor(descriptor: OwnedFd, path: &str, maximum: u64) -> Result<Stri
         if count == 0 {
             break;
         }
-        total = total.checked_add(count as u64).ok_or(CacheError::FileSize {
-            path: path.to_owned(),
-            limit: maximum,
-        })?;
+        total = total
+            .checked_add(count as u64)
+            .ok_or(CacheError::FileSize {
+                path: path.to_owned(),
+                limit: maximum,
+            })?;
         if total > maximum {
             return Err(CacheError::FileSize {
                 path: path.to_owned(),
@@ -1374,7 +1459,13 @@ fn create_staging(parent: &TrustedGenerationParent) -> Result<Staging, CacheErro
                     OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC,
                     Mode::empty(),
                 )
-                .map_err(|error| nix_error("open staging directory", &parent.display_path.join(&name), error))?;
+                .map_err(|error| {
+                    nix_error(
+                        "open staging directory",
+                        &parent.display_path.join(&name),
+                        error,
+                    )
+                })?;
                 return Ok(Staging {
                     path: parent.display_path.join(&name),
                     name,
@@ -1411,10 +1502,15 @@ fn remove_tree_at(
         .map_err(|error| nix_error("open staging cleanup", &display_parent.join(name), error))?;
         let mut children = Vec::new();
         for child in directory.iter() {
-            let child = child.map_err(|error| nix_error("read staging cleanup", &display_parent.join(name), error))?;
-            let child_name = child.file_name().to_str()            .map_err(|_| CacheError::Cleanup {
-                detail: "staging directory contains a non-UTF-8 name".to_owned(),
+            let child = child.map_err(|error| {
+                nix_error("read staging cleanup", &display_parent.join(name), error)
             })?;
+            let child_name = child
+                .file_name()
+                .to_str()
+                .map_err(|_| CacheError::Cleanup {
+                    detail: "staging directory contains a non-UTF-8 name".to_owned(),
+                })?;
             if child_name != "." && child_name != ".." {
                 children.push(child_name.to_owned());
             }
@@ -1431,17 +1527,18 @@ fn remove_tree_at(
         // staging directory's owner mode through its retained descriptor so
         // recursive cleanup remains possible after pre-publication hardening.
         stat::fchmod(&directory_fd, Mode::S_IRWXU).map_err(|error| {
-            nix_error(
-                "prepare staging cleanup",
-                &display_parent.join(name),
-                error,
-            )
+            nix_error("prepare staging cleanup", &display_parent.join(name), error)
         })?;
         for child in children {
             remove_tree_at(directory_fd.as_fd(), &child, &display_parent.join(name))?;
         }
-        unistd::unlinkat(parent, name, unistd::UnlinkatFlags::RemoveDir)
-            .map_err(|error| nix_error("remove staging directory", &display_parent.join(name), error))?;
+        unistd::unlinkat(parent, name, unistd::UnlinkatFlags::RemoveDir).map_err(|error| {
+            nix_error(
+                "remove staging directory",
+                &display_parent.join(name),
+                error,
+            )
+        })?;
     } else {
         unistd::unlinkat(parent, name, unistd::UnlinkatFlags::NoRemoveDir)
             .map_err(|error| nix_error("remove staged file", &display_parent.join(name), error))?;
@@ -1477,7 +1574,11 @@ mod tests {
         }
     }
 
-    fn roots() -> (tempfile::TempDir, IsolatedAttemptRoot, TrustedGenerationParent) {
+    fn roots() -> (
+        tempfile::TempDir,
+        IsolatedAttemptRoot,
+        TrustedGenerationParent,
+    ) {
         let temp = tempfile::tempdir().expect("create fixture");
         let attempt = temp.path().join("attempt");
         let parent = temp.path().join("generations");
@@ -1516,14 +1617,24 @@ mod tests {
         assert!(generation.path.is_dir());
         assert!(!generation.reused);
         assert_eq!(generation.durability, Durability::Synced);
-        assert_eq!(fs::read(generation.path.join("registry/crate")).expect("read"), b"crate");
+        assert_eq!(
+            fs::read(generation.path.join("registry/crate")).expect("read"),
+            b"crate"
+        );
         assert!(
             generation.path.join("empty").is_dir(),
             "an empty source directory must be present in the generation"
         );
         assert!(generation.identity.starts_with("sha256:"));
-        let mode = fs::metadata(&generation.path).expect("stat generation").permissions().mode();
-        assert_eq!(mode & 0o7777, 0o555, "generation directory is immutable 0555");
+        let mode = fs::metadata(&generation.path)
+            .expect("stat generation")
+            .permissions()
+            .mode();
+        assert_eq!(
+            mode & 0o7777,
+            0o555,
+            "generation directory is immutable 0555"
+        );
         let file_mode = fs::metadata(generation.path.join("registry/crate"))
             .expect("stat file")
             .permissions()
@@ -1551,7 +1662,11 @@ mod tests {
             .mode();
         // The execute bit is preserved as 0555; the setuid, group, and write
         // bits from the source are never carried into the generation.
-        assert_eq!(mode & 0o7777, 0o555, "executable file becomes 0555 without setuid");
+        assert_eq!(
+            mode & 0o7777,
+            0o555,
+            "executable file becomes 0555 without setuid"
+        );
     }
 
     #[test]
@@ -1607,23 +1722,38 @@ mod tests {
         fs::write(source.join("one"), b"one").expect("one");
         symlink(source.join("one"), source.join("link")).expect("link");
         let manifest = [entry("one", b"one")];
-        assert!(matches!(promote(&plan(&attempt, &parent, &manifest)), Err(CacheError::SourceSymlink { .. })));
+        assert!(matches!(
+            promote(&plan(&attempt, &parent, &manifest)),
+            Err(CacheError::SourceSymlink { .. })
+        ));
 
         fs::remove_file(source.join("link")).expect("remove link");
         fs::hard_link(source.join("one"), source.join("hard")).expect("hard");
-        assert!(matches!(promote(&plan(&attempt, &parent, &manifest)), Err(CacheError::SourceHardLink { .. })));
+        assert!(matches!(
+            promote(&plan(&attempt, &parent, &manifest)),
+            Err(CacheError::SourceHardLink { .. })
+        ));
         fs::remove_file(source.join("hard")).expect("remove hard");
 
         let _socket = UnixListener::bind(source.join("socket")).expect("socket");
-        assert!(matches!(promote(&plan(&attempt, &parent, &manifest)), Err(CacheError::SourceNonRegular { .. })));
+        assert!(matches!(
+            promote(&plan(&attempt, &parent, &manifest)),
+            Err(CacheError::SourceNonRegular { .. })
+        ));
         drop(_socket);
         fs::remove_file(source.join("socket")).expect("remove socket");
 
         let mut restrictive = plan(&attempt, &parent, &manifest);
         restrictive.bounds.max_file_bytes = 2;
-        assert!(matches!(promote(&restrictive), Err(CacheError::FileSize { .. })));
+        assert!(matches!(
+            promote(&restrictive),
+            Err(CacheError::FileSize { .. })
+        ));
         fs::write(source.join("extra"), b"extra").expect("extra");
-        assert!(matches!(promote(&plan(&attempt, &parent, &manifest)), Err(CacheError::UnlistedFile { .. })));
+        assert!(matches!(
+            promote(&plan(&attempt, &parent, &manifest)),
+            Err(CacheError::UnlistedFile { .. })
+        ));
     }
 
     #[test]
@@ -1637,7 +1767,10 @@ mod tests {
         fs::write(attempt_path.join("crate"), b"attacker").expect("attacker source");
         let manifest = [entry("crate", b"trusted")];
         let generation = promote(&plan(&attempt, &parent, &manifest)).expect("descriptor source");
-        assert_eq!(fs::read(generation.path.join("crate")).expect("generation"), b"trusted");
+        assert_eq!(
+            fs::read(generation.path.join("crate")).expect("generation"),
+            b"trusted"
+        );
     }
 
     #[test]
@@ -1761,9 +1894,14 @@ mod tests {
         fs::write(first_temp.path().join("attempt/crate"), b"same").expect("first");
         fs::write(second_temp.path().join("attempt/crate"), b"same").expect("second");
         let manifest = [entry("crate", b"same")];
-        let first = promote(&plan(&first_attempt, &first_parent, &manifest)).expect("first generation");
-        let second = promote(&plan(&second_attempt, &second_parent, &manifest)).expect("second generation");
+        let first =
+            promote(&plan(&first_attempt, &first_parent, &manifest)).expect("first generation");
+        let second =
+            promote(&plan(&second_attempt, &second_parent, &manifest)).expect("second generation");
         assert_eq!(first.identity, second.identity);
-        assert!(first.identity.len() <= 71, "identity stays protocol bounded");
+        assert!(
+            first.identity.len() <= 71,
+            "identity stays protocol bounded"
+        );
     }
 }

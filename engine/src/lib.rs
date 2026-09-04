@@ -31,6 +31,7 @@ pub mod task_commands;
 pub mod task_queue;
 pub mod tree;
 pub mod vcs;
+pub mod vcs_commit;
 pub mod wizard;
 
 use clap::Parser;

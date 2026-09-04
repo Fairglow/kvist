@@ -123,6 +123,11 @@ fn copy_engine_artifact(engine: &Path, name: &str) {
 }
 
 fn queue(engine: &Path, status: &str, recovery_state: &str) -> String {
+    let completed_at = if status == "completed" {
+        "\"2026-09-01T20:30:00Z\""
+    } else {
+        "null"
+    };
     format!(
         r#"schema_version: 1
 component:
@@ -168,7 +173,7 @@ tasks:
     timestamps:
       created_at: "2026-09-01T20:30:00Z"
       updated_at: "2026-09-01T20:30:00Z"
-      completed_at: null
+      completed_at: {completed_at}
     blocked_reason: null
     recovery_state: {recovery_state}
 "#,

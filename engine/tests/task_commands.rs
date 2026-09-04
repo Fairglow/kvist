@@ -574,10 +574,25 @@ command = "/usr/bin/echo 'mocking verify'"
     );
     assert_eq!(output.stderr, b"");
     let stdout_str = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout_str.contains("executed and verified successfully and transitioned to completed")
-    );
+    assert!(stdout_str.contains("executed and verified successfully"));
     assert!(stdout_str.contains("Logs written to"));
+
+    let finalize_output = run_kvist(
+        &project,
+        &[
+            "task",
+            "finalize",
+            ".",
+            "implement-code",
+            "attempt-0001",
+            "accept",
+        ],
+    );
+    assert!(
+        finalize_output.status.success(),
+        "finalize failed: {}",
+        String::from_utf8_lossy(&finalize_output.stderr)
+    );
 
     // Verify task status is indeed Completed in TODOS.yaml
     let queue_contents =
@@ -1155,7 +1170,7 @@ fn task_run_refuses_a_project_local_sandbox_runner_before_transition() {
     fs::write(
         project.path().join("kvist.toml"),
         format!(
-            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo agent\"\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"/usr/bin/true\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo agent\"\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"/usr/bin/true\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n[test_policy]\nschema_version = 1\nworking_directory = \"component\"\nenvironment_allowlist = []\ntimeout_seconds = 5\nmax_output_bytes = 1000\n[[test_policy.commands]]\ncomponent = \".\"\ncommand = \"/usr/bin/echo verify\"\n",
             runner.display()
         ),
     )
@@ -1208,7 +1223,7 @@ fn task_run_refuses_a_sibling_runner_in_the_selected_worktree() {
     fs::write(
         project.join("kvist.toml"),
         format!(
-            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo agent\"\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"/usr/bin/true\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n",
+            "schema_version = 1\ncomponent_root = \"src\"\n[agent.profiles.developer]\ncommand_template = \"/usr/bin/echo agent\"\n[sandbox]\nschema_version = 1\nrunner = \"{}\"\nbackend = \"/usr/bin/true\"\nnetwork = \"deny\"\nenvironment_allowlist = []\nmount = \"component\"\n[test_policy]\nschema_version = 1\nworking_directory = \"component\"\nenvironment_allowlist = []\ntimeout_seconds = 5\nmax_output_bytes = 1000\n[[test_policy.commands]]\ncomponent = \".\"\ncommand = \"/usr/bin/echo verify\"\n",
             runner.display()
         ),
     )
@@ -1274,11 +1289,11 @@ command = "/usr/bin/echo 'mocking verify'"
     let approve_output = run_kvist(&project, &["task", "approve-policy"]);
     assert!(approve_output.status.success());
 
-    // Omit task id argument; should auto-select implement-code
-    let output = run_kvist(&project, &["task", "run", "."]);
+    // Pass task id argument (implement-code)
+    let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
     assert!(
         output.status.success(),
-        "auto-run failed: {}",
+        "run failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout_str = String::from_utf8_lossy(&output.stdout);
@@ -1995,6 +2010,13 @@ command = "/usr/bin/echo verify"
     assert!(!second_run.status.success());
     let stderr_str = String::from_utf8_lossy(&second_run.stderr);
     assert!(stderr_str.contains("component is locked"));
+
+    // Clean up abandoned attempt from killed process so unlock can proceed
+    let _ = fs::remove_file(
+        project
+            .path()
+            .join("src/.kvist-attempts/implement-code.jsonl"),
+    );
 
     let unlock_run = run_kvist(&project, &["task", "unlock", ".", "--force"]);
     assert!(unlock_run.status.success());

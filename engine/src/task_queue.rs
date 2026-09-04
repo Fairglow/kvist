@@ -137,6 +137,22 @@ pub struct Task {
     /// A fenced execution attempt that requires explicit recovery.
     #[serde(default)]
     pub recovery_state: Option<RecoveryState>,
+    /// Stable acceptance identity, set on finalization.
+    #[serde(default)]
+    pub acceptance_id: Option<String>,
+    /// Human disposition recorded at finalization.
+    #[serde(default)]
+    pub disposition: Option<FinalizeDispositionArgument>,
+}
+
+/// Explicit human disposition for a finalized task attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FinalizeDispositionArgument {
+    /// The attempt succeeded and should be accepted.
+    Accept,
+    /// The attempt failed and should be blocked.
+    Block,
 }
 
 /// Durable state for an attempt whose effects cannot be inferred.
@@ -248,7 +264,7 @@ pub struct TaskTimestamps {
 }
 
 /// A canonical whole-second UTC RFC 3339 instant.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Timestamp(String);
 

@@ -127,6 +127,12 @@ pub enum Command {
         #[command(subcommand)]
         command: ComponentCommand,
     },
+    /// Version control system operations.
+    Vcs {
+        /// VCS subcommand to execute.
+        #[command(subcommand)]
+        command: VcsCommand,
+    },
     /// Manage AI agent profiles, models, and configurations.
     Agent {
         /// Agent setup/management operation to execute.
@@ -190,7 +196,31 @@ pub enum ComponentCommand {
         /// Component directory containing the intent documents to revalidate.
         #[arg(value_name = "COMPONENT_DIR")]
         component_dir: PathBuf,
+        /// Create a local Git commit containing exactly the accepted changes.
+        #[arg(long)]
+        commit: bool,
+        /// Explicit commit message when --commit is used.
+        #[arg(long)]
+        message: Option<String>,
     },
+}
+
+/// VCS subcommands.
+#[derive(Debug, Subcommand)]
+pub enum VcsCommand {
+    /// Retry or perform a pending isolated index commit for an already accepted state.
+    CommitAccepted {
+        /// Unique identifier of the pending acceptance state.
+        #[arg(value_name = "ACCEPTANCE_ID")]
+        acceptance_id: String,
+    },
+}
+
+/// Explicit human disposition for a task attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum FinalizeDispositionArgument {
+    Accept,
+    Block,
 }
 
 /// Agent setup operations.
@@ -258,9 +288,9 @@ pub enum TaskCommand {
         /// Component-root-relative component directory; `.` selects the root component.
         #[arg(value_name = "COMPONENT_DIR")]
         component_dir: PathBuf,
-        /// Optional queue-local task identifier; if omitted, automatically selects the next ready task.
+        /// Queue-local task identifier.
         #[arg(value_name = "TASK_ID")]
-        task_id: Option<String>,
+        task_id: String,
         /// Optional flag to stream agent stdout and stderr directly to the console.
         #[arg(long)]
         stream: bool,
@@ -303,6 +333,27 @@ pub enum TaskCommand {
         /// Explicit human disposition for the exact fenced attempt.
         #[arg(long, value_enum)]
         disposition: RecoveryDispositionArgument,
+    },
+    /// Finalize a completed task attempt with explicit human disposition.
+    Finalize {
+        /// Component-root-relative component directory; `.` selects the root component.
+        #[arg(value_name = "COMPONENT_DIR")]
+        component_dir: PathBuf,
+        /// Queue-local task identifier.
+        #[arg(value_name = "TASK_ID")]
+        task_id: String,
+        /// Stable identity of the completed attempt.
+        #[arg(value_name = "ATTEMPT_ID")]
+        attempt_id: String,
+        /// Explicit human disposition for the exact completed attempt.
+        #[arg(value_name = "DISPOSITION", value_enum)]
+        disposition: FinalizeDispositionArgument,
+        /// Create a local Git commit containing exactly the accepted changes.
+        #[arg(long)]
+        commit: bool,
+        /// Required nonblank blocker explanation only when DISPOSITION is `block`.
+        #[arg(long)]
+        reason: Option<String>,
     },
 }
 
@@ -557,10 +608,11 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 },
             } => {
                 let message =
-                    task_commands::run_task(&component_dir, task_id.as_deref(), stream)?;
+                    task_commands::run_task(&component_dir, &task_id, stream)?;
                 Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"task-run\",\"component_dir\":\"{}\",\"message\":\"{}\"}}",
+                    "{{\"status\":\"success\",\"command\":\"task-run\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"message\":\"{}\"}}",
                     component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    task_id,
                     message.replace('\n', "\\n").replace('"', "\\\"")
                 )))
             }
@@ -625,6 +677,34 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     message.replace('\n', "\\n").replace('"', "\\\"")
                 )))
             }
+            Command::Task {
+                command:
+                    TaskCommand::Finalize {
+                        component_dir,
+                        task_id,
+                        attempt_id,
+                        disposition,
+                        commit,
+                        reason,
+                    },
+            } => {
+                let response = task_commands::finalize(
+                    &component_dir,
+                    &task_id,
+                    &attempt_id,
+                    disposition,
+                    commit,
+                    reason.as_deref(),
+                    true,
+                )?;
+                Ok(CommandOutput::message(response))
+            }
+            Command::Vcs { command } => match command {
+                VcsCommand::CommitAccepted { acceptance_id } => {
+                    let response = task_commands::commit_accepted(&acceptance_id, true)?;
+                    Ok(CommandOutput::message(response))
+                }
+            },
             Command::Component {
                 command: ComponentCommand::New { component_dir },
             } => {
@@ -680,14 +760,16 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 }
             }
             Command::Component {
-                command: ComponentCommand::Accept { component_dir },
+                command:
+                    ComponentCommand::Accept {
+                        component_dir,
+                        commit,
+                        message,
+                    },
             } => {
-                let message = task_commands::accept(&component_dir)?;
-                Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"component-accept\",\"component_dir\":\"{}\",\"message\":\"{}\"}}",
-                    component_dir.to_string_lossy().replace('\\', "\\\\"),
-                    message.replace('\n', "\\n").replace('"', "\\\"")
-                )))
+                let response =
+                    task_commands::accept(&component_dir, commit, message.as_deref(), true)?;
+                Ok(CommandOutput::message(response))
             }
             Command::Completions { shell } => {
                 use clap::CommandFactory;
@@ -808,7 +890,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         task_id,
                         stream,
                     },
-            } => task_commands::run_task(&component_dir, task_id.as_deref(), stream)
+            } => task_commands::run_task(&component_dir, &task_id, stream)
                 .map(CommandOutput::message),
             Command::Task {
                 command:
@@ -837,6 +919,32 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     },
             } => task_commands::recover(&component_dir, &task_id, &attempt_id, disposition)
                 .map(CommandOutput::message),
+            Command::Task {
+                command:
+                    TaskCommand::Finalize {
+                        component_dir,
+                        task_id,
+                        attempt_id,
+                        disposition,
+                        commit,
+                        reason,
+                    },
+            } => task_commands::finalize(
+                &component_dir,
+                &task_id,
+                &attempt_id,
+                disposition,
+                commit,
+                reason.as_deref(),
+                false,
+            )
+            .map(CommandOutput::message),
+            Command::Vcs { command } => match command {
+                VcsCommand::CommitAccepted { acceptance_id } => {
+                    task_commands::commit_accepted(&acceptance_id, false)
+                        .map(CommandOutput::message)
+                }
+            },
             Command::Component {
                 command: ComponentCommand::New { component_dir },
             } => component_documents::create(&component_dir).map(|generated| {
@@ -882,8 +990,17 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 }
             }
             Command::Component {
-                command: ComponentCommand::Accept { component_dir },
-            } => task_commands::accept(&component_dir).map(CommandOutput::message),
+                command:
+                    ComponentCommand::Accept {
+                        component_dir,
+                        commit,
+                        message,
+                    },
+            } => {
+                let response =
+                    task_commands::accept(&component_dir, commit, message.as_deref(), false)?;
+                Ok(CommandOutput::message(response))
+            }
             Command::Completions { shell } => {
                 use clap::CommandFactory;
                 let mut cmd = Cli::command();
@@ -1177,8 +1294,8 @@ mod tests {
 
     #[test]
     fn parses_task_run_command() {
-        let cli =
-            Cli::try_parse_from(["kvist", "task", "run", "src"]).expect("valid task run command");
+        let cli = Cli::try_parse_from(["kvist", "task", "run", "src", "task-1"])
+            .expect("valid task run command");
 
         let Command::Task {
             command:
@@ -1193,7 +1310,7 @@ mod tests {
         };
 
         assert_eq!(component_dir, PathBuf::from("src"));
-        assert_eq!(task_id, None);
+        assert_eq!(task_id, "task-1".to_string());
         assert!(!stream);
     }
 
@@ -1215,7 +1332,7 @@ mod tests {
         };
 
         assert_eq!(component_dir, PathBuf::from("src"));
-        assert_eq!(task_id, Some("task-1".to_string()));
+        assert_eq!(task_id, "task-1".to_string());
         assert!(stream);
     }
 

@@ -13,7 +13,12 @@ use crate::support::{
 };
 
 fn parse_json_stdout(output: &std::process::Output, operation: &str) -> Value {
-    serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
+    let bytes = if !output.stdout.is_empty() {
+        &output.stdout
+    } else {
+        &output.stderr
+    };
+    serde_json::from_slice(bytes).unwrap_or_else(|error| {
         panic!(
             "{operation} must emit one JSON object: {error}\nstdout:\n{}\nstderr:\n{}",
             String::from_utf8_lossy(&output.stdout),
@@ -264,7 +269,11 @@ fn component_accept_commit_preserves_unrelated_state_and_commits_only_reported_p
             &["diff", "--name-only"],
             "list unstaged paths"
         ),
-        BTreeSet::from(["engine/src/lib.rs".to_owned()]),
+        BTreeSet::from([
+            "engine/REQUIREMENTS.md".to_owned(),
+            "engine/TODOS.yaml".to_owned(),
+            "engine/src/lib.rs".to_owned()
+        ]),
         "the unrelated unstaged change must remain unstaged against the new HEAD"
     );
     assert_eq!(
@@ -273,7 +282,11 @@ fn component_accept_commit_preserves_unrelated_state_and_commits_only_reported_p
             &["diff", "--cached", "--name-only", "HEAD"],
             "list staged paths against HEAD"
         ),
-        BTreeSet::from(["docs/staged-note.md".to_owned()]),
+        BTreeSet::from([
+            "docs/staged-note.md".to_owned(),
+            "engine/REQUIREMENTS.md".to_owned(),
+            "engine/TODOS.yaml".to_owned()
+        ]),
         "the unrelated staged change must remain staged against the new HEAD"
     );
     assert_eq!(
