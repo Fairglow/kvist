@@ -528,12 +528,7 @@ impl OriginPolicy {
     /// redirect target through the same typed authorization API, with the
     /// addresses pinned to the resulting connection. This value type performs no
     /// resolution, socket operation, redirect following, or enforcement itself.
-    pub fn authorizes_resolved(
-        &self,
-        kind: RequestKind,
-        url: &str,
-        addresses: &[IpAddr],
-    ) -> bool {
+    pub fn authorizes_resolved(&self, kind: RequestKind, url: &str, addresses: &[IpAddr]) -> bool {
         if !self.authorizes_request(kind, url) || addresses.is_empty() {
             return false;
         }
@@ -833,8 +828,12 @@ mod tests {
                 "IPv4-mapped private/loopback `{mapped}` must be rejected"
             );
         }
-        assert!(!is_public_address("::ffff:127.0.0.1".parse().expect("mapped")));
-        assert!(is_public_address("::ffff:93.184.216.34".parse().expect("mapped")));
+        assert!(!is_public_address(
+            "::ffff:127.0.0.1".parse().expect("mapped")
+        ));
+        assert!(is_public_address(
+            "::ffff:93.184.216.34".parse().expect("mapped")
+        ));
     }
 
     #[test]

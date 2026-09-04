@@ -557,7 +557,7 @@ pub fn runner_path() -> PathBuf {
         .unwrap_or_else(|| {
             panic!(
                 "the real Bubblewrap sandbox runner is not installed outside the selected \
-                 worktree; build engine/sandbox_runner and set KVIST_SANDBOX_RUNNER_TEST_BIN \
+                 worktree; build sandbox_runner and set KVIST_SANDBOX_RUNNER_TEST_BIN \
                  to its installed regular-file executable"
             )
         })

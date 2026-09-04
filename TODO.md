@@ -205,6 +205,7 @@ remain pending.
     tests/
     benches/
   ```
+
 - `kvist component validate .kvist` validates all three intent documents;
   current `kvist component accept .kvist` structurally validates and records
   current intent and immediate-parent contract revisions.
@@ -481,7 +482,7 @@ native-loop prerequisites, and deferred hardening remain incomplete.
 Detailed rationale and task chains are in
 `docs/agent-runtime/architecture.md`,
 `docs/agent-runtime/rig-evaluation.md`, and
-`engine/agent_runtime/TODOS.yaml`.
+`agent_runtime/TODOS.yaml`.
 
 ### TODO AGN-05 — Configurable Log Retention & Monotonic Naming
 

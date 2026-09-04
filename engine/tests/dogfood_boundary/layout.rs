@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::fs;
 
 use crate::support::repository_root;
 
@@ -11,80 +11,77 @@ const COMPONENT_ARTIFACTS: [&str; 5] = [
 ];
 
 #[test]
-fn target_workspace_is_owned_by_the_engine_component() {
+fn workspace_is_owned_by_the_repository_root() {
     let root = repository_root();
-    let engine = root.join("engine");
     let required = [
         "Cargo.toml",
         "Cargo.lock",
-        "src",
-        "tests",
-        "REQUIREMENTS.md",
-        "CONTRACT.md",
-        "DESIGN.md",
-        "TODOS.yaml",
-        "IMPL.md",
+        "VISION.md",
+        "ARCHITECTURE.md",
+        "ROOT_CONTRACT.md",
+        "kvist.toml",
     ];
     let missing = required
         .iter()
-        .filter(|path| !engine.join(path).exists())
+        .filter(|path| !root.join(path).exists())
         .copied()
         .collect::<Vec<_>>();
 
     assert!(
         missing.is_empty(),
-        "engine/ must own the Rust workspace and root artifacts; missing: {missing:?}"
+        "repository root must own the workspace manifest, lockfile, and root intent; missing: {missing:?}"
     );
-    let manifest: toml::Value = toml::from_str(
-        &fs::read_to_string(engine.join("Cargo.toml")).expect("read engine manifest"),
-    )
-    .expect("parse engine Cargo.toml");
+    let manifest: toml::Value =
+        toml::from_str(&fs::read_to_string(root.join("Cargo.toml")).expect("read root manifest"))
+            .expect("parse root Cargo.toml");
     let members = manifest
         .get("workspace")
         .and_then(|workspace| workspace.get("members"))
         .and_then(toml::Value::as_array)
-        .expect("engine Cargo.toml workspace.members")
+        .expect("root Cargo.toml workspace.members")
         .iter()
         .map(|member| member.as_str().expect("workspace member must be a string"))
         .collect::<Vec<_>>();
     assert!(
-        members.contains(&"agent_runtime") && members.contains(&"sandbox_runner"),
-        "engine/Cargo.toml must structurally declare both child components; members: {members:?}"
+        members.contains(&"engine")
+            && members.contains(&"agent_runtime")
+            && members.contains(&"sandbox_runner"),
+        "root Cargo.toml must declare engine, agent_runtime, and sandbox_runner components; members: {members:?}"
     );
 }
 
 #[test]
-fn runtime_and_runner_are_complete_child_components() {
-    let engine = repository_root().join("engine");
-    for child in ["agent_runtime", "sandbox_runner"] {
-        let child = engine.join(child);
+fn top_level_components_are_complete() {
+    let root = repository_root();
+    for component in ["engine", "agent_runtime", "sandbox_runner"] {
+        let dir = root.join(component);
         let missing = COMPONENT_ARTIFACTS
             .iter()
             .chain(["Cargo.toml", "src", "tests"].iter())
-            .filter(|path| !child.join(path).exists())
+            .filter(|path| !dir.join(path).exists())
             .copied()
             .collect::<Vec<_>>();
         assert!(
             missing.is_empty(),
-            "{} must be a complete buildable child component; missing: {missing:?}",
-            child.display()
+            "{} must be a complete buildable component; missing: {missing:?}",
+            dir.display()
         );
     }
 }
 
 #[test]
-fn retired_workspace_and_component_paths_have_no_aliases() {
+fn retired_nested_paths_have_no_aliases() {
     let root = repository_root();
-    for retired in ["Cargo.toml", "Cargo.lock", "src", "tests"] {
+    for retired_nested in [
+        "engine/agent_runtime",
+        "engine/sandbox_runner",
+        "engine/src/agent_runtime",
+        "engine/src/sandbox_runner",
+        "engine/Cargo.lock",
+    ] {
         assert!(
-            !root.join(retired).exists(),
-            "retired repository-root path `{retired}` must be removed, not retained as an alias"
-        );
-    }
-    for retired_child in ["engine/src/agent_runtime", "engine/src/sandbox_runner"] {
-        assert!(
-            !Path::new(&root).join(retired_child).exists(),
-            "retired child path `{retired_child}` must not remain as an alias"
+            !root.join(retired_nested).exists(),
+            "retired nested path `{retired_nested}` must not remain as an alias"
         );
     }
     let config: toml::Value =

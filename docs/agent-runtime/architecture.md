@@ -11,12 +11,12 @@ isolation boundary.
 
 The supported backend classes are:
 
-| Backend class | Examples | Agent loop | Enforcement boundary |
-| --- | --- | --- | --- |
-| Native model | llama-server, Ollama, approved OpenAI-compatible endpoint | Standalone bounded loop | Host policy and grants; standalone broker and execution mechanism |
-| One-shot model | llama-cli | None initially; prompt/diagnostic only | No tool access |
-| External agent | Gemini CLI, Copilot CLI, Aider, Goose, Cline | External process | Selected sandbox around the complete process |
-| Plan-only | Any qualifying backend with effects disabled | Standalone or external process | No effectful tool is available |
+| Backend class  | Examples                                                  | Agent loop                             | Enforcement boundary                                              |
+| -------------- | --------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------- |
+| Native model   | llama-server, Ollama, approved OpenAI-compatible endpoint | Standalone bounded loop                | Host policy and grants; standalone broker and execution mechanism |
+| One-shot model | llama-cli                                                 | None initially; prompt/diagnostic only | No tool access                                                    |
+| External agent | Gemini CLI, Copilot CLI, Aider, Goose, Cline              | External process                       | Selected sandbox around the complete process                      |
+| Plan-only      | Any qualifying backend with effects disabled              | Standalone or external process         | No effectful tool is available                                    |
 
 Native model mode is the preferred long-term path because Kvist can observe,
 authorize, execute, and journal every tool request. External-agent mode remains
@@ -171,13 +171,13 @@ version. They are not Kvist's durable workflow state.
 
 ## Protocol boundaries
 
-| Protocol | Appropriate use | Not provided |
-| --- | --- | --- |
-| OpenAI-compatible chat or Responses | Model transport adapter | Universal semantics, policy, or isolation |
-| Function/tool calling | Structured model intent | Authorization or execution |
-| MCP | External tool/resource transport behind the broker | Model abstraction or sandbox |
-| ACP | Structured external-agent/editor adapter | Model transport or internal tool mediation |
-| A2A | Later remote opaque-agent delegation | Local tool broker or host enforcement |
+| Protocol                            | Appropriate use                                    | Not provided                               |
+| ----------------------------------- | -------------------------------------------------- | ------------------------------------------ |
+| OpenAI-compatible chat or Responses | Model transport adapter                            | Universal semantics, policy, or isolation  |
+| Function/tool calling               | Structured model intent                            | Authorization or execution                 |
+| MCP                                 | External tool/resource transport behind the broker | Model abstraction or sandbox               |
+| ACP                                 | Structured external-agent/editor adapter           | Model transport or internal tool mediation |
+| A2A                                 | Later remote opaque-agent delegation               | Local tool broker or host enforcement      |
 
 Kvist should become an MCP host only after its broker exists. MCP server
 identity, launch, schemas, credentials, and every `tools/call` remain subject
@@ -259,4 +259,4 @@ Kvist therefore requires:
 8. Add MCP and ACP adapters only after the trusted boundaries exist.
 
 The durable task chains are maintained in
-`engine/agent_runtime/TODOS.yaml`.
+`agent_runtime/TODOS.yaml`.

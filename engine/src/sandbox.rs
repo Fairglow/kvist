@@ -1613,7 +1613,6 @@ fn create_descriptor_bound_copy(
     is_directory_runner: bool,
 ) -> Result<(File, PathBuf, PathBuf)> {
     use std::fs::OpenOptions;
-    use std::os::fd::AsRawFd;
     use std::os::unix::fs::OpenOptionsExt;
     use std::os::unix::fs::PermissionsExt;
 
@@ -1647,19 +1646,20 @@ fn create_descriptor_bound_copy(
         .write_all(bytes)
         .and_then(|()| writable_file.sync_all())
     {
+        drop(writable_file);
         let _ = fs::remove_file(&copy_path);
         return Err(KvistError::SandboxUnavailable {
             runner: runner_path.to_string_lossy().into_owned(),
             reason: format!("write descriptor-bound runner copy: write error: {source}"),
         });
     }
+    drop(writable_file);
     fs::set_permissions(&copy_path, fs::Permissions::from_mode(0o500)).map_err(|source| {
         KvistError::SandboxUnavailable {
             runner: runner_path.to_string_lossy().into_owned(),
             reason: format!("protect descriptor-bound runner copy: permission denied: {source}"),
         }
     })?;
-    drop(writable_file);
     let file = File::open(&copy_path).map_err(|source| KvistError::SandboxUnavailable {
         runner: runner_path.to_string_lossy().into_owned(),
         reason: format!("reopen descriptor-bound runner copy: permission denied: {source}"),
@@ -1672,7 +1672,7 @@ fn create_descriptor_bound_copy(
         runner: runner_path.to_string_lossy().into_owned(),
         reason: format!("retain descriptor-bound runner across execve: syscall failed: {source}"),
     })?;
-    let launch_path = PathBuf::from(format!("/proc/self/fd/{}", file.as_raw_fd()));
+    let launch_path = copy_path.clone();
     Ok((file, copy_path, launch_path))
 }
 

@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "engine",
+    "agent_runtime",
+    "sandbox_runner",
+]
+default-members = ["engine"]
+resolver = "3"
+
+[profile.dev]
+debug = "line-tables-only"

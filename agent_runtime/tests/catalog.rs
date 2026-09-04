@@ -52,7 +52,10 @@ fn options(workspace: &TempDir) -> ModelDiscoveryOptions {
 }
 
 fn executable(workspace: &TempDir, body: &str) -> String {
-    let path = workspace.path().join("provider");
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let id = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = workspace.path().join(format!("provider-{id}"));
     fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write fake ACP provider");
     fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
         .expect("make fake ACP provider executable");

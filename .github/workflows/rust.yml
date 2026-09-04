@@ -23,13 +23,13 @@ jobs:
         with:
           components: rustfmt, clippy
       - name: Verify lockfile and formatting
-        run: cargo fmt --manifest-path engine/Cargo.toml --check
+        run: cargo fmt --check
       - name: Lint
-        run: cargo clippy --manifest-path engine/Cargo.toml --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Test workspace
-        run: cargo test --manifest-path engine/Cargo.toml --locked --workspace --all-features
+        run: cargo test --locked --workspace --all-features
       - name: Release build
-        run: cargo build --manifest-path engine/Cargo.toml --locked --workspace --release --all-features
+        run: cargo build --locked --workspace --release --all-features
 
   audit:
     name: Dependencies and licenses
@@ -41,7 +41,7 @@ jobs:
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           command: check
-          arguments: --manifest-path engine/Cargo.toml --all-features --locked
+          arguments: --all-features --locked
           command-arguments: advisories bans licenses sources
 
   msrv:
@@ -52,9 +52,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.94.0
       - name: Check
-        run: cargo check --manifest-path engine/Cargo.toml --locked --workspace --all-features
+        run: cargo check --locked --workspace --all-features
       - name: Test
-        run: cargo test --manifest-path engine/Cargo.toml --locked --workspace --all-features
+        run: cargo test --locked --workspace --all-features
 
   vcs:
     name: VCS tracking (Ubuntu)
@@ -66,4 +66,4 @@ jobs:
       - name: Install jj 0.44.0
         run: cargo install --locked --version 0.44.0 jj-cli
       - name: Test Git and jj tracking
-        run: cargo test --manifest-path engine/Cargo.toml --locked --test vcs
+        run: cargo test -p kvist --locked --test vcs
