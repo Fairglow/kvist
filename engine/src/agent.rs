@@ -1,0 +1,316 @@
+//! External agent execution and response capture.
+
+use std::{
+    fs::{self, OpenOptions},
+    io::{self, Write},
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+use serde::Deserialize;
+
+use crate::{
+    KvistError, Result,
+    config::{AgentProfile, SandboxConfig, VcsSelection},
+    sandbox::{self, RunnerIdentity},
+    task_queue::Timestamp,
+};
+
+/// Structured execution result of an external agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentRunResult {
+    /// True if the agent succeeded and exited with status 0.
+    pub success: bool,
+    /// Number of prompt/input tokens used, if reported.
+    pub tokens_input: Option<usize>,
+    /// Number of output/completion tokens used, if reported.
+    pub tokens_output: Option<usize>,
+    /// Path to the raw execution log file.
+    pub log_path: PathBuf,
+    /// Bounded redacted combined output retained as execution evidence.
+    pub stdout: String,
+    /// Empty because evidence is normalized into the combined output field.
+    pub stderr: String,
+    pub timed_out: bool,
+    pub output_limit_exceeded: bool,
+}
+
+/// Inputs for one sandboxed agent task.
+pub struct AgentExecutionRequest<'a> {
+    pub project_root: &'a Path,
+    pub vcs_selection: VcsSelection,
+    pub prompt: &'a str,
+    pub context_paths: &'a [PathBuf],
+    pub read_only_mounts: &'a [sandbox::ReadOnlyMount],
+    pub target_dir: &'a Path,
+    pub task_id: &'a str,
+    pub stream_output: bool,
+    /// The agent role (architect or developer) for which the model was selected.
+    pub role: super::config::Role,
+    /// The authenticated execution-approval digest bound as the request policy
+    /// identity.
+    pub policy_identity: &'a str,
+}
+
+/// Run-record schema parsed from the agent's run metadata file.
+#[derive(Debug, Deserialize)]
+struct RunRecord {
+    #[allow(dead_code)]
+    status: String,
+    tokens_input: Option<usize>,
+    tokens_output: Option<usize>,
+}
+
+/// Splits and interpolates command arguments safely without spawning a shell.
+pub fn split_command(
+    template: &str,
+    prompt: &str,
+    context_paths: &[PathBuf],
+    target_dir: &Path,
+) -> Result<(String, Vec<String>)> {
+    agent_runtime::render_command(template, prompt, context_paths, target_dir).map_err(Into::into)
+}
+
+/// Gets the effective command for a given agent profile and model selection.
+pub fn get_effective_command(
+    profile: &AgentProfile,
+    role: crate::config::Role,
+    prompt: &str,
+    context_paths: &[PathBuf],
+    target_dir: &Path,
+) -> Result<(String, Vec<String>)> {
+    get_effective_command_with_options(profile, role, None, None, prompt, context_paths, target_dir)
+}
+
+/// Gets the effective command with explicit per-invocation model and effort selection.
+pub fn get_effective_command_with_options(
+    profile: &AgentProfile,
+    role: crate::config::Role,
+    model_override: Option<&str>,
+    reasoning_effort: Option<agent_runtime::ReasoningEffort>,
+    prompt: &str,
+    context_paths: &[PathBuf],
+    target_dir: &Path,
+) -> Result<(String, Vec<String>)> {
+    let model_name = model_override
+        .or(profile.model.as_deref())
+        .unwrap_or(&profile.default_model);
+    let selected_model = if matches!(model_name, "default" | "default-model") {
+        profile.models.first()
+    } else {
+        profile.models.iter().find(|model| model.name == model_name)
+    }
+    .ok_or_else(|| KvistError::InvalidModelSelection {
+        model_name: model_name.to_owned(),
+        role,
+        available: profile
+            .models
+            .iter()
+            .map(|m| m.name.clone())
+            .collect::<Vec<_>>()
+            .join(", "),
+    })?;
+
+    if selected_model.name == "none" {
+        return split_raw_command(&selected_model.command);
+    }
+
+    let prompt = match &selected_model.system_prompt {
+        Some(system_prompt) if !system_prompt.is_empty() => {
+            format!("{system_prompt}\n\n{prompt}")
+        }
+        _ => prompt.to_owned(),
+    };
+    agent_runtime::render_command_with_reasoning_effort(
+        &selected_model.command,
+        &prompt,
+        context_paths,
+        target_dir,
+        reasoning_effort,
+    )
+    .map_err(Into::into)
+}
+
+fn split_raw_command(template: &str) -> Result<(String, Vec<String>)> {
+    agent_runtime::split_raw_command(template).map_err(Into::into)
+}
+
+/// Spawns the subprocess, redirects output to log file, and optionally streams to console.
+pub fn execute_agent(
+    profile: &AgentProfile,
+    sandbox_config: &SandboxConfig,
+    expected_runner: &RunnerIdentity,
+    probe: &sandbox::SandboxProbe,
+    request: AgentExecutionRequest<'_>,
+) -> Result<AgentRunResult> {
+    let (program, args) = get_effective_command(
+        profile,
+        request.role,
+        request.prompt,
+        request.context_paths,
+        request.target_dir,
+    )?;
+
+    let logs_dir = ensure_logs_directory(request.target_dir)?;
+
+    let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+    let log_file_name = format!(
+        "{}_{}.log",
+        request.task_id,
+        timestamp.to_string().replace(':', "-")
+    );
+    let log_path = logs_dir.join(log_file_name);
+    let mut log_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&log_path)
+        .map_err(|source| KvistError::Io {
+            operation: "create agent log file",
+            path: log_path.clone(),
+            source,
+        })?;
+
+    let sandbox::ExecutionResult {
+        output,
+        timed_out,
+        output_limit_exceeded,
+    } = sandbox::execute_with_timeout(
+        sandbox_config,
+        sandbox::ExecutionRequest {
+            project_root: request.project_root,
+            vcs_selection: request.vcs_selection,
+            component_dir: request.target_dir,
+            phase: sandbox::ExecutionPhase::Authoring,
+            program: &program,
+            arguments: &args,
+            environment: sandbox::allowed_environment(sandbox_config, None),
+            read_only_mounts: request.read_only_mounts,
+            backend: &probe.backend,
+            policy_identity: request.policy_identity,
+        },
+        sandbox::ExecutionOptions {
+            timeout: Some(Duration::from_secs(profile.timeout_seconds)),
+            output_limit: Some(profile.max_output_bytes),
+        },
+        expected_runner,
+    )?;
+    let redactions = redaction_values(profile, sandbox_config);
+    let success = output.status.success() && !timed_out && !output_limit_exceeded;
+    let stdout = redact_combined_output(
+        output.stdout,
+        output.stderr,
+        &redactions,
+        profile.max_output_bytes,
+    );
+    log_file
+        .write_all(stdout.as_bytes())
+        .map_err(|source| KvistError::Io {
+            operation: "write agent log",
+            path: log_path.clone(),
+            source,
+        })?;
+    if request.stream_output {
+        io::stdout().write_all(stdout.as_bytes()).ok();
+    }
+
+    // 4. Try parsing the JSON Run Record for token feedback
+    // The run record should be written by the agent at .kvist/runs/<task_id>_<timestamp>.json
+    let runs_dir = request.target_dir.join(".kvist").join("runs");
+    let record_name = format!(
+        "{}_{}.json",
+        request.task_id,
+        timestamp.to_string().replace(':', "-")
+    );
+    let record_path = runs_dir.join(record_name);
+
+    let mut tokens_input = None;
+    let mut tokens_output = None;
+
+    if record_path.exists()
+        && let Ok(contents) = fs::read_to_string(&record_path)
+        && let Ok(record) = serde_json::from_str::<RunRecord>(&contents)
+    {
+        tokens_input = record.tokens_input;
+        tokens_output = record.tokens_output;
+    }
+
+    Ok(AgentRunResult {
+        success,
+        tokens_input,
+        tokens_output,
+        log_path,
+        stdout,
+        stderr: String::new(),
+        timed_out,
+        output_limit_exceeded,
+    })
+}
+
+fn ensure_logs_directory(target_dir: &Path) -> Result<PathBuf> {
+    let kvist_dir = target_dir.join(".kvist");
+    ensure_real_directory(&kvist_dir, "create agent state directory")?;
+    let logs_dir = kvist_dir.join("logs");
+    ensure_real_directory(&logs_dir, "create agent logs directory")?;
+    Ok(logs_dir)
+}
+
+fn ensure_real_directory(path: &Path, operation: &'static str) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+            Ok(())
+        }
+        Ok(_) => Err(KvistError::Io {
+            operation,
+            path: path.to_path_buf(),
+            source: io::Error::other("directory must be a real directory"),
+        }),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            fs::create_dir(path).map_err(|source| KvistError::Io {
+                operation,
+                path: path.to_path_buf(),
+                source,
+            })
+        }
+        Err(source) => Err(KvistError::Io {
+            operation,
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn redaction_values(profile: &AgentProfile, sandbox_config: &SandboxConfig) -> Vec<String> {
+    let mut values = profile.redaction_values.clone();
+    for value in sandbox::allowed_environment(sandbox_config, None).into_values() {
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+    values
+}
+
+fn redact_combined_output(
+    mut stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    redactions: &[String],
+    limit: usize,
+) -> String {
+    stdout.extend_from_slice(&stderr);
+    let mut text = String::from_utf8_lossy(&stdout).into_owned();
+    for value in redactions {
+        text = text.replace(value, "[REDACTED]");
+    }
+    truncate_utf8(&mut text, limit);
+    text
+}
+
+fn truncate_utf8(value: &mut String, limit: usize) {
+    if value.len() <= limit {
+        return;
+    }
+    let mut boundary = limit;
+    while !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    value.truncate(boundary);
+}

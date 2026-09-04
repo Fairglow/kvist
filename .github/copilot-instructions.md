@@ -123,5 +123,6 @@ advisory input, not a Kvist receipt.
   commands after a code change. Do not weaken tests, skip checks, or change
   production behavior merely to make validation pass.
 - Make surgical changes. Do not reformat, rename, or alter unrelated files.
-  Do not modify licensing terms without explicit authorization; Kvist uses BSL
-  1.1 / dual licensing as defined by the project.
+  Do not modify licensing terms without explicit authorization; Kvist uses
+  AGPL-3.0-or-later with optional separate commercial licensing as defined by
+  the project.

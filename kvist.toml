@@ -3,7 +3,7 @@
 schema_version = 1
 
 # Directory containing the root component and its descendants.
-component_root = "src"
+component_root = "engine"
 
 [discovery]
 # Bounded, deterministic traversal limits. Each has a documented hard maximum.

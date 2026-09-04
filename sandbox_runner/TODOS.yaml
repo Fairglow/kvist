@@ -1,0 +1,97 @@
+schema_version: 1
+component:
+  requirements_revision: "sha256:fd851bdf9d703c6928d359afd01d4bc81b99bc95c66794010c6b8dbe77482363"
+  contract_revision: "sha256:66834c5a7bd55bc949c885240105989a06a4141b1fa2074f2501dbfbf42990ed"
+  design_revision: "sha256:f914c25425863857b5bbc3807f7b462c9b38e791c8679b5f2c18d47020f4964c"
+  parent_contract:
+    path: "../CONTRACT.md"
+    revision: "sha256:97e29ab932fa292248f6fa87d99b3efca1b5859ae0555bdcd19b8398ddc483c3"
+  revalidation:
+    state: current
+    checked_at: "2026-09-02T06:23:00Z"
+    stale_since: null
+    causes: []
+tasks:
+  - id: "sandbox-runner-write-tests"
+    title: "Define sandbox runner protocol tests"
+    description: "Write native failing tests for the redefined version-one probe and request, strict typed grants, Bubblewrap identity and namespace enforcement, resource bounds, process cleanup, and fail-closed behavior."
+    context: "The buildable scaffold intentionally implements no runner protocol or operating-system enforcement."
+    purpose: "Establish executable negative and positive evidence before any request can cause effects."
+    expected_outcome: "Tests reject malformed and retired requests, aliases, links, overlapping grants, backend substitution, resource escape, and host fallback while defining the accepted Bubblewrap path."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "../CONTRACT.md#Required-interfaces"
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "DESIGN.md#Verification-strategy"
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-01T21:04:20Z"
+      updated_at: "2026-09-02T08:00:00Z"
+      completed_at: "2026-09-02T08:00:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sandbox-runner-implement-code"
+    title: "Implement Bubblewrap sandbox runner"
+    description: "Implement the accepted bounded version-one protocol, independent typed-grant validation, verified Bubblewrap execution, Linux namespace and resource enforcement, and complete process cleanup without importing engine types."
+    context: "Only the scaffold exists; it fails closed and cannot execute an approved task."
+    purpose: "Provide the independently installed enforcement boundary required for supervised Kvist execution."
+    expected_outcome: "The runner satisfies the preceding native tests and never degrades to the host or retired request shape."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sandbox-runner-write-tests"
+    requirements:
+      - "../CONTRACT.md#Required-interfaces"
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "DESIGN.md#Interactions-and-state"
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-01T21:04:20Z"
+      updated_at: "2026-09-02T08:00:00Z"
+      completed_at: "2026-09-02T08:00:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sandbox-runner-security-audit"
+    title: "Audit sandbox runner authority"
+    description: "Independently review request parsing, canonical paths, mount construction, namespace isolation, Bubblewrap substitution, environment and network denial, resource enforcement, process cleanup, and fallback resistance."
+    context: "The production runner will turn untrusted request data into operating-system effects."
+    purpose: "Identify every high-confidence path to authority escalation, disclosure, or false enforcement before installation."
+    expected_outcome: "Findings are corrected with native regression tests or retained as explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sandbox-runner-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T21:04:20Z"
+      updated_at: "2026-09-01T21:04:20Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sandbox-runner-compliance-review"
+    title: "Review sandbox runner compliance"
+    description: "Derive observed runner behavior from source and native tests in a clean-slate context, then compare the resulting implementation record with approved local and parent intent in a separate source-blind context."
+    context: "The runner implementer cannot certify the boundary that enforces task effects."
+    purpose: "Retain an independent disposition for every protocol, isolation, resource, and failure guarantee."
+    expected_outcome: "The review records satisfied clauses, discrepancies, unsupported behavior, and required arbitration before production promotion."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sandbox-runner-security-audit"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T21:04:20Z"
+      updated_at: "2026-09-01T21:04:20Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

@@ -5,7 +5,8 @@
 **Reviewed:** Implemented portions through 2026-08-25; partial and planned
 review, onboarding, promotion, and compliance work is tracked below
 **Reviewed by:** Stefan Kvist | 2026-08-25
-**Build:** `cargo build --release` passes with 0 warnings
+**Build:** `cargo build --manifest-path engine/Cargo.toml --release` passes with
+0 warnings
 
 ## Status conventions
 
@@ -18,6 +19,55 @@ review, onboarding, promotion, and compliance work is tracked below
 ---
 
 # Remaining Prioritized Backlog
+
+## Dogfooding Execution Prerequisite
+
+### TODO DOG-01 — Recoverable Supervised Bubblewrap Execution
+
+**Context:** Kvist cannot currently use `task run` on its own root component.
+No production runner implements the sandbox protocol, the migrated `engine/`
+component now owns its Cargo manifest and integration tests, version-one
+requests cannot express task-scoped workspace authority, and ambiguous
+prepared attempts have no reconciliation command.
+
+**Acceptance criteria:**
+
+- Migrate the product workspace and root artifacts to `engine/`, with complete
+  `agent_runtime/` and `sandbox_runner/` child components and no aliases for
+  retired paths.
+- Write the complete root and runner test plans before production changes.
+- Add explicit digest-bound attempt recovery that never guesses about source
+  effects or uses destructive VCS reset.
+- Replace the unreleased protocol-version-one request and probe semantics with
+  typed authoring, dependency, verification, context, toolchain, cache, and
+  scratch grants; reject the legacy shape.
+- Implement and independently install a single-file Bubblewrap runner outside
+  the worktree. Bind both runner and Bubblewrap identity to approval.
+- Give Cargo a distinct bounded acquisition phase with attempt-local writable
+  dependency directories and source-aware network access. Support crates.io
+  first; require exact policy for additional registries and Git sources.
+- Keep authoring and verification network-denied. Use local agents initially;
+  defer remote agents to host-owned model transport and typed tool brokering.
+- Add supervised execution with an explicit task ID, no automatic retry, and
+  separate human finalization.
+- Give component, project, and task acceptance an explicit local-commit option
+  that commits only the canonical accepted set. Preserve unrelated worktree and
+  index state, disable hooks by default, honor signing policy, never push, and
+  retain accepted-but-uncommitted recovery state.
+- Implement exact Git commit automation first through an isolated index and
+  expected-head update. Defer Jujutsu commit automation until its distinct
+  working-copy and operation-log semantics are independently designed and
+  promoted.
+- Protect intent, queues, implementation records, approval material, canonical
+  evidence, Git state, credentials, ambient home state, and child
+  implementations from agent writes.
+- Run native negative isolation, dependency, recovery, verification, and
+  lifecycle tests against the real runner.
+- Complete independent root and runner security audits and source-blind
+  compliance reviews before resuming DOC-01.
+- Keep unattended execution disabled until private workspaces,
+  conflict-checked promotion, and crash-recoverable multi-file journaling are
+  separately implemented and reviewed.
 
 ## Target Workflow: Review, Intent Proposals, and Contract Verification
 
@@ -155,6 +205,7 @@ remain pending.
     tests/
     benches/
   ```
+
 - `kvist component validate .kvist` validates all three intent documents;
   current `kvist component accept .kvist` structurally validates and records
   current intent and immediate-parent contract revisions.
@@ -431,7 +482,7 @@ native-loop prerequisites, and deferred hardening remain incomplete.
 Detailed rationale and task chains are in
 `docs/agent-runtime/architecture.md`,
 `docs/agent-runtime/rig-evaluation.md`, and
-`src/agent_runtime/TODOS.yaml`.
+`agent_runtime/TODOS.yaml`.
 
 ### TODO AGN-05 — Configurable Log Retention & Monotonic Naming
 
@@ -494,4 +545,4 @@ phase, queue chain, review, or promotion gate is complete:
 For detailed strategy and current contracts, refer to
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md),
 [`ARCHITECTURE.md`](ARCHITECTURE.md), and the root component documents under
-`src/`.
+`engine/`.

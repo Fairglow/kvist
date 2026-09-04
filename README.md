@@ -1,6 +1,7 @@
 # Kvist
 
 [![Rust](https://github.com/Fairglow/kvist/actions/workflows/rust.yml/badge.svg)](https://github.com/Fairglow/kvist/actions/workflows/rust.yml)
+[![License: AGPL v3+](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 
 Kvist is a filesystem-native, architecture-driven tool for human-directed AI
 development. Its durable hierarchy is `VISION.md` -> `ARCHITECTURE.md` ->
@@ -15,25 +16,50 @@ structure in [`ARCHITECTURE.md`](ARCHITECTURE.md), detailed strategy in
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md),
 and the standards posture in [`docs/standards.md`](docs/standards.md).
 
+## Why Kvist
+
+AI coding tools are increasingly capable at producing code. The harder problem
+is keeping product intent, architecture, authority, and evidence coherent as
+those tools act. Important decisions can otherwise remain in chat history,
+context can cross component boundaries without review, and successful
+execution can be mistaken for correctness.
+
+Kvist provides a durable control layer around AI-assisted development. It does
+not try to replace coding agents or model frameworks. It gives them explicit,
+version-controlled work to perform; limits the context and authority they
+receive; and keeps intended behavior separate from independently observed
+implementation evidence.
+
+The human remains the architect and final arbiter. Agents may propose,
+implement, document, and review, but an agent does not approve product intent
+or certify its own work. When evidence and intent disagree, Kvist preserves the
+discrepancy for a person to resolve rather than silently choosing a side.
+
+This makes Kvist most relevant to teams that value architectural continuity,
+inspectable state, bounded execution, and reviewable evidence more than
+unrestricted autonomy. See [Why Kvist](docs/why-kvist.md) for a grounded
+comparison with coding agents, specification kits, agent frameworks,
+sandboxes, and governance tools.
+
 ## CLI contract
 
-| Command                                            | Contract                                                                                     |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `kvist init [PROJECT_DIR]`                         | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.   |
-| `kvist convert <PROJECT_DIR>`                      | Generate no-clobber draft onboarding artifacts for an existing Rust project.                 |
-| `kvist doctor [PROJECT_DIR]`                       | Read-only inspection of the root artifact state and recovery guidance.                       |
-| `kvist status [PROJECT_DIR] [--format text\|json] [--only-documents]` | Read-only versioned inspection, optionally limited to document state.        |
-| `kvist tree [PROJECT_DIR]`                         | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory. |
-| `kvist component new <COMPONENT_DIR>`              | Create no-clobber `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` templates.               |
-| `kvist component validate <COMPONENT_DIR>`         | Validate all three component intent documents without rewriting them.                        |
-| `kvist component accept <COMPONENT_DIR>`           | Structurally validate and record local intent and immediate-parent contract revisions.        |
-| `kvist task next <COMPONENT_DIR>`                  | Select the first ready task without changing durable state.                                  |
-| `kvist task transition <COMPONENT_DIR> ...`        | Persist one legal task-state transition with append-only attempt evidence.                   |
-| `kvist task run <COMPONENT_DIR> [TASK_ID]`         | Run the configured external agent for one ready task; see the execution boundary below.      |
-| `kvist task log <COMPONENT_DIR> <TASK_ID>`         | Print the most recent bounded, redacted agent log for a task.                                |
-| `kvist task approve-policy [PROJECT_DIR]`          | Record approval of the complete effective execution policy.                                  |
-| `kvist prompt [PROMPT] --allow-host-execution`     | Run a prompt with optional role/model/reasoning selection; text output is provider content only. |
-| `kvist agent setup [--force]`                      | Collect, qualify, and bind a reusable profile; force is required to retain failed qualification. |
+| Command                                                               | Contract                                                                                         |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `kvist init [PROJECT_DIR]`                                            | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.       |
+| `kvist convert <PROJECT_DIR>`                                         | Generate no-clobber draft onboarding artifacts for an existing Rust project.                     |
+| `kvist doctor [PROJECT_DIR]`                                          | Read-only inspection of the root artifact state and recovery guidance.                           |
+| `kvist status [PROJECT_DIR] [--format text\|json] [--only-documents]` | Read-only versioned inspection, optionally limited to document state.                            |
+| `kvist tree [PROJECT_DIR]`                                            | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory.     |
+| `kvist component new <COMPONENT_DIR>`                                 | Create no-clobber `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` templates.                   |
+| `kvist component validate <COMPONENT_DIR>`                            | Validate all three component intent documents without rewriting them.                            |
+| `kvist component accept <COMPONENT_DIR>`                              | Structurally validate and record local intent and immediate-parent contract revisions.           |
+| `kvist task next <COMPONENT_DIR>`                                     | Select the first ready task without changing durable state.                                      |
+| `kvist task transition <COMPONENT_DIR> ...`                           | Persist one legal task-state transition with append-only attempt evidence.                       |
+| `kvist task run <COMPONENT_DIR> [TASK_ID]`                            | Run the configured external agent for one ready task; see the execution boundary below.          |
+| `kvist task log <COMPONENT_DIR> <TASK_ID>`                            | Print the most recent bounded, redacted agent log for a task.                                    |
+| `kvist task approve-policy [PROJECT_DIR]`                             | Record approval of the complete effective execution policy.                                      |
+| `kvist prompt [PROMPT] --allow-host-execution`                        | Run a prompt with optional role/model/reasoning selection; text output is provider content only. |
+| `kvist agent setup [--force]`                                         | Collect, qualify, and bind a reusable profile; force is required to retain failed qualification. |
 
 Delivery is organized into phases. The completed, current, and planned phase
 scope, context, and acceptance criteria are maintained in
@@ -147,7 +173,8 @@ cargo run --locked -p agent-runtime --bin agent-run -- run \
   "Review this change"
 ```
 
-Send a text-only request directly to a local Ollama or llama-server endpoint:
+Send a text-only request through the Rig-backed local Ollama or llama-server
+transport:
 
 ```bash
 cargo run --locked -p agent-runtime --bin agent-run -- model \
@@ -164,25 +191,25 @@ cargo run --locked -p agent-runtime --bin agent-run -- model \
   "Summarize the supplied prompt"
 ```
 
-The direct adapter accepts loopback HTTP only, has no proxy or credential
-support, and exposes no tools through this command. The library API additionally
-supports canonical tool descriptors and returns tool calls as untrusted
-`ToolIntent` values; it never executes them.
-
-The exactly pinned optional Rig adapter uses the same command contract and is
-selected explicitly after enabling its Cargo feature:
+The exactly pinned Rig adapter is enabled and selected by default on the
+`rig-integration` branch. It accepts loopback HTTP only, has no proxy or
+credential support, and exposes no tools through this command. The library API
+additionally supports canonical tool descriptors and returns tool calls as
+untrusted `ToolIntent` values; it never executes them.
 
 ```bash
-cargo run --locked -p agent-runtime --bin agent-run --features rig-transport -- model \
-  --transport rig \
+cargo run --locked -p agent-runtime --bin agent-run -- model \
   --provider ollama \
   --endpoint http://127.0.0.1:11434 \
   --model qwen3-coder \
+  --output-schema '{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"],"additionalProperties":false}' \
   --file prompt.md
 ```
 
-It currently supports only numeric-loopback Ollama and llama-server endpoints.
-The direct adapter remains the default and fallback.
+Provider-native schema enforcement is a generation constraint; callers still
+parse and validate the returned content. The direct adapter remains an
+explicit conformance and fallback path via `--transport direct`. Kvist never
+automatically replays a failed Rig request through it.
 
 List provider-advertised model IDs without running inference:
 
@@ -231,11 +258,13 @@ command = "ollama run qwen3-coder '{prompt}'"
 
 The library crate is named `agent_runtime`. Its outcomes and constraints,
 consumer boundary, and private realization live in
-[`src/agent_runtime/REQUIREMENTS.md`](src/agent_runtime/REQUIREMENTS.md),
-[`src/agent_runtime/CONTRACT.md`](src/agent_runtime/CONTRACT.md), and
-[`src/agent_runtime/DESIGN.md`](src/agent_runtime/DESIGN.md).
+[`agent_runtime/REQUIREMENTS.md`](agent_runtime/REQUIREMENTS.md),
+[`agent_runtime/CONTRACT.md`](agent_runtime/CONTRACT.md), and
+[`agent_runtime/DESIGN.md`](agent_runtime/DESIGN.md).
 The layered runtime decision is documented in
 [`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md),
+the current and planned runtime choices in
+[`docs/agent-runtime/runtime-selection.md`](docs/agent-runtime/runtime-selection.md),
 the direct transport is available for local testing, and the Rig 0.42.0
 adoption decision and contained optional adapter gates are in
 [`docs/agent-runtime/rig-evaluation.md`](docs/agent-runtime/rig-evaluation.md).
@@ -297,29 +326,79 @@ project must opt in with this versioned, project-local configuration:
 [sandbox]
 schema_version = 1
 runner = "/absolute/path/to/separately-installed-sandbox-runner"
+backend = "/absolute/path/to/bubblewrap-executable"
 network = "deny"
 environment_allowlist = ["PATH"]
 mount = "component"
 ```
 
 `runner` must be an absolute path to a regular, non-symlink executable outside
-both the project root and the selected Git/jj worktree root. Repository-
-controlled runners, including siblings of a nested Kvist project, are forbidden
-even when they self-attest. Kvist refuses execution if it cannot resolve the
-selected worktree root. The runner is spawned without a shell. It must acknowledge
-`--kvist-sandbox-probe-v1` by writing exactly
-`kvist-sandbox-probe-v1: network=deny; mount=component` and accept one JSON
-request on stdin when passed `--kvist-sandbox-request-v1`. Request version 1
-contains the target program/arguments, a `/workspace/component` working
-directory and writable component mount, denied network, allowed environment,
-and read-only context mounts. `ROOT_CONTRACT.md` is materialized at
-`/workspace/context/ROOT_CONTRACT.md`; a child component's nearest ancestor
-component contract is materialized at
+both the project root and the selected Git/jj worktree root. `backend` must
+likewise be an absolute path to a regular, non-symlink enforcement-backend
+(Bubblewrap) executable outside the project root and worktree; its content
+digest is approval-bound. Repository-controlled runners or backends, including
+siblings of a nested Kvist project, are forbidden even when they self-attest.
+Kvist refuses execution if it cannot resolve the selected worktree root. The
+runner is spawned without a shell. It must answer `--kvist-sandbox-probe-v1`
+with the closed `kvist-sandbox-probe-v1` JSON object reporting its runner
+identity and the enforcement backend kind, path, and digest, and accept one
+JSON request on stdin when passed `--kvist-sandbox-request-v1`. The probe must
+report the approved runner digest and the exact configured backend identity,
+and the backend bytes are rehashed and revalidated immediately before
+execution. Request version 1 is a closed, typed value with an explicit phase,
+argument vector, a `/workspace/component` working directory, denied network
+(or exact package sources during mediated acquisition), allowed environment,
+resource bounds, approval-bound identities, and typed grants. An authoring
+request grants read-write access only to the component's explicit
+implementation and test roots and mounts each intent and record document
+read-only at a disjoint destination; the component root is never writable.
+`ROOT_CONTRACT.md` is materialized at `/workspace/context/ROOT_CONTRACT.md`; a
+child component's nearest ancestor component contract is materialized at
 `/workspace/context/PARENT_CONTRACT.md`. The runner must enforce those values
 and proxy its sandboxed child result. Missing configuration, an unavailable
 runner, or a failed probe refuses `task run` before any task transition; Kvist
 never falls back to host execution. A version-1 sandbox cannot run a
 `test_policy` with `working_directory = "project"`.
+
+Mediated Cargo dependency acquisition is configured, per project, under
+`[sandbox.acquisition]`. The canonical crates.io source is built in and is
+never listed. Additional registries and Git sources are explicit, exact, and
+bounded, and are validated with the same rules the sandbox runner enforces:
+
+```toml
+[sandbox.acquisition]
+# Optional cache-promotion bounds; each defaults conservatively and may never
+# exceed the runner's safe maxima.
+max_cache_files = 65536
+max_cache_file_bytes = 268435456
+max_cache_bytes = 2147483648
+
+# Zero or more additional registries. Production origins must be exact
+# canonical HTTPS with no credentials, query, fragment, percent aliases, or
+# private/link-local/loopback literal address, and must not impersonate crates.io.
+[[sandbox.acquisition.registry]]
+name = "private"
+index_origin = "https://registry.example.invalid/index/"
+download_origin = "https://registry.example.invalid/crates/"
+
+# Zero or more Git sources pinned to an immutable 40-hex revision on an exact
+# canonical HTTPS repository. Moving branches are rejected.
+[[sandbox.acquisition.git]]
+repository = "https://git.example.invalid/dependency.git"
+revision = "0123456789abcdef0123456789abcdef01234567"
+```
+
+No credential or token belongs in this configuration. Acquisition is exactly
+`cargo fetch` (without `--locked`), so new or changed dependencies can resolve
+in a real attempt-local writable `CARGO_HOME` and an isolated writable lockfile
+workspace without mounting the user's Cargo home. Its lockfile before/after
+identities and derived source identities are bound to its immutable cache
+generation result. Verification is exactly `cargo test --locked`, offline
+(`CARGO_NET_OFFLINE=true`), with an approved immutable Cargo-home generation
+mounted read-only and separate target scratch. The engine plans and runner
+validates these semantics; OS mounts, process execution, network transport,
+DNS/address pinning, redirects, live task wiring, and final project-cache
+generation selection remain deferred, so requests still fail closed.
 
 Before `task run` probes a runner or changes a task, run
 `kvist task approve-policy`. It atomically writes a versioned, deterministic,
@@ -332,8 +411,9 @@ rejected. The record covers both effective agent templates, token limits,
 timeouts, combined-output caps, and redaction policies,
 the selected agent-config source path and digest, the exact bounded
 `ROOT_CONTRACT.md` digest, parsed sandbox configuration, canonical runner path
-and digest, test policy (including absence), and relevant schema/protocol
-versions. Any missing, malformed, or changed input causes `task run` to refuse
+and digest, canonical enforcement-backend path and digest, test policy
+(including absence), and relevant schema/protocol versions. Any missing,
+malformed, or changed input causes `task run` to refuse
 without probing, host fallback, or task mutation. On Linux, each probe and
 request launches a private descriptor-bound copy of freshly verified runner
 bytes, so replacement after validation cannot alter what executes. Platforms
@@ -349,7 +429,19 @@ boundaries for possible future restoration.
 Kvist's MSRV is Rust **1.94**. Edition 2024 itself is available from Rust 1.85,
 but 1.94 is the upstream-tested compiler for the exactly pinned Rig 0.42.0
 transport dependency. CI tests Rust 1.94 and current stable on Linux.
-`Cargo.lock` is committed and every CI build/test command uses `--locked`.
+`Cargo.lock` is committed and every CI build/test command uses
+`--locked`. Kvist's own repository dogfoods the component model: the root Rust
+workspace lives at the repository root (`Cargo.toml`), with `engine/`,
+`agent_runtime/`, and `sandbox_runner/` as complete top-level component boundaries. The
+[`sandbox_runner` intent](sandbox_runner/REQUIREMENTS.md) is present, and
+its package now validates the version-one protocol and mediated-Cargo plan
+semantics, independently derives source identities, and builds immutable
+Cargo-home cache generations with descriptor-relative Linux operations. It
+still fails closed for every execution request: Bubblewrap mounts and process
+enforcement, network transport/DNS/address pinning/redirect enforcement, and
+final project-cache generation selection are later work. Newly initialized
+projects retain their configured component root and currently default to
+`src/`.
 
 The portable default quality gate uses only Cargo:
 
@@ -387,17 +479,17 @@ they do not remove the TOCTOU limitation above.
 
 `kvist init` creates the following deterministic, UTF-8 templates.
 
-| Path                  | Version and required defaults                                                                    | Purpose |
-| --------------------- | ------------------------------------------------------------------------------------------------ | ------- |
-| `VISION.md`           | `<!-- kvist-vision-version: 1 -->`                                                              | Approved product direction. |
-| `ARCHITECTURE.md`     | `<!-- kvist-architecture-version: 1 -->`                                                        | Approved system decomposition, dependency direction, and cross-cutting decisions. |
-| `kvist.toml`          | configuration schema `1`; `component_root = "src"`; `vcs.kind = "auto"`; `llm.provider = "none"` | Project-local configuration with VCS and opt-in external LLM settings. |
-| `ROOT_CONTRACT.md`    | `<!-- kvist-root-contract-version: 1 -->`                                                       | Global architectural and compliance constraints for every component. |
-| `src/REQUIREMENTS.md` | `<!-- kvist-requirements-version: 1 -->`                                                        | Root outcomes, constraints, acceptance criteria, and verification obligations. |
-| `src/CONTRACT.md`     | `<!-- kvist-contract-version: 1 -->`                                                            | Consumer-facing interfaces and observable semantics. |
-| `src/DESIGN.md`       | `<!-- kvist-design-version: 1 -->`                                                              | Private structure, algorithms, state transitions, and recovery design. |
-| `src/TODOS.yaml`      | `schema_version: 1`                                                                             | Versioned, traceable execution plan with ordered lifecycle tasks. |
-| `src/IMPL.md`         | `<!-- kvist-implementation-record-version: 1 -->`                                               | Independently observed implementation record. |
+| Path                  | Version and required defaults                                                                    | Purpose                                                                           |
+| --------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `VISION.md`           | `<!-- kvist-vision-version: 1 -->`                                                               | Approved product direction.                                                       |
+| `ARCHITECTURE.md`     | `<!-- kvist-architecture-version: 1 -->`                                                         | Approved system decomposition, dependency direction, and cross-cutting decisions. |
+| `kvist.toml`          | configuration schema `1`; `component_root = "src"`; `vcs.kind = "auto"`; `llm.provider = "none"` | Project-local configuration with VCS and opt-in external LLM settings.            |
+| `ROOT_CONTRACT.md`    | `<!-- kvist-root-contract-version: 1 -->`                                                        | Global architectural and compliance constraints for every component.              |
+| `src/REQUIREMENTS.md` | `<!-- kvist-requirements-version: 1 -->`                                                         | Root outcomes, constraints, acceptance criteria, and verification obligations.    |
+| `src/CONTRACT.md`     | `<!-- kvist-contract-version: 1 -->`                                                             | Consumer-facing interfaces and observable semantics.                              |
+| `src/DESIGN.md`       | `<!-- kvist-design-version: 1 -->`                                                               | Private structure, algorithms, state transitions, and recovery design.            |
+| `src/TODOS.yaml`      | `schema_version: 1`                                                                              | Versioned, traceable execution plan with ordered lifecycle tasks.                 |
+| `src/IMPL.md`         | `<!-- kvist-implementation-record-version: 1 -->`                                                | Independently observed implementation record.                                     |
 
 These formats have independent version markers. This pre-release artifact
 split is a clean break: retired component files, commands, and queue fields
@@ -541,11 +633,11 @@ artifact layout. Invalid output lists both malformed and missing artifacts.
 Each intent document starts with its independent version marker and uses exact,
 ordered, unique, nonempty level-two sections:
 
-| Artifact | Authority | Required sections |
-| --- | --- | --- |
-| `REQUIREMENTS.md` | Outcomes, constraints, acceptance, verification | Purpose and scope; stakeholders and concerns; functional requirements; quality requirements and constraints; acceptance and traceability |
-| `CONTRACT.md` | Consumer-visible semantics | Boundary and ownership; provided interfaces; required interfaces; data and schemas; behavioral guarantees; errors and failure semantics; security and authority; compatibility and verification |
-| `DESIGN.md` | Private realization | Design overview; internal structure; interactions and state; algorithms and decisions; failure and recovery; security and resource design; verification strategy |
+| Artifact          | Authority                                       | Required sections                                                                                                                                                                               |
+| ----------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `REQUIREMENTS.md` | Outcomes, constraints, acceptance, verification | Purpose and scope; stakeholders and concerns; functional requirements; quality requirements and constraints; acceptance and traceability                                                        |
+| `CONTRACT.md`     | Consumer-visible semantics                      | Boundary and ownership; provided interfaces; required interfaces; data and schemas; behavioral guarantees; errors and failure semantics; security and authority; compatibility and verification |
+| `DESIGN.md`       | Private realization                             | Design overview; internal structure; interactions and state; algorithms and decisions; failure and recovery; security and resource design; verification strategy                                |
 
 `CONTRACT.md` references any useful native machine-readable schema by exact
 provider-owned path and dialect/version. The schema supplements consumer
@@ -584,6 +676,19 @@ argument parsing and help generation, and
 errors. Both are mature, widely maintained Rust ecosystem dependencies. The
 project keeps its dependency graph small and adds dependencies only when their
 security, licensing, maintenance, and operational benefits are justified.
+
+Dependency policy is enforced with
+[`cargo-deny`](https://github.com/EmbarkStudios/cargo-deny):
+
+```bash
+cargo install --locked --version 0.20.2 cargo-deny
+cargo deny --manifest-path engine/Cargo.toml --all-features --locked check advisories bans licenses sources
+```
+
+CI rejects known advisories, wildcard requirements, unknown registries or Git
+sources, and licenses outside the reviewed allowlist. Duplicate dependency
+versions remain warnings because the pinned Rig graph currently contains
+legitimate duplicates that are tracked as footprint cost.
 
 The runtime uses [toml](https://crates.io/crates/toml) 1 to validate the
 project-local configuration before reading its component tree.
@@ -640,23 +745,23 @@ tasks:
 
 ### Component revision and revalidation fields
 
-| Field | Allowed values | Purpose and tool use |
-| --- | --- | --- |
-| `schema_version` | Integer `1` | Selects the queue parser contract independently of other artifact versions. Unknown versions are refused. |
-| `component.requirements_revision` | `sha256:` plus 64 lowercase hexadecimal digits | Fingerprints the exact local `REQUIREMENTS.md` used to plan the queue. |
-| `component.contract_revision` | Same SHA-256 form | Fingerprints the exact local `CONTRACT.md`; a change is separately attributable and may affect declared consumers. |
-| `component.design_revision` | Same SHA-256 form | Fingerprints the exact local `DESIGN.md`; a change stales local work without becoming an implicit child input. |
-| `component.parent_contract` | `null` at the root, otherwise `{ path: "<relative-parent-contract>", revision: "sha256:..." }` | Records the only implicit upstream component context. |
-| `parent_contract.path` | One or more `..` segments followed by `CONTRACT.md`, such as `../CONTRACT.md` or `../../../CONTRACT.md` | Is computed from the child to its actual nearest ancestor component across transparent namespace directories; arbitrary peers and project paths are rejected. |
-| `parent_contract.revision` | SHA-256 revision form | Records the reviewed parent consumer contract; a later mismatch is attributable stale evidence. |
-| `revalidation.state` | `current` or `stale` | `current` permits task selection; `stale` blocks it until explicit component acceptance. |
-| `revalidation.checked_at` | Whole-second UTC RFC 3339 | Records when revisions were accepted or compared. |
-| `revalidation.stale_since` | `null` when current; UTC timestamp when stale | Preserves how long the current stale condition has existed. |
-| `revalidation.causes` | Empty when current; nonempty cause list when stale | Retains exact mismatch evidence rather than hiding it behind a boolean. |
-| `causes[].kind` | Local requirements, contract, or design revision changed; or parent contract revision changed | Attributes the artifact that invalidated the queue. |
-| `causes[].path` | Nonblank component-relative artifact path | Identifies the exact inspected artifact. |
-| `causes[].expected_revision` | SHA-256 revision | Preserves the revision on which the queue relied. |
-| `causes[].observed_revision` | Different SHA-256 revision | Preserves the revision that invalidated the queue. |
+| Field                             | Allowed values                                                                                          | Purpose and tool use                                                                                                                                          |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schema_version`                  | Integer `1`                                                                                             | Selects the queue parser contract independently of other artifact versions. Unknown versions are refused.                                                     |
+| `component.requirements_revision` | `sha256:` plus 64 lowercase hexadecimal digits                                                          | Fingerprints the exact local `REQUIREMENTS.md` used to plan the queue.                                                                                        |
+| `component.contract_revision`     | Same SHA-256 form                                                                                       | Fingerprints the exact local `CONTRACT.md`; a change is separately attributable and may affect declared consumers.                                            |
+| `component.design_revision`       | Same SHA-256 form                                                                                       | Fingerprints the exact local `DESIGN.md`; a change stales local work without becoming an implicit child input.                                                |
+| `component.parent_contract`       | `null` at the root, otherwise `{ path: "<relative-parent-contract>", revision: "sha256:..." }`          | Records the only implicit upstream component context.                                                                                                         |
+| `parent_contract.path`            | One or more `..` segments followed by `CONTRACT.md`, such as `../CONTRACT.md` or `../../../CONTRACT.md` | Is computed from the child to its actual nearest ancestor component across transparent namespace directories; arbitrary peers and project paths are rejected. |
+| `parent_contract.revision`        | SHA-256 revision form                                                                                   | Records the reviewed parent consumer contract; a later mismatch is attributable stale evidence.                                                               |
+| `revalidation.state`              | `current` or `stale`                                                                                    | `current` permits task selection; `stale` blocks it until explicit component acceptance.                                                                      |
+| `revalidation.checked_at`         | Whole-second UTC RFC 3339                                                                               | Records when revisions were accepted or compared.                                                                                                             |
+| `revalidation.stale_since`        | `null` when current; UTC timestamp when stale                                                           | Preserves how long the current stale condition has existed.                                                                                                   |
+| `revalidation.causes`             | Empty when current; nonempty cause list when stale                                                      | Retains exact mismatch evidence rather than hiding it behind a boolean.                                                                                       |
+| `causes[].kind`                   | Local requirements, contract, or design revision changed; or parent contract revision changed           | Attributes the artifact that invalidated the queue.                                                                                                           |
+| `causes[].path`                   | Nonblank component-relative artifact path                                                               | Identifies the exact inspected artifact.                                                                                                                      |
+| `causes[].expected_revision`      | SHA-256 revision                                                                                        | Preserves the revision on which the queue relied.                                                                                                             |
+| `causes[].observed_revision`      | Different SHA-256 revision                                                                              | Preserves the revision that invalidated the queue.                                                                                                            |
 
 A current queue must have `stale_since: null` and `causes: []`. A stale queue
 must have both timestamps, with `stale_since` no later than `checked_at`, and
@@ -721,6 +826,22 @@ This is the only pre-release queue format recognized by the current artifact
 model. Retired fields are rejected rather than aliased or migrated. Future
 compatibility policy must be declared explicitly before release; it is not
 implied by the current version marker.
+
+## License and contributions
+
+Kvist and the in-repository `agent-runtime` crate are copyright (C) 2026
+Stefan Lindblad and licensed under the
+[GNU Affero General Public License, version 3 or later](LICENSE).
+
+The AGPL permits personal, open-source, and commercial use under its terms.
+Organizations that need to distribute, embed, modify, or operate Kvist without
+AGPL obligations may request separate commercial terms as described in
+[`COMMERCIAL-LICENSE.md`](COMMERCIAL-LICENSE.md). No permission beyond the
+AGPL is granted unless both parties execute a separate written agreement.
+
+External code contributions are not accepted at this stage. Bug reports,
+use-case feedback, and design discussion remain welcome. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Task execution boundary
 

@@ -1,14 +1,16 @@
 <!-- kvist-architecture-version: 1 -->
+
 # Project Architecture
 
 ## Scope, stakeholders, and concerns
 
 The system of interest is the local `kvist` CLI, its reusable `agent-runtime`
-component, and the durable project artifacts they read or write. The human
-architect is the approval and arbitration authority. External coding agents,
-models, version-control tools, editors, and sandbox runners are adjacent
-systems and are never assumed trustworthy merely because the user selected
-them.
+component, its independently installed `sandbox-runner` enforcement component,
+and the durable project artifacts they read or write. The human architect is
+the approval and arbitration authority. External coding agents, models,
+version-control tools, editors, package sources, and operating-system isolation
+services are adjacent systems and are never assumed trustworthy merely because
+the user selected them.
 
 The architecture addresses bounded context, architectural drift, durable
 provenance, deterministic local operation, untrusted repository input,
@@ -35,22 +37,30 @@ trusted core.
   subprocess output, and imported artifacts are untrusted input.
 - External commands MUST be invoked without a shell and effectful task
   execution requires an independently installed approved enforcement boundary.
+- Network authority MUST be capability-specific. Dependency acquisition MAY
+  reach explicitly approved sources through a bounded acquisition phase;
+  authoring and verification remain network-denied.
 - Linux is the only executable target until other backends have independent
   native tests.
 
 ## Component model
 
-| Stable ID | Path | Responsibility | Provides | Requires |
-| --- | --- | --- | --- | --- |
-| `kvist.engine` | `src/` | Project artifacts, component discovery, validation, status, queues, policy, task lifecycle, context selection, evidence, and CLI dispatch | `kvist.cli/v1`, `kvist.artifacts/v1`, `kvist.host-authority/planned` | `agent-runtime.library/v1`, operating-system and VCS services |
-| `agent-runtime` | `src/agent_runtime/` | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport, and reusable bounded runtime mechanisms | `agent-runtime.library/v1`, `agent-runtime.cli/v1` | Host authority interfaces and operating-system process/network services |
+| Stable ID        | Path              | Responsibility                                                                                                                                  | Provides                                                             | Requires                                                                                    |
+| ---------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `kvist.engine`   | `engine/`         | Project artifacts, component discovery, validation, status, queues, policy, task lifecycle, context selection, evidence, and CLI dispatch       | `kvist.cli/v1`, `kvist.artifacts/v1`, `kvist.host-authority/planned` | `agent-runtime.library/v1`, `sandbox-runner.protocol/v1`, operating-system and VCS services |
+| `agent-runtime`  | `agent_runtime/`  | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport, and reusable bounded runtime mechanisms | `agent-runtime.library/v1`, `agent-runtime.cli/v1`                   | Host authority interfaces and operating-system process/network services                     |
+| `sandbox-runner` | `sandbox_runner/` | Strict request validation and Linux Bubblewrap enforcement for approved task grants                                                             | `sandbox-runner.protocol/v1`, `sandbox-runner.cli/v1`                | Bubblewrap, Linux kernel isolation, and operating-system process/filesystem services        |
 
-The dependency direction is one way: `kvist.engine` depends on
-`agent-runtime`; `agent-runtime` does not import Kvist types. Provider libraries
-remain behind private adapters. A directory below a component becomes a child
-component candidate when it contains any member of the five-artifact set, so
-missing adjacent artifacts remain diagnosable. It is complete only when it
-owns all five.
+The repository layout places the root Rust workspace manifest at the project
+root (`/Cargo.toml`), with `engine/`, `agent_runtime/`, and `sandbox_runner/`
+as top-level peer components. `kvist.engine` depends on `agent-runtime` as a
+Rust library, while `sandbox-runner` is an independent execution boundary.
+Neither child imports Kvist engine types. The engine and installed runner
+communicate only through the versioned protocol. Provider libraries remain
+behind private adapters. A directory becomes a component candidate when it
+contains any member of the five-artifact set, so missing adjacent artifacts
+remain diagnosable. It is complete only when it owns all five. Sub-components,
+when created, are nested directly within their parent component directory.
 
 ## Interactions and dependency rules
 
@@ -65,10 +75,13 @@ owns all five.
    exact digests of the three documents and the canonical task-definition
    projection. The human acknowledges the feedback or records an exact-digest
    exception before acceptance.
-4. Task execution receives local component artifacts plus read-only sandbox
+4. Task authoring receives local component artifacts plus read-only sandbox
    mounts for `ROOT_CONTRACT.md` and the immediate parent `CONTRACT.md`.
    Explicit provider contracts are the only additional cross-component
    behavioral context; provider designs and implementations remain excluded.
+   Verification is a separate request and may read approved provider source
+   and workspace metadata needed by build tools without adding it to agent
+   context or write authority.
 5. Tests precede implementation. Security audit and independent compliance
    review follow implementation.
 6. A clean-slate documenter derives `IMPL.md` from code and tests without
@@ -106,15 +119,27 @@ independently observed behavior.
 same-directory temporary files, synchronization where supported, and explicit
 no-clobber or atomic-replacement behavior.
 
+**Accepted-change commits:** human acceptance and VCS commit creation are
+distinct durable states. An optional local commit contains only the exact
+digest-bound acceptance set and engine-written workflow evidence. It preserves
+unrelated worktree and index state, never pushes, and remains recoverable when
+commit creation fails.
+
 **Security and authority:** model tool intent and repository content are
-untrusted proposals. Kvist owns task policy, grants, approved resource and
-credential bindings, execution-tier selection, artifact promotion, and
-canonical evidence. The selected sandbox or execution backend is the only
-layer allowed to cause constrained effects.
+untrusted proposals. Kvist owns task policy, typed path and network grants,
+approved resource and credential references, execution-tier selection,
+artifact promotion, and canonical evidence. The installed sandbox runner is
+the only layer allowed to cause approved filesystem and process effects.
+Dependency acquisition is a separate bounded capability that can reach only
+configured package sources and writes only attempt-local caches and workspace
+dependency state. Remote model credentials and transport remain outside the
+effect sandbox.
 
 **Compatibility:** every machine-consumed artifact declares an independent
-format version. Unknown or invalid semantics fail explicitly. No compatibility
-or migration behavior is retained before the first usable release.
+format version. Unknown or invalid semantics fail explicitly. The unreleased
+sandbox protocol remains version 1 but its old shape is replaced rather than
+recognized or migrated. No compatibility or migration behavior is retained
+before the first usable release.
 
 **Traceability:** queue tasks link to durable `SOURCE#LOCATOR` identifiers.
 Machine-readable schemas, when useful, are referenced by exact path and
@@ -147,6 +172,9 @@ The component table is the canonical static decomposition view. The lifecycle
 sequence above is the canonical workflow view. Detailed authority and model
 transport views for the child runtime live in
 [`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md).
+Selection guidance for native, Rig-run, containerized Rig-agent, and external
+agent drivers lives in
+[`docs/agent-runtime/runtime-selection.md`](docs/agent-runtime/runtime-selection.md).
 
 Future diagrams should use C4-compatible context, container, component, and
 dynamic concepts only when they answer a named stakeholder concern. Diagram
@@ -162,14 +190,19 @@ model is recorded in
 The nonbinding review gate and its separation from compliance are recorded in
 [`0002-advisory-document-review.md`](docs/decisions/0002-advisory-document-review.md).
 
-The main deferred risks are advisory-review and project-level acceptance
-automation, observed-intent proposal and comparison, contract-clause
-traceability, general cross-component contract graph resolution,
-schema-compatibility analysis, architecture-model interchange, and automated
-materialization of explicitly declared provider contracts. Root and
-immediate-parent contracts are already materialized read-only. Deferral must
-not discard stable IDs, exact schema versions, dependency direction, or
-revision provenance needed to implement the remaining capabilities later.
+The immediate prerequisite risks are repository-layout migration, explicit
+attempt recovery, the production Bubblewrap runner, typed sandbox grants,
+mediated dependency acquisition, supervised finalization, and exact
+accepted-change Git commits. Unattended execution remains disabled until
+private workspaces and conflict-checked promotion are complete and
+independently reviewed. Jujutsu commit automation, advisory-review and
+project-level acceptance automation, remote model brokering, observed-intent
+proposal and comparison, contract-clause traceability, general cross-component
+contract graph resolution, schema-compatibility analysis, architecture-model
+interchange, and automated materialization of explicitly declared provider
+contracts remain deferred. Deferral must not discard stable IDs, exact schema
+versions, dependency direction, or revision provenance needed to implement the
+remaining capabilities later.
 
 ## Standards and interoperability
 

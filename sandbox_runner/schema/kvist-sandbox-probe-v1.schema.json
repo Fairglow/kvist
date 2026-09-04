@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://kvist.dev/schema/kvist-sandbox-probe-v1.schema.json",
+  "title": "kvist-sandbox-probe-v1",
+  "description": "Closed version-one capability probe response emitted by the Kvist sandbox runner once Bubblewrap enforcement is integrated. The runner's Rust parser is authoritative; this schema mirrors src/protocol.rs and is a non-normative aid for machine consumers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocol", "protocol_version", "runner", "backend", "capabilities"],
+  "properties": {
+    "protocol": { "const": "kvist-sandbox-probe-v1" },
+    "protocol_version": { "const": 1 },
+    "runner": { "$ref": "#/$defs/executable" },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path", "digest"],
+      "properties": {
+        "kind": { "const": "bubblewrap" },
+        "path": { "$ref": "#/$defs/absolutePath" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["namespaces", "new_session", "parent_death_signal"],
+      "properties": {
+        "namespaces": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mount", "network", "pid", "ipc", "uts", "user"],
+          "properties": {
+            "mount": { "type": "boolean" },
+            "network": { "type": "boolean" },
+            "pid": { "type": "boolean" },
+            "ipc": { "type": "boolean" },
+            "uts": { "type": "boolean" },
+            "user": { "type": "boolean" }
+          }
+        },
+        "new_session": { "type": "boolean" },
+        "parent_death_signal": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "absolutePath": { "type": "string", "pattern": "^/", "maxLength": 4096 },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "executable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest"],
+      "properties": {
+        "path": { "$ref": "#/$defs/absolutePath" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    }
+  }
+}

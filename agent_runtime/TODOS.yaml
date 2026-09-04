@@ -1,0 +1,1653 @@
+schema_version: 1
+component:
+  requirements_revision: "sha256:58849618584e9af48dd94cd0aea2806fd6f1905484846a9907a76806caa502e7"
+  contract_revision: "sha256:2b7478dcc6d7667c475e6128ef91f9ea031dffd94e1863630931b52a810f115e"
+  design_revision: "sha256:d290df050d46ccafd0bc0aabf75b22f79eeb8920058dca293bd7d33586eff366"
+  parent_contract:
+    path: "../CONTRACT.md"
+    revision: "sha256:9772c55be0107de462f33813ab31a207aa18eb8c463f28281cccaf31a0d82a58"
+  revalidation:
+    state: current
+    checked_at: "2026-09-02T06:23:00Z"
+    stale_since: null
+    causes: []
+tasks:
+  - id: "sa-01-write-tests"
+    title: "Define standalone supervision tests"
+    description: "Write failing library and CLI tests for shell-free rendering, explicit host acknowledgement, prompt files, retry context, terminal process failures, loop detection, and idle termination."
+    context: "Generic prompt supervision is embedded in Kvist and has no independently consumable contract or executable."
+    purpose: "Establish the reusable Linux-first behavior before moving implementation out of the root crate."
+    expected_outcome: "Focused tests fail until the standalone crate provides its documented public API and command."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#AGN-07"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T21:14:41Z"
+      completed_at: "2026-08-29T21:14:41Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-01-implement-code"
+    title: "Extract agent runtime"
+    description: "Implement the reusable library and standalone CLI, move prompt acquisition and command rendering, add typed retry context, and integrate Kvist through the path dependency."
+    context: "The failing tests define a provider-neutral host-execution surface while Kvist retains workflow-specific policy and state."
+    purpose: "Make supervision independently useful without duplicating or coupling it to Kvist task semantics."
+    expected_outcome: "Kvist and the standalone command use one tested implementation and unsupported platforms fail explicitly."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-01-write-tests"
+    requirements:
+      - "../CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Interactions-and-state"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "TODO.md#AGN-07"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T21:14:41Z"
+      completed_at: "2026-08-29T21:14:41Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-01-security-audit"
+    title: "Audit extracted host execution"
+    description: "Independently inspect process-group termination, stream handling, prompt file opening, command parsing, retry classification, acknowledgement boundaries, and unsupported-platform gates."
+    context: "Moving process execution into a reusable crate increases the number of callers that can rely on its limits and diagnostics."
+    purpose: "Identify authority, lifecycle, and denial-of-service defects before representing the component as robust."
+    expected_outcome: "A security review records or remediates every high-confidence finding without overstating host-mode isolation."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-01-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-01-compliance-review"
+    title: "Review standalone runtime compliance"
+    description: "Derive the implementation record from code and tests without intended component documents, then compare the record with this component contract in a separate review context."
+    context: "The implementer cannot certify that the extracted API and CLI satisfy their own contract."
+    purpose: "Preserve independent evidence and surface discrepancies for explicit arbitration."
+    expected_outcome: "The implementation record and source-blind review classify every contract difference without silently revising either artifact."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-01-security-audit"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-02-write-tests"
+    title: "Define transactional workspace tests"
+    description: "Specify failing tests for bounded immutable input snapshots, private writable overlays, link and special-file rejection, deterministic diffs, conflict detection, and explicit promotion."
+    context: "Retry notices and archived copies can aid recovery but cannot safely undo partial edits or concurrent user changes."
+    purpose: "Define transactional file behavior before any supervisor attempts rollback or output promotion."
+    expected_outcome: "Tests prove failed attempts leave live inputs unchanged and successful output is applied only after validated conflict-free approval."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-01-compliance-review"
+    requirements:
+      - "DESIGN.md#Failure-and-recovery"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-02-implement-code"
+    title: "Implement transactional workspaces"
+    description: "Create bounded content-addressed input snapshots and attempt-local writable overlays that emit reviewed patches or artifacts without destructive source-control reset."
+    context: "A disposable attempt workspace makes retries predictable and avoids overwriting live user edits after failure."
+    purpose: "Provide reliable local side-effect containment before stronger operating-system isolation."
+    expected_outcome: "Attempts operate on private state and promotion detects every changed live precondition before writing."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-02-write-tests"
+    requirements:
+      - "DESIGN.md#Failure-and-recovery"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-02-security-audit"
+    title: "Audit transactional workspaces"
+    description: "Review snapshot traversal, hard links, symbolic links, metadata, races, resource bounds, patch application, concurrent mutation, and cleanup."
+    context: "A flawed recovery layer can destroy user work or expose files that were not granted."
+    purpose: "Find path and transaction vulnerabilities before workspace promotion is trusted."
+    expected_outcome: "Independent findings are remediated or retained as explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-02-implement-code"
+    requirements:
+      - "DESIGN.md#Failure-and-recovery"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-02-compliance-review"
+    title: "Review transactional workspace compliance"
+    description: "Compare source-derived workspace behavior with the snapshot, overlay, conflict, and promotion contract."
+    context: "Recovery guarantees must be independently verified before retries can rely on them."
+    purpose: "Prevent archive or reset behavior from being described as transactional without evidence."
+    expected_outcome: "A source-blind review records compliance or an explicit discrepancy."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-02-security-audit"
+    requirements:
+      - "DESIGN.md#Failure-and-recovery"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-03-write-tests"
+    title: "Define strict Linux isolation tests"
+    description: "Write negative tests for ungranted reads and writes, inherited descriptors, credentials, process escape, network access, executable substitution, resource exhaustion, and unavailable backends."
+    context: "Host mode, restricted users, and fakeroot do not independently provide complete mediation."
+    purpose: "Make the exact Linux assurance tier executable before choosing or integrating isolation primitives."
+    expected_outcome: "Tests fail closed unless every declared filesystem, process, environment, network, and resource restriction is enforced."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-02-compliance-review"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-03-implement-code"
+    title: "Implement strict Linux backend"
+    description: "Add a replaceable Linux backend using a dedicated identity and Bubblewrap namespaces with explicit mounts, environment, network, process, and resource policy; evaluate Landlock as defense in depth."
+    context: "The standalone runtime needs a real reference monitor before strict mode can replace explicit host execution."
+    purpose: "Enforce least authority with no silent fallback when required kernel or backend features are unavailable."
+    expected_outcome: "Strict Linux runs expose only approved resources and tools, report backend capabilities, and fail before launch on incomplete enforcement."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-03-write-tests"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-03-security-audit"
+    title: "Audit strict Linux backend"
+    description: "Review namespace construction, mount topology, uid and gid mapping, seccomp, Landlock compatibility, cgroups, terminal isolation, sockets, procfs, TOCTOU, and cleanup."
+    context: "Sandbox construction errors can turn a strict-mode claim into ambient host execution."
+    purpose: "Independently challenge every claimed Linux isolation guarantee."
+    expected_outcome: "No strict mode ships with an unresolved high-confidence escape or silent degradation."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-03-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-03-compliance-review"
+    title: "Review Linux isolation compliance"
+    description: "Compare observed backend behavior and capability reporting with the strict Linux contract without inspecting implementation during the comparison."
+    context: "A sandbox implementer cannot certify the boundary that contains agent-controlled code."
+    purpose: "Retain independent assurance evidence and explicit limitations."
+    expected_outcome: "The review either confirms the documented assurance tier or blocks release with precise discrepancies."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-03-security-audit"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-08-write-tests"
+    title: "Define layered runtime contract tests"
+    description: "Write failing tests for standalone-owned canonical messages, model turns, capability states, typed unsupported behavior, tool descriptors, untrusted intent/results, cancellation, bounded provider extensions, host-service traits, and redacted runtime events."
+    context: "The reusable protocol boundary must be stable before broker or provider implementations can become structural, while authorization, execution, and compliance evidence remain host-owned."
+    purpose: "Prevent provider, framework, or embedding-host types from defining the standalone model protocol or crossing authority boundaries."
+    expected_outcome: "Tests express a provider-neutral contract with advertised, tested, and policy-enabled capabilities and no executable side effects in model or loop types."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T09:12:00Z"
+      completed_at: "2026-08-30T09:12:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-08-implement-code"
+    title: "Implement layered runtime contracts"
+    description: "Implement provider-independent backend classification, canonical model and tool-intent types, capability descriptors, cancellation and budget types, typed provider extensions, host-service traits, and redacted runtime events without selecting a transport framework."
+    context: "The standalone runtime must own reusable protocol interfaces before either a host broker or Rig/direct transport adapter depends on them."
+    purpose: "Create a small stable seam that keeps provider libraries replaceable and leaves authorization, execution, promotion, and compliance evidence with the embedding host."
+    expected_outcome: "Public runtime contracts contain no Kvist, Rig, or provider SDK type and cannot directly execute tools, access credentials, broaden resources, promote artifacts, or write canonical compliance evidence."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-08-write-tests"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-09-01T18:57:19Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-08-security-audit"
+    title: "Audit layered runtime boundaries"
+    description: "Independently review type boundaries, provider extensions, capability transitions, endpoint references, host-service sequencing, cancellation, event redaction, and all paths from model output to effectful host services."
+    context: "A leaky canonical contract can allow provider behavior to bypass a host broker or become falsely trusted durable state."
+    purpose: "Find authority confusion and confused-deputy paths before host services or provider adapters depend on the interfaces."
+    expected_outcome: "No model or adapter type can authorize or execute an effect, enable an untested capability, or insert unbounded unredacted provider state into host evidence."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-08-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-08-compliance-review"
+    title: "Review layered runtime compliance"
+    description: "Derive the new backend, capability, model, tool-intent, host-service, and runtime-event interfaces from source without intended component documents, then compare them with the layered architecture contract."
+    context: "The implementation author cannot certify that provider-neutral types preserve the intended one-way ownership and authority split."
+    purpose: "Record independent evidence that the canonical runtime seam is stable enough for host broker and transport experiments."
+    expected_outcome: "The review classifies every interface and records provider leakage, host coupling, missing failure states, or authority ambiguity for arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-08-security-audit"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-04-write-tests"
+    title: "Define brokered tool and provider tests"
+    description: "Write tests for consuming typed host grants, canonical arguments and resources, provider-only network paths, credential-reference isolation, idempotency evidence, retry budgets, and bounded redacted runtime events."
+    context: "Provider permission prompts and unrestricted agent CLIs cannot prove that only pre-approved tools and destinations were used."
+    purpose: "Specify complete mediation and side-effect-aware retry behavior independently of a provider."
+    expected_outcome: "Tests reject unknown tools, schemas, destinations, credentials, ambiguous outcomes, and unsafe retries."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-08-compliance-review"
+    requirements:
+      - "DESIGN.md#Interactions-and-state"
+      - "DESIGN.md#Internal-structure"
+      - "DESIGN.md#Security-and-resource-design"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-04-implement-code"
+    title: "Implement capability and provider brokers"
+    description: "Add typed capability evaluation and broker sequencing that consumes host authorization decisions and approved bindings, mediates provider networking and credential references, applies idempotency-aware retries and budgets, and emits bounded redacted runtime events."
+    context: "Strict filesystem isolation alone cannot constrain in-process tools or distinguish model traffic from arbitrary egress."
+    purpose: "Give callers a provider-neutral pre-approved action contract with deterministic enforcement evidence."
+    expected_outcome: "Every tool and provider action requires an explicit host authorization before execution and every retry has machine-verifiable rationale without the component inventing grants or compliance evidence."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-04-write-tests"
+    requirements:
+      - "DESIGN.md#Interactions-and-state"
+      - "DESIGN.md#Internal-structure"
+      - "DESIGN.md#Security-and-resource-design"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-04-security-audit"
+    title: "Audit capability and provider brokers"
+    description: "Review grant and resource canonicalization, confused-deputy paths, host-authority sequencing, schema validation, provider connectors, credential references, network mediation, idempotency, and runtime-event integrity."
+    context: "The broker mechanism becomes the reference monitor for tool dispatch while authority remains host-owned."
+    purpose: "Find authorization or data-exfiltration bypasses before strict contracts expose brokered capabilities."
+    expected_outcome: "Independent review leaves no unresolved high-confidence authorization bypass."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-04-implement-code"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "DESIGN.md#Security-and-resource-design"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-04-compliance-review"
+    title: "Review brokered execution compliance"
+    description: "Compare source-derived capability, grant consumption, provider, retry, and runtime-event behavior with the provider-neutral contract."
+    context: "Tool and network mediation claims require an independent comparison."
+    purpose: "Prevent provider-specific behavior from weakening the common contract unnoticed."
+    expected_outcome: "The review records compliance by capability and provider or blocks unsupported combinations."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-04-security-audit"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "DESIGN.md#Security-and-resource-design"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-05-write-tests"
+    title: "Define deferred platform conformance tests"
+    description: "Design a backend conformance suite and native CI prerequisites for macOS process containment and Windows AppContainer, restricted-token, and Job Object behavior."
+    context: "The Linux-only maintainer cannot responsibly enable platforms whose authority and termination semantics are not tested natively."
+    purpose: "Keep portable contracts explicit while preventing nominal support from outrunning evidence."
+    expected_outcome: "A common suite defines required behavior and each platform has a documented native test and maintenance owner."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-04-compliance-review"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-05-implement-code"
+    title: "Restore independently tested platforms"
+    description: "Implement platform backends only after selecting maintainable native macOS and Windows isolation mechanisms and provisioning their required native test matrices."
+    context: "Conditional compilation alone cannot establish equivalent filesystem, process-tree, credential, or network guarantees."
+    purpose: "Restore platforms without contaminating provider-neutral policy or silently weakening strict execution."
+    expected_outcome: "Each enabled platform advertises a tested assurance tier and fails closed for unsupported contract dimensions."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-05-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-05-security-audit"
+    title: "Audit restored platform backends"
+    description: "Run platform-native security reviews covering containment, process trees, links and reparse points, credentials, environment, network, resources, and backend failure."
+    context: "Platform restoration changes the trusted computing base and cannot inherit Linux review evidence."
+    purpose: "Require native independent scrutiny before a platform is represented as supported."
+    expected_outcome: "Every enabled backend has platform-specific findings resolved or explicitly blocking release."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-05-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-05-compliance-review"
+    title: "Review restored platform compliance"
+    description: "Compare source-derived native behavior with the common contract and each platform assurance statement."
+    context: "Cross-platform labels must not imply guarantees that differ silently by operating system."
+    purpose: "Preserve an explicit evidence boundary for every supported platform."
+    expected_outcome: "A separate review certifies or rejects each platform and records non-equivalent behavior."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-05-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-08-29T20:50:32Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-06-write-tests"
+    title: "Define reusable model setup tests"
+    description: "Write failing library and CLI tests for generic named profiles, provider defaults, command verification, formatting-preserving profile persistence, host-execution acknowledgement, and Kvist role binding."
+    context: "Provider and model setup remains embedded in Kvist even though profile creation and verification are useful to every agent-runtime caller."
+    purpose: "Establish the standalone setup contract before moving wizard and configuration behavior across the component boundary."
+    expected_outcome: "Tests distinguish reusable provider profiles from Kvist-specific role mappings and fail until both standalone setup and compatibility integration exist."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T21:30:04Z"
+      updated_at: "2026-08-29T21:43:45Z"
+      completed_at: "2026-08-29T21:43:45Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-06-implement-code"
+    title: "Extract model profiles and setup"
+    description: "Move generic provider defaults, profile validation and verification, formatting-preserving global persistence, and terminal setup into agent-runtime; keep Kvist role bindings and project policy in Kvist."
+    context: "The reusable crate already owns prompting and supervision but standalone users must still configure commands manually."
+    purpose: "Make the library and CLI self-contained for discovering, testing, saving, and running named model profiles."
+    expected_outcome: "agent-run setup manages reusable profiles, Kvist can bind those profiles to roles, and kvist agent setup remains a compatibility surface without duplicated setup logic."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-06-write-tests"
+    requirements:
+      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-29T21:30:04Z"
+      updated_at: "2026-08-29T21:43:45Z"
+      completed_at: "2026-08-29T21:43:45Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-06-security-audit"
+    title: "Audit reusable model setup"
+    description: "Independently review profile parsing, provider probes, command verification, host acknowledgement, configuration path selection, link handling, size bounds, and atomic persistence."
+    context: "Reusable model configuration controls executable selection and may contain provider endpoints or credential-bearing environment decisions."
+    purpose: "Find command, filesystem, and authority-boundary defects before other applications trust stored profiles."
+    expected_outcome: "High-confidence setup vulnerabilities are remediated or retained as explicit blockers without treating provider verification as sandbox evidence."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-06-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T21:30:04Z"
+      updated_at: "2026-08-29T21:30:04Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-06-compliance-review"
+    title: "Review model setup compliance"
+    description: "Derive setup behavior from source and tests without intended component documents, then compare the observed record with the generic-profile and Kvist-binding contracts."
+    context: "The implementer cannot certify that model setup is reusable without leaking Kvist workflow semantics into the standalone component."
+    purpose: "Preserve independent evidence for the extracted configuration boundary."
+    expected_outcome: "The review classifies every setup and integration requirement and records discrepancies for explicit arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-06-security-audit"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T21:30:04Z"
+      updated_at: "2026-08-29T21:30:04Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-07-write-tests"
+    title: "Define provider CLI qualification tests"
+    description: "Write failing tests for conventional executable discovery, provider-preserving fallback paths, bounded version probes, maintained llama-cli/Gemini/Copilot templates, null provider stdin, and actionable pre-save failures."
+    context: "The initial setup defaults guessed several unsupported commands and changed users with llama-cli wrappers into a generic custom-script provider."
+    purpose: "Establish executable evidence that saved profiles match real noninteractive provider interfaces and are qualified before adoption."
+    expected_outcome: "Tests distinguish executable accessibility from exact model qualification and reject profiles whose selected CLI or wrapper cannot pass the provider probe."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "../CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-29T22:42:17Z"
+      updated_at: "2026-08-29T22:56:15Z"
+      completed_at: "2026-08-29T22:56:15Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-07-implement-code"
+    title: "Qualify provider CLI profiles"
+    description: "Probe conventional provider executables, accept compatible fallback paths without changing provider identity, generate maintained llama-cli/Gemini/Copilot templates, and improve exact-command qualification diagnostics."
+    context: "Local inspection found llama-cli flags differ from the guessed template, Gemini is named gemini rather than gemini-cli, and Copilot uses noninteractive --prompt rather than a chat subcommand."
+    purpose: "Make setup produce usable profiles for the common locally installed providers while explaining accessibility, argument, model, and authentication failures."
+    expected_outcome: "A selected provider remains correctly classified, its generated command uses supported noninteractive arguments, and no profile is persisted before the selected qualification path completes or is explicitly declined."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-07-write-tests"
+    requirements:
+      - "../CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-29T22:42:17Z"
+      updated_at: "2026-08-29T22:56:15Z"
+      completed_at: "2026-08-29T22:56:15Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-07-security-audit"
+    title: "Audit provider CLI qualification"
+    description: "Independently review executable discovery, fallback path validation, probe bounds, stdin handling, generated permission flags, model selectors, exact-command verification, and error redaction."
+    context: "Provider setup selects executable authority and may auto-approve tools during noninteractive host execution."
+    purpose: "Find command substitution, interactive blocking, authority escalation, and misleading qualification defects before saved profiles are trusted."
+    expected_outcome: "High-confidence provider qualification vulnerabilities are remediated or retained as explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-07-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T22:42:17Z"
+      updated_at: "2026-08-29T22:42:17Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-07-compliance-review"
+    title: "Review provider qualification compliance"
+    description: "Derive provider discovery, template, probe, and qualification behavior from source and tests without intended component documents, then compare it with the provider setup contract."
+    context: "The implementer cannot certify that locally observed CLI behavior has been represented accurately or portably."
+    purpose: "Preserve independent evidence for adopting provider-specific profiles."
+    expected_outcome: "The review classifies every provider qualification requirement and records discrepancies for explicit arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-07-security-audit"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-29T22:42:17Z"
+      updated_at: "2026-08-29T22:42:17Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-12-write-tests"
+    title: "Define direct model transport tests"
+    description: "Write failing conformance tests for a private direct local HTTP adapter covering fake OpenAI-compatible HTTP, Ollama and llama-server, unary/streamed text, tool schema/call conversion, stable IDs, malformed/duplicate calls, invalid arguments, unsupported choices, cancellation, deadlines, malformed/truncated responses, bounded redaction, TRACE sentinels, Rust 1.85, dependency and binary deltas, licenses, advisories, and local-only TLS exclusion; add the machine-readable cargo-deny license/advisory policy and measurement commands used by the decision matrix."
+    context: "Rig 0.42.0 failed hard adoption gates, but the canonical transport seam and native loop still require a small reliable local-provider implementation."
+    purpose: "Specify only the transport behavior Kvist needs without inheriting a broad framework or weakening tool-intent and authority boundaries."
+    expected_outcome: "Tests prove deterministic text and structured-intent translation, explicit unsupported behavior, fail-closed streaming, no tool execution, and no sensitive payload leakage."
+    kind: test
+    status: completed
+    depends_on:
+      - "sa-08-write-tests"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T09:28:47Z"
+      completed_at: "2026-08-30T09:28:47Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-12-implement-code"
+    title: "Implement direct local model transport"
+    description: "Implement the minimal private bounded HTTP transport and provider conversion required for approved Ollama, llama-server, and fake OpenAI-compatible endpoints, exposing only standalone canonical events and untrusted tool intents."
+    context: "A direct adapter is the selected first path after the Rig no-go and must remain replaceable without entering public types or host authority logic."
+    purpose: "Provide native model text, streaming, and tool-intent transport with a small auditable dependency and behavior surface."
+    expected_outcome: "Approved local profiles produce bounded canonical turns; endpoint policy, credentials, deadlines, cancellation, capability rejection, and redaction remain explicit, and no model output can execute a tool."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-12-write-tests"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T09:39:11Z"
+      completed_at: "2026-08-30T09:39:11Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-12-security-audit"
+    title: "Audit direct model transport"
+    description: "Independently review URL and redirect handling, loopback policy, credential routing, HTTP bounds, parser state, tool-call identity and arguments, cancellation, timeout races, malformed streams, TRACE/error leakage, and raw provider extensions."
+    context: "A small direct adapter still parses untrusted network data and handles prompts, credentials, and model-proposed actions."
+    purpose: "Find network, deserialization, resource-exhaustion, leakage, and authority-confusion defects before the native loop relies on the transport."
+    expected_outcome: "No unresolved high-confidence issue permits destination escape, secret disclosure, unbounded input, silent capability downgrade, tool execution, or false terminal success."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-12-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-12-compliance-review"
+    title: "Review direct transport compliance"
+    description: "Derive the adapter's provider, streaming, structured-intent, error, cancellation, endpoint, event, dependency, binary, license, advisory, and TLS behavior without intended component documents, then compare it with the canonical transport contract and decision matrix."
+    context: "A direct implementation is useful only if its smaller dependency graph does not hide provider-specific semantic gaps."
+    purpose: "Provide independent evidence that the first native transport is complete enough for the bounded loop and remains replaceable."
+    expected_outcome: "The review approves exact provider/server/model combinations, records unsupported capabilities and objective supply-chain measurements, and blocks native-loop use for every unevaluated or discrepant deployment."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-12-security-audit"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-10-write-tests"
+    title: "Define native model agent tests"
+    description: "Write failing component tests with deterministic fake host-authority and evidence services for bounded sequential tool turns, context budgets, malformed intent repair, typed unsupported capabilities, policy denial, approved tool results, uncertain side effects, cancellation, checkpoint replay, and terminal runtime events over the selected model transport."
+    context: "Local inference reaches agent parity only when the standalone loop connects model intent to the independently reviewed broker and execution backend; real Kvist authority and compliance evidence are tracked by the root agn-authority task chain."
+    purpose: "Define enforceable native agent behavior without importing provider-specific loops or allowing a model to certify task completion."
+    expected_outcome: "Tests prove with fake host services that model output cannot cause an effect before typed authorization and that every terminal run emits bounded replayable events; enabling Kvist native mode still requires the root authority review."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-04-compliance-review"
+      - "sa-12-compliance-review"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-10-implement-code"
+    title: "Implement bounded native agent loop"
+    description: "Implement the standalone-owned loop over the approved transport and typed broker mechanism with sequential calls, explicit budgets, deterministic context, typed recovery, runtime checkpoint events, cancellation, and no direct execution authority."
+    context: "The native loop is the preferred path for llama-server, Ollama, and compatible hosted inference because the embedding host can authorize every proposed action."
+    purpose: "Bring inference backends to useful agent parity while preserving Kvist policy, sandbox, and evidence guarantees."
+    expected_outcome: "Approved native model profiles can complete a contract through mediated tools, while unsupported or denied behavior fails explicitly and no provider library type escapes the transport boundary."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-10-write-tests"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-10-security-audit"
+    title: "Audit native agent loop"
+    description: "Independently review prompt and result trust, tool intent validation, policy sequencing, retries, uncertain effects, context poisoning, checkpoint integrity, capability downgrade, cancellation, and denial-of-service bounds."
+    context: "A native loop becomes an authority-routing component even though it must never possess execution authority itself."
+    purpose: "Find paths by which model output, provider extensions, or replay state could bypass the broker or corrupt durable evidence."
+    expected_outcome: "No unresolved high-confidence finding permits unapproved effects, hidden capability escalation, unsafe replay, or false success."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-10-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-10-compliance-review"
+    title: "Review native agent compliance"
+    description: "Derive native loop behavior and evidence from code and tests without intended component documents, then compare it with the model, capability, broker, policy, execution, and journal contracts."
+    context: "The implementer cannot certify that agent parity was achieved without weakening the authority boundaries."
+    purpose: "Provide independent evidence that native model mode satisfies the layered architecture."
+    expected_outcome: "The review classifies every native-loop guarantee and records discrepancies or unsupported provider/model combinations for arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-10-security-audit"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-11-write-tests"
+    title: "Define opaque external-agent tests"
+    description: "Write failing tests for explicit external-agent classification, whole-process sandboxing, credential and network exclusion, structured event adapters, artifact and VCS diff capture, cancellation, and refusal when the selected execution tier cannot enforce policy."
+    context: "Gemini, Copilot, Aider, Goose, Cline, and similar agents retain opaque internal loops that cannot be mediated tool by tool."
+    purpose: "Preserve useful mature agents without misrepresenting their permission prompts as Kvist authorization."
+    expected_outcome: "Tests prove external agents run only within an approved outer execution boundary and produce attributable artifact evidence."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-03-compliance-review"
+      - "sa-07-compliance-review"
+      - "sa-08-compliance-review"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-11-implement-code"
+    title: "Harden opaque external-agent mode"
+    description: "Implement explicit external-agent profiles, mandatory execution-backend capability checks, structured output or ACP adapters where supported, artifact/VCS evidence capture, and removal of provider auto-approval defaults unless separately authorized."
+    context: "External agents remain valuable compatibility backends but cannot share the trust claims of Kvist-native model and broker execution."
+    purpose: "Constrain mature provider-specific agents at process level while keeping their internal functionality available."
+    expected_outcome: "Every external-agent run advertises its coarse-grained assurance tier, fails closed without the required sandbox, and records exact executable, version, arguments, policy, workspace, and artifacts."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-11-write-tests"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-11-security-audit"
+    title: "Audit opaque external-agent mode"
+    description: "Independently review sandbox enforcement, inherited descriptors and credentials, network scope, provider permission flags, executable identity, structured event parsing, artifact attribution, cancellation, and escape behavior."
+    context: "An opaque agent can invoke internal shell, filesystem, browser, Git, or MCP tools outside Kvist's typed broker."
+    purpose: "Ensure process-level containment claims match the actual Linux execution backend and do not rely on cooperative provider behavior."
+    expected_outcome: "No unresolved high-confidence issue permits an external agent to exceed its declared outer boundary or forge completion evidence."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-11-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-11-compliance-review"
+    title: "Review external-agent compliance"
+    description: "Derive external-agent launch, containment, event, and artifact behavior without intended component documents, then compare it with the opaque-backend contract and declared assurance tiers."
+    context: "Provider-specific functionality must not be described as fine-grained Kvist mediation when only process-level enforcement exists."
+    purpose: "Provide independent evidence for each supported external-agent adapter and execution tier."
+    expected_outcome: "The review approves or rejects each agent/backend combination and records every non-equivalent capability or containment guarantee."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-11-security-audit"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:05:12Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-13-write-tests"
+    title: "Define brokered MCP host tests"
+    description: "Write failing tests for importing versioned MCP server identities and schemas behind the reviewed broker, host authorization before every tools/call, bounded resource reads, credential and network bindings, cancellation, protocol errors, and redacted runtime events."
+    context: "MCP is an external tool transport, not authorization or isolation, and must not be placed on the first native-loop delivery path."
+    purpose: "Specify optional MCP interoperability without allowing servers or models to bypass the typed broker and host grants."
+    expected_outcome: "Tests reject unknown or changed servers, tools, schemas, resources, credentials, destinations, and calls lacking an exact host authorization."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-04-compliance-review"
+      - "sa-10-compliance-review"
+      - "sa-11-compliance-review"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-13-implement-code"
+    title: "Implement brokered MCP host adapter"
+    description: "Implement optional MCP server discovery and calls as versioned tool/resource transports behind canonical descriptors, broker sequencing, host authority, selected execution/network backends, and bounded redacted runtime events."
+    context: "The reviewed native loop and broker establish the authority boundary that MCP must consume rather than replace."
+    purpose: "Reuse approved MCP tools while preserving standalone and host policy guarantees."
+    expected_outcome: "MCP behavior is disabled by default, capability-negotiated, bound to exact server and schema identity, and incapable of executing without the same authorization as a first-party tool."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-13-write-tests"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-13-security-audit"
+    title: "Audit brokered MCP host"
+    description: "Independently review server identity and launch, schema changes, transport parsing, resource and URI canonicalization, credentials, network scope, cancellation, output bounds, confused-deputy paths, and event redaction."
+    context: "An imported MCP server is untrusted executable or networked code with a model-facing schema."
+    purpose: "Find paths by which MCP can broaden authority, exfiltrate data, forge tool identity, or bypass execution controls."
+    expected_outcome: "No unresolved high-confidence issue permits an unapproved server, destination, resource, credential, or effect."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-13-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-13-compliance-review"
+    title: "Review MCP host compliance"
+    description: "Derive MCP server, schema, call, resource, authorization, transport, and event behavior without intended component documents, then compare it with the brokered protocol contract."
+    context: "Protocol compatibility cannot certify policy mediation or containment."
+    purpose: "Provide independent evidence for every approved MCP server and execution tier."
+    expected_outcome: "The review approves exact combinations, records semantic gaps, and rejects every nominally compatible server that cannot preserve the authority boundary."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-13-security-audit"
+    requirements:
+      - "DESIGN.md#Internal-structure"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T07:33:10Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-09-write-tests"
+    title: "Define pinned Rig transport tests"
+    description: "For immutable rig-core 0.42.0, reuse the direct-transport conformance suite and add framework-containment tests for exact features, private types, tool schema/call conversion, cancellation, TRACE sentinels, locked Rust 1.94 and current stable builds, marginal dependencies and binary size, licenses, advisories, and TLS."
+    context: "The project deliberately raises its MSRV to Rig's upstream-tested Rust 1.94 toolchain. The earlier 128-package delta over bare Tokio remains a preliminary footprint warning; the meaningful comparison uses the reviewed direct adapter."
+    purpose: "Permit evidence-based reevaluation without exposing Rig types or placing a speculative framework on the native runtime critical path."
+    expected_outcome: "Tests define a removable optional adapter that converts Rig output into canonical text and untrusted tool intents without exposing or invoking Rig tools."
+    kind: test
+    status: completed
+    depends_on:
+      - "sa-12-implement-code"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T11:50:26Z"
+      completed_at: "2026-08-30T11:50:26Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-09-implement-code"
+    title: "Prototype the private Rig transport"
+    description: "Build a removable adapter over exact rig-core 0.42.0 for canonical text, streaming, and untrusted structured tool intent; reject Rig tool execution, hosted tools, arbitrary additional parameters, persistence, and raw default evidence."
+    context: "Rig may reuse provider conversion while the standalone boundary and embedding host retain endpoint, credential, cancellation, capability, redaction, policy, execution, and evidence contracts."
+    purpose: "Determine whether Rig reduces provider maintenance enough to justify its marginal dependency and compatibility cost over the direct adapter."
+    expected_outcome: "The experiment records a go or no-go result; a go exposes only standalone-owned types, while a no-go leaves production behavior unchanged."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-09-write-tests"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T12:39:12Z"
+      completed_at: "2026-08-30T12:39:12Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-09-security-audit"
+    title: "Audit Rig transport prototype"
+    description: "Independently inspect dependency features, endpoint and credential routing, raw provider extensions, hosted tools, tool-call parsing and identity, cancellation, malformed streams, TRACE/error leakage, TLS, advisories, and every translation between Rig and standalone types."
+    context: "A private adapter can still bypass policy or leak sensitive provider payloads if its boundary is incomplete."
+    purpose: "Establish whether the prototype is safe enough to retain as an optional transport implementation."
+    expected_outcome: "The audit resolves or blocks every high-confidence authority, network, credential, deserialization, cancellation, and evidence defect."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-09-implement-code"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-09-compliance-review"
+    title: "Review Rig prototype decision"
+    description: "Compare source-derived prototype behavior and measured build evidence with every Rig go/no-go gate, then record an exact-version decision matrix and whether to retain, revise, upstream-patch, or remove the dependency."
+    context: "Prototype success cannot be inferred from compiling one provider example or from Rig's advertised capabilities."
+    purpose: "Produce an independent, reversible dependency decision before production code relies on Rig."
+    expected_outcome: "The review records a complete go/no-go matrix, exact dependency version and features, marginal package/binary deltas versus the direct adapter, license/advisory disposition, TLS scope, unresolved gaps, and the approved transport path."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-09-security-audit"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T07:05:12Z"
+      updated_at: "2026-08-30T07:33:10Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-14-write-tests"
+    title: "Define hosted Rig provider tests"
+    description: "After the local Rig adapter is independently approved, write failing tests for a deliberately selected hosted-provider matrix covering Rustls roots, endpoint and redirect policy, proxy denial, credential references, model qualification, unary and streaming text, structured tool intents, cancellation, rate-limit status, bounded redaction, and provider-specific capability differences."
+    context: "Rig can reduce provider maintenance beyond Ollama and llama-server, but each hosted provider adds credential, destination, TLS, semantic, and data-governance requirements that the local-only prototype intentionally excludes."
+    purpose: "Expand provider coverage through one canonical boundary without treating advertised Rig support as Kvist deployment conformance."
+    expected_outcome: "A named provider/version/model matrix has deterministic fake coverage and opt-in live qualification criteria before hosted network access is implemented."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-09-compliance-review"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T12:05:00Z"
+      updated_at: "2026-08-30T12:05:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-14-implement-code"
+    title: "Implement approved hosted Rig providers"
+    description: "Add only the hosted Rig providers approved by the conformance matrix, with explicit Rustls configuration, endpoint and credential bindings, capability descriptors, bounded canonical conversion, and no Rig tool execution or persistence."
+    context: "The local prototype proves the adapter seam but deliberately has no TLS, credentials, redirects, proxies, or arbitrary remote destinations."
+    purpose: "Gain wider provider support while preserving standalone-owned policy and evidence boundaries."
+    expected_outcome: "Approved hosted profiles use private Rig conversion and fail closed for every unqualified endpoint, credential, model, capability, or provider response."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-14-write-tests"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T12:05:00Z"
+      updated_at: "2026-08-30T12:05:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-14-security-audit"
+    title: "Audit hosted Rig providers"
+    description: "Independently review certificate roots, DNS and redirect behavior, proxy and environment handling, credential attachment, cross-provider routing, provider-hosted tool exclusion, request and response bounds, cancellation, tracing, error redaction, and dependency advisories for every enabled hosted provider."
+    context: "Remote providers move sensitive prompts and credentials across a network boundary and have materially different risks from numeric-loopback HTTP."
+    purpose: "Prevent destination escape, credential disclosure, provider confusion, payload leakage, and silent capability downgrade."
+    expected_outcome: "Every approved hosted provider has no unresolved high-confidence network, credential, authority, or data-protection defect."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-14-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T12:05:00Z"
+      updated_at: "2026-08-30T12:05:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-14-compliance-review"
+    title: "Review hosted Rig provider compliance"
+    description: "Derive the enabled provider, endpoint, TLS, credential, capability, conversion, redaction, dependency, and live qualification behavior from code and tests, then compare it with the approved provider matrix in a separate review context."
+    context: "Framework support and successful compilation do not establish that a hosted provider preserves Kvist's contract."
+    purpose: "Make provider promotion evidence-based and reversible."
+    expected_outcome: "The review approves exact provider/version/model combinations, records every unsupported behavior, and leaves all unevaluated combinations disabled."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-14-security-audit"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T12:05:00Z"
+      updated_at: "2026-08-30T12:05:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-15-write-tests"
+    title: "Define isolated stream delivery tests"
+    description: "Write failing contract tests for a pull-based or async model stream boundary covering ordered text and tool events, bounded buffering, slow-consumer backpressure, callback-free cancellation and deadlines, consumer failure, terminal-turn assembly, and clean shutdown without detached work."
+    context: "The current synchronous callback can be checked before and after invocation but cannot be preempted while arbitrary caller code executes."
+    purpose: "Define a stream interface whose transport deadlines and cancellation do not depend on a callback returning control."
+    expected_outcome: "Tests distinguish provider progress, bounded event delivery, consumer work, timeout, cancellation, and terminal assembly without permitting unbounded queues or background leaks."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-09-compliance-review"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T13:00:00Z"
+      updated_at: "2026-08-30T13:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-15-implement-code"
+    title: "Implement isolated stream delivery"
+    description: "Replace or supplement the synchronous callback with the approved pull-based or async boundary, preserving canonical event ordering, bounded backpressure, cancellation, deadlines, consumer errors, and terminal-turn ownership for direct and Rig transports."
+    context: "Running a borrowed synchronous callback inside transport polling prevents safe preemption and makes arbitrary caller latency part of the transport control path."
+    purpose: "Keep provider I/O supervision enforceable independently of caller-controlled event processing."
+    expected_outcome: "A stalled consumer cannot block transport deadline or cancellation enforcement, exceed bounded memory, detach provider work, or reorder canonical stream events."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-15-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T13:00:00Z"
+      updated_at: "2026-08-30T13:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-15-security-audit"
+    title: "Audit isolated stream delivery"
+    description: "Independently review queue bounds, wakeups, cancellation races, deadline ownership, consumer abandonment, thread and task lifetime, error redaction, event ordering, and cleanup for every stream transport."
+    context: "Concurrency introduced to isolate caller work can create denial-of-service, detached-work, stale-borrow, ordering, or evidence-integrity failures."
+    purpose: "Challenge the new concurrency boundary before hosts rely on preemptive stream supervision."
+    expected_outcome: "No slow or failed consumer can escape bounds, retain sensitive events indefinitely, outlive the call, or falsify terminal stream state."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-15-implement-code"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T13:00:00Z"
+      updated_at: "2026-08-30T13:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-15-compliance-review"
+    title: "Review isolated stream compliance"
+    description: "Derive stream production, buffering, delivery, timeout, cancellation, failure, cleanup, and terminal assembly behavior from code without intended component documents, then compare it with the approved callback-free contract."
+    context: "The implementation author cannot certify that concurrency preserves ordering, bounds, ownership, and deterministic shutdown."
+    purpose: "Record independent evidence that stream delivery no longer depends on synchronous callback cooperation."
+    expected_outcome: "The review confirms every stream invariant or blocks adoption with precise discrepancies and reproducible evidence."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-15-security-audit"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T13:00:00Z"
+      updated_at: "2026-08-30T13:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-16-write-tests"
+    title: "Define agent runtime rename tests"
+    description: "Update tests to require the agent-runtime package, agent_runtime library, agent-run executable, canonical agent-runtime profile path, and deterministic fallback to an existing legacy supervised-agent profile only when the canonical path is absent."
+    context: "The component now supplies a provider-neutral runtime rather than one concrete supervised agent, but existing users may already have stored standalone profiles."
+    purpose: "Make the new technical identity explicit without silently losing profile configuration during the rename."
+    expected_outcome: "Tests fail until all public identifiers are renamed and legacy profile discovery remains bounded, deterministic, and subordinate to the canonical path."
+    kind: test
+    status: completed
+    depends_on:
+      - "sa-09-implement-code"
+    requirements:
+      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T16:08:00Z"
+      updated_at: "2026-08-30T16:09:03Z"
+      completed_at: "2026-08-30T16:09:03Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-16-implement-code"
+    title: "Rename component to agent runtime"
+    description: "Rename the component directory, Cargo package, Rust crate, executable, imports, user-facing commands, documentation paths, and canonical profile directory to agent-runtime, preserving deterministic legacy profile discovery when no canonical file exists."
+    context: "Agent runtime is the conventional provider-neutral name for transport, supervision, retry, broker, and future isolation infrastructure; Rig remains a private adapter and does not define the component identity."
+    purpose: "Align names with the component's layered runtime responsibility before downstream API adoption grows."
+    expected_outcome: "Kvist and standalone usage consistently expose agent-runtime, agent_runtime, and agent-run with no stale technical identifier outside deliberate migration references."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-16-write-tests"
+    requirements:
+      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T16:08:00Z"
+      updated_at: "2026-08-30T16:14:57Z"
+      completed_at: "2026-08-30T16:14:57Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-16-security-audit"
+    title: "Audit agent runtime rename"
+    description: "Independently review profile-path fallback, link handling, canonical-path precedence, Cargo feature containment, executable selection, and stale identifier paths that could load unintended configuration or bypass existing boundaries."
+    context: "Configuration migration and executable renaming can accidentally select untrusted state or produce divergent security behavior."
+    purpose: "Ensure the rename changes identity only and does not weaken profile, process, transport, or authority controls."
+    expected_outcome: "No legacy fallback overrides canonical configuration, follows an unsafe path, broadens execution, or changes transport authority."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-16-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T16:08:00Z"
+      updated_at: "2026-08-30T16:08:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-16-compliance-review"
+    title: "Review agent runtime rename compliance"
+    description: "Derive package, crate, executable, component path, profile resolution, and documentation behavior from source without intended component documents, then compare it with the accepted rename contract."
+    context: "The implementation author cannot certify that a repository-wide rename is complete or compatibility-safe."
+    purpose: "Record independent evidence that technical names and migration behavior match the approved public contract."
+    expected_outcome: "The review identifies every stale non-migration identifier or behavioral discrepancy before the rename is declared complete."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-16-security-audit"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T16:08:00Z"
+      updated_at: "2026-08-30T16:08:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-17-write-tests"
+    title: "Define llama-server setup discovery tests"
+    description: "Write failing tests for the current llama-server default endpoint, health-path probing, curl configuration isolation, bounded OpenAI-compatible model discovery, numeric and explicit model selection, separate profile naming, and exact qualified request generation."
+    context: "Probing the llama.cpp router root returns HTTP 415 while `/health` succeeds, and a literal `default` model fails when the router advertises only named models."
+    purpose: "Make setup identify a reachable server and an actually available model before the optional live qualification request."
+    expected_outcome: "Tests expose advertised models safely, retain explicit manual/default choices, and generate a request for the selected provider model without conflating it with the profile name."
+    kind: test
+    status: completed
+    depends_on:
+      - "sa-16-implement-code"
+    requirements:
+      - "../CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T16:37:30Z"
+      updated_at: "2026-08-30T16:38:00Z"
+      completed_at: "2026-08-30T16:38:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-17-implement-code"
+    title: "Implement llama-server setup discovery"
+    description: "Use llama-server's current loopback default, probe `/health`, fetch and validate bounded `/v1/models` data, prompt for a listed or explicit model independently from the profile name, disable ambient curl configuration, and generate the exact chat-completions command."
+    context: "The previous root probe produced a false warning and the combined model/profile prompt generated model `default`, which this router rejected with HTTP 400."
+    purpose: "Let users qualify and persist a working named llama-server model through the normal setup flow."
+    expected_outcome: "A user can select Qwen3.8-9B-Q4_K_M from the local router, run the generated test prompt successfully, and save a separately named profile."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-17-write-tests"
+    requirements:
+      - "../CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-30T16:37:30Z"
+      updated_at: "2026-08-30T16:51:44Z"
+      completed_at: "2026-08-30T16:51:44Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-17-security-audit"
+    title: "Audit llama-server setup discovery"
+    description: "Independently review URL construction, curl configuration isolation, subprocess bounds, JSON and model-ID validation, terminal output, selection parsing, command quoting, provider-response handling, and configuration persistence."
+    context: "Model discovery consumes untrusted network JSON and reflects selected identifiers into terminal output and a persisted executable command."
+    purpose: "Prevent option injection, terminal control injection, unbounded output, model confusion, and unintended endpoint selection."
+    expected_outcome: "No discovered or manually entered value can escape its argument/JSON boundary, exceed declared bounds, override the endpoint, or silently select another model."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-17-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T16:37:30Z"
+      updated_at: "2026-08-30T16:37:30Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-17-compliance-review"
+    title: "Review llama-server setup compliance"
+    description: "Derive probe, discovery, selection, qualification, and persisted-command behavior from source without intended component documents, then compare it with the accepted setup contract."
+    context: "A successful request alone does not establish bounded discovery, deterministic selection, or configuration safety."
+    purpose: "Record independent evidence that setup behavior matches the provider-neutral profile contract."
+    expected_outcome: "The review confirms the advertised model path and all failure behavior or blocks completion with precise discrepancies."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-17-security-audit"
+    requirements:
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-30T16:37:30Z"
+      updated_at: "2026-08-30T16:37:30Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-18-write-tests"
+    title: "Define prompt presentation and qualification tests"
+    description: "Write failing tests for content-only text output, single-object JSON capture, provider-supplied reasoning events, profile and reasoning selection, fixed-prompt setup qualification, failed-test refusal, and forced persistence."
+    context: "The runtime currently appends or forwards provider presentation without a canonical JSON capture path, drops direct reasoning, and asks three avoidable setup questions."
+    purpose: "Make the requested prompt and setup experience executable before changing public runtime behavior."
+    expected_outcome: "Focused tests fail until output, selection, reasoning, and qualification behavior matches the revised contract."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#AR-REQ-OUTPUT-PRESENTATION"
+      - "REQUIREMENTS.md#AR-REQ-PROMPT-COMMAND"
+      - "REQUIREMENTS.md#AR-REQ-SETUP"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-31T19:53:23Z"
+      updated_at: "2026-08-31T20:15:25Z"
+      completed_at: "2026-08-31T20:15:25Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-18-implement-code"
+    title: "Implement prompt presentation and qualification"
+    description: "Add bounded capture, content-only text and JSON output, provider-supplied reasoning events, typed reasoning placeholders, and automatic fixed-prompt setup qualification with force-only failed persistence."
+    context: "The failing tests define one portable output boundary while preserving opaque provider limitations and explicit host authority."
+    purpose: "Let users observe supported progress, select configured behavior per prompt, and trust setup qualification without repetitive prompts."
+    expected_outcome: "The standalone CLI exposes deterministic output and qualification while multiple named profiles remain independently selectable."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-18-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-OUTPUT-PRESENTATION"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-08-31T19:53:23Z"
+      updated_at: "2026-08-31T20:15:25Z"
+      completed_at: "2026-08-31T20:15:25Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-18-security-audit"
+    title: "Audit prompt output and setup authority"
+    description: "Independently review output capture bounds, terminal disclosure, JSON encoding, reasoning-data handling, option injection, setup host authority, fixed-prompt execution, and forced failed-profile persistence."
+    context: "Provider output and reasoning are untrusted, while setup qualification intentionally runs one exact command with current host authority."
+    purpose: "Prevent clean-output and setup convenience from creating injection, leakage, authority, or false-qualification defects."
+    expected_outcome: "Every high-confidence defect is fixed or retained as an explicit blocker before promotion."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "sa-18-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-31T19:53:23Z"
+      updated_at: "2026-08-31T23:28:28Z"
+      completed_at: "2026-08-31T23:28:28Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-18-compliance-review"
+    title: "Review prompt presentation compliance"
+    description: "Independently derive output, reasoning, selection, and setup behavior and compare it with the accepted runtime requirements and contract."
+    context: "The implementer cannot certify that provider content stays clean, reasoning stays accurately labeled, or failed qualification remains explicit."
+    purpose: "Retain a separate verdict for every revised prompt and setup guarantee."
+    expected_outcome: "The review records each satisfied clause, discrepancy, and approved deferral before the feature is promoted."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "sa-18-security-audit"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#AR-REQ-OUTPUT-PRESENTATION"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-08-31T19:53:23Z"
+      updated_at: "2026-08-31T23:28:28Z"
+      completed_at: "2026-08-31T23:28:28Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-19-write-tests"
+    title: "Define provider model discovery tests"
+    description: "Write failing tests for bounded Ollama, llama-server, Copilot ACP, and Gemini ACP catalogs, numbered selection, current-model defaults, explicit custom fallback, deterministic list output, host acknowledgement, wrong IDs, unsolicited requests, empty or inconsistent state, oversized records, timeout, and helper cleanup."
+    context: "Setup requires users to type provider model identifiers even when providers expose account-aware catalogs."
+    purpose: "Make assisted selection and non-interactive model listing executable before adding discovery processes."
+    expected_outcome: "Tests fail until every catalog-capable provider offers bounded choices and free-form input is gated behind the final custom entry."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#AR-REQ-SETUP"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T06:27:02Z"
+      updated_at: "2026-09-01T07:01:22Z"
+      completed_at: "2026-09-01T07:01:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-19-implement-code"
+    title: "Implement provider model discovery"
+    description: "Add canonical bounded catalogs, HTTP and ACP discovery adapters, numbered setup choices with a final custom fallback, explicit Gemini Auto selection, and standalone text/JSON listing."
+    context: "The failing catalog tests define provider discovery without hardcoded account-specific model lists or prompt inference."
+    purpose: "Remove exact-model spelling as a prerequisite for configuring supported providers."
+    expected_outcome: "Setup and the runtime list command expose provider-advertised models safely and qualify the selected exact model."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-19-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-SETUP"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-01T06:27:02Z"
+      updated_at: "2026-09-01T07:01:22Z"
+      completed_at: "2026-09-01T07:01:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-19-security-audit"
+    title: "Audit provider model discovery"
+    description: "Review ACP process authority and cleanup, HTTP endpoint handling, catalog bounds, untrusted identifiers and labels, custom selection gating, and structured output."
+    context: "Model discovery starts provider helpers and parses untrusted account-specific metadata before qualification."
+    purpose: "Prevent assisted setup from introducing process leaks, injection, unbounded data, hidden authority, or misleading availability claims."
+    expected_outcome: "High-confidence discovery vulnerabilities are fixed or retained as explicit blockers."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "sa-19-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T06:27:02Z"
+      updated_at: "2026-09-01T07:01:22Z"
+      completed_at: "2026-09-01T07:01:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-19-compliance-review"
+    title: "Review provider model discovery compliance"
+    description: "Independently derive catalog, selection, fallback, output, and cleanup behavior and compare it with the runtime intent."
+    context: "The discovery implementer cannot certify that every advertised choice is bounded, provider-derived, and applied exactly."
+    purpose: "Retain independent evidence for the model-discovery and setup-selection guarantees."
+    expected_outcome: "The review records every satisfied clause, discrepancy, and provider limitation before promotion."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "sa-19-security-audit"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#AR-REQ-SETUP"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T06:27:02Z"
+      updated_at: "2026-09-01T07:01:22Z"
+      completed_at: "2026-09-01T07:01:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-20-write-tests"
+    title: "Define promoted Rig integration tests"
+    description: "Write failing parity tests for Rig-default selection, explicit direct fallback, provider-native JSON Schema requests, incompatible schema-and-tool rejection, and non-replay failure behavior."
+    context: "The isolated integration branch needs to exercise Rig in normal builds and evaluate one high-value structured-output capability without weakening Kvist authority."
+    purpose: "Make the experiment's preferred transport and fallback semantics executable before promotion."
+    expected_outcome: "Tests distinguish the default and fallback paths and prove both encode bounded structured-output constraints without executing tools."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T08:34:52Z"
+      updated_at: "2026-09-01T08:49:35Z"
+      completed_at: "2026-09-01T08:49:35Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-20-implement-code"
+    title: "Promote Rig on integration branch"
+    description: "Enable exact-pinned Rig by default, select it for model calls, retain explicit direct selection, map canonical output schemas through both adapters, and document measured tradeoffs."
+    context: "Rig reduces provider-wire maintenance but must remain replaceable and must not own policy, retries, tools, validation, or evidence."
+    purpose: "Create a complete branch-level trial that exercises Rig under realistic default build and CLI flow."
+    expected_outcome: "Normal integration-branch builds use Rig, explicit direct fallback remains available, and structured generation stays behind Kvist-owned canonical types."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sa-20-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+    timestamps:
+      created_at: "2026-09-01T08:34:52Z"
+      updated_at: "2026-09-01T08:49:35Z"
+      completed_at: "2026-09-01T08:49:35Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-20-security-audit"
+    title: "Audit promoted Rig integration"
+    description: "Independently review default dependency activation, schema conversion and bounds, provider enforcement claims, tracing suppression, request replay semantics, and fallback isolation."
+    context: "Making the framework path normal increases exposure to upstream provider conversion, async runtime, HTTP, and supply-chain defects."
+    purpose: "Prevent branch findings from being represented as production-ready without an independent authority and leakage review."
+    expected_outcome: "Every high-confidence issue is fixed or retained as an explicit promotion blocker."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-20-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T08:34:52Z"
+      updated_at: "2026-09-01T08:34:52Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-20-compliance-review"
+    title: "Review promoted Rig integration compliance"
+    description: "Independently derive default selection, schema, fallback, error, and dependency behavior and compare it with the accepted experiment intent."
+    context: "The integration implementer cannot certify that framework reuse preserved the canonical contract."
+    purpose: "Provide a separate promotion verdict and retain every discrepancy for human arbitration."
+    expected_outcome: "The review either supports a bounded transport-only promotion or records precise blockers."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-20-security-audit"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T08:34:52Z"
+      updated_at: "2026-09-01T08:34:52Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-21-write-tests"
+    title: "Define optional Rig promotion tests"
+    description: "Write failing regression and qualification tests for a direct-default build, explicit per-request Rig or direct selection in a Rig-enabled build, both feature modes in CI, and an exact live Ollama and llama-server version/model/template matrix covering unary text, streaming, structured output, tool intent, malformed or truncated responses, cancellation, and deadlines."
+    context: "The integration branch proves the private adapter against deterministic providers, but optional promotion to main must not impose Rig by default or represent unevaluated local deployments as qualified."
+    purpose: "Make the user-selectable experimental boundary and remaining live-provider evidence executable before changing the main-branch default."
+    expected_outcome: "Tests fail until default builds retain the direct adapter, Rig-enabled builds can choose either transport per request, both modes remain covered in CI, and unavailable live combinations are recorded as unevaluated."
+    kind: test
+    status: pending
+    depends_on:
+      - "sa-20-compliance-review"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T17:08:25Z"
+      updated_at: "2026-09-01T17:08:25Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-21-implement-code"
+    title: "Expose optional Rig transport"
+    description: "Make Rig an explicit opt-in Cargo feature on main while keeping direct transport as the default even when Rig is compiled, add direct-only and all-feature CI coverage, document exact build and per-prompt selection commands, supported local-provider matrices and limitations, and retain non-automatic fallback semantics."
+    context: "Users should be able to evaluate the contained Rig adapter without changing project profile configuration, enlarging every default build, or mistaking the low-level model command for a complete Kvist agent loop."
+    purpose: "Offer a reversible experimental integration that users can select deliberately while preserving current Kvist task and prompt behavior."
+    expected_outcome: "A documented Rig-enabled build accepts explicit `--transport rig` or `--transport direct` for each model request, normal builds remain direct-only, and no configuration or failure path silently changes transports."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sa-21-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "DESIGN.md#Algorithms-and-decisions"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-01T17:08:25Z"
+      updated_at: "2026-09-01T17:08:25Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-21-security-audit"
+    title: "Audit optional Rig promotion"
+    description: "Independently review feature isolation, per-request transport selection, endpoint routing, live provider conversion, schema and tool-intent handling, malformed streams, cancellation races, tracing and error leakage, CI coverage, dependency advisories, and the retained direct fallback."
+    context: "Opt-in status reduces default exposure but does not make framework parsing, network, resource, or authority defects acceptable for users who enable the feature."
+    purpose: "Prevent the experimental option from weakening Kvist boundaries or making unsafe capability and fallback claims."
+    expected_outcome: "Every high-confidence authority, leakage, routing, deserialization, cancellation, and dependency defect is fixed or retained as an explicit promotion blocker."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-21-implement-code"
+    requirements:
+      - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T17:08:25Z"
+      updated_at: "2026-09-01T17:08:25Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-21-compliance-review"
+    title: "Review optional Rig promotion"
+    description: "Compare source-derived default and feature behavior, live-provider results, CI evidence, user documentation, fallback semantics, tool-descriptor scope, and the exact dependency decision matrix with the accepted transport intent."
+    context: "The package-count guideline is advisory rather than a hard gate, but its maintenance and supply-chain cost, all unevaluated provider combinations, and every contract discrepancy still require explicit human arbitration."
+    purpose: "Produce a bounded decision on retaining Rig as a user-selectable experimental transport without promoting it to Kvist's authority or agent-loop layer."
+    expected_outcome: "The review records exact qualified combinations, unsupported behavior, package and binary costs, license and advisory status, resolved or arbitrated contract gaps, and whether optional main-branch promotion is supported."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-21-security-audit"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-01T17:08:25Z"
+      updated_at: "2026-09-01T17:08:25Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

@@ -25,10 +25,10 @@ comparison between intended and observed behavior.
 For the root component, the clean-checkout verification is:
 
 ```bash
-cargo run --locked -- doctor .
-cargo run --locked -- tree .
-cargo run --locked -- component validate src
-cargo run --locked -- status . --only-documents
+cargo run --manifest-path engine/Cargo.toml --locked -- doctor .
+cargo run --manifest-path engine/Cargo.toml --locked -- tree .
+cargo run --manifest-path engine/Cargo.toml --locked -- component validate engine
+cargo run --manifest-path engine/Cargo.toml --locked -- status . --only-documents
 ```
 
 ## Advisory document review

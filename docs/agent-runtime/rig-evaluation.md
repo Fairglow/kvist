@@ -2,14 +2,15 @@
 
 ## Decision
 
-Evaluation date: 2026-08-30.
+Evaluation date: 2026-09-01.
 
-Rig remains directionally promising as a private implementation of the
-`agent-runtime` model-transport boundary. Exactly pinned `rig-core` 0.42.0
-is accepted as a non-default prototype behind the `rig-transport` Cargo
-feature after Kvist deliberately raised its MSRV to Rust 1.94, the compiler
-used by that Rig release's repository and CI. The direct transport remains the
-default, fallback, and conformance baseline. Rig is not Kvist's authorization
+Rig is a default-enabled experiment on the `rig-integration` branch, not yet an
+accepted production preference. Exactly pinned `rig-core` 0.42.0 implements the
+private `agent-runtime` model-transport boundary after Kvist deliberately raised
+its MSRV to Rust 1.94, the compiler used by that Rig release's repository and
+CI. The direct transport remains an explicit fallback and conformance baseline.
+There is no automatic fallback because replay after an uncertain provider
+request can duplicate cost or future effects. Rig is not Kvist's authorization
 layer, tool broker, execution backend, sandbox, or durable evidence store.
 
 The experiment used the immutable published `rig-core` 0.42.0 crate, exactly
@@ -22,11 +23,28 @@ Do not adopt the `rig` facade or `rig-agent`. Do not make Rig messages, tools,
 errors, completion requests, provider payloads, or serialized state part of a
 public or durable Kvist interface.
 
-The optional adapter reuses Ollama and llamafile/OpenAI-compatible conversion
+The experiment adapter reuses Ollama and llamafile/OpenAI-compatible conversion
 for local Ollama and llama-server. A component-owned HTTP client enforces
 numeric loopback routing and request/response bounds. Every later immutable Rig
 release requires a new locked compiler, conformance, tracing, and dependency
 review.
+
+## Branch experiment assessment
+
+| Question | Finding |
+| --- | --- |
+| What improves? | Rig centralizes provider request/response conversion, SSE/NDJSON assembly, finish reasons, usage, tool-call fragments, and provider evolution. The branch also gains provider-native structured-output requests without exposing Rig types. |
+| What remains Kvist-owned? | Canonical messages and turns, endpoint policy, limits, cancellation semantics, schema subset and returned-output validation, retry decisions, tool authorization/execution, redaction, and durable evidence. |
+| What does it cost? | The current target-specific normal/build graph is 148 unique packages with Rig versus 49 for the direct-only build, a delta of 99. The private Rig adapter is 1,086 source lines while the hardened direct transport is 1,856; retaining both means the experiment adds code rather than deleting it. |
+| Does usage change? | Normal branch builds include Rig and `agent-run model` defaults to it. `--transport direct` is the explicit fallback. `--output-schema '<object>'` adds a generation constraint. Reasoning effort and provider reasoning still require the direct transport. Project configuration and Kvist task flow do not change. |
+| Should fallback remain? | Yes, while Rig is pre-1.0 and live deployment conformance is incomplete. Fallback must be manually selected before a request; automatic replay is unsafe after uncertain acceptance. A later production decision may keep direct only as a test oracle or remove it after multiple stable Rig upgrades. |
+| Is Rig robust enough? | The pinned completion/provider core is robust enough for a contained experiment and fake-provider conformance. It is not yet proven robust enough to be Kvist's sole production transport because upstream warns of breaking changes, declares no MSRV, and exact local model/server/template matrices remain unevaluated. |
+| Best future boundary | Rig has the better future for provider-wire breadth if its smaller crate split stabilizes. Kvist's own canonical contract and authority layers have the better future for deterministic workflow, security, and evidence. The best implementation is therefore hybrid, not full framework adoption. |
+
+Raw source-line counts are only maintenance indicators: the direct file also
+contains component-specific hardening and bounded HTTP helpers that Rig does
+not replace. The experiment demonstrates reuse potential, not a net
+maintenance saving yet.
 
 ## Evidence baseline
 
@@ -203,11 +221,11 @@ The original throwaway experiment and the integrated adapter measured:
 | Rust 1.85 | Historical fail. `rig-core` itself uses Edition 2024 let-chains stabilized in Rust 1.88. |
 | Rust 1.94 | Pass for the complete `agent-runtime --all-features` suite. This is the upstream-tested compiler, not a Rig-declared MSRV. |
 | Current Rust 1.98 | Pass for the integrated unary, streaming, tool-intent, bounds, cancellation, CLI, and tracing tests. |
-| Locked package count | Warning. 180 packages with `rig-transport` versus 52 for the direct default: delta 128, exceeding the normal 75-package gate. Retaining the dependency as optional is the explicit exception; promotion still requires independent review. |
-| Release binary size | Pass. 6,529,656 bytes with `rig-transport` versus 2,281,272 direct-default bytes: delta 4,248,384 bytes, below the 15 MiB limit. |
+| Locked package count | Advisory. Current target-specific normal/build count is 148 packages with `rig-transport` versus 49 for the direct-only build: delta 99, above the 75-package review guideline. Package count informs maintenance and supply-chain review but does not block promotion by itself. |
+| Release binary size | Pass. 6,747,168 bytes with `rig-transport` versus 2,473,416 direct-only bytes: delta 4,273,752 bytes, below the 15 MiB limit. |
 | TLS with defaults disabled | As intended for local-only scope: no Rustls, native-tls, or OpenSSL selected. |
-| Advisories | Pass: `cargo deny check advisories`. |
-| Licenses | Pass for external dependencies under the documented permissive allowlist. The two workspace packages retain their pre-existing missing-license-field warnings. |
+| Advisories, bans, sources | Pass under `cargo deny`. |
+| Licenses | Pass. The workspace packages declare AGPL-3.0-or-later, every resolved dependency has an allowed license choice, and the all-feature graph passes `cargo-deny`. |
 
 The integrated measurement builds the actual standalone executable from fresh
 target directories. The package count uses the direct adapter as the marginal
@@ -220,9 +238,9 @@ upgrade must be requalified rather than assumed compatible.
 
 ## Prototype scope
 
-The current release has a non-default internal adapter. Default production
-behavior does not depend on it until independent security and compliance
-reviews approve promotion.
+The experiment has a default-enabled internal adapter so normal branch builds
+exercise its dependency and behavior. Promotion to `main` still requires live
+provider conformance plus independent security and compliance reviews.
 
 Support:
 
@@ -231,6 +249,8 @@ Support:
 - Kvist tool descriptor to provider tool-schema translation;
 - provider tool-call to canonical `ToolIntent` translation;
 - provider/model, response, and transport-request identity, usage, and finish reason;
+- provider-native JSON Schema generation constraints for Ollama and
+  llama-server, with independent host validation still required;
 - explicit cancellation and deadlines;
 - local Ollama and llama-server;
 - one deterministic fake OpenAI-compatible server.
@@ -308,8 +328,9 @@ Unavailable live services or models are recorded as `unevaluated`, never
 - no facade, `rig-agent`, derive, vector, memory, or provider companion crate;
 - local-only build has no selected TLS backend and makes no HTTPS claim;
 - optional Rustls experiment is measured separately;
-- release binary delta is at most 15 MiB and the target-specific normal/build
-  package delta is at most 75 unless a documented human exception is approved;
+- release binary delta is at most 15 MiB; a target-specific normal/build
+  package delta above 75 triggers a documented maintenance and supply-chain
+  assessment but is not a hard failure;
 - every transitive license is one of MIT, Apache-2.0, BSD-2-Clause,
   BSD-3-Clause, ISC, Unicode-3.0, Zlib, or CDLA-Permissive-2.0; every other,
   unknown, or unlicensed dependency requires explicit legal approval;
@@ -346,15 +367,19 @@ Promote or upgrade the Rig adapter only if:
    deployment matrix;
 6. malformed and truncated streams fail closed;
 7. TRACE sentinel tests demonstrate no content leakage;
-8. dependency, size, license, advisory, and local-HTTP/TLS decisions satisfy the
-   objective gates;
+8. dependency footprint has a documented assessment, while size, license,
+   advisory, and local-HTTP/TLS decisions satisfy their objective gates;
 9. an exact-version upgrade cannot bypass the conformance suite.
 
 The 0.42.0 adapter passes the implemented compiler and fake-provider gates and
-is retained as optional. Its 128-package marginal increase requires explicit
-review before promotion. Live Ollama and llama-server model matrices,
-independent security audit, and compliance review remain pending. A future
-no-go result leaves the direct adapter and canonical seam unchanged.
+is default-enabled only on the experiment branch. This does not yet demonstrate
+lower maintenance cost because the direct oracle remains implemented. Its
+current target-specific normal/build graph contains 148 unique packages versus
+49 without default features, a 99-package marginal increase.
+That footprint requires explicit review before promotion but is not a
+standalone blocker. Live Ollama and llama-server model matrices, independent
+security audit, and compliance review remain pending. A future no-go result
+leaves the direct adapter and canonical seam unchanged.
 
 ## Direction assessment
 
@@ -372,9 +397,9 @@ The immediate durable target is:
 
 ```text
 agent-runtime canonical model contract
-    -> direct local HTTP adapter (default/fallback)
-    -> optional pinned Rig adapter
+    -> pinned Rig adapter (experiment default)
         -> approved local provider
+    -> direct local HTTP adapter (explicit fallback/conformance)
 
 Kvist host policy
     -> typed broker
@@ -382,6 +407,7 @@ Kvist host policy
             -> durable Kvist evidence
 ```
 
-The optional Rig adapter may become the preferred transport only after all
-promotion gates pass; it never replaces the canonical contract or host-owned
-authority layers.
+The Rig adapter may become the preferred transport only after all promotion
+gates pass and maintenance evidence shows that upstream provider fixes offset
+the retained adapter and dependency cost. It never replaces the canonical
+contract or host-owned authority layers.

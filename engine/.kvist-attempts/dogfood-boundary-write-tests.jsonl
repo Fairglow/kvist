@@ -1,0 +1,4 @@
+{"phase":"prepared","task_id":"dogfood-boundary-write-tests","from_status":"pending","to_status":"in-progress","timestamp":"2026-09-01T20:30:01Z","reason":null}
+{"phase":"committed","task_id":"dogfood-boundary-write-tests","from_status":"pending","to_status":"in-progress","timestamp":"2026-09-01T20:30:01Z","reason":null}
+{"phase":"prepared","task_id":"dogfood-boundary-write-tests","from_status":"in-progress","to_status":"completed","timestamp":"2026-09-01T20:58:49Z","reason":null}
+{"phase":"committed","task_id":"dogfood-boundary-write-tests","from_status":"in-progress","to_status":"completed","timestamp":"2026-09-01T20:58:49Z","reason":null}
