@@ -1,18 +1,15 @@
 //! Kvist Interactive Workspace Shell implementation.
 
-use std::path::Path;
-use std::process::Command;
+use crate::{KvistError, Result, config};
 use clap::Parser;
 use rustyline::DefaultEditor;
-use crate::{Result, KvistError, config};
+use std::path::Path;
+use std::process::Command;
 
 /// Launches and runs the persistent interactive workspace shell (REPL).
 pub fn run_shell(project_dir: &Path) -> Result<()> {
     // 1. Load active project configuration to establish the status line context
-    let project_config = match config::load(project_dir) {
-        Ok(cfg) => Some(cfg),
-        Err(_) => None,
-    };
+    let project_config = config::load(project_dir).ok();
 
     let sandbox_backend = project_config
         .as_ref()
@@ -21,13 +18,7 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
 
     let default_model = project_config
         .as_ref()
-        .and_then(|cfg| {
-            cfg.agent
-                .developer
-                .models
-                .first()
-                .map(|m| m.name.clone())
-        })
+        .and_then(|cfg| cfg.agent.developer.models.first().map(|m| m.name.clone()))
         .unwrap_or_else(|| "none".to_owned());
 
     // 2. Initialize Rustyline Editor
@@ -107,7 +98,7 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
                         eprintln!("error: failed to parse command input: {err}");
                     }
                 }
-                
+
                 // Add command to input history
                 let _ = rl.add_history_entry(line);
             }
