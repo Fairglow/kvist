@@ -1110,13 +1110,28 @@ fn run_launched_bounded(
     timeout: Option<Duration>,
     output_limit: Option<usize>,
 ) -> Result<ExecutionResult> {
-    let child = launch
-        .command(config)
-        .arg(argument)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
+    let mut attempts = 0;
+    let child = loop {
+        let res = launch
+            .command(config)
+            .arg(argument)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn();
+        match res {
+            Err(ref e) if e.raw_os_error() == Some(26) && attempts < 5 => {
+                attempts += 1;
+                tracing::warn!(
+                    runner = %config.runner,
+                    attempt = attempts,
+                    "transient Text file busy (os error 26) spawning runner copy; retrying in 10ms"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            other => break other,
+        }
+    };
     let mut child =
         child.map_err(|source| sandbox_error(config, "start sandbox runner", source))?;
     let stdin = child
@@ -1645,7 +1660,9 @@ fn create_descriptor_bound_copy(
     use std::os::unix::fs::PermissionsExt;
 
     let temp_dir_path = temp_dir.path();
-    secure_copy_directory_or_file(runner_path, temp_dir_path, is_directory_runner)?;
+    if is_directory_runner {
+        secure_copy_directory_or_file(runner_path, temp_dir_path, is_directory_runner)?;
+    }
 
     let mut nonce = [0_u8; 16];
     getrandom::fill(&mut nonce).map_err(|_error| KvistError::SandboxUnavailable {

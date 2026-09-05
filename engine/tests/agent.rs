@@ -92,6 +92,7 @@ fn split_command_decodes_escaped_backslashes_and_quotes() {
 #[test]
 #[cfg(target_os = "linux")]
 fn execute_agent_captures_stdout_and_stderr_in_log_file() {
+    kvist::init_test_logging();
     let workspace = TempDir::new().expect("workspace");
     let status = std::process::Command::new("git")
         .args(["init", "--quiet"])
@@ -206,6 +207,7 @@ printf 'sandboxed agent output\n'
 
 #[cfg(target_os = "linux")]
 fn probe_test_workspace(probe_body: &str) -> (TempDir, TempDir, SandboxConfig) {
+    kvist::init_test_logging();
     use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
 

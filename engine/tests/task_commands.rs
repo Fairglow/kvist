@@ -56,6 +56,7 @@ fn fake_sandbox_runner_path(project: &TempDir) -> std::path::PathBuf {
 
 #[cfg(target_os = "linux")]
 fn configure_fake_sandbox(project: &TempDir) {
+    kvist::init_test_logging();
     use std::os::unix::fs::PermissionsExt;
 
     let runner = fake_sandbox_runner_path(project);

@@ -5,7 +5,19 @@ use std::{
 
 use agent_runtime::{AttemptContext, CommandSpec, SupervisionPolicy, run_supervised};
 
+fn init_test_logging() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let _ = tracing_subscriber::fmt()
+            .with_writer(std::io::stderr)
+            .with_max_level(tracing::Level::DEBUG)
+            .try_init();
+    });
+}
+
 fn policy(max_retries: u32) -> SupervisionPolicy {
+    init_test_logging();
     SupervisionPolicy {
         idle_timeout: Duration::from_secs(5),
         attempt_timeout: None,
