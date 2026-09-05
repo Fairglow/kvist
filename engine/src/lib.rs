@@ -28,6 +28,7 @@ pub mod prompt_input;
 pub mod reverse_discovery;
 pub mod sandbox;
 pub mod status;
+pub mod shell;
 pub mod task_commands;
 pub mod task_queue;
 pub mod tree;

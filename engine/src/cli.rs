@@ -31,6 +31,8 @@ pub struct Cli {
 /// Commands that form Kvist's public CLI contract.
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Start the interactive workspace shell.
+    Shell(ProjectDirectory),
     /// Initialize a project with Kvist's root artifacts.
     Init(ProjectDirectory),
     /// Convert an existing Rust project into a Kvist-managed component.
@@ -503,6 +505,10 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     r#"{"status":"success","command":"agent-setup","message":"agent setup wizard complete"}"#.to_owned()
                 ))
             },
+            Command::Shell(_) => Err(KvistError::SandboxUnavailable {
+                runner: "shell".to_owned(),
+                reason: "interactive shell is not supported in JSON mode".to_owned(),
+            }),
             Command::Init(project) => {
                 let outcome = init::initialize(&project.path)?;
                 Ok(CommandOutput::message(format!(
@@ -843,6 +849,10 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     "agent setup wizard complete".to_owned(),
                 ))
             }
+            Command::Shell(project) => {
+                crate::shell::run_shell(&project.path)?;
+                Ok(CommandOutput::none())
+            }
             Command::Init(project) => init::initialize(&project.path)
                 .map(|outcome| CommandOutput::message(outcome.to_string())),
             Command::Tree(project) => {
@@ -1136,6 +1146,17 @@ fn validate_component_documents(
 mod tests {
     use super::*;
     use clap::error::ErrorKind;
+
+    #[test]
+    fn parses_shell_with_the_current_directory_by_default() {
+        let cli = Cli::try_parse_from(["kvist", "shell"]).expect("valid shell command");
+
+        let Command::Shell(project) = cli.command else {
+            panic!("expected shell command");
+        };
+
+        assert_eq!(project.path, PathBuf::from("."));
+    }
 
     #[test]
     fn parses_init_with_the_current_directory_by_default() {

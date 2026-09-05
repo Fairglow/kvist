@@ -27,6 +27,8 @@ toml_edit = "0.25.13"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
 agent-runtime = { version = "=0.1.0", path = "../agent_runtime" }
+rustyline = "18.0.1"
+minus = "5.7.2"
 
 [dev-dependencies]
 kvist-sandbox-runner = { version = "=0.1.0", path = "../sandbox_runner" }
