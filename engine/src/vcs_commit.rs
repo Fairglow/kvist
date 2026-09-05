@@ -338,6 +338,12 @@ pub fn commit_acceptance_record(project_dir: &Path, record: &AcceptanceRecord) -
         });
     }
 
+    tracing::info!(
+        acceptance_id = %record.acceptance_id,
+        changes_count = record.accepted_changes.len(),
+        "creating VCS commit for accepted changes"
+    );
+
     // 4. Verify all accepted pre-digests match what is currently in HEAD
     for change in &record.accepted_changes {
         verify_head_pre_digest(

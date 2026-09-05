@@ -503,6 +503,31 @@ Detailed rationale and task chains are in
 - Add option `kvist task run-all --parallel` to discover ready tasks across all components and execute them in parallel up to a CPU-concurrency limit.
 - Ensure that task queue files and task locks are safely isolated, avoiding collision on state updates.
 
+## Logging, Diagnostics & Observability Policy
+
+### [PARTIAL] TODO OBS-01 — Structured Diagnostic Logging & Observability Standard Across All Subsystems
+
+**Context:** Kvist needs a uniform logging discipline where events are classified consistently across all subsystems (engine, agent_runtime, sandbox_runner) to provide enough actionable context without log spamming. Diagnostic logs must never corrupt stdout (reserved for commands/JSON).
+
+**Acceptance criteria:**
+
+- Integrate `tracing` and `tracing-subscriber` into `engine` and `agent-runtime`.
+- Emit all diagnostic logging to `stderr` with level filtering (`KVIST_LOG`, `RUST_LOG`).
+- Enforce log level semantics: `ERROR` for invariant violations, `WARN` for retries/degraded states, `INFO` for operator milestones, `DEBUG` for contextual parameters, and `TRACE` for fine-grained internal steps.
+- Enforce anti-spamming: summarize directory discovery, debounce streaming chunks, rate-limit retries.
+- Ensure test executions default to `DEBUG` log level (`init_test_logging`) so diagnostic insights are available during test failures.
+- Document logging rules and standards in `docs/logging.md` and link from `docs/standards.md`.
+
+### TODO OBS-02 — Sandbox Runner Wire-Protocol Structured Logging & Diagnostics
+
+**Context:** The standalone Linux `kvist-sandbox-runner` executes in a distinct process boundary and must surface diagnostic insights consistently over `stderr` during Bubblewrap setup, mount validation, resource cap enforcement, and isolation breaches.
+
+**Acceptance criteria:**
+
+- Ensure `kvist-sandbox-runner` uses structured diagnostics adhering to the log level standards.
+- Provide actionable diagnostic context on exit without leaking confidential data or breaking fail-closed invariants.
+- Cover runner diagnostic outputs with integration tests.
+
 ---
 
 ## Implemented Work and Remaining Qualifications

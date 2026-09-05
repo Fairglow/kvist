@@ -146,6 +146,11 @@ pub fn verify_profile(
     working_directory: &Path,
     host_execution_acknowledged: bool,
 ) -> Result<()> {
+    tracing::info!(
+        profile = %profile.name,
+        provider = %profile.provider,
+        "verifying model profile"
+    );
     if !host_execution_acknowledged {
         return Err(Error::HostExecutionNotAcknowledged);
     }

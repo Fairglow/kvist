@@ -49,6 +49,10 @@ struct DiscoveredSymbols {
 
 /// Scans a directory and reverse-engineers a spec, task queue, and implementation record.
 pub fn reverse_discover(path: &Path) -> Result<ReverseDiscoverOutcome> {
+    tracing::info!(
+        path = %path.display(),
+        "starting reverse discovery on directory"
+    );
     // 1. Verify directory safety
     let metadata = fs::symlink_metadata(path).map_err(|source| KvistError::Io {
         operation: "inspect reverse-discovery path",

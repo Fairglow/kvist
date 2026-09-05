@@ -213,19 +213,26 @@ pub fn discover_models(
     options: &ModelDiscoveryOptions,
     cancellation: &CancellationToken,
 ) -> Result<ModelCatalog> {
+    tracing::info!(provider = ?provider, "discovering provider models");
     validate_options(options)?;
     let _signals = SignalCancellation::new_with_token(cancellation.clone())?;
-    match provider {
+    let catalog = match provider {
         CatalogProvider::Ollama | CatalogProvider::LlamaServer => {
-            discover_http(provider, options, cancellation)
+            discover_http(provider, options, cancellation)?
         }
         CatalogProvider::Copilot | CatalogProvider::Gemini => {
             if !options.allow_host_discovery {
                 return Err(Error::HostDiscoveryNotAcknowledged);
             }
-            discover_acp(provider, options, cancellation)
+            discover_acp(provider, options, cancellation)?
         }
-    }
+    };
+    tracing::info!(
+        provider = ?provider,
+        models_count = catalog.models.len(),
+        "discovered provider models"
+    );
+    Ok(catalog)
 }
 
 fn validate_options(options: &ModelDiscoveryOptions) -> Result<()> {

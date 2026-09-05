@@ -11,7 +11,7 @@ homepage = "https://github.com/Fairglow/kvist"
 
 [features]
 default = ["rig-transport"]
-rig-transport = ["dep:bytes", "dep:futures", "dep:reqwest", "dep:rig-core", "dep:tokio", "dep:tracing"]
+rig-transport = ["dep:bytes", "dep:futures", "dep:reqwest", "dep:rig-core", "dep:tokio"]
 
 [lib]
 name = "agent_runtime"
@@ -34,7 +34,7 @@ tempfile = "3.27"
 thiserror = "2.0"
 tokio = { version = "1", features = ["macros", "net", "rt", "time"], optional = true }
 toml_edit = "0.25.13"
-tracing = { version = "0.1", optional = true }
+tracing = "0.1"
 
 [dev-dependencies]
 tempfile = "3.27"

@@ -70,6 +70,11 @@ pub fn convert(project_dir: &Path) -> Result<ConvertOutcome> {
     validate_project_directory(project_dir)?;
     let manifest = read_manifest(project_dir)?;
     validate_implementation_root(project_dir)?;
+    tracing::info!(
+        project_dir = %project_dir.display(),
+        package = %manifest.name,
+        "converting existing Rust project"
+    );
 
     let metadata_directory = project_dir.join(METADATA_DIRECTORY);
     match fs::symlink_metadata(&metadata_directory) {
@@ -164,6 +169,11 @@ pub fn convert(project_dir: &Path) -> Result<ConvertOutcome> {
         write_new_file_atomically(&metadata_directory.join(name), &contents)?;
     }
     sync_directory(&metadata_directory)?;
+
+    tracing::info!(
+        project_dir = %project_dir.display(),
+        "successfully converted project to Kvist component"
+    );
 
     Ok(ConvertOutcome::Converted {
         project_dir: project_dir.to_path_buf(),

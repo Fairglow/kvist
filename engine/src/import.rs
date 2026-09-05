@@ -61,6 +61,12 @@ pub fn import(
     component: Option<&Path>,
     dest_dir: &Path,
 ) -> Result<ImportOutcome> {
+    tracing::info!(
+        repo_url = %repo_url,
+        branch = %branch,
+        dest_dir = %dest_dir.display(),
+        "importing repository"
+    );
     // 1. Ensure target destination directory is either empty or doesn't exist yet
     if dest_dir.exists() {
         if !dest_dir.is_dir() {

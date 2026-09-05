@@ -77,8 +77,11 @@ impl fmt::Display for InitOutcome {
 /// Only an uninitialized project is written. A validated current project is
 /// reported unchanged; partial, invalid, and unsupported projects are refused.
 pub fn initialize(project_dir: &Path) -> Result<InitOutcome> {
+    tracing::info!(project_dir = %project_dir.display(), "initializing Kvist project");
     ensure_project_directory(project_dir)?;
-    match project_state::inspect(project_dir)?.state {
+    let state = project_state::inspect(project_dir)?.state;
+    tracing::debug!(project_dir = %project_dir.display(), state = state.name(), "inspected project state");
+    match state {
         ProjectState::Uninitialized
             if project_dir.join("Cargo.toml").exists()
                 && fs::symlink_metadata(project_dir.join("src"))
@@ -86,20 +89,24 @@ pub fn initialize(project_dir: &Path) -> Result<InitOutcome> {
         {
             return convert::convert(project_dir).map(|outcome| match outcome {
                 convert::ConvertOutcome::Converted { project_dir } => {
+                    tracing::info!(project_dir = %project_dir.display(), "converted existing Rust project");
                     InitOutcome::ConvertedExistingRustProject { project_dir }
                 }
                 convert::ConvertOutcome::AlreadyConverted { project_dir } => {
+                    tracing::info!(project_dir = %project_dir.display(), "existing Rust project already converted");
                     InitOutcome::AlreadyConvertedExistingRustProject { project_dir }
                 }
             });
         }
         ProjectState::Uninitialized => {}
         ProjectState::Current => {
+            tracing::info!(project_dir = %project_dir.display(), "project already initialized");
             return Ok(InitOutcome::AlreadyInitialized {
                 project_dir: project_dir.to_path_buf(),
             });
         }
         state => {
+            tracing::error!(project_dir = %project_dir.display(), state = state.name(), "project state prevents initialization");
             return Err(KvistError::ProjectStateNotInitializable {
                 project_dir: project_dir.to_path_buf(),
                 state: state.name().to_owned(),
@@ -108,10 +115,14 @@ pub fn initialize(project_dir: &Path) -> Result<InitOutcome> {
     }
 
     create_artifact_parents(project_dir, root_artifacts())?;
+    tracing::debug!(project_dir = %project_dir.display(), artifacts_count = root_artifacts().len(), "writing root artifact set");
     for artifact in root_artifacts() {
-        write_new_file_atomically(&project_dir.join(artifact.relative_path), artifact.contents)?;
+        let dest = project_dir.join(artifact.relative_path);
+        tracing::trace!(artifact = %dest.display(), bytes = artifact.contents.len(), "writing artifact");
+        write_new_file_atomically(&dest, artifact.contents)?;
     }
 
+    tracing::info!(project_dir = %project_dir.display(), "successfully initialized Kvist project");
     Ok(InitOutcome::Initialized {
         project_dir: project_dir.to_path_buf(),
     })

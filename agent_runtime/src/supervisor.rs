@@ -339,9 +339,21 @@ where
             });
         }
 
+        tracing::debug!(
+            program = %specification.program,
+            attempt = attempt_number,
+            max_retries = policy.max_retries,
+            "running supervised attempt"
+        );
+
         let event = run_attempt(&specification, policy, &cancellation, &mut output)?;
         match event {
             AttemptEvent::Exited(status) if status.success() => {
+                tracing::info!(
+                    program = %specification.program,
+                    attempts = attempt_number,
+                    "supervised execution succeeded"
+                );
                 return Ok((
                     ExecutionReport {
                         attempts: attempt_number,
@@ -349,9 +361,22 @@ where
                     output,
                 ));
             }
-            AttemptEvent::Exited(status) => return Err(Error::ProcessFailed { status }),
+            AttemptEvent::Exited(status) => {
+                tracing::error!(
+                    program = %specification.program,
+                    status = ?status.code(),
+                    "supervised process failed"
+                );
+                return Err(Error::ProcessFailed { status });
+            }
             AttemptEvent::Retry(cause) if attempt_number <= policy.max_retries => {
                 prior_failure = Some(cause);
+                tracing::warn!(
+                    cause = cause.description(),
+                    attempt = attempt_number + 1,
+                    max_attempts = policy.max_retries + 1,
+                    "supervisor retrying after failure"
+                );
                 eprintln!(
                     "[supervisor] retrying after {} (attempt {}/{})",
                     cause.description(),

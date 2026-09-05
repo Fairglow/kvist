@@ -99,6 +99,10 @@ fn run_wizard_inner<R: BufRead, W: Write>(
     profile_config: Option<&Path>,
     force: bool,
 ) -> Result<()> {
+    tracing::info!(
+        project_dir = %project_dir.display(),
+        "starting interactive agent setup wizard"
+    );
     write_output(
         writer,
         "==================================================\n\

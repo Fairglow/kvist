@@ -22,6 +22,7 @@ mod file_io;
 mod filesystem;
 pub mod import;
 pub mod init;
+pub mod logging;
 pub mod project_state;
 pub mod prompt_input;
 pub mod reverse_discovery;
@@ -37,9 +38,11 @@ pub mod wizard;
 use clap::Parser;
 
 pub use error::{KvistError, Result};
+pub use logging::{init_logging, init_test_logging};
 
 /// Parses process arguments and dispatches the requested command.
 pub fn run() -> Result<cli::CommandOutput> {
+    logging::init_logging();
     let cli = cli::Cli::try_parse()?;
     cli::execute(cli.command, cli.json)
 }

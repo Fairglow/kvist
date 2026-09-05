@@ -308,6 +308,12 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         .collect::<Result<Vec<_>>>()?;
     let state = classify(&artifacts);
     let (component_root, components, discovery_error) = inspect_components(project_dir, state)?;
+    tracing::debug!(
+        project_dir = %project_dir.display(),
+        state = state.name(),
+        components_count = components.len(),
+        "inspected project state"
+    );
     Ok(ProjectInspection {
         project_dir: project_dir.to_path_buf(),
         state,

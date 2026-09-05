@@ -740,6 +740,7 @@ pub fn ensure_available(
     expected_runner: &RunnerIdentity,
     expected_backend: &BackendIdentity,
 ) -> Result<SandboxProbe> {
+    tracing::debug!(runner = %config.runner, "probing sandbox runner availability");
     let launch = checked_runner_launch(config, project_root, vcs_selection, expected_runner)?;
     let result = run_launched_bounded(
         &launch,
@@ -842,7 +843,7 @@ pub fn ensure_available(
             reason: "the runner probe reported an enforcement backend kind, path, or digest that does not match the approved backend identity".to_owned(),
         });
     }
-    Ok(SandboxProbe {
+    let sandbox_probe = SandboxProbe {
         runner_path: probe.runner.path,
         runner_digest: probe.runner.digest,
         backend: BackendIdentity {
@@ -850,7 +851,14 @@ pub fn ensure_available(
             path: probe.backend.path,
             digest: probe.backend.digest,
         },
-    })
+    };
+    tracing::debug!(
+        runner = %config.runner,
+        backend = %sandbox_probe.backend.path,
+        digest = %sandbox_probe.backend.digest,
+        "sandbox probe confirmed availability"
+    );
+    Ok(sandbox_probe)
 }
 
 fn validate_probe_digest(config: &SandboxConfig, value: &str, label: &str) -> Result<()> {
@@ -1061,6 +1069,19 @@ pub fn execute_with_timeout(
         cache: None,
         scratch: None,
     };
+    tracing::info!(
+        program = %request.program,
+        phase = ?request.phase,
+        component = %request.component_dir.display(),
+        "executing command in sandbox"
+    );
+    tracing::debug!(
+        program = %request.program,
+        grants_count = grants.len(),
+        timeout = ?options.timeout,
+        "dispatched sandbox execution request"
+    );
+
     let encoded =
         serde_json::to_vec(&sandbox_request).map_err(|error| KvistError::SandboxUnavailable {
             runner: config.runner.clone(),
@@ -1198,6 +1219,12 @@ fn run_launched_bounded(
                     sandbox_error(config, "wait for terminated sandbox runner", source)
                 })?,
             };
+            if timed_out {
+                tracing::warn!(timeout = ?timeout, "sandbox execution timed out");
+            }
+            if output_limit_exceeded {
+                tracing::warn!(limit = ?output_limit, "sandbox execution exceeded output limit");
+            }
             // A direct runner can exit while an escaped descendant keeps either
             // pipe open. Do not wait for that holder after terminating its group.
             return Ok(ExecutionResult {
@@ -1215,6 +1242,7 @@ fn run_launched_bounded(
             && !stdout_open
             && !stderr_open
         {
+            tracing::debug!(status = ?status, "sandbox runner exited normally");
             return Ok(ExecutionResult {
                 output: std::process::Output {
                     status,

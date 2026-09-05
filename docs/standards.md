@@ -14,14 +14,14 @@ reference the named format without claiming conformance in unrelated areas.
 
 ## Adopted and aligned practices
 
-| Standard or practice | Kvist position | Application |
-| --- | --- | --- |
-| ISO/IEC/IEEE 42010:2022 | Conceptually aligned; formal conformance not yet claimed | `ARCHITECTURE.md` identifies the system, stakeholders, concerns, architecture drivers, component and interaction views, correspondences, decisions, and rationale. The standard deliberately does not prescribe a file format or method. |
-| arc42 | Tailored content profile | Context, constraints, building blocks, runtime interactions, cross-cutting concepts, decisions, quality concerns, risks, and glossary concepts inform architecture and design templates. Unneeded sections are omitted. |
-| C4 model | Selective visualization convention | Context, container, component, and dynamic views may be used when valuable. Kvist's directory-to-component mapping is a Kvist convention, not a C4 requirement. |
-| RFC 2119 and RFC 8174 (BCP 14) | Adopted for normative prose | Uppercase MUST, SHOULD, MAY, and related terms have BCP 14 meanings only where the document includes the interpretation statement. Ordinary lowercase prose is not treated as a requirement level. |
-| Architecture Decision Records | Adopted practice | Significant decisions use numbered Markdown files containing status, context, decision, alternatives, and consequences. Superseding decisions create a new ADR rather than rewriting history. |
-| Semantic Versioning 2.0.0 | Intended for released public contracts | A public API or artifact format must be explicitly declared before SemVer compatibility claims are meaningful. Pre-release internal schemas remain independently versioned. |
+| Standard or practice           | Kvist position                                           | Application                                                                                                                                                                                                                              |
+| ------------------------------ | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ISO/IEC/IEEE 42010:2022        | Conceptually aligned; formal conformance not yet claimed | `ARCHITECTURE.md` identifies the system, stakeholders, concerns, architecture drivers, component and interaction views, correspondences, decisions, and rationale. The standard deliberately does not prescribe a file format or method. |
+| arc42                          | Tailored content profile                                 | Context, constraints, building blocks, runtime interactions, cross-cutting concepts, decisions, quality concerns, risks, and glossary concepts inform architecture and design templates. Unneeded sections are omitted.                  |
+| C4 model                       | Selective visualization convention                       | Context, container, component, and dynamic views may be used when valuable. Kvist's directory-to-component mapping is a Kvist convention, not a C4 requirement.                                                                          |
+| RFC 2119 and RFC 8174 (BCP 14) | Adopted for normative prose                              | Uppercase MUST, SHOULD, MAY, and related terms have BCP 14 meanings only where the document includes the interpretation statement. Ordinary lowercase prose is not treated as a requirement level.                                       |
+| Architecture Decision Records  | Adopted practice                                         | Significant decisions use numbered Markdown files containing status, context, decision, alternatives, and consequences. Superseding decisions create a new ADR rather than rewriting history.                                            |
+| Semantic Versioning 2.0.0      | Intended for released public contracts                   | A public API or artifact format must be explicitly declared before SemVer compatibility claims are meaningful. Pre-release internal schemas remain independently versioned.                                                              |
 
 ISO/IEC/IEEE 15288 and 12207 informed the recursive lifecycle, role separation,
 configuration management, traceability, verification, and review gates. Kvist
@@ -40,15 +40,16 @@ than claiming IEEE 1016 conformance or reproducing its document organization.
 useful machine-readable syntax, the contract should reference the native
 definition and state its exact dialect/version and authority:
 
-| Boundary | Preferred machine-readable definition | Current support |
-| --- | --- | --- |
-| HTTP API | OpenAPI | May be referenced from `CONTRACT.md`; validation/import/export deferred until an HTTP boundary needs it |
-| Event or message API | AsyncAPI | May be referenced; validation/import/export deferred |
-| JSON or YAML data | JSON Schema 2020-12 or an explicitly named later dialect | Recommended for machine-consumed artifact payloads; Kvist's Rust parsers remain authoritative for current internal schemas |
-| RPC | Protocol Buffers/gRPC or the selected protocol's IDL | May be referenced when selected by architecture |
-| WebAssembly component boundary | WIT | May be referenced when a WASI component boundary exists |
-| Rust library | Public Rust types, rustdoc, compile-time checks, and contract tests | Native current practice |
-| CLI | Parser definition, deterministic help/reference output, and integration tests | Native current practice; no universal CLI schema is claimed |
+| Boundary                       | Preferred machine-readable definition                                                           | Current support                                                                                                            |
+| ------------------------------ | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| HTTP API                       | OpenAPI                                                                                         | May be referenced from `CONTRACT.md`; validation/import/export deferred until an HTTP boundary needs it                    |
+| Event or message API           | AsyncAPI                                                                                        | May be referenced; validation/import/export deferred                                                                       |
+| JSON or YAML data              | JSON Schema 2020-12 or an explicitly named later dialect                                        | Recommended for machine-consumed artifact payloads; Kvist's Rust parsers remain authoritative for current internal schemas |
+| RPC                            | Protocol Buffers/gRPC or the selected protocol's IDL                                            | May be referenced when selected by architecture                                                                            |
+| WebAssembly component boundary | WIT                                                                                             | May be referenced when a WASI component boundary exists                                                                    |
+| Rust library                   | Public Rust types, rustdoc, compile-time checks, and contract tests                             | Native current practice                                                                                                    |
+| CLI                            | Parser definition, deterministic help/reference output, and integration tests                   | Native current practice; no universal CLI schema is claimed                                                                |
+| Observability & Diagnostics    | Structured level-filtered logging via `tracing` to `stderr` with `KVIST_LOG`/`RUST_LOG` control | Defined in [`docs/logging.md`](logging.md)                                                                                 |
 
 Machine-readable definitions describe syntax and data shape well, but usually
 do not capture all authorization, ordering, retry, partial-effect,

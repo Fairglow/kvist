@@ -10,6 +10,11 @@ use crate::{
 /// Discovers and renders the component tree for a project root.
 pub fn render_project(project_root: &Path) -> Result<String> {
     let config = config::load(project_root)?;
+    tracing::debug!(
+        project_root = %project_root.display(),
+        component_root = %config.component_root.display(),
+        "rendering component tree"
+    );
     let discovery = discovery::discover_with_limits(
         &project_root.join(&config.component_root),
         config.discovery,

@@ -18,6 +18,12 @@ pub fn resolve_prompt(
     file: Option<&Path>,
     use_editor: bool,
 ) -> Result<String> {
+    tracing::debug!(
+        has_value = prompt.is_some(),
+        file = ?file,
+        use_editor = use_editor,
+        "resolving prompt input"
+    );
     if let Some(prompt) = prompt {
         return validate_prompt(prompt);
     }

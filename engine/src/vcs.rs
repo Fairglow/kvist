@@ -133,6 +133,12 @@ pub fn inspect(
     required_paths: impl IntoIterator<Item = PathBuf>,
 ) -> VcsInspection {
     let required_paths = required_paths.into_iter().collect::<BTreeSet<_>>();
+    tracing::debug!(
+        project_dir = %project_dir.display(),
+        selection = ?selection,
+        required_paths_count = required_paths.len(),
+        "inspecting VCS tracking status"
+    );
     if let Some(path) = required_paths.iter().find(|path| !is_normal_relative(path)) {
         return VcsInspection::unavailable(
             "inspection failed",

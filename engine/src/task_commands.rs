@@ -85,6 +85,15 @@ fn transition_locked(
     task.timestamps.completed_at = (target == TaskStatus::Completed).then(|| timestamp.clone());
     task.blocked_reason = (target == TaskStatus::Blocked).then(|| reason.unwrap().to_owned());
 
+    tracing::info!(
+        task_id = %task_id,
+        from = ?from,
+        to = ?target,
+        reason = ?reason,
+        component = %context.component_path.display(),
+        "task status transitioned"
+    );
+
     let serialized = serialize(&queue).map_err(|error| KvistError::TaskQueueUnavailable {
         path: context
             .component_dir
@@ -4148,6 +4157,11 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
         let lang = detect_language(&context.component_dir);
         let prompt = load_and_interpolate_template(&context.component_dir, lang, task)?;
 
+        tracing::info!(
+            task_id = %task_id,
+            component = %component_path.display(),
+            "running task via external agent in sandbox"
+        );
         println!("Running task `{task_id}` via external agent...");
 
         // 6. Execute agent
@@ -4190,6 +4204,10 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
         // 7. Transition task status depending on outcome
         if run_result.success {
             if task.kind == TaskKind::Implementation {
+                tracing::info!(
+                    task_id = %task_id,
+                    "running test-command verification"
+                );
                 println!("Running test-command verification...");
                 match verify_task(
                     component_path,

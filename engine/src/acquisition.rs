@@ -420,6 +420,10 @@ pub fn build_acquisition_plan(
     path_value: String,
     config: &AcquisitionConfig,
 ) -> Result<AcquisitionPlan, PlanError> {
+    tracing::debug!(
+        sources_count = config.additional_sources.len() + 1,
+        "building dependency acquisition plan"
+    );
     validate_acquisition_config(config)?;
     validate_path_value(&path_value)?;
     // The supplied toolchain root must not lexically overlap the attempt root
@@ -486,6 +490,7 @@ pub fn build_verification_plan(
     approved_cargo_home: HostPath,
     path_value: String,
 ) -> Result<VerificationPlan, PlanError> {
+    tracing::debug!("building offline verification plan");
     validate_path_value(&path_value)?;
     // The toolchain root and the approved Cargo-home generation must not
     // lexically overlap the verification root (whose children supply scratch and

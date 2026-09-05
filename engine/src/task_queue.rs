@@ -352,6 +352,10 @@ pub fn parse(contents: &str) -> std::result::Result<TaskQueue, TaskQueueError> {
     }
     let queue: TaskQueue = serde_yaml::from_str(contents)?;
     validate(&queue)?;
+    tracing::trace!(
+        tasks_count = queue.tasks.len(),
+        "parsed and validated task queue"
+    );
     Ok(queue)
 }
 

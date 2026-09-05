@@ -261,6 +261,12 @@ impl ModelTransport for DirectModelTransport {
         request: &ModelRequest,
         cancellation: &CancellationToken,
     ) -> Result<ModelTurn> {
+        tracing::debug!(
+            provider = ?self.provider,
+            endpoint = %self.endpoint.authority,
+            streaming = false,
+            "dispatching direct model request"
+        );
         let mut body = Vec::new();
         self.execute_with_body(request, false, cancellation, &mut |chunk| {
             body.extend_from_slice(chunk);
@@ -278,6 +284,12 @@ impl ModelTransport for DirectModelTransport {
         cancellation: &CancellationToken,
         on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>,
     ) -> Result<ModelTurn> {
+        tracing::debug!(
+            provider = ?self.provider,
+            endpoint = %self.endpoint.authority,
+            streaming = true,
+            "dispatching direct streaming model request"
+        );
         let mut decoder = StreamDecoder::new(self.provider, request);
         let decode_deadline = Instant::now() + self.deadline;
         let mut deliver = |event| {

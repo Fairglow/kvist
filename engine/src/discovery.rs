@@ -162,6 +162,7 @@ pub fn discover(component_root: &Path) -> Result<Discovery> {
 /// This is used by project commands after loading `kvist.toml`; the public
 /// [`discover`] API retains its deterministic default limits for direct users.
 pub fn discover_with_limits(component_root: &Path, limits: DiscoveryLimits) -> Result<Discovery> {
+    tracing::debug!(component_root = %component_root.display(), "starting component discovery");
     validate_component_root(component_root)?;
 
     let mut context = ScanContext {
@@ -181,6 +182,13 @@ pub fn discover_with_limits(component_root: &Path, limits: DiscoveryLimits) -> R
     context
         .components
         .sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+
+    tracing::info!(
+        component_root = %component_root.display(),
+        components_found = context.components.len(),
+        directories_scanned = context.scanned_directories,
+        "completed component discovery"
+    );
 
     Ok(Discovery {
         components: context.components,
@@ -253,6 +261,11 @@ fn scan_directory(
                 max_components: context.limits.max_components,
             });
         }
+        tracing::debug!(
+            component = %relative_path.display(),
+            status = ?component.status(),
+            "found component"
+        );
         context.components.push(component);
     }
 

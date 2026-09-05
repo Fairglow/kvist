@@ -151,6 +151,12 @@ pub fn execute_agent(
         request.target_dir,
     )?;
 
+    tracing::info!(
+        task_id = %request.task_id,
+        role = ?request.role,
+        "executing agent for task"
+    );
+
     let logs_dir = ensure_logs_directory(request.target_dir)?;
 
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
@@ -160,6 +166,14 @@ pub fn execute_agent(
         timestamp.to_string().replace(':', "-")
     );
     let log_path = logs_dir.join(log_file_name);
+
+    tracing::debug!(
+        task_id = %request.task_id,
+        program = %program,
+        log_path = %log_path.display(),
+        timeout_seconds = profile.timeout_seconds,
+        "prepared agent execution in sandbox"
+    );
     let mut log_file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -232,6 +246,35 @@ pub fn execute_agent(
     {
         tokens_input = record.tokens_input;
         tokens_output = record.tokens_output;
+    }
+
+    if success {
+        tracing::info!(
+            task_id = %request.task_id,
+            tokens_input = ?tokens_input,
+            tokens_output = ?tokens_output,
+            log_path = %log_path.display(),
+            "agent execution completed successfully"
+        );
+    } else if timed_out {
+        tracing::warn!(
+            task_id = %request.task_id,
+            log_path = %log_path.display(),
+            "agent execution timed out"
+        );
+    } else if output_limit_exceeded {
+        tracing::warn!(
+            task_id = %request.task_id,
+            log_path = %log_path.display(),
+            "agent execution exceeded output limit"
+        );
+    } else {
+        tracing::warn!(
+            task_id = %request.task_id,
+            exit_code = ?output.status.code(),
+            log_path = %log_path.display(),
+            "agent execution failed"
+        );
     }
 
     Ok(AgentRunResult {
