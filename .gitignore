@@ -1,2 +1,12 @@
+# Ignore editor settings
 /.zed
-/_next_prompt.txt
+/.vscode
+
+# Ignore temporal files
+/*.txt
+/*.log
+
+# Ignore Gemini CLI deps
+/node_modules
+/package-lock.json
+/package.json
