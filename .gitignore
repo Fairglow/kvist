@@ -1,6 +1,10 @@
+# Ignore Rust target directories
+/target
+
 # Ignore editor settings
-/.zed
-/.vscode
+.idea
+.vscode
+.zed
 
 # Ignore temporal files
 /*.txt
