@@ -11,6 +11,7 @@ homepage = "https://github.com/Fairglow/kvist"
 readme = "../README.md"
 
 [dependencies]
+chrono = "0.4"
 clap = { version = "4.6", features = ["derive"] }
 clap_complete = "4.6"
 getrandom = "0.4"
@@ -27,7 +28,7 @@ toml_edit = "0.25.13"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
 agent-runtime = { version = "=0.1.0", path = "../agent_runtime" }
-rustyline = "18.0.1"
+reedline = "0.38"
 minus = "5.7.2"
 
 [dev-dependencies]
