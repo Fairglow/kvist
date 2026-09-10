@@ -1,6 +1,9 @@
 # Ignore Rust target directories
 /target
 
+# Ignore Kvist settings
+.kvist
+
 # Ignore editor settings
 .idea
 .vscode
