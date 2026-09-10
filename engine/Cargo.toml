@@ -29,7 +29,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
 agent-runtime = { version = "=0.1.0", path = "../agent_runtime" }
 reedline = "0.38"
-minus = "5.7.2"
+minus = { version = "5.7.2", features = ["static_output"] }
 
 [dev-dependencies]
 kvist-sandbox-runner = { version = "=0.1.0", path = "../sandbox_runner" }
