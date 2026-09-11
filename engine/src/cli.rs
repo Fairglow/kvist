@@ -399,11 +399,11 @@ impl From<TaskStatusArgument> for TaskStatus {
 pub struct CommandOutput(String);
 
 impl CommandOutput {
-    fn message(message: impl Into<String>) -> Self {
+    pub(crate) fn message(message: impl Into<String>) -> Self {
         Self(message.into())
     }
 
-    fn none() -> Self {
+    pub(crate) fn none() -> Self {
         Self(String::new())
     }
 

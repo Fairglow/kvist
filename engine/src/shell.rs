@@ -44,7 +44,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use reedline::{
-    ColumnarMenu, DefaultHinter, DefaultPrompt, DefaultPromptSegment, Emacs, KeyCode, KeyModifiers,
+    DefaultHinter, DefaultPrompt, DefaultPromptSegment, Emacs, IdeMenu, KeyCode, KeyModifiers,
     MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, default_emacs_keybindings,
 };
 
@@ -60,8 +60,11 @@ pub use prompt_editor::{
     build_prompt_seed, edit_prompt_with_seed, print_prompt_block, prompt_editor_command,
 };
 pub use state::DynamicState;
-pub use status::{ActiveLocks, LockInfo, StatusContext, prompt_label};
-pub use stream::{ProgressSpinner, StreamManager};
+pub use status::{
+    ActiveLocks, LockInfo, StatusContext, print_welcome_banner, prompt_label, short_prompt,
+    status_bar_label,
+};
+pub use stream::{AgentFeedback, ProgressSpinner, StreamManager};
 use tree::build_root;
 
 /// Name of the completion menu registered with the line editor.
@@ -91,11 +94,18 @@ fn dispatch(
     if program == "prompt" && arguments.len() == 1 {
         let command = prompt_editor_command(project_dir, &arguments[0])?;
         if let Some(command) = command {
-            execute_command(command);
+            stream_manager.print_prompt_stage(line);
+            stream_manager.print_working_stage();
+            let result = cli::execute(command, false);
+            stream_manager.print_result_stage(&result);
+            let summary = match &result {
+                Ok(out) => truncate(&out.to_string(), 100),
+                Err(err) => truncate(&err.to_string(), 100),
+            };
             journal.append(JournalEntry {
                 timestamp: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
                 command: format!("prompt {}", arguments[0]),
-                result: "prompt authoring initiated".into(),
+                result: summary,
                 transient: false,
             });
             return Ok(());
@@ -114,11 +124,19 @@ fn dispatch(
 
             let should_stream = is_streaming_command(&parsed.command);
             if should_stream {
-                let _ = stream_manager.prepare_log_path(&program);
-                let spinner = stream_manager.start_spinner(&program);
-                let result = cli::execute(parsed.command, false);
-                spinner.stop();
-                stream_manager.finish_stream(&program, &result, line);
+                let mut cmd = parsed.command;
+                if let cli::Command::Task {
+                    command: cli::TaskCommand::Run { ref mut stream, .. },
+                } = cmd
+                {
+                    *stream = true;
+                }
+
+                stream_manager.print_prompt_stage(line);
+                stream_manager.print_working_stage();
+
+                let result = cli::execute(cmd, false);
+                stream_manager.print_result_stage(&result);
 
                 let summary = match &result {
                     Ok(out) => truncate(&out.to_string(), 100),
@@ -184,10 +202,16 @@ fn is_streaming_command(command: &cli::Command) -> bool {
     }
 }
 
-/// Builds the line editor with the Kvist completer, inline hinter, and columnar menu.
+/// Builds the line editor with the Kvist completer, inline hinter, and IDE completion menu.
 fn build_editor(completer: Box<KvistCompleter>) -> std::result::Result<Reedline, KvistError> {
-    let completion_menu = Box::new(ColumnarMenu::default().with_name(COMPLETION_MENU));
+    let completion_menu = Box::new(
+        IdeMenu::default()
+            .with_name(COMPLETION_MENU)
+            .with_default_border(),
+    );
     let mut keybindings = default_emacs_keybindings();
+
+    // Tab opens the completion menu or cycles to next candidate
     keybindings.add_binding(
         KeyModifiers::NONE,
         KeyCode::Tab,
@@ -196,6 +220,56 @@ fn build_editor(completer: Box<KvistCompleter>) -> std::result::Result<Reedline,
             ReedlineEvent::MenuNext,
         ]),
     );
+
+    // Shift-Tab cycles to previous candidate
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::BackTab,
+        ReedlineEvent::MenuPrevious,
+    );
+    keybindings.add_binding(
+        KeyModifiers::SHIFT,
+        KeyCode::BackTab,
+        ReedlineEvent::MenuPrevious,
+    );
+
+    // Down arrow navigates menu when open, else standard Down
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Down,
+        ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::MenuDown,
+            ReedlineEvent::MenuNext,
+            ReedlineEvent::Down,
+        ]),
+    );
+
+    // Up arrow navigates menu when open, else standard Up
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Up,
+        ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::MenuUp,
+            ReedlineEvent::MenuPrevious,
+            ReedlineEvent::Up,
+        ]),
+    );
+
+    // Left and Right arrow keys inside menu
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Right,
+        ReedlineEvent::UntilFound(vec![ReedlineEvent::MenuRight, ReedlineEvent::Right]),
+    );
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Left,
+        ReedlineEvent::UntilFound(vec![ReedlineEvent::MenuLeft, ReedlineEvent::Left]),
+    );
+
+    // Esc closes the completion menu
+    keybindings.add_binding(KeyModifiers::NONE, KeyCode::Esc, ReedlineEvent::Esc);
+
     let edit_mode = Box::new(Emacs::new(keybindings));
 
     let editor = Reedline::create()
@@ -203,20 +277,8 @@ fn build_editor(completer: Box<KvistCompleter>) -> std::result::Result<Reedline,
         .with_hinter(Box::new(DefaultHinter::default()))
         .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
         .with_edit_mode(edit_mode)
-        .with_quick_completions(true);
+        .with_quick_completions(false);
     Ok(editor)
-}
-
-/// Executes a parsed command, displaying any non-empty output through the pager.
-fn execute_command(command: cli::Command) {
-    match cli::execute(command, false) {
-        Ok(output) => {
-            display_output(&output.to_string());
-        }
-        Err(error) => {
-            let _ = error.print();
-        }
-    }
 }
 
 /// Launches and runs the persistent interactive workspace shell (REPL).
@@ -230,14 +292,11 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
 
     let mut editor = build_editor(completer)?;
 
-    println!("==================================================");
-    println!(" Kvist Interactive Workspace Shell");
-    println!(" Commands are primary (e.g. 'task run', 'status').");
-    println!(" Press TAB for auto-completion.");
-    println!(" Type 'prompt <task_id>' to author a task prompt.");
-    println!(" Type 'journal' or 'history' to view the session log.");
-    println!(" Type 'exit' or 'quit' or press Ctrl+D to exit.");
-    println!("==================================================");
+    let initial_branch = state
+        .lock()
+        .ok()
+        .and_then(|guard| guard.branch().map(str::to_owned));
+    print_welcome_banner(&status, initial_branch.as_deref());
 
     loop {
         // Keep dynamic completions in step with the durable project state.
@@ -245,13 +304,14 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
             *guard = DynamicState::load(project_dir);
         }
 
+        let current_status = StatusContext::load(project_dir);
         let branch = state
             .lock()
             .ok()
             .and_then(|guard| guard.branch().map(str::to_owned));
         let prompt = DefaultPrompt {
-            left_prompt: DefaultPromptSegment::Basic(prompt_label(&status, branch.as_deref())),
-            right_prompt: DefaultPromptSegment::Empty,
+            left_prompt: DefaultPromptSegment::Basic(short_prompt(branch.as_deref())),
+            right_prompt: DefaultPromptSegment::Basic(status_bar_label(&current_status)),
         };
 
         let signal = match editor.read_line(&prompt) {

@@ -137,6 +137,44 @@ pub fn prompt_label(status: &StatusContext, branch: Option<&str>) -> String {
     )
 }
 
+/// Returns a concise, modern prompt for the active line editor.
+pub fn short_prompt(branch: Option<&str>) -> String {
+    match branch {
+        Some(b) if !b.is_empty() && b != "no-vcs" => format!("kvist ({b}) ❯ "),
+        _ => "kvist ❯ ".to_owned(),
+    }
+}
+
+/// Formats the compact status badge displayed in the right bar / right prompt area.
+pub fn status_bar_label(status: &StatusContext) -> String {
+    let locks = if status.active_locks > 0 {
+        format!(" · 🔒 {}", status.active_locks)
+    } else {
+        String::new()
+    };
+    format!(
+        "[{}{} · {}]",
+        status.sandbox_backend, locks, status.default_model
+    )
+}
+
+/// Prints a modern, styled welcome banner with static environment information.
+pub fn print_welcome_banner(status: &StatusContext, branch: Option<&str>) {
+    let branch_str = branch.unwrap_or("no-vcs");
+    println!("╭──────────────────────────────────────────────────────────────╮");
+    println!("│  ⚡ Kvist Interactive Workspace Shell                        │");
+    println!(
+        "│  Branch: {:<12} Sandbox: {:<12} Model: {:<11}│",
+        branch_str, status.sandbox_backend, status.default_model
+    );
+    if status.active_locks > 0 {
+        println!("│  Active locks: {:<46}│", status.active_locks);
+    }
+    println!("│  Commands: 'task next', 'task run', 'status', 'help'         │");
+    println!("│  Press TAB for autocomplete (arrows to pick)  ·  'exit'      │");
+    println!("╰──────────────────────────────────────────────────────────────╯");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +206,30 @@ mod tests {
         assert_eq!(
             prompt_label(&status, Some("main")),
             "kvist (main) [sandbox: bubblewrap] [model: ollama] [locks: 3] > "
+        );
+    }
+
+    #[test]
+    fn short_prompt_and_status_bar() {
+        assert_eq!(short_prompt(Some("main")), "kvist (main) ❯ ");
+        assert_eq!(short_prompt(None), "kvist ❯ ");
+        assert_eq!(short_prompt(Some("no-vcs")), "kvist ❯ ");
+
+        let status = StatusContext {
+            sandbox_backend: "bubblewrap".to_owned(),
+            default_model: "ollama".to_owned(),
+            active_locks: 0,
+        };
+        assert_eq!(status_bar_label(&status), "[bubblewrap · ollama]");
+
+        let status_locked = StatusContext {
+            sandbox_backend: "bubblewrap".to_owned(),
+            default_model: "ollama".to_owned(),
+            active_locks: 2,
+        };
+        assert_eq!(
+            status_bar_label(&status_locked),
+            "[bubblewrap · 🔒 2 · ollama]"
         );
     }
 

@@ -250,6 +250,17 @@ fn complete_flag(
     dedupe(candidates)
 }
 
+/// Returns a human-friendly description for candidates in dynamic domains.
+fn domain_description(domain: ValueDomain) -> &'static str {
+    match domain {
+        ValueDomain::Component => "Component directory",
+        ValueDomain::Task => "Task ID",
+        ValueDomain::Attempt => "Attempt ID",
+        ValueDomain::Model => "Model profile",
+        ValueDomain::Branch => "VCS branch",
+    }
+}
+
 /// Completes the value of a value-taking option.
 fn complete_option_value(
     flag: &FlagSpec,
@@ -262,7 +273,7 @@ fn complete_option_value(
         if value.starts_with(prefix) {
             candidates.push(Candidate {
                 value: value.clone(),
-                description: None,
+                description: flag.help.clone(),
                 span,
                 append_whitespace: false,
             });
@@ -270,10 +281,11 @@ fn complete_option_value(
     }
     let empty_scope = Scope::default();
     if let Some(domain) = option_domain(flag.long.as_deref().unwrap_or("")) {
+        let desc = domain_description(domain);
         for value in dynamic_values(domain, &empty_scope, prefix, state) {
             candidates.push(Candidate {
                 value,
-                description: None,
+                description: Some(desc.to_owned()),
                 span,
                 append_whitespace: false,
             });
@@ -295,17 +307,21 @@ fn complete_positional(
         if value.starts_with(prefix) {
             candidates.push(Candidate {
                 value: value.clone(),
-                description: None,
+                description: positional
+                    .help
+                    .clone()
+                    .or_else(|| positional.value_name.clone()),
                 span,
                 append_whitespace: false,
             });
         }
     }
     if let Some(domain) = positional_domain(positional.value_name.as_deref().unwrap_or("")) {
+        let desc = domain_description(domain);
         for value in dynamic_values(domain, scope, prefix, state) {
             candidates.push(Candidate {
                 value,
-                description: None,
+                description: Some(desc.to_owned()),
                 span,
                 append_whitespace: false,
             });
