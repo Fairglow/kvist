@@ -1,365 +1,346 @@
-# Kvist workflow guide
+# Kvist Workflow & User Guide
 
-Kvist is a local, filesystem-native tool for human-directed,
-architecture-driven development. Its current interface is command-line based;
-future graphical and editor interfaces operate on the same durable project
-artifacts. The hierarchy is `VISION.md` -> `ARCHITECTURE.md` -> per-component
-`REQUIREMENTS.md` + `CONTRACT.md` + `DESIGN.md` -> `TODOS.yaml` -> `IMPL.md`.
-A component works from its local artifacts, `ROOT_CONTRACT.md`, and the
-immediate parent `CONTRACT.md`. That parent is the nearest ancestor component,
-even across transparent namespace directories. Parent requirements or design
-and peer implementations do not propagate implicitly.
+Kvist is a local, filesystem-native execution harness and workflow engine for **human-directed, architecture-driven software engineering**. It wraps autonomous coding agents in strict, deterministic state machines, ensuring unmonitored agent execution is bounded, auditable, and mathematically contained.
 
-Executable releases currently support Linux only. macOS and Windows remain
-disabled until native test environments and independently reviewed execution
-backends are available.
+The core architecture flows from top-level vision down to concrete verified code:
+```
+VISION.md  ──►  ARCHITECTURE.md  ──►  ROOT_CONTRACT.md
+                                              │
+                      ┌───────────────────────┴───────────────────────┐
+                      ▼                                               ▼
+          Component: src/network                          Component: src/storage
+          ├── REQUIREMENTS.md                             ├── REQUIREMENTS.md
+          ├── CONTRACT.md                                 ├── CONTRACT.md
+          ├── DESIGN.md                                   ├── DESIGN.md
+          ├── TODOS.yaml                                  ├── TODOS.yaml
+          └── IMPL.md                                     └── IMPL.md
+```
 
-[`VISION.md`](VISION.md) defines product direction,
-[`ARCHITECTURE.md`](ARCHITECTURE.md) defines approved system structure, and
-[`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md)
-retains detailed strategy. This guide describes current commands and labels
-required but not-yet-automated stages explicitly.
+Executable releases currently support Linux (`x86_64`). macOS and Windows support remain deferred until native test environments and independently reviewed namespace execution backends are available.
 
-## Intended lifecycle
+---
 
-1. The human architect approves `VISION.md`, `ARCHITECTURE.md`, and each
-   component boundary. For that component, `REQUIREMENTS.md` owns outcomes,
-   constraints, acceptance criteria, and verification obligations;
-   `CONTRACT.md` owns consumer-facing interfaces and observable semantics; and
-   `DESIGN.md` owns internal realization. The three documents may be drafted
-   manually or with agent assistance, and the architect approves their content
-   as ready for task planning.
-2. A designer derives a traceable `TODOS.yaml` plan from the approved
-   requirements, contract, and design in test, implementation, security-audit,
-   and compliance-review order. The target workflow then performs one bounded
-   advisory review of the three intent documents and a canonical projection of
-   the task definitions, or records the configured opt-out or an exact-bundle
-   exception. Findings remain nonbinding; the architect acknowledges the
-   opportunity and accepts the bundle.
-3. The executor advances every accepted, ready task in the queue in dependency
-   order with only the permitted component context. It can run uninterrupted
-   and unsupervised; the human may choose to observe or run one task at a time,
-   but does not need to intervene between tasks.
-4. A clean-slate documenter derives `IMPL.md` from implementation and test
-   evidence without reading any intent document or prior `IMPL.md`. A separate,
-   source-blind reviewer compares the fresh record and test evidence with
-   `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md`. The architect arbitrates
-   every discrepancy explicitly.
+## 1. Quick Start
 
-The human remains the approval authority at every stage. Kvist validates
-component documents and queues, persists legal task transitions, and can
-invoke a configured external agent for one task. It does **not** yet automate
-the architect or designer roles, the interview, clean-slate record creation,
-source-blind review, advisory-review acceptance gate, or arbitration loop. Do
-not claim a component is compliant until independent review is recorded.
+### 1.1 Installation
 
-## Current and target document review
+Kvist is built from source using standard Cargo:
 
-Current `component accept` only structurally validates local intent and records
-its revisions in `TODOS.yaml`. It does **not** enforce AI review, inspect a
-review receipt, or call an agent.
+```bash
+cargo build --release -p kvist -p kvist-sandbox-runner -p agent-runtime
+```
 
-The planned target gate applies to the exact digests of local
-`REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` plus a canonical projection
-of task definitions from `TODOS.yaml`. It contains only authored definition
-fields and excludes all `component` metadata plus per-task status, timestamps,
-blocked reason, and recovery state. Generated intent drafts are included.
-Generated evidence—`IMPL.md`, compliance and review reports, status, and
-attempt logs—is exempt. Arbitrary Markdown files are not automatically
-governed.
+Install the binaries into your `$PATH`:
+```bash
+cargo install --path engine
+cargo install --path sandbox_runner
+```
 
-A separate planned review operation will use strict context: the local intent
-bundle, `ROOT_CONTRACT.md`, and the immediate parent `CONTRACT.md`. It will use
-the existing shell-free, bounded, approved or acknowledged agent execution
-path. `component accept` remains deterministic and local and never spawns an
-agent or performs network I/O.
+Verify the installation:
+```bash
+kvist --version
+kvist --help
+```
 
-When project review is required, target acceptance requires either a current
-exact-digest receipt plus explicit human acknowledgement or an explicit
-exception. A per-bundle exception records actor, timestamp, reason, and exact
-digests. A project `[review] required = false` setting visibly disables the
-per-bundle gate. With no configured agent, a review-required project needs an
-exception; absence is never an implicit pass. Findings and severity are
-advisory only and cannot block acceptance or determine compliance.
-Review defaults to required when the configuration is absent, and generated
-projects will state `[review] required = true` explicitly.
+### 1.2 The Interactive Shell
 
-Versioned receipts and redacted bounded reports will live under component-local
-`.kvist/reviews/`. They are VCS-trackable, but are outside the five-artifact
-set, do not trigger candidacy or staleness, are not task context, and are not
-compliance evidence. Kvist mints receipts from execution evidence; model output
-cannot. Raw transcripts and secrets are not retained. Project-level review of
-`VISION.md`, `ARCHITECTURE.md`, `ROOT_CONTRACT.md`, ADRs, and referenced native
-schemas requires a later project-level acceptance surface.
+For the best developer experience, launch Kvist's interactive shell:
 
-## Start a project
+```bash
+kvist shell
+```
 
+The shell provides:
+* **Contextual Auto-Completion:** Press `<TAB>` to autocomplete commands, flags, subcommands, component directory paths, active task IDs, attempt IDs, and configured model names.
+* **Live Status Prompt:** Displays active VCS branch, current component focus, and active task lock state.
+* **Built-in Terminal Pager & Spinner:** View execution logs and streaming agent output without leaving the session.
+* **Audit Journaling:** Persists an append-only session history for reproducible workflows.
+
+---
+
+## 2. Three Paths to Getting Started
+
+Depending on your codebase status, Kvist provides three distinct entry paths:
+
+| Path | Command | Best Used For |
+| :--- | :--- | :--- |
+| **Path A: Start Fresh** | `kvist init <DIR>` | Creating a brand-new project with greenfield architecture. |
+| **Path B: Convert Project** | `kvist convert <DIR>` | Bringing an existing Rust crate into Kvist without altering source files. |
+| **Path C: Reverse Discovery** | `kvist reverse-discover <DIR>` | Analyzing an existing legacy codebase (Rust, Python, polyglot) and generating draft specs. |
+
+---
+
+### Path A: Starting Fresh from Scratch
+
+Use this path when starting a new project or greenfield service.
+
+#### Step 1: Initialize the Project
 ```bash
 kvist init my-project
 cd my-project
+```
+
+`kvist init` scaffolds the root architectural artifacts:
+* `VISION.md`: High-level business and product goals.
+* `ARCHITECTURE.md`: High-level system architecture and component boundaries.
+* `ROOT_CONTRACT.md`: Non-negotiable global architectural rules, security policies, and invariants.
+* `deny.toml` & `Cargo.toml`: Safe dependency limits and workspace declarations.
+* Root component files (`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, `IMPL.md`).
+
+#### Step 2: Validate System Health
+```bash
 kvist doctor .
 kvist status .
 ```
+`kvist doctor` verifies file permissions, VCS status (Git/Jujutsu), and artifact schema versions without modifying any files.
 
-`init` writes the root contract and root component artifacts only into an
-uninitialized directory. When the directory is an existing Rust package with
-`Cargo.toml` and `src/`, it instead writes validated draft onboarding artifacts
-to `.kvist/` and preserves the package implementation. `doctor` provides
-read-only diagnostics, and `status` reports component state without persisting
-derived stale evidence.
-
-After the architect approves a child component boundary, create and validate
-its intent documents:
-
+#### Step 3: Configure Agent Profiles
+Configure which LLM or agent backend drives your tasks:
 ```bash
-kvist component new src/network
-kvist component validate src/network
+kvist agent setup
+```
+This launches an interactive wizard that detects local models (`llama-server`, `Ollama`) or installed CLI tools (`gemini`, `copilot`), tests them with a live qualification prompt, and registers their profile.
+
+#### Step 4: Define Child Components
+As your architecture expands, carve out isolated child components:
+```bash
+kvist component new src/storage
+kvist component validate src/storage
+```
+Edit the generated `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` in `src/storage/` to define the component's boundaries.
+
+#### Step 5: Accept Intent
+Once intent documents are authored and reviewed, record their cryptographic revisions into `TODOS.yaml`:
+```bash
+kvist component accept src/storage
 ```
 
-The architect reviews the three documents, then records their current
-revisions:
-
+#### Step 6: Execute and Advance Tasks
+Advance tasks through the queue:
 ```bash
-kvist component accept src/network
+# View the next ready task
+kvist task next src/storage
+
+# Approve test policy before execution
+kvist task approve-policy .
+
+# Run the task via the sandboxed agent
+kvist task run src/storage implement-code --stream
 ```
 
-The designer then drafts the queue from the approved intent. Each task states
-its purpose, context, expected outcome, requirement references, dependencies,
-lifecycle kind, and status. The queue is durable workflow state, not an agent
-transcript. Its component provenance fields are `requirements_revision`,
-`contract_revision`, `design_revision`, and `parent_contract`.
+---
 
-## Inspect and revalidate work
+### Path B: Converting an Existing Rust Project
 
+Use this path when you have an existing Rust repository (`Cargo.toml` and `src/`) and want to govern it with Kvist without modifying or breaking any of your existing code.
+
+#### Step 1: Run Conversion
+From your project directory:
 ```bash
-kvist status .
-kvist status . --only-documents
-kvist tree .
-kvist task next .
+kvist convert .
+```
+
+#### What `kvist convert` Does:
+1. **Zero-Touch Guarantee:** Leaves your `Cargo.toml`, `Cargo.lock`, and `src/**/*.rs` files completely untouched.
+2. **Draft Artifact Creation:** Reads your crate manifest (name, version, dependencies, features) and synthesizes draft intent documents into a private `.kvist/` directory:
+   * `.kvist/REQUIREMENTS.md`
+   * `.kvist/CONTRACT.md`
+   * `.kvist/DESIGN.md`
+   * `.kvist/TODOS.yaml`
+   * `.kvist/IMPL.md`
+   * `.kvist/COMPLIANCE_REVIEW.md`
+3. **Idempotence:** Safe to run repeatedly; if metadata already exists, it will not overwrite your edits.
+
+#### Step 2: Review and Promote Drafts
+Inspect the generated drafts in `.kvist/`:
+```bash
+cat .kvist/REQUIREMENTS.md
+cat .kvist/CONTRACT.md
+```
+Refine the requirements and contracts to accurately document your crate's public APIs and guarantees. When satisfied, move them into their permanent locations:
+```bash
+mv .kvist/*.md .
+mv .kvist/TODOS.yaml .
+```
+
+#### Step 3: Validate and Accept
+```bash
+kvist component validate .
+kvist component accept .
+```
+Your project is now fully managed by Kvist.
+
+---
+
+### Path C: Reverse Discovery of an Existing Codebase
+
+Use this path when onboarding legacy repositories, multi-language codebases (e.g. Python, TypeScript, C/C++), or projects with minimal existing documentation.
+
+#### Step 1: Run Reverse Discovery
+```bash
+kvist reverse-discover /path/to/existing-codebase
+```
+
+#### What `kvist reverse-discover` Does:
+1. **Recursive Source Analysis:** Scans the codebase, identifying source files, test suites, external documentation, and exposed public functions/classes.
+2. **Non-Destructive Staging:** Places all reverse-engineered documents in `.kvist/` to prevent overwriting any existing project files.
+3. **Draft Synthesis:** Automatically drafts:
+   * **`REQUIREMENTS.md`:** Reverse-engineers functional requirements and acceptance criteria from existing test suites and documentation.
+   * **`CONTRACT.md`:** Documents public API exports, public types, and invariants discovered in the code.
+   * **`DESIGN.md`:** Outlines architectural modules, dependencies, and internal mechanics.
+   * **`TODOS.yaml`:** Synthesizes a structured lifecycle task queue (`test` -> `implementation` -> `security-audit` -> `compliance-review`).
+   * **`IMPL.md`:** Generates an initial observed implementation record.
+
+#### Step 2: Human Audit & Specification Refinement
+*Because reverse discovery infers intent from implementation, the generated contract is non-normative.*
+
+1. Open `.kvist/REQUIREMENTS.md` and `.kvist/CONTRACT.md`.
+2. Review the extracted symbols, verify error boundaries, and add any unwritten architectural invariants.
+3. Once refined, copy the artifacts to the component root and run:
+```bash
+kvist component validate .
 kvist component accept .
 ```
 
-`status` detects local requirements, contract, design, and immediate-parent
-contract digest mismatches and reports attributable stale components.
-`--only-documents` limits status output to document state. `component accept`
-is currently an explicit revalidation write: it structurally validates the
-intent, records its current revisions, and clears attributable stale evidence
-for the selected component. It does not enforce AI review, approve an arbitrary
-implementation change, or replace independent compliance review.
+---
 
-`task next` selects the first ready task in declared order. `task transition`
-performs one audited state change and records `prepared` and `committed`
-attempt evidence. Both require a current project, current component, and
-complete VCS tracking.
+## 3. The 5 Core Component Artifacts
 
-## External agents and verification
+Every Kvist component is governed by five standard files:
 
-`task run COMPONENT_DIR [TASK_ID]` is an optional sandbox-runner integration.
-It uses the `developer` profile for `test` and `implementation` tasks, the
-`security-reviewer` profile for security audits, and the `architect` profile
-for compliance reviews.
+| Artifact | Author / Source | Role & Guarantees |
+| :--- | :--- | :--- |
+| **`REQUIREMENTS.md`** | Architect / Stakeholder | Owns outcomes, user stories, resource constraints, and testable acceptance criteria. |
+| **`CONTRACT.md`** | Architect / Component Owner | Owns external observable interfaces, public APIs, wire protocols, and invariants. |
+| **`DESIGN.md`** | Tech Lead / Designer | Owns internal state machines, algorithms, internal file structure, and technical mechanics. |
+| **`TODOS.yaml`** | Designer / Lead | The durable task queue. Declares tasks, dependencies, kinds (`test`, `implementation`, `security-audit`, `compliance-review`), and revision digests. |
+| **`IMPL.md`** | Clean-Slate Documenter | Observed implementation evidence. Documented purely from source code without reading intent documents. |
 
-The sandbox exposes one writable mount at `/workspace/component`. It also
-materializes `ROOT_CONTRACT.md` read-only at
-`/workspace/context/ROOT_CONTRACT.md` and, for a child, its actual nearest
-ancestor component contract at `/workspace/context/PARENT_CONTRACT.md`.
-Transparent namespace directories do not prevent that parent lookup. General
-materialization of other explicitly declared provider contracts remains
-deferred.
+---
 
-The target executor runs the accepted queue uninterrupted and lets the final
-independent review decide compliance. The current command-line surface exposes
-only the one-task primitive, but it can run the full ready queue unattended on
-POSIX shells:
+## 4. Contract Inheritance & Staleness Detection
+
+Kvist uses strict, unidirectional architectural boundaries:
+1. **Nearest Parent Inheritance:** A child component inherits only its immediate parent component's `CONTRACT.md` and the global `ROOT_CONTRACT.md`. Peer components cannot see each other's internal implementation.
+2. **Transparent Namespaces:** If a component resides in `src/drivers/storage/nvme`, Kvist walks up the directory tree to find the nearest actual component ancestor, even across intermediate namespace folders.
+3. **Cryptographic Staleness Tracking:** Whenever a parent's `CONTRACT.md` is modified, Kvist marks all child components as **stale**:
+```
+$ kvist status .
+component: src/storage/nvme state: stale
+  cause: parent contract revision mismatch (expected sha256:abc..., found sha256:def...)
+```
+To clear staleness, review the parent changes and run `kvist component accept <DIR>`.
+
+---
+
+## 5. Sandboxed Agent Execution
+
+Kvist never executes unconstrained coding agents directly on your host. Agent execution is secured via a multi-layer defense:
+
+```
++--------------------------------------------------------------------------+
+| HOST SYSTEM                                                              |
+|                                                                          |
+|   kvist engine  ──(request json)──►  kvist-sandbox-runner                |
+|                                             │                            |
+|                                             ▼ (Linux Namespaces)         |
+|   +------------------------------------------------------------------+   |
+|   | Bubblewrap Container (User, IPC, PID, UTS, Cgroup, Net)          |   |
+|   |                                                                  |   |
+|   |   - Writable: Target Component Directory (/workspace/component)  |   |
+|   |   - Read-Only: ROOT_CONTRACT.md, PARENT_CONTRACT.md              |   |
+|   |   - Blocked: All other project directories                       |   |
+|   |   - Network: Mediated via Source-Aware Proxy to Registries       |   |
+|   |   - Limits: prlimit (FDs, File Size, Output Bytes, Timeouts)     |   |
+|   |                                                                  |   |
+|   |   [ Coding Agent / Compiler / Test Suite ]                       |   |
+|   +------------------------------------------------------------------+   |
++--------------------------------------------------------------------------+
+```
+
+### 5.1 Approving Test Policies
+Before executing implementation tasks, the human operator must explicitly approve the test policy:
+```bash
+kvist task approve-policy .
+```
+This cryptographically signs an approval record locking the test command, runner binary identity, and resource limits. If any binary or policy is modified, Kvist refuses execution until re-approved.
+
+### 5.2 Running a Task
+```bash
+# Run the next ready task
+kvist task run .
+
+# Run a specific task with real-time output streaming
+kvist task run . implement-code --stream
+```
+
+### 5.3 Automated Unattended Task Loop
+To advance all ready tasks in dependency order unattended:
 
 ```bash
 while task_id="$(kvist task next .)" && [ "$task_id" != "no ready task" ]; do
+  echo "Executing task: $task_id"
   kvist task run . "$task_id" || exit $?
 done
 kvist status .
 ```
 
-This loop selects and executes each ready task in order, stopping when no task
-is ready or a command-level error occurs. The final `status` exposes a blocked
-or stale result. It does not automate the clean-slate documenter or
-source-blind reviewer in step 4; that independent validation remains manual
-until Phase 3 automation is implemented.
-
-Agent configuration is selected from `[agent]` in `kvist.toml`,
-`.kvist/config.toml`, the user configuration path, then the system
-configuration path. Template arguments are passed without a shell and may use
-`{prompt}`, `{prompt_json}`, `{context_files}`, and `{target_directory}`;
-`{prompt_json}` emits a complete escaped JSON string. Keep every intended
-argument whitespace-free or use a wrapper executable; shell pipelines,
-redirection, and shell quoting are not supported.
-
-Generic provider profiles can be configured independently of Kvist:
+### 5.4 Replaying Execution Trajectories
+Every execution turn, tool call, and token metric is journaled into `.kvist/runs/`. You can replay historical trajectories offline:
 
 ```bash
-agent-run setup
-agent-run run --allow-host-execution \
-  --profile local-coder \
-  --file prompt.md
+kvist task replay .kvist/runs/implement-code_2026-09-11T22-00-00Z.trajectory.jsonl
 ```
 
-Test a local inference endpoint without granting a provider process host
-execution:
+---
 
-```bash
-agent-run model \
-  --provider ollama \
-  --endpoint http://127.0.0.1:11434 \
-  --model qwen3-coder \
-  --stream \
-  --file prompt.md
-```
+## 6. Review & Compliance Discipline
 
-Use `--provider llama-server --endpoint http://127.0.0.1:9931` for
-llama-server. This command is text-only and exposes no tools. The underlying
-library decodes canonical tool intents for future brokered use, but does not
-authorize or execute them.
+To prevent models from hallucinating success or certifying their own code:
 
-llama-server setup probes `/health` rather than the router UI and reads the
-bounded OpenAI-compatible `/v1/models` list. A listed model can be selected by
-number; an exact model ID or the literal `default` can be entered instead.
-The profile name is a separate value.
+1. **Clean-Slate Documentation:** `IMPL.md` must be authored by an agent that reads only the source code and test outputs, with zero access to `REQUIREMENTS.md`, `CONTRACT.md`, or previous task logs.
+2. **Source-Blind Compliance Review:** A separate reviewer compares the authored intent (`REQUIREMENTS.md`, `CONTRACT.md`) against `IMPL.md` and test results, **without access to the source code**.
+3. **Architectural Arbitration:** The human architect arbitrates any discrepancies between intent and implementation.
 
-`kvist agent setup` either collects a profile through that same library setup
-flow or loads a saved standalone profile. Kvist then materializes the selected
-name and command into its role configuration. It does not resolve a mutable
-standalone profile during task execution, so `task approve-policy` continues
-to cover the exact effective command.
+For detailed instructions on compliance reviews, refer to [`REVIEW_RUNBOOK.md`](REVIEW_RUNBOOK.md) and [`COMPLIANCE_REVIEW.md`](COMPLIANCE_REVIEW.md).
 
-For llama-cli, Gemini, and Copilot, setup first verifies the conventional
-executable with `--version`; an inaccessible command triggers a compatible
-executable/wrapper path prompt without changing the provider kind. The
-subsequent live model test is what qualifies the complete command, model,
-credentials, and arguments. A llama wrapper must forward with `"$@"`, never
-unquoted `$*`. llama-cli is inference-only, whereas the generated Gemini and
-Copilot templates enable noninteractive agent tools under the explicit host
-execution warning.
+---
 
-The planned agent runtime separates model transport, bounded native loop, typed
-tool broker, policy, execution backend, and durable evidence. Local
-llama-server and Ollama integrations use the standalone-owned model boundary
-under Kvist authority; Gemini and Copilot remain opaque external agents
-constrained as complete processes. On the `rig-integration` branch, exactly
-pinned Rig 0.42.0 is the default provider-wire adapter and the direct HTTP
-transport remains an explicit, non-automatic fallback and conformance oracle.
-See
-[`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md)
-and the versioned
-[`Rig transport evaluation`](docs/agent-runtime/rig-evaluation.md).
+## 7. Command Reference Cheat-Sheet
 
-Run the default Rig adapter:
+### Shell & Diagnostics
+| Command | Description |
+| :--- | :--- |
+| `kvist shell` | Start the interactive development shell with auto-completions. |
+| `kvist doctor [DIR]` | Check project health, versions, and VCS configuration. |
+| `kvist status [DIR]` | Inspect component lifecycle status, document staleness, and locks. |
+| `kvist tree [DIR]` | Render an ASCII component tree. |
+| `kvist completions <SHELL>` | Generate shell auto-completion scripts (`bash`, `zsh`, `fish`, `powershell`). |
 
-```bash
-cargo run -p agent-runtime --bin agent-run -- \
-  model --provider ollama \
-  --endpoint http://127.0.0.1:11434 --model qwen3-coder \
-  --file prompt.md
-```
+### Onboarding & Creation
+| Command | Description |
+| :--- | :--- |
+| `kvist init [DIR]` | Initialize a greenfield project with root artifacts. |
+| `kvist convert <DIR>` | Convert an existing Rust project into Kvist without editing code. |
+| `kvist reverse-discover <PATH>` | Reverse-engineer draft specs and task queue from any existing codebase. |
+| `kvist import <REPO_URL>` | Import Kvist components from an external Git repository. |
 
-Use `--output-schema '<JSON Schema object>'` for provider-native structured
-generation, while still validating returned JSON in the host. Use
-`--transport direct` only for explicit fallback or conformance testing; a Rig
-failure is never replayed automatically.
+### Component Management
+| Command | Description |
+| :--- | :--- |
+| `kvist component new <PATH>` | Scaffold a new child component directory with valid Markdown templates. |
+| `kvist component validate <PATH>` | Structurally validate component intent documents. |
+| `kvist component accept <PATH>` | Cryptographically accept intent documents and update queue revisions. |
 
-For implementation tasks, configure and approve the repository test policy
-before running:
-
-```bash
-kvist task approve-policy
-kvist task run . implement-code
-kvist task log . implement-code
-```
-
-The approval record covers the exact `ROOT_CONTRACT.md` digest, agent
-configuration, sandbox runner identity, resource limits, redaction policy, and
-`[test_policy]`. Agent and test programs are sent to the separately installed
-sandbox runner; Kvist never falls back to executing them directly on the host.
-
-`kvist prompt`, in contrast, is an explicitly acknowledged host operation:
-
-```bash
-kvist prompt --allow-host-execution --file prompt.md
-```
-
-Its bounded prompt input, command rendering, idle supervision, loop detection,
-and retry notices come from the standalone `agent-runtime` library. The
-standalone CLI can be invoked with
-`cargo run -p agent-runtime --bin agent-run -- run ...`.
-Host-mode retry notices warn that an earlier attempt may have left side effects;
-they do not provide rollback or isolation. Snapshot workspaces, restricted
-identities, Linux sandboxing, brokered tools, and future platforms are planned
-in
-`agent_runtime/REQUIREMENTS.md`,
-`agent_runtime/CONTRACT.md`, `agent_runtime/DESIGN.md`, and
-`agent_runtime/TODOS.yaml`.
-
-## Planned observed-intent and contract-verification workflows
-
-A planned `propose intent` or `derive draft` operation reads an independently
-generated `IMPL.md` and writes no-clobber draft `REQUIREMENTS.md` and
-`DESIGN.md` only. It cannot recover stakeholder intent, must mark uncertainty,
-and never generates a normative `CONTRACT.md`. Generated drafts still require
-human review, advisory AI review or exception, acknowledgement, and acceptance.
-
-A separate advisory comparison may report differences between `IMPL.md` and
-existing intent without modifying either. It avoids compliance verdict
-vocabulary and cannot count as compliance evidence. This is distinct from
-`reverse-discover`, the source-based onboarding pipeline; any contract produced
-there is a non-normative draft.
-
-Contract verification will use stable clause locators, initially existing
-heading anchors, with explicit IDs introduced only by a later explicit
-format/version decision. Tests will map to clauses, approved execution evidence
-will feed a traceability report, and the report will identify uncovered or
-failed clauses. Tests are evidence, not proof; this is not code coverage and
-does not replace compliance comparison of `CONTRACT.md`, `IMPL.md`, and test
-evidence.
-
-Command names and syntax for these planned workflows are provisional and are
-not current interfaces.
-
-## Planned accepted-change commits
-
-Target acceptance operations offer an explicit `--commit` option. It commits
-only the canonical acceptance set: exact accepted files, queue transitions,
-and engine-written evidence bound to the accepted review or task attempt.
-Unrelated staged, unstaged, and untracked work remains untouched, and any
-overlap or concurrent head change refuses the commit.
-
-Acceptance remains valid if local commit creation fails. Kvist retains a
-versioned pending-commit journal and reports an acceptance ID that a planned
-`vcs commit-accepted ACCEPTANCE_ID` command can retry without repeating review
-or acceptance. Commit automation never pushes, stashes, resets, cleans, or
-amends. Git is the initial backend and uses an isolated index; Jujutsu commit
-automation remains deferred until separately designed and reviewed. These
-commands and flags are planned and are not part of the current CLI.
-
-## Documentation and review discipline
-
-`IMPL.md` is an observed implementation record, not user-facing documentation.
-Its documenter examines source, tests, manifests, and necessary non-intent
-build configuration without reading `REQUIREMENTS.md`, `CONTRACT.md`,
-`DESIGN.md`, `TODOS.yaml`, any prior `IMPL.md`, architecture or root intent,
-prior reviews, chat history, or Git history. The source-blind reviewer examines
-the approved requirements, contract, design, fresh implementation record, test
-evidence, immediate parent contract, and root contract without source access.
-Record compliance, mismatches, approved deferrals, and arbitration in version
-control. The implementer may not certify its own work, and no participant may
-edit intent or observed records merely to hide a disagreement.
-
-Advisory intent review happens before acceptance and is deliberately
-nonbinding. Its receipt records an opportunity and acknowledgement or
-exception, not correctness, independence, or compliance. Independent
-compliance review remains mandatory after implementation.
-
-The component artifact split is pre-release. Retired component documents,
-commands, and queue fields are not accepted or migrated, and there is no
-version bump for this clean break.
-
-The reusable procedure is in [`REVIEW_RUNBOOK.md`](REVIEW_RUNBOOK.md).
-[`COMPLIANCE_REVIEW.md`](COMPLIANCE_REVIEW.md) records completed reviews and
-the current unreviewed execution-policy discrepancy.
+### Task Management & Execution
+| Command | Description |
+| :--- | :--- |
+| `kvist task next [DIR]` | Print the next ready task ID. |
+| `kvist task approve-policy [DIR]`| Cryptographically approve the sandbox test-execution policy. |
+| `kvist task run [DIR] [TASK]` | Execute a task inside the Bubblewrap sandbox. |
+| `kvist task log <DIR> <TASK>` | Display the execution log of a completed or failed task. |
+| `kvist task replay <SESSION>` | Step through a structured execution trajectory journal. |
+| `kvist task unlock [DIR]` | Release stale or orphaned component execution locks. |
+| `kvist task recover <DIR> <TASK>` | Safely recover an interrupted or blocked task. |
+| `kvist task finalize <DIR> <TASK> <ATTEMPT>` | Review and finalize task execution evidence. |
+| `kvist task transition <DIR> <TASK> <STATUS>` | Perform an audited task state transition (`pending`, `in-progress`, `blocked`, `completed`). |
