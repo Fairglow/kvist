@@ -3,7 +3,7 @@ use std::{
     net::TcpListener,
     sync::mpsc,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use agent_runtime::{
@@ -189,6 +189,12 @@ fn direct_transports_encode_provider_native_output_schemas() {
     let body = captured.recv().expect("llama-server request").body;
     assert_eq!(body["response_format"]["json_schema"]["schema"], schema);
     assert_eq!(body["response_format"]["json_schema"]["strict"], true);
+    assert!(
+        body["grammar"]
+            .as_str()
+            .expect("grammar present in request")
+            .contains("root ::=")
+    );
 }
 
 #[test]
@@ -878,4 +884,151 @@ fn close_delimited_body_is_bounded_before_stream_events() {
 
     assert!(error.to_string().contains("response limit"));
     assert!(events.is_empty());
+}
+
+#[test]
+fn slot_allocation_timeout_aborts_stalled_connection() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider");
+    let endpoint = format!(
+        "http://{}",
+        listener.local_addr().expect("fake provider address")
+    );
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        let mut request = [0_u8; 8192];
+        let _ = stream.read(&mut request).expect("read request");
+        // Server hangs without sending headers (e.g. stalled slot allocation / VRAM prefill)
+        thread::sleep(Duration::from_secs(2));
+    });
+
+    let transport = DirectModelTransport::new(
+        LocalModelProvider::Ollama,
+        &endpoint,
+        Duration::from_secs(10),
+        1024,
+    )
+    .expect("transport")
+    .with_slot_timeout(Duration::from_millis(150));
+
+    let start = Instant::now();
+    let error = transport
+        .complete(&request(ToolChoice::Auto), &CancellationToken::new())
+        .expect_err("slot allocation timeout must stop stalled server");
+
+    let elapsed = start.elapsed();
+    assert!(elapsed < Duration::from_secs(2), "elapsed: {:?}", elapsed);
+    assert!(
+        error.to_string().contains("slot allocation timed out"),
+        "error: {error}"
+    );
+}
+
+#[test]
+fn ttft_watchdog_aborts_stalled_stream() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider");
+    let endpoint = format!(
+        "http://{}",
+        listener.local_addr().expect("fake provider address")
+    );
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        let mut request = [0_u8; 8192];
+        let _ = stream.read(&mut request).expect("read request");
+        // Server sends HTTP headers immediately
+        let headers = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
+        stream.write_all(headers).expect("write headers");
+        // But then hangs before emitting the first token chunk (e.g. prefill decode stall)
+        thread::sleep(Duration::from_secs(2));
+    });
+
+    let transport = DirectModelTransport::new(
+        LocalModelProvider::LlamaServer,
+        &endpoint,
+        Duration::from_secs(10),
+        4096,
+    )
+    .expect("transport")
+    .with_ttft_timeout(Duration::from_millis(150));
+
+    let mut events = Vec::new();
+    let start = Instant::now();
+    let error = transport
+        .stream(
+            &request(ToolChoice::None),
+            &CancellationToken::new(),
+            &mut |event| {
+                events.push(event);
+                Ok(())
+            },
+        )
+        .expect_err("TTFT watchdog must stop stream before first token");
+
+    let elapsed = start.elapsed();
+    assert!(elapsed < Duration::from_secs(2), "elapsed: {:?}", elapsed);
+    assert!(
+        error
+            .to_string()
+            .contains("time-to-first-token watchdog timed out"),
+        "error: {error}"
+    );
+    assert!(events.is_empty());
+}
+
+#[test]
+fn inter_token_cadence_watchdog_aborts_hung_stream() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider");
+    let endpoint = format!(
+        "http://{}",
+        listener.local_addr().expect("fake provider address")
+    );
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        let mut request = [0_u8; 8192];
+        let _ = stream.read(&mut request).expect("read request");
+        // Server sends HTTP headers
+        let headers = b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n";
+        stream.write_all(headers).expect("write headers");
+        // Server emits first token chunk immediately
+        let chunk1_data = b"data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\n";
+        let chunk1_header = format!("{:x}\r\n", chunk1_data.len());
+        stream
+            .write_all(chunk1_header.as_bytes())
+            .expect("write chunk header");
+        stream.write_all(chunk1_data).expect("write chunk data");
+        stream.write_all(b"\r\n").expect("write chunk crlf");
+        // But then hangs before emitting the next token (e.g. GPU deadlocked midway)
+        thread::sleep(Duration::from_secs(2));
+    });
+
+    let transport = DirectModelTransport::new(
+        LocalModelProvider::LlamaServer,
+        &endpoint,
+        Duration::from_secs(10),
+        4096,
+    )
+    .expect("transport")
+    .with_cadence_timeout(Duration::from_millis(150));
+
+    let mut events = Vec::new();
+    let start = Instant::now();
+    let error = transport
+        .stream(
+            &request(ToolChoice::None),
+            &CancellationToken::new(),
+            &mut |event| {
+                events.push(event);
+                Ok(())
+            },
+        )
+        .expect_err("Cadence watchdog must abort hung stream between tokens");
+
+    let elapsed = start.elapsed();
+    assert!(elapsed < Duration::from_secs(2), "elapsed: {:?}", elapsed);
+    assert!(
+        error
+            .to_string()
+            .contains("inter-token cadence watchdog timed out"),
+        "error: {error}"
+    );
+    assert_eq!(events.len(), 1);
 }

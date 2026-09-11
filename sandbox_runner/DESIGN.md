@@ -3,11 +3,11 @@
 
 ## Design overview
 
-This revision is a protocol-capable, enforcement-unavailable boundary. A small
-library exposes the closed version-one protocol types, an independent validator,
-and a fail-closed probe; the executable dispatches the two protocol modes.
-Bubblewrap production behavior remains excluded until its queued tests exist, so
-a valid request is validated but never executed.
+This runner enforces isolated Linux execution for approved Kvist task requests.
+A core library strictly validates the version-one protocol types and bounds;
+`src/enforcement.rs` executes requests within isolated Bubblewrap namespaces,
+applies `prlimit` resource bounds, and guards network access. Missing
+prerequisites or invalid requests fail closed.
 
 ## Internal structure
 
@@ -15,14 +15,15 @@ a valid request is validated but never executed.
 | --- | --- |
 | `src/protocol.rs` | Closed, `deny_unknown_fields` version-one request and probe types and bounds |
 | `src/validation.rs` | Independent size, structural, lexical, and mediated-acquisition semantic validation with actionable errors |
-| `src/origin.rs` | Strict URL parsing and a validated source-aware origin matcher for the future network boundary |
+| `src/origin.rs` | Strict URL parsing and a validated source-aware origin matcher for the network boundary |
 | `src/cache.rs` | Descriptor-relative bounded construction and atomic no-replacement publication of immutable Cargo-home generations |
-| `src/probe.rs` | Fail-closed capability probe that models the probe response but cannot confirm it |
-| `src/lib.rs` | Module surface and honest status constants |
-| `src/main.rs` | Fail-closed command boundary for the two protocol modes |
+| `src/probe.rs` | Verified capability probe testing kernel namespaces and Bubblewrap backend availability |
+| `src/enforcement.rs` | Bubblewrap execution, namespace boundaries, `prlimit` resource caps, network guard proxy, and execution supervision |
+| `src/lib.rs` | Module surface and status constants |
+| `src/main.rs` | Command boundary for probe and request protocol modes |
 | `schema/*.json` | Non-normative JSON Schema 2020-12 aids mirroring `src/protocol.rs` |
-| `tests/conformance.rs` | Accepted shape, canonical serialization, malformed/oversized/unknown, legacy rejection, acquisition source/argv/environment policy, and fail-closed executable |
-| `tests/scaffold.rs` | Structural and fail-closed evidence |
+| `tests/conformance.rs` | Accepted shape, canonical serialization, malformed/oversized/unknown, legacy rejection, acquisition source/argv/environment policy, probe, and executable enforcement |
+| `tests/scaffold.rs` | Structural and capability probe evidence |
 
 The later implementation will add private Bubblewrap, mount, resource, process,
 and cleanup modules — wiring the existing origin matcher and cache primitive to

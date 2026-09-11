@@ -1,4 +1,5 @@
 <!-- kvist-contract-version: 1 -->
+
 # Sandbox Runner Contract
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
@@ -25,18 +26,28 @@ mode argument:
 
 - `--kvist-sandbox-request-v1` reads one bounded JSON request from standard
   input, strictly parses and independently validates it, and either rejects it
-  with an actionable non-secret diagnostic or — because Bubblewrap enforcement
-  is not yet integrated — fails closed without executing it. It never falls
-  back to host execution and never reports a request as enforced.
+  with an actionable non-secret diagnostic or enforces it via Bubblewrap-backed
+  Linux isolation. It never falls back to host execution and never reports an unconstrained
+  request as enforced.
 - `--kvist-sandbox-probe-v1` attempts to confirm production enforcement
-  capabilities. In this revision it always fails closed with a diagnostic
-  because no verified Bubblewrap backend and namespace enforcement are
-  integrated; it emits no probe response object.
+  capabilities. When a verified Bubblewrap backend and namespace enforcement are
+  available, it emits a confirmed probe response object; otherwise it fails closed
+  with an actionable non-secret diagnostic.
 
 The accepted target interface is the redefined
 `kvist-sandbox-probe-v1` and `kvist-sandbox-request-v1` protocol described by
-ADR 0004. Request parsing and validation are implemented in this revision;
-Bubblewrap-backed isolation and a confirmed probe response are not.
+ADR 0004. Request parsing, validation, and Bubblewrap-backed isolation are
+fully implemented and active.
+
+## Enforcement status
+
+Bubblewrap-based namespace enforcement is fully implemented and active. The
+runner constructs a complete Bubblewrap command line that establishes user,
+IPC, PID, UTS, cgroup, and network namespace boundaries. Resource limits are
+enforced via the `prlimit` system call. Network egress is proxied through a
+source-aware guard that restricts connections to allowlisted registries and
+Git sources. Immutable cache promotion uses `RENAME_NOREPLACE` to guarantee
+atomicity.
 
 ## Required interfaces
 
@@ -60,8 +71,8 @@ endpoint, an acquisition lockfile workspace, and result-bound promotion
 metadata), and scratch. Cargo phases have exact allowlisted environments, exact
 argv, and exact toolchain/grant/cache topology. The runner independently
 derives source identities using documented domain-separated encodings and
-rejects a mismatch. Actual network transport, DNS/address pinning, redirect,
-namespace, mount, and process enforcement remain deferred.
+rejects a mismatch. Network egress is strictly mediated via the source-aware proxy,
+and namespace, mount, and process isolation are enforced via Bubblewrap.
 
 Source identity is the SHA-256 label of a domain followed by each field's
 eight-byte big-endian byte length and bytes, with no implicit normalization:
@@ -106,10 +117,10 @@ scratch target/HOME, path, source identity, or result-bound promotion metadata.
 Verification rejects anything but `<cargo> test --locked`, non-denied network,
 non-offline environment, mutable Cargo home, or wrong cache/scratch/workspace
 topology. The runner exposes validated transport-policy value types and
-descriptor-relative immutable generation construction; neither performs
-network or mount enforcement. A fully valid request still fails closed because
-OS enforcement is unavailable; the runner never reports it as enforced or
-executes it on the host.
+descriptor-relative immutable generation construction, and enforces namespace,
+mount, resource, and network isolation via Bubblewrap and a local source-aware proxy;
+if enforcement prerequisites are not met, a request fails closed and never falls
+back to host execution.
 
 ## Errors and failure semantics
 
@@ -123,10 +134,9 @@ Unknown arguments do not activate fallback or host execution.
 
 The runner is a separate trust boundary. It validates all request input
 independently, bounds untrusted input before parsing, and must be installed as
-a regular non-link file outside the selected project and worktree. This
-revision exercises no process, namespace, or network authority and opens no
-request grant path. Its filesystem authority is limited to reading standard
-input, writing its diagnostic, and — only when the later integration invokes
+a regular non-link file outside the selected project and worktree. The runner
+exercises process, namespace, and network authority exclusively via Bubblewrap
+and the network guard proxy according to validated request constraints.
 the cache primitive with provider-opened root capabilities — no-follow bounded
 immutable-generation construction. The current command boundary never invokes
 it; selecting or changing a project's current cache generation is not

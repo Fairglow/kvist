@@ -306,6 +306,15 @@ pub enum TaskCommand {
         #[arg(value_name = "TASK_ID")]
         task_id: String,
     },
+    /// Replay an agent execution session from a structured JSONL journal file.
+    Replay {
+        /// Path to the session JSONL journal file.
+        #[arg(value_name = "SESSION_JSONL")]
+        session_file: PathBuf,
+        /// Maximum turn to step through (optional).
+        #[arg(long)]
+        max_turns: Option<usize>,
+    },
     /// Approve the current test-command policy.
     ApprovePolicy {
         /// Project directory; defaults to the current working directory.
@@ -638,6 +647,21 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 )))
             }
             Command::Task {
+                command: TaskCommand::Replay {
+                    session_file,
+                    max_turns,
+                },
+            } => {
+                let replay_content =
+                    task_commands::replay_task_session(&session_file, max_turns)?;
+                let mut escaped_content = String::new();
+                json_string_escape(&mut escaped_content, &replay_content);
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"task-replay\",\"session_file\":\"{}\",\"replay\":{escaped_content}}}",
+                    session_file.to_string_lossy().replace('\\', "\\\\"),
+                )))
+            }
+            Command::Task {
                 command: TaskCommand::ApprovePolicy { path },
             } => {
                 let message = task_commands::approve_policy(&path)?;
@@ -909,6 +933,14 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         task_id,
                     },
             } => task_commands::task_log(&component_dir, &task_id).map(CommandOutput::message),
+            Command::Task {
+                command:
+                    TaskCommand::Replay {
+                        session_file,
+                        max_turns,
+                    },
+            } => task_commands::replay_task_session(&session_file, max_turns)
+                .map(CommandOutput::message),
             Command::Task {
                 command: TaskCommand::ApprovePolicy { path },
             } => task_commands::approve_policy(&path).map(CommandOutput::message),
@@ -1411,6 +1443,33 @@ mod tests {
 
         assert_eq!(component_dir, PathBuf::from("src"));
         assert_eq!(task_id, "task-1".to_string());
+    }
+
+    #[test]
+    fn parses_task_replay_command() {
+        let cli = Cli::try_parse_from([
+            "kvist",
+            "task",
+            "replay",
+            ".kvist/runs/session.jsonl",
+            "--max-turns",
+            "3",
+        ])
+        .expect("valid task replay command");
+
+        let Command::Task {
+            command:
+                TaskCommand::Replay {
+                    session_file,
+                    max_turns,
+                },
+        } = cli.command
+        else {
+            panic!("expected task replay command");
+        };
+
+        assert_eq!(session_file, PathBuf::from(".kvist/runs/session.jsonl"));
+        assert_eq!(max_turns, Some(3));
     }
 
     #[test]

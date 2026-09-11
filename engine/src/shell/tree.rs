@@ -288,6 +288,7 @@ mod tests {
             "transition",
             "run",
             "log",
+            "replay",
             "approve-policy",
             "unlock",
             "recover",
@@ -295,7 +296,7 @@ mod tests {
         ] {
             assert!(task.find_subcommand(name).is_some(), "missing task {name}");
         }
-        assert_eq!(task.subcommands.len(), 8);
+        assert_eq!(task.subcommands.len(), 9);
     }
 
     #[test]

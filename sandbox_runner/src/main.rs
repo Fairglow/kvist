@@ -1,11 +1,10 @@
 #![forbid(unsafe_code)]
-//! Fail-closed command boundary for the Kvist sandbox runner.
+//! Command boundary for the Kvist sandbox runner.
 //!
 //! The executable strictly parses and validates the redefined version-one
 //! protocol. It rejects superseded ("legacy"), malformed, oversized, or
-//! unknown requests with an actionable diagnostic, and it refuses to execute
-//! even a fully valid request because Bubblewrap enforcement is not yet
-//! integrated. It never falls back to unconstrained host execution.
+//! unknown requests with an actionable diagnostic, and enforces valid requests
+//! via Bubblewrap-backed Linux isolation. It never falls back to unconstrained host execution.
 
 use std::io::{self, Read};
 use std::process::ExitCode;

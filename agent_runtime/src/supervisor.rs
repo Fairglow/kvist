@@ -81,6 +81,14 @@ impl SupervisionPolicy {
     }
 }
 
+pub use crate::loop_detection::{
+    ACTION_HASH_RING_CAPACITY, ActionHashRing, ActionRecord, CONSECUTIVE_IDENTICAL_ACTION_LIMIT,
+    DEFAULT_TEMPERATURE_JITTER, LoopDecision, MAX_STALLED_TURNS, OBSERVATION_INVARIANT_LIMIT,
+    REASONING_NGRAM_SIZE, REASONING_SIMILARITY_THRESHOLD, WINDOW_IDENTICAL_ACTION_LIMIT,
+    compute_action_hash, compute_ngram_jaccard_similarity, compute_observation_hash,
+    normalize_json,
+};
+
 /// Failure classes for which the current supervisor permits a retry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetryCause {
@@ -88,13 +96,19 @@ pub enum RetryCause {
     IdleTimeout,
     /// The stdout suffix contained a supported repetition pattern.
     RepetitionLoop,
+    /// Model or agent repeated the exact action consecutively or within window.
+    ActionRepetition,
+    /// Output invariant detected across actions without environment mutation.
+    OutputInvariantStall,
 }
 
 impl RetryCause {
-    fn description(self) -> &'static str {
+    pub fn description(self) -> &'static str {
         match self {
             Self::IdleTimeout => "an idle timeout",
             Self::RepetitionLoop => "a repetition loop",
+            Self::ActionRepetition => "action repetition",
+            Self::OutputInvariantStall => "an invariant output stall",
         }
     }
 }
@@ -111,15 +125,21 @@ pub struct AttemptContext {
 impl AttemptContext {
     /// Returns advisory prompt text describing prior side-effect uncertainty.
     pub fn retry_notice(&self) -> Option<String> {
-        self.prior_failure.map(|failure| {
-            format!(
+        self.prior_failure.map(|failure| match failure {
+            RetryCause::ActionRepetition | RetryCause::OutputInvariantStall => {
+                "[SYSTEM REJECTION]: You have executed this exact action or reached an identical state. \
+                 The environment did not change. You MUST choose a completely different approach, \
+                 inspect alternative files, or terminate."
+                    .to_owned()
+            }
+            _ => format!(
                 "[Supervisor retry context]\n\
                  This is attempt {} after the prior attempt ended because of {}. \
                  The prior attempt may have changed files or external systems. \
                  Inspect and reconcile current state before repeating any non-idempotent action.",
                 self.attempt_number,
                 failure.description()
-            )
+            ),
         })
     }
 }

@@ -4529,6 +4529,100 @@ pub fn task_log(component_path: &Path, task_id: &str) -> Result<String> {
     Ok(contents)
 }
 
+/// Replays an agent execution session from a structured JSONL journal file.
+pub fn replay_task_session(session_file: &Path, max_turns: Option<usize>) -> Result<String> {
+    let report = agent_runtime::replay_trajectory(session_file, max_turns)
+        .map_err(KvistError::AgentRuntime)?;
+
+    let mut out = String::new();
+    out.push_str(&format!(
+        "Replaying session `{}` for task `{}`:\n",
+        report.session_id.as_deref().unwrap_or("unknown"),
+        report.task_id.as_deref().unwrap_or("unknown"),
+    ));
+    out.push_str(&format!(
+        "Total events: {}, Replayed turns: {}, Tool calls: {}\n",
+        report.total_events, report.replayed_turns, report.tool_calls_count
+    ));
+    out.push_str("------------------------------------------------------------\n");
+
+    for event in &report.events {
+        match event {
+            agent_runtime::TrajectoryEvent::SessionStart {
+                session_id,
+                task_id,
+                timestamp,
+            } => {
+                out.push_str(&format!(
+                    "[SessionStart] id={session_id} task={task_id} time={timestamp}\n"
+                ));
+            }
+            agent_runtime::TrajectoryEvent::TurnStart { turn, timestamp } => {
+                out.push_str(&format!("\n--- Turn {turn} (time={timestamp}) ---\n"));
+            }
+            agent_runtime::TrajectoryEvent::PromptEval {
+                turn,
+                new_tokens,
+                cached_tokens,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "[Turn {turn} PromptEval] new_tokens={:?} cached_tokens={:?}\n",
+                    new_tokens, cached_tokens
+                ));
+            }
+            agent_runtime::TrajectoryEvent::ModelReasoning { turn, reasoning } => {
+                out.push_str(&format!("[Turn {turn} Reasoning]: {reasoning}\n"));
+            }
+            agent_runtime::TrajectoryEvent::ToolDispatch {
+                turn,
+                tool,
+                args,
+                action_hash,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "[Turn {turn} ToolDispatch] {tool} (hash: {action_hash})\n  args: {args}\n"
+                ));
+            }
+            agent_runtime::TrajectoryEvent::ToolResult {
+                turn,
+                tool,
+                exit_code,
+                bytes,
+                state_mutated,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "[Turn {turn} ToolResult] {tool} exit_code={exit_code} bytes={bytes} mutated={state_mutated}\n"
+                ));
+            }
+            agent_runtime::TrajectoryEvent::TurnFinish {
+                turn,
+                finish_reason,
+                output_tokens,
+            } => {
+                out.push_str(&format!(
+                    "[Turn {turn} Finish] reason={finish_reason} output_tokens={:?}\n",
+                    output_tokens
+                ));
+            }
+            agent_runtime::TrajectoryEvent::SessionFinish {
+                total_turns,
+                total_tokens,
+                success,
+                ..
+            } => {
+                out.push_str(&format!(
+                    "\n[SessionFinish] turns={total_turns} tokens={total_tokens} success={success}\n"
+                ));
+            }
+        }
+    }
+
+    Ok(out)
+}
+
 const EXECUTION_APPROVAL_VERSION: u32 = 1;
 const APPROVAL_STATE_DIRECTORY: &str = "approval-v1";
 const APPROVAL_SECRET_FILE: &str = "approval-secret";

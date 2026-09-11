@@ -636,6 +636,7 @@ mod tests {
             "transition",
             "run",
             "log",
+            "replay",
             "approve-policy",
             "unlock",
             "recover",
@@ -643,7 +644,7 @@ mod tests {
         ] {
             assert!(got.contains(&name), "missing task {name} in {got:?}");
         }
-        assert_eq!(got.len(), 8);
+        assert_eq!(got.len(), 9);
     }
 
     #[test]

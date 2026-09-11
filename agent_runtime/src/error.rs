@@ -71,6 +71,18 @@ pub enum Error {
     #[error("model transport timed out")]
     ModelTransportTimedOut,
 
+    /// Slot allocation timeout elapsed before the local provider accepted the request.
+    #[error("slot allocation timed out after {timeout:?}")]
+    SlotAllocationTimedOut { timeout: std::time::Duration },
+
+    /// Time-to-first-token watchdog elapsed before the local provider streamed initial tokens.
+    #[error("time-to-first-token watchdog timed out after {timeout:?}")]
+    TtftTimedOut { timeout: std::time::Duration },
+
+    /// Inter-token cadence watchdog elapsed between streamed tokens.
+    #[error("inter-token cadence watchdog timed out after {timeout:?}")]
+    InterTokenCadenceTimedOut { timeout: std::time::Duration },
+
     /// The provider returned a non-success response; its body is intentionally omitted.
     #[error("model provider returned HTTP status {status}")]
     ModelProviderStatus { status: u16 },

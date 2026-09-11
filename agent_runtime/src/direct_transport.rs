@@ -26,6 +26,12 @@ const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_RECORD_BYTES: usize = 1024 * 1024;
 const IO_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
+/// Default slot allocation timeout for local model requests (15 seconds).
+pub const DEFAULT_SLOT_ALLOCATION_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Default Time-To-First-Token watchdog timeout for streaming local model requests (45 seconds).
+pub const DEFAULT_TTFT_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(45);
+
 /// Direct bounded HTTP transport for local Ollama and llama-server endpoints.
 #[derive(Debug, Clone)]
 pub struct DirectModelTransport {
@@ -33,6 +39,9 @@ pub struct DirectModelTransport {
     endpoint: Endpoint,
     deadline: Duration,
     max_response_bytes: usize,
+    slot_allocation_timeout: Duration,
+    ttft_watchdog_timeout: Duration,
+    cadence_watchdog_timeout: Option<Duration>,
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +109,25 @@ impl DirectModelTransport {
         deadline: Duration,
         max_response_bytes: usize,
     ) -> Result<Self> {
+        Self::with_watchdogs(
+            provider,
+            endpoint,
+            deadline,
+            max_response_bytes,
+            DEFAULT_SLOT_ALLOCATION_TIMEOUT,
+            DEFAULT_TTFT_WATCHDOG_TIMEOUT,
+        )
+    }
+
+    /// Creates a local transport with explicit deadline, response bound, slot allocation timeout, and TTFT watchdog.
+    pub fn with_watchdogs(
+        provider: LocalModelProvider,
+        endpoint: &str,
+        deadline: Duration,
+        max_response_bytes: usize,
+        slot_allocation_timeout: Duration,
+        ttft_watchdog_timeout: Duration,
+    ) -> Result<Self> {
         if deadline.is_zero() || deadline > MAX_DEADLINE {
             return Err(Error::InvalidModelTransport {
                 reason: "deadline must be between one nanosecond and 24 hours".to_owned(),
@@ -112,12 +140,62 @@ impl DirectModelTransport {
             });
         }
 
+        if slot_allocation_timeout.is_zero() || slot_allocation_timeout > MAX_DEADLINE {
+            return Err(Error::InvalidModelTransport {
+                reason: "slot allocation timeout must be between one nanosecond and 24 hours"
+                    .to_owned(),
+            });
+        }
+
+        if ttft_watchdog_timeout.is_zero() || ttft_watchdog_timeout > MAX_DEADLINE {
+            return Err(Error::InvalidModelTransport {
+                reason: "TTFT watchdog timeout must be between one nanosecond and 24 hours"
+                    .to_owned(),
+            });
+        }
+
         Ok(Self {
             provider,
             endpoint: parse_endpoint(endpoint)?,
             deadline,
             max_response_bytes,
+            slot_allocation_timeout,
+            ttft_watchdog_timeout,
+            cadence_watchdog_timeout: None,
         })
+    }
+
+    /// Configures the slot allocation timeout.
+    pub fn with_slot_timeout(mut self, timeout: Duration) -> Self {
+        self.slot_allocation_timeout = timeout;
+        self
+    }
+
+    /// Configures the Time-To-First-Token watchdog timeout.
+    pub fn with_ttft_timeout(mut self, timeout: Duration) -> Self {
+        self.ttft_watchdog_timeout = timeout;
+        self
+    }
+
+    /// Configures the optional Inter-Token Cadence Watchdog timeout for streaming responses.
+    pub fn with_cadence_timeout(mut self, timeout: Duration) -> Self {
+        self.cadence_watchdog_timeout = Some(timeout);
+        self
+    }
+
+    /// Returns the configured slot allocation timeout.
+    pub fn slot_allocation_timeout(&self) -> Duration {
+        self.slot_allocation_timeout
+    }
+
+    /// Returns the configured TTFT watchdog timeout.
+    pub fn ttft_watchdog_timeout(&self) -> Duration {
+        self.ttft_watchdog_timeout
+    }
+
+    /// Returns the configured inter-token cadence watchdog timeout, if enabled.
+    pub fn cadence_watchdog_timeout(&self) -> Option<Duration> {
+        self.cadence_watchdog_timeout
     }
 
     fn execute_with_body(
@@ -158,10 +236,17 @@ impl DirectModelTransport {
         );
         write_checked(&mut socket, head.as_bytes(), cancellation, deadline)?;
         write_checked(&mut socket, &body, cancellation, deadline)?;
+        let watchdogs = ResponseWatchdogs {
+            slot_allocation_timeout: self.slot_allocation_timeout,
+            ttft_watchdog_timeout: self.ttft_watchdog_timeout,
+            cadence_watchdog_timeout: self.cadence_watchdog_timeout,
+            is_streaming: stream,
+        };
         read_response(
             socket,
             cancellation,
             deadline,
+            watchdogs,
             self.max_response_bytes,
             on_body,
         )
@@ -206,10 +291,17 @@ pub(crate) fn get_bounded(
     );
     write_checked(&mut socket, head.as_bytes(), cancellation, expires)?;
     let mut body = Vec::new();
+    let watchdogs = ResponseWatchdogs {
+        slot_allocation_timeout: DEFAULT_SLOT_ALLOCATION_TIMEOUT,
+        ttft_watchdog_timeout: DEFAULT_TTFT_WATCHDOG_TIMEOUT,
+        cadence_watchdog_timeout: None,
+        is_streaming: false,
+    };
     read_response(
         socket,
         cancellation,
         expires,
+        watchdogs,
         max_response_bytes,
         &mut |chunk| {
             body.extend_from_slice(chunk);
@@ -729,6 +821,9 @@ fn encode_request(
                         }
                     }),
                 );
+                if let Ok(grammar) = crate::gbnf::compile_json_schema(schema) {
+                    root.insert("grammar".to_owned(), Value::String(grammar));
+                }
             }
         }
     }
@@ -842,14 +937,24 @@ fn write_checked(
     Ok(())
 }
 
+#[derive(Debug, Clone, Copy)]
+struct ResponseWatchdogs {
+    slot_allocation_timeout: Duration,
+    ttft_watchdog_timeout: Duration,
+    cadence_watchdog_timeout: Option<Duration>,
+    is_streaming: bool,
+}
+
 fn read_response(
     mut stream: TcpStream,
     cancellation: &CancellationToken,
     deadline: Instant,
+    watchdogs: ResponseWatchdogs,
     max_response_bytes: usize,
     on_body: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
     let mut received = Vec::new();
+    let slot_deadline = Instant::now() + watchdogs.slot_allocation_timeout;
     let header_end = loop {
         if let Some(index) = received.windows(4).position(|value| value == b"\r\n\r\n") {
             break index + 4;
@@ -860,13 +965,23 @@ fn read_response(
             });
         }
         let mut buffer = [0_u8; 4096];
-        let count = read_checked(
+        let current_header_deadline = deadline.min(slot_deadline);
+        let count = match read_checked(
             &mut stream,
             &mut buffer,
             cancellation,
-            deadline,
+            current_header_deadline,
             "reading response headers",
-        )?;
+        ) {
+            Ok(n) => n,
+            Err(Error::ModelTransportTimedOut) if Instant::now() >= slot_deadline => {
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+                return Err(Error::SlotAllocationTimedOut {
+                    timeout: watchdogs.slot_allocation_timeout,
+                });
+            }
+            Err(error) => return Err(error),
+        };
         if count == 0 {
             return malformed("response ended before HTTP headers completed");
         }
@@ -884,6 +999,17 @@ fn read_response(
     }
 
     let initial = received[header_end..].to_vec();
+    let ttft_opt = if watchdogs.is_streaming {
+        Some(watchdogs.ttft_watchdog_timeout)
+    } else {
+        None
+    };
+    let cadence_opt = if watchdogs.is_streaming {
+        watchdogs.cadence_watchdog_timeout
+    } else {
+        None
+    };
+
     if chunked {
         let mut socket = BufferedSocket {
             stream,
@@ -893,6 +1019,8 @@ fn read_response(
             &mut socket,
             cancellation,
             deadline,
+            ttft_opt,
+            cadence_opt,
             max_response_bytes,
             on_body,
         )?;
@@ -909,15 +1037,49 @@ fn read_response(
         if !initial.is_empty() {
             on_body(&initial)?;
         }
+        let mut first_body_chunk = initial.is_empty();
+        let ttft_deadline = ttft_opt.map(|d| Instant::now() + d);
+        let mut cadence_deadline = None;
         while received_body < length {
             let mut buffer = [0_u8; 8192];
-            let count = read_checked(
+            let current_deadline = if first_body_chunk {
+                if let Some(td) = ttft_deadline {
+                    deadline.min(td)
+                } else {
+                    deadline
+                }
+            } else if let Some(cd) = cadence_deadline {
+                deadline.min(cd)
+            } else {
+                deadline
+            };
+            let count = match read_checked(
                 &mut stream,
                 &mut buffer,
                 cancellation,
-                deadline,
+                current_deadline,
                 "reading response body",
-            )?;
+            ) {
+                Ok(n) => n,
+                Err(Error::ModelTransportTimedOut)
+                    if first_body_chunk && ttft_deadline.is_some_and(|td| Instant::now() >= td) =>
+                {
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                    return Err(Error::TtftTimedOut {
+                        timeout: watchdogs.ttft_watchdog_timeout,
+                    });
+                }
+                Err(Error::ModelTransportTimedOut)
+                    if !first_body_chunk
+                        && cadence_deadline.is_some_and(|cd| Instant::now() >= cd) =>
+                {
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                    return Err(Error::InterTokenCadenceTimedOut {
+                        timeout: cadence_opt.unwrap_or(watchdogs.ttft_watchdog_timeout),
+                    });
+                }
+                Err(error) => return Err(error),
+            };
             if count == 0 {
                 return malformed("response body ended before Content-Length");
             }
@@ -927,6 +1089,8 @@ fn read_response(
             }
             on_body(&buffer[..count])?;
             received_body += count;
+            first_body_chunk = false;
+            cadence_deadline = cadence_opt.map(|d| Instant::now() + d);
         }
     } else {
         let mut received_body = initial.len();
@@ -938,6 +1102,9 @@ fn read_response(
         if !initial.is_empty() {
             on_body(&initial)?;
         }
+        let mut first_body_chunk = initial.is_empty();
+        let ttft_deadline = ttft_opt.map(|d| Instant::now() + d);
+        let mut cadence_deadline = None;
         loop {
             if received_body > max_response_bytes {
                 return Err(Error::ModelResponseLimitExceeded {
@@ -945,13 +1112,44 @@ fn read_response(
                 });
             }
             let mut buffer = [0_u8; 8192];
-            let count = read_checked(
+            let current_deadline = if first_body_chunk {
+                if let Some(td) = ttft_deadline {
+                    deadline.min(td)
+                } else {
+                    deadline
+                }
+            } else if let Some(cd) = cadence_deadline {
+                deadline.min(cd)
+            } else {
+                deadline
+            };
+            let count = match read_checked(
                 &mut stream,
                 &mut buffer,
                 cancellation,
-                deadline,
+                current_deadline,
                 "reading response body",
-            )?;
+            ) {
+                Ok(n) => n,
+                Err(Error::ModelTransportTimedOut)
+                    if first_body_chunk && ttft_deadline.is_some_and(|td| Instant::now() >= td) =>
+                {
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                    return Err(Error::TtftTimedOut {
+                        timeout: watchdogs.ttft_watchdog_timeout,
+                    });
+                }
+                Err(Error::ModelTransportTimedOut)
+                    if !first_body_chunk
+                        && cadence_deadline.is_some_and(|cd| Instant::now() >= cd) =>
+                {
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                    return Err(Error::InterTokenCadenceTimedOut {
+                        timeout: cadence_opt.unwrap_or(watchdogs.ttft_watchdog_timeout),
+                    });
+                }
+                Err(error) => return Err(error),
+            };
             if count == 0 {
                 break;
             }
@@ -962,6 +1160,8 @@ fn read_response(
             }
             on_body(&buffer[..count])?;
             received_body += count;
+            first_body_chunk = false;
+            cadence_deadline = cadence_opt.map(|d| Instant::now() + d);
         }
     }
 
@@ -1023,12 +1223,48 @@ fn read_chunked_body(
     socket: &mut BufferedSocket,
     cancellation: &CancellationToken,
     deadline: Instant,
+    ttft_watchdog_timeout: Option<Duration>,
+    cadence_watchdog_timeout: Option<Duration>,
     max_response_bytes: usize,
     on_body: &mut dyn FnMut(&[u8]) -> Result<()>,
 ) -> Result<()> {
     let mut body_bytes = 0_usize;
+    let mut first_chunk = socket.buffered.is_empty();
+    let ttft_deadline = ttft_watchdog_timeout.map(|d| Instant::now() + d);
+    let mut cadence_deadline = None;
     loop {
-        let line = socket.read_crlf_line(cancellation, deadline, 1024)?;
+        let current_deadline = if first_chunk {
+            if let Some(td) = ttft_deadline {
+                deadline.min(td)
+            } else {
+                deadline
+            }
+        } else if let Some(cd) = cadence_deadline {
+            deadline.min(cd)
+        } else {
+            deadline
+        };
+
+        let line = match socket.read_crlf_line(cancellation, current_deadline, 1024) {
+            Ok(l) => l,
+            Err(Error::ModelTransportTimedOut)
+                if first_chunk && ttft_deadline.is_some_and(|td| Instant::now() >= td) =>
+            {
+                let _ = socket.stream.shutdown(std::net::Shutdown::Both);
+                return Err(Error::TtftTimedOut {
+                    timeout: ttft_watchdog_timeout.unwrap_or(DEFAULT_TTFT_WATCHDOG_TIMEOUT),
+                });
+            }
+            Err(Error::ModelTransportTimedOut)
+                if !first_chunk && cadence_deadline.is_some_and(|cd| Instant::now() >= cd) =>
+            {
+                let _ = socket.stream.shutdown(std::net::Shutdown::Both);
+                return Err(Error::InterTokenCadenceTimedOut {
+                    timeout: cadence_watchdog_timeout.unwrap_or(DEFAULT_TTFT_WATCHDOG_TIMEOUT),
+                });
+            }
+            Err(error) => return Err(error),
+        };
         let size_text = line.split(|byte| *byte == b';').next().unwrap_or_default();
         let size_text =
             std::str::from_utf8(size_text).map_err(|_| Error::MalformedModelResponse {
@@ -1062,14 +1298,37 @@ fn read_chunked_body(
         let mut remaining = size;
         while remaining > 0 {
             let count = remaining.min(8192);
-            let chunk = socket.read_exact(cancellation, deadline, count)?;
+            let chunk = match socket.read_exact(cancellation, current_deadline, count) {
+                Ok(c) => c,
+                Err(Error::ModelTransportTimedOut)
+                    if first_chunk && ttft_deadline.is_some_and(|td| Instant::now() >= td) =>
+                {
+                    let _ = socket.stream.shutdown(std::net::Shutdown::Both);
+                    return Err(Error::TtftTimedOut {
+                        timeout: ttft_watchdog_timeout.unwrap_or(DEFAULT_TTFT_WATCHDOG_TIMEOUT),
+                    });
+                }
+                Err(Error::ModelTransportTimedOut)
+                    if !first_chunk && cadence_deadline.is_some_and(|cd| Instant::now() >= cd) =>
+                {
+                    let _ = socket.stream.shutdown(std::net::Shutdown::Both);
+                    return Err(Error::InterTokenCadenceTimedOut {
+                        timeout: cadence_watchdog_timeout.unwrap_or(DEFAULT_TTFT_WATCHDOG_TIMEOUT),
+                    });
+                }
+                Err(error) => return Err(error),
+            };
             on_body(&chunk)?;
             body_bytes += count;
             remaining -= count;
+            first_chunk = false;
+            cadence_deadline = cadence_watchdog_timeout.map(|d| Instant::now() + d);
         }
         if socket.read_exact(cancellation, deadline, 2)? != b"\r\n" {
             return malformed("HTTP chunk is missing CRLF");
         }
+        first_chunk = false;
+        cadence_deadline = cadence_watchdog_timeout.map(|d| Instant::now() + d);
     }
 }
 

@@ -24,16 +24,18 @@ path = "src/main.rs"
 bytes = { version = "1", optional = true }
 clap = { version = "4.6", features = ["derive"] }
 futures = { version = "0.3", optional = true }
+hex = "0.4"
 nix = { version = "0.31", default-features = false, features = ["fs", "poll", "process", "signal"] }
 reqwest = { version = "0.13", default-features = false, optional = true }
 rig-core = { version = "=0.42.0", default-features = false, optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+sha2 = "0.11"
 signal-hook = "0.3"
 tempfile = "3.27"
 thiserror = "2.0"
 tokio = { version = "1", features = ["macros", "net", "rt", "time"], optional = true }
-toml_edit = "0.25.13"
+toml_edit = "0.25.15"
 tracing = "0.1"
 
 [dev-dependencies]

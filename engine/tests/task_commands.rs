@@ -2260,3 +2260,63 @@ tasks:
         log_content
     );
 }
+
+#[test]
+fn task_replay_replays_session_trajectory() {
+    let project = TempDir::new().expect("project");
+    let runs_dir = project.path().join(".kvist").join("runs");
+    fs::create_dir_all(&runs_dir).expect("create runs dir");
+    let session_file = runs_dir.join("test_session.jsonl");
+
+    let journal = r#"{"event":"session_start","session_id":"sess-99","task_id":"implement-code","timestamp":1772899200}
+{"event":"turn_start","turn":1,"timestamp":1772899201}
+{"event":"prompt_eval","turn":1,"new_tokens":120}
+{"event":"model_reasoning","turn":1,"reasoning":"Analyzing the task requirements."}
+{"event":"tool_dispatch","turn":1,"call_id":"c1","tool":"read_file","args":{"path":"src/lib.rs"},"action_hash":"sha256:abcd"}
+{"event":"tool_result","turn":1,"call_id":"c1","tool":"read_file","stdout":"pub fn run() {}","stderr":"","exit_code":0,"bytes":17,"state_mutated":false}
+{"event":"turn_finish","turn":1,"output_tokens":30,"finish_reason":"stop"}
+{"event":"session_finish","session_id":"sess-99","task_id":"implement-code","total_turns":1,"total_tokens":150,"success":true}
+"#;
+    fs::write(&session_file, journal).expect("write journal");
+
+    let output = run_kvist(
+        &project,
+        &["task", "replay", session_file.to_str().unwrap()],
+    );
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Replaying session `sess-99` for task `implement-code`"));
+    assert!(stdout.contains("Turn 1"));
+    assert!(stdout.contains("Analyzing the task requirements"));
+    assert!(stdout.contains("read_file"));
+}
+
+#[test]
+fn task_replay_json_mode() {
+    let project = TempDir::new().expect("project");
+    let runs_dir = project.path().join(".kvist").join("runs");
+    fs::create_dir_all(&runs_dir).expect("create runs dir");
+    let session_file = runs_dir.join("test_session.jsonl");
+
+    let journal = r#"{"event":"session_start","session_id":"sess-json","task_id":"implement-code","timestamp":1772899200}
+{"event":"session_finish","session_id":"sess-json","task_id":"implement-code","total_turns":0,"total_tokens":0,"success":true}
+"#;
+    fs::write(&session_file, journal).expect("write journal");
+
+    let output = run_kvist(
+        &project,
+        &["--json", "task", "replay", session_file.to_str().unwrap()],
+    );
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("\"command\":\"task-replay\""));
+    assert!(stdout.contains("\"status\":\"success\""));
+}

@@ -248,6 +248,77 @@ pub fn execute_agent(
         tokens_output = record.tokens_output;
     }
 
+    // Record structured session trajectory journal
+    let trajectory_path = runs_dir.join(format!(
+        "{}_{}.trajectory.jsonl",
+        request.task_id,
+        timestamp.to_string().replace(':', "-")
+    ));
+    let recorder = agent_runtime::TrajectoryRecorder::new(&trajectory_path);
+    let session_id = format!(
+        "{}_{}",
+        request.task_id,
+        timestamp.to_string().replace(':', "-")
+    );
+    let now_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::SessionStart {
+        session_id: session_id.clone(),
+        task_id: request.task_id.to_string(),
+        timestamp: now_ts,
+    });
+    let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::TurnStart {
+        turn: 1,
+        timestamp: now_ts,
+    });
+    let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::PromptEval {
+        turn: 1,
+        cached_tokens: None,
+        new_tokens: tokens_input.map(|t| t as u64),
+        eval_duration_ms: None,
+    });
+    let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::ToolDispatch {
+        turn: 1,
+        call_id: "call_1".to_owned(),
+        tool: program.clone(),
+        args: serde_json::json!({
+            "prompt": request.prompt,
+            "target_dir": request.target_dir.display().to_string(),
+        }),
+        action_hash: agent_runtime::compute_action_hash(
+            &program,
+            &serde_json::json!({ "prompt": request.prompt }),
+        ),
+    });
+    let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::ToolResult {
+        turn: 1,
+        call_id: "call_1".to_owned(),
+        tool: program.clone(),
+        stdout: stdout.clone(),
+        stderr: String::new(),
+        exit_code: output.status.code().unwrap_or(-1),
+        bytes: stdout.len(),
+        state_mutated: success,
+    });
+    let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::TurnFinish {
+        turn: 1,
+        output_tokens: tokens_output.map(|t| t as u64),
+        finish_reason: if success {
+            "stop".to_string()
+        } else {
+            "error".to_string()
+        },
+    });
+    let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::SessionFinish {
+        session_id,
+        task_id: request.task_id.to_string(),
+        total_turns: 1,
+        total_tokens: (tokens_input.unwrap_or(0) + tokens_output.unwrap_or(0)) as u64,
+        success,
+    });
+
     if success {
         tracing::info!(
             task_id = %request.task_id,

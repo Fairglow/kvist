@@ -948,3 +948,57 @@ fn interrupt_terminates_the_supervised_process_group() {
         }
     }
 }
+
+#[test]
+fn standalone_cli_replays_trajectory_journal() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("session.jsonl");
+    let content = r#"{"event":"session_start","session_id":"test-session-1","task_id":"my-task","timestamp":1700000000}
+{"event":"turn_start","turn":1,"timestamp":1700000001}
+{"event":"tool_dispatch","turn":1,"call_id":"c1","tool":"read_file","args":{"path":"src/main.rs"},"action_hash":"sha256:abc"}
+{"event":"tool_result","turn":1,"call_id":"c1","tool":"read_file","stdout":"fn main() {}","stderr":"","exit_code":0,"bytes":12,"state_mutated":false}
+{"event":"turn_finish","turn":1,"finish_reason":"stop"}
+{"event":"session_finish","session_id":"test-session-1","task_id":"my-task","total_turns":1,"total_tokens":42,"success":true}
+"#;
+    fs::write(&file, content).expect("write session file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args(["replay", file.to_str().unwrap()])
+        .output()
+        .expect("run agent-run replay");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Replaying session `test-session-1` for task `my-task`"));
+    assert!(stdout.contains("[Turn 1 ToolDispatch] read_file"));
+    assert!(stdout.contains("[SessionFinish] turns=1 tokens=42 success=true"));
+}
+
+#[test]
+fn standalone_cli_replays_trajectory_json() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("session.jsonl");
+    let content = r#"{"event":"session_start","session_id":"json-sess","task_id":"task-2","timestamp":1700000000}
+{"event":"session_finish","session_id":"json-sess","task_id":"task-2","total_turns":0,"total_tokens":0,"success":true}
+"#;
+    fs::write(&file, content).expect("write session file");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-run"))
+        .args(["replay", "--json", file.to_str().unwrap()])
+        .output()
+        .expect("run agent-run replay json");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).expect("valid json output");
+    assert_eq!(parsed["session_id"], "json-sess");
+    assert_eq!(parsed["final_success"], true);
+}

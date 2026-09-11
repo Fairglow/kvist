@@ -13,6 +13,8 @@ mod catalog;
 mod command;
 mod direct_transport;
 mod error;
+pub mod gbnf;
+pub mod loop_detection;
 mod model;
 mod profile;
 mod prompt;
@@ -20,6 +22,7 @@ mod prompt;
 mod rig_transport;
 mod setup;
 mod supervisor;
+pub mod trajectory;
 
 pub use catalog::{
     CatalogProvider, ModelCatalog, ModelDiscoveryOptions, ProviderModel, discover_models,
@@ -27,6 +30,7 @@ pub use catalog::{
 pub use command::{render_command, render_command_with_reasoning_effort, split_raw_command};
 pub use direct_transport::DirectModelTransport;
 pub use error::{Error, Result};
+pub use gbnf::{compile_json_schema, compile_tools_schema};
 pub use model::{
     CancellationToken, FinishReason, LocalModelProvider, ModelMessage, ModelRequest,
     ModelStreamEvent, ModelTransport, ModelTurn, ModelUsage, ReasoningEffort, ToolChoice,
@@ -44,6 +48,14 @@ pub use setup::{
     run_setup_wizard_with_options, verify_profile,
 };
 pub use supervisor::{
-    AttemptContext, CapturedExecutionReport, CommandSpec, ExecutionReport, RetryCause,
-    SupervisionPolicy, run_supervised, run_supervised_capture,
+    ACTION_HASH_RING_CAPACITY, ActionHashRing, ActionRecord, AttemptContext,
+    CONSECUTIVE_IDENTICAL_ACTION_LIMIT, CapturedExecutionReport, CommandSpec,
+    DEFAULT_TEMPERATURE_JITTER, ExecutionReport, LoopDecision, MAX_STALLED_TURNS,
+    OBSERVATION_INVARIANT_LIMIT, REASONING_NGRAM_SIZE, REASONING_SIMILARITY_THRESHOLD, RetryCause,
+    SupervisionPolicy, WINDOW_IDENTICAL_ACTION_LIMIT, compute_action_hash,
+    compute_ngram_jaccard_similarity, compute_observation_hash, normalize_json, run_supervised,
+    run_supervised_capture,
+};
+pub use trajectory::{
+    TrajectoryEvent, TrajectoryRecorder, TrajectoryReplayReport, replay_trajectory,
 };

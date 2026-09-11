@@ -38,8 +38,25 @@ enum Command {
     /// Discover provider-advertised model identifiers without running inference.
     Models(ModelsArguments),
     Run(RunArguments),
+    /// Replay an agent execution session from a structured JSONL journal file.
+    Replay(ReplayArguments),
     /// Interactively create or update a reusable provider profile.
     Setup(SetupArguments),
+}
+
+#[derive(Debug, Args)]
+struct ReplayArguments {
+    /// Path to the session JSONL journal file.
+    #[arg(value_name = "SESSION_JSONL")]
+    session_file: PathBuf,
+
+    /// Maximum turn to step through (optional).
+    #[arg(long)]
+    max_turns: Option<usize>,
+
+    /// Emit replay summary as JSON.
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Debug, Args)]
@@ -280,8 +297,100 @@ fn execute() -> agent_runtime::Result<()> {
         Command::Model(arguments) => model(arguments),
         Command::Models(arguments) => models(arguments),
         Command::Run(arguments) => run(arguments),
+        Command::Replay(arguments) => replay(arguments),
         Command::Setup(arguments) => setup(arguments),
     }
+}
+
+fn replay(arguments: ReplayArguments) -> agent_runtime::Result<()> {
+    let report = agent_runtime::replay_trajectory(&arguments.session_file, arguments.max_turns)?;
+    if arguments.json {
+        let json = serde_json::to_string(&report).map_err(|e| Error::InvalidModelRequest {
+            reason: format!("failed to serialize replay report: {e}"),
+        })?;
+        println!("{json}");
+    } else {
+        println!(
+            "Replaying session `{}` for task `{}`:",
+            report.session_id.as_deref().unwrap_or("unknown"),
+            report.task_id.as_deref().unwrap_or("unknown"),
+        );
+        println!(
+            "Total events: {}, Replayed turns: {}, Tool calls: {}",
+            report.total_events, report.replayed_turns, report.tool_calls_count
+        );
+        println!("------------------------------------------------------------");
+        for event in &report.events {
+            match event {
+                agent_runtime::TrajectoryEvent::SessionStart {
+                    session_id,
+                    task_id,
+                    timestamp,
+                } => {
+                    println!("[SessionStart] id={session_id} task={task_id} time={timestamp}");
+                }
+                agent_runtime::TrajectoryEvent::TurnStart { turn, timestamp } => {
+                    println!("\n--- Turn {turn} (time={timestamp}) ---");
+                }
+                agent_runtime::TrajectoryEvent::PromptEval {
+                    turn,
+                    new_tokens,
+                    cached_tokens,
+                    ..
+                } => {
+                    println!(
+                        "[Turn {turn} PromptEval] new_tokens={new_tokens:?} cached_tokens={cached_tokens:?}"
+                    );
+                }
+                agent_runtime::TrajectoryEvent::ModelReasoning { turn, reasoning } => {
+                    println!("[Turn {turn} Reasoning]: {reasoning}");
+                }
+                agent_runtime::TrajectoryEvent::ToolDispatch {
+                    turn,
+                    tool,
+                    args,
+                    action_hash,
+                    ..
+                } => {
+                    println!(
+                        "[Turn {turn} ToolDispatch] {tool} (hash: {action_hash})\n  args: {args}"
+                    );
+                }
+                agent_runtime::TrajectoryEvent::ToolResult {
+                    turn,
+                    tool,
+                    exit_code,
+                    bytes,
+                    state_mutated,
+                    ..
+                } => {
+                    println!(
+                        "[Turn {turn} ToolResult] {tool} exit_code={exit_code} bytes={bytes} mutated={state_mutated}"
+                    );
+                }
+                agent_runtime::TrajectoryEvent::TurnFinish {
+                    turn,
+                    finish_reason,
+                    output_tokens,
+                } => {
+                    println!(
+                        "[Turn {turn} Finish] reason={finish_reason} output_tokens={output_tokens:?}"
+                    );
+                }
+                agent_runtime::TrajectoryEvent::SessionFinish {
+                    total_turns,
+                    total_tokens,
+                    success,
+                    ..
+                } => {
+                    println!(
+                        "\n[SessionFinish] turns={total_turns} tokens={total_tokens} success={success}"
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn models(arguments: ModelsArguments) -> agent_runtime::Result<()> {
