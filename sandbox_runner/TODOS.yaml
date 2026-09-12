@@ -1,11 +1,9 @@
 schema_version: 1
 component:
   requirements_revision: "sha256:fd851bdf9d703c6928d359afd01d4bc81b99bc95c66794010c6b8dbe77482363"
-  contract_revision: "sha256:66834c5a7bd55bc949c885240105989a06a4141b1fa2074f2501dbfbf42990ed"
-  design_revision: "sha256:f914c25425863857b5bbc3807f7b462c9b38e791c8679b5f2c18d47020f4964c"
-  parent_contract:
-    path: "../CONTRACT.md"
-    revision: "sha256:97e29ab932fa292248f6fa87d99b3efca1b5859ae0555bdcd19b8398ddc483c3"
+  contract_revision: "sha256:5bbc03186226e97133864e23cf673f35d39f6d976249ca8d2d60613a136c8c07"
+  design_revision: "sha256:5d8579f014f4f387eb800e921885b8256860da0c54ef08ad591a585611c81b46"
+  parent_contract: null
   revalidation:
     state: current
     checked_at: "2026-09-02T06:23:00Z"
@@ -22,7 +20,6 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - "../CONTRACT.md#Required-interfaces"
       - "CONTRACT.md#Compatibility-and-verification"
       - "DESIGN.md#Verification-strategy"
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
@@ -44,7 +41,6 @@ tasks:
     depends_on:
       - "sandbox-runner-write-tests"
     requirements:
-      - "../CONTRACT.md#Required-interfaces"
       - "CONTRACT.md#Behavioral-guarantees"
       - "DESIGN.md#Interactions-and-state"
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"

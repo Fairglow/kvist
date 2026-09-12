@@ -3,9 +3,7 @@ component:
   requirements_revision: "sha256:58849618584e9af48dd94cd0aea2806fd6f1905484846a9907a76806caa502e7"
   contract_revision: "sha256:2b7478dcc6d7667c475e6128ef91f9ea031dffd94e1863630931b52a810f115e"
   design_revision: "sha256:d290df050d46ccafd0bc0aabf75b22f79eeb8920058dca293bd7d33586eff366"
-  parent_contract:
-    path: "../CONTRACT.md"
-    revision: "sha256:9772c55be0107de462f33813ab31a207aa18eb8c463f28281cccaf31a0d82a58"
+  parent_contract: null
   revalidation:
     state: current
     checked_at: "2026-09-02T06:23:00Z"
@@ -22,7 +20,6 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - "../CONTRACT.md#Provided-interfaces"
       - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
       - "TODO.md#AGN-07"
@@ -43,7 +40,7 @@ tasks:
     depends_on:
       - "sa-01-write-tests"
     requirements:
-      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
       - "DESIGN.md#Interactions-and-state"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
       - "TODO.md#AGN-07"
@@ -478,7 +475,6 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - "../CONTRACT.md#Provided-interfaces"
       - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
@@ -498,7 +494,6 @@ tasks:
     depends_on:
       - "sa-06-write-tests"
     requirements:
-      - "../CONTRACT.md#Provided-interfaces"
       - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
@@ -555,7 +550,7 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
       - "DESIGN.md#Algorithms-and-decisions"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
@@ -575,7 +570,7 @@ tasks:
     depends_on:
       - "sa-07-write-tests"
     requirements:
-      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
       - "DESIGN.md#Algorithms-and-decisions"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
@@ -1179,7 +1174,6 @@ tasks:
     depends_on:
       - "sa-09-implement-code"
     requirements:
-      - "../CONTRACT.md#Provided-interfaces"
       - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
@@ -1199,7 +1193,6 @@ tasks:
     depends_on:
       - "sa-16-write-tests"
     requirements:
-      - "../CONTRACT.md#Provided-interfaces"
       - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
@@ -1257,7 +1250,7 @@ tasks:
     depends_on:
       - "sa-16-implement-code"
     requirements:
-      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
       - "DESIGN.md#Algorithms-and-decisions"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
@@ -1277,7 +1270,7 @@ tasks:
     depends_on:
       - "sa-17-write-tests"
     requirements:
-      - "../CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Provided-interfaces"
       - "DESIGN.md#Algorithms-and-decisions"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
