@@ -508,6 +508,11 @@ pub fn write_finalizable_attempt(project: &Path, verification_success: bool) {
 }
 
 pub fn runner_path() -> PathBuf {
+    static RUNNER: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    RUNNER.get_or_init(resolve_runner_path).clone()
+}
+
+fn resolve_runner_path() -> PathBuf {
     let mut candidates = Vec::new();
     if let Some(path) = std::env::var_os("KVIST_SANDBOX_RUNNER_TEST_BIN") {
         candidates.push(PathBuf::from(path));
@@ -581,13 +586,16 @@ pub fn runner_path() -> PathBuf {
             && !metadata.file_type().is_symlink()
         {
             use std::os::unix::fs::PermissionsExt;
-            let staged_dir = std::env::temp_dir().join("kvist-test-sandbox-bin");
+            let staged_dir =
+                std::env::temp_dir().join(format!("kvist-test-sandbox-bin-{}", std::process::id()));
             let _ = fs::create_dir_all(&staged_dir);
             let staged_runner = staged_dir.join("kvist-sandbox-runner");
+            let tmp_staged = staged_dir.join(format!("tmp-runner-{}", std::process::id()));
             if let Ok(bytes) = fs::read(path)
-                && fs::write(&staged_runner, &bytes).is_ok()
+                && fs::write(&tmp_staged, &bytes).is_ok()
             {
-                let _ = fs::set_permissions(&staged_runner, fs::Permissions::from_mode(0o755));
+                let _ = fs::set_permissions(&tmp_staged, fs::Permissions::from_mode(0o755));
+                let _ = fs::rename(&tmp_staged, &staged_runner);
                 if let Ok(canonical) = staged_runner.canonicalize()
                     && !canonical.starts_with(&canonical_worktree)
                 {
