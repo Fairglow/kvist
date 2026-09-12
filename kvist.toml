@@ -21,3 +21,30 @@ kind = "auto"
 [llm]
 # External LLM integration is opt-in. No provider is configured by default.
 provider = "none"
+
+[sandbox]
+schema_version = 1
+runner = "/opt/target/release/kvist-sandbox-runner"
+backend = "/usr/bin/bwrap"
+network = "deny"
+mount = "component"
+environment_allowlist = ["PATH", "RUST_BACKTRACE", "CARGO_HOME", "RUSTC", "TERM"]
+
+[test_policy]
+schema_version = 1
+working_directory = "project"
+environment_allowlist = ["PATH", "RUST_BACKTRACE", "CARGO_HOME", "RUSTC", "TERM"]
+timeout_seconds = 180
+max_output_bytes = 1048576
+
+[[test_policy.commands]]
+component = "engine"
+command = "cargo test -p kvist"
+
+[[test_policy.commands]]
+component = "agent_runtime"
+command = "cargo test -p agent-runtime"
+
+[[test_policy.commands]]
+component = "sandbox_runner"
+command = "cargo test -p kvist-sandbox-runner"
