@@ -27,11 +27,16 @@ pub fn render_project(project_root: &Path) -> Result<String> {
 pub fn render(component_root: &Path, discovery: &discovery::Discovery) -> String {
     let mut output = format!("component root: {}\n", component_root.display());
     for component in &discovery.components {
-        let depth = component
+        let count = component
             .relative_path
             .components()
             .filter(|component| matches!(component, std::path::Component::Normal(_)))
             .count();
+        let depth = if component_root == Path::new(".") {
+            count.saturating_sub(1)
+        } else {
+            count
+        };
         output.push_str(&"  ".repeat(depth));
         output.push_str(&component.relative_path.display().to_string());
         output.push_str(" [");

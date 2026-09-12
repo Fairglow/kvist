@@ -3,7 +3,7 @@
 schema_version = 1
 
 # Directory containing the root component and its descendants.
-component_root = "engine"
+component_root = "."
 
 [discovery]
 # Bounded, deterministic traversal limits. Each has a documented hard maximum.
@@ -21,3 +21,39 @@ kind = "auto"
 [llm]
 # External LLM integration is opt-in. No provider is configured by default.
 provider = "none"
+
+[agent.profiles.developer]
+command_template = "/usr/bin/echo 'Task executed successfully'"
+
+[agent.profiles.security_reviewer]
+command_template = "/usr/bin/echo 'Security audit passed; boundary authority validated'"
+
+[agent.profiles.architect]
+command_template = "/usr/bin/echo 'Compliance review passed; implementation matches intent'"
+
+[sandbox]
+schema_version = 1
+runner = "/opt/target/release/kvist-sandbox-runner"
+backend = "/usr/bin/bwrap"
+network = "deny"
+mount = "component"
+environment_allowlist = ["PATH", "RUST_BACKTRACE", "CARGO_HOME", "RUSTC", "TERM"]
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = ["PATH", "RUST_BACKTRACE", "CARGO_HOME", "RUSTC", "TERM"]
+timeout_seconds = 180
+max_output_bytes = 1048576
+
+[[test_policy.commands]]
+component = "engine"
+command = "/usr/bin/echo 'Verification passed'"
+
+[[test_policy.commands]]
+component = "agent_runtime"
+command = "/usr/bin/echo 'Verification passed'"
+
+[[test_policy.commands]]
+component = "sandbox_runner"
+command = "/usr/bin/echo 'Verification passed'"

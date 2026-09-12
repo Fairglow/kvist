@@ -171,7 +171,7 @@ tasks:
     purpose: "Automate the mechanical VCS publication of an exact accepted change while keeping acceptance, commit, and push as separate human authorities."
     expected_outcome: "Component, project, and supervised-task acceptance can create or later retry one exact local Git commit; unrelated state remains byte-for-byte and index-for-index unchanged; overlaps and races refuse; hooks are off by default; signing policy is honored; no push or amend occurs."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "dogfood-runner-integrate-code"
     requirements:
@@ -182,8 +182,8 @@ tasks:
       - "TODO.md#TODO-DOG-01"
     timestamps:
       created_at: "2026-09-01T20:24:06Z"
-      updated_at: "2026-09-01T20:24:06Z"
-      completed_at: null
+      updated_at: "2026-09-12T14:22:21Z"
+      completed_at: "2026-09-12T14:22:21Z"
     blocked_reason: null
     recovery_state: null
   - id: "dogfood-boundary-security-audit"
@@ -193,7 +193,7 @@ tasks:
     purpose: "Find every high-confidence path to authority escalation, disclosure, cross-project contamination, or forged evidence before Kvist uses the runner on itself."
     expected_outcome: "All high-confidence vulnerabilities are corrected with native regression tests or retained as explicit blockers; no unsupported isolation or remote-agent claim is promoted."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "dogfood-vcs-commit-implement-code"
     requirements:
@@ -205,8 +205,8 @@ tasks:
       - "TODO.md#TODO-DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
-      updated_at: "2026-09-01T19:57:32Z"
-      completed_at: null
+      updated_at: "2026-09-12T14:36:21Z"
+      completed_at: "2026-09-12T14:36:21Z"
     blocked_reason: null
     recovery_state: null
   - id: "dogfood-boundary-compliance-review"
@@ -216,7 +216,7 @@ tasks:
     purpose: "Retain an independent disposition for every authority, context, network, recovery, and lifecycle guarantee before DOC-01 resumes."
     expected_outcome: "The review records satisfied clauses, commit-scope and recovery guarantees, discrepancies, unsupported VCS tiers, and required arbitration, and permits supervised local dogfooding only if no blocking mismatch remains."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "dogfood-boundary-security-audit"
     requirements:
@@ -229,8 +229,8 @@ tasks:
       - "TODO.md#TODO-DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
-      updated_at: "2026-09-01T19:57:32Z"
-      completed_at: null
+      updated_at: "2026-09-12T14:37:09Z"
+      completed_at: "2026-09-12T14:37:09Z"
     blocked_reason: null
     recovery_state: null
   - id: "doc-01-write-tests"

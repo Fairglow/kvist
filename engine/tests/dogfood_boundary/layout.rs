@@ -89,7 +89,7 @@ fn retired_nested_paths_have_no_aliases() {
             .expect("parse kvist.toml");
     assert_eq!(
         config.get("component_root").and_then(toml::Value::as_str),
-        Some("engine"),
-        "the structurally parsed component root must be engine/"
+        Some("."),
+        "the structurally parsed component root must be the workspace root (.)"
     );
 }

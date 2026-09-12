@@ -929,14 +929,13 @@ fn normalize_component_root(config_path: &Path, value: &str) -> Result<PathBuf> 
         ));
     }
 
+    let mut has_cur_dir = false;
     let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {
             Component::Normal(segment) => normalized.push(segment),
-            Component::CurDir
-            | Component::ParentDir
-            | Component::RootDir
-            | Component::Prefix(_) => {
+            Component::CurDir => has_cur_dir = true,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
                 return Err(invalid_configuration(
                     config_path,
                     "`component_root` may contain only normal path segments",
@@ -946,6 +945,9 @@ fn normalize_component_root(config_path: &Path, value: &str) -> Result<PathBuf> 
     }
 
     if normalized.as_os_str().is_empty() {
+        if has_cur_dir {
+            return Ok(PathBuf::from("."));
+        }
         return Err(invalid_configuration(
             config_path,
             "`component_root` must contain a directory name",
