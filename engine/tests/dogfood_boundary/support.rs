@@ -540,27 +540,68 @@ pub fn runner_path() -> PathBuf {
     let canonical_worktree = repository_root()
         .canonicalize()
         .expect("canonical test worktree");
-    candidates
-        .into_iter()
-        .find(|path| {
-            fs::symlink_metadata(path)
-                .ok()
-                .and_then(|metadata| {
-                    path.canonicalize().ok().map(|canonical| {
-                        metadata.file_type().is_file()
-                            && !metadata.file_type().is_symlink()
-                            && !canonical.starts_with(&canonical_worktree)
-                    })
+
+    if let Some(outside) = candidates.iter().find(|path| {
+        fs::symlink_metadata(path)
+            .ok()
+            .and_then(|metadata| {
+                path.canonicalize().ok().map(|canonical| {
+                    metadata.file_type().is_file()
+                        && !metadata.file_type().is_symlink()
+                        && !canonical.starts_with(&canonical_worktree)
                 })
-                .unwrap_or(false)
-        })
-        .unwrap_or_else(|| {
-            panic!(
-                "the real Bubblewrap sandbox runner is not installed outside the selected \
-                 worktree; build sandbox_runner and set KVIST_SANDBOX_RUNNER_TEST_BIN \
-                 to its installed regular-file executable"
-            )
-        })
+            })
+            .unwrap_or(false)
+    }) {
+        return outside.clone();
+    }
+
+    // If the sandbox runner binary has not been built yet (e.g. running only `-p kvist`),
+    // build it automatically so the boundary test can stage and execute it.
+    if !candidates.iter().any(|p| p.is_file()) {
+        let _ = Command::new("cargo")
+            .args([
+                "build",
+                "-p",
+                "kvist-sandbox-runner",
+                "--bin",
+                "kvist-sandbox-runner",
+            ])
+            .current_dir(repository_root())
+            .status();
+    }
+
+    // When running tests without an explicit external installation (e.g. `cargo test` in a
+    // fresh checkout or CI), automatically stage the compiled target binary into an isolated
+    // temporary directory outside the worktree. This satisfies the regular-file, non-worktree
+    // boundary constraint cleanly and automatically.
+    for path in &candidates {
+        if let Ok(metadata) = fs::symlink_metadata(path)
+            && metadata.file_type().is_file()
+            && !metadata.file_type().is_symlink()
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let staged_dir = std::env::temp_dir().join("kvist-test-sandbox-bin");
+            let _ = fs::create_dir_all(&staged_dir);
+            let staged_runner = staged_dir.join("kvist-sandbox-runner");
+            if let Ok(bytes) = fs::read(path)
+                && fs::write(&staged_runner, &bytes).is_ok()
+            {
+                let _ = fs::set_permissions(&staged_runner, fs::Permissions::from_mode(0o755));
+                if let Ok(canonical) = staged_runner.canonicalize()
+                    && !canonical.starts_with(&canonical_worktree)
+                {
+                    return staged_runner;
+                }
+            }
+        }
+    }
+
+    panic!(
+        "the real Bubblewrap sandbox runner is not installed outside the selected \
+         worktree; build sandbox_runner and set KVIST_SANDBOX_RUNNER_TEST_BIN \
+         to its installed regular-file executable"
+    )
 }
 
 pub fn probe_runner() -> Value {

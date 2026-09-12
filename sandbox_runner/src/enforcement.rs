@@ -263,17 +263,17 @@ fn inspect_and_promote_cache(
 }
 
 /// Configures resource limits on the child process using `/usr/bin/prlimit` utility.
-/// This avoids the fork process-limit issues and requires zero unsafe code.
+/// Note: `--nproc` is intentionally omitted here because Linux RLIMIT_NPROC applies
+/// across the entire real host UID (breaking fork for the user in multi-process/CI environments);
+/// process count is actively supervised in the process tree monitor via `count_processes_in_pgid`.
 fn safe_prlimit(child_pid: u32, limits: crate::protocol::Resources) {
     let pid_str = child_pid.to_string();
-    let nproc_str = format!("--nproc={}", limits.max_processes);
     let nofile_str = format!("--nofile={}", limits.max_files);
     let fsize_str = format!("--fsize={}", limits.max_file_bytes);
 
     let _ = Command::new("/usr/bin/prlimit")
         .arg("--pid")
         .arg(&pid_str)
-        .arg(&nproc_str)
         .arg(&nofile_str)
         .arg(&fsize_str)
         .output();
@@ -415,12 +415,10 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     bwrap_args.push("--unshare-ipc".to_owned());
     bwrap_args.push("--unshare-pid".to_owned());
     bwrap_args.push("--unshare-uts".to_owned());
-    bwrap_args.push("--unshare-cgroup".to_owned());
+    bwrap_args.push("--unshare-cgroup-try".to_owned());
     if request.network.mode == NetworkMode::Deny {
         bwrap_args.push("--unshare-net".to_owned());
     }
-
-    // 3. Setup sessions and parent lifecycle bindings
 
     // 3. Setup sessions and parent lifecycle bindings
     bwrap_args.push("--new-session".to_owned());

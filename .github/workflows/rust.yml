@@ -30,8 +30,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Bubblewrap
-        run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends bubblewrap
+      - name: Install and configure Bubblewrap
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y --no-install-recommends bubblewrap
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          fi
+          sudo chmod u+s /usr/bin/bwrap || true
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -49,11 +54,6 @@ jobs:
 
       - name: Build workspace (debug)
         run: cargo build --locked --workspace --all-targets --all-features
-
-      - name: Install sandbox runner outside worktree
-        run: |
-          sudo install -m 0755 target/debug/kvist-sandbox-runner /usr/local/bin/kvist-sandbox-runner
-          echo "KVIST_SANDBOX_RUNNER_TEST_BIN=/usr/local/bin/kvist-sandbox-runner" >> "$GITHUB_ENV"
 
       - name: Test workspace
         run: cargo test --locked --workspace --all-features
@@ -81,8 +81,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Bubblewrap
-        run: sudo apt-get update -y && sudo apt-get install -y --no-install-recommends bubblewrap
+      - name: Install and configure Bubblewrap
+        run: |
+          sudo apt-get update -y && sudo apt-get install -y --no-install-recommends bubblewrap
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          fi
+          sudo chmod u+s /usr/bin/bwrap || true
 
       - name: Install Rust 1.94.0
         uses: dtolnay/rust-toolchain@1.94.0
@@ -95,11 +100,6 @@ jobs:
 
       - name: Build workspace (debug)
         run: cargo build --locked --workspace --all-targets --all-features
-
-      - name: Install sandbox runner outside worktree
-        run: |
-          sudo install -m 0755 target/debug/kvist-sandbox-runner /usr/local/bin/kvist-sandbox-runner
-          echo "KVIST_SANDBOX_RUNNER_TEST_BIN=/usr/local/bin/kvist-sandbox-runner" >> "$GITHUB_ENV"
 
       - name: Test workspace
         run: cargo test --locked --workspace --all-features

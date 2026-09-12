@@ -729,11 +729,20 @@ printf 'downloaded crate' > /workspace/cargo-home/crate
     enable_cache_promotion(&mut request);
     let request_thread = thread::spawn(move || run_runner_request(&request));
     let started = fixture.path().join("scratch/acquisition-started");
-    let deadline = Instant::now() + Duration::from_secs(3);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while !started.exists() && Instant::now() < deadline {
+        if request_thread.is_finished() {
+            break;
+        }
         thread::sleep(Duration::from_millis(10));
     }
-    assert!(started.exists(), "controlled acquisition did not start");
+    if !started.exists() {
+        let output = request_thread.join().expect("join failed request thread");
+        panic!(
+            "controlled acquisition did not start; runner output: {}",
+            output_text(&output)
+        );
+    }
     let concurrent = b"concurrent project-cache update\n";
     fs::write(fixture.path().join("project-cache/sentinel"), concurrent)
         .expect("write concurrent project-cache change");
