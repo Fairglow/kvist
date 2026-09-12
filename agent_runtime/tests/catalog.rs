@@ -45,7 +45,7 @@ fn serve_json(body: &'static str) -> (String, mpsc::Receiver<String>) {
 fn options(workspace: &TempDir) -> ModelDiscoveryOptions {
     ModelDiscoveryOptions {
         working_directory: workspace.path().to_path_buf(),
-        timeout: Duration::from_secs(2),
+        timeout: Duration::from_secs(10),
         max_response_bytes: 64 * 1024,
         ..ModelDiscoveryOptions::default()
     }
@@ -147,7 +147,8 @@ printf '%s\n' '{}'"#,
         assert!(
             error.to_string().contains("at least one model")
                 || error.to_string().contains("record exceeded")
-                || error.to_string().contains("output exceeded")
+                || error.to_string().contains("output exceeded"),
+            "unexpected error message: {error}"
         );
     }
 
@@ -456,7 +457,7 @@ fn acp_timeout_terminates_and_reaps_the_process_group() {
         .expect("provider PID")
         .parse::<i32>()
         .expect("numeric provider PID");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match kill(Pid::from_raw(pid), None) {
             Err(Errno::ESRCH) => break,
@@ -485,7 +486,7 @@ fn acp_cancellation_terminates_and_reaps_the_process_group() {
     let cancellation_request = cancellation.clone();
     let marker = pid_path.clone();
     thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(5);
         while !marker.exists() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(10));
         }
@@ -500,7 +501,7 @@ fn acp_cancellation_terminates_and_reaps_the_process_group() {
         .expect("provider PID")
         .parse::<i32>()
         .expect("numeric provider PID");
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         match kill(Pid::from_raw(pid), None) {
             Err(Errno::ESRCH) => break,

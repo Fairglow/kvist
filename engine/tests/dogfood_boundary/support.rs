@@ -614,11 +614,25 @@ fn resolve_runner_path() -> PathBuf {
 
 pub fn probe_runner() -> Value {
     let runner = runner_path();
-    let output = Command::new(&runner)
-        .arg("--kvist-sandbox-probe-v1")
-        .env_clear()
-        .output()
-        .expect("run real sandbox probe");
+    let mut attempts = 0;
+    let output = loop {
+        match Command::new(&runner)
+            .arg("--kvist-sandbox-probe-v1")
+            .env_clear()
+            .output()
+        {
+            Ok(output) => break output,
+            Err(ref error)
+                if (error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    || error.raw_os_error() == Some(26))
+                    && attempts < 10 =>
+            {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(source) => panic!("run real sandbox probe: {source:?}"),
+        }
+    };
     assert_success(&output, "real Bubblewrap sandbox probe");
     serde_json::from_slice(&output.stdout).unwrap_or_else(|error| {
         panic!(
@@ -630,14 +644,28 @@ pub fn probe_runner() -> Value {
 
 pub fn run_runner_request(request: &Value) -> Output {
     let runner = runner_path();
-    let mut child = Command::new(runner)
-        .arg("--kvist-sandbox-request-v1")
-        .env_clear()
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("start real sandbox runner");
+    let mut attempts = 0;
+    let mut child = loop {
+        match Command::new(&runner)
+            .arg("--kvist-sandbox-request-v1")
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(child) => break child,
+            Err(ref error)
+                if (error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    || error.raw_os_error() == Some(26))
+                    && attempts < 10 =>
+            {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(source) => panic!("start real sandbox runner: {source:?}"),
+        }
+    };
     child
         .stdin
         .take()

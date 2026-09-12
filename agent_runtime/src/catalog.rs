@@ -368,11 +368,27 @@ fn discover_acp(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .process_group(0);
-    let mut child = command.spawn().map_err(|source| Error::Io {
-        operation: "spawn ACP catalog provider",
-        path: PathBuf::from(executable),
-        source,
-    })?;
+    let mut attempts = 0;
+    let mut child = loop {
+        match command.spawn() {
+            Ok(child) => break child,
+            Err(ref error)
+                if (error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    || error.raw_os_error() == Some(26))
+                    && attempts < 10 =>
+            {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(source) => {
+                return Err(Error::Io {
+                    operation: "spawn ACP catalog provider",
+                    path: PathBuf::from(executable),
+                    source,
+                });
+            }
+        }
+    };
     let stdin = match child.stdin.take() {
         Some(stdin) => stdin,
         None => {

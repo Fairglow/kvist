@@ -563,11 +563,22 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     child_cmd.process_group(0);
 
     // Spawn the Bubblewrap supervisor process
-    let mut child = match child_cmd.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            eprintln!("kvist-sandbox-runner: failed to spawn Bubblewrap process: {error}");
-            return ExitCode::from(3);
+    let mut attempts = 0;
+    let mut child = loop {
+        match child_cmd.spawn() {
+            Ok(child) => break child,
+            Err(ref error)
+                if (error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    || error.raw_os_error() == Some(26))
+                    && attempts < 10 =>
+            {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => {
+                eprintln!("kvist-sandbox-runner: failed to spawn Bubblewrap process: {error}");
+                return ExitCode::from(3);
+            }
         }
     };
 

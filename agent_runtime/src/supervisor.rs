@@ -436,11 +436,27 @@ fn run_attempt(
         command.current_dir(directory);
     }
 
-    let mut child = command.spawn().map_err(|source| Error::Io {
-        operation: "spawn supervised command",
-        path: PathBuf::from(&specification.program),
-        source,
-    })?;
+    let mut attempts = 0;
+    let mut child = loop {
+        match command.spawn() {
+            Ok(child) => break child,
+            Err(ref error)
+                if (error.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    || error.raw_os_error() == Some(26))
+                    && attempts < 10 =>
+            {
+                attempts += 1;
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(source) => {
+                return Err(Error::Io {
+                    operation: "spawn supervised command",
+                    path: PathBuf::from(&specification.program),
+                    source,
+                });
+            }
+        }
+    };
     let stdout = child.stdout.take().ok_or_else(|| Error::Io {
         operation: "capture supervised stdout",
         path: PathBuf::from("stdout"),
