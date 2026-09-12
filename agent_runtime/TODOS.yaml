@@ -57,7 +57,7 @@ tasks:
     purpose: "Identify authority, lifecycle, and denial-of-service defects before representing the component as robust."
     expected_outcome: "A security review records or remediates every high-confidence finding without overstating host-mode isolation."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "sa-01-implement-code"
     requirements:
@@ -65,8 +65,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
+      updated_at: "2026-09-12T14:35:09Z"
+      completed_at: "2026-09-12T14:35:09Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-01-compliance-review"
@@ -76,7 +76,7 @@ tasks:
     purpose: "Preserve independent evidence and surface discrepancies for explicit arbitration."
     expected_outcome: "The implementation record and source-blind review classify every contract difference without silently revising either artifact."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "sa-01-security-audit"
     requirements:
@@ -84,8 +84,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
+      updated_at: "2026-09-12T14:35:15Z"
+      completed_at: "2026-09-12T14:35:15Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-02-write-tests"
