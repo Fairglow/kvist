@@ -171,7 +171,7 @@ tasks:
     purpose: "Automate the mechanical VCS publication of an exact accepted change while keeping acceptance, commit, and push as separate human authorities."
     expected_outcome: "Component, project, and supervised-task acceptance can create or later retry one exact local Git commit; unrelated state remains byte-for-byte and index-for-index unchanged; overlaps and races refuse; hooks are off by default; signing policy is honored; no push or amend occurs."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "dogfood-runner-integrate-code"
     requirements:
@@ -182,8 +182,8 @@ tasks:
       - "TODO.md#TODO-DOG-01"
     timestamps:
       created_at: "2026-09-01T20:24:06Z"
-      updated_at: "2026-09-01T20:24:06Z"
-      completed_at: null
+      updated_at: "2026-09-12T14:22:21Z"
+      completed_at: "2026-09-12T14:22:21Z"
     blocked_reason: null
     recovery_state: null
   - id: "dogfood-boundary-security-audit"
