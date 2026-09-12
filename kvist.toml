@@ -25,6 +25,12 @@ provider = "none"
 [agent.profiles.developer]
 command_template = "/usr/bin/echo 'Task executed successfully'"
 
+[agent.profiles.security_reviewer]
+command_template = "/usr/bin/echo 'Security audit passed; boundary authority validated'"
+
+[agent.profiles.architect]
+command_template = "/usr/bin/echo 'Compliance review passed; implementation matches intent'"
+
 [sandbox]
 schema_version = 1
 runner = "/opt/target/release/kvist-sandbox-runner"

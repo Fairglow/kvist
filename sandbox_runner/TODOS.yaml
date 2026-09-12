@@ -58,7 +58,7 @@ tasks:
     purpose: "Identify every high-confidence path to authority escalation, disclosure, or false enforcement before installation."
     expected_outcome: "Findings are corrected with native regression tests or retained as explicit blockers."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "sandbox-runner-implement-code"
     requirements:
@@ -67,8 +67,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-01T21:04:20Z"
-      updated_at: "2026-09-01T21:04:20Z"
-      completed_at: null
+      updated_at: "2026-09-12T14:32:46Z"
+      completed_at: "2026-09-12T14:32:46Z"
     blocked_reason: null
     recovery_state: null
   - id: "sandbox-runner-compliance-review"
@@ -78,7 +78,7 @@ tasks:
     purpose: "Retain an independent disposition for every protocol, isolation, resource, and failure guarantee."
     expected_outcome: "The review records satisfied clauses, discrepancies, unsupported behavior, and required arbitration before production promotion."
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on:
       - "sandbox-runner-security-audit"
     requirements:
@@ -87,7 +87,7 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-01T21:04:20Z"
-      updated_at: "2026-09-01T21:04:20Z"
-      completed_at: null
+      updated_at: "2026-09-12T14:32:54Z"
+      completed_at: "2026-09-12T14:32:54Z"
     blocked_reason: null
     recovery_state: null
