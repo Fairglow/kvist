@@ -1724,23 +1724,21 @@ pub fn accept(
                 .join(ComponentArtifact::Design.filename()),
         )?;
 
-        if context.component_path == Path::new(".") {
-            queue.component.parent_contract = None;
-        } else {
-            let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                operation: "determine current project directory",
-                path: PathBuf::from("."),
-                source,
-            })?;
-            let inspection = project_state::inspect(&project_dir)?;
-            let component_root = project_dir.join(
-                inspection
-                    .component_root
-                    .clone()
-                    .unwrap_or_else(|| PathBuf::from("src")),
-            );
-            let (parent_component_dir, parent_relative_path) =
-                discovery::find_parent_component_dir(&component_root, &context.component_path)?;
+        let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+            operation: "determine current project directory",
+            path: PathBuf::from("."),
+            source,
+        })?;
+        let inspection = project_state::inspect(&project_dir)?;
+        let component_root = project_dir.join(
+            inspection
+                .component_root
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("src")),
+        );
+        let parent_info =
+            discovery::find_parent_component(&component_root, &context.component_path)?;
+        if let Some((parent_component_dir, parent_relative_path)) = parent_info {
             let parent_contract_path =
                 parent_component_dir.join(ComponentArtifact::Contract.filename());
             let parent_contents =
@@ -1752,6 +1750,8 @@ pub fn accept(
                 ),
                 revision: digest(parent_contents.as_bytes()),
             });
+        } else {
+            queue.component.parent_contract = None;
         }
 
         queue.component.requirements_revision = digest(requirements.as_bytes());
@@ -4142,7 +4142,7 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
             source: project_dir.join("ROOT_CONTRACT.md"),
             destination: "/workspace/context/ROOT_CONTRACT.md".to_owned(),
         }];
-        if context.component_path != Path::new(".") {
+        if queue.component.parent_contract.is_some() {
             let component_root = project_dir.join(&config.component_root);
             let (parent_component_dir, _) =
                 discovery::find_parent_component_dir(&component_root, &context.component_path)?;

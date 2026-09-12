@@ -170,15 +170,20 @@ pub fn discover_with_limits(component_root: &Path, limits: DiscoveryLimits) -> R
         scanned_directories: 0,
         components: Vec::new(),
     };
+    let is_workspace_root = is_workspace_namespace_root(component_root);
     scan_directory(
         component_root,
         Path::new(""),
         ScanPosition {
             depth: 0,
-            is_root: true,
+            is_workspace_root,
         },
         &mut context,
     )?;
+    if context.components.is_empty() {
+        let root_component = inspect_component(component_root, Path::new(""))?;
+        context.components.push(root_component);
+    }
     context
         .components
         .sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
@@ -227,6 +232,17 @@ fn validate_component_root(component_root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn is_workspace_namespace_root(component_root: &Path) -> bool {
+    let config_path = component_root.join("kvist.toml");
+    if let Ok(content) = fs::read_to_string(config_path)
+        && let Ok(value) = toml::from_str::<toml::Value>(&content)
+        && value.get("component_root").and_then(|v| v.as_str()) == Some(".")
+    {
+        return true;
+    }
+    false
+}
+
 struct ScanContext {
     limits: DiscoveryLimits,
     scanned_directories: usize,
@@ -235,7 +251,7 @@ struct ScanContext {
 
 struct ScanPosition {
     depth: usize,
-    is_root: bool,
+    is_workspace_root: bool,
 }
 
 fn scan_directory(
@@ -253,7 +269,12 @@ fn scan_directory(
     }
 
     let component = inspect_component(directory, relative_path)?;
-    let is_component = position.is_root || component.is_candidate();
+    let is_root = position.depth == 0;
+    let is_component = if is_root && !position.is_workspace_root {
+        true
+    } else {
+        component.is_candidate()
+    };
     if is_component {
         if context.components.len() == context.limits.max_components {
             return Err(KvistError::ComponentDiscoveryComponentLimitExceeded {
@@ -338,7 +359,7 @@ fn scan_directory(
             &child_relative_path,
             ScanPosition {
                 depth: position.depth + 1,
-                is_root: false,
+                is_workspace_root: position.is_workspace_root,
             },
             context,
         )?;
@@ -408,11 +429,14 @@ const fn artifact_index(artifact: ComponentArtifact) -> usize {
     }
 }
 
-/// Finds the first ancestor directory of a component that is itself a Kvist component.
-pub fn find_parent_component_dir(
+/// Finds the nearest ancestor directory of a component that is itself a Kvist component.
+pub fn find_parent_component(
     component_root: &Path,
     relative_path: &Path,
-) -> Result<(PathBuf, PathBuf)> {
+) -> Result<Option<(PathBuf, PathBuf)>> {
+    if relative_path.as_os_str().is_empty() || relative_path == Path::new(".") {
+        return Ok(None);
+    }
     let mut current = relative_path.to_path_buf();
     while let Some(parent) = current.parent() {
         if parent.as_os_str().is_empty() {
@@ -421,12 +445,27 @@ pub fn find_parent_component_dir(
         let parent_dir = component_root.join(parent);
         // Is it a component?
         if is_component_dir(&parent_dir)? {
-            return Ok((parent_dir, parent.to_path_buf()));
+            return Ok(Some((parent_dir, parent.to_path_buf())));
         }
         current = parent.to_path_buf();
     }
-    // Root is the fallback
-    Ok((component_root.to_path_buf(), PathBuf::from(".")))
+    if is_component_dir(component_root)? {
+        Ok(Some((component_root.to_path_buf(), PathBuf::from("."))))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Finds the first ancestor directory of a component that is itself a Kvist component.
+pub fn find_parent_component_dir(
+    component_root: &Path,
+    relative_path: &Path,
+) -> Result<(PathBuf, PathBuf)> {
+    if let Some(found) = find_parent_component(component_root, relative_path)? {
+        Ok(found)
+    } else {
+        Ok((component_root.to_path_buf(), PathBuf::from(".")))
+    }
 }
 
 fn is_component_dir(path: &Path) -> Result<bool> {

@@ -19,7 +19,7 @@ use crate::{
         ROOT_IMPLEMENTATION_RECORD_PATH, TODO_QUEUE_VERSION, VISION_VERSION,
     },
     component_documents::{self, DocumentDiagnosticKind, DocumentKind},
-    config,
+    config::{self, DiscoveryLimits},
     discovery::{self, ComponentArtifact},
     filesystem::is_link_like,
     task_queue::{self, StalenessCause, StalenessCauseKind, TaskQueue, TaskQueueError, TaskStatus},
@@ -331,10 +331,8 @@ fn artifacts_for_project(project_dir: &Path) -> Vec<Artifact> {
     let component_root = config::load(project_dir)
         .map(|configuration| configuration.component_root)
         .unwrap_or_else(|_| PathBuf::from("src"));
-    let component_path =
-        |filename: &str| component_root.join(filename).to_string_lossy().into_owned();
 
-    vec![
+    let mut artifacts = vec![
         Artifact {
             path: "kvist.toml".to_owned(),
             kind: ArtifactKind::Configuration,
@@ -351,27 +349,81 @@ fn artifacts_for_project(project_dir: &Path) -> Vec<Artifact> {
             path: "ROOT_CONTRACT.md".to_owned(),
             kind: ArtifactKind::RootContract,
         },
-        Artifact {
-            path: component_path(DocumentKind::Requirements.filename()),
-            kind: ArtifactKind::ComponentDocument(DocumentKind::Requirements),
-        },
-        Artifact {
-            path: component_path(DocumentKind::Contract.filename()),
-            kind: ArtifactKind::ComponentDocument(DocumentKind::Contract),
-        },
-        Artifact {
-            path: component_path(DocumentKind::Design.filename()),
-            kind: ArtifactKind::ComponentDocument(DocumentKind::Design),
-        },
-        Artifact {
-            path: component_path(ComponentArtifact::TaskQueue.filename()),
-            kind: ArtifactKind::TodoQueue,
-        },
-        Artifact {
-            path: component_path(ComponentArtifact::ImplementationRecord.filename()),
-            kind: ArtifactKind::ImplementationRecord,
-        },
-    ]
+    ];
+
+    if component_root == Path::new(".") {
+        if let Ok(discovery) =
+            discovery::discover_with_limits(project_dir, DiscoveryLimits::default())
+        {
+            for component in discovery.components {
+                let comp_path = component.relative_path;
+                for (doc_kind, art_kind) in [
+                    (
+                        DocumentKind::Requirements,
+                        ArtifactKind::ComponentDocument(DocumentKind::Requirements),
+                    ),
+                    (
+                        DocumentKind::Contract,
+                        ArtifactKind::ComponentDocument(DocumentKind::Contract),
+                    ),
+                    (
+                        DocumentKind::Design,
+                        ArtifactKind::ComponentDocument(DocumentKind::Design),
+                    ),
+                ] {
+                    artifacts.push(Artifact {
+                        path: comp_path
+                            .join(doc_kind.filename())
+                            .to_string_lossy()
+                            .into_owned(),
+                        kind: art_kind,
+                    });
+                }
+                artifacts.push(Artifact {
+                    path: comp_path
+                        .join(ComponentArtifact::TaskQueue.filename())
+                        .to_string_lossy()
+                        .into_owned(),
+                    kind: ArtifactKind::TodoQueue,
+                });
+                artifacts.push(Artifact {
+                    path: comp_path
+                        .join(ComponentArtifact::ImplementationRecord.filename())
+                        .to_string_lossy()
+                        .into_owned(),
+                    kind: ArtifactKind::ImplementationRecord,
+                });
+            }
+        }
+    } else {
+        let component_path =
+            |filename: &str| component_root.join(filename).to_string_lossy().into_owned();
+
+        artifacts.extend([
+            Artifact {
+                path: component_path(DocumentKind::Requirements.filename()),
+                kind: ArtifactKind::ComponentDocument(DocumentKind::Requirements),
+            },
+            Artifact {
+                path: component_path(DocumentKind::Contract.filename()),
+                kind: ArtifactKind::ComponentDocument(DocumentKind::Contract),
+            },
+            Artifact {
+                path: component_path(DocumentKind::Design.filename()),
+                kind: ArtifactKind::ComponentDocument(DocumentKind::Design),
+            },
+            Artifact {
+                path: component_path(ComponentArtifact::TaskQueue.filename()),
+                kind: ArtifactKind::TodoQueue,
+            },
+            Artifact {
+                path: component_path(ComponentArtifact::ImplementationRecord.filename()),
+                kind: ArtifactKind::ImplementationRecord,
+            },
+        ]);
+    }
+
+    artifacts
 }
 
 fn invalid_root_inspection(project_dir: &Path) -> ProjectInspection {
@@ -510,13 +562,12 @@ fn inspect_component(
             );
         }
 
-        let is_component_root = is_component_root(&component.relative_path);
-        match (&queue.component.parent_contract, is_component_root) {
-            (None, true) => {}
-            (Some(_), true) | (None, false) => context_is_invalid = true,
-            (Some(parent), false) => {
-                let (parent_component_dir, parent_relative_path) =
-                    discovery::find_parent_component_dir(component_root, &component.relative_path)?;
+        let parent_info =
+            discovery::find_parent_component(component_root, &component.relative_path)?;
+        match (&queue.component.parent_contract, parent_info) {
+            (None, None) => {}
+            (Some(_), None) | (None, Some(_)) => context_is_invalid = true,
+            (Some(parent), Some((parent_component_dir, parent_relative_path))) => {
                 let parent_contract =
                     parent_component_dir.join(ComponentArtifact::Contract.filename());
                 let (state, contents) =
@@ -820,6 +871,8 @@ fn inspect_vcs(project_dir: &Path, state: ProjectState) -> VcsInspection {
     for component in discovery.components {
         let component_dir = if component.relative_path == Path::new(".") {
             config.component_root.clone()
+        } else if config.component_root == Path::new(".") {
+            component.relative_path.clone()
         } else {
             config.component_root.join(component.relative_path)
         };

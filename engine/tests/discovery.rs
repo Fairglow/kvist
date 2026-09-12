@@ -175,3 +175,54 @@ fn rejects_link_like_descendants_without_following_them() {
 
     assert!(error.to_string().contains("link-like component path"));
 }
+
+#[test]
+fn discovers_top_level_peer_components_when_root_is_dot() {
+    let workspace = TempDir::new().expect("workspace");
+    fs::write(
+        workspace.path().join("kvist.toml"),
+        "schema_version = 1\ncomponent_root = \".\"\n",
+    )
+    .expect("write kvist.toml");
+    create_component(
+        &workspace.path().join("engine"),
+        &[
+            ComponentArtifact::Requirements,
+            ComponentArtifact::Contract,
+            ComponentArtifact::Design,
+            ComponentArtifact::TaskQueue,
+            ComponentArtifact::ImplementationRecord,
+        ],
+    );
+    create_component(
+        &workspace.path().join("agent_runtime"),
+        &[
+            ComponentArtifact::Requirements,
+            ComponentArtifact::Contract,
+            ComponentArtifact::Design,
+            ComponentArtifact::TaskQueue,
+            ComponentArtifact::ImplementationRecord,
+        ],
+    );
+
+    let discovery = kvist::discovery::discover_with_limits(workspace.path(), Default::default())
+        .expect("discover peer components");
+
+    assert_eq!(
+        discovery
+            .components
+            .iter()
+            .map(|c| c.relative_path.as_path())
+            .collect::<Vec<_>>(),
+        [
+            std::path::Path::new("agent_runtime"),
+            std::path::Path::new("engine")
+        ]
+    );
+    assert!(
+        discovery
+            .components
+            .iter()
+            .all(|c| c.status() == ComponentStatus::Complete)
+    );
+}
