@@ -22,7 +22,7 @@ review, onboarding, promotion, and compliance work is tracked below
 
 ## Dogfooding Execution Prerequisite
 
-### TODO DOG-01 — Recoverable Supervised Bubblewrap Execution
+### COMPLETED DOG-01 — Recoverable Supervised Bubblewrap Execution
 
 **Context:** Kvist cannot currently use `task run` on its own root component.
 No production runner implements the sandbox protocol, the migrated `engine/`
