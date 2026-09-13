@@ -1,10 +1,13 @@
-#![forbid(unsafe_code)]
-
 //! Linux-first prompt acquisition, shell-free command rendering, and bounded
 //! host-process supervision.
 //!
 //! This crate does not provide a sandbox. Callers must explicitly distinguish
 //! host execution from future isolated execution backends.
+//!
+//! The single `unsafe` block in this crate installs the shared SIGINT/SIGTERM
+//! handler in [`interrupt::install_handler`]; its safety contract (an
+//! async-signal-safe handler installed exactly once per process) is documented
+//! and covered by the `interrupt` module's tests. Everything else is safe.
 
 #[cfg(not(target_os = "linux"))]
 compile_error!("agent-runtime currently supports Linux only");
@@ -14,6 +17,7 @@ mod command;
 mod direct_transport;
 mod error;
 pub mod gbnf;
+mod interrupt;
 pub mod loop_detection;
 mod model;
 mod profile;
@@ -31,6 +35,10 @@ pub use command::{render_command, render_command_with_reasoning_effort, split_ra
 pub use direct_transport::DirectModelTransport;
 pub use error::{Error, Result};
 pub use gbnf::{compile_json_schema, compile_tools_schema};
+pub use interrupt::{
+    clear_active_process_group, clear_active_process_group_if, install_handler,
+    set_active_process_group, take_interrupted,
+};
 pub use model::{
     CancellationToken, FinishReason, LocalModelProvider, ModelMessage, ModelRequest,
     ModelStreamEvent, ModelTransport, ModelTurn, ModelUsage, ReasoningEffort, ToolChoice,

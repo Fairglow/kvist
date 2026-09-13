@@ -58,14 +58,6 @@ impl KvistCompleter {
         Self { root, state }
     }
 
-    /// Replaces the dynamic snapshot the completer resolves against.
-    #[allow(dead_code)]
-    pub fn refresh(&self, state: DynamicState) {
-        if let Ok(mut guard) = self.state.lock() {
-            *guard = state;
-        }
-    }
-
     /// Resolves completions against this completer's current shared state.
     #[allow(dead_code)]
     pub fn complete(&self, line: &str, pos: usize) -> Vec<Candidate> {

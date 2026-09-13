@@ -104,18 +104,28 @@ impl DynamicState {
             .unwrap_or_default()
     }
 
-    /// Runnable (uncompleted) task IDs for one component path, in queue order.
-    /// Excludes completed tasks and prioritizes the next ready task.
+    /// Runnable (uncompleted) task IDs for one component path.
+    ///
+    /// Excludes completed tasks and moves the next ready task (the first
+    /// pending task whose dependencies are all completed) to the front, so
+    /// completion offers it first.
     pub fn runnable_task_ids_for(&self, component: &str) -> Vec<String> {
         let Some(scope) = self.scopes.get(component) else {
             return Vec::new();
         };
-        scope
+        let mut runnable: Vec<String> = scope
             .tasks
             .iter()
             .filter(|task| task.status != task_queue::TaskStatus::Completed)
             .map(|task| task.id.clone())
-            .collect()
+            .collect();
+        if let Some(ready) = task_queue::next_ready_task_id(&scope.tasks)
+            && let Some(position) = runnable.iter().position(|id| *id == ready)
+        {
+            let promoted = runnable.remove(position);
+            runnable.insert(0, promoted);
+        }
+        runnable
     }
 
     /// Finds a task by ID across every component, returning its component path.
@@ -441,5 +451,74 @@ tasks:
     fn git_branch_returns_none_outside_a_repository() {
         let dir = tempfile::tempdir().unwrap();
         assert!(git_branch(dir.path()).is_none());
+    }
+
+    fn task(id: &str, status: task_queue::TaskStatus, deps: &[&str]) -> task_queue::Task {
+        task_queue::Task {
+            id: id.to_owned(),
+            title: id.to_owned(),
+            description: String::new(),
+            context: String::new(),
+            purpose: String::new(),
+            expected_outcome: String::new(),
+            kind: task_queue::TaskKind::Test,
+            status,
+            depends_on: deps.iter().map(|dep| (*dep).to_owned()).collect(),
+            requirements: Vec::new(),
+            timestamps: task_queue::TaskTimestamps {
+                created_at: task_queue::Timestamp::default(),
+                updated_at: task_queue::Timestamp::default(),
+                completed_at: None,
+            },
+            blocked_reason: None,
+            recovery_state: None,
+            acceptance_id: None,
+            disposition: None,
+        }
+    }
+
+    fn state_with_tasks(tasks: Vec<task_queue::Task>) -> DynamicState {
+        let mut scopes = BTreeMap::new();
+        scopes.insert(
+            ".".to_owned(),
+            ComponentScope {
+                tasks,
+                attempts: BTreeMap::new(),
+            },
+        );
+        DynamicState::new(vec![".".to_owned()], scopes, Vec::new(), None)
+    }
+
+    #[test]
+    fn runnable_task_ids_promote_the_next_ready_task_to_the_front() {
+        // `later` is listed first but waits on `dep`; `dep` is the ready task.
+        let state = state_with_tasks(vec![
+            task("later", task_queue::TaskStatus::Pending, &["dep"]),
+            task("dep", task_queue::TaskStatus::Pending, &[]),
+        ]);
+        assert_eq!(
+            state.runnable_task_ids_for("."),
+            vec!["dep".to_owned(), "later".to_owned()]
+        );
+
+        // Once `dep` completes, `later` becomes the ready task.
+        let state = state_with_tasks(vec![
+            task("later", task_queue::TaskStatus::Pending, &["dep"]),
+            task("dep", task_queue::TaskStatus::Completed, &[]),
+        ]);
+        assert_eq!(state.runnable_task_ids_for("."), vec!["later".to_owned()]);
+    }
+
+    #[test]
+    fn runnable_task_ids_exclude_completed_and_keep_queue_order_when_nothing_is_ready() {
+        let state = state_with_tasks(vec![
+            task("a", task_queue::TaskStatus::Completed, &[]),
+            task("b", task_queue::TaskStatus::Blocked, &[]),
+            task("c", task_queue::TaskStatus::InProgress, &[]),
+        ]);
+        assert_eq!(
+            state.runnable_task_ids_for("."),
+            vec!["b".to_owned(), "c".to_owned()]
+        );
     }
 }

@@ -116,11 +116,18 @@ impl ExecutionPhase {
     }
 }
 
+/// A relay invoked with each runner stdout chunk as it is drained.
+pub type LiveStdoutSink = Box<dyn FnMut(&[u8])>;
+
 /// Host-side resource controls for the sandbox runner process.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Default)]
 pub struct ExecutionOptions {
     pub timeout: Option<Duration>,
     pub output_limit: Option<usize>,
+    /// Optional relay invoked with each runner stdout chunk as it is drained;
+    /// the bounded capture continues unchanged, so evidence and live output
+    /// cannot diverge.
+    pub live_stdout: Option<LiveStdoutSink>,
 }
 
 /// Bounded result returned by a sandbox runner request.
@@ -128,6 +135,8 @@ pub struct ExecutionResult {
     pub output: std::process::Output,
     pub timed_out: bool,
     pub output_limit_exceeded: bool,
+    /// True when the run was cancelled by SIGINT/SIGTERM.
+    pub cancelled: bool,
 }
 
 /// Canonical, content-addressed identity of the trusted runner.
@@ -749,12 +758,21 @@ pub fn ensure_available(
         None,
         Some(PROBE_DEADLINE),
         Some(MAX_PROBE_BYTES),
+        None,
     )?;
     let ExecutionResult {
         output,
         timed_out,
         output_limit_exceeded,
+        cancelled,
     } = result;
+    if cancelled {
+        return Err(KvistError::SandboxUnavailable {
+            runner: config.runner.clone(),
+            reason: "the sandbox availability probe was interrupted before it could attest"
+                .to_owned(),
+        });
+    }
     if timed_out {
         return Err(KvistError::SandboxUnavailable {
             runner: config.runner.clone(),
@@ -1095,6 +1113,7 @@ pub fn execute_with_timeout(
         Some(&encoded),
         options.timeout,
         options.output_limit,
+        options.live_stdout,
     )
 }
 
@@ -1102,6 +1121,20 @@ pub fn execute_with_timeout(
 /// writes a request to its standard input, and captures its output under a hard
 /// deadline and combined-output cap using the bounded capture and process-group
 /// termination machinery. It never calls the unbounded `Command::output()`.
+/// Clears the registered process group when the supervision scope ends.
+struct ProcessGroupGuard {
+    /// Registered process group ID.
+    pgid: i32,
+}
+
+impl Drop for ProcessGroupGuard {
+    fn drop(&mut self) {
+        // Clear only when this guard's registration is still the active one,
+        // so a newer nested registration is never clobbered by an older scope.
+        let _ = agent_runtime::clear_active_process_group_if(self.pgid);
+    }
+}
+
 fn run_launched_bounded(
     launch: &VerifiedRunnerLaunch,
     config: &SandboxConfig,
@@ -1109,6 +1142,7 @@ fn run_launched_bounded(
     stdin_bytes: Option<&[u8]>,
     timeout: Option<Duration>,
     output_limit: Option<usize>,
+    mut live_stdout: Option<LiveStdoutSink>,
 ) -> Result<ExecutionResult> {
     let mut attempts = 0;
     let child = loop {
@@ -1134,6 +1168,14 @@ fn run_launched_bounded(
     };
     let mut child =
         child.map_err(|source| sandbox_error(config, "start sandbox runner", source))?;
+    // The runner runs in its own process group (PGID == runner PID). Register
+    // it so SIGINT/SIGTERM reaches the runner and its descendants.
+    let pgid = i32::try_from(child.id()).map_err(|_| KvistError::SandboxUnavailable {
+        runner: config.runner.clone(),
+        reason: "sandbox runner process ID exceeds the supported range".to_owned(),
+    })?;
+    agent_runtime::set_active_process_group(pgid);
+    let _group_guard = ProcessGroupGuard { pgid };
     let stdin = child
         .stdin
         .take()
@@ -1189,6 +1231,7 @@ fn run_launched_bounded(
 
         let mut output_limit_exceeded = false;
         if stdout_open {
+            let before = captured_stdout.len();
             output_limit_exceeded |= drain_stream_bounded(
                 &mut stdout,
                 &mut captured_stdout,
@@ -1198,6 +1241,11 @@ fn run_launched_bounded(
                 config,
                 "read sandbox runner stdout",
             )?;
+            if let Some(sink) = live_stdout.as_mut()
+                && captured_stdout.len() > before
+            {
+                sink(&captured_stdout[before..]);
+            }
         }
         if stderr_open {
             output_limit_exceeded |= drain_stream_bounded(
@@ -1215,6 +1263,41 @@ fn run_launched_bounded(
             status = child
                 .try_wait()
                 .map_err(|source| sandbox_error(config, "wait for sandbox runner", source))?;
+        }
+
+        if agent_runtime::take_interrupted() {
+            tracing::info!(runner = %config.runner, "sandbox execution interrupted by signal");
+            // The shared handler already signalled the group; give it a short
+            // grace period to exit before escalating.
+            for _ in 0..20 {
+                let exited = child
+                    .try_wait()
+                    .map_err(|source| {
+                        sandbox_error(config, "wait for interrupted sandbox runner", source)
+                    })?
+                    .is_some();
+                if exited {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            terminate_process_group(&child, config, "interrupted")?;
+            let status = match status {
+                Some(status) => status,
+                None => child.wait().map_err(|source| {
+                    sandbox_error(config, "wait for interrupted sandbox runner", source)
+                })?,
+            };
+            return Ok(ExecutionResult {
+                output: std::process::Output {
+                    status,
+                    stdout: captured_stdout,
+                    stderr: captured_stderr,
+                },
+                timed_out: false,
+                output_limit_exceeded: false,
+                cancelled: true,
+            });
         }
 
         let timed_out = timeout.is_some_and(|limit| started.elapsed() >= limit);
@@ -1250,6 +1333,7 @@ fn run_launched_bounded(
                 },
                 timed_out,
                 output_limit_exceeded,
+                cancelled: false,
             });
         }
 
@@ -1266,6 +1350,7 @@ fn run_launched_bounded(
                 },
                 timed_out: false,
                 output_limit_exceeded: false,
+                cancelled: false,
             });
         }
 
@@ -2034,6 +2119,7 @@ mod tests {
             None,
             Some(Duration::from_millis(75)),
             Some(1024),
+            None,
         )
         .expect("supervision must return after deadline");
         assert!(result.timed_out);
@@ -2055,6 +2141,7 @@ mod tests {
             None,
             Some(Duration::from_secs(1)),
             Some(4),
+            None,
         )
         .expect("supervision must return after output overflow");
         assert!(result.output_limit_exceeded);

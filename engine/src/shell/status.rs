@@ -1,101 +1,27 @@
-use std::collections::BTreeMap;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::time::Instant;
+use std::path::Path;
 
 use crate::config;
 
-/// Active locks tracked by the workspace shell.
-#[derive(Debug, Default)]
-pub struct ActiveLocks {
-    /// Lock paths currently held by writers, keyed by lock file path.
-    locks: Mutex<BTreeMap<PathBuf, LockInfo>>,
-}
-
-/// Information about an active lock.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LockInfo {
-    /// Task ID that holds the lock.
-    pub task_id: String,
-    /// When the lock was acquired.
-    pub acquired_at: Instant,
-    /// The process or thread that holds it.
-    pub owner: String,
-}
-
-impl ActiveLocks {
-    /// Creates a new active locks manager.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Records a new active lock.
-    pub fn record(&self, path: PathBuf, task_id: String, owner: String) {
-        if let Ok(mut locks) = self.locks.lock() {
-            locks.insert(
-                path,
-                LockInfo {
-                    task_id,
-                    acquired_at: Instant::now(),
-                    owner,
-                },
-            );
-        }
-    }
-
-    /// Removes a lock when released.
-    pub fn release(&self, path: &Path) {
-        if let Ok(mut locks) = self.locks.lock() {
-            locks.remove(path);
-        }
-    }
-
-    /// Returns all active locks as a list for display.
-    pub fn as_list(&self) -> Vec<(PathBuf, LockInfo)> {
-        self.locks
-            .lock()
-            .map(|l| l.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
-            .unwrap_or_default()
-    }
-
-    /// Returns the number of currently recorded active locks.
-    pub fn count(&self) -> usize {
-        self.locks.lock().map(|l| l.len()).unwrap_or(0)
-    }
-
-    /// Scans the system task-lock state directory for active locks.
-    pub fn scan_system_locks() -> usize {
-        user_state_base()
-            .map(|base| base.join("kvist").join("task-locks-v1"))
-            .and_then(|dir| fs::read_dir(dir).ok())
-            .map(|entries| {
-                entries
-                    .flatten()
-                    .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("lock"))
-                    .count()
-            })
-            .unwrap_or(0)
-    }
-}
-
-fn user_state_base() -> Option<PathBuf> {
-    std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local").join("state")))
-}
+use super::locks;
 
 /// Stable context shown in the status bar that does not change per prompt.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StatusContext {
+    /// The configured sandbox backend name, or `none`.
     pub sandbox_backend: String,
+    /// The configured default model profile, or `none`.
     pub default_model: String,
-    pub active_locks: usize,
+    /// Locks whose owning process is still alive.
+    pub live_locks: usize,
+    /// Leftover locks whose owner is gone (safe to clean with `locks clean`).
+    pub stale_locks: usize,
 }
 
 impl StatusContext {
     pub fn load(project_dir: &Path) -> Self {
-        let active_locks = ActiveLocks::scan_system_locks();
+        let all_locks = locks::scan();
+        let live_locks = all_locks.iter().filter(|lock| lock.live).count();
+        let stale_locks = all_locks.len() - live_locks;
         match config::load(project_dir) {
             Ok(cfg) => Self {
                 sandbox_backend: cfg
@@ -113,31 +39,17 @@ impl StatusContext {
                         .map(|model| model.name.clone())
                         .unwrap_or_else(|| "none".to_owned())
                 },
-                active_locks,
+                live_locks,
+                stale_locks,
             },
             Err(_) => Self {
                 sandbox_backend: "none".to_owned(),
                 default_model: "none".to_owned(),
-                active_locks,
+                live_locks,
+                stale_locks,
             },
         }
     }
-}
-
-/// Formats the styled prompt label according to ADR 0007.
-pub fn prompt_label(status: &StatusContext, branch: Option<&str>) -> String {
-    let locks_part = if status.active_locks > 0 {
-        format!(" [locks: {}]", status.active_locks)
-    } else {
-        String::new()
-    };
-    format!(
-        "kvist ({}) [sandbox: {}] [model: {}]{} > ",
-        branch.unwrap_or("no-vcs"),
-        status.sandbox_backend,
-        status.default_model,
-        locks_part
-    )
 }
 
 /// Returns a concise, modern prompt for the active line editor.
@@ -150,15 +62,15 @@ pub fn short_prompt(branch: Option<&str>) -> String {
 
 /// Formats the compact status badge displayed in the right bar / right prompt area.
 pub fn status_bar_label(status: &StatusContext) -> String {
-    let locks = if status.active_locks > 0 {
-        format!(" · 🔒 {}", status.active_locks)
-    } else {
-        String::new()
-    };
-    format!(
-        "[{}{} · {}]",
-        status.sandbox_backend, locks, status.default_model
-    )
+    let mut parts = vec![status.sandbox_backend.clone()];
+    if status.live_locks > 0 {
+        parts.push(format!("🔒 {}", status.live_locks));
+    }
+    if status.stale_locks > 0 {
+        parts.push(format!("⚠ {} stale", status.stale_locks));
+    }
+    parts.push(status.default_model.clone());
+    format!("[{}]", parts.join(" · "))
 }
 
 /// Formats the welcome banner text with static environment information.
@@ -170,8 +82,16 @@ pub fn format_welcome_banner(status: &StatusContext, branch: Option<&str>) -> St
     banner.push_str(&format!("│  Branch:   {}\n", branch_str));
     banner.push_str(&format!("│  Sandbox:  {}\n", status.sandbox_backend));
     banner.push_str(&format!("│  Model:    {}\n", status.default_model));
-    if status.active_locks > 0 {
-        banner.push_str(&format!("│  Locks:    {}\n", status.active_locks));
+    if status.live_locks > 0 || status.stale_locks > 0 {
+        let stale = if status.stale_locks > 0 {
+            format!(", {} stale (run `locks clean`)", status.stale_locks)
+        } else {
+            String::new()
+        };
+        banner.push_str(&format!(
+            "│  Locks:    {} active{stale}\n",
+            status.live_locks
+        ));
     }
     banner.push_str("│  Commands: 'overview', 'status', 'task run', 'help'\n");
     banner.push_str("│  Press TAB for autocomplete (arrows to pick)  ·  'exit'\n");
@@ -189,36 +109,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prompt_label_shows_branch_and_context() {
-        let status = StatusContext {
-            sandbox_backend: "bubblewrap".to_owned(),
-            default_model: "ollama".to_owned(),
-            active_locks: 0,
-        };
-        assert_eq!(
-            prompt_label(&status, Some("main")),
-            "kvist (main) [sandbox: bubblewrap] [model: ollama] > "
-        );
-        assert_eq!(
-            prompt_label(&status, None),
-            "kvist (no-vcs) [sandbox: bubblewrap] [model: ollama] > "
-        );
-    }
-
-    #[test]
-    fn prompt_label_shows_active_locks_when_present() {
-        let status = StatusContext {
-            sandbox_backend: "bubblewrap".to_owned(),
-            default_model: "ollama".to_owned(),
-            active_locks: 3,
-        };
-        assert_eq!(
-            prompt_label(&status, Some("main")),
-            "kvist (main) [sandbox: bubblewrap] [model: ollama] [locks: 3] > "
-        );
-    }
-
-    #[test]
     fn short_prompt_and_status_bar() {
         assert_eq!(short_prompt(Some("main")), "kvist (main) ❯ ");
         assert_eq!(short_prompt(None), "kvist ❯ ");
@@ -227,33 +117,21 @@ mod tests {
         let status = StatusContext {
             sandbox_backend: "bubblewrap".to_owned(),
             default_model: "ollama".to_owned(),
-            active_locks: 0,
+            live_locks: 0,
+            stale_locks: 0,
         };
         assert_eq!(status_bar_label(&status), "[bubblewrap · ollama]");
 
         let status_locked = StatusContext {
             sandbox_backend: "bubblewrap".to_owned(),
             default_model: "ollama".to_owned(),
-            active_locks: 2,
+            live_locks: 2,
+            stale_locks: 1,
         };
         assert_eq!(
             status_bar_label(&status_locked),
-            "[bubblewrap · 🔒 2 · ollama]"
+            "[bubblewrap · 🔒 2 · ⚠ 1 stale · ollama]"
         );
-    }
-
-    #[test]
-    fn active_locks_record_and_release() {
-        let locks = ActiveLocks::new();
-        assert_eq!(locks.count(), 0);
-
-        let path = PathBuf::from("/tmp/test.lock");
-        locks.record(path.clone(), "task-1".into(), "user".into());
-        assert_eq!(locks.count(), 1);
-        assert_eq!(locks.as_list().len(), 1);
-
-        locks.release(&path);
-        assert_eq!(locks.count(), 0);
     }
 
     #[test]
@@ -261,7 +139,8 @@ mod tests {
         let status = StatusContext {
             sandbox_backend: "bubblewrap".to_owned(),
             default_model: "ollama-long-model-name".to_owned(),
-            active_locks: 1,
+            live_locks: 1,
+            stale_locks: 2,
         };
         let banner = format_welcome_banner(&status, Some("feature/long-branch-name-overflow-test"));
         for line in banner.lines() {
@@ -270,5 +149,13 @@ mod tests {
         assert!(banner.contains("│  Branch:   feature/long-branch-name-overflow-test"));
         assert!(banner.contains("│  Sandbox:  bubblewrap"));
         assert!(banner.contains("│  Model:    ollama-long-model-name"));
+        assert!(banner.contains("│  Locks:    1 active, 2 stale (run `locks clean`)"));
+    }
+
+    #[test]
+    fn welcome_banner_omits_locks_when_none() {
+        let status = StatusContext::default();
+        let banner = format_welcome_banner(&status, None);
+        assert!(!banner.contains("Locks:"));
     }
 }

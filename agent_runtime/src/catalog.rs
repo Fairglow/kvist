@@ -18,7 +18,8 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::{
-    CancellationToken, Error, Result, direct_transport::get_bounded, supervisor::SignalCancellation,
+    CancellationToken, Error, Result, direct_transport::get_bounded, interrupt,
+    supervisor::SignalCancellation,
 };
 
 const MAX_MODELS: usize = 128;
@@ -227,6 +228,9 @@ pub fn discover_models(
             discover_acp(provider, options, cancellation)?
         }
     };
+    if interrupt::take_interrupted() {
+        return Err(Error::Cancelled);
+    }
     tracing::info!(
         provider = ?provider,
         models_count = catalog.models.len(),

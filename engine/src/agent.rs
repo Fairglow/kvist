@@ -224,10 +224,22 @@ pub fn execute_agent(
             source,
         })?;
 
+    // When streaming, relay each drained chunk to the terminal immediately;
+    // the bounded capture below continues unchanged, so the evidence log and
+    // the live output cannot diverge.
+    let live_stdout = if request.stream_output {
+        Some(Box::new(|chunk: &[u8]| {
+            let _ = io::stdout().write_all(chunk);
+            let _ = io::stdout().flush();
+        }) as sandbox::LiveStdoutSink)
+    } else {
+        None
+    };
     let sandbox::ExecutionResult {
         output,
         timed_out,
         output_limit_exceeded,
+        cancelled,
     } = sandbox::execute_with_timeout(
         sandbox_config,
         sandbox::ExecutionRequest {
@@ -245,11 +257,12 @@ pub fn execute_agent(
         sandbox::ExecutionOptions {
             timeout: Some(Duration::from_secs(profile.timeout_seconds)),
             output_limit: Some(profile.max_output_bytes),
+            live_stdout,
         },
         expected_runner,
     )?;
     let redactions = redaction_values(profile, sandbox_config);
-    let success = output.status.success() && !timed_out && !output_limit_exceeded;
+    let success = output.status.success() && !timed_out && !output_limit_exceeded && !cancelled;
     let stdout = redact_combined_output(
         output.stdout,
         output.stderr,
@@ -263,9 +276,6 @@ pub fn execute_agent(
             path: log_path.clone(),
             source,
         })?;
-    if request.stream_output {
-        io::stdout().write_all(stdout.as_bytes()).ok();
-    }
 
     // 4. Try parsing the JSON Run Record for token feedback
     // The run record should be written by the agent at .kvist/runs/<task_id>_<timestamp>.json
@@ -359,6 +369,14 @@ pub fn execute_agent(
         success,
     });
 
+    if cancelled {
+        tracing::warn!(
+            task_id = %request.task_id,
+            log_path = %log_path.display(),
+            "agent execution was interrupted before completion"
+        );
+        return Err(KvistError::AgentRuntime(agent_runtime::Error::Cancelled));
+    }
     if success {
         tracing::info!(
             task_id = %request.task_id,

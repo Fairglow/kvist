@@ -820,7 +820,7 @@ fn sync_lock_directory(path: &Path) -> Result<()> {
     sync_directory(parent)
 }
 
-fn lock_owner_appears_live(contents: &str) -> bool {
+pub(crate) fn lock_owner_appears_live(contents: &str) -> bool {
     let Some(pid) = contents
         .lines()
         .find_map(|line| line.strip_prefix("pid: "))
@@ -5652,6 +5652,7 @@ pub fn verify_task(
         output,
         timed_out,
         output_limit_exceeded,
+        cancelled,
     } = crate::sandbox::execute_with_timeout(
         sandbox_config,
         crate::sandbox::ExecutionRequest {
@@ -5672,6 +5673,7 @@ pub fn verify_task(
         crate::sandbox::ExecutionOptions {
             timeout: Some(std::time::Duration::from_secs(policy.timeout_seconds)),
             output_limit: Some(policy.max_output_bytes),
+            live_stdout: None,
         },
         &approved_runner,
     )?;
@@ -5687,7 +5689,7 @@ pub fn verify_task(
         &redactions,
         policy.max_output_bytes.min(MAX_VERIFICATION_EVIDENCE_BYTES),
     );
-    let success = !timed_out && !output_limit_exceeded && output.status.success();
+    let success = !timed_out && !output_limit_exceeded && !cancelled && output.status.success();
     let exit_code = output.status.code();
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let attempt_path = attempt_path(&context.component_dir, task_id)?;

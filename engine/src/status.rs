@@ -340,82 +340,71 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
             None => inspection.project_dir.join(&component.path),
         };
 
-        let (tasks_summary, next_task) = if let Ok(content) =
-            fs::read_to_string(component_dir.join("TODOS.yaml"))
-        {
-            if let Ok(queue) = crate::task_queue::parse(&content) {
-                let comp_total = queue.tasks.len();
-                let comp_completed = queue
-                    .tasks
-                    .iter()
-                    .filter(|t| t.status == crate::task_queue::TaskStatus::Completed)
-                    .count();
-                let comp_in_progress = queue
-                    .tasks
-                    .iter()
-                    .filter(|t| t.status == crate::task_queue::TaskStatus::InProgress)
-                    .count();
-                let comp_pending = queue
-                    .tasks
-                    .iter()
-                    .filter(|t| t.status == crate::task_queue::TaskStatus::Pending)
-                    .count();
-                let comp_blocked = queue
-                    .tasks
-                    .iter()
-                    .filter(|t| t.status == crate::task_queue::TaskStatus::Blocked)
-                    .count();
+        let (tasks_summary, next_task) =
+            if let Ok(content) = fs::read_to_string(component_dir.join("TODOS.yaml")) {
+                if let Ok(queue) = crate::task_queue::parse(&content) {
+                    let comp_total = queue.tasks.len();
+                    let comp_completed = queue
+                        .tasks
+                        .iter()
+                        .filter(|t| t.status == crate::task_queue::TaskStatus::Completed)
+                        .count();
+                    let comp_in_progress = queue
+                        .tasks
+                        .iter()
+                        .filter(|t| t.status == crate::task_queue::TaskStatus::InProgress)
+                        .count();
+                    let comp_pending = queue
+                        .tasks
+                        .iter()
+                        .filter(|t| t.status == crate::task_queue::TaskStatus::Pending)
+                        .count();
+                    let comp_blocked = queue
+                        .tasks
+                        .iter()
+                        .filter(|t| t.status == crate::task_queue::TaskStatus::Blocked)
+                        .count();
 
-                total_tasks += comp_total;
-                total_completed += comp_completed;
-                total_in_progress += comp_in_progress;
-                total_pending += comp_pending;
-                total_blocked += comp_blocked;
+                    total_tasks += comp_total;
+                    total_completed += comp_completed;
+                    total_in_progress += comp_in_progress;
+                    total_pending += comp_pending;
+                    total_blocked += comp_blocked;
 
-                let pct = (comp_completed * 100)
-                    .checked_div(comp_total)
-                    .unwrap_or(100);
-                let mut detail_parts = Vec::new();
-                if comp_in_progress > 0 {
-                    detail_parts.push(format!("{comp_in_progress} in-progress"));
-                }
-                if comp_pending > 0 {
-                    detail_parts.push(format!("{comp_pending} pending"));
-                }
-                if comp_blocked > 0 {
-                    detail_parts.push(format!("{comp_blocked} blocked"));
-                }
+                    let pct = (comp_completed * 100)
+                        .checked_div(comp_total)
+                        .unwrap_or(100);
+                    let mut detail_parts = Vec::new();
+                    if comp_in_progress > 0 {
+                        detail_parts.push(format!("{comp_in_progress} in-progress"));
+                    }
+                    if comp_pending > 0 {
+                        detail_parts.push(format!("{comp_pending} pending"));
+                    }
+                    if comp_blocked > 0 {
+                        detail_parts.push(format!("{comp_blocked} blocked"));
+                    }
 
-                let summary = if detail_parts.is_empty() {
-                    format!("{comp_completed}/{comp_total} completed ({pct}%)")
+                    let summary = if detail_parts.is_empty() {
+                        format!("{comp_completed}/{comp_total} completed ({pct}%)")
+                    } else {
+                        format!(
+                            "{comp_completed}/{comp_total} completed ({pct}%) [{}]",
+                            detail_parts.join(", ")
+                        )
+                    };
+
+                    let next = crate::task_queue::next_ready_task_id(&queue.tasks)
+                        .and_then(|id| queue.tasks.iter().find(|t| t.id == id))
+                        .map(|t| (t.id.clone(), t.title.clone()));
+
+                    (Some(summary), next)
                 } else {
-                    format!(
-                        "{comp_completed}/{comp_total} completed ({pct}%) [{}]",
-                        detail_parts.join(", ")
-                    )
-                };
-
-                let next = queue
-                    .tasks
-                    .iter()
-                    .find(|t| {
-                        t.status == crate::task_queue::TaskStatus::Pending
-                            && t.depends_on.iter().all(|dep| {
-                                queue.tasks.iter().any(|other| {
-                                    &other.id == dep
-                                        && other.status == crate::task_queue::TaskStatus::Completed
-                                })
-                            })
-                    })
-                    .map(|t| (t.id.clone(), t.title.clone()));
-
-                (Some(summary), next)
+                    (None, None)
+                }
             } else {
                 (None, None)
-            }
-        } else {
-            (None, None)
-        };
+            };
 
         let guidance = match component.state {
             ComponentState::Stale => Some(format!(

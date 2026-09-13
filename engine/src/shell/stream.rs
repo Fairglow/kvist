@@ -1,14 +1,34 @@
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::{KvistError, Result, cli};
 
+/// Delay before the spinner becomes visible, so fast commands never flicker.
+const SPINNER_DELAY: Duration = Duration::from_millis(150);
+
+/// Formats an elapsed-time label: seconds under a minute, minutes and
+/// seconds under an hour, hours and minutes beyond that.
+pub(crate) fn format_elapsed(secs: u64) -> String {
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+    }
+}
+
 /// A non-blocking background terminal spinner for transient command execution.
+///
+/// The spinner starts lazily (after a short delay) so fast commands never
+/// flicker, and it displays elapsed time so long-running work is visibly
+/// progressing rather than hung. It draws only when stderr is an interactive
+/// terminal; captured output is never polluted with cursor control.
 pub struct ProgressSpinner {
     running: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
@@ -18,17 +38,38 @@ impl ProgressSpinner {
     /// Starts an asynchronous spinner on stderr displaying `message`.
     pub fn start(message: String) -> Self {
         let running = Arc::new(AtomicBool::new(true));
+        let tty = io::stderr().is_terminal();
         let running_clone = running.clone();
 
         let handle = thread::spawn(move || {
+            if !tty {
+                // Nothing to draw; just wait for shutdown.
+                while running_clone.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(100));
+                }
+                return;
+            }
             let spinner_chars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+            let started = Instant::now();
             let mut idx = 0;
             while running_clone.load(Ordering::Relaxed) {
+                let elapsed = started.elapsed();
+                if elapsed < SPINNER_DELAY {
+                    // Deferred start: fast commands never see a spinner.
+                    thread::sleep(Duration::from_millis(16));
+                    continue;
+                }
                 let char = spinner_chars[idx % spinner_chars.len()];
-                let _ = io::stderr().write_all(format!("\r  {char} {message}...").as_bytes());
+                let _ = io::stderr().write_all(
+                    format!(
+                        "\r  {char} {message} ({})",
+                        format_elapsed(elapsed.as_secs())
+                    )
+                    .as_bytes(),
+                );
                 let _ = io::stderr().flush();
                 idx += 1;
-                thread::sleep(Duration::from_millis(80));
+                thread::sleep(Duration::from_millis(100));
             }
             // Erase the transient spinner line completely using ANSI codes
             let _ = io::stderr().write_all(b"\r\x1b[2K");
@@ -311,16 +352,6 @@ impl StreamManager {
         }
         println!("╰──────────────────────────────────────────────────────────────────");
     }
-
-    /// Replaces transient progress display with the finalized command output and log link.
-    pub fn finish_stream(
-        &self,
-        _program: &str,
-        result: &std::result::Result<cli::CommandOutput, crate::KvistError>,
-        _prompt_line: &str,
-    ) {
-        self.print_result_stage(result);
-    }
 }
 
 #[cfg(test)]
@@ -331,8 +362,16 @@ mod tests {
     #[test]
     fn spinner_starts_and_stops_cleanly() {
         let spinner = ProgressSpinner::start("Testing".into());
-        thread::sleep(Duration::from_millis(150));
+        thread::sleep(Duration::from_millis(250));
         spinner.stop();
+    }
+
+    #[test]
+    fn format_elapsed_renders_units() {
+        assert_eq!(format_elapsed(0), "0s");
+        assert_eq!(format_elapsed(59), "59s");
+        assert_eq!(format_elapsed(60), "1m 0s");
+        assert_eq!(format_elapsed(3725), "1h 2m");
     }
 
     #[test]

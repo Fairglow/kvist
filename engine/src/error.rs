@@ -88,6 +88,12 @@ pub enum KvistError {
     /// Interactive agent configuration was cancelled by the user.
     #[error("agent setup cancelled")]
     AgentSetupCancelled,
+    /// The interactive shell could not attach to an interactive terminal.
+    #[error("interactive shell requires an interactive terminal: {reason}")]
+    ShellNotInteractive {
+        /// Actionable explanation of the terminal condition.
+        reason: String,
+    },
     /// The reusable agent runtime rejected or failed an operation.
     #[error(transparent)]
     AgentRuntime(#[from] agent_runtime::Error),

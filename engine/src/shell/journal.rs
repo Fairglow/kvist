@@ -1,14 +1,28 @@
-use std::fs;
+//! Append-only, JSONL session journal.
+//!
+//! The journal persists one JSON object per line (`{timestamp, command,
+//! result}`) in `.kvist/session.log` and is append-only across shell
+//! sessions. Every append is written immediately in O_APPEND mode so an
+//! interrupted session never loses recorded commands; loading tolerates
+//! malformed or truncated lines instead of failing the shell.
+
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use crate::Result;
+use serde::{Deserialize, Serialize};
+
+use super::pager::display_output;
 
 /// Session journal file path relative to the project root.
 pub const SESSION_JOURNAL: &str = ".kvist/session.log";
 
+/// Maximum bytes read from the journal when loading it into memory.
+const MAX_JOURNAL_BYTES: u64 = 1_048_576;
+
 /// A single entry in the session journal.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JournalEntry {
     /// Timestamp of the entry (RFC 3339 formatted).
     pub timestamp: String,
@@ -16,109 +30,118 @@ pub struct JournalEntry {
     pub command: String,
     /// The result or output summary.
     pub result: String,
-    /// Whether this was a transient stream (excluded from permanent disk persistence).
-    pub transient: bool,
 }
 
-/// Manages the REPL session journal with atomic disk persistence.
+/// Loads the existing journal file, tolerating malformed lines.
+fn load_existing(path: &Path) -> Vec<JournalEntry> {
+    let Ok(metadata) = fs::metadata(path) else {
+        return Vec::new();
+    };
+    if metadata.len() > MAX_JOURNAL_BYTES {
+        // An oversized journal is reported rather than materialized in memory.
+        eprintln!(
+            "warning: session journal at `{}` is larger than {} bytes and will not be listed; \
+               truncate it to restore `journal` output",
+            path.display(),
+            MAX_JOURNAL_BYTES
+        );
+        return Vec::new();
+    }
+    let Ok(contents) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    contents
+        .lines()
+        .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
+        .collect()
+}
+
+/// Manages the REPL session journal with append-only disk persistence.
 pub struct SessionJournal {
     /// Path to the journal file relative to the project root.
     journal_path: PathBuf,
-    /// In-memory cache of entries.
+    /// In-memory cache of entries (existing plus this session's).
     entries: Mutex<Vec<JournalEntry>>,
 }
 
 impl SessionJournal {
-    /// Creates a new session journal for the given project root.
+    /// Creates a new session journal for the given project root, loading any
+    /// existing journal so the history is append-only across sessions.
     pub fn new(project_root: &Path) -> Self {
+        let journal_path = project_root.join(SESSION_JOURNAL);
         Self {
-            journal_path: project_root.join(SESSION_JOURNAL),
-            entries: Mutex::new(Vec::new()),
+            journal_path: journal_path.clone(),
+            entries: Mutex::new(load_existing(&journal_path)),
         }
     }
 
-    /// Appends an entry to the journal and periodically persists.
+    /// Appends an entry to the journal and persists it immediately.
     pub fn append(&self, entry: JournalEntry) {
-        let mut entries = self.entries.lock().unwrap();
-        entries.push(entry);
-        if entries.len().is_multiple_of(100) {
-            self.persist_locked(&entries);
+        if let Ok(mut guard) = self.entries.lock() {
+            guard.push(entry.clone());
         }
+        self.append_line(&entry);
     }
 
-    /// Flushes all pending entries to disk.
-    pub fn flush(&self) {
-        let entries = self.entries.lock().unwrap().clone();
-        self.persist_locked(&entries);
-    }
-
-    /// Internal persistence helper.
-    fn persist_locked(&self, entries: &[JournalEntry]) {
-        if entries.is_empty() {
+    /// Writes one entry as a single JSONL line using an append open.
+    fn append_line(&self, entry: &JournalEntry) {
+        let Ok(mut line) = serde_json::to_string(entry) else {
+            return;
+        };
+        line.push('\n');
+        if let Some(parent) = self.journal_path.parent()
+            && let Err(error) = fs::create_dir_all(parent)
+        {
+            eprintln!("warning: could not create journal directory: {error}");
             return;
         }
-        if let Some(parent) = self.journal_path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        let temp_path = format!("{}.tmp", self.journal_path.display());
-        let mut content = "# Session Journal
-# Format: timestamp|command|result|transient
-"
-        .to_string();
-        for entry in entries {
-            if entry.transient {
-                continue;
+        match OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.journal_path)
+        {
+            Ok(mut file) => {
+                if file
+                    .write_all(line.as_bytes())
+                    .and_then(|_| file.flush())
+                    .is_err()
+                {
+                    eprintln!("warning: could not append to session journal");
+                }
             }
-            content.push_str(&format!(
-                "{}|{}|{}|{}
-",
-                entry.timestamp, entry.command, entry.result, entry.transient
-            ));
-        }
-        if let Err(e) = fs::write(&temp_path, &content) {
-            eprintln!("Warning: could not persist session journal: {}", e);
-            return;
-        }
-        if fs::rename(&temp_path, &self.journal_path).is_err() {
-            let _ = fs::remove_file(&temp_path);
+            Err(error) => eprintln!("warning: could not open session journal: {error}"),
         }
     }
 
-    /// Returns entries since a given index.
-    #[allow(dead_code)]
-    pub fn since(&self, since_index: usize) -> Vec<String> {
-        let entries = self.entries.lock().unwrap().clone();
-        entries
-            .iter()
-            .skip(since_index)
-            .map(|e| e.command.clone())
-            .collect()
-    }
-
-    /// Returns a copy of all current in-memory entries.
+    /// Returns a copy of all known entries (previous sessions plus this one).
     pub fn entries(&self) -> Vec<JournalEntry> {
-        self.entries.lock().unwrap().clone()
+        self.entries
+            .lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_default()
     }
 }
 
-/// Displays the current session journal entries.
-pub fn display_session_status(journal: &SessionJournal) -> Result<()> {
+/// Displays the session journal entries through the shared pager.
+pub fn display_session_status(journal: &SessionJournal) {
     let entries = journal.entries();
-    let permanent: Vec<_> = entries.iter().filter(|e| !e.transient).collect();
-    if permanent.is_empty() {
+    if entries.is_empty() {
         println!("Session journal: (empty)");
-        return Ok(());
+        return;
     }
-
-    println!("Session journal:");
-    for (i, entry) in permanent.iter().enumerate() {
-        println!("  {}. [{}] {}", i + 1, entry.timestamp, entry.command);
+    let mut text = format!("Session journal ({} entries):\n", entries.len());
+    for (i, entry) in entries.iter().enumerate() {
+        text.push_str(&format!(
+            "  {}. [{}] {}\n",
+            i + 1,
+            entry.timestamp,
+            entry.command
+        ));
         if !entry.result.is_empty() {
-            println!("     -> {}", entry.result);
+            text.push_str(&format!("     -> {}\n", entry.result));
         }
     }
-    println!("  Total: {} entries", permanent.len());
-    Ok(())
+    display_output(&text);
 }
 
 #[cfg(test)]
@@ -126,62 +149,75 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn entry(command: &str, result: &str) -> JournalEntry {
+        JournalEntry {
+            timestamp: "2026-09-10T12:00:00Z".into(),
+            command: command.into(),
+            result: result.into(),
+        }
+    }
+
     #[test]
-    fn journal_creation_and_append() {
+    fn journal_creation_and_append_persists_immediately() {
         let dir = tempdir().unwrap();
         let journal = SessionJournal::new(dir.path());
         assert!(journal.entries().is_empty());
 
-        journal.append(JournalEntry {
-            timestamp: "2026-09-10T12:00:00Z".into(),
-            command: "task run . write-tests".into(),
-            result: "ok".into(),
-            transient: false,
-        });
+        journal.append(entry("task run . write-tests", "ok"));
 
         assert_eq!(journal.entries().len(), 1);
-        assert_eq!(journal.since(0), vec!["task run . write-tests"]);
-        assert_eq!(journal.since(1), Vec::<String>::new());
-    }
-
-    #[test]
-    fn journal_flush_persists_to_file_excluding_transient() {
-        let dir = tempdir().unwrap();
-        let journal = SessionJournal::new(dir.path());
-
-        journal.append(JournalEntry {
-            timestamp: "2026-09-10T12:00:00Z".into(),
-            command: "status".into(),
-            result: "ok".into(),
-            transient: false,
-        });
-        journal.append(JournalEntry {
-            timestamp: "2026-09-10T12:01:00Z".into(),
-            command: "stream-progress".into(),
-            result: "chunk".into(),
-            transient: true,
-        });
-        journal.flush();
-
         let log_file = dir.path().join(SESSION_JOURNAL);
         assert!(log_file.exists());
         let contents = fs::read_to_string(&log_file).unwrap();
-        assert!(contents.contains("status"));
-        assert!(!contents.contains("stream-progress"));
+        assert_eq!(contents.lines().count(), 1);
+        let parsed: JournalEntry = serde_json::from_str(contents.lines().next().unwrap()).unwrap();
+        assert_eq!(parsed, entry("task run . write-tests", "ok"));
+    }
+
+    #[test]
+    fn journal_is_append_only_across_sessions() {
+        let dir = tempdir().unwrap();
+        let journal = SessionJournal::new(dir.path());
+        journal.append(entry("status", "ok"));
+
+        // A second "session" over the same project root loads the prior entry
+        // and appends beside it without rewriting existing lines.
+        let journal2 = SessionJournal::new(dir.path());
+        assert_eq!(journal2.entries().len(), 1);
+        journal2.append(entry("task next .", "write-tests"));
+
+        let contents = fs::read_to_string(dir.path().join(SESSION_JOURNAL)).unwrap();
+        assert_eq!(contents.lines().count(), 2);
+        assert_eq!(
+            contents.lines().next().unwrap(),
+            serde_json::to_string(&entry("status", "ok")).unwrap()
+        );
+        assert_eq!(journal2.entries().len(), 2);
+    }
+
+    #[test]
+    fn journal_loading_tolerates_malformed_and_truncated_lines() {
+        let dir = tempdir().unwrap();
+        let log_file = dir.path().join(SESSION_JOURNAL);
+        fs::create_dir_all(log_file.parent().unwrap()).unwrap();
+        fs::write(
+            &log_file,
+            "not-json\n\n{\"timestamp\":\"2026-09-10T12:00:00Z\",\"command\":\"ok\",\"result\":\"ok\"}\n{\"timestamp\":\"trunc",
+        )
+        .unwrap();
+
+        let journal = SessionJournal::new(dir.path());
+        assert_eq!(journal.entries().len(), 1);
+        assert_eq!(journal.entries()[0].command, "ok");
     }
 
     #[test]
     fn display_session_status_handles_empty_and_populated() {
         let dir = tempdir().unwrap();
         let journal = SessionJournal::new(dir.path());
-        assert!(display_session_status(&journal).is_ok());
+        display_session_status(&journal);
 
-        journal.append(JournalEntry {
-            timestamp: "2026-09-10T12:00:00Z".into(),
-            command: "status".into(),
-            result: "ok".into(),
-            transient: false,
-        });
-        assert!(display_session_status(&journal).is_ok());
+        journal.append(entry("status", "ok"));
+        display_session_status(&journal);
     }
 }
