@@ -221,7 +221,6 @@ fn is_streaming_command(command: &cli::Command) -> bool {
             command,
             cli::TaskCommand::Run { .. } | cli::TaskCommand::Recover { .. }
         ),
-        cli::Command::Agent { .. } => true,
         cli::Command::Prompt {
             detect_loops,
             max_restarts,
@@ -418,6 +417,11 @@ mod tests {
 
         let tree = cli::Command::Tree(cli::ProjectDirectory { path: ".".into() });
         assert!(!is_streaming_command(&tree));
+
+        let agent_list = cli::Command::Agent {
+            command: cli::AgentCommand::List,
+        };
+        assert!(!is_streaming_command(&agent_list));
     }
 
     #[test]

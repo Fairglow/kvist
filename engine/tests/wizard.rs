@@ -509,3 +509,27 @@ fn wizard_cancel_via_escape_or_c() {
     let err = run_wizard(&mut reader, &mut writer, project.path()).expect_err("should cancel");
     assert!(matches!(err, kvist::KvistError::AgentSetupCancelled));
 }
+
+#[test]
+fn agent_remove_all_clears_configuration() {
+    let project = TempDir::new().expect("create project");
+    let script_path = project.path().join("provider.sh");
+    fs::write(&script_path, "#!/bin/sh\nexit 0\n").expect("write provider");
+    #[cfg(unix)]
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    // Configure a model
+    let mock_input = format!("1\n6\n{}\ntest-model\n\n1\n1\n", script_path.display());
+    let mut reader = Cursor::new(mock_input);
+    let mut writer = Vec::new();
+    run_wizard(&mut reader, &mut writer, project.path()).expect("save model");
+
+    let config_path = project.path().join("kvist.toml");
+    let clear_msg =
+        kvist::wizard::remove_all_models(&config_path, project.path(), true).expect("remove all");
+    assert!(clear_msg.contains("Successfully cleared all agent configuration"));
+
+    let list_output = kvist::wizard::list_models(project.path()).expect("list models");
+    assert!(list_output.contains("no models configured"));
+}

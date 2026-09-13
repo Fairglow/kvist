@@ -158,33 +158,21 @@ pub fn status_bar_label(status: &StatusContext) -> String {
     )
 }
 
-fn fit_banner_field(value: &str, max_width: usize) -> String {
-    if value.len() > max_width {
-        format!("{}...", &value[..max_width.saturating_sub(3)])
-    } else {
-        value.to_owned()
-    }
-}
-
 /// Formats the welcome banner text with static environment information.
 pub fn format_welcome_banner(status: &StatusContext, branch: Option<&str>) -> String {
-    let branch_str = fit_banner_field(branch.unwrap_or("no-vcs"), 50);
-    let sandbox_str = fit_banner_field(&status.sandbox_backend, 50);
-    let model_str = fit_banner_field(&status.default_model, 50);
+    let branch_str = branch.unwrap_or("no-vcs");
 
     let mut banner = String::new();
-    banner.push_str("╭──────────────────────────────────────────────────────────────╮\n");
-    banner.push_str("│  ⚡ Kvist Interactive Workspace Shell                        │\n");
-    banner.push_str(&format!("│  Branch:  {:<50}│\n", branch_str));
-    banner.push_str(&format!("│  Sandbox: {:<50}│\n", sandbox_str));
-    banner.push_str(&format!("│  Model:   {:<50}│\n", model_str));
+    banner.push_str("╭── Kvist Interactive Workspace Shell ─────────────────────────────\n");
+    banner.push_str(&format!("│  Branch:   {}\n", branch_str));
+    banner.push_str(&format!("│  Sandbox:  {}\n", status.sandbox_backend));
+    banner.push_str(&format!("│  Model:    {}\n", status.default_model));
     if status.active_locks > 0 {
-        let locks_str = fit_banner_field(&status.active_locks.to_string(), 50);
-        banner.push_str(&format!("│  Locks:   {:<50}│\n", locks_str));
+        banner.push_str(&format!("│  Locks:    {}\n", status.active_locks));
     }
-    banner.push_str("│  Commands: 'status', 'overview', 'task run', 'help'          │\n");
-    banner.push_str("│  Press TAB for autocomplete (arrows to pick)  ·  'exit'      │\n");
-    banner.push_str("╰──────────────────────────────────────────────────────────────╯");
+    banner.push_str("│  Commands: 'overview', 'status', 'task run', 'help'\n");
+    banner.push_str("│  Press TAB for autocomplete (arrows to pick)  ·  'exit'\n");
+    banner.push_str("╰──────────────────────────────────────────────────────────────────");
     banner
 }
 
@@ -274,12 +262,10 @@ mod tests {
         };
         let banner = format_welcome_banner(&status, Some("feature/long-branch-name-overflow-test"));
         for line in banner.lines() {
-            // Check that box starts with ╭/│/╰ and ends with ╮/│/╯
             assert!(line.starts_with('╭') || line.starts_with('│') || line.starts_with('╰'));
-            assert!(line.ends_with('╮') || line.ends_with('│') || line.ends_with('╯'));
         }
-        assert!(banner.contains("│  Branch:  feature/long-branch-name-overflow-test"));
-        assert!(banner.contains("│  Sandbox: bubblewrap"));
-        assert!(banner.contains("│  Model:   ollama-long-model-name"));
+        assert!(banner.contains("│  Branch:   feature/long-branch-name-overflow-test"));
+        assert!(banner.contains("│  Sandbox:  bubblewrap"));
+        assert!(banner.contains("│  Model:    ollama-long-model-name"));
     }
 }

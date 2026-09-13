@@ -18,7 +18,7 @@ use std::process::Command;
 
 use serde_json::Value;
 
-use crate::{config, project_state, task_queue};
+use crate::{project_state, task_queue};
 
 /// A dynamic value domain the completion engine can resolve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,17 +181,33 @@ impl DynamicState {
     }
 
     fn load_models(&mut self, project_dir: &Path) {
-        let Ok(cfg) = config::load(project_dir) else {
+        let config_path = project_dir.join("kvist.toml");
+        let Ok(contents) = fs::read_to_string(&config_path) else {
+            return;
+        };
+        let Ok(doc) = contents.parse::<toml_edit::DocumentMut>() else {
             return;
         };
         let mut names: Vec<String> = Vec::new();
-        for profile in [
-            &cfg.agent.architect,
-            &cfg.agent.developer,
-            &cfg.agent.security_reviewer,
-        ] {
-            for model in &profile.models {
-                names.push(model.name.clone());
+        if let Some(agent) = doc.get("agent").and_then(toml_edit::Item::as_table)
+            && let Some(profiles) = agent.get("profiles").and_then(toml_edit::Item::as_table)
+        {
+            for (_, profile_item) in profiles.iter() {
+                if let Some(profile_table) = profile_item.as_table()
+                    && let Some(models) = profile_table
+                        .get("models")
+                        .and_then(toml_edit::Item::as_array_of_tables)
+                {
+                    for model_table in models.iter() {
+                        if let Some(name) = model_table
+                            .get("name")
+                            .and_then(toml_edit::Item::as_value)
+                            .and_then(toml_edit::Value::as_str)
+                        {
+                            names.push(name.to_owned());
+                        }
+                    }
+                }
             }
         }
         names.sort();

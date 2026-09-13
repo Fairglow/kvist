@@ -238,25 +238,89 @@ impl fmt::Display for ProjectInspection {
         if let Some(diagnostic) = &self.root_diagnostic {
             writeln!(formatter, "diagnostic: {diagnostic}")?;
         }
+
+        // Group artifacts: project root artifacts vs component artifacts
+        let mut root_artifacts = Vec::new();
+        let mut component_artifacts: std::collections::BTreeMap<String, Vec<&ArtifactStatus>> =
+            std::collections::BTreeMap::new();
+
         for artifact in &self.artifacts {
-            writeln!(formatter, "{}: {}", artifact.path, artifact.status)?;
+            if let Some((comp, _)) = artifact.path.split_once('/') {
+                component_artifacts
+                    .entry(comp.to_owned())
+                    .or_default()
+                    .push(artifact);
+            } else {
+                root_artifacts.push(artifact);
+            }
         }
-        writeln!(formatter, "vcs: {}", self.vcs.summary)?;
+
+        if !root_artifacts.is_empty() {
+            writeln!(formatter, "\n[Project Artifacts]")?;
+            for artifact in root_artifacts {
+                writeln!(formatter, "  {}: {}", artifact.path, artifact.status)?;
+            }
+        }
+
+        for (comp_name, comp_arts) in component_artifacts {
+            writeln!(formatter, "\n[Component: {comp_name}]")?;
+            for artifact in comp_arts {
+                writeln!(formatter, "  {}: {}", artifact.path, artifact.status)?;
+            }
+        }
+
+        writeln!(formatter, "\n[Version Control]")?;
+        writeln!(formatter, "  vcs: {}", self.vcs.summary)?;
         if let Some(repository_root) = &self.vcs.repository_root {
-            writeln!(formatter, "vcs repository: {}", repository_root.display())?;
+            writeln!(formatter, "  vcs repository: {}", repository_root.display())?;
         }
+
+        let mut vcs_root_artifacts = Vec::new();
+        let mut vcs_component_artifacts: std::collections::BTreeMap<
+            String,
+            Vec<&crate::vcs::VcsArtifactStatus>,
+        > = std::collections::BTreeMap::new();
+
         for artifact in &self.vcs.artifacts {
-            writeln!(
-                formatter,
-                "vcs {}: {}",
-                artifact.path.display(),
-                artifact.state.description()
-            )?;
+            let path_str = artifact.path.to_string_lossy();
+            if let Some((comp, _)) = path_str.split_once('/') {
+                vcs_component_artifacts
+                    .entry(comp.to_owned())
+                    .or_default()
+                    .push(artifact);
+            } else {
+                vcs_root_artifacts.push(artifact);
+            }
         }
+
+        if !vcs_root_artifacts.is_empty() {
+            writeln!(formatter, "  [Project Artifacts]")?;
+            for artifact in vcs_root_artifacts {
+                writeln!(
+                    formatter,
+                    "    vcs {}: {}",
+                    artifact.path.display(),
+                    artifact.state.description()
+                )?;
+            }
+        }
+
+        for (comp_name, comp_arts) in vcs_component_artifacts {
+            writeln!(formatter, "  [Component: {comp_name}]")?;
+            for artifact in comp_arts {
+                writeln!(
+                    formatter,
+                    "    vcs {}: {}",
+                    artifact.path.display(),
+                    artifact.state.description()
+                )?;
+            }
+        }
+
         if let Some(diagnostic) = &self.vcs.diagnostic {
-            writeln!(formatter, "vcs diagnostic: {diagnostic}")?;
+            writeln!(formatter, "  vcs diagnostic: {diagnostic}")?;
         }
-        write!(formatter, "guidance: {}", self.guidance)
+        write!(formatter, "\nguidance: {}", self.guidance)
     }
 }
 

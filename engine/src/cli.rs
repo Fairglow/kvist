@@ -238,11 +238,14 @@ pub enum AgentCommand {
     },
     /// List configured and available agent models with their role assignments.
     List,
-    /// Remove a configured agent model.
+    /// Remove configured agent models.
     Remove {
         /// Name of the model profile to remove.
-        #[arg(value_name = "MODEL_NAME")]
-        name: String,
+        #[arg(value_name = "MODEL_NAME", required_unless_present = "all")]
+        name: Option<String>,
+        /// Remove all configured agent models and reset agent configuration.
+        #[arg(long)]
+        all: bool,
         /// Remove from global user configuration instead of project configuration.
         #[arg(long)]
         global: bool,
@@ -548,7 +551,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 )))
             }
             Command::Agent {
-                command: AgentCommand::Remove { name, global },
+                command: AgentCommand::Remove { name, all, global },
             } => {
                 let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
                     operation: "determine current project directory",
@@ -562,7 +565,16 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 } else {
                     current_dir.join("kvist.toml")
                 };
-                let msg = wizard::remove_model(&config_path, &current_dir, !global, &name)?;
+                let msg = if all {
+                    wizard::remove_all_models(&config_path, &current_dir, !global)?
+                } else if let Some(model_name) = name {
+                    wizard::remove_model(&config_path, &current_dir, !global, &model_name)?
+                } else {
+                    return Err(KvistError::AgentSetupFailed {
+                        reason: "specify a model name or use --all to clear all agent configuration"
+                            .to_owned(),
+                    });
+                };
                 let mut msg_json = String::new();
                 json_string_escape(&mut msg_json, &msg);
                 Ok(CommandOutput::message(format!(
@@ -954,7 +966,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 wizard::list_models(&current_dir).map(CommandOutput::message)
             }
             Command::Agent {
-                command: AgentCommand::Remove { name, global },
+                command: AgentCommand::Remove { name, all, global },
             } => {
                 let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
                     operation: "determine current project directory",
@@ -970,8 +982,19 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 } else {
                     current_dir.join("kvist.toml")
                 };
-                wizard::remove_model(&config_path, &current_dir, !global, &name)
-                    .map(CommandOutput::message)
+                if all {
+                    wizard::remove_all_models(&config_path, &current_dir, !global)
+                        .map(CommandOutput::message)
+                } else if let Some(model_name) = name {
+                    wizard::remove_model(&config_path, &current_dir, !global, &model_name)
+                        .map(CommandOutput::message)
+                } else {
+                    Err(KvistError::AgentSetupFailed {
+                        reason:
+                            "specify a model name or use --all to clear all agent configuration"
+                                .to_owned(),
+                    })
+                }
             }
             Command::Shell(project) => {
                 crate::shell::run_shell(&project.path)?;

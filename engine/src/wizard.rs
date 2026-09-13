@@ -524,6 +524,7 @@ pub fn remove_model(
                     == Some(model_name)
                 {
                     profile_table.remove("model");
+                    removed_count += 1;
                 }
                 // If default_model matches model_name, reset it
                 if profile_table
@@ -532,7 +533,13 @@ pub fn remove_model(
                     .and_then(Value::as_str)
                     == Some(model_name)
                 {
-                    profile_table["default_model"] = value("default");
+                    profile_table.remove("default_model");
+                    removed_count += 1;
+                }
+                // If model_name is "default", also remove legacy command_template
+                if model_name == "default" && profile_table.contains_key("command_template") {
+                    profile_table.remove("command_template");
+                    removed_count += 1;
                 }
             }
         }
@@ -561,40 +568,108 @@ pub fn remove_model(
     ))
 }
 
+/// Removes all configured agent models and resets agent profile configuration.
+pub fn remove_all_models(
+    config_path: &Path,
+    project_dir: &Path,
+    project_local: bool,
+) -> Result<String> {
+    let (mut document, existing_contents) = load_document(config_path, project_local)?;
+    if existing_contents.is_none() {
+        return Err(KvistError::AgentSetupFailed {
+            reason: format!(
+                "configuration file `{}` does not exist",
+                config_path.display()
+            ),
+        });
+    }
+
+    if let Some(agent) = document.get_mut("agent").and_then(Item::as_table_mut) {
+        if let Some(profiles) = agent.get_mut("profiles").and_then(Item::as_table_mut) {
+            for (_, profile_item) in profiles.iter_mut() {
+                if let Some(profile_table) = profile_item.as_table_mut() {
+                    profile_table.remove("models");
+                    profile_table.remove("model");
+                    profile_table.remove("command_template");
+                    profile_table.remove("default_model");
+                }
+            }
+        }
+        agent.remove("models");
+    }
+
+    let contents = document.to_string();
+    if project_local {
+        config::validate_project_configuration_contents(config_path, project_dir, &contents)?;
+    } else {
+        config::validate_agent_configuration_contents(config_path, &contents)?;
+    }
+    replace_file_atomically(config_path, &contents)?;
+
+    Ok(format!(
+        "Successfully cleared all agent configuration from `{}`.",
+        config_path.display()
+    ))
+}
+
 /// Lists configured and available agent models with their role assignments.
 pub fn list_models(project_dir: &Path) -> Result<String> {
     let mut output = String::new();
     output.push_str("╭── Agent Models ──────────────────────────────────────────────────\n");
 
-    let cfg = config::load(project_dir)?;
+    let config_path = project_dir.join("kvist.toml");
+    let (document, existing_contents) = load_document(&config_path, true)?;
 
     let mut configured_models: BTreeMap<String, (String, Vec<String>)> = BTreeMap::new();
-    let roles = [
-        ("Developer", &cfg.agent.developer),
-        ("Architect", &cfg.agent.architect),
-        ("Security Reviewer", &cfg.agent.security_reviewer),
-    ];
 
-    for (role_name, profile) in &roles {
-        let active_model = profile.model.as_deref().unwrap_or(&profile.default_model);
-        for m in &profile.models {
-            let entry = configured_models
-                .entry(m.name.clone())
-                .or_insert_with(|| (m.command.clone(), Vec::new()));
-            let role_desc = if m.name == active_model {
-                format!("{role_name} (active)")
-            } else {
-                role_name.to_string()
-            };
-            if !entry.1.contains(&role_desc) {
-                entry.1.push(role_desc);
+    if existing_contents.is_some()
+        && let Some(agent) = document.get("agent").and_then(Item::as_table)
+        && let Some(profiles) = agent.get("profiles").and_then(Item::as_table)
+    {
+        for (role_key, profile_item) in profiles.iter() {
+            if let Some(profile_table) = profile_item.as_table() {
+                let active_model = profile_table
+                    .get("model")
+                    .and_then(Item::as_value)
+                    .and_then(Value::as_str);
+
+                if let Some(models) = profile_table
+                    .get("models")
+                    .and_then(Item::as_array_of_tables)
+                {
+                    for model_table in models.iter() {
+                        if let (Some(name), Some(cmd)) = (
+                            model_table
+                                .get("name")
+                                .and_then(Item::as_value)
+                                .and_then(Value::as_str),
+                            model_table
+                                .get("command")
+                                .and_then(Item::as_value)
+                                .and_then(Value::as_str),
+                        ) {
+                            let entry = configured_models
+                                .entry(name.to_owned())
+                                .or_insert_with(|| (cmd.to_owned(), Vec::new()));
+                            let is_active = active_model == Some(name);
+                            let role_desc = if is_active {
+                                format!("{role_key} (active)")
+                            } else {
+                                role_key.to_string()
+                            };
+                            if !entry.1.contains(&role_desc) {
+                                entry.1.push(role_desc);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
 
     output.push_str("│  Configured Models in Project:\n");
     if configured_models.is_empty() {
-        output.push_str("│    (no custom models configured; using default templates)\n");
+        output.push_str("│    (no models configured; run 'agent setup' to configure a model)\n");
     } else {
         for (name, (command, assigned_roles)) in &configured_models {
             let roles_str = if assigned_roles.is_empty() {
