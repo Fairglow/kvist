@@ -17,10 +17,14 @@ const LLAMA_SERVER_DEFAULT_URL: &str = "http://127.0.0.1:9931";
 const SETUP_TEST_PROMPT: &str = "Reply with exactly: OK";
 
 /// Controls the non-interactive qualification decision made by setup.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SetupOptions {
     /// Persist a profile even when its mandatory live qualification fails.
     pub force: bool,
+    /// Default Ollama base URL override.
+    pub ollama_url: Option<String>,
+    /// Default llama-server base URL override.
+    pub llama_server_url: Option<String>,
 }
 
 /// Collects and optionally verifies one reusable provider profile.
@@ -60,7 +64,7 @@ pub fn collect_profile_with_options<R: BufRead, W: Write>(
     };
     write_output(writer, &format!("\nConfiguring provider: {provider}\n"))?;
 
-    let profile = configure_profile(provider, reader, writer, working_directory)?;
+    let profile = configure_profile(provider, reader, writer, working_directory, &options)?;
     write_output(
         writer,
         &format!("Generated command template: {}\n", profile.command),
@@ -174,6 +178,7 @@ fn configure_profile<R: BufRead, W: Write>(
     reader: &mut R,
     writer: &mut W,
     working_directory: &Path,
+    options: &SetupOptions,
 ) -> Result<ModelProfile> {
     let (name, command) = match provider {
         "llama-cli" => {
@@ -201,12 +206,11 @@ fn configure_profile<R: BufRead, W: Write>(
             (name, command)
         }
         "llama-server" => {
-            let url = prompt_with_default(
-                reader,
-                writer,
-                "llama-server base URL",
-                LLAMA_SERVER_DEFAULT_URL,
-            )?;
+            let default_url = options
+                .llama_server_url
+                .as_deref()
+                .unwrap_or(LLAMA_SERVER_DEFAULT_URL);
+            let url = prompt_with_default(reader, writer, "llama-server base URL", default_url)?;
             let url = url.trim_end_matches('/');
             let model = select_discovered_model(
                 reader,
@@ -239,7 +243,8 @@ fn configure_profile<R: BufRead, W: Write>(
             (name, command)
         }
         "ollama" => {
-            let url = prompt_with_default(reader, writer, "Ollama base URL", OLLAMA_DEFAULT_URL)?;
+            let default_url = options.ollama_url.as_deref().unwrap_or(OLLAMA_DEFAULT_URL);
+            let url = prompt_with_default(reader, writer, "Ollama base URL", default_url)?;
             let url = url.trim_end_matches('/');
             let model = select_discovered_model(
                 reader,

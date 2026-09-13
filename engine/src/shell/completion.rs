@@ -260,6 +260,7 @@ fn domain_description(domain: ValueDomain) -> &'static str {
         ValueDomain::Task => "Task ID",
         ValueDomain::Attempt => "Attempt ID",
         ValueDomain::Model => "Model profile",
+        ValueDomain::Role => "Agent role",
         ValueDomain::Branch => "VCS branch",
     }
 }
@@ -365,6 +366,7 @@ fn positional_domain(value_name: &str) -> Option<ValueDomain> {
         "TASK_ID" => Some(ValueDomain::Task),
         "ATTEMPT_ID" => Some(ValueDomain::Attempt),
         "MODEL_NAME" | "MODEL" => Some(ValueDomain::Model),
+        "ROLE" => Some(ValueDomain::Role),
         _ => None,
     }
 }
@@ -396,6 +398,11 @@ fn dynamic_values(
             _ => Vec::new(),
         },
         ValueDomain::Model => state.models().to_vec(),
+        ValueDomain::Role => vec![
+            "developer".to_owned(),
+            "architect".to_owned(),
+            "security-reviewer".to_owned(),
+        ],
         ValueDomain::Branch => state
             .branch()
             .into_iter()

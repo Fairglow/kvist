@@ -103,13 +103,16 @@ impl StatusContext {
                     .as_ref()
                     .map(|sandbox| sandbox.backend.clone())
                     .unwrap_or_else(|| "none".to_owned()),
-                default_model: cfg
-                    .agent
-                    .developer
-                    .models
-                    .first()
-                    .map(|model| model.name.clone())
-                    .unwrap_or_else(|| "none".to_owned()),
+                default_model: if !cfg.agent.developer.profile.is_empty() {
+                    cfg.agent.developer.profile.clone()
+                } else {
+                    cfg.agent
+                        .developer
+                        .models
+                        .first()
+                        .map(|model| model.name.clone())
+                        .unwrap_or_else(|| "none".to_owned())
+                },
                 active_locks,
             },
             Err(_) => Self {

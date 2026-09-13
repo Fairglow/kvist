@@ -322,6 +322,8 @@ mod tests {
                 .is_some()
         );
         let agent = node(&root, "agent");
+        assert!(agent.find_subcommand("profile").is_some());
+        assert!(agent.find_subcommand("role").is_some());
         assert!(agent.find_subcommand("setup").is_some());
         assert!(agent.find_subcommand("list").is_some());
         assert!(agent.find_subcommand("remove").is_some());

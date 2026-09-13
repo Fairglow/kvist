@@ -37,6 +37,29 @@ impl ReasoningEffort {
             Self::Max => "max",
         }
     }
+
+    /// Parses a reasoning effort string case-insensitively.
+    pub fn parse_effort(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "none" => Some(Self::None),
+            "minimal" => Some(Self::Minimal),
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            "xhigh" => Some(Self::Xhigh),
+            "max" => Some(Self::Max),
+            _ => None,
+        }
+    }
+}
+
+impl std::str::FromStr for ReasoningEffort {
+    type Err = String;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Self::parse_effort(s)
+            .ok_or_else(|| format!("invalid reasoning effort `{s}`: expected none, minimal, low, medium, high, xhigh, or max"))
+    }
 }
 
 /// Local HTTP provider protocols supported by the direct transport.

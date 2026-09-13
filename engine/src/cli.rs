@@ -227,18 +227,87 @@ pub enum FinalizeDispositionArgument {
     Block,
 }
 
-/// Agent setup operations.
+/// Model profile management operations.
+#[derive(Debug, Subcommand)]
+pub enum AgentProfileCommand {
+    /// Add and qualify a new model profile.
+    Add {
+        /// Save a profile even when mandatory live qualification fails.
+        #[arg(long)]
+        force: bool,
+    },
+    /// List configured and available model profiles.
+    List,
+    /// Remove configured model profile(s).
+    Remove {
+        /// Name of the model profile to remove.
+        #[arg(value_name = "MODEL_NAME", required_unless_present = "all")]
+        name: Option<String>,
+        /// Remove all configured model profiles.
+        #[arg(long)]
+        all: bool,
+        /// Remove from global user configuration instead of project configuration.
+        #[arg(long)]
+        global: bool,
+    },
+}
+
+/// Role assignment operations for model profiles.
+#[derive(Debug, Subcommand)]
+pub enum AgentRoleCommand {
+    /// List current role assignments and available model profiles.
+    List,
+    /// Assign a model profile to a role.
+    Set {
+        /// Role to assign: developer, architect, or security-reviewer.
+        #[arg(value_name = "ROLE")]
+        role: String,
+        /// Name of the model profile to assign.
+        #[arg(value_name = "MODEL_NAME")]
+        model: String,
+        /// Optional thinking effort for this role: none, minimal, low, medium, high, xhigh, max.
+        #[arg(long, value_name = "EFFORT")]
+        thinking_effort: Option<String>,
+        /// Update global user configuration instead of project configuration.
+        #[arg(long)]
+        global: bool,
+    },
+    /// Clear role assignment(s).
+    Clear {
+        /// Role to clear: developer, architect, or security-reviewer.
+        #[arg(value_name = "ROLE", required_unless_present = "all")]
+        role: Option<String>,
+        /// Clear assignments for all roles.
+        #[arg(long)]
+        all: bool,
+        /// Update global user configuration instead of project configuration.
+        #[arg(long)]
+        global: bool,
+    },
+}
+
+/// Agent setup, profile management, and role assignment operations.
 #[derive(Debug, Subcommand)]
 pub enum AgentCommand {
-    /// Launch the interactive setup wizard to configure and test new models.
+    /// Manage model profiles (add, list, remove).
+    Profile {
+        #[command(subcommand)]
+        command: Option<AgentProfileCommand>,
+    },
+    /// Manage role bindings to model profiles (list, set, clear).
+    Role {
+        #[command(subcommand)]
+        command: Option<AgentRoleCommand>,
+    },
+    /// Configure and qualify a new model profile (alias for 'agent profile add').
     Setup {
         /// Save a profile even when mandatory live qualification fails.
         #[arg(long)]
         force: bool,
     },
-    /// List configured and available agent models with their role assignments.
+    /// List configured and available agent models (alias for 'agent profile list').
     List,
-    /// Remove configured agent models.
+    /// Remove configured agent model(s) (alias for 'agent profile remove').
     Remove {
         /// Name of the model profile to remove.
         #[arg(value_name = "MODEL_NAME", required_unless_present = "all")]
@@ -510,6 +579,123 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     r#"{{"content":{content_json}}}"#
                 )))
             },
+            Command::Agent {
+                command: AgentCommand::Profile { command },
+            } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                match command.unwrap_or(AgentProfileCommand::List) {
+                    AgentProfileCommand::List => {
+                        let text = wizard::list_models(&current_dir)?;
+                        let mut text_json = String::new();
+                        json_string_escape(&mut text_json, &text);
+                        Ok(CommandOutput::message(format!(
+                            r#"{{"status":"success","command":"agent-profile-list","output":{text_json}}}"#
+                        )))
+                    }
+                    AgentProfileCommand::Add { force } => {
+                        let mut reader = std::io::BufReader::new(std::io::stdin());
+                        let mut writer = std::io::BufWriter::new(std::io::stderr());
+                        match wizard::run_wizard_with_force(&mut reader, &mut writer, &current_dir, force) {
+                            Ok(()) => Ok(CommandOutput::message(
+                                r#"{"status":"success","command":"agent-profile-add","message":"agent profile add complete"}"#.to_owned()
+                            )),
+                            Err(KvistError::AgentSetupCancelled) => Ok(CommandOutput::message(
+                                r#"{"status":"cancelled","command":"agent-profile-add","message":"agent profile add cancelled"}"#.to_owned()
+                            )),
+                            Err(source) => Err(source),
+                        }
+                    }
+                    AgentProfileCommand::Remove { name, all, global } => {
+                        let config_path = if global {
+                            config::global_user_config_path().ok_or_else(|| KvistError::AgentSetupFailed {
+                                reason: "cannot resolve user configuration directory".to_owned(),
+                            })?
+                        } else {
+                            current_dir.join("kvist.toml")
+                        };
+                        let msg = if all {
+                            wizard::remove_all_models(&config_path, &current_dir, !global)?
+                        } else if let Some(model_name) = name {
+                            wizard::remove_model(&config_path, &current_dir, !global, &model_name)?
+                        } else {
+                            return Err(KvistError::AgentSetupFailed {
+                                reason: "specify a model name or use --all to clear all agent configuration".to_owned(),
+                            });
+                        };
+                        let mut msg_json = String::new();
+                        json_string_escape(&mut msg_json, &msg);
+                        Ok(CommandOutput::message(format!(
+                            r#"{{"status":"success","command":"agent-profile-remove","message":{msg_json}}}"#
+                        )))
+                    }
+                }
+            }
+            Command::Agent {
+                command: AgentCommand::Role { command },
+            } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                match command.unwrap_or(AgentRoleCommand::List) {
+                    AgentRoleCommand::List => {
+                        let text = wizard::list_roles(&current_dir)?;
+                        let mut text_json = String::new();
+                        json_string_escape(&mut text_json, &text);
+                        Ok(CommandOutput::message(format!(
+                            r#"{{"status":"success","command":"agent-role-list","output":{text_json}}}"#
+                        )))
+                    }
+                    AgentRoleCommand::Set {
+                        role,
+                        model,
+                        thinking_effort,
+                        global,
+                    } => {
+                        let config_path = if global {
+                            config::global_user_config_path().ok_or_else(|| KvistError::AgentSetupFailed {
+                                reason: "cannot resolve user configuration directory".to_owned(),
+                            })?
+                        } else {
+                            current_dir.join("kvist.toml")
+                        };
+                        let effort = match thinking_effort {
+                            Some(s) => Some(agent_runtime::ReasoningEffort::parse_effort(&s).ok_or_else(|| {
+                                KvistError::AgentSetupFailed {
+                                    reason: format!("invalid reasoning effort `{s}`: expected none, minimal, low, medium, high, xhigh, or max"),
+                                }
+                            })?),
+                            None => None,
+                        };
+                        let msg = wizard::set_role_model_with_effort(&config_path, &current_dir, !global, &role, &model, effort)?;
+                        let mut msg_json = String::new();
+                        json_string_escape(&mut msg_json, &msg);
+                        Ok(CommandOutput::message(format!(
+                            r#"{{"status":"success","command":"agent-role-set","message":{msg_json}}}"#
+                        )))
+                    }
+                    AgentRoleCommand::Clear { role, all, global } => {
+                        let config_path = if global {
+                            config::global_user_config_path().ok_or_else(|| KvistError::AgentSetupFailed {
+                                reason: "cannot resolve user configuration directory".to_owned(),
+                            })?
+                        } else {
+                            current_dir.join("kvist.toml")
+                        };
+                        let msg = wizard::clear_role(&config_path, &current_dir, !global, role.as_deref(), all)?;
+                        let mut msg_json = String::new();
+                        json_string_escape(&mut msg_json, &msg);
+                        Ok(CommandOutput::message(format!(
+                            r#"{{"status":"success","command":"agent-role-clear","message":{msg_json}}}"#
+                        )))
+                    }
+                }
+            }
             Command::Agent {
                 command: AgentCommand::Setup { force },
             } => {
@@ -934,6 +1120,131 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     },
                 )?;
                 Ok(CommandOutput::none())
+            }
+            Command::Agent {
+                command: AgentCommand::Profile { command },
+            } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                match command.unwrap_or(AgentProfileCommand::List) {
+                    AgentProfileCommand::List => {
+                        wizard::list_models(&current_dir).map(CommandOutput::message)
+                    }
+                    AgentProfileCommand::Add { force } => {
+                        let mut reader = std::io::BufReader::new(std::io::stdin());
+                        let mut writer = std::io::BufWriter::new(std::io::stdout());
+                        match wizard::run_wizard_with_force(
+                            &mut reader,
+                            &mut writer,
+                            &current_dir,
+                            force,
+                        ) {
+                            Ok(()) => Ok(CommandOutput::message(
+                                "agent profile add complete".to_owned(),
+                            )),
+                            Err(KvistError::AgentSetupCancelled) => Ok(CommandOutput::message(
+                                "agent profile add cancelled".to_owned(),
+                            )),
+                            Err(source) => Err(source),
+                        }
+                    }
+                    AgentProfileCommand::Remove { name, all, global } => {
+                        let config_path = if global {
+                            config::global_user_config_path().ok_or_else(|| {
+                                KvistError::AgentSetupFailed {
+                                    reason: "cannot resolve user configuration directory"
+                                        .to_owned(),
+                                }
+                            })?
+                        } else {
+                            current_dir.join("kvist.toml")
+                        };
+                        if all {
+                            wizard::remove_all_models(&config_path, &current_dir, !global)
+                                .map(CommandOutput::message)
+                        } else if let Some(model_name) = name {
+                            wizard::remove_model(&config_path, &current_dir, !global, &model_name)
+                                .map(CommandOutput::message)
+                        } else {
+                            Err(KvistError::AgentSetupFailed {
+                                reason:
+                                    "specify a model name or use --all to clear all agent configuration"
+                                        .to_owned(),
+                            })
+                        }
+                    }
+                }
+            }
+            Command::Agent {
+                command: AgentCommand::Role { command },
+            } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                match command.unwrap_or(AgentRoleCommand::List) {
+                    AgentRoleCommand::List => {
+                        wizard::list_roles(&current_dir).map(CommandOutput::message)
+                    }
+                    AgentRoleCommand::Set {
+                        role,
+                        model,
+                        thinking_effort,
+                        global,
+                    } => {
+                        let config_path = if global {
+                            config::global_user_config_path().ok_or_else(|| {
+                                KvistError::AgentSetupFailed {
+                                    reason: "cannot resolve user configuration directory"
+                                        .to_owned(),
+                                }
+                            })?
+                        } else {
+                            current_dir.join("kvist.toml")
+                        };
+                        let effort = match thinking_effort {
+                            Some(s) => Some(agent_runtime::ReasoningEffort::parse_effort(&s).ok_or_else(|| {
+                                KvistError::AgentSetupFailed {
+                                    reason: format!("invalid reasoning effort `{s}`: expected none, minimal, low, medium, high, xhigh, or max"),
+                                }
+                            })?),
+                            None => None,
+                        };
+                        wizard::set_role_model_with_effort(
+                            &config_path,
+                            &current_dir,
+                            !global,
+                            &role,
+                            &model,
+                            effort,
+                        )
+                        .map(CommandOutput::message)
+                    }
+                    AgentRoleCommand::Clear { role, all, global } => {
+                        let config_path = if global {
+                            config::global_user_config_path().ok_or_else(|| {
+                                KvistError::AgentSetupFailed {
+                                    reason: "cannot resolve user configuration directory"
+                                        .to_owned(),
+                                }
+                            })?
+                        } else {
+                            current_dir.join("kvist.toml")
+                        };
+                        wizard::clear_role(
+                            &config_path,
+                            &current_dir,
+                            !global,
+                            role.as_deref(),
+                            all,
+                        )
+                        .map(CommandOutput::message)
+                    }
+                }
             }
             Command::Agent {
                 command: AgentCommand::Setup { force },

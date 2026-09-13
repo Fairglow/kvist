@@ -31,6 +31,8 @@ pub enum ValueDomain {
     Attempt,
     /// A model profile name from the agent configuration.
     Model,
+    /// An agent role (developer, architect, security-reviewer).
+    Role,
     /// The active Git branch of the project repository.
     Branch,
 }
@@ -181,33 +183,22 @@ impl DynamicState {
     }
 
     fn load_models(&mut self, project_dir: &Path) {
-        let config_path = project_dir.join("kvist.toml");
-        let Ok(contents) = fs::read_to_string(&config_path) else {
-            return;
-        };
-        let Ok(doc) = contents.parse::<toml_edit::DocumentMut>() else {
-            return;
-        };
-        let mut names: Vec<String> = Vec::new();
-        if let Some(agent) = doc.get("agent").and_then(toml_edit::Item::as_table)
-            && let Some(profiles) = agent.get("profiles").and_then(toml_edit::Item::as_table)
+        if !project_dir.join("kvist.toml").is_file()
+            && !project_dir.join(".kvist/config.toml").is_file()
         {
-            for (_, profile_item) in profiles.iter() {
-                if let Some(profile_table) = profile_item.as_table()
-                    && let Some(models) = profile_table
-                        .get("models")
-                        .and_then(toml_edit::Item::as_array_of_tables)
-                {
-                    for model_table in models.iter() {
-                        if let Some(name) = model_table
-                            .get("name")
-                            .and_then(toml_edit::Item::as_value)
-                            .and_then(toml_edit::Value::as_str)
-                        {
-                            names.push(name.to_owned());
-                        }
-                    }
-                }
+            return;
+        }
+        let mut names: Vec<String> = Vec::new();
+        if let Ok(cfg) = crate::config::load(project_dir) {
+            for name in cfg.agent.profiles.keys() {
+                names.push(name.clone());
+            }
+        }
+        if let Some(profile_config) = agent_runtime::default_profile_config_path()
+            && let Ok(profiles) = agent_runtime::load_profiles(&profile_config)
+        {
+            for p in profiles {
+                names.push(p.name);
             }
         }
         names.sort();

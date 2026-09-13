@@ -1,13 +1,12 @@
 //! Interactive agent model setup wizard.
 
 use std::{
-    collections::BTreeMap,
     fs,
     io::{BufRead, Write},
     path::{Path, PathBuf},
 };
 
-use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, Value, value};
+use toml_edit::{DocumentMut, Item, Table, Value, value};
 
 use crate::{
     KvistError, Result, config,
@@ -47,6 +46,7 @@ fn read_input<R: BufRead>(reader: &mut R) -> Result<String> {
         || trimmed.eq_ignore_ascii_case("cancel")
         || trimmed.eq_ignore_ascii_case("quit")
         || trimmed.eq_ignore_ascii_case("q")
+        || trimmed.eq_ignore_ascii_case("c")
     {
         return Err(KvistError::AgentSetupCancelled);
     }
@@ -84,14 +84,7 @@ pub fn run_wizard_with_force<R: BufRead, W: Write>(
     project_dir: &Path,
     force: bool,
 ) -> Result<()> {
-    let profile_config = agent_runtime::default_profile_config_path();
-    run_wizard_inner(
-        reader,
-        writer,
-        project_dir,
-        profile_config.as_deref(),
-        force,
-    )
+    run_wizard_inner(reader, writer, project_dir, None, force)
 }
 
 /// Runs setup with an explicit standalone profile store.
@@ -123,18 +116,8 @@ fn run_wizard_inner<R: BufRead, W: Write>(
          This wizard guides you through configuring and testing local/remote LLM\n\
          agent model profiles for Kvist.\n\n",
     )?;
-    write_output(
-        writer,
-        "Select profile source:\n\
-           1) Configure a provider profile now\n\
-           2) Use a saved agent-runtime profile\n\
-         Choose (1-2) [1]: ",
-    )?;
-    let model = if read_input(reader)? == "2" {
-        let profile_config = profile_config.ok_or_else(|| KvistError::AgentSetupFailed {
-            reason: "cannot resolve standalone profile configuration; set HOME or XDG_CONFIG_HOME"
-                .to_owned(),
-        })?;
+
+    let model = if let Some(profile_config) = profile_config {
         let profiles = agent_runtime::load_profiles(profile_config)?;
         if profiles.is_empty() {
             return Err(KvistError::AgentSetupFailed {
@@ -162,58 +145,19 @@ fn run_wizard_inner<R: BufRead, W: Write>(
                 ),
             })?
     } else {
-        agent_runtime::collect_profile_with_options(
-            reader,
-            writer,
-            project_dir,
-            agent_runtime::SetupOptions { force },
-        )?
-    };
-
-    if let Ok(cfg) = config::load(project_dir) {
-        write_output(writer, "\nCurrent role assignments:\n")?;
-        let dev_model = cfg
-            .agent
-            .developer
-            .model
-            .as_deref()
-            .unwrap_or(&cfg.agent.developer.default_model);
-        let arch_model = cfg
-            .agent
-            .architect
-            .model
-            .as_deref()
-            .unwrap_or(&cfg.agent.architect.default_model);
-        let sec_model = cfg
-            .agent
-            .security_reviewer
-            .model
-            .as_deref()
-            .unwrap_or(&cfg.agent.security_reviewer.default_model);
-        write_output(writer, &format!("  Developer:         {}\n", dev_model))?;
-        write_output(writer, &format!("  Architect:         {}\n", arch_model))?;
-        write_output(writer, &format!("  Security Reviewer: {}\n", sec_model))?;
-    }
-
-    write_output(writer, "\nWhich roles should use this model?\n")?;
-    write_output(
-        writer,
-        "  0) No roles (save as configured model, unassigned)\n",
-    )?;
-    write_output(writer, "  1) Developer (test writing & implementation)\n")?;
-    write_output(writer, "  2) Architect (compliance reviews)\n")?;
-    write_output(writer, "  3) Security Reviewer (security audits)\n")?;
-    write_output(writer, "  4) All roles\n")?;
-    write_output(writer, "  c) Cancel\n")?;
-    write_output(writer, "Choose (0-4) [0]: ")?;
-    let input = read_input(reader)?;
-    let roles: Vec<&str> = match input.as_str() {
-        "1" => vec!["developer"],
-        "2" => vec!["architect"],
-        "3" => vec!["security-reviewer"],
-        "4" => vec!["developer", "architect", "security-reviewer"],
-        "c" | "cancel" => return Err(KvistError::AgentSetupCancelled),
-        _ => vec![], // default "0", empty, or other: No roles!
+        let setup_options = if let Ok(cfg) = config::load(project_dir) {
+            agent_runtime::SetupOptions {
+                force,
+                ollama_url: cfg.agent.discovery.ollama_url,
+                llama_server_url: cfg.agent.discovery.llama_server_url,
+            }
+        } else {
+            agent_runtime::SetupOptions {
+                force,
+                ..Default::default()
+            }
+        };
+        agent_runtime::collect_profile_with_options(reader, writer, project_dir, setup_options)?
     };
 
     write_output(writer, "\nWhere should this configuration be saved?\n")?;
@@ -232,14 +176,16 @@ fn run_wizard_inner<R: BufRead, W: Write>(
         })?
     };
 
-    persist_model(&config_path, project_dir, project_local, &roles, &model)?;
+    persist_model(&config_path, project_dir, project_local, &model)?;
     write_output(
         writer,
         &format!(
             "\nSuccessfully configured model `{}` in {}.\n\
+             Next Step: Run 'kvist agent role set <ROLE> {}' to assign this model to a role.\n\
              ==================================================\n",
             model.name,
-            config_path.display()
+            config_path.display(),
+            model.name
         ),
     )
 }
@@ -248,7 +194,6 @@ fn persist_model(
     config_path: &Path,
     project_dir: &Path,
     project_local: bool,
-    roles: &[&str],
     model: &agent_runtime::ModelProfile,
 ) -> Result<()> {
     let (mut document, existing_contents) = load_document(config_path, project_local)?;
@@ -259,13 +204,7 @@ fn persist_model(
             config::validate_agent_configuration_contents(config_path, contents)?;
         }
     }
-    if roles.is_empty() {
-        add_unassigned_model(&mut document, model)?;
-    } else {
-        for role in roles {
-            upsert_role_model(&mut document, role, model)?;
-        }
-    }
+    upsert_provider_and_profile(&mut document, model)?;
     let contents = document.to_string();
     if contents.len() as u64 > config::MAX_CONFIGURATION_BYTES {
         return Err(KvistError::ProjectConfigurationTooLarge {
@@ -364,115 +303,32 @@ fn ensure_table<'a>(item: &'a mut Item, config_path: &str) -> Result<&'a mut Tab
         })
 }
 
-fn upsert_role_model(
+fn upsert_provider_and_profile(
     document: &mut DocumentMut,
-    role: &str,
     model: &agent_runtime::ModelProfile,
 ) -> Result<()> {
     let agent = ensure_table(&mut document["agent"], "agent")?;
+
+    // 1. Ensure provider table
+    let providers = ensure_table(&mut agent["providers"], "agent.providers")?;
+    if !providers.contains_key(&model.provider) {
+        let provider_table = ensure_table(
+            &mut providers[&model.provider],
+            &format!("agent.providers.{}", model.provider),
+        )?;
+        provider_table["type"] = value(&model.provider);
+    }
+
+    // 2. Ensure profile table
     let profiles = ensure_table(&mut agent["profiles"], "agent.profiles")?;
-    let role_key = if role == "security-reviewer"
-        && profiles.contains_key("security_reviewer")
-        && !profiles.contains_key("security-reviewer")
-    {
-        "security_reviewer"
-    } else {
-        role
-    };
-    let profile = ensure_table(
-        &mut profiles[role_key],
-        &format!("agent.profiles.{role_key}"),
+    let profile_table = ensure_table(
+        &mut profiles[&model.name],
+        &format!("agent.profiles.{}", model.name),
     )?;
-    profile["model"] = value(&model.name);
-    profile["default_model"] = value(&model.name);
-    upsert_model_item(&mut profile["models"], model)
-}
+    profile_table["provider"] = value(&model.provider);
+    profile_table["model"] = value(&model.name);
+    profile_table["command"] = value(&model.command);
 
-fn upsert_model_item(item: &mut Item, model: &agent_runtime::ModelProfile) -> Result<()> {
-    if item.is_none() {
-        *item = Item::ArrayOfTables(ArrayOfTables::new());
-    }
-    match item {
-        Item::ArrayOfTables(models) => {
-            if let Some(existing) = models.iter_mut().find(|table| {
-                table
-                    .get("name")
-                    .and_then(Item::as_value)
-                    .and_then(Value::as_str)
-                    == Some(model.name.as_str())
-            }) {
-                existing["command"] = value(&model.command);
-            } else {
-                let mut table = Table::new();
-                table["name"] = value(&model.name);
-                table["command"] = value(&model.command);
-                models.push(table);
-            }
-            Ok(())
-        }
-        Item::Value(Value::Array(models)) => upsert_inline_model(models, model),
-        _ => Err(KvistError::AgentSetupFailed {
-            reason: "`agent profile models` must be an array of tables".to_owned(),
-        }),
-    }
-}
-
-fn upsert_inline_model(models: &mut Array, model: &agent_runtime::ModelProfile) -> Result<()> {
-    let existing_index = models.iter().position(|value| {
-        value
-            .as_inline_table()
-            .and_then(|table| table.get("name"))
-            .and_then(Value::as_str)
-            == Some(model.name.as_str())
-    });
-    if let Some(index) = existing_index {
-        let existing = models
-            .get_mut(index)
-            .and_then(Value::as_inline_table_mut)
-            .ok_or_else(|| KvistError::AgentSetupFailed {
-                reason: "`agent profile models` must contain only tables".to_owned(),
-            })?;
-        existing.insert("command", Value::from(&model.command));
-    } else {
-        if models.iter().any(|value| !value.is_inline_table()) {
-            return Err(KvistError::AgentSetupFailed {
-                reason: "`agent profile models` must contain only tables".to_owned(),
-            });
-        }
-        let mut table = InlineTable::new();
-        table.insert("name", Value::from(&model.name));
-        table.insert("command", Value::from(&model.command));
-        models.push(table);
-    }
-    Ok(())
-}
-
-fn add_unassigned_model(
-    document: &mut DocumentMut,
-    model: &agent_runtime::ModelProfile,
-) -> Result<()> {
-    let agent = ensure_table(&mut document["agent"], "agent")?;
-    let profiles = ensure_table(&mut agent["profiles"], "agent.profiles")?;
-    let mut updated_any = false;
-    for role_key in [
-        "developer",
-        "architect",
-        "security_reviewer",
-        "security-reviewer",
-    ] {
-        if profiles.contains_key(role_key) {
-            let profile = ensure_table(
-                &mut profiles[role_key],
-                &format!("agent.profiles.{role_key}"),
-            )?;
-            upsert_model_item(&mut profile["models"], model)?;
-            updated_any = true;
-        }
-    }
-    if !updated_any {
-        let profile = ensure_table(&mut profiles["developer"], "agent.profiles.developer")?;
-        upsert_model_item(&mut profile["models"], model)?;
-    }
     Ok(())
 }
 
@@ -494,51 +350,69 @@ pub fn remove_model(
     }
 
     let mut removed_count = 0;
-    if let Some(agent) = document.get_mut("agent").and_then(Item::as_table_mut)
-        && let Some(profiles) = agent.get_mut("profiles").and_then(Item::as_table_mut)
-    {
-        for (_, profile_item) in profiles.iter_mut() {
-            if let Some(profile_table) = profile_item.as_table_mut() {
-                // Check models array of tables
-                if let Some(models) = profile_table
-                    .get_mut("models")
-                    .and_then(Item::as_array_of_tables_mut)
-                {
-                    let prev_len = models.len();
-                    models.retain(|table| {
-                        table
-                            .get("name")
-                            .and_then(Item::as_value)
-                            .and_then(Value::as_str)
-                            != Some(model_name)
-                    });
-                    if models.len() < prev_len {
-                        removed_count += prev_len - models.len();
+    if let Some(agent) = document.get_mut("agent").and_then(Item::as_table_mut) {
+        // 1. Remove from profiles table
+        if let Some(profiles) = agent.get_mut("profiles").and_then(Item::as_table_mut) {
+            if profiles.contains_key(model_name) {
+                profiles.remove(model_name);
+                removed_count += 1;
+            }
+            // Also check legacy tables
+            for (_, profile_item) in profiles.iter_mut() {
+                if let Some(profile_table) = profile_item.as_table_mut() {
+                    if let Some(models) = profile_table
+                        .get_mut("models")
+                        .and_then(Item::as_array_of_tables_mut)
+                    {
+                        let prev_len = models.len();
+                        models.retain(|table| {
+                            table
+                                .get("name")
+                                .and_then(Item::as_value)
+                                .and_then(Value::as_str)
+                                != Some(model_name)
+                        });
+                        if models.len() < prev_len {
+                            removed_count += prev_len - models.len();
+                        }
+                    }
+                    if profile_table
+                        .get("model")
+                        .and_then(Item::as_value)
+                        .and_then(Value::as_str)
+                        == Some(model_name)
+                    {
+                        profile_table.remove("model");
+                        removed_count += 1;
+                    }
+                    if profile_table
+                        .get("default_model")
+                        .and_then(Item::as_value)
+                        .and_then(Value::as_str)
+                        == Some(model_name)
+                    {
+                        profile_table.remove("default_model");
+                        removed_count += 1;
+                    }
+                    if model_name == "default" && profile_table.contains_key("command_template") {
+                        profile_table.remove("command_template");
+                        removed_count += 1;
                     }
                 }
-                // If model matches model_name, remove the active model override
-                if profile_table
-                    .get("model")
-                    .and_then(Item::as_value)
-                    .and_then(Value::as_str)
-                    == Some(model_name)
+            }
+        }
+
+        // 2. Clear from roles if assigned
+        if let Some(roles) = agent.get_mut("roles").and_then(Item::as_table_mut) {
+            for (_, role_item) in roles.iter_mut() {
+                if let Some(role_table) = role_item.as_table_mut()
+                    && role_table
+                        .get("profile")
+                        .and_then(Item::as_value)
+                        .and_then(Value::as_str)
+                        == Some(model_name)
                 {
-                    profile_table.remove("model");
-                    removed_count += 1;
-                }
-                // If default_model matches model_name, reset it
-                if profile_table
-                    .get("default_model")
-                    .and_then(Item::as_value)
-                    .and_then(Value::as_str)
-                    == Some(model_name)
-                {
-                    profile_table.remove("default_model");
-                    removed_count += 1;
-                }
-                // If model_name is "default", also remove legacy command_template
-                if model_name == "default" && profile_table.contains_key("command_template") {
-                    profile_table.remove("command_template");
+                    role_table.remove("profile");
                     removed_count += 1;
                 }
             }
@@ -585,17 +459,16 @@ pub fn remove_all_models(
     }
 
     if let Some(agent) = document.get_mut("agent").and_then(Item::as_table_mut) {
-        if let Some(profiles) = agent.get_mut("profiles").and_then(Item::as_table_mut) {
-            for (_, profile_item) in profiles.iter_mut() {
-                if let Some(profile_table) = profile_item.as_table_mut() {
-                    profile_table.remove("models");
-                    profile_table.remove("model");
-                    profile_table.remove("command_template");
-                    profile_table.remove("default_model");
+        if agent.contains_key("profiles") {
+            agent.remove("profiles");
+        }
+        if let Some(roles) = agent.get_mut("roles").and_then(Item::as_table_mut) {
+            for (_, role_item) in roles.iter_mut() {
+                if let Some(role_table) = role_item.as_table_mut() {
+                    role_table.remove("profile");
                 }
             }
         }
-        agent.remove("models");
     }
 
     let contents = document.to_string();
@@ -615,71 +488,88 @@ pub fn remove_all_models(
 /// Lists configured and available agent models with their role assignments.
 pub fn list_models(project_dir: &Path) -> Result<String> {
     let mut output = String::new();
-    output.push_str("╭── Agent Models ──────────────────────────────────────────────────\n");
+    output.push_str("╭── Agent Models & Profiles ───────────────────────────────────────\n");
 
     let config_path = project_dir.join("kvist.toml");
-    let (document, existing_contents) = load_document(&config_path, true)?;
+    let (document, existing_contents) =
+        load_document(&config_path, true).unwrap_or((DocumentMut::new(), None));
 
-    let mut configured_models: BTreeMap<String, (String, Vec<String>)> = BTreeMap::new();
-
+    let mut project_models = Vec::new();
     if existing_contents.is_some()
         && let Some(agent) = document.get("agent").and_then(Item::as_table)
         && let Some(profiles) = agent.get("profiles").and_then(Item::as_table)
     {
-        for (role_key, profile_item) in profiles.iter() {
-            if let Some(profile_table) = profile_item.as_table() {
-                let active_model = profile_table
+        for (name, item) in profiles.iter() {
+            if let Some(p_table) = item.as_table() {
+                let provider = p_table
+                    .get("provider")
+                    .and_then(Item::as_value)
+                    .and_then(Value::as_str)
+                    .unwrap_or("custom");
+                let model_id = p_table
                     .get("model")
                     .and_then(Item::as_value)
                     .and_then(Value::as_str);
-
-                if let Some(models) = profile_table
-                    .get("models")
-                    .and_then(Item::as_array_of_tables)
-                {
-                    for model_table in models.iter() {
-                        if let (Some(name), Some(cmd)) = (
-                            model_table
-                                .get("name")
-                                .and_then(Item::as_value)
-                                .and_then(Value::as_str),
-                            model_table
-                                .get("command")
-                                .and_then(Item::as_value)
-                                .and_then(Value::as_str),
-                        ) {
-                            let entry = configured_models
-                                .entry(name.to_owned())
-                                .or_insert_with(|| (cmd.to_owned(), Vec::new()));
-                            let is_active = active_model == Some(name);
-                            let role_desc = if is_active {
-                                format!("{role_key} (active)")
-                            } else {
-                                role_key.to_string()
-                            };
-                            if !entry.1.contains(&role_desc) {
-                                entry.1.push(role_desc);
-                            }
-                        }
-                    }
-                }
+                project_models.push((
+                    name.to_owned(),
+                    provider.to_owned(),
+                    model_id.map(str::to_owned),
+                ));
             }
         }
     }
 
     output.push_str("│  Configured Models in Project:\n");
-    if configured_models.is_empty() {
-        output.push_str("│    (no models configured; run 'agent setup' to configure a model)\n");
+    if project_models.is_empty() {
+        output.push_str(
+            "│    (no models configured; run 'kvist agent profile add' to configure a model)\n",
+        );
     } else {
-        for (name, (command, assigned_roles)) in &configured_models {
-            let roles_str = if assigned_roles.is_empty() {
-                "unassigned (no roles)".to_owned()
-            } else {
-                assigned_roles.join(", ")
-            };
+        for (name, provider, model_id) in &project_models {
             output.push_str(&format!("│    • {name}\n"));
-            output.push_str(&format!("│      Roles:   {roles_str}\n"));
-            output.push_str(&format!("│      Command: {command}\n"));
+            output.push_str(&format!("│      Provider: {provider}\n"));
+            if let Some(mid) = model_id {
+                output.push_str(&format!("│      Model ID: {mid}\n"));
+            }
+        }
+    }
+
+    // List user-global profiles if ~/.config/kvist/config.toml exists
+    if let Some(user_config_path) = config::global_user_config_path()
+        && let Ok((user_doc, Some(_))) = load_document(&user_config_path, false)
+        && let Some(agent) = user_doc.get("agent").and_then(Item::as_table)
+        && let Some(profiles) = agent.get("profiles").and_then(Item::as_table)
+    {
+        let mut user_models = Vec::new();
+        for (name, item) in profiles.iter() {
+            if let Some(p_table) = item.as_table() {
+                let provider = p_table
+                    .get("provider")
+                    .and_then(Item::as_value)
+                    .and_then(Value::as_str)
+                    .unwrap_or("custom");
+                let model_id = p_table
+                    .get("model")
+                    .and_then(Item::as_value)
+                    .and_then(Value::as_str);
+                user_models.push((
+                    name.to_owned(),
+                    provider.to_owned(),
+                    model_id.map(str::to_owned),
+                ));
+            }
+        }
+        if !user_models.is_empty() {
+            output.push_str(&format!(
+                "│\n│  Global User Profiles ({}):\n",
+                user_config_path.display()
+            ));
+            for (name, provider, model_id) in &user_models {
+                output.push_str(&format!("│    • {name} (provider: {provider})\n"));
+                if let Some(mid) = model_id {
+                    output.push_str(&format!("│      Model ID: {mid}\n"));
+                }
+            }
         }
     }
 
@@ -690,7 +580,7 @@ pub fn list_models(project_dir: &Path) -> Result<String> {
     {
         output.push_str("│\n│  Available Standalone Agent-Runtime Profiles:\n");
         for p in &profiles {
-            let is_configured = configured_models.contains_key(&p.name);
+            let is_configured = project_models.iter().any(|(name, _, _)| name == &p.name);
             let status_badge = if is_configured { " [configured]" } else { "" };
             output.push_str(&format!(
                 "│    • {} ({}){}\n",
@@ -701,4 +591,350 @@ pub fn list_models(project_dir: &Path) -> Result<String> {
 
     output.push_str("╰──────────────────────────────────────────────────────────────────");
     Ok(output)
+}
+
+/// Normalizes a role string to canonical form: "developer", "architect", or "security-reviewer".
+pub fn normalize_role_name(role: &str) -> Result<String> {
+    let lower = role.trim().to_ascii_lowercase();
+    match lower.as_str() {
+        "developer" | "dev" => Ok("developer".to_owned()),
+        "architect" | "arch" => Ok("architect".to_owned()),
+        "security-reviewer" | "security_reviewer" | "security" | "sec" => {
+            Ok("security-reviewer".to_owned())
+        }
+        _ => Err(KvistError::AgentSetupFailed {
+            reason: format!(
+                "unknown role `{role}`; valid roles are: developer, architect, security-reviewer"
+            ),
+        }),
+    }
+}
+
+/// Lists current role assignments and available model profiles for assignment.
+pub fn list_roles(project_dir: &Path) -> Result<String> {
+    let mut output = String::new();
+    output.push_str("╭── Role Assignments ──────────────────────────────────────────────\n");
+
+    let mut role_models: std::collections::BTreeMap<String, (Option<String>, Option<String>)> =
+        std::collections::BTreeMap::new();
+    role_models.insert("developer".to_owned(), (None, None));
+    role_models.insert("architect".to_owned(), (None, None));
+    role_models.insert("security-reviewer".to_owned(), (None, None));
+
+    let config_path = project_dir.join("kvist.toml");
+    let (document, existing_contents) =
+        load_document(&config_path, true).unwrap_or((DocumentMut::new(), None));
+
+    if existing_contents.is_some()
+        && let Some(agent) = document.get("agent").and_then(Item::as_table)
+    {
+        if let Some(roles) = agent.get("roles").and_then(Item::as_table) {
+            for (role_key, role_item) in roles.iter() {
+                if let Some(role_table) = role_item.as_table() {
+                    let active = role_table
+                        .get("profile")
+                        .or_else(|| role_table.get("model"))
+                        .and_then(Item::as_value)
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    let effort = role_table
+                        .get("thinking_effort")
+                        .and_then(Item::as_value)
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    let norm_key = if role_key == "security_reviewer" {
+                        "security-reviewer"
+                    } else {
+                        role_key
+                    };
+                    role_models.insert(norm_key.to_owned(), (active, effort));
+                }
+            }
+        }
+        if let Some(profiles) = agent.get("profiles").and_then(Item::as_table) {
+            for (role_key, profile_item) in profiles.iter() {
+                if let Some(profile_table) = profile_item.as_table() {
+                    let active = profile_table
+                        .get("model")
+                        .and_then(Item::as_value)
+                        .and_then(Value::as_str)
+                        .map(str::to_owned);
+                    if active.is_some() {
+                        let norm_key = if role_key == "security_reviewer" {
+                            "security-reviewer"
+                        } else {
+                            role_key
+                        };
+                        if role_models
+                            .get(norm_key)
+                            .map(|(a, _)| a.is_none())
+                            .unwrap_or(true)
+                        {
+                            role_models.insert(norm_key.to_owned(), (active, None));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    output.push_str("│  Role                Assigned Model Profile\n");
+    output.push_str("│  ────────────────────────────────────────────────────────────────\n");
+    for (role_name, (assigned, effort)) in &role_models {
+        let assigned_str = match (assigned, effort) {
+            (Some(profile), Some(eff)) => format!("{profile} (thinking: {eff})"),
+            (Some(profile), None) => profile.clone(),
+            (None, _) => "(unassigned)".to_owned(),
+        };
+        output.push_str(&format!("│  {:<20} {}\n", role_name, assigned_str));
+    }
+
+    let merged_config = config::load(project_dir)
+        .map(|c| c.agent)
+        .unwrap_or_default();
+    let mut available_models: Vec<String> = merged_config.profiles.keys().cloned().collect();
+
+    if let Some(profile_config) = agent_runtime::default_profile_config_path()
+        && let Ok(profiles) = agent_runtime::load_profiles(&profile_config)
+    {
+        for p in profiles {
+            if !available_models.contains(&p.name) {
+                available_models.push(p.name);
+            }
+        }
+    }
+
+    if !available_models.is_empty() {
+        output.push_str("│\n│  Available Model Profiles for Assignment:\n");
+        for model in &available_models {
+            output.push_str(&format!("│    • {}\n", model));
+        }
+    }
+
+    output.push_str("│\n│  Commands:\n");
+    output.push_str(
+        "│    Assign role:   kvist agent role set <ROLE> <MODEL_NAME> [--thinking-effort <EFFORT>]\n",
+    );
+    output.push_str("│    Clear role:    kvist agent role clear <ROLE>\n");
+    output.push_str("│    Add profile:   kvist agent profile add\n");
+    output.push_str("╰──────────────────────────────────────────────────────────────────");
+    Ok(output)
+}
+
+/// Sets the active model profile for a given role in project or global configuration.
+pub fn set_role_model(
+    config_path: &Path,
+    project_dir: &Path,
+    project_local: bool,
+    role: &str,
+    model_name: &str,
+) -> Result<String> {
+    set_role_model_with_effort(
+        config_path,
+        project_dir,
+        project_local,
+        role,
+        model_name,
+        None,
+    )
+}
+
+/// Sets the active model profile and optional thinking effort for a given role.
+pub fn set_role_model_with_effort(
+    config_path: &Path,
+    project_dir: &Path,
+    project_local: bool,
+    role: &str,
+    model_name: &str,
+    thinking_effort: Option<agent_runtime::ReasoningEffort>,
+) -> Result<String> {
+    let normalized_role = normalize_role_name(role)?;
+    let (mut document, existing_contents) = load_document(config_path, project_local)?;
+
+    let mut model_profile: Option<agent_runtime::ModelProfile> = None;
+    let mut found = false;
+
+    if let Some(agent) = document.get("agent").and_then(Item::as_table)
+        && let Some(profiles) = agent.get("profiles").and_then(Item::as_table)
+    {
+        if profiles.contains_key(model_name) {
+            found = true;
+        } else {
+            for (_, p_item) in profiles.iter() {
+                if let Some(p_table) = p_item.as_table()
+                    && let Some(models) = p_table.get("models").and_then(Item::as_array_of_tables)
+                {
+                    for m in models.iter() {
+                        if m.get("name")
+                            .and_then(Item::as_value)
+                            .and_then(Value::as_str)
+                            == Some(model_name)
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !found
+        && let Ok(cfg) = config::load(project_dir)
+        && cfg.agent.profiles.contains_key(model_name)
+    {
+        found = true;
+    }
+
+    if !found
+        && let Some(profile_config) = agent_runtime::default_profile_config_path()
+        && let Ok(profiles) = agent_runtime::load_profiles(&profile_config)
+        && let Some(standalone) = profiles.into_iter().find(|p| p.name == model_name)
+    {
+        model_profile = Some(standalone);
+        found = true;
+    }
+
+    if !found {
+        return Err(KvistError::AgentSetupFailed {
+            reason: format!(
+                "model profile `{model_name}` is not configured in `{}` and was not found in agent-runtime profiles.\nRun 'kvist agent profile add' to configure it first.",
+                config_path.display()
+            ),
+        });
+    }
+
+    if let Some(standalone) = &model_profile {
+        upsert_provider_and_profile(&mut document, standalone)?;
+    }
+
+    let agent = ensure_table(&mut document["agent"], "agent")?;
+    let roles = ensure_table(&mut agent["roles"], "agent.roles")?;
+    let role_key = if normalized_role == "security-reviewer"
+        && roles.contains_key("security_reviewer")
+        && !roles.contains_key("security-reviewer")
+    {
+        "security_reviewer"
+    } else {
+        normalized_role.as_str()
+    };
+
+    let role_table = ensure_table(&mut roles[role_key], &format!("agent.roles.{role_key}"))?;
+    role_table["profile"] = value(model_name);
+    if let Some(effort) = thinking_effort {
+        role_table["thinking_effort"] = value(effort.as_str());
+    }
+
+    let contents = document.to_string();
+    if project_local {
+        config::validate_project_configuration_contents(config_path, project_dir, &contents)?;
+    } else {
+        config::validate_agent_configuration_contents(config_path, &contents)?;
+    }
+    if existing_contents.is_some() {
+        replace_file_atomically(config_path, &contents)?;
+    } else {
+        write_new_file_atomically(config_path, &contents)?;
+    }
+
+    Ok(format!(
+        "Successfully assigned model profile `{model_name}` to role `{normalized_role}` in `{}`.",
+        config_path.display()
+    ))
+}
+
+/// Clears role assignment(s) in project or global configuration.
+pub fn clear_role(
+    config_path: &Path,
+    project_dir: &Path,
+    project_local: bool,
+    role: Option<&str>,
+    all: bool,
+) -> Result<String> {
+    let (mut document, existing_contents) = load_document(config_path, project_local)?;
+    if existing_contents.is_none() {
+        return Err(KvistError::AgentSetupFailed {
+            reason: format!(
+                "configuration file `{}` does not exist",
+                config_path.display()
+            ),
+        });
+    }
+
+    let mut cleared = 0;
+    if let Some(agent) = document.get_mut("agent").and_then(Item::as_table_mut) {
+        if let Some(roles) = agent.get_mut("roles").and_then(Item::as_table_mut) {
+            for (role_key, role_item) in roles.iter_mut() {
+                let should_clear = if all {
+                    true
+                } else if let Some(target_role) = role {
+                    let norm = normalize_role_name(target_role).unwrap_or(target_role.to_owned());
+                    role_key == norm
+                        || (norm == "security-reviewer" && role_key == "security_reviewer")
+                } else {
+                    false
+                };
+
+                if should_clear
+                    && let Some(role_table) = role_item.as_table_mut()
+                    && role_table.contains_key("profile")
+                {
+                    role_table.remove("profile");
+                    cleared += 1;
+                }
+            }
+        }
+
+        // Also check legacy agent.profiles tables
+        if let Some(profiles) = agent.get_mut("profiles").and_then(Item::as_table_mut) {
+            for (role_key, profile_item) in profiles.iter_mut() {
+                let should_clear = if all {
+                    true
+                } else if let Some(target_role) = role {
+                    let norm = normalize_role_name(target_role).unwrap_or(target_role.to_owned());
+                    role_key == norm
+                        || (norm == "security-reviewer" && role_key == "security_reviewer")
+                } else {
+                    false
+                };
+
+                if should_clear
+                    && let Some(profile_table) = profile_item.as_table_mut()
+                    && profile_table.contains_key("model")
+                {
+                    profile_table.remove("model");
+                    cleared += 1;
+                }
+            }
+        }
+    }
+
+    if cleared == 0 {
+        let target = if all {
+            "any role".to_owned()
+        } else {
+            format!("role `{}`", role.unwrap_or(""))
+        };
+        return Err(KvistError::AgentSetupFailed {
+            reason: format!("no active model assignment was found for {target}"),
+        });
+    }
+
+    let contents = document.to_string();
+    if project_local {
+        config::validate_project_configuration_contents(config_path, project_dir, &contents)?;
+    } else {
+        config::validate_agent_configuration_contents(config_path, &contents)?;
+    }
+    replace_file_atomically(config_path, &contents)?;
+
+    let target_desc = if all {
+        "all roles".to_owned()
+    } else {
+        format!("role `{}`", role.unwrap_or(""))
+    };
+    Ok(format!(
+        "Successfully cleared model assignment for {target_desc} in `{}`.",
+        config_path.display()
+    ))
 }

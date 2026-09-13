@@ -95,38 +95,78 @@ pub fn get_effective_command_with_options(
     let model_name = model_override
         .or(profile.model.as_deref())
         .unwrap_or(&profile.default_model);
-    let selected_model = if matches!(model_name, "default" | "default-model") {
-        profile.models.first()
-    } else {
-        profile.models.iter().find(|model| model.name == model_name)
-    }
-    .ok_or_else(|| KvistError::InvalidModelSelection {
-        model_name: model_name.to_owned(),
-        role,
-        available: profile
-            .models
-            .iter()
-            .map(|m| m.name.clone())
-            .collect::<Vec<_>>()
-            .join(", "),
-    })?;
 
-    if selected_model.name == "none" {
-        return split_raw_command(&selected_model.command);
+    let (selected_command, system_prompt, is_none) =
+        if matches!(model_name, "default" | "default-model") {
+            if let Some(first) = profile.models.first() {
+                (
+                    first.command.as_str(),
+                    first.system_prompt.as_deref(),
+                    first.name == "none",
+                )
+            } else if !profile.command_template.is_empty() {
+                (profile.command_template.as_str(), None, false)
+            } else {
+                return Err(KvistError::InvalidModelSelection {
+                    model_name: model_name.to_owned(),
+                    role,
+                    available: profile
+                        .models
+                        .iter()
+                        .map(|m| m.name.clone())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                });
+            }
+        } else if let Some(found) = profile.models.iter().find(|model| model.name == model_name) {
+            (
+                found.command.as_str(),
+                found.system_prompt.as_deref(),
+                found.name == "none",
+            )
+        } else if !profile.command_template.is_empty()
+            && (model_name == profile.profile || model_name == role.as_str())
+        {
+            (profile.command_template.as_str(), None, false)
+        } else {
+            return Err(KvistError::InvalidModelSelection {
+                model_name: model_name.to_owned(),
+                role,
+                available: profile
+                    .models
+                    .iter()
+                    .map(|m| m.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            });
+        };
+
+    if is_none {
+        return split_raw_command(selected_command);
     }
 
-    let prompt = match &selected_model.system_prompt {
-        Some(system_prompt) if !system_prompt.is_empty() => {
-            format!("{system_prompt}\n\n{prompt}")
-        }
+    let prompt = match system_prompt {
+        Some(sys) if !sys.is_empty() => format!("{sys}\n\n{prompt}"),
         _ => prompt.to_owned(),
     };
+
+    let effort = match reasoning_effort {
+        Some(explicit) => Some(explicit),
+        None => {
+            if selected_command.contains("{reasoning_effort}") {
+                profile.thinking_effort
+            } else {
+                None
+            }
+        }
+    };
+
     agent_runtime::render_command_with_reasoning_effort(
-        &selected_model.command,
+        selected_command,
         &prompt,
         context_paths,
         target_dir,
-        reasoning_effort,
+        effort,
     )
     .map_err(Into::into)
 }

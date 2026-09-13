@@ -103,6 +103,8 @@ fn execute_agent_captures_stdout_and_stderr_in_log_file() {
 
     // We use a basic command available on standard platforms like 'echo'
     let profile = AgentProfile {
+        role: Role::Developer,
+        profile: "default".to_owned(),
         command_template: "/usr/bin/echo '{prompt}'".to_owned(),
         models: vec![Model {
             name: "default".to_owned(),
@@ -111,6 +113,7 @@ fn execute_agent_captures_stdout_and_stderr_in_log_file() {
         }],
         default_model: "default".to_owned(),
         model: None,
+        thinking_effort: None,
         token_limit: None,
         timeout_seconds: 5,
         max_output_bytes: 1_024,

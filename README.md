@@ -59,7 +59,12 @@ sandboxes, and governance tools.
 | `kvist task log <COMPONENT_DIR> <TASK_ID>`                            | Print the most recent bounded, redacted agent log for a task.                                    |
 | `kvist task approve-policy [PROJECT_DIR]`                             | Record approval of the complete effective execution policy.                                      |
 | `kvist prompt [PROMPT] --allow-host-execution`                        | Run a prompt with optional role/model/reasoning selection; text output is provider content only. |
-| `kvist agent setup [--force]`                                         | Collect, qualify, and bind a reusable profile; force is required to retain failed qualification. |
+| `kvist agent profile add [--force]` (or `setup`)                      | Collect, qualify, and register a new model profile without assigning roles.                      |
+| `kvist agent profile list` (or `list`)                                | List all configured and standalone model profiles with their active role assignments.            |
+| `kvist agent profile remove <MODEL_NAME> [--all]` (or `remove`)      | Remove configured model profile(s) or clear all agent configuration.                              |
+| `kvist agent role [list]`                                             | Inspect current role assignments (developer, architect, security-reviewer).                       |
+| `kvist agent role set <ROLE> <MODEL>`                                 | Bind a configured or standalone profile to a role.                                               |
+| `kvist agent role clear <ROLE> [--all]`                               | Clear role assignment(s).                                                                        |
 
 Delivery is organized into phases. The completed, current, and planned phase
 scope, context, and acceptance criteria are maintained in

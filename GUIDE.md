@@ -94,12 +94,39 @@ kvist status .
 ```
 `kvist doctor` verifies file permissions, VCS status (Git/Jujutsu), and artifact schema versions without modifying any files.
 
-#### Step 3: Configure Agent Profiles
-Configure which LLM or agent backend drives your tasks:
+#### Step 3: Configure Agent Profiles and Assign Roles
+Kvist cleanly separates **configuring a model profile** from **assigning it to a role**:
+
+1. **Configure and test model profiles**:
 ```bash
+kvist agent profile add
+# or simply:
 kvist agent setup
 ```
-This launches an interactive wizard that detects local models (`llama-server`, `Ollama`) or installed CLI tools (`gemini`, `copilot`), tests them with a live qualification prompt, and registers their profile.
+This wizard qualifies local models (`llama-server`, `Ollama`) or installed CLI tools (`gemini`, `copilot`), tests them with a live qualification prompt, and saves them to your model catalog without requiring immediate role assignments.
+
+2. **Assign profiles to roles**:
+```bash
+# View current role assignments and available models
+kvist agent role
+
+# Assign a model profile to a specific role
+kvist agent role set developer qwen
+kvist agent role set architect sonnet
+
+# Clear an assignment
+kvist agent role clear developer
+```
+
+3. **Customize provider discovery (optional)**:
+In `kvist.toml` (or `~/.config/kvist/config.toml`), you can configure provider discovery endpoints:
+```toml
+[agent.discovery]
+ollama_url = "http://127.0.0.1:11434"
+llama_server_url = "http://127.0.0.1:8080"
+timeout_seconds = 5
+allow_host_discovery = true
+```
 
 #### Step 4: Define Child Components
 As your architecture expands, carve out isolated child components:
