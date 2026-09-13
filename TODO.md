@@ -503,6 +503,28 @@ Detailed rationale and task chains are in
 - Add option `kvist task run-all --parallel` to discover ready tasks across all components and execute them in parallel up to a CPU-concurrency limit.
 - Ensure that task queue files and task locks are safely isolated, avoiding collision on state updates.
 
+## Interactive Workspace Shell
+
+### [PARTIAL] TODO SHL-01 — First-Class Interactive Workspace Shell
+
+**Context:** The `kvist shell` interactive workspace shell was added during dogfooding and became the primary user interface, but it landed after the initial plan without durable requirements, contract coverage, a design section, or a test matrix. Live investigation found session-terminating terminal failures, stale task locks presented as active, buffered (non-streaming) agent output with a dead spinner, an overwrite-instead-of-append session journal, no persistent history, and a contract that did not describe the shell at all.
+
+**Implemented (2026-09-13 hardening pass):**
+
+- Durable `REQ-INTERACTIVE-SHELL`, contract coverage for the shell and the drifted CLI surface, design section, and a `shell-hardening-*` queue chain in `engine/TODOS.yaml`.
+- Robustness: non-interactive refusal with an actionable diagnostic; command failures, prompt-editor cancellations, and transient terminal read failures no longer terminate the session; repeated terminal read failures exit with a clear diagnostic.
+- Cancellation: a shared SIGINT/SIGTERM handler terminates the supervised process group (sandbox runner and host supervisor), returns a typed cancelled result, and leaves durable task state for explicit `task finalize` / `task recover`.
+- Live streaming: sandbox output is relayed to the terminal while produced, with the bounded evidence log unchanged; a deferred spinner with elapsed time covers silent commands.
+- Lock liveness: the prompt, banner, and `locks [clean]` builtin distinguish live from stale locks using process liveness.
+- Append-only JSONL session journal at `.kvist/session.log` and persistent editor history at `.kvist/history` (`journal` and `history` builtins).
+- Workflow builtins with completion and confirmation gates: `cd`, `tasks`, `run` (first ready task; `task run` without TASK_ID now matches the contract), `help`, `last`, `locks`, destructive-operation confirmations, and prompt-editor submit confirmation.
+- Theming with `NO_COLOR`/`CLICOLOR`/`CLICOLOR_FORCE`/`TERM=dumb` handling, exit-state prompt, `Ctrl+L` clear, terminal-width-aware boxes, and a height-aware pager.
+
+**Acceptance criteria (remaining qualifications):**
+
+- Independent security audit of shell input bounds, lock-file parsing, editor invocation, and signal/process handling (`shell-hardening-security-audit`).
+- Clean-slate `IMPL.md` re-derivation and source-blind compliance review against `REQ-INTERACTIVE-SHELL` and the provided-interfaces contract (`shell-hardening-compliance-review`).
+
 ## Logging, Diagnostics & Observability Policy
 
 ### [PARTIAL] TODO OBS-01 — Structured Diagnostic Logging & Observability Standard Across All Subsystems

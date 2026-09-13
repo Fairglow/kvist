@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:cae723b95c0194269dbb8b7cca637774083739d88cb63293ca2cba4219f05160"
-  contract_revision: "sha256:97e29ab932fa292248f6fa87d99b3efca1b5859ae0555bdcd19b8398ddc483c3"
-  design_revision: "sha256:b2de09fc64cb11a7138620d52f922fb618a0c52a47ce1362ec73aefba46ae5cb"
+  requirements_revision: "sha256:b78ecf8dca7798d1b92d1b00514f5380642082f586865128709c4923af017d9a"
+  contract_revision: "sha256:31c7919dd60c92f2e341a99f76f276debba7ec07259edc46c3f4208ac82e8a5a"
+  design_revision: "sha256:84e679b67bf4d314a1428c74e9fbea72391d6249f2a1575ffe586f32cf770f0c"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-02T06:22:59Z"
+    checked_at: "2026-09-13T20:46:07Z"
     stale_since: null
     causes: []
 tasks:
@@ -1690,5 +1690,87 @@ tasks:
       created_at: "2026-09-01T06:27:02Z"
       updated_at: "2026-09-01T07:01:22Z"
       completed_at: "2026-09-01T07:01:22Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shell-hardening-write-tests"
+    title: "Define interactive shell hardening tests"
+    description: "Write unit and integration tests for shell dispatch, builtins, completion, dynamic state, journal persistence, lock liveness, signal cancellation, and non-interactive refusal."
+    context: "The workspace shell is the primary user interface but was added after the initial plan and lacked durable requirements, contract coverage, and a test matrix."
+    purpose: "Establish executable evidence that the shell is robust, informative, and consistent with the command surface before further feature work."
+    expected_outcome: "Tests cover session-terminating regressions, terminal read failures, unknown-task prompt semantics, append-only journal behavior, stale lock classification, and process-group cancellation."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-SHELL"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#SHL-01"
+    timestamps:
+      created_at: "2026-09-13T19:30:00Z"
+      updated_at: "2026-09-13T19:30:00Z"
+      completed_at: "2026-09-13T19:30:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shell-hardening-implement-code"
+    title: "Implement interactive shell hardening"
+    description: "Make the shell resilient and useful: non-interactive refusal, total dispatch, SIGINT process-group cancellation, live sandbox output relay, lock liveness, append-only journal, persistent history, component context, ready-task run, builtins, confirmations, and terminal theming."
+    context: "Live investigation showed session-terminating terminal failures, stale locks presented as active, buffered (non-streaming) agent output, dead spinner and prompt APIs, and a contract that did not describe the shell."
+    purpose: "Deliver the first-class interactive experience the project promises without weakening the headless command surface."
+    expected_outcome: "The shell survives recoverable failures, cancels running work on SIGINT, relays streaming output live, distinguishes live from stale locks, and exposes cd, tasks, run, help, last, history, journal, and locks builtins with completion and theming."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "shell-hardening-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-SHELL"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "TODO.md#SHL-01"
+    timestamps:
+      created_at: "2026-09-13T19:30:00Z"
+      updated_at: "2026-09-13T19:30:00Z"
+      completed_at: "2026-09-13T19:30:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shell-hardening-security-audit"
+    title: "Audit interactive shell trust boundaries"
+    description: "Review lock file parsing, journal and history paths, editor invocation, signal handler safety, untrusted run/journal data flows, and confirmation gating in the shell."
+    context: "The shell reads user-state lock files, project attempt journals, and run records, and it launches external editors and supervised process groups."
+    purpose: "Identify path, parsing, or process-control weaknesses before the shell is treated as the trusted primary interface."
+    expected_outcome: "An independent finding record confirms or remediates shell input bounds, subprocess handling, and state-file hygiene."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "shell-hardening-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-SHELL"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#SHL-01"
+    timestamps:
+      created_at: "2026-09-13T19:30:00Z"
+      updated_at: "2026-09-13T19:30:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "shell-hardening-compliance-review"
+    title: "Independently review shell hardening compliance"
+    description: "Compare the source-derived shell behavior with REQ-INTERACTIVE-SHELL and the provided-interfaces contract, retaining discrepancies for human arbitration."
+    context: "An implementer cannot certify the primary user interface."
+    purpose: "Preserve independent evidence that the shell matches its declared behavior."
+    expected_outcome: "A clean-slate implementation record and source-blind review classify shell behavior without silently changing its contract."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "shell-hardening-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#SHL-01"
+    timestamps:
+      created_at: "2026-09-13T19:30:00Z"
+      updated_at: "2026-09-13T19:30:00Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null

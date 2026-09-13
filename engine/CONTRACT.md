@@ -1,4 +1,5 @@
 <!-- kvist-contract-version: 1 -->
+
 # Kvist Engine Contract
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
@@ -23,33 +24,50 @@ generic command supervision, or reusable provider profiles.
 
 The `kvist` executable provides:
 
+- `shell [PROJECT_DIR]`
 - `init [PROJECT_DIR]`
 - `convert PROJECT_DIR`
 - `import REPO_URL [--branch BRANCH] [--component PATH] [DEST_DIR]`
 - `reverse-discover PATH`
 - `doctor [PROJECT_DIR]`
-- `status [PROJECT_DIR] [--format text|json] [--only-documents]
-  [--only-impls] [--unfinished]`
+- `status [PROJECT_DIR] [--format text|json|overview] [--only-documents]
+[--only-impls] [--unfinished]`
+- `overview [PROJECT_DIR]`
 - `tree [PROJECT_DIR]`
 - `component new COMPONENT_DIR`
 - `component validate COMPONENT_DIR`
-- `component accept COMPONENT_DIR`
+- `component accept COMPONENT_DIR [--commit] [--message TEXT]`
 - `task next COMPONENT_DIR`
 - `task transition COMPONENT_DIR TASK_ID STATUS [--reason TEXT]`
 - `task run COMPONENT_DIR [TASK_ID] [--stream]`
 - `task log COMPONENT_DIR TASK_ID`
+- `task replay SESSION_JSONL [--max-turns N]`
 - `task approve-policy [PROJECT_DIR]`
 - `task unlock COMPONENT_DIR [--force]`
 - `task recover COMPONENT_DIR TASK_ID ATTEMPT_ID --disposition execution-did-not-start`
+- `task finalize COMPONENT_DIR TASK_ID ATTEMPT_ID DISPOSITION [--commit]
+[--reason TEXT]` with DISPOSITION `accept` or `block`
 - `prompt` with one explicit prompt source or redirected input, optional
   `--role`, `--model`, and `--reasoning-effort`
 - `agent setup [--force]`
+- `agent profile add [--force]`, `agent profile list`, and
+  `agent profile remove [MODEL_NAME] [--all] [--global]`
+- `agent role list`, `agent role set ROLE MODEL_NAME [--effort EFFORT]
+[--global]`, and `agent role clear [ROLE] [--all] [--global]`
+- `agent list` and `agent remove [MODEL_NAME] [--all] [--global]`
+- `vcs commit-accepted ACCEPTANCE_ID`
 - `completions SHELL`
 
+`task run` without TASK_ID executes the first ready task of the component;
+when no task is ready it fails with an actionable diagnostic and changes no
+durable state. `vcs commit-accepted` retries or performs the isolated index
+commit for an already accepted set.
+
 Commands are non-interactive unless their contract explicitly obtains terminal
-input. Success is written to standard output. Domain failures are actionable,
-written to standard error, and return a nonzero status. Parser help returns
-success and parser input errors use the parser's nonzero status.
+input; `shell` and the agent setup/configuration flows are the interactive
+exceptions. Success is written to standard output. Domain failures are
+actionable, written to standard error, and return a nonzero status. Parser
+help returns success and parser input errors use the parser's nonzero status.
 
 Plain `prompt` output is the bounded provider content and has no synthetic
 completion trailer. Global `--json` suppresses live provider streams and emits
@@ -92,11 +110,42 @@ stale evidence without changing task definitions or status.
 
 The pre-spawn dogfooding recovery surface provides explicit attempt recovery
 only when authenticated evidence proves the runner descriptor was not launched
-and no write scope was exposed. Human finalization belongs to the later
-dogfood-runner-integrate-code task and has no current command spelling.
-Acceptance operations also gain an explicit `--commit` option, and a planned
-`vcs commit-accepted ACCEPTANCE_ID` operation retries a commit for an already
-accepted set. They are not current CLI interfaces.
+and no write scope was exposed. `task finalize` records an explicit human
+disposition for a completed attempt and optionally creates the acceptance
+commit. Acceptance operations support an explicit `--commit` option, and
+`vcs commit-accepted ACCEPTANCE_ID` retries a commit for an already accepted
+set.
+
+`shell [PROJECT_DIR]` starts the interactive workspace shell and requires an
+interactive standard input; it fails with an actionable diagnostic otherwise
+and is not supported under global `--json`. Lines are parsed against the same
+command surface as the CLI. Static completion is derived from that surface and
+dynamic completion covers component paths, task IDs, attempt IDs, model
+profile names, and the active VCS branch; dynamic sets are refreshed after
+every executed command and each source degrades independently without aborting
+the session. The shell builtins are `cd [COMPONENT_DIR]`,
+`tasks [COMPONENT_DIR] [--status STATUS]`, `run [COMPONENT_DIR] [TASK_ID]`,
+`help`, `last [COUNT]`, `history [COUNT]`, `journal`, `locks [clean]`, and
+`exit`/`quit`. `cd` remembers a default component for the builtins and for
+completion ordering; `run` without a task ID executes the first ready task of
+the selected component. `prompt TASK_ID` opens the external editor seeded with
+the task context and submits only after explicit confirmation.
+
+The shell persists an append-only JSONL session journal at
+`.kvist/session.log` and a line-based editor history at `.kvist/history`; both
+are local uninspected state and MUST NOT be treated as compliance evidence.
+Command failures, prompt-editor cancellations, and transient terminal read
+failures do not terminate the session; repeated terminal read failures exit
+with an actionable diagnostic. SIGINT during a running command requests
+cancellation, terminates the supervised process group, and returns to the
+prompt with durable task state left for explicit finalize or recovery.
+Streaming task execution relays sandbox output to the terminal while it is
+produced and retains the full bounded log as evidence. The prompt and status
+line report the active VCS branch, the default component, the configured
+sandbox backend, the default model, and task-lock counts that distinguish
+live locks from stale ones. Destructive operations (`task unlock --force`,
+`agent remove --all`, `component accept --commit`, `vcs commit-accepted`)
+require an explicit in-shell confirmation.
 
 ## Required interfaces
 
