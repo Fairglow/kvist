@@ -573,22 +573,6 @@ pub fn list_models(project_dir: &Path) -> Result<String> {
         }
     }
 
-    // List standalone profiles from agent-runtime
-    if let Some(profile_config) = agent_runtime::default_profile_config_path()
-        && let Ok(profiles) = agent_runtime::load_profiles(&profile_config)
-        && !profiles.is_empty()
-    {
-        output.push_str("│\n│  Available Standalone Agent-Runtime Profiles:\n");
-        for p in &profiles {
-            let is_configured = project_models.iter().any(|(name, _, _)| name == &p.name);
-            let status_badge = if is_configured { " [configured]" } else { "" };
-            output.push_str(&format!(
-                "│    • {} ({}){}\n",
-                p.name, p.provider, status_badge
-            ));
-        }
-    }
-
     output.push_str("╰──────────────────────────────────────────────────────────────────");
     Ok(output)
 }
@@ -694,12 +678,14 @@ pub fn list_roles(project_dir: &Path) -> Result<String> {
         .unwrap_or_default();
     let mut available_models: Vec<String> = merged_config.profiles.keys().cloned().collect();
 
-    if let Some(profile_config) = agent_runtime::default_profile_config_path()
-        && let Ok(profiles) = agent_runtime::load_profiles(&profile_config)
+    if let Some(user_config_path) = config::global_user_config_path()
+        && let Ok((user_doc, Some(_))) = load_document(&user_config_path, false)
+        && let Some(agent) = user_doc.get("agent").and_then(Item::as_table)
+        && let Some(profiles) = agent.get("profiles").and_then(Item::as_table)
     {
-        for p in profiles {
-            if !available_models.contains(&p.name) {
-                available_models.push(p.name);
+        for (name, _) in profiles.iter() {
+            if !available_models.contains(&name.to_owned()) {
+                available_models.push(name.to_owned());
             }
         }
     }
@@ -751,7 +737,6 @@ pub fn set_role_model_with_effort(
     let normalized_role = normalize_role_name(role)?;
     let (mut document, existing_contents) = load_document(config_path, project_local)?;
 
-    let mut model_profile: Option<agent_runtime::ModelProfile> = None;
     let mut found = false;
 
     if let Some(agent) = document.get("agent").and_then(Item::as_table)
@@ -787,25 +772,22 @@ pub fn set_role_model_with_effort(
     }
 
     if !found
-        && let Some(profile_config) = agent_runtime::default_profile_config_path()
-        && let Ok(profiles) = agent_runtime::load_profiles(&profile_config)
-        && let Some(standalone) = profiles.into_iter().find(|p| p.name == model_name)
+        && let Some(user_config_path) = config::global_user_config_path()
+        && let Ok((user_doc, Some(_))) = load_document(&user_config_path, false)
+        && let Some(agent) = user_doc.get("agent").and_then(Item::as_table)
+        && let Some(profiles) = agent.get("profiles").and_then(Item::as_table)
+        && profiles.contains_key(model_name)
     {
-        model_profile = Some(standalone);
         found = true;
     }
 
     if !found {
         return Err(KvistError::AgentSetupFailed {
             reason: format!(
-                "model profile `{model_name}` is not configured in `{}` and was not found in agent-runtime profiles.\nRun 'kvist agent profile add' to configure it first.",
+                "model profile `{model_name}` is not configured in `{}`.\nRun 'kvist agent profile add' to configure it first.",
                 config_path.display()
             ),
         });
-    }
-
-    if let Some(standalone) = &model_profile {
-        upsert_provider_and_profile(&mut document, standalone)?;
     }
 
     let agent = ensure_table(&mut document["agent"], "agent")?;

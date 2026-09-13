@@ -132,6 +132,9 @@ fn test_wizard_custom_script_local_config() {
 fn wizard_merges_a_model_into_existing_configuration() {
     let project = TempDir::new().expect("create temp dir");
     let project_dir = project.path();
+    unsafe {
+        std::env::set_var("XDG_CONFIG_HOME", project_dir.join(".config"));
+    }
     fs::write(
         project_dir.join("kvist.toml"),
         r#"# Keep this project configuration comment.

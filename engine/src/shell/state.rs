@@ -194,11 +194,15 @@ impl DynamicState {
                 names.push(name.clone());
             }
         }
-        if let Some(profile_config) = agent_runtime::default_profile_config_path()
-            && let Ok(profiles) = agent_runtime::load_profiles(&profile_config)
+        if let Some(user_path) = crate::config::global_user_config_path()
+            && let Ok(user_contents) = std::fs::read_to_string(&user_path)
+            && let Ok(user_table) = user_contents.parse::<toml::Value>()
         {
-            for p in profiles {
-                names.push(p.name);
+            let lookup = user_table.get("agent").unwrap_or(&user_table);
+            if let Some(profiles) = lookup.get("profiles").and_then(toml::Value::as_table) {
+                for name in profiles.keys() {
+                    names.push(name.clone());
+                }
             }
         }
         names.sort();

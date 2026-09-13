@@ -1173,6 +1173,16 @@ fn invalid_configuration(config_path: &Path, reason: &str) -> KvistError {
 
 /// Returns the standard user-specific global configuration path for Kvist.
 pub fn global_user_config_path() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("KVIST_CONFIG_PATH") {
+        return Some(PathBuf::from(path));
+    }
+    // Isolate unit/integration tests running under Cargo unless an explicit XDG_CONFIG_HOME or KVIST_ALLOW_USER_CONFIG is set
+    if std::env::var_os("CARGO_TARGET_TMPDIR").is_some()
+        && std::env::var_os("XDG_CONFIG_HOME").is_none()
+        && std::env::var_os("KVIST_ALLOW_USER_CONFIG").is_none()
+    {
+        return None;
+    }
     if cfg!(windows) {
         std::env::var_os("APPDATA")
             .map(PathBuf::from)
@@ -1307,8 +1317,89 @@ fn load_agent_config(
                         );
                     }
                 }
-                config.sync_roles_and_profiles();
             }
+            if let Some(user_profiles) = lookup.get("profiles").and_then(toml::Value::as_table) {
+                for (name, item) in user_profiles {
+                    if !config.profiles.contains_key(name)
+                        && let Some(p_table) = item.as_table()
+                    {
+                        let provider = p_table
+                            .get("provider")
+                            .and_then(toml::Value::as_str)
+                            .unwrap_or("custom")
+                            .to_owned();
+                        let model = p_table
+                            .get("model")
+                            .and_then(toml::Value::as_str)
+                            .map(str::to_owned);
+                        let command = p_table
+                            .get("command")
+                            .or_else(|| p_table.get("command_template"))
+                            .and_then(toml::Value::as_str)
+                            .map(str::to_owned);
+                        let context_window = p_table
+                            .get("context_window")
+                            .and_then(toml::Value::as_integer)
+                            .map(|v| v as usize);
+                        let supports_thinking = p_table
+                            .get("supports_thinking")
+                            .and_then(toml::Value::as_bool);
+                        let default_thinking_effort = p_table
+                            .get("default_thinking_effort")
+                            .and_then(toml::Value::as_str)
+                            .and_then(agent_runtime::ReasoningEffort::parse_effort);
+                        let temperature =
+                            p_table.get("temperature").and_then(toml::Value::as_float);
+                        let system_prompt = p_table
+                            .get("system_prompt")
+                            .and_then(toml::Value::as_str)
+                            .map(str::to_owned);
+
+                        config.profiles.insert(
+                            name.clone(),
+                            ProfileConfig {
+                                name: name.clone(),
+                                provider,
+                                model,
+                                context_window,
+                                supports_thinking,
+                                default_thinking_effort,
+                                temperature,
+                                system_prompt,
+                                command,
+                            },
+                        );
+                    }
+                }
+            }
+            if let Some(user_roles) = lookup.get("roles").and_then(toml::Value::as_table) {
+                for (name, item) in user_roles {
+                    if let Some(role) = Role::from_str_case_insensitive(name) {
+                        let role_cfg = config
+                            .roles
+                            .entry(role)
+                            .or_insert_with(|| RoleConfig::default_for_role(role));
+                        if (role_cfg.profile.is_empty() || role_cfg.profile.ends_with("-default"))
+                            && let Some(r_table) = item.as_table()
+                        {
+                            if let Some(prof) = r_table
+                                .get("profile")
+                                .or_else(|| r_table.get("model"))
+                                .and_then(toml::Value::as_str)
+                            {
+                                role_cfg.profile = prof.to_owned();
+                            }
+                            if let Some(effort_str) =
+                                r_table.get("thinking_effort").and_then(toml::Value::as_str)
+                            {
+                                role_cfg.thinking_effort =
+                                    agent_runtime::ReasoningEffort::parse_effort(effort_str);
+                            }
+                        }
+                    }
+                }
+            }
+            config.sync_roles_and_profiles();
         }
         return Ok(config);
     }
