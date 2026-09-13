@@ -158,21 +158,39 @@ pub fn status_bar_label(status: &StatusContext) -> String {
     )
 }
 
+fn fit_banner_field(value: &str, max_width: usize) -> String {
+    if value.len() > max_width {
+        format!("{}...", &value[..max_width.saturating_sub(3)])
+    } else {
+        value.to_owned()
+    }
+}
+
+/// Formats the welcome banner text with static environment information.
+pub fn format_welcome_banner(status: &StatusContext, branch: Option<&str>) -> String {
+    let branch_str = fit_banner_field(branch.unwrap_or("no-vcs"), 50);
+    let sandbox_str = fit_banner_field(&status.sandbox_backend, 50);
+    let model_str = fit_banner_field(&status.default_model, 50);
+
+    let mut banner = String::new();
+    banner.push_str("╭──────────────────────────────────────────────────────────────╮\n");
+    banner.push_str("│  ⚡ Kvist Interactive Workspace Shell                        │\n");
+    banner.push_str(&format!("│  Branch:  {:<50}│\n", branch_str));
+    banner.push_str(&format!("│  Sandbox: {:<50}│\n", sandbox_str));
+    banner.push_str(&format!("│  Model:   {:<50}│\n", model_str));
+    if status.active_locks > 0 {
+        let locks_str = fit_banner_field(&status.active_locks.to_string(), 50);
+        banner.push_str(&format!("│  Locks:   {:<50}│\n", locks_str));
+    }
+    banner.push_str("│  Commands: 'status', 'overview', 'task run', 'help'          │\n");
+    banner.push_str("│  Press TAB for autocomplete (arrows to pick)  ·  'exit'      │\n");
+    banner.push_str("╰──────────────────────────────────────────────────────────────╯");
+    banner
+}
+
 /// Prints a modern, styled welcome banner with static environment information.
 pub fn print_welcome_banner(status: &StatusContext, branch: Option<&str>) {
-    let branch_str = branch.unwrap_or("no-vcs");
-    println!("╭──────────────────────────────────────────────────────────────╮");
-    println!("│  ⚡ Kvist Interactive Workspace Shell                        │");
-    println!(
-        "│  Branch: {:<12} Sandbox: {:<12} Model: {:<11}│",
-        branch_str, status.sandbox_backend, status.default_model
-    );
-    if status.active_locks > 0 {
-        println!("│  Active locks: {:<46}│", status.active_locks);
-    }
-    println!("│  Commands: 'task next', 'task run', 'status', 'help'         │");
-    println!("│  Press TAB for autocomplete (arrows to pick)  ·  'exit'      │");
-    println!("╰──────────────────────────────────────────────────────────────╯");
+    println!("{}", format_welcome_banner(status, branch));
 }
 
 #[cfg(test)]
@@ -245,5 +263,23 @@ mod tests {
 
         locks.release(&path);
         assert_eq!(locks.count(), 0);
+    }
+
+    #[test]
+    fn welcome_banner_layout_and_bounds() {
+        let status = StatusContext {
+            sandbox_backend: "bubblewrap".to_owned(),
+            default_model: "ollama-long-model-name".to_owned(),
+            active_locks: 1,
+        };
+        let banner = format_welcome_banner(&status, Some("feature/long-branch-name-overflow-test"));
+        for line in banner.lines() {
+            // Check that box starts with ╭/│/╰ and ends with ╮/│/╯
+            assert!(line.starts_with('╭') || line.starts_with('│') || line.starts_with('╰'));
+            assert!(line.ends_with('╮') || line.ends_with('│') || line.ends_with('╯'));
+        }
+        assert!(banner.contains("│  Branch:  feature/long-branch-name-overflow-test"));
+        assert!(banner.contains("│  Sandbox: bubblewrap"));
+        assert!(banner.contains("│  Model:   ollama-long-model-name"));
     }
 }

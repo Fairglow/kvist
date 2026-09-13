@@ -112,6 +112,26 @@ fn dispatch(
         }
     }
 
+    // In the interactive shell REPL, bare 'status' and 'overview' display the human overview
+    if line == "status" || line == "overview" {
+        let inspection = crate::project_state::inspect(project_dir)?;
+        let text = crate::status::render(
+            &inspection,
+            crate::status::StatusFormat::Overview,
+            false,
+            false,
+            false,
+        );
+        display_output(&text);
+        journal.append(JournalEntry {
+            timestamp: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+            command: line.to_string(),
+            result: truncate(&text, 100),
+            transient: false,
+        });
+        return Ok(());
+    }
+
     let mut full_args: Vec<String> = vec!["kvist".to_owned(), program.clone()];
     full_args.extend(arguments.iter().cloned());
 
@@ -157,9 +177,18 @@ fn dispatch(
                         truncate(&text, 100)
                     }
                     Err(error) => {
-                        let msg = error.to_string();
-                        let _ = error.print();
-                        truncate(&msg, 100)
+                        if matches!(
+                            &error,
+                            KvistError::AgentSetupCancelled
+                                | KvistError::AgentRuntime(agent_runtime::Error::Cancelled)
+                        ) {
+                            println!("Operation cancelled.");
+                            "cancelled".to_owned()
+                        } else {
+                            let msg = error.to_string();
+                            let _ = error.print();
+                            truncate(&msg, 100)
+                        }
                     }
                 };
                 journal.append(JournalEntry {
@@ -277,7 +306,7 @@ fn build_editor(completer: Box<KvistCompleter>) -> std::result::Result<Reedline,
         .with_hinter(Box::new(DefaultHinter::default()))
         .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
         .with_edit_mode(edit_mode)
-        .with_quick_completions(false);
+        .with_quick_completions(true);
     Ok(editor)
 }
 

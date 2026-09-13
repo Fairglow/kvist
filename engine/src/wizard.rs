@@ -1,6 +1,7 @@
 //! Interactive agent model setup wizard.
 
 use std::{
+    collections::BTreeMap,
     fs,
     io::{BufRead, Write},
     path::{Path, PathBuf},
@@ -31,14 +32,25 @@ fn write_output<W: Write>(writer: &mut W, data: &str) -> Result<()> {
 
 fn read_input<R: BufRead>(reader: &mut R) -> Result<String> {
     let mut buffer = String::new();
-    reader
+    let bytes = reader
         .read_line(&mut buffer)
         .map_err(|source| KvistError::Io {
             operation: "read setup wizard input",
             path: PathBuf::from("stdin"),
             source,
         })?;
-    Ok(buffer.trim().to_owned())
+    if bytes == 0 {
+        return Err(KvistError::AgentSetupCancelled);
+    }
+    let trimmed = buffer.trim();
+    if trimmed == "\x1b"
+        || trimmed.eq_ignore_ascii_case("cancel")
+        || trimmed.eq_ignore_ascii_case("quit")
+        || trimmed.eq_ignore_ascii_case("q")
+    {
+        return Err(KvistError::AgentSetupCancelled);
+    }
+    Ok(trimmed.to_owned())
 }
 
 fn prompt_required<R: BufRead, W: Write>(
@@ -158,17 +170,50 @@ fn run_wizard_inner<R: BufRead, W: Write>(
         )?
     };
 
+    if let Ok(cfg) = config::load(project_dir) {
+        write_output(writer, "\nCurrent role assignments:\n")?;
+        let dev_model = cfg
+            .agent
+            .developer
+            .model
+            .as_deref()
+            .unwrap_or(&cfg.agent.developer.default_model);
+        let arch_model = cfg
+            .agent
+            .architect
+            .model
+            .as_deref()
+            .unwrap_or(&cfg.agent.architect.default_model);
+        let sec_model = cfg
+            .agent
+            .security_reviewer
+            .model
+            .as_deref()
+            .unwrap_or(&cfg.agent.security_reviewer.default_model);
+        write_output(writer, &format!("  Developer:         {}\n", dev_model))?;
+        write_output(writer, &format!("  Architect:         {}\n", arch_model))?;
+        write_output(writer, &format!("  Security Reviewer: {}\n", sec_model))?;
+    }
+
     write_output(writer, "\nWhich roles should use this model?\n")?;
+    write_output(
+        writer,
+        "  0) No roles (save as configured model, unassigned)\n",
+    )?;
     write_output(writer, "  1) Developer (test writing & implementation)\n")?;
     write_output(writer, "  2) Architect (compliance reviews)\n")?;
     write_output(writer, "  3) Security Reviewer (security audits)\n")?;
     write_output(writer, "  4) All roles\n")?;
-    write_output(writer, "Choose (1-4) [1]: ")?;
-    let roles = match read_input(reader)?.as_str() {
+    write_output(writer, "  c) Cancel\n")?;
+    write_output(writer, "Choose (0-4) [0]: ")?;
+    let input = read_input(reader)?;
+    let roles: Vec<&str> = match input.as_str() {
+        "1" => vec!["developer"],
         "2" => vec!["architect"],
         "3" => vec!["security-reviewer"],
         "4" => vec!["developer", "architect", "security-reviewer"],
-        _ => vec!["developer"],
+        "c" | "cancel" => return Err(KvistError::AgentSetupCancelled),
+        _ => vec![], // default "0", empty, or other: No roles!
     };
 
     write_output(writer, "\nWhere should this configuration be saved?\n")?;
@@ -214,8 +259,12 @@ fn persist_model(
             config::validate_agent_configuration_contents(config_path, contents)?;
         }
     }
-    for role in roles {
-        upsert_role_model(&mut document, role, model)?;
+    if roles.is_empty() {
+        add_unassigned_model(&mut document, model)?;
+    } else {
+        for role in roles {
+            upsert_role_model(&mut document, role, model)?;
+        }
     }
     let contents = document.to_string();
     if contents.len() as u64 > config::MAX_CONFIGURATION_BYTES {
@@ -396,4 +445,185 @@ fn upsert_inline_model(models: &mut Array, model: &agent_runtime::ModelProfile) 
         models.push(table);
     }
     Ok(())
+}
+
+fn add_unassigned_model(
+    document: &mut DocumentMut,
+    model: &agent_runtime::ModelProfile,
+) -> Result<()> {
+    let agent = ensure_table(&mut document["agent"], "agent")?;
+    let profiles = ensure_table(&mut agent["profiles"], "agent.profiles")?;
+    let mut updated_any = false;
+    for role_key in [
+        "developer",
+        "architect",
+        "security_reviewer",
+        "security-reviewer",
+    ] {
+        if profiles.contains_key(role_key) {
+            let profile = ensure_table(
+                &mut profiles[role_key],
+                &format!("agent.profiles.{role_key}"),
+            )?;
+            upsert_model_item(&mut profile["models"], model)?;
+            updated_any = true;
+        }
+    }
+    if !updated_any {
+        let profile = ensure_table(&mut profiles["developer"], "agent.profiles.developer")?;
+        upsert_model_item(&mut profile["models"], model)?;
+    }
+    Ok(())
+}
+
+/// Removes a configured model profile from project or user configuration.
+pub fn remove_model(
+    config_path: &Path,
+    project_dir: &Path,
+    project_local: bool,
+    model_name: &str,
+) -> Result<String> {
+    let (mut document, existing_contents) = load_document(config_path, project_local)?;
+    if existing_contents.is_none() {
+        return Err(KvistError::AgentSetupFailed {
+            reason: format!(
+                "configuration file `{}` does not exist",
+                config_path.display()
+            ),
+        });
+    }
+
+    let mut removed_count = 0;
+    if let Some(agent) = document.get_mut("agent").and_then(Item::as_table_mut)
+        && let Some(profiles) = agent.get_mut("profiles").and_then(Item::as_table_mut)
+    {
+        for (_, profile_item) in profiles.iter_mut() {
+            if let Some(profile_table) = profile_item.as_table_mut() {
+                // Check models array of tables
+                if let Some(models) = profile_table
+                    .get_mut("models")
+                    .and_then(Item::as_array_of_tables_mut)
+                {
+                    let prev_len = models.len();
+                    models.retain(|table| {
+                        table
+                            .get("name")
+                            .and_then(Item::as_value)
+                            .and_then(Value::as_str)
+                            != Some(model_name)
+                    });
+                    if models.len() < prev_len {
+                        removed_count += prev_len - models.len();
+                    }
+                }
+                // If model matches model_name, remove the active model override
+                if profile_table
+                    .get("model")
+                    .and_then(Item::as_value)
+                    .and_then(Value::as_str)
+                    == Some(model_name)
+                {
+                    profile_table.remove("model");
+                }
+                // If default_model matches model_name, reset it
+                if profile_table
+                    .get("default_model")
+                    .and_then(Item::as_value)
+                    .and_then(Value::as_str)
+                    == Some(model_name)
+                {
+                    profile_table["default_model"] = value("default");
+                }
+            }
+        }
+    }
+
+    if removed_count == 0 {
+        return Err(KvistError::AgentSetupFailed {
+            reason: format!(
+                "model `{model_name}` was not found in `{}`",
+                config_path.display()
+            ),
+        });
+    }
+
+    let contents = document.to_string();
+    if project_local {
+        config::validate_project_configuration_contents(config_path, project_dir, &contents)?;
+    } else {
+        config::validate_agent_configuration_contents(config_path, &contents)?;
+    }
+    replace_file_atomically(config_path, &contents)?;
+
+    Ok(format!(
+        "Successfully removed model `{model_name}` from `{}`.",
+        config_path.display()
+    ))
+}
+
+/// Lists configured and available agent models with their role assignments.
+pub fn list_models(project_dir: &Path) -> Result<String> {
+    let mut output = String::new();
+    output.push_str("╭── Agent Models ──────────────────────────────────────────────────\n");
+
+    let cfg = config::load(project_dir)?;
+
+    let mut configured_models: BTreeMap<String, (String, Vec<String>)> = BTreeMap::new();
+    let roles = [
+        ("Developer", &cfg.agent.developer),
+        ("Architect", &cfg.agent.architect),
+        ("Security Reviewer", &cfg.agent.security_reviewer),
+    ];
+
+    for (role_name, profile) in &roles {
+        let active_model = profile.model.as_deref().unwrap_or(&profile.default_model);
+        for m in &profile.models {
+            let entry = configured_models
+                .entry(m.name.clone())
+                .or_insert_with(|| (m.command.clone(), Vec::new()));
+            let role_desc = if m.name == active_model {
+                format!("{role_name} (active)")
+            } else {
+                role_name.to_string()
+            };
+            if !entry.1.contains(&role_desc) {
+                entry.1.push(role_desc);
+            }
+        }
+    }
+
+    output.push_str("│  Configured Models in Project:\n");
+    if configured_models.is_empty() {
+        output.push_str("│    (no custom models configured; using default templates)\n");
+    } else {
+        for (name, (command, assigned_roles)) in &configured_models {
+            let roles_str = if assigned_roles.is_empty() {
+                "unassigned (no roles)".to_owned()
+            } else {
+                assigned_roles.join(", ")
+            };
+            output.push_str(&format!("│    • {name}\n"));
+            output.push_str(&format!("│      Roles:   {roles_str}\n"));
+            output.push_str(&format!("│      Command: {command}\n"));
+        }
+    }
+
+    // List standalone profiles from agent-runtime
+    if let Some(profile_config) = agent_runtime::default_profile_config_path()
+        && let Ok(profiles) = agent_runtime::load_profiles(&profile_config)
+        && !profiles.is_empty()
+    {
+        output.push_str("│\n│  Available Standalone Agent-Runtime Profiles:\n");
+        for p in &profiles {
+            let is_configured = configured_models.contains_key(&p.name);
+            let status_badge = if is_configured { " [configured]" } else { "" };
+            output.push_str(&format!(
+                "│    • {} ({}){}\n",
+                p.name, p.provider, status_badge
+            ));
+        }
+    }
+
+    output.push_str("╰──────────────────────────────────────────────────────────────────");
+    Ok(output)
 }

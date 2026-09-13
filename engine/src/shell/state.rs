@@ -50,7 +50,7 @@ pub struct DynamicState {
     /// Component paths relative to the component root; `.` is the root.
     components: Vec<String>,
     /// Task and attempt scopes keyed by component path.
-    scopes: BTreeMap<String, ComponentScope>,
+    pub(crate) scopes: BTreeMap<String, ComponentScope>,
     /// Model profile names across all roles, sorted and de-duplicated.
     models: Vec<String>,
     /// The active Git branch, when the project is inside a Git repository.
@@ -102,6 +102,20 @@ impl DynamicState {
             .unwrap_or_default()
     }
 
+    /// Runnable (uncompleted) task IDs for one component path, in queue order.
+    /// Excludes completed tasks and prioritizes the next ready task.
+    pub fn runnable_task_ids_for(&self, component: &str) -> Vec<String> {
+        let Some(scope) = self.scopes.get(component) else {
+            return Vec::new();
+        };
+        scope
+            .tasks
+            .iter()
+            .filter(|task| task.status != task_queue::TaskStatus::Completed)
+            .map(|task| task.id.clone())
+            .collect()
+    }
+
     /// Finds a task by ID across every component, returning its component path.
     pub fn find_task(&self, task_id: &str) -> Option<(&str, &task_queue::Task)> {
         for (component, scope) in &self.scopes {
@@ -126,6 +140,15 @@ impl DynamicState {
         let mut tasks = Vec::new();
         for component in &self.components {
             tasks.extend(self.task_ids_for(component));
+        }
+        tasks
+    }
+
+    /// Every runnable task ID across every component.
+    pub fn all_runnable_task_ids(&self) -> Vec<String> {
+        let mut tasks = Vec::new();
+        for component in &self.components {
+            tasks.extend(self.runnable_task_ids_for(component));
         }
         tasks
     }

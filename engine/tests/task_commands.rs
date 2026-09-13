@@ -2320,3 +2320,48 @@ fn task_replay_json_mode() {
     assert!(stdout.contains("\"command\":\"task-replay\""));
     assert!(stdout.contains("\"status\":\"success\""));
 }
+
+#[test]
+#[cfg(target_os = "linux")]
+fn task_run_batch_item_prefix_or_all() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+[agent.profiles.developer]
+command_template = "/usr/bin/echo 'mocking execute' {context_files}"
+
+[test_policy]
+schema_version = 1
+working_directory = "component"
+environment_allowlist = ["PATH"]
+timeout_seconds = 5
+max_output_bytes = 1000
+[[test_policy.commands]]
+component = "."
+command = "/usr/bin/echo 'mocking verify'"
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+    track_project(&project);
+
+    assert!(
+        run_kvist(&project, &["task", "approve-policy"])
+            .status
+            .success()
+    );
+
+    // Run using prefix "implement"
+    let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args(["task", "run", ".", "implement"])
+        .current_dir(project.path())
+        .output()
+        .expect("run task batch");
+    assert!(output.status.success());
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout_str.contains("executed and verified successfully")
+            || stdout_str.contains("completed")
+    );
+}

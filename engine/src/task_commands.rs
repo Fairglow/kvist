@@ -4421,6 +4421,95 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
     }
 }
 
+/// Runs a single task, all tasks for a TODO item (e.g. `sa-02`), or all uncompleted tasks for a component.
+pub fn run_task_or_item(component_path: &Path, task_spec: &str, stream: bool) -> Result<String> {
+    let context = validate_context(component_path)?;
+    let queue = read_queue(&context.component_dir)?;
+
+    let target_tasks: Vec<String> = if task_spec == "all" {
+        let uncompleted: Vec<String> = queue
+            .tasks
+            .iter()
+            .filter(|t| t.status != TaskStatus::Completed)
+            .map(|t| t.id.clone())
+            .collect();
+        if uncompleted.is_empty() {
+            return Ok(format!(
+                "all tasks in component `{}` are already completed",
+                component_path.display()
+            ));
+        }
+        uncompleted
+    } else if let Some(task) = queue.tasks.iter().find(|t| t.id == task_spec) {
+        // Exact single task match
+        vec![task.id.clone()]
+    } else {
+        // Check for item / prefix match (e.g. "sa-02" matching "sa-02-write-tests", etc.)
+        let prefix_matches: Vec<String> = queue
+            .tasks
+            .iter()
+            .filter(|t| {
+                (t.id.starts_with(&format!("{task_spec}-")) || t.id == task_spec)
+                    && t.status != TaskStatus::Completed
+            })
+            .map(|t| t.id.clone())
+            .collect();
+
+        if prefix_matches.is_empty() {
+            let all_matching: Vec<&Task> = queue
+                .tasks
+                .iter()
+                .filter(|t| t.id.starts_with(&format!("{task_spec}-")) || t.id == task_spec)
+                .collect();
+            if !all_matching.is_empty() {
+                return Ok(format!(
+                    "all tasks for `{task_spec}` in component `{}` are already completed",
+                    component_path.display()
+                ));
+            }
+            return Err(KvistError::TaskNotFound {
+                component: context.component_path.clone(),
+                task_id: task_spec.to_owned(),
+            });
+        }
+        prefix_matches
+    };
+
+    let total = target_tasks.len();
+    if total == 1 {
+        return run_task(component_path, &target_tasks[0], stream);
+    }
+
+    let mut completed_count = 0;
+    for (idx, task_id) in target_tasks.iter().enumerate() {
+        let step = idx + 1;
+        println!(
+            "\n▶ [{step}/{total}] Running task `{task_id}` in `{}`...",
+            component_path.display()
+        );
+        match run_task(component_path, task_id, stream) {
+            Ok(output) => {
+                println!("✓ [{step}/{total}] Task `{task_id}` completed successfully.");
+                completed_count += 1;
+                if !stream && !output.is_empty() {
+                    let first_line = output.lines().next().unwrap_or("");
+                    println!("  {first_line}");
+                }
+            }
+            Err(err) => {
+                eprintln!("✗ [{step}/{total}] Task `{task_id}` failed: {err}");
+                return Err(err);
+            }
+        }
+    }
+
+    Ok(format!(
+        "Successfully completed all {completed_count} tasks ({}) for `{task_spec}` in component `{}`.",
+        target_tasks.join(", "),
+        component_path.display()
+    ))
+}
+
 fn select_runnable_task(context: &TaskContext, requested: Option<&str>) -> Result<String> {
     let queue = read_queue(&context.component_dir)?;
     let task_id = match requested {

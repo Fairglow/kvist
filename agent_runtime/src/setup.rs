@@ -603,12 +603,22 @@ fn write_output<W: Write>(writer: &mut W, data: &str) -> Result<()> {
 
 fn read_input<R: BufRead>(reader: &mut R) -> Result<String> {
     let mut buffer = String::new();
-    reader.read_line(&mut buffer).map_err(|source| Error::Io {
+    let bytes = reader.read_line(&mut buffer).map_err(|source| Error::Io {
         operation: "read setup input",
         path: PathBuf::from("setup input"),
         source,
     })?;
-    Ok(buffer.trim().to_owned())
+    if bytes == 0 {
+        return Err(Error::Cancelled);
+    }
+    let trimmed = buffer.trim();
+    if trimmed == "\x1b"
+        || trimmed.eq_ignore_ascii_case("cancel")
+        || trimmed.eq_ignore_ascii_case("q")
+    {
+        return Err(Error::Cancelled);
+    }
+    Ok(trimmed.to_owned())
 }
 
 fn prompt_with_default<R: BufRead, W: Write>(

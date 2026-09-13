@@ -85,6 +85,9 @@ pub enum KvistError {
         /// Actionable setup diagnostic.
         reason: String,
     },
+    /// Interactive agent configuration was cancelled by the user.
+    #[error("agent setup cancelled")]
+    AgentSetupCancelled,
     /// The reusable agent runtime rejected or failed an operation.
     #[error(transparent)]
     AgentRuntime(#[from] agent_runtime::Error),

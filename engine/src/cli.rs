@@ -117,6 +117,8 @@ pub enum Command {
         #[arg(long)]
         unfinished: bool,
     },
+    /// Render a human-friendly project overview with progress and next tasks.
+    Overview(ProjectDirectory),
     /// Select or transition component tasks.
     Task {
         /// Task operation to execute from the current project root.
@@ -233,6 +235,17 @@ pub enum AgentCommand {
         /// Save a profile even when mandatory live qualification fails.
         #[arg(long)]
         force: bool,
+    },
+    /// List configured and available agent models with their role assignments.
+    List,
+    /// Remove a configured agent model.
+    Remove {
+        /// Name of the model profile to remove.
+        #[arg(value_name = "MODEL_NAME")]
+        name: String,
+        /// Remove from global user configuration instead of project configuration.
+        #[arg(long)]
+        global: bool,
     },
 }
 
@@ -504,15 +517,57 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 })?;
                 let mut reader = std::io::BufReader::new(std::io::stdin());
                 let mut writer = std::io::BufWriter::new(std::io::stderr());
-                wizard::run_wizard_with_force(
+                match wizard::run_wizard_with_force(
                     &mut reader,
                     &mut writer,
                     &current_dir,
                     force,
-                )?;
-                Ok(CommandOutput::message(
-                    r#"{"status":"success","command":"agent-setup","message":"agent setup wizard complete"}"#.to_owned()
-                ))
+                ) {
+                    Ok(()) => Ok(CommandOutput::message(
+                        r#"{"status":"success","command":"agent-setup","message":"agent setup wizard complete"}"#.to_owned()
+                    )),
+                    Err(KvistError::AgentSetupCancelled) => Ok(CommandOutput::message(
+                        r#"{"status":"cancelled","command":"agent-setup","message":"agent setup cancelled"}"#.to_owned()
+                    )),
+                    Err(source) => Err(source),
+                }
+            },
+            Command::Agent {
+                command: AgentCommand::List,
+            } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                let text = wizard::list_models(&current_dir)?;
+                let mut text_json = String::new();
+                json_string_escape(&mut text_json, &text);
+                Ok(CommandOutput::message(format!(
+                    r#"{{"status":"success","command":"agent-list","output":{text_json}}}"#
+                )))
+            }
+            Command::Agent {
+                command: AgentCommand::Remove { name, global },
+            } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                let config_path = if global {
+                    config::global_user_config_path().ok_or_else(|| KvistError::AgentSetupFailed {
+                        reason: "cannot resolve user configuration directory".to_owned(),
+                    })?
+                } else {
+                    current_dir.join("kvist.toml")
+                };
+                let msg = wizard::remove_model(&config_path, &current_dir, !global, &name)?;
+                let mut msg_json = String::new();
+                json_string_escape(&mut msg_json, &msg);
+                Ok(CommandOutput::message(format!(
+                    r#"{{"status":"success","command":"agent-remove","message":{msg_json}}}"#
+                )))
             },
             Command::Shell(_) => Err(KvistError::SandboxUnavailable {
                 runner: "shell".to_owned(),
@@ -579,6 +634,16 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     unfinished,
                 )))
             }
+            Command::Overview(project) => {
+                let inspection = project_state::inspect(&project.path)?;
+                Ok(CommandOutput::message(status::render(
+                    &inspection,
+                    status::StatusFormat::Json,
+                    false,
+                    false,
+                    false,
+                )))
+            }
             Command::Task {
                 command: TaskCommand::Next { component_dir },
             } => {
@@ -623,7 +688,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 },
             } => {
                 let message =
-                    task_commands::run_task(&component_dir, &task_id, stream)?;
+                    task_commands::run_task_or_item(&component_dir, &task_id, stream)?;
                 Ok(CommandOutput::message(format!(
                     "{{\"status\":\"success\",\"command\":\"task-run\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"message\":\"{}\"}}",
                     component_dir.to_string_lossy().replace('\\', "\\\\"),
@@ -868,10 +933,45 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 })?;
                 let mut reader = std::io::BufReader::new(std::io::stdin());
                 let mut writer = std::io::BufWriter::new(std::io::stdout());
-                wizard::run_wizard_with_force(&mut reader, &mut writer, &current_dir, force)?;
-                Ok(CommandOutput::message(
-                    "agent setup wizard complete".to_owned(),
-                ))
+                match wizard::run_wizard_with_force(&mut reader, &mut writer, &current_dir, force) {
+                    Ok(()) => Ok(CommandOutput::message(
+                        "agent setup wizard complete".to_owned(),
+                    )),
+                    Err(KvistError::AgentSetupCancelled) => {
+                        Ok(CommandOutput::message("agent setup cancelled".to_owned()))
+                    }
+                    Err(source) => Err(source),
+                }
+            }
+            Command::Agent {
+                command: AgentCommand::List,
+            } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                wizard::list_models(&current_dir).map(CommandOutput::message)
+            }
+            Command::Agent {
+                command: AgentCommand::Remove { name, global },
+            } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                let config_path = if global {
+                    config::global_user_config_path().ok_or_else(|| {
+                        KvistError::AgentSetupFailed {
+                            reason: "cannot resolve user configuration directory".to_owned(),
+                        }
+                    })?
+                } else {
+                    current_dir.join("kvist.toml")
+                };
+                wizard::remove_model(&config_path, &current_dir, !global, &name)
+                    .map(CommandOutput::message)
             }
             Command::Shell(project) => {
                 crate::shell::run_shell(&project.path)?;
@@ -899,6 +999,15 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     unfinished,
                 ))
             }),
+            Command::Overview(project) => project_state::inspect(&project.path).map(|inspection| {
+                CommandOutput::message(status::render(
+                    &inspection,
+                    status::StatusFormat::Overview,
+                    false,
+                    false,
+                    false,
+                ))
+            }),
             Command::Task {
                 command: TaskCommand::Next { component_dir },
             } => task_commands::next(&component_dir).map(CommandOutput::message),
@@ -924,7 +1033,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         task_id,
                         stream,
                     },
-            } => task_commands::run_task(&component_dir, &task_id, stream)
+            } => task_commands::run_task_or_item(&component_dir, &task_id, stream)
                 .map(CommandOutput::message),
             Command::Task {
                 command:

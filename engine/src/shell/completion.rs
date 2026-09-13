@@ -34,6 +34,8 @@ pub struct Candidate {
 /// Resolves one token being typed into its dynamic value domain.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct Scope {
+    /// The active subcommand name (e.g. "run"), if any.
+    command: Option<String>,
     /// The component path already typed, if any.
     component: Option<String>,
     /// The task ID already typed, if any.
@@ -152,6 +154,7 @@ fn walk<'a>(root: &'a CommandNode, resolved: &[Token], scope: &mut Scope) -> Cur
             node = sub;
             positionals_consumed = 0;
             *scope = Scope::default();
+            scope.command = Some(sub.name.clone());
             pending_value = None;
             continue;
         }
@@ -361,6 +364,7 @@ fn positional_domain(value_name: &str) -> Option<ValueDomain> {
         "COMPONENT_DIR" => Some(ValueDomain::Component),
         "TASK_ID" => Some(ValueDomain::Task),
         "ATTEMPT_ID" => Some(ValueDomain::Attempt),
+        "MODEL_NAME" | "MODEL" => Some(ValueDomain::Model),
         _ => None,
     }
 }
@@ -374,10 +378,19 @@ fn dynamic_values(
 ) -> Vec<String> {
     let all: Vec<String> = match domain {
         ValueDomain::Component => state.components().to_vec(),
-        ValueDomain::Task => match &scope.component {
-            Some(component) => state.task_ids_for(component),
-            None => state.all_task_ids(),
-        },
+        ValueDomain::Task => {
+            if scope.command.as_deref() == Some("run") {
+                match &scope.component {
+                    Some(component) => state.runnable_task_ids_for(component),
+                    None => state.all_runnable_task_ids(),
+                }
+            } else {
+                match &scope.component {
+                    Some(component) => state.task_ids_for(component),
+                    None => state.all_task_ids(),
+                }
+            }
+        }
         ValueDomain::Attempt => match (&scope.component, &scope.task) {
             (Some(component), Some(task)) => state.attempts_for(component, task).to_vec(),
             _ => Vec::new(),
@@ -568,6 +581,7 @@ mod tests {
             "reverse-discover",
             "prompt",
             "status",
+            "overview",
             "task",
             "component",
             "vcs",
@@ -576,7 +590,7 @@ mod tests {
         ] {
             assert!(got.contains(&name), "missing {name} in {got:?}");
         }
-        assert_eq!(got.len(), 14);
+        assert_eq!(got.len(), 15);
     }
 
     #[test]
@@ -712,9 +726,10 @@ mod tests {
         let c = completer();
         assert_eq!(
             values(&complete(&c, "status --format ")),
-            vec!["text", "json"]
+            vec!["text", "json", "overview"]
         );
         assert_eq!(values(&complete(&c, "status --format j")), vec!["json"]);
+        assert_eq!(values(&complete(&c, "status --format o")), vec!["overview"]);
     }
 
     #[test]
@@ -722,9 +737,10 @@ mod tests {
         let c = completer();
         assert_eq!(
             values(&complete(&c, "status --format=")),
-            vec!["text", "json"]
+            vec!["text", "json", "overview"]
         );
         assert_eq!(values(&complete(&c, "status --format=j")), vec!["json"]);
+        assert_eq!(values(&complete(&c, "status --format=o")), vec!["overview"]);
     }
 
     // ---- Stage 5: dynamic values ------------------------------------------
@@ -823,6 +839,16 @@ mod tests {
             vec!["implement-code"]
         );
         assert_eq!(values(&complete(&c, "task run . w")), vec!["write-tests"]);
+    }
+
+    #[test]
+    fn task_run_excludes_completed_tasks_and_prioritizes_next_ready_task() {
+        let mut state = fixture_state();
+        // Mark first task as completed
+        state.scopes.get_mut(".").unwrap().tasks[0].status = TaskStatus::Completed;
+        let c = completer_with_state(state);
+        // Completed "write-tests" must NOT be listed; "implement-code" must be the first option!
+        assert_eq!(values(&complete(&c, "task run . ")), vec!["implement-code"]);
     }
 
     #[test]

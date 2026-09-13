@@ -434,3 +434,78 @@ fn wizard_materializes_a_standalone_profile_into_kvist_roles() {
         3
     );
 }
+
+#[test]
+fn wizard_supports_unassigned_model_and_subsequent_removal() {
+    let project = TempDir::new().expect("create project");
+    let script_path = project.path().join("provider.sh");
+    fs::write(&script_path, "#!/bin/sh\nexit 0\n").expect("write provider");
+    #[cfg(unix)]
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    // Configure model with option 0 (No roles, unassigned)
+    let mock_input = format!(
+        "1\n6\n{}\nunassigned-model\n\n0\n1\n",
+        script_path.display()
+    );
+    let mut reader = Cursor::new(mock_input);
+    let mut writer = Vec::new();
+
+    run_wizard(&mut reader, &mut writer, project.path()).expect("save unassigned model");
+
+    let cfg = config::load(project.path()).expect("load config");
+    // Verify it is present in models
+    assert!(
+        cfg.agent
+            .developer
+            .models
+            .iter()
+            .any(|m| m.name == "unassigned-model")
+    );
+    // But NOT set as the active role model
+    assert_ne!(
+        cfg.agent.developer.model.as_deref(),
+        Some("unassigned-model")
+    );
+
+    // List models and check output
+    let list_output = kvist::wizard::list_models(project.path()).expect("list models");
+    assert!(list_output.contains("unassigned-model"));
+    assert!(list_output.contains("unassigned"));
+
+    // Remove the model
+    let config_path = project.path().join("kvist.toml");
+    let remove_msg =
+        kvist::wizard::remove_model(&config_path, project.path(), true, "unassigned-model")
+            .expect("remove model");
+    assert!(remove_msg.contains("Successfully removed"));
+
+    let cfg_after = config::load(project.path()).expect("load config after removal");
+    assert!(
+        !cfg_after
+            .agent
+            .developer
+            .models
+            .iter()
+            .any(|m| m.name == "unassigned-model")
+    );
+}
+
+#[test]
+fn wizard_cancel_via_escape_or_c() {
+    let project = TempDir::new().expect("create project");
+    let script_path = project.path().join("provider.sh");
+    fs::write(&script_path, "#!/bin/sh\nexit 0\n").expect("write provider");
+    #[cfg(unix)]
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    // Input sends 'c' at role selection
+    let mock_input = format!("1\n6\n{}\ncancel-model\n\nc\n", script_path.display());
+    let mut reader = Cursor::new(mock_input);
+    let mut writer = Vec::new();
+
+    let err = run_wizard(&mut reader, &mut writer, project.path()).expect_err("should cancel");
+    assert!(matches!(err, kvist::KvistError::AgentSetupCancelled));
+}

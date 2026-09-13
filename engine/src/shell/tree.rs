@@ -237,6 +237,7 @@ mod tests {
             "reverse-discover",
             "prompt",
             "status",
+            "overview",
             "task",
             "component",
             "vcs",
@@ -245,7 +246,7 @@ mod tests {
         ] {
             assert!(root.find_subcommand(name).is_some(), "missing {name}");
         }
-        assert_eq!(root.subcommands.len(), 14);
+        assert_eq!(root.subcommands.len(), 15);
     }
 
     #[test]
@@ -320,7 +321,10 @@ mod tests {
                 .find_subcommand("commit-accepted")
                 .is_some()
         );
-        assert!(node(&root, "agent").find_subcommand("setup").is_some());
+        let agent = node(&root, "agent");
+        assert!(agent.find_subcommand("setup").is_some());
+        assert!(agent.find_subcommand("list").is_some());
+        assert!(agent.find_subcommand("remove").is_some());
     }
 
     #[test]
@@ -403,7 +407,10 @@ mod tests {
         let root = root();
         let status = node(&root, "status");
         let format = status.find_flag_by_long("format").expect("format flag");
-        assert_eq!(status.flags[format].possible_values, vec!["text", "json"]);
+        assert_eq!(
+            status.flags[format].possible_values,
+            vec!["text", "json", "overview"]
+        );
         for flag in ["only-documents", "only-impls", "unfinished"] {
             assert!(!status.flags[status.find_flag_by_long(flag).unwrap()].takes_value);
         }
