@@ -27,15 +27,13 @@ use crate::{
     vcs::VcsArtifactState,
 };
 
-/// Selects the first ready task in declared queue order.
+/// Selects the first ready task in declared queue order, using the same
+/// definition as the overview, the shell, and the blank-task `task run`
+/// suggestion.
 pub fn next(component_path: &Path) -> Result<String> {
     let context = validate_context(component_path)?;
     let queue = read_queue(&context.component_dir)?;
-    Ok(queue
-        .tasks
-        .iter()
-        .find(|task| task_is_ready(task, &queue.tasks))
-        .map_or_else(|| "no ready task".to_owned(), |task| task.id.clone()))
+    Ok(next_ready_task_id(&queue.tasks).unwrap_or_else(|| "no ready task".to_owned()))
 }
 
 /// Persists a legal task transition with prepared and committed audit records.

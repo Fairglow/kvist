@@ -1263,7 +1263,7 @@ fn task_run_refuses_a_sibling_runner_in_the_selected_worktree() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn task_run_auto_selects_and_executes_next_ready_task() {
+fn task_run_explicit_task_id_executes_and_verifies() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
