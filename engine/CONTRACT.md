@@ -130,8 +130,10 @@ the session. The shell builtins are `cd [COMPONENT_DIR]`,
 `tasks [COMPONENT_DIR] [--status STATUS]`, `run [COMPONENT_DIR] [TASK_ID]`,
 `help`, `last [COUNT]`, `history [COUNT]`, `journal`, `locks [clean]`, and
 `exit`/`quit`. `cd` remembers a default component for the builtins and for
-completion ordering; `run` without a task ID suggests the first ready task of
-the selected component and runs it only after an explicit confirmation (a bare
+completion ordering; when `tasks` or `run` names a component different from the
+current focus, the shell prints a hint to switch and leaves the focus
+unchanged. `run` without a task ID suggests the first ready task of the
+selected component and runs it only after an explicit confirmation (a bare
 ENTER accepts; a refusal changes no state). `prompt TASK_ID` opens the external
 editor seeded with
 the task context and submits only after explicit confirmation.

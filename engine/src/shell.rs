@@ -305,10 +305,16 @@ impl Shell {
                 return LoopAction::Continue;
             }
         };
+        let hint = parsed.component.as_deref().and_then(|requested| {
+            component_focus_hint(self.current_component().as_deref(), requested)
+        });
         let component = parsed
             .component
             .or_else(|| self.current_component())
             .unwrap_or_else(|| ".".to_owned());
+        if let Some(hint) = hint {
+            println!("{hint}");
+        }
         let state = DynamicState::load(&self.project_dir);
         if !state.components().iter().any(|c| c == &component) {
             let known = state.components().join(", ");
@@ -350,7 +356,7 @@ impl Shell {
     /// auto-executed: the next ready task runs only after an explicit
     /// confirmation (bare ENTER accepts).
     fn handle_run(&mut self, args: &[String], line: &str) -> LoopAction {
-        let (component, task) = match parse_run_args(args) {
+        let (requested_component, task) = match parse_run_args(args) {
             Ok(parsed) => parsed,
             Err(message) => {
                 eprintln!("error: {message}");
@@ -358,9 +364,15 @@ impl Shell {
                 return LoopAction::Continue;
             }
         };
-        let component = component
+        let hint = requested_component.as_deref().and_then(|requested| {
+            component_focus_hint(self.current_component().as_deref(), requested)
+        });
+        let component = requested_component
             .or_else(|| self.current_component())
             .unwrap_or_else(|| ".".to_owned());
+        if let Some(hint) = hint {
+            println!("{hint}");
+        }
         let suggested = task.is_none();
         let task = match task {
             Some(task) => task,
@@ -806,6 +818,29 @@ fn parse_run_args(args: &[String]) -> std::result::Result<RunArgs, String> {
 fn resolve_next_ready_task(state: &DynamicState, component: &str) -> Option<String> {
     let scope = state.scopes.get(component)?;
     task_queue::next_ready_task_id(&scope.tasks)
+}
+
+/// Builds a hint for when a command names a component that is not the current
+/// focus, so the user is never surprised by which component a later bare
+/// command will target. Returns `None` when the requested component matches the
+/// focus (root and an unset focus compare equal). Pure: it never changes focus.
+fn component_focus_hint(current: Option<&str>, requested: &str) -> Option<String> {
+    let requested_focus = if requested.is_empty() || requested == "." {
+        None
+    } else {
+        Some(requested)
+    };
+    let current_focus = match current {
+        Some(c) if !c.is_empty() && c != "." => Some(c),
+        _ => None,
+    };
+    if requested_focus == current_focus {
+        return None;
+    }
+    Some(match current_focus {
+        None => format!("note: no component focused (cd {requested} to switch)"),
+        Some(current) => format!("note: still focused on {current} (cd {requested} to switch)"),
+    })
 }
 
 /// Parses a `last [COUNT]` / `history [COUNT]` argument (pure).
@@ -1462,6 +1497,34 @@ mod tests {
         assert_eq!(resolve_next_ready_task(&state, "."), None);
         // An unknown component has no scope.
         assert_eq!(resolve_next_ready_task(&state, "ghost"), None);
+    }
+
+    #[test]
+    fn component_focus_hint_only_when_requested_differs_from_focus() {
+        // No focus: naming a component suggests focusing it.
+        assert_eq!(
+            component_focus_hint(None, "engine"),
+            Some("note: no component focused (cd engine to switch)".to_owned())
+        );
+        // A root request with no focus matches: no hint.
+        assert_eq!(component_focus_hint(None, "."), None);
+        // A request matching the focus: no hint.
+        assert_eq!(component_focus_hint(Some("engine"), "engine"), None);
+        // A different component than the focus: hint.
+        assert_eq!(
+            component_focus_hint(Some("engine"), "agent_runtime"),
+            Some("note: still focused on engine (cd agent_runtime to switch)".to_owned())
+        );
+        // Requesting root while focused elsewhere: hint.
+        assert_eq!(
+            component_focus_hint(Some("engine"), "."),
+            Some("note: still focused on engine (cd . to switch)".to_owned())
+        );
+        // A root focus compares equal to no focus.
+        assert_eq!(
+            component_focus_hint(Some("."), "engine"),
+            Some("note: no component focused (cd engine to switch)".to_owned())
+        );
     }
 
     #[test]
