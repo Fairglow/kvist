@@ -62,7 +62,7 @@ use reedline::{
 use clap::Parser;
 
 use crate::{
-    KvistError, Result, cli,
+    KvistError, Result, cli, task_commands,
     task_queue::{self, TaskKind, TaskStatus},
 };
 use agent_runtime::split_raw_command;
@@ -345,10 +345,10 @@ impl Shell {
         LoopAction::Continue
     }
 
-    /// `run [COMPONENT_DIR] [TASK_ID]`: run a task, or the next ready task
-    /// when the task is omitted. The next-ready selection is a shell-side
-    /// convenience: the supervised CLI is always handed an explicit task ID,
-    /// so it never auto-selects a task on its own.
+    /// `run [COMPONENT_DIR] [TASK_ID]`: run a task, or — when the task is
+    /// omitted — suggest the next ready task. An omitted task is never
+    /// auto-executed: the next ready task runs only after an explicit
+    /// confirmation (bare ENTER accepts).
     fn handle_run(&mut self, args: &[String], line: &str) -> LoopAction {
         let (component, task) = match parse_run_args(args) {
             Ok(parsed) => parsed,
@@ -361,6 +361,7 @@ impl Shell {
         let component = component
             .or_else(|| self.current_component())
             .unwrap_or_else(|| ".".to_owned());
+        let suggested = task.is_none();
         let task = match task {
             Some(task) => task,
             None => {
@@ -376,8 +377,32 @@ impl Shell {
                 }
             }
         };
+        if suggested && !self.confirm_suggested_run(&task, line) {
+            return LoopAction::Continue;
+        }
         self.dispatch_labeled(&format!("task run {component} {task}"), line);
         LoopAction::Continue
+    }
+
+    /// Asks the user to confirm a suggested (next-ready) run. A refusal, or a
+    /// confirmation that cannot be obtained in a non-interactive context, aborts
+    /// the run without changing durable state.
+    fn confirm_suggested_run(&self, task_id: &str, line: &str) -> bool {
+        match task_commands::confirm_run_suggestion(task_id) {
+            Ok(confirmed) => {
+                if !confirmed {
+                    println!("Cancelled: did not run the suggested task `{task_id}`.");
+                    self.journal.append(journal_entry(line, "run cancelled"));
+                }
+                confirmed
+            }
+            Err(error) => {
+                let _ = error.print();
+                self.journal
+                    .append(journal_entry(line, "confirmation unavailable"));
+                false
+            }
+        }
     }
 
     /// `last [COUNT]`: recent agent runs with tokens and log links.
@@ -543,7 +568,7 @@ impl Shell {
         let run_task_id = match &parsed.command {
             cli::Command::Task {
                 command: cli::TaskCommand::Run { task_id, .. },
-            } => Some(task_id.clone()),
+            } => task_id.clone(),
             _ => None,
         };
         let mut cmd = parsed.command;
@@ -878,7 +903,7 @@ fn render_help() -> String {
     );
     text.push_str("  tasks [COMPONENT] [--status S] list tasks; S: pending, in-progress, blocked, completed\n");
     text.push_str(
-        "  run [COMPONENT] [TASK]         run a task, or the next ready task when omitted\n",
+        "  run [COMPONENT] [TASK]         run a task; omit TASK to confirm the next ready one\n",
     );
     text.push_str("  last [COUNT]                   recent agent runs with tokens and log links\n");
     text.push_str("  history [COUNT]                recent editor history lines\n");
@@ -893,7 +918,7 @@ fn render_help() -> String {
     );
     text.push_str("\nTop workflow commands (the full CLI surface also parses):\n");
     text.push_str("  task next .            show the next ready task\n");
-    text.push_str("  task run . TASK        run a task in the sandboxed agent (explicit ID)\n");
+    text.push_str("  task run . [TASK]      run a task; omit TASK to confirm the next ready one\n");
     text.push_str("  task log . TASK        inspect an execution log\n");
     text.push_str("  task transition . TASK STATUS  record a status transition\n");
     text.push_str("  component validate DIR validate component intent documents\n");
@@ -1189,7 +1214,7 @@ mod tests {
         let task_run = cli::Command::Task {
             command: cli::TaskCommand::Run {
                 component_dir: ".".into(),
-                task_id: "t1".into(),
+                task_id: Some("t1".to_owned()),
                 stream: true,
             },
         };
@@ -1576,7 +1601,7 @@ mod tests {
         let plain_run = cli::Command::Task {
             command: cli::TaskCommand::Run {
                 component_dir: ".".into(),
-                task_id: "t1".into(),
+                task_id: Some("t1".to_owned()),
                 stream: false,
             },
         };

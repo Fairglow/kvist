@@ -232,9 +232,12 @@ as the CLI and MUST derive static completion from that surface so completions
 cannot drift from parseable commands. Dynamic completion MUST cover component
 paths, task IDs, attempt IDs, model profile names, and the active VCS branch,
 MUST refresh after every executed command, and MUST degrade per source without
-aborting the session. `task run` without a task ID MUST execute the first
-ready task of the selected component and MUST change no durable state when no
-task is ready.
+aborting the session. `task run` without a task ID MUST NOT auto-execute a
+task: it MUST suggest the first ready task of the selected component and run it
+only after an explicit interactive confirmation (a bare ENTER accepts; a
+refusal MUST change no state). When no task is ready, or when standard input is
+not an interactive terminal, it MUST fail with an actionable diagnostic and
+MUST change no durable state.
 
 The shell MUST persist an append-only JSONL session journal of final command
 inputs and result summaries at `.kvist/session.log` and a line-based editor

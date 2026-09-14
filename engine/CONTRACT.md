@@ -58,16 +58,19 @@ The `kvist` executable provides:
 - `vcs commit-accepted ACCEPTANCE_ID`
 - `completions SHELL`
 
-`task run` without TASK_ID executes the first ready task of the component;
-when no task is ready it fails with an actionable diagnostic and changes no
-durable state. `vcs commit-accepted` retries or performs the isolated index
-commit for an already accepted set.
+`task run` without TASK_ID suggests the first ready task of the component and
+executes it only after an explicit interactive confirmation (a bare ENTER
+accepts; a refusal changes no state). When no task is ready, or when standard
+input is not an interactive terminal, it fails with an actionable diagnostic
+and changes no durable state. `vcs commit-accepted` retries or performs the
+isolated index commit for an already accepted set.
 
 Commands are non-interactive unless their contract explicitly obtains terminal
-input; `shell` and the agent setup/configuration flows are the interactive
-exceptions. Success is written to standard output. Domain failures are
-actionable, written to standard error, and return a nonzero status. Parser
-help returns success and parser input errors use the parser's nonzero status.
+input; `shell`, the agent setup/configuration flows, and `task run` without
+TASK_ID (which confirms the suggested task) are the interactive exceptions.
+Success is written to standard output. Domain failures are actionable, written
+to standard error, and return a nonzero status. Parser help returns success and
+parser input errors use the parser's nonzero status.
 
 Plain `prompt` output is the bounded provider content and has no synthetic
 completion trailer. Global `--json` suppresses live provider streams and emits
@@ -127,8 +130,10 @@ the session. The shell builtins are `cd [COMPONENT_DIR]`,
 `tasks [COMPONENT_DIR] [--status STATUS]`, `run [COMPONENT_DIR] [TASK_ID]`,
 `help`, `last [COUNT]`, `history [COUNT]`, `journal`, `locks [clean]`, and
 `exit`/`quit`. `cd` remembers a default component for the builtins and for
-completion ordering; `run` without a task ID executes the first ready task of
-the selected component. `prompt TASK_ID` opens the external editor seeded with
+completion ordering; `run` without a task ID suggests the first ready task of
+the selected component and runs it only after an explicit confirmation (a bare
+ENTER accepts; a refusal changes no state). `prompt TASK_ID` opens the external
+editor seeded with
 the task context and submits only after explicit confirmation.
 
 The shell persists an append-only JSONL session journal at

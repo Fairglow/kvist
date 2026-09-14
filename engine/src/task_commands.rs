@@ -4,7 +4,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, IsTerminal, Read, Write},
     path::{Component, Path, PathBuf},
 };
 
@@ -21,8 +21,8 @@ use crate::{
     filesystem::is_link_like,
     project_state::{self, ComponentState, MAX_ROOT_TEXT_ARTIFACT_BYTES, ProjectState},
     task_queue::{
-        RecoveryState, RecoveryStateKind, Task, TaskKind, TaskQueue, TaskStatus, Timestamp, parse,
-        serialize,
+        RecoveryState, RecoveryStateKind, Task, TaskKind, TaskQueue, TaskStatus, Timestamp,
+        next_ready_task_id, parse, serialize,
     },
     vcs::VcsArtifactState,
 };
@@ -4421,10 +4421,65 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
     }
 }
 
+/// Confirms running a suggested (next-ready) task. A bare ENTER, `y`, or
+/// `yes` confirms; anything else refuses. When stdin is not an interactive
+/// terminal the suggestion cannot be confirmed, so this fails instead of
+/// auto-executing, preserving the invariant that supervised runs never
+/// auto-select a task.
+pub(crate) fn confirm_run_suggestion(task_id: &str) -> Result<bool> {
+    if !io::stdin().is_terminal() {
+        return Err(KvistError::TaskRunSuggestionNotInteractive);
+    }
+    eprint!("Run suggested next task `{task_id}`? [Y/n] ");
+    io::stderr().flush().map_err(|source| KvistError::Io {
+        operation: "flush stderr",
+        path: PathBuf::from("stderr"),
+        source,
+    })?;
+    let mut input = String::new();
+    let read = io::stdin()
+        .read_line(&mut input)
+        .map_err(|source| KvistError::Io {
+            operation: "read confirmation input",
+            path: PathBuf::from("stdin"),
+            source,
+        })?;
+    if read == 0 {
+        return Ok(false); // EOF: refuse, fail closed
+    }
+    Ok(matches!(
+        input.trim().to_ascii_lowercase().as_str(),
+        "" | "y" | "yes"
+    ))
+}
+
 /// Runs a single task, all tasks for a TODO item (e.g. `sa-02`), or all uncompleted tasks for a component.
-pub fn run_task_or_item(component_path: &Path, task_spec: &str, stream: bool) -> Result<String> {
+///
+/// When `task_spec` is `None`, the next ready task is suggested and run only
+/// after an interactive confirmation; a non-interactive context fails instead
+/// of auto-executing.
+pub fn run_task_or_item(
+    component_path: &Path,
+    task_spec: Option<&str>,
+    stream: bool,
+) -> Result<String> {
     let context = validate_context(component_path)?;
     let queue = read_queue(&context.component_dir)?;
+
+    let task_spec = match task_spec {
+        None => {
+            let task_id = next_ready_task_id(&queue.tasks).ok_or(KvistError::NoReadyTasks {
+                component: context.component_path.clone(),
+            })?;
+            if !confirm_run_suggestion(&task_id)? {
+                return Ok(format!(
+                    "Cancelled: did not run the suggested task `{task_id}`."
+                ));
+            }
+            return run_task(component_path, &task_id, stream);
+        }
+        Some(spec) => spec,
+    };
 
     let target_tasks: Vec<String> = if task_spec == "all" {
         let uncompleted: Vec<String> = queue

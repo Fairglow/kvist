@@ -375,9 +375,11 @@ pub enum TaskCommand {
         /// Component-root-relative component directory; `.` selects the root component.
         #[arg(value_name = "COMPONENT_DIR")]
         component_dir: PathBuf,
-        /// Queue-local task identifier.
+        /// Queue-local task identifier; when omitted, the next ready task is
+        /// suggested and run only after an interactive confirmation (a
+        /// non-interactive context fails instead of auto-executing).
         #[arg(value_name = "TASK_ID")]
-        task_id: String,
+        task_id: Option<String>,
         /// Optional flag to stream agent stdout and stderr directly to the console.
         #[arg(long)]
         stream: bool,
@@ -886,11 +888,14 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 },
             } => {
                 let message =
-                    task_commands::run_task_or_item(&component_dir, &task_id, stream)?;
+                    task_commands::run_task_or_item(&component_dir, task_id.as_deref(), stream)?;
+                let task_id_field = match task_id.as_deref() {
+                    Some(id) => format!("\"{id}\""),
+                    None => "null".to_owned(),
+                };
                 Ok(CommandOutput::message(format!(
-                    "{{\"status\":\"success\",\"command\":\"task-run\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"message\":\"{}\"}}",
+                    "{{\"status\":\"success\",\"command\":\"task-run\",\"component_dir\":\"{}\",\"task_id\":{task_id_field},\"message\":\"{}\"}}",
                     component_dir.to_string_lossy().replace('\\', "\\\\"),
-                    task_id,
                     message.replace('\n', "\\n").replace('"', "\\\"")
                 )))
             }
@@ -1367,7 +1372,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         task_id,
                         stream,
                     },
-            } => task_commands::run_task_or_item(&component_dir, &task_id, stream)
+            } => task_commands::run_task_or_item(&component_dir, task_id.as_deref(), stream)
                 .map(CommandOutput::message),
             Command::Task {
                 command:
@@ -1806,7 +1811,29 @@ mod tests {
         };
 
         assert_eq!(component_dir, PathBuf::from("src"));
-        assert_eq!(task_id, "task-1".to_string());
+        assert_eq!(task_id, Some("task-1".to_owned()));
+        assert!(!stream);
+    }
+
+    #[test]
+    fn parses_task_run_command_with_omitted_task_id() {
+        let cli = Cli::try_parse_from(["kvist", "task", "run", "src"])
+            .expect("valid task run command without a task id");
+
+        let Command::Task {
+            command:
+                TaskCommand::Run {
+                    component_dir,
+                    task_id,
+                    stream,
+                },
+        } = cli.command
+        else {
+            panic!("expected task run command");
+        };
+
+        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(task_id, None);
         assert!(!stream);
     }
 
@@ -1828,7 +1855,7 @@ mod tests {
         };
 
         assert_eq!(component_dir, PathBuf::from("src"));
-        assert_eq!(task_id, "task-1".to_string());
+        assert_eq!(task_id, Some("task-1".to_owned()));
         assert!(stream);
     }
 
