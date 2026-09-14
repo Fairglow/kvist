@@ -50,31 +50,44 @@ struct Scope {
 pub struct KvistCompleter {
     root: CommandNode,
     state: Arc<Mutex<DynamicState>>,
+    /// The shell's current component, shared with the REPL so `cd` reorders
+    /// completions without rebuilding the editor.
+    current_component: Arc<Mutex<Option<String>>>,
 }
 
 impl KvistCompleter {
     /// Builds a completer over a static command tree and a shared snapshot.
-    pub fn new(root: CommandNode, state: Arc<Mutex<DynamicState>>) -> Self {
-        Self { root, state }
+    pub fn new(
+        root: CommandNode,
+        state: Arc<Mutex<DynamicState>>,
+        current_component: Arc<Mutex<Option<String>>>,
+    ) -> Self {
+        Self {
+            root,
+            state,
+            current_component,
+        }
     }
 
     /// Resolves completions against this completer's current shared state.
     #[allow(dead_code)]
     pub fn complete(&self, line: &str, pos: usize) -> Vec<Candidate> {
-        let Ok(guard) = self.state.lock() else {
+        let (Ok(guard), Ok(current)) = (self.state.lock(), self.current_component.lock()) else {
             return Vec::new();
         };
-        Self::resolve(&self.root, &guard, line, pos)
+        Self::resolve(&self.root, &guard, current.as_deref(), line, pos)
     }
 
     /// Resolves completions for the text under the cursor.
     ///
     /// `line` is the full buffer and `pos` the cursor's byte offset. Pure and
     /// deterministic: it performs no I/O and reads no shared state, so it is
-    /// the unit under test.
+    /// the unit under test. `current_component` (from `cd`) is offered first
+    /// in component-scoped domains.
     pub fn resolve(
         root: &CommandNode,
         state: &DynamicState,
+        current_component: Option<&str>,
         line: &str,
         pos: usize,
     ) -> Vec<Candidate> {
@@ -99,12 +112,19 @@ impl KvistCompleter {
 
         let span = (active_start, pos);
         if active_prefix.starts_with('-') {
-            complete_flag(node, &active_prefix, state, span)
+            complete_flag(node, &active_prefix, state, current_component, span)
         } else if let Some(flag) = cursor.pending_value_flag() {
             // The previous token was a value-taking option; complete its value.
-            complete_option_value(flag, &active_prefix, state, span)
+            complete_option_value(flag, &active_prefix, state, current_component, span)
         } else if let Some(positional) = node.positionals.get(cursor.positionals_consumed()) {
-            complete_positional(positional, &scope, &active_prefix, state, span)
+            complete_positional(
+                positional,
+                &scope,
+                &active_prefix,
+                state,
+                current_component,
+                span,
+            )
         } else {
             complete_subcommands(node, &active_prefix, span)
         }
@@ -113,11 +133,13 @@ impl KvistCompleter {
 
 impl Completer for KvistCompleter {
     fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
-        let candidates = match self.state.lock() {
-            Ok(guard) => Self::resolve(&self.root, &guard, line, pos),
-            // A poisoned lock means a completer panicked while holding it;
-            // degrade to no completions rather than abort the editor.
-            Err(_) => Vec::new(),
+        // A poisoned lock means a completer panicked while holding it;
+        // degrade to no completions rather than abort the editor.
+        let candidates = match (self.state.lock(), self.current_component.lock()) {
+            (Ok(guard), Ok(current)) => {
+                Self::resolve(&self.root, &guard, current.as_deref(), line, pos)
+            }
+            _ => Vec::new(),
         };
         candidates
             .into_iter()
@@ -207,12 +229,19 @@ fn complete_flag(
     node: &CommandNode,
     prefix: &str,
     state: &DynamicState,
+    current_component: Option<&str>,
     span: (usize, usize),
 ) -> Vec<Candidate> {
     // Inline value form: `--opt=part` completes the value, not the flag.
     if let Some((long, value_prefix)) = split_inline_value(prefix) {
         if let Some(flag) = node.find_flag_by_long(long) {
-            return complete_option_value(&node.flags[flag], value_prefix, state, span);
+            return complete_option_value(
+                &node.flags[flag],
+                value_prefix,
+                state,
+                current_component,
+                span,
+            );
         }
         return Vec::new();
     }
@@ -262,6 +291,7 @@ fn complete_option_value(
     flag: &FlagSpec,
     prefix: &str,
     state: &DynamicState,
+    current_component: Option<&str>,
     span: (usize, usize),
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
@@ -278,7 +308,7 @@ fn complete_option_value(
     let empty_scope = Scope::default();
     if let Some(domain) = option_domain(flag.long.as_deref().unwrap_or("")) {
         let desc = domain_description(domain);
-        for value in dynamic_values(domain, &empty_scope, prefix, state) {
+        for value in dynamic_values(domain, &empty_scope, prefix, state, current_component) {
             candidates.push(Candidate {
                 value,
                 description: Some(desc.to_owned()),
@@ -296,6 +326,7 @@ fn complete_positional(
     scope: &Scope,
     prefix: &str,
     state: &DynamicState,
+    current_component: Option<&str>,
     span: (usize, usize),
 ) -> Vec<Candidate> {
     let mut candidates = Vec::new();
@@ -314,7 +345,7 @@ fn complete_positional(
     }
     if let Some(domain) = positional_domain(positional.value_name.as_deref().unwrap_or("")) {
         let desc = domain_description(domain);
-        for value in dynamic_values(domain, scope, prefix, state) {
+        for value in dynamic_values(domain, scope, prefix, state, current_component) {
             candidates.push(Candidate {
                 value,
                 description: Some(desc.to_owned()),
@@ -364,24 +395,37 @@ fn positional_domain(value_name: &str) -> Option<ValueDomain> {
 }
 
 /// Resolves the dynamic candidates for one domain under a typed scope.
+///
+/// When the shell has a current component (via `cd`) and the scope does not
+/// name one, the current component's values are offered first.
 fn dynamic_values(
     domain: ValueDomain,
     scope: &Scope,
     prefix: &str,
     state: &DynamicState,
+    current_component: Option<&str>,
 ) -> Vec<String> {
     let all: Vec<String> = match domain {
-        ValueDomain::Component => state.components().to_vec(),
+        ValueDomain::Component => {
+            let mut components = state.components().to_vec();
+            if let Some(current) = current_component
+                && let Some(position) = components.iter().position(|c| c == current)
+            {
+                let promoted = components.remove(position);
+                components.insert(0, promoted);
+            }
+            components
+        }
         ValueDomain::Task => {
             if scope.command.as_deref() == Some("run") {
                 match &scope.component {
                     Some(component) => state.runnable_task_ids_for(component),
-                    None => state.all_runnable_task_ids(),
+                    None => ordered_tasks(state, current_component, true),
                 }
             } else {
                 match &scope.component {
                     Some(component) => state.task_ids_for(component),
-                    None => state.all_task_ids(),
+                    None => ordered_tasks(state, current_component, false),
                 }
             }
         }
@@ -404,6 +448,35 @@ fn dynamic_values(
     all.into_iter()
         .filter(|value| value.starts_with(prefix))
         .collect()
+}
+
+/// Every component's task IDs in component-then-queue order, with the
+/// current component's tasks promoted to the front when one is set.
+fn ordered_tasks(
+    state: &DynamicState,
+    current_component: Option<&str>,
+    runnable_only: bool,
+) -> Vec<String> {
+    let pick = |component: &str| -> Vec<String> {
+        if runnable_only {
+            state.runnable_task_ids_for(component)
+        } else {
+            state.task_ids_for(component)
+        }
+    };
+    let mut tasks = Vec::new();
+    if let Some(current) = current_component
+        && state.components().iter().any(|c| c == current)
+    {
+        tasks.extend(pick(current));
+    }
+    for component in state.components() {
+        if Some(component.as_str()) == current_component {
+            continue;
+        }
+        tasks.extend(pick(component));
+    }
+    tasks
 }
 
 /// Records a typed option value into the scope when it carries domain meaning.
@@ -552,7 +625,11 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn completer() -> KvistCompleter {
-        KvistCompleter::new(build_root(), Arc::new(Mutex::new(DynamicState::default())))
+        KvistCompleter::new(
+            build_root(),
+            Arc::new(Mutex::new(DynamicState::default())),
+            Arc::new(Mutex::new(None)),
+        )
     }
 
     fn values(candidates: &[Candidate]) -> Vec<&str> {
@@ -586,16 +663,26 @@ mod tests {
             "vcs",
             "agent",
             "completions",
+            "cd",
+            "tasks",
+            "run",
+            "help",
+            "last",
+            "history",
+            "journal",
+            "locks",
+            "exit",
+            "quit",
         ] {
             assert!(got.contains(&name), "missing {name} in {got:?}");
         }
-        assert_eq!(got.len(), 15);
+        assert_eq!(got.len(), 15 + 10);
     }
 
     #[test]
     fn partial_verb_prefix_filters_first_order_commands() {
         let c = completer();
-        assert_eq!(values(&complete(&c, "ta")), vec!["task"]);
+        assert_eq!(values(&complete(&c, "ta")), vec!["task", "tasks"]);
         assert_eq!(
             values(&complete(&c, "comp")),
             vec!["component", "completions"]
@@ -609,7 +696,7 @@ mod tests {
         // Cursor after "ta" in the middle of a longer line.
         let res = c.complete("task run", 2);
         let got = values(&res);
-        assert_eq!(got, vec!["task"]);
+        assert_eq!(got, vec!["task", "tasks"]);
     }
 
     // ---- Stage 2: per-command flags ---------------------------------------
@@ -802,7 +889,15 @@ mod tests {
     }
 
     fn completer_with_state(state: DynamicState) -> KvistCompleter {
-        KvistCompleter::new(build_root(), Arc::new(Mutex::new(state)))
+        completer_with_state_and_focus(state, None)
+    }
+
+    fn completer_with_state_and_focus(state: DynamicState, focus: Option<&str>) -> KvistCompleter {
+        KvistCompleter::new(
+            build_root(),
+            Arc::new(Mutex::new(state)),
+            Arc::new(Mutex::new(focus.map(str::to_owned))),
+        )
     }
 
     #[test]
@@ -906,5 +1001,35 @@ mod tests {
         assert!(complete(&c, "task run . ").is_empty());
         assert!(complete(&c, "prompt --model ").is_empty());
         assert!(complete(&c, "import --branch ").is_empty());
+    }
+
+    // ---- Stage 6: current-component completion ordering -------------------
+
+    #[test]
+    fn current_component_is_offered_first() {
+        let c = completer_with_state_and_focus(fixture_state(), Some("engine"));
+        assert_eq!(values(&complete(&c, "task run ")), vec!["engine", "."]);
+    }
+
+    #[test]
+    fn current_component_is_offered_first_in_the_run_builtin() {
+        let c = completer_with_state_and_focus(fixture_state(), Some("engine"));
+        // The bare `run` builtin completes its component from the focus.
+        assert_eq!(values(&complete(&c, "run ")), vec!["engine", "."]);
+    }
+
+    #[test]
+    fn typed_component_still_scopes_tasks_over_the_current_component() {
+        let c = completer_with_state_and_focus(fixture_state(), Some("engine"));
+        assert_eq!(
+            values(&complete(&c, "task run . ")),
+            vec!["write-tests", "implement-code"]
+        );
+    }
+
+    #[test]
+    fn unknown_current_component_changes_no_ordering() {
+        let c = completer_with_state_and_focus(fixture_state(), Some("ghost"));
+        assert_eq!(values(&complete(&c, "task run ")), vec![".", "engine"]);
     }
 }

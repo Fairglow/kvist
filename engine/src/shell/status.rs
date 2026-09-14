@@ -53,10 +53,17 @@ impl StatusContext {
 }
 
 /// Returns a concise, modern prompt for the active line editor.
-pub fn short_prompt(branch: Option<&str>) -> String {
+///
+/// The current component (set with `cd`) is shown when it is not the root;
+/// the root component is the default and keeps the prompt uncluttered.
+pub fn short_prompt(branch: Option<&str>, component: Option<&str>) -> String {
+    let component = component
+        .filter(|c| !c.is_empty() && *c != ".")
+        .map(|c| format!("{c}/ "))
+        .unwrap_or_default();
     match branch {
-        Some(b) if !b.is_empty() && b != "no-vcs" => format!("kvist ({b}) ❯ "),
-        _ => "kvist ❯ ".to_owned(),
+        Some(b) if !b.is_empty() && b != "no-vcs" => format!("kvist {component}({b}) ❯ "),
+        _ => format!("kvist {component}❯ "),
     }
 }
 
@@ -74,12 +81,18 @@ pub fn status_bar_label(status: &StatusContext) -> String {
 }
 
 /// Formats the welcome banner text with static environment information.
-pub fn format_welcome_banner(status: &StatusContext, branch: Option<&str>) -> String {
+pub fn format_welcome_banner(
+    status: &StatusContext,
+    branch: Option<&str>,
+    component: Option<&str>,
+) -> String {
     let branch_str = branch.unwrap_or("no-vcs");
+    let component_str = component.filter(|c| !c.is_empty()).unwrap_or(". (root)");
 
     let mut banner = String::new();
     banner.push_str("╭── Kvist Interactive Workspace Shell ─────────────────────────────\n");
     banner.push_str(&format!("│  Branch:   {}\n", branch_str));
+    banner.push_str(&format!("│  Component:  {component_str}\n"));
     banner.push_str(&format!("│  Sandbox:  {}\n", status.sandbox_backend));
     banner.push_str(&format!("│  Model:    {}\n", status.default_model));
     if status.live_locks > 0 || status.stale_locks > 0 {
@@ -100,8 +113,8 @@ pub fn format_welcome_banner(status: &StatusContext, branch: Option<&str>) -> St
 }
 
 /// Prints a modern, styled welcome banner with static environment information.
-pub fn print_welcome_banner(status: &StatusContext, branch: Option<&str>) {
-    println!("{}", format_welcome_banner(status, branch));
+pub fn print_welcome_banner(status: &StatusContext, branch: Option<&str>, component: Option<&str>) {
+    println!("{}", format_welcome_banner(status, branch, component));
 }
 
 #[cfg(test)]
@@ -110,9 +123,15 @@ mod tests {
 
     #[test]
     fn short_prompt_and_status_bar() {
-        assert_eq!(short_prompt(Some("main")), "kvist (main) ❯ ");
-        assert_eq!(short_prompt(None), "kvist ❯ ");
-        assert_eq!(short_prompt(Some("no-vcs")), "kvist ❯ ");
+        assert_eq!(short_prompt(Some("main"), None), "kvist (main) ❯ ");
+        assert_eq!(short_prompt(None, None), "kvist ❯ ");
+        assert_eq!(short_prompt(Some("no-vcs"), None), "kvist ❯ ");
+        assert_eq!(
+            short_prompt(Some("main"), Some("engine")),
+            "kvist engine/ (main) ❯ "
+        );
+        assert_eq!(short_prompt(None, Some("engine")), "kvist engine/ ❯ ");
+        assert_eq!(short_prompt(Some("main"), Some(".")), "kvist (main) ❯ ");
 
         let status = StatusContext {
             sandbox_backend: "bubblewrap".to_owned(),
@@ -142,7 +161,11 @@ mod tests {
             live_locks: 1,
             stale_locks: 2,
         };
-        let banner = format_welcome_banner(&status, Some("feature/long-branch-name-overflow-test"));
+        let banner = format_welcome_banner(
+            &status,
+            Some("feature/long-branch-name-overflow-test"),
+            Some("engine"),
+        );
         for line in banner.lines() {
             assert!(line.starts_with('╭') || line.starts_with('│') || line.starts_with('╰'));
         }
@@ -155,7 +178,8 @@ mod tests {
     #[test]
     fn welcome_banner_omits_locks_when_none() {
         let status = StatusContext::default();
-        let banner = format_welcome_banner(&status, None);
+        let banner = format_welcome_banner(&status, None, None);
         assert!(!banner.contains("Locks:"));
+        assert!(banner.contains("│  Component:  . (root)"));
     }
 }

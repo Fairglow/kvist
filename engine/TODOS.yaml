@@ -1718,7 +1718,7 @@ tasks:
     purpose: "Deliver the first-class interactive experience the project promises without weakening the headless command surface."
     expected_outcome: "The shell survives recoverable failures, cancels running work on SIGINT, relays streaming output live, distinguishes live from stale locks, and exposes cd, tasks, run, help, last, history, journal, and locks builtins with completion and theming."
     kind: implementation
-    status: in-progress
+    status: completed
     depends_on:
       - "shell-hardening-write-tests"
     requirements:
@@ -1728,8 +1728,8 @@ tasks:
       - "TODO.md#SHL-01"
     timestamps:
       created_at: "2026-09-13T19:30:00Z"
-      updated_at: "2026-09-13T23:49:35Z"
-      completed_at: null
+      updated_at: "2026-09-14T11:06:26Z"
+      completed_at: "2026-09-14T11:06:26Z"
     blocked_reason: null
     recovery_state: null
   - id: "shell-hardening-security-audit"

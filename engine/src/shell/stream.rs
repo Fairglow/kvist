@@ -114,6 +114,9 @@ pub struct AgentFeedback {
     pub log_path: Option<PathBuf>,
 }
 
+/// Re-exports the feedback target so shell callers keep one import site.
+pub use super::runs::FeedbackTarget;
+
 /// Manages transient output streams and log link replacement for execution.
 pub struct StreamManager {
     project_root: PathBuf,
@@ -163,49 +166,20 @@ impl StreamManager {
         println!("╭── Agent Working ─────────────────────────────────────────────────");
     }
 
-    /// Scans `.kvist/runs/` across the project for the latest session trajectory or run record.
-    pub fn find_latest_agent_feedback(&self) -> Option<AgentFeedback> {
-        let mut runs_dirs = Vec::new();
-        let root_runs = self.project_root.join(".kvist/runs");
-        if root_runs.exists() {
-            runs_dirs.push(root_runs);
-        }
-
-        // Also check child component directories under src/
-        let src_dir = self.project_root.join("src");
-        if let Ok(entries) = fs::read_dir(&src_dir) {
-            for entry in entries.flatten() {
-                let comp_runs = entry.path().join(".kvist/runs");
-                if comp_runs.exists() {
-                    runs_dirs.push(comp_runs);
-                }
-            }
-        }
-
-        // Find the newest .trajectory.jsonl file
-        let mut newest_file: Option<(PathBuf, std::time::SystemTime)> = None;
-        for runs_dir in &runs_dirs {
-            if let Ok(entries) = fs::read_dir(runs_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().and_then(|ext| ext.to_str()) == Some("jsonl")
-                        && let Ok(meta) = path.metadata()
-                        && let Ok(modified) = meta.modified()
-                        && newest_file
-                            .as_ref()
-                            .is_none_or(|(_, best)| modified > *best)
-                    {
-                        newest_file = Some((path, modified));
-                    }
-                }
-            }
-        }
-
-        let (traj_path, _) = newest_file?;
+    /// Finds the agent execution feedback to show after a run, correlated with
+    /// the requested target (a specific task or the most recent run).
+    pub fn find_latest_agent_feedback(&self, target: &FeedbackTarget<'_>) -> Option<AgentFeedback> {
+        let runs = super::runs::scan_recent_runs(&self.project_root, usize::MAX);
+        let run = super::runs::select_recent_run(&runs, target)?;
+        let traj_path = run.trajectory_path.clone()?;
         let report = agent_runtime::replay_trajectory(&traj_path, None).ok()?;
         let mut reasoning = None;
-        let mut tokens_in = None;
-        let mut tokens_out = None;
+        // Run-record totals are authoritative; only when the record leaves a
+        // direction open do we accumulate the per-turn trajectory metrics.
+        let record_in = run.tokens_input.map(|t| t as usize);
+        let record_out = run.tokens_output.map(|t| t as usize);
+        let mut tokens_in = record_in;
+        let mut tokens_out = record_out;
 
         for event in &report.events {
             match event {
@@ -217,14 +191,20 @@ impl StreamManager {
                 agent_runtime::TrajectoryEvent::PromptEval {
                     new_tokens: Some(t),
                     ..
-                } => {
-                    tokens_in = Some(tokens_in.unwrap_or(0) + (*t as usize));
+                } if record_in.is_none() => {
+                    tokens_in = match tokens_in {
+                        Some(acc) => Some(acc.saturating_add(*t as usize)),
+                        None => Some(*t as usize),
+                    };
                 }
                 agent_runtime::TrajectoryEvent::TurnFinish {
                     output_tokens: Some(t),
                     ..
-                } => {
-                    tokens_out = Some(tokens_out.unwrap_or(0) + (*t as usize));
+                } if record_out.is_none() => {
+                    tokens_out = match tokens_out {
+                        Some(acc) => Some(acc.saturating_add(*t as usize)),
+                        None => Some(*t as usize),
+                    };
                 }
                 agent_runtime::TrajectoryEvent::SessionFinish { total_tokens, .. }
                     if tokens_in.is_none() && tokens_out.is_none() =>
@@ -235,35 +215,15 @@ impl StreamManager {
             }
         }
 
-        // Check for matching .json run record
-        if let Some(parent) = traj_path.parent() {
-            let json_name = traj_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .map(|n| n.replace(".trajectory.jsonl", ".json"));
-            if let Some(jname) = json_name {
-                let json_path = parent.join(jname);
-                if json_path.exists()
-                    && let Ok(contents) = fs::read_to_string(&json_path)
-                    && let Ok(v) = serde_json::from_str::<serde_json::Value>(&contents)
-                {
-                    if let Some(in_t) = v.get("tokens_input").and_then(|t| t.as_u64()) {
-                        tokens_in = Some(in_t as usize);
-                    }
-                    if let Some(out_t) = v.get("tokens_output").and_then(|t| t.as_u64()) {
-                        tokens_out = Some(out_t as usize);
-                    }
-                }
-            }
-        }
-
-        // Find the latest log file in .kvist/logs/
+        // Logs live next to the run records, in the same component's .kvist dir,
+        // named `<task_id>_<timestamp>.log`.
         let mut log_path = None;
-        let logs_dir = self.project_root.join(".kvist/logs");
-        if logs_dir.exists()
-            && let Some(task_id) = &report.task_id
-            && let Ok(entries) = fs::read_dir(&logs_dir)
+        if let Some(runs_dir) = traj_path.parent()
+            && let Some(kvist_dir) = runs_dir.parent()
+            && let Some(task_id) = &run.task_id
+            && let Ok(entries) = fs::read_dir(kvist_dir.join("logs"))
         {
+            let prefix = format!("{task_id}_");
             let mut newest_log = None;
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -271,7 +231,8 @@ impl StreamManager {
                     .file_name()
                     .and_then(|n| n.to_str())
                     .unwrap_or_default();
-                if fname.starts_with(task_id)
+                if fname.starts_with(&prefix)
+                    && fname.ends_with(".log")
                     && let Ok(meta) = path.metadata()
                     && let Ok(modified) = meta.modified()
                     && newest_log.as_ref().is_none_or(|(_, best)| modified > *best)
@@ -284,7 +245,7 @@ impl StreamManager {
 
         Some(AgentFeedback {
             session_id: report.session_id,
-            task_id: report.task_id,
+            task_id: report.task_id.or(run.task_id.clone()),
             turns: report.replayed_turns,
             tool_calls: report.tool_calls_count,
             tokens_input: tokens_in,
@@ -299,6 +260,7 @@ impl StreamManager {
     pub fn print_result_stage(
         &self,
         result: &std::result::Result<cli::CommandOutput, crate::KvistError>,
+        target: &FeedbackTarget<'_>,
     ) {
         println!("╰──────────────────────────────────────────────────────────────────");
         println!("╭── Agent Result ──────────────────────────────────────────────────");
@@ -309,7 +271,7 @@ impl StreamManager {
                 for line in trimmed.lines() {
                     println!("│  {line}");
                 }
-                if let Some(feedback) = self.find_latest_agent_feedback() {
+                if let Some(feedback) = self.find_latest_agent_feedback(target) {
                     println!("│");
                     println!("│  Agent Feedback:");
                     if let (Some(in_tok), Some(out_tok)) =
@@ -327,11 +289,9 @@ impl StreamManager {
                         );
                     }
                     if let Some(reasoning) = &feedback.reasoning {
-                        let snippet = if reasoning.len() > 80 {
-                            format!("{}...", &reasoning[..77])
-                        } else {
-                            reasoning.clone()
-                        };
+                        // `truncate` is character-based, so multi-byte text
+                        // never panics on a byte boundary.
+                        let snippet = crate::shell::truncate(reasoning, 80);
                         println!("│    • Reasoning: \"{snippet}\"");
                     }
                     if let Some(traj) = &feedback.trajectory_path
@@ -357,6 +317,7 @@ impl StreamManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shell::runs::write_trajectory;
     use tempfile::tempdir;
 
     #[test]
@@ -389,10 +350,14 @@ mod tests {
         let manager = StreamManager::new(dir.path());
         manager.print_prompt_stage("task run . implement-code");
         manager.print_working_stage();
-        manager.print_result_stage(&Ok(cli::CommandOutput::message("success")));
-        manager.print_result_stage(&Err(KvistError::AgentRuntime(
-            agent_runtime::Error::Cancelled,
-        )));
+        manager.print_result_stage(
+            &Ok(cli::CommandOutput::message("success")),
+            &FeedbackTarget::Latest,
+        );
+        manager.print_result_stage(
+            &Err(KvistError::AgentRuntime(agent_runtime::Error::Cancelled)),
+            &FeedbackTarget::None,
+        );
     }
 
     #[test]
@@ -400,22 +365,11 @@ mod tests {
         let dir = tempdir().unwrap();
         let runs_dir = dir.path().join(".kvist").join("runs");
         fs::create_dir_all(&runs_dir).unwrap();
-
-        let traj_path = runs_dir.join("task-1_2026-09-11T22-00-00Z.trajectory.jsonl");
-        let journal = r#"{"event":"session_start","session_id":"s1","task_id":"task-1","timestamp":1700000000}
-{"event":"turn_start","turn":1,"timestamp":1700000001}
-{"event":"prompt_eval","turn":1,"new_tokens":50,"cached_tokens":100}
-{"event":"model_reasoning","turn":1,"reasoning":"Inspecting test suite."}
-{"event":"tool_dispatch","turn":1,"call_id":"c1","tool":"read_file","args":{},"action_hash":"h1"}
-{"event":"tool_result","turn":1,"call_id":"c1","tool":"read_file","stdout":"","stderr":"","exit_code":0,"bytes":0,"state_mutated":false}
-{"event":"turn_finish","turn":1,"output_tokens":25,"finish_reason":"stop"}
-{"event":"session_finish","session_id":"s1","task_id":"task-1","total_turns":1,"total_tokens":75,"success":true}
-"#;
-        fs::write(&traj_path, journal).unwrap();
+        let traj_path = write_trajectory(&runs_dir, "task-1", "2026-09-11T22-00-00Z");
 
         let manager = StreamManager::new(dir.path());
         let feedback = manager
-            .find_latest_agent_feedback()
+            .find_latest_agent_feedback(&FeedbackTarget::Latest)
             .expect("feedback present");
         assert_eq!(feedback.task_id.as_deref(), Some("task-1"));
         assert_eq!(feedback.turns, 1);
@@ -426,5 +380,89 @@ mod tests {
             feedback.reasoning.as_deref(),
             Some("Inspecting test suite.")
         );
+        assert_eq!(feedback.trajectory_path, Some(traj_path));
+    }
+
+    #[test]
+    fn feedback_prefers_the_executed_task_over_newer_other_runs() {
+        let dir = tempdir().unwrap();
+        let runs_dir = dir.path().join(".kvist").join("runs");
+        fs::create_dir_all(&runs_dir).unwrap();
+
+        let older = write_trajectory(&runs_dir, "task-a", "2026-09-11T20-00-00Z");
+        write_trajectory(&runs_dir, "task-b", "2026-09-11T22-00-00Z");
+
+        let manager = StreamManager::new(dir.path());
+        let feedback = manager
+            .find_latest_agent_feedback(&FeedbackTarget::Task("task-a"))
+            .expect("feedback for the requested task");
+        assert_eq!(feedback.task_id.as_deref(), Some("task-a"));
+        assert_eq!(feedback.trajectory_path, Some(older));
+    }
+
+    #[test]
+    fn feedback_accumulates_trajectory_tokens_without_a_run_record() {
+        let dir = tempdir().unwrap();
+        let runs_dir = dir.path().join(".kvist").join("runs");
+        fs::create_dir_all(&runs_dir).unwrap();
+        let traj_path = runs_dir.join("task-x_2026-09-11T22-00-00Z.trajectory.jsonl");
+        // Two prompt evaluations and two turn finishes; without a run record
+        // the totals are the per-turn sums (50 + 30 in, 25 + 15 out).
+        let journal = r#"{"event":"session_start","session_id":"s1","task_id":"task-x","timestamp":1}
+{"event":"prompt_eval","turn":1,"new_tokens":50}
+{"event":"turn_finish","turn":1,"output_tokens":25,"finish_reason":"stop"}
+{"event":"prompt_eval","turn":2,"new_tokens":30}
+{"event":"turn_finish","turn":2,"output_tokens":15,"finish_reason":"stop"}
+{"event":"session_finish","session_id":"s1","task_id":"task-x","total_turns":2,"total_tokens":100,"success":true}
+"#;
+        fs::write(&traj_path, journal).unwrap();
+
+        let manager = StreamManager::new(dir.path());
+        let feedback = manager
+            .find_latest_agent_feedback(&FeedbackTarget::Latest)
+            .expect("feedback present");
+        assert_eq!(feedback.tokens_input, Some(80));
+        assert_eq!(feedback.tokens_output, Some(40));
+    }
+
+    #[test]
+    fn feedback_prefers_run_record_totals_over_trajectory_sums() {
+        let dir = tempdir().unwrap();
+        let runs_dir = dir.path().join(".kvist").join("runs");
+        fs::create_dir_all(&runs_dir).unwrap();
+        write_trajectory(&runs_dir, "task-y", "2026-09-11T22-00-00Z");
+        fs::write(
+            runs_dir.join("task-y_2026-09-11T22-00-00Z.json"),
+            r#"{"status":"completed","tokens_input":900,"tokens_output":400}"#,
+        )
+        .unwrap();
+
+        let manager = StreamManager::new(dir.path());
+        let feedback = manager
+            .find_latest_agent_feedback(&FeedbackTarget::Latest)
+            .expect("feedback present");
+        assert_eq!(feedback.tokens_input, Some(900));
+        assert_eq!(feedback.tokens_output, Some(400));
+    }
+
+    #[test]
+    fn feedback_finds_the_component_log_next_to_the_runs_dir() {
+        let dir = tempdir().unwrap();
+        let kvist_dir = dir.path().join(".kvist");
+        let runs_dir = kvist_dir.join("runs");
+        let logs_dir = kvist_dir.join("logs");
+        fs::create_dir_all(&runs_dir).unwrap();
+        fs::create_dir_all(&logs_dir).unwrap();
+        write_trajectory(&runs_dir, "task-z", "2026-09-11T22-00-00Z");
+        let log = logs_dir.join("task-z_2026-09-11T22-00-00Z.log");
+        fs::write(&log, "agent output").unwrap();
+        // A different task's log must not be attributed to this run.
+        fs::write(logs_dir.join("task-other_2026-09-11T23-00-00Z.log"), "x").unwrap();
+
+        let manager = StreamManager::new(dir.path());
+        let feedback = manager
+            .find_latest_agent_feedback(&FeedbackTarget::Latest)
+            .expect("feedback present");
+        assert_eq!(feedback.log_path, Some(log));
     }
 }
