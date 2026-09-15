@@ -1172,16 +1172,15 @@ fn invalid_configuration(config_path: &Path, reason: &str) -> KvistError {
 }
 
 /// Returns the standard user-specific global configuration path for Kvist.
+///
+/// `KVIST_CONFIG_PATH` overrides resolution entirely; otherwise the path is
+/// resolved from XDG (Unix/macOS) or `%APPDATA%` (Windows) conventions.
+/// Test isolation is the caller's responsibility and is enforced in tests by
+/// setting `KVIST_CONFIG_PATH` or `XDG_CONFIG_HOME` on the child process, never
+/// by special-casing Cargo inside this resolver.
 pub fn global_user_config_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os("KVIST_CONFIG_PATH") {
         return Some(PathBuf::from(path));
-    }
-    // Isolate unit/integration tests running under Cargo unless an explicit XDG_CONFIG_HOME or KVIST_ALLOW_USER_CONFIG is set
-    if std::env::var_os("CARGO_TARGET_TMPDIR").is_some()
-        && std::env::var_os("XDG_CONFIG_HOME").is_none()
-        && std::env::var_os("KVIST_ALLOW_USER_CONFIG").is_none()
-    {
-        return None;
     }
     if cfg!(windows) {
         std::env::var_os("APPDATA")
@@ -2204,4 +2203,64 @@ fn parse_test_policy(
         max_output_bytes,
         commands,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Writes `contents` to `<root>/kvist.toml` and returns the project root.
+    fn write_project_config(root: &Path, contents: &str) {
+        std::fs::write(root.join("kvist.toml"), contents).expect("write kvist.toml");
+    }
+
+    /// `load` reads purely from the injected project root, so these tests
+    /// never touch the real user configuration and stay hermetic under the
+    /// parallel runner.
+    #[test]
+    fn loads_component_root_from_an_injected_config_path() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 1\ncomponent_root = \"src\"\n",
+        );
+        let config = load(root.path()).expect("load project config");
+        assert_eq!(config.component_root, std::path::PathBuf::from("src"));
+    }
+
+    #[test]
+    fn reports_a_missing_project_configuration() {
+        let root = tempfile::tempdir().expect("tempdir");
+        match load(root.path()) {
+            Err(KvistError::ProjectConfigurationMissing { .. }) => {}
+            other => panic!("expected ProjectConfigurationMissing, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_an_unsupported_schema_version() {
+        let root = tempfile::tempdir().expect("tempdir");
+        write_project_config(
+            root.path(),
+            "schema_version = 999\ncomponent_root = \"src\"\n",
+        );
+        match load(root.path()) {
+            Err(KvistError::UnsupportedProjectConfigurationVersion { .. }) => {}
+            other => panic!("expected UnsupportedProjectConfigurationVersion, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_a_config_that_exceeds_the_size_limit() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let padding = "x".repeat(MAX_CONFIGURATION_BYTES as usize + 1);
+        write_project_config(
+            root.path(),
+            &format!("schema_version = 1\ncomponent_root = \"src\"\nbig = \"{padding}\"\n"),
+        );
+        match load(root.path()) {
+            Err(KvistError::ProjectConfigurationTooLarge { .. }) => {}
+            other => panic!("expected ProjectConfigurationTooLarge, got {other:?}"),
+        }
+    }
 }

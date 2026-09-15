@@ -108,14 +108,19 @@ pub fn edit_prompt_with_editor(seed: &str, editor: &str) -> Result<String> {
 }
 
 /// Launches the editor, retrying the transient `ETXTBSY` ("text file
-/// busy") failure.
+/// busy") failure with capped exponential backoff.
 ///
 /// On Linux the kernel briefly reports a file as busy while another thread
 /// in the same process is writing files, and an editor binary can be busy
-/// while an updater rewrites it; both clear on their own, so a short bounded
-/// retry is safe and keeps a launch failure from being misreported as a
-/// missing editor.
+/// while an updater rewrites it; both clear on their own. Only that specific
+/// transient error is retried (bounded to a few attempts), so a genuine
+/// missing editor is never masked while a launch failure still surfaces
+/// promptly.
 fn spawn_editor(program: &str, arguments: &[String]) -> Result<ExitStatus> {
+    // Capped exponential backoff (50ms, 100ms, 200ms, 400ms) limits the total
+    // wait while giving dirty-page flushes increasing room to clear.
+    const MAX_RETRIES: u32 = 4;
+    const BACKOFF_BASE_MS: u64 = 50;
     let mut retries = 0u32;
     loop {
         match ProcessCommand::new(program)
@@ -126,9 +131,12 @@ fn spawn_editor(program: &str, arguments: &[String]) -> Result<ExitStatus> {
             .status()
         {
             Ok(status) => return Ok(status),
-            Err(error) if error.kind() == io::ErrorKind::ExecutableFileBusy && retries < 4 => {
+            Err(error)
+                if error.kind() == io::ErrorKind::ExecutableFileBusy && retries < MAX_RETRIES =>
+            {
+                let backoff = std::time::Duration::from_millis(BACKOFF_BASE_MS << retries);
                 retries += 1;
-                std::thread::sleep(std::time::Duration::from_millis(50));
+                std::thread::sleep(backoff);
             }
             Err(error) => {
                 return Err(KvistError::Io {
