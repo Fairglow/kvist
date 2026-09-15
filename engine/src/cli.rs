@@ -599,7 +599,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         )))
                     }
                     AgentProfileCommand::Add { force } => {
-                        let mut reader = std::io::BufReader::new(std::io::stdin());
+                        let mut reader = crate::interruptible_stdin::interruptible_reader();
                         let mut writer = std::io::BufWriter::new(std::io::stderr());
                         match wizard::run_wizard_with_force(&mut reader, &mut writer, &current_dir, force) {
                             Ok(()) => Ok(CommandOutput::message(
@@ -706,7 +706,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     path: PathBuf::from("."),
                     source,
                 })?;
-                let mut reader = std::io::BufReader::new(std::io::stdin());
+                let mut reader = crate::interruptible_stdin::interruptible_reader();
                 let mut writer = std::io::BufWriter::new(std::io::stderr());
                 match wizard::run_wizard_with_force(
                     &mut reader,
@@ -1139,7 +1139,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         wizard::list_models(&current_dir).map(CommandOutput::message)
                     }
                     AgentProfileCommand::Add { force } => {
-                        let mut reader = std::io::BufReader::new(std::io::stdin());
+                        let mut reader = crate::interruptible_stdin::interruptible_reader();
                         let mut writer = std::io::BufWriter::new(std::io::stdout());
                         match wizard::run_wizard_with_force(
                             &mut reader,
@@ -1259,7 +1259,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     path: PathBuf::from("."),
                     source,
                 })?;
-                let mut reader = std::io::BufReader::new(std::io::stdin());
+                let mut reader = crate::interruptible_stdin::interruptible_reader();
                 let mut writer = std::io::BufWriter::new(std::io::stdout());
                 match wizard::run_wizard_with_force(&mut reader, &mut writer, &current_dir, force) {
                     Ok(()) => Ok(CommandOutput::message(

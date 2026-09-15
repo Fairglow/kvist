@@ -4,7 +4,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
-    io::{self, IsTerminal, Read, Write},
+    io::{self, BufRead, IsTerminal, Read, Write},
     path::{Component, Path, PathBuf},
 };
 
@@ -2048,13 +2048,17 @@ pub fn unlock(component_path: &Path, force: bool) -> Result<String> {
                 })?;
 
                 let mut input = String::new();
-                std::io::stdin()
+                let mut reader = crate::interruptible_stdin::interruptible_reader();
+                let read = reader
                     .read_line(&mut input)
                     .map_err(|source| KvistError::Io {
                         operation: "read confirmation input",
                         path: PathBuf::from("stdin"),
                         source,
                     })?;
+                if read == 0 {
+                    return Ok("unlock cancelled by user".to_owned());
+                }
 
                 let trimmed = input.trim().to_lowercase();
                 if trimmed != "y" && trimmed != "yes" {
@@ -4435,7 +4439,8 @@ pub(crate) fn confirm_run_suggestion(task_id: &str) -> Result<bool> {
         source,
     })?;
     let mut input = String::new();
-    let read = io::stdin()
+    let mut reader = crate::interruptible_stdin::interruptible_reader();
+    let read = reader
         .read_line(&mut input)
         .map_err(|source| KvistError::Io {
             operation: "read confirmation input",
@@ -4443,7 +4448,8 @@ pub(crate) fn confirm_run_suggestion(task_id: &str) -> Result<bool> {
             source,
         })?;
     if read == 0 {
-        return Ok(false); // EOF: refuse, fail closed
+        // EOF or Ctrl-C: refuse, fail closed.
+        return Ok(false);
     }
     Ok(matches!(
         input.trim().to_ascii_lowercase().as_str(),

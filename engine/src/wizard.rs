@@ -31,13 +31,21 @@ fn write_output<W: Write>(writer: &mut W, data: &str) -> Result<()> {
 
 fn read_input<R: BufRead>(reader: &mut R) -> Result<String> {
     let mut buffer = String::new();
-    let bytes = reader
-        .read_line(&mut buffer)
-        .map_err(|source| KvistError::Io {
-            operation: "read setup wizard input",
-            path: PathBuf::from("stdin"),
-            source,
-        })?;
+    let bytes = match reader.read_line(&mut buffer) {
+        // An interrupt (Ctrl-C / SIGINT) during an interactive prompt is a
+        // cancellation, not an I/O failure, so surface it as such.
+        Err(source) if source.kind() == std::io::ErrorKind::Interrupted => {
+            return Err(KvistError::AgentSetupCancelled);
+        }
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "read setup wizard input",
+                path: PathBuf::from("stdin"),
+                source,
+            });
+        }
+        Ok(bytes) => bytes,
+    };
     if bytes == 0 {
         return Err(KvistError::AgentSetupCancelled);
     }
@@ -332,6 +340,57 @@ fn upsert_provider_and_profile(
     Ok(())
 }
 
+/// Returns whether `config_path` declares `[agent.profiles.<name>]`.
+fn declared_profile(config_path: &Path, name: &str) -> bool {
+    load_document(config_path, false)
+        .ok()
+        .and_then(|(doc, _)| {
+            doc.get("agent")
+                .and_then(Item::as_table)
+                .and_then(|agent| agent.get("profiles"))
+                .and_then(Item::as_table)
+                .map(|profiles| profiles.contains_key(name))
+        })
+        .unwrap_or(false)
+}
+
+/// Returns whether `config_path` declares any `[agent.profiles.*]` entry.
+fn declared_any_profile(config_path: &Path) -> bool {
+    load_document(config_path, false)
+        .ok()
+        .and_then(|(doc, _)| {
+            doc.get("agent")
+                .and_then(Item::as_table)
+                .and_then(|agent| agent.get("profiles"))
+                .and_then(Item::as_table)
+                .map(|profiles| !profiles.is_empty())
+        })
+        .unwrap_or(false)
+}
+
+/// Error shown when a profile is targeted in the wrong configuration scope
+/// (for example a global model removed without `--global`): it tells the user
+/// where the profile actually lives and which flag to use, instead of a plain
+/// "not found" that is technically true but unactionable.
+fn scope_mismatch_error(targeted_global: bool, alternate: &Path, subject: &str) -> KvistError {
+    let where_found = if targeted_global {
+        "re-run without `--global` to remove it there".to_owned()
+    } else {
+        "re-run with `--global` to remove it there".to_owned()
+    };
+    let scope = if targeted_global {
+        "the global user configuration"
+    } else {
+        "this project configuration"
+    };
+    KvistError::AgentSetupFailed {
+        reason: format!(
+            "{subject} was not found in {scope}. It is configured in `{}`. {where_found}.",
+            alternate.display()
+        ),
+    }
+}
+
 /// Removes a configured model profile from project or user configuration.
 pub fn remove_model(
     config_path: &Path,
@@ -420,6 +479,20 @@ pub fn remove_model(
     }
 
     if removed_count == 0 {
+        let alternate = if project_local {
+            config::global_user_config_path()
+        } else {
+            Some(project_dir.join("kvist.toml"))
+        };
+        if let Some(alternate) = alternate
+            && declared_profile(&alternate, model_name)
+        {
+            return Err(scope_mismatch_error(
+                !project_local,
+                &alternate,
+                &format!("model `{model_name}`"),
+            ));
+        }
         return Err(KvistError::AgentSetupFailed {
             reason: format!(
                 "model `{model_name}` was not found in `{}`",
@@ -456,6 +529,24 @@ pub fn remove_all_models(
                 config_path.display()
             ),
         });
+    }
+
+    // Nothing to clear here if this scope has no profiles but the other one does.
+    if !declared_any_profile(config_path) {
+        let alternate = if project_local {
+            config::global_user_config_path()
+        } else {
+            Some(project_dir.join("kvist.toml"))
+        };
+        if let Some(alternate) = alternate
+            && declared_any_profile(&alternate)
+        {
+            return Err(scope_mismatch_error(
+                !project_local,
+                &alternate,
+                "any configured profile",
+            ));
+        }
     }
 
     if let Some(agent) = document.get_mut("agent").and_then(Item::as_table_mut) {

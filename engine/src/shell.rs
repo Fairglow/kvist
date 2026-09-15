@@ -652,6 +652,7 @@ impl Shell {
         }
 
         let streaming = is_streaming_command(&parsed.command);
+        let interactive = is_interactive_command(&parsed.command);
         // Capture the run's task before moving the command, for feedback
         // correlation with the run's own trajectory.
         let run_task_id = match &parsed.command {
@@ -672,11 +673,19 @@ impl Shell {
             self.stream_manager.print_working_stage();
         }
 
-        // A spinner with elapsed time covers any command that outlasts its
-        // deferred start, so slow work is visibly progressing rather than hung.
-        let spinner = self.stream_manager.start_spinner(&program);
+        // A spinner with elapsed time covers slow background work so it is
+        // visibly progressing rather than hung. Interactive commands drive their
+        // own prompt (a wizard here) and must not be covered by a spinner that
+        // would imply a background agent run while the command waits for input.
+        let spinner = if interactive {
+            None
+        } else {
+            Some(self.stream_manager.start_spinner(&program))
+        };
         let result = cli::execute(cmd, false);
-        spinner.stop();
+        if let Some(spinner) = spinner {
+            spinner.stop();
+        }
 
         if streaming {
             let feedback_target = match run_task_id.as_deref() {
@@ -1119,19 +1128,36 @@ fn destructive_gate(command: &cli::Command) -> Option<&'static str> {
     }
 }
 
-/// Asks the user to confirm an operation; a missing or unreadable answer is
-/// a refusal, so confirmation can never block or crash the session.
+/// Asks the user to confirm an operation; a missing, unreadable, or cancelled
+/// answer is a refusal, so confirmation can never block, hang, or crash the
+/// session. Ctrl-C while the prompt is displayed interrupts the read and is
+/// treated as a refusal.
 fn confirm(prompt: &str) -> bool {
     print!("{prompt}");
     let _ = io::stdout().flush();
     let mut answer = String::new();
-    match io::stdin().lock().read_line(&mut answer) {
+    let mut reader = crate::interruptible_stdin::interruptible_reader();
+    match reader.read_line(&mut answer) {
         Ok(0) | Err(_) => false,
         Ok(_) => matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes"),
     }
 }
 
 /// Returns whether a command type produces long-running output that should be streamed.
+/// Commands that drive their own interactive prompt and therefore must not be
+/// covered by the progress spinner (see `dispatch_labeled`).
+fn is_interactive_command(command: &cli::Command) -> bool {
+    matches!(
+        command,
+        cli::Command::Agent {
+            command: cli::AgentCommand::Setup { .. }
+                | cli::AgentCommand::Profile {
+                    command: Some(cli::AgentProfileCommand::Add { .. })
+                }
+        }
+    )
+}
+
 fn is_streaming_command(command: &cli::Command) -> bool {
     match command {
         cli::Command::Task { command } => matches!(

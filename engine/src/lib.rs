@@ -22,6 +22,7 @@ mod file_io;
 mod filesystem;
 pub mod import;
 pub mod init;
+pub(crate) mod interruptible_stdin;
 pub mod logging;
 pub mod project_state;
 pub mod prompt_input;
