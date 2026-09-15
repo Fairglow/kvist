@@ -42,6 +42,16 @@ struct Scope {
     task: Option<String>,
 }
 
+/// A dynamic candidate: the value to insert plus its rich description
+/// (e.g. a task's status and title) shown beside the candidate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ValueCandidate {
+    /// The text to insert.
+    value: String,
+    /// A human description of the value, when one can be derived.
+    description: Option<String>,
+}
+
 /// The tab-completion engine for the Kvist shell.
 ///
 /// The static tree is fixed for the session; the dynamic snapshot is shared
@@ -97,8 +107,10 @@ impl KvistCompleter {
 
         // The token under the cursor is the last one unless the cursor sits on
         // trailing whitespace (in which case a fresh, empty token is starting).
+        // A complete `--` separator is consumed rather than treated as a
+        // flag prefix: Tab after `--` completes the next positional.
         let (resolved, active_prefix, active_start) = match tokens.last() {
-            Some(last) if last.end == pos => {
+            Some(last) if last.end == pos && last.text != "--" => {
                 let active = last.text.clone();
                 let start = last.start;
                 (&tokens[..tokens.len() - 1], active, start)
@@ -111,7 +123,22 @@ impl KvistCompleter {
         let node = cursor.node;
 
         let span = (active_start, pos);
-        if active_prefix.starts_with('-') {
+        if cursor.no_flags {
+            // After `--` only positional values remain; a dash-leading token
+            // is a value, not a flag.
+            if let Some(positional) = node.positionals.get(cursor.positionals_consumed()) {
+                complete_positional(
+                    positional,
+                    &scope,
+                    &active_prefix,
+                    state,
+                    current_component,
+                    span,
+                )
+            } else {
+                Vec::new()
+            }
+        } else if active_prefix.starts_with('-') {
             complete_flag(node, &active_prefix, state, current_component, span)
         } else if let Some(flag) = cursor.pending_value_flag() {
             // The previous token was a value-taking option; complete its value.
@@ -157,13 +184,26 @@ impl Completer for KvistCompleter {
 
 /// Walks the command tree over the resolved (complete) tokens, returning the
 /// node under the cursor and recording any typed component/task for scoping.
+/// A `--` token ends flag parsing: everything after it is a positional value.
 fn walk<'a>(root: &'a CommandNode, resolved: &[Token], scope: &mut Scope) -> Cursor<'a> {
     let mut node: &'a CommandNode = root;
     let mut positionals_consumed = 0usize;
     let mut pending_value: Option<String> = None;
+    let mut no_flags = false;
 
     for token in resolved {
         let text = &token.text;
+        if no_flags {
+            if let Some(positional) = node.positionals.get(positionals_consumed) {
+                positionals_consumed += 1;
+                apply_positional_value(positional, text, scope);
+            }
+            continue;
+        }
+        if text == "--" {
+            no_flags = true;
+            continue;
+        }
         if let Some(sub) = node.find_subcommand(text) {
             node = sub;
             positionals_consumed = 0;
@@ -198,6 +238,7 @@ fn walk<'a>(root: &'a CommandNode, resolved: &[Token], scope: &mut Scope) -> Cur
         node,
         positionals_consumed,
         pending_value,
+        no_flags,
     }
 }
 
@@ -206,13 +247,10 @@ struct Cursor<'a> {
     node: &'a CommandNode,
     positionals_consumed: usize,
     pending_value: Option<String>,
+    no_flags: bool,
 }
 
 impl<'a> Cursor<'a> {
-    #[allow(dead_code)]
-    fn node(&self) -> &'a CommandNode {
-        self.node
-    }
     fn positionals_consumed(&self) -> usize {
         self.positionals_consumed
     }
@@ -274,7 +312,8 @@ fn complete_flag(
     dedupe(candidates)
 }
 
-/// Returns a human-friendly description for candidates in dynamic domains.
+/// Returns a human-friendly description for candidates in dynamic domains
+/// whose values carry no per-value detail.
 fn domain_description(domain: ValueDomain) -> &'static str {
     match domain {
         ValueDomain::Component => "Component directory",
@@ -283,6 +322,28 @@ fn domain_description(domain: ValueDomain) -> &'static str {
         ValueDomain::Model => "Model profile",
         ValueDomain::Role => "Agent role",
         ValueDomain::Branch => "VCS branch",
+    }
+}
+
+/// Builds the rich description for one task candidate: the next-ready marker
+/// (in run contexts) plus the task's status and truncated title.
+fn task_description(
+    state: &DynamicState,
+    component: &str,
+    task_id: &str,
+    next_ready: Option<&str>,
+) -> String {
+    let mut parts = Vec::new();
+    if next_ready.is_some_and(|ready| ready == task_id) {
+        parts.push("★ next ready".to_owned());
+    }
+    if let Some(label) = state.task_label(component, task_id) {
+        parts.push(label);
+    }
+    if parts.is_empty() {
+        "Task ID".to_owned()
+    } else {
+        parts.join(" · ")
     }
 }
 
@@ -308,10 +369,10 @@ fn complete_option_value(
     let empty_scope = Scope::default();
     if let Some(domain) = option_domain(flag.long.as_deref().unwrap_or("")) {
         let desc = domain_description(domain);
-        for value in dynamic_values(domain, &empty_scope, prefix, state, current_component) {
+        for candidate in dynamic_values(domain, &empty_scope, prefix, state, current_component) {
             candidates.push(Candidate {
-                value,
-                description: Some(desc.to_owned()),
+                description: candidate.description.or_else(|| Some(desc.to_owned())),
+                value: candidate.value,
                 span,
                 append_whitespace: false,
             });
@@ -345,10 +406,10 @@ fn complete_positional(
     }
     if let Some(domain) = positional_domain(positional.value_name.as_deref().unwrap_or("")) {
         let desc = domain_description(domain);
-        for value in dynamic_values(domain, scope, prefix, state, current_component) {
+        for candidate in dynamic_values(domain, scope, prefix, state, current_component) {
             candidates.push(Candidate {
-                value,
-                description: Some(desc.to_owned()),
+                description: candidate.description.or_else(|| Some(desc.to_owned())),
+                value: candidate.value,
                 span,
                 append_whitespace: false,
             });
@@ -397,15 +458,17 @@ fn positional_domain(value_name: &str) -> Option<ValueDomain> {
 /// Resolves the dynamic candidates for one domain under a typed scope.
 ///
 /// When the shell has a current component (via `cd`) and the scope does not
-/// name one, the current component's values are offered first.
+/// name one, the current component's values are offered first. Candidates
+/// carry a rich description (task status/title, the next-ready marker, the
+/// current component) shown beside the value in the completion menu.
 fn dynamic_values(
     domain: ValueDomain,
     scope: &Scope,
     prefix: &str,
     state: &DynamicState,
     current_component: Option<&str>,
-) -> Vec<String> {
-    let all: Vec<String> = match domain {
+) -> Vec<ValueCandidate> {
+    let candidates: Vec<ValueCandidate> = match domain {
         ValueDomain::Component => {
             let mut components = state.components().to_vec();
             if let Some(current) = current_component
@@ -415,68 +478,126 @@ fn dynamic_values(
                 components.insert(0, promoted);
             }
             components
+                .into_iter()
+                .map(|component| ValueCandidate {
+                    description: current_component
+                        .is_some_and(|current| current == component)
+                        .then(|| "current component".to_owned()),
+                    value: component,
+                })
+                .collect()
         }
         ValueDomain::Task => {
-            if scope.command.as_deref() == Some("run") {
-                match &scope.component {
-                    Some(component) => state.runnable_task_ids_for(component),
-                    None => ordered_tasks(state, current_component, true),
-                }
-            } else {
-                match &scope.component {
-                    Some(component) => state.task_ids_for(component),
-                    None => ordered_tasks(state, current_component, false),
-                }
-            }
+            let runnable_only = scope.command.as_deref() == Some("run");
+            let pairs = match &scope.component {
+                Some(component) => state
+                    .scopes
+                    .get(component)
+                    .map(|_| {
+                        let ids = if runnable_only {
+                            state.runnable_task_ids_for(component)
+                        } else {
+                            state.task_ids_for(component)
+                        };
+                        ids.into_iter()
+                            .map(|id| (component.to_owned(), id))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+                None => ordered_task_pairs(state, current_component, runnable_only),
+            };
+            pairs
+                .into_iter()
+                .filter(|(_, id)| id.starts_with(prefix))
+                .map(|(component, id)| {
+                    let next_ready = if runnable_only {
+                        state
+                            .scopes
+                            .get(&component)
+                            .and_then(|scope| crate::task_queue::next_ready_task_id(&scope.tasks))
+                    } else {
+                        None
+                    };
+                    let description =
+                        task_description(state, &component, &id, next_ready.as_deref());
+                    ValueCandidate {
+                        value: id,
+                        description: Some(description),
+                    }
+                })
+                .collect()
         }
         ValueDomain::Attempt => match (&scope.component, &scope.task) {
-            (Some(component), Some(task)) => state.attempts_for(component, task).to_vec(),
+            (Some(component), Some(task)) => state
+                .attempts_for(component, task)
+                .iter()
+                .map(|attempt| ValueCandidate {
+                    value: attempt.clone(),
+                    description: None,
+                })
+                .collect(),
             _ => Vec::new(),
         },
-        ValueDomain::Model => state.models().to_vec(),
-        ValueDomain::Role => vec![
-            "developer".to_owned(),
-            "architect".to_owned(),
-            "security-reviewer".to_owned(),
-        ],
+        ValueDomain::Model => state
+            .models()
+            .iter()
+            .map(|model| ValueCandidate {
+                value: model.clone(),
+                description: None,
+            })
+            .collect(),
+        ValueDomain::Role => ["developer", "architect", "security-reviewer"]
+            .into_iter()
+            .map(|role| ValueCandidate {
+                value: role.to_owned(),
+                description: None,
+            })
+            .collect(),
         ValueDomain::Branch => state
             .branch()
             .into_iter()
-            .map(|branch| branch.to_owned())
+            .map(|branch| ValueCandidate {
+                value: branch.to_owned(),
+                description: None,
+            })
             .collect(),
     };
-    all.into_iter()
-        .filter(|value| value.starts_with(prefix))
+    candidates
+        .into_iter()
+        .filter(|candidate| candidate.value.starts_with(prefix))
         .collect()
 }
 
 /// Every component's task IDs in component-then-queue order, with the
 /// current component's tasks promoted to the front when one is set.
-fn ordered_tasks(
+fn ordered_task_pairs(
     state: &DynamicState,
     current_component: Option<&str>,
     runnable_only: bool,
-) -> Vec<String> {
-    let pick = |component: &str| -> Vec<String> {
-        if runnable_only {
+) -> Vec<(String, String)> {
+    let pick = |component: &str| -> Vec<(String, String)> {
+        let ids = if runnable_only {
             state.runnable_task_ids_for(component)
         } else {
             state.task_ids_for(component)
-        }
+        };
+        ids.into_iter()
+            .map(|id| (component.to_owned(), id))
+            .collect()
     };
-    let mut tasks = Vec::new();
+    let mut pairs = Vec::new();
     if let Some(current) = current_component
         && state.components().iter().any(|c| c == current)
     {
-        tasks.extend(pick(current));
+        pairs.extend(pick(current));
     }
     for component in state.components() {
         if Some(component.as_str()) == current_component {
             continue;
         }
-        tasks.extend(pick(component));
+        pairs.extend(pick(component));
     }
-    tasks
+    pairs
 }
 
 /// Records a typed option value into the scope when it carries domain meaning.
@@ -726,7 +847,7 @@ mod tests {
     #[test]
     fn command_flags_complete_after_the_verb() {
         let c = completer();
-        let res = complete(&c, "status --");
+        let res = complete(&c, "status -");
         let got = values(&res);
         for flag in [
             "--format",
@@ -738,6 +859,9 @@ mod tests {
         ] {
             assert!(got.contains(&flag), "missing {flag} in {got:?}");
         }
+        // A complete `--` separator ends flag parsing; `status` has no
+        // positional value domain, so nothing is offered.
+        assert!(complete(&c, "status --").is_empty());
     }
 
     // ---- Stage 3: subcommand recursion ------------------------------------
@@ -1031,5 +1155,135 @@ mod tests {
     fn unknown_current_component_changes_no_ordering() {
         let c = completer_with_state_and_focus(fixture_state(), Some("ghost"));
         assert_eq!(values(&complete(&c, "task run ")), vec![".", "engine"]);
+    }
+
+    // ---- Stage 7: rich descriptions and the `--` separator ----------------
+
+    #[test]
+    fn task_candidates_carry_status_and_title_descriptions() {
+        let mut state = fixture_state();
+        state.scopes.get_mut(".").expect("root scope").tasks[0].title =
+            "Write the tests".to_owned();
+        let c = completer_with_state(state);
+        // Outside run contexts: status and title, no next-ready marker.
+        let res = complete(&c, "task transition . ");
+        let wt = res
+            .iter()
+            .find(|candidate| candidate.value == "write-tests")
+            .expect("candidate present");
+        assert_eq!(wt.description.as_deref(), Some("pending · Write the tests"));
+        // The prefix filter keeps the description attached to the value.
+        let res = complete(&c, "task transition . w");
+        assert_eq!(res.len(), 1);
+        assert_eq!(
+            res[0].description.as_deref(),
+            Some("pending · Write the tests")
+        );
+    }
+
+    #[test]
+    fn run_context_marks_the_next_ready_task_in_its_description() {
+        let c = completer_with_state(fixture_state());
+        let res = complete(&c, "task run . ");
+        let wt = res
+            .iter()
+            .find(|candidate| candidate.value == "write-tests")
+            .expect("candidate present");
+        assert_eq!(
+            wt.description.as_deref(),
+            Some("★ next ready · pending · write-tests")
+        );
+        let ic = res
+            .iter()
+            .find(|candidate| candidate.value == "implement-code")
+            .expect("candidate present");
+        assert!(
+            !ic.description
+                .as_deref()
+                .unwrap_or("")
+                .contains("next ready")
+        );
+
+        // The bare `run` builtin uses the same run context.
+        let res = complete(&c, "run . ");
+        let wt = res
+            .iter()
+            .find(|candidate| candidate.value == "write-tests")
+            .expect("candidate");
+        assert!(
+            wt.description
+                .as_deref()
+                .unwrap_or("")
+                .starts_with("★ next ready")
+        );
+    }
+
+    #[test]
+    fn current_component_candidate_carries_a_description() {
+        let c = completer_with_state_and_focus(fixture_state(), Some("engine"));
+        let res = complete(&c, "task run ");
+        let engine = res
+            .iter()
+            .find(|candidate| candidate.value == "engine")
+            .expect("candidate present");
+        assert_eq!(engine.description.as_deref(), Some("current component"));
+        let root = res
+            .iter()
+            .find(|candidate| candidate.value == ".")
+            .expect("candidate");
+        assert_eq!(root.description.as_deref(), Some("Component directory"));
+    }
+
+    #[test]
+    fn prompt_positional_offers_the_project_task_ids() {
+        let c = completer_with_state(fixture_state());
+        // In the shell, `prompt TASK_ID` authors a prompt: the positional is
+        // the task-ID domain, ordered by component.
+        assert_eq!(
+            values(&complete(&c, "prompt ")),
+            vec!["write-tests", "implement-code", "build-tree"]
+        );
+        assert_eq!(values(&complete(&c, "prompt b")), vec!["build-tree"]);
+    }
+
+    #[test]
+    fn inline_option_value_completes_mid_line_for_dynamic_domains() {
+        let c = completer_with_state(fixture_state());
+        assert_eq!(values(&complete(&c, "prompt --model=ol")), vec!["ollama"]);
+        assert_eq!(values(&complete(&c, "prompt --model=ol")), vec!["ollama"]);
+        assert_eq!(
+            values(&complete(&c, "prompt --model=")),
+            vec!["llama-cli", "ollama"]
+        );
+    }
+
+    #[test]
+    fn double_dash_suppresses_flag_completion_and_keeps_positionals() {
+        let c = completer_with_state(fixture_state());
+        // Without `--`, a dash-leading token completes flags of `task run`.
+        let without = complete(&c, "task run . -");
+        assert!(values(&without).contains(&"--stream"));
+        // With `--`, the same token is a positional value: no task ID starts
+        // with a dash, and no flags are offered.
+        let with = complete(&c, "task run . -- -");
+        assert!(with.is_empty());
+        // A bare value after `--` still completes the positional domain.
+        let with_value = complete(&c, "task run . -- w");
+        assert_eq!(values(&with_value), vec!["write-tests"]);
+    }
+
+    #[test]
+    fn double_dash_is_consumed_and_the_next_positional_completes() {
+        let c = completer_with_state(fixture_state());
+        // Tab on a complete `--` completes the next positional (TASK_ID), not
+        // flags: the separator is consumed, not a flag prefix.
+        assert_eq!(
+            values(&complete(&c, "task run . --")),
+            vec!["write-tests", "implement-code"]
+        );
+        // Subcommand completion after `--` stops (only positionals remain).
+        assert!(complete(&c, "task -- r").is_empty());
+        // The first `task run` positional is a component: `-- .` offers it.
+        assert_eq!(values(&complete(&c, "task run -- .")), vec!["."]);
     }
 }

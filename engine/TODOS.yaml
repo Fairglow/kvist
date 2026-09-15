@@ -1732,6 +1732,47 @@ tasks:
       completed_at: "2026-09-14T11:06:26Z"
     blocked_reason: null
     recovery_state: null
+  - id: "shell-polish-write-tests"
+    title: "Define interactive shell polish tests"
+    description: "Write tests for terminal theming degradation (NO_COLOR, CLICOLOR, CLICOLOR_FORCE, TERM=dumb), width-fitting titled boxes, the height-aware pager policy, exit-state prompts, rich completion descriptions, the -- separator, and a pty end-to-end smoke test."
+    context: "The state-of-the-art gap analysis classified theming, layout, and presentation tests as the final phase of the shell work."
+    purpose: "Establish executable evidence that shell output is modern, aligned, and degrades to plain text before the shell is treated as production quality."
+    expected_outcome: "Tests cover themed and plain rendering of every shell surface, box width bounds, pager thresholds, prompt exit states, completion descriptions, separator semantics, and a full pty banner/help/exit cycle."
+    kind: test
+    status: completed
+    depends_on:
+      - "shell-hardening-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-SHELL"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+      - "TODO.md#SHL-01"
+    timestamps:
+      created_at: "2026-09-15T02:00:00Z"
+      updated_at: "2026-09-15T02:51:51Z"
+      completed_at: "2026-09-15T02:51:51Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shell-polish-implement-code"
+    title: "Implement interactive shell polish"
+    description: "Deliver modern TUI-grade presentation: a themed prompt with branch, component, and exit state, a dimmed status badge, width-fitting titled boxes for the banner and streaming stages, rich completion descriptions, the -- separator, a height-aware pager, Ctrl+L clear, and transient editor-launch retry."
+    context: "The review judged the shell functionally complete but presentationally dated, and listed theming, layout, and smarts as the remaining first-class gap."
+    purpose: "Make the interactive shell a first-class, modern terminal experience that degrades cleanly to plain text."
+    expected_outcome: "Every shell surface renders with consistent column alignment under both themes, boxes fit the terminal width, long output pages by terminal height, completion shows task status and next-ready hints, and the pty smoke test passes end to end."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "shell-polish-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-SHELL"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+      - "TODO.md#SHL-01"
+    timestamps:
+      created_at: "2026-09-15T02:00:00Z"
+      updated_at: "2026-09-15T02:51:51Z"
+      completed_at: "2026-09-15T02:51:51Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "shell-hardening-security-audit"
     title: "Audit interactive shell trust boundaries"
     description: "Review lock file parsing, journal and history paths, editor invocation, signal handler safety, untrusted run/journal data flows, and confirmation gating in the shell."
@@ -1742,6 +1783,7 @@ tasks:
     status: pending
     depends_on:
       - "shell-hardening-implement-code"
+      - "shell-polish-implement-code"
     requirements:
       - "CONTRACT.md#Security-and-authority"
       - "REQUIREMENTS.md#REQ-INTERACTIVE-SHELL"

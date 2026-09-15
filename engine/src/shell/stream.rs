@@ -1,12 +1,14 @@
 use std::fs;
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crate::{KvistError, Result, cli};
+use crate::cli;
+
+use super::style::{self, Theme};
 
 /// Delay before the spinner becomes visible, so fast commands never flicker.
 const SPINNER_DELAY: Duration = Duration::from_millis(150);
@@ -120,16 +122,28 @@ pub use super::runs::FeedbackTarget;
 /// Manages transient output streams and log link replacement for execution.
 pub struct StreamManager {
     project_root: PathBuf,
-    current_log: Mutex<Option<PathBuf>>,
+    theme: Theme,
 }
 
 impl StreamManager {
     /// Creates a new stream manager for the given project root.
-    pub fn new(project_root: &Path) -> Self {
+    pub fn new(project_root: &Path, theme: Theme) -> Self {
         Self {
             project_root: project_root.to_path_buf(),
-            current_log: Mutex::new(None),
+            theme,
         }
+    }
+
+    /// The probed terminal width, when known, for fitting stage boxes.
+    fn width(&self) -> Option<usize> {
+        style::terminal_size().map(|(width, _)| width)
+    }
+
+    /// The maximum visible columns for one stage row at the current width.
+    fn row_limit(&self) -> usize {
+        self.width()
+            .map(|width| width.saturating_sub(4))
+            .unwrap_or(160)
     }
 
     /// Starts a non-blocking progress spinner for a long-running command.
@@ -137,33 +151,27 @@ impl StreamManager {
         ProgressSpinner::start(format!("Running {command_name}"))
     }
 
-    /// Prepares a timestamped log path in `.kvist/logs/`.
-    pub fn prepare_log_path(&self, program: &str) -> Result<PathBuf> {
-        let log_dir = self.project_root.join(".kvist/logs");
-        fs::create_dir_all(&log_dir).map_err(|e| KvistError::Io {
-            operation: "create logs directory",
-            path: log_dir.clone(),
-            source: e,
-        })?;
-        let timestamp = chrono::Utc::now().format("%Y-%m-%dT%H-%M-%SZ").to_string();
-        let log_name = format!("{}_{}.log", program.replace('-', "_"), timestamp);
-        let log_path = log_dir.join(log_name);
-        if let Ok(mut guard) = self.current_log.lock() {
-            *guard = Some(log_path.clone());
-        }
-        Ok(log_path)
-    }
-
-    /// Prints the styled Prompt stage header.
+    /// Prints the Prompt stage: a closed box holding the command line.
     pub fn print_prompt_stage(&self, prompt_line: &str) {
-        println!("╭── Prompt ────────────────────────────────────────────────────────");
-        println!("│  {prompt_line}");
-        println!("╰──────────────────────────────────────────────────────────────────");
+        let titled = style::titled_box(
+            self.theme,
+            "Prompt",
+            &[crate::shell::truncate(prompt_line, self.row_limit())],
+            self.width(),
+        );
+        println!(
+            "{}\n{}\n{}",
+            titled.top,
+            titled.rows.join("\n"),
+            titled.bottom
+        );
     }
 
-    /// Prints the styled Agent Working stage header.
+    /// Prints the Agent Working stage header (the box stays open until the
+    /// result stage closes it at the same width).
     pub fn print_working_stage(&self) {
-        println!("╭── Agent Working ─────────────────────────────────────────────────");
+        let titled = style::titled_box(self.theme, "Agent Working", &[], self.width());
+        println!("{}", titled.top);
     }
 
     /// Finds the agent execution feedback to show after a run, correlated with
@@ -256,61 +264,76 @@ impl StreamManager {
         })
     }
 
-    /// Prints the styled Agent Result and Feedback stage.
-    pub fn print_result_stage(
+    /// Builds the content rows of the Agent Result stage (pure, so the
+    /// output can be asserted without a terminal).
+    pub fn result_stage_rows(
         &self,
         result: &std::result::Result<cli::CommandOutput, crate::KvistError>,
         target: &FeedbackTarget<'_>,
-    ) {
-        println!("╰──────────────────────────────────────────────────────────────────");
-        println!("╭── Agent Result ──────────────────────────────────────────────────");
+    ) -> Vec<String> {
+        let limit = self.row_limit();
+        let mut rows: Vec<String> = Vec::new();
         match result {
             Ok(output) => {
                 let text = output.to_string();
                 let trimmed = text.trim();
                 for line in trimmed.lines() {
-                    println!("│  {line}");
+                    rows.push(crate::shell::truncate(line, limit));
                 }
                 if let Some(feedback) = self.find_latest_agent_feedback(target) {
-                    println!("│");
-                    println!("│  Agent Feedback:");
+                    rows.push(String::new());
+                    rows.push("Agent Feedback:".to_owned());
                     if let (Some(in_tok), Some(out_tok)) =
                         (feedback.tokens_input, feedback.tokens_output)
                     {
                         let total = in_tok + out_tok;
-                        println!(
-                            "│    • Tokens: {in_tok} input · {out_tok} output ({total} total)"
-                        );
+                        rows.push(format!(
+                            "• Tokens: {in_tok} input · {out_tok} output ({total} total)"
+                        ));
                     }
                     if feedback.turns > 0 || feedback.tool_calls > 0 {
-                        println!(
-                            "│    • Activity: {} turn(s), {} tool call(s)",
+                        rows.push(format!(
+                            "• Activity: {} turn(s), {} tool call(s)",
                             feedback.turns, feedback.tool_calls
-                        );
+                        ));
                     }
                     if let Some(reasoning) = &feedback.reasoning {
                         // `truncate` is character-based, so multi-byte text
                         // never panics on a byte boundary.
                         let snippet = crate::shell::truncate(reasoning, 80);
-                        println!("│    • Reasoning: \"{snippet}\"");
+                        rows.push(format!("• Reasoning: \"{snippet}\""));
                     }
                     if let Some(traj) = &feedback.trajectory_path
                         && let Ok(rel) = traj.strip_prefix(&self.project_root)
                     {
-                        println!("│    • Trajectory: ./{rel}", rel = rel.display());
+                        rows.push(format!("• Trajectory: ./{rel}", rel = rel.display()));
                     }
                     if let Some(log) = &feedback.log_path
                         && let Ok(rel) = log.strip_prefix(&self.project_root)
                     {
-                        println!("│    • Full log: ./{rel}", rel = rel.display());
+                        rows.push(format!("• Full log: ./{rel}", rel = rel.display()));
                     }
                 }
             }
             Err(error) => {
-                println!("│  ✘ Execution failed: {error}");
+                rows.push(format!("✘ Execution failed: {error}"));
             }
         }
-        println!("╰──────────────────────────────────────────────────────────────────");
+        rows
+    }
+
+    /// Closes the Agent Working box and prints the Agent Result and Feedback
+    /// stage as a closed box that fits the terminal width.
+    pub fn print_result_stage(
+        &self,
+        result: &std::result::Result<cli::CommandOutput, crate::KvistError>,
+        target: &FeedbackTarget<'_>,
+    ) {
+        let close = style::titled_box(self.theme, "Agent Working", &[], self.width()).bottom;
+        let rows = self.result_stage_rows(result, target);
+        let titled = style::titled_box(self.theme, "Agent Result", &rows, self.width());
+        println!("{}\n{}\n{}", close, titled.top, titled.rows.join("\n"));
+        println!("{}", titled.bottom);
     }
 }
 
@@ -336,18 +359,9 @@ mod tests {
     }
 
     #[test]
-    fn prepare_log_path_creates_directory_and_returns_valid_path() {
-        let dir = tempdir().unwrap();
-        let manager = StreamManager::new(dir.path());
-        let log_path = manager.prepare_log_path("task-run").unwrap();
-        assert!(log_path.starts_with(dir.path().join(".kvist/logs")));
-        assert!(log_path.to_str().unwrap().contains("task_run"));
-    }
-
-    #[test]
     fn stage_printing_executes_without_panicking() {
         let dir = tempdir().unwrap();
-        let manager = StreamManager::new(dir.path());
+        let manager = StreamManager::new(dir.path(), Theme::plain());
         manager.print_prompt_stage("task run . implement-code");
         manager.print_working_stage();
         manager.print_result_stage(
@@ -355,8 +369,103 @@ mod tests {
             &FeedbackTarget::Latest,
         );
         manager.print_result_stage(
-            &Err(KvistError::AgentRuntime(agent_runtime::Error::Cancelled)),
+            &Err(crate::KvistError::AgentRuntime(
+                agent_runtime::Error::Cancelled,
+            )),
             &FeedbackTarget::None,
+        );
+    }
+
+    #[test]
+    fn result_stage_rows_keep_the_full_error_detail() {
+        let dir = tempdir().unwrap();
+        let manager = StreamManager::new(dir.path(), Theme::plain());
+        let rows = manager.result_stage_rows(
+            &Err(crate::KvistError::AgentRuntime(
+                agent_runtime::Error::Cancelled,
+            )),
+            &FeedbackTarget::None,
+        );
+        assert_eq!(rows.len(), 1);
+        assert!(rows[0].starts_with("✘ Execution failed: "));
+        assert!(rows[0].contains("cancelled"));
+
+        let rows = manager.result_stage_rows(
+            &Ok(cli::CommandOutput::message("line one\nline two")),
+            &FeedbackTarget::None,
+        );
+        assert_eq!(rows, vec!["line one".to_owned(), "line two".to_owned()]);
+    }
+
+    #[test]
+    fn result_stage_rows_truncates_multibyte_reasoning_on_a_char_boundary() {
+        let dir = tempdir().unwrap();
+        let runs_dir = dir.path().join(".kvist").join("runs");
+        fs::create_dir_all(&runs_dir).unwrap();
+        // A 100-character multi-byte reasoning snippet: truncation must stay
+        // on a character boundary and mark the cut.
+        let reasoning = "é".repeat(100);
+        let journal = format!(
+            r#"{{"event":"session_start","session_id":"s1","task_id":"task-mb","timestamp":1}}
+{{"event":"model_reasoning","turn":1,"reasoning":"{reasoning}"}}
+{{"event":"session_finish","session_id":"s1","task_id":"task-mb","total_turns":1,"total_tokens":10,"success":true}}
+"#
+        );
+        fs::write(
+            runs_dir.join("task-mb_2026-09-11T22-00-00Z.trajectory.jsonl"),
+            journal,
+        )
+        .unwrap();
+
+        let manager = StreamManager::new(dir.path(), Theme::plain());
+        let rows = manager.result_stage_rows(
+            &Ok(cli::CommandOutput::message("done")),
+            &FeedbackTarget::Latest,
+        );
+        let reasoning_row = rows
+            .iter()
+            .find(|row| row.starts_with("• Reasoning:"))
+            .expect("reasoning row present");
+        let snippet = reasoning_row
+            .trim_start_matches("• Reasoning: \"")
+            .trim_end_matches("\"");
+        assert!(snippet.ends_with("..."));
+        // 77 visible characters plus the ellipsis, all valid UTF-8.
+        assert_eq!(snippet.chars().count(), 80);
+        assert!(snippet.chars().all(|c| c == 'é' || c == '.'));
+    }
+
+    #[test]
+    fn result_stage_rows_include_the_feedback_block_with_links() {
+        let dir = tempdir().unwrap();
+        let kvist_dir = dir.path().join(".kvist");
+        let runs_dir = kvist_dir.join("runs");
+        let logs_dir = kvist_dir.join("logs");
+        fs::create_dir_all(&runs_dir).unwrap();
+        fs::create_dir_all(&logs_dir).unwrap();
+        write_trajectory(&runs_dir, "task-fb", "2026-09-11T22-00-00Z");
+        fs::write(
+            runs_dir.join("task-fb_2026-09-11T22-00-00Z.json"),
+            r#"{"status":"success","tokens_input":12,"tokens_output":8}"#,
+        )
+        .unwrap();
+        fs::write(logs_dir.join("task-fb_2026-09-11T22-00-00Z.log"), "out").unwrap();
+
+        let manager = StreamManager::new(dir.path(), Theme::plain());
+        let rows = manager.result_stage_rows(
+            &Ok(cli::CommandOutput::message("done")),
+            &FeedbackTarget::Task("task-fb"),
+        );
+        assert!(rows.contains(&"Agent Feedback:".to_owned()));
+        assert!(rows.contains(&"• Tokens: 12 input · 8 output (20 total)".to_owned()));
+        assert!(rows.contains(&"• Activity: 1 turn(s), 1 tool call(s)".to_owned()));
+        assert!(
+            rows.iter()
+                .any(|row| row.starts_with("• Trajectory: ./.kvist/runs/"))
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.starts_with("• Full log: ./.kvist/logs/"))
         );
     }
 
@@ -367,7 +476,7 @@ mod tests {
         fs::create_dir_all(&runs_dir).unwrap();
         let traj_path = write_trajectory(&runs_dir, "task-1", "2026-09-11T22-00-00Z");
 
-        let manager = StreamManager::new(dir.path());
+        let manager = StreamManager::new(dir.path(), Theme::plain());
         let feedback = manager
             .find_latest_agent_feedback(&FeedbackTarget::Latest)
             .expect("feedback present");
@@ -392,7 +501,7 @@ mod tests {
         let older = write_trajectory(&runs_dir, "task-a", "2026-09-11T20-00-00Z");
         write_trajectory(&runs_dir, "task-b", "2026-09-11T22-00-00Z");
 
-        let manager = StreamManager::new(dir.path());
+        let manager = StreamManager::new(dir.path(), Theme::plain());
         let feedback = manager
             .find_latest_agent_feedback(&FeedbackTarget::Task("task-a"))
             .expect("feedback for the requested task");
@@ -417,7 +526,7 @@ mod tests {
 "#;
         fs::write(&traj_path, journal).unwrap();
 
-        let manager = StreamManager::new(dir.path());
+        let manager = StreamManager::new(dir.path(), Theme::plain());
         let feedback = manager
             .find_latest_agent_feedback(&FeedbackTarget::Latest)
             .expect("feedback present");
@@ -437,7 +546,7 @@ mod tests {
         )
         .unwrap();
 
-        let manager = StreamManager::new(dir.path());
+        let manager = StreamManager::new(dir.path(), Theme::plain());
         let feedback = manager
             .find_latest_agent_feedback(&FeedbackTarget::Latest)
             .expect("feedback present");
@@ -459,7 +568,7 @@ mod tests {
         // A different task's log must not be attributed to this run.
         fs::write(logs_dir.join("task-other_2026-09-11T23-00-00Z.log"), "x").unwrap();
 
-        let manager = StreamManager::new(dir.path());
+        let manager = StreamManager::new(dir.path(), Theme::plain());
         let feedback = manager
             .find_latest_agent_feedback(&FeedbackTarget::Latest)
             .expect("feedback present");

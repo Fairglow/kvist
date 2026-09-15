@@ -1,6 +1,7 @@
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Command as ProcessCommand, Stdio};
+use std::process::{Command as ProcessCommand, ExitStatus, Stdio};
 
 use agent_runtime::{MAX_PROMPT_BYTES, split_raw_command};
 
@@ -33,9 +34,25 @@ pub fn prompt_editor_command(project_dir: &Path, task_id: &str) -> Result<Option
     }))
 }
 
-/// Opens `$VISUAL`/`$EDITOR` (defaulting to `nano`, `vim`, or `vi`) on a temporary file
-/// seeded with `seed`, and returns the validated contents after the editor exits.
+/// Opens `$VISUAL`/`$EDITOR` (defaulting to `vi`) on a temporary file seeded
+/// with `seed`, and returns the validated contents after the editor exits.
 pub fn edit_prompt_with_seed(seed: &str) -> Result<String> {
+    let editor = std::env::var_os("VISUAL")
+        .or_else(|| std::env::var_os("EDITOR"))
+        .unwrap_or_else(|| "vi".into())
+        .into_string()
+        .map_err(|_| KvistError::InvalidPromptInput {
+            reason: "VISUAL or EDITOR must be valid UTF-8".to_owned(),
+        })?;
+    edit_prompt_with_editor(seed, &editor)
+}
+
+/// Opens an explicit editor command (a file path or a `program args...`
+/// line) on a temporary file seeded with `seed`, and returns the validated
+/// contents after the editor exits. The prompt must be non-empty and within
+/// [`MAX_PROMPT_BYTES`]; a non-zero editor exit is a cancellation, not a
+/// crash.
+pub fn edit_prompt_with_editor(seed: &str, editor: &str) -> Result<String> {
     let directory = tempfile::tempdir().map_err(|source| KvistError::Io {
         operation: "create prompt editor directory",
         path: std::env::temp_dir(),
@@ -48,17 +65,10 @@ pub fn edit_prompt_with_seed(seed: &str) -> Result<String> {
         source,
     })?;
 
-    let editor = std::env::var_os("VISUAL")
-        .or_else(|| std::env::var_os("EDITOR"))
-        .unwrap_or_else(|| "vi".into())
-        .into_string()
-        .map_err(|_| KvistError::InvalidPromptInput {
-            reason: "VISUAL or EDITOR must be valid UTF-8".to_owned(),
-        })?;
-    let (program, mut arguments) = if Path::new(&editor).is_file() {
-        (editor, Vec::new())
+    let (program, mut arguments) = if Path::new(editor).is_file() {
+        (editor.to_owned(), Vec::new())
     } else {
-        split_raw_command(&editor).map_err(KvistError::AgentRuntime)?
+        split_raw_command(editor).map_err(KvistError::AgentRuntime)?
     };
     arguments.push(
         prompt_path
@@ -69,21 +79,13 @@ pub fn edit_prompt_with_seed(seed: &str) -> Result<String> {
             .to_owned(),
     );
 
-    let status = ProcessCommand::new(&program)
-        .args(&arguments)
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .map_err(|source| KvistError::Io {
-            operation: "open prompt editor",
-            path: PathBuf::from(&program),
-            source,
-        })?;
+    let status = spawn_editor(&program, &arguments)?;
 
     if !status.success() {
         return Err(KvistError::InvalidPromptInput {
-            reason: format!("editor `{program}` exited with status {status}"),
+            reason: format!(
+                "editor `{program}` exited with status {status}; prompt authoring cancelled"
+            ),
         });
     }
 
@@ -103,6 +105,40 @@ pub fn edit_prompt_with_seed(seed: &str) -> Result<String> {
         });
     }
     Ok(contents)
+}
+
+/// Launches the editor, retrying the transient `ETXTBSY` ("text file
+/// busy") failure.
+///
+/// On Linux the kernel briefly reports a file as busy while another thread
+/// in the same process is writing files, and an editor binary can be busy
+/// while an updater rewrites it; both clear on their own, so a short bounded
+/// retry is safe and keeps a launch failure from being misreported as a
+/// missing editor.
+fn spawn_editor(program: &str, arguments: &[String]) -> Result<ExitStatus> {
+    let mut retries = 0u32;
+    loop {
+        match ProcessCommand::new(program)
+            .args(arguments)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+        {
+            Ok(status) => return Ok(status),
+            Err(error) if error.kind() == io::ErrorKind::ExecutableFileBusy && retries < 4 => {
+                retries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(error) => {
+                return Err(KvistError::Io {
+                    operation: "open prompt editor",
+                    path: PathBuf::from(program),
+                    source: error,
+                });
+            }
+        }
+    }
 }
 
 /// Seeds the editor buffer with the task's recorded context.
@@ -245,5 +281,87 @@ mod tests {
             "hello world
 line 2",
         );
+    }
+
+    /// Writes an executable POSIX shell script acting as the editor: it
+    /// receives the prompt file path as its first argument.
+    #[cfg(unix)]
+    fn editor_script(dir: &Path, body: &str) -> String {
+        let script = dir.join("editor.sh");
+        fs::write(&script, format!("#!/bin/sh\n{body}")).expect("write editor script");
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).expect("chmod");
+        script.to_str().expect("utf-8 path").to_owned()
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn editor_cancellation_is_a_typed_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let editor = editor_script(dir.path(), "exit 3");
+        let error = edit_prompt_with_editor("seed", &editor).unwrap_err();
+        match error {
+            KvistError::InvalidPromptInput { reason } => {
+                assert!(reason.contains("exited with status"), "reason: {reason}");
+                assert!(reason.contains("cancelled"), "reason: {reason}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn editor_empty_prompt_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let editor = editor_script(dir.path(), ": > \"$1\"");
+        let error = edit_prompt_with_editor("seed", &editor).unwrap_err();
+        match error {
+            KvistError::InvalidPromptInput { reason } => {
+                assert!(reason.contains("must not be empty"), "reason: {reason}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn editor_oversized_prompt_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        // The script emits MAX_PROMPT_BYTES + 1 bytes into the prompt file.
+        let editor = editor_script(
+            dir.path(),
+            &format!(
+                "head -c {} /dev/zero | tr '\\0' 'a' > \"$1\"",
+                MAX_PROMPT_BYTES + 1
+            ),
+        );
+        let error = edit_prompt_with_editor("seed", &editor).unwrap_err();
+        match error {
+            KvistError::InvalidPromptInput { reason } => {
+                assert!(reason.contains("exceeds the"), "reason: {reason}");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn editor_valid_edit_is_returned() {
+        let dir = tempfile::tempdir().unwrap();
+        let editor = editor_script(dir.path(), "printf 'do the thing' > \"$1\"");
+        let prompt = edit_prompt_with_editor("seed", &editor).expect("valid edit");
+        assert_eq!(prompt, "do the thing");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn editor_must_exist_or_the_error_names_the_program() {
+        let error = edit_prompt_with_editor("seed", "/definitely/not/an/editor").unwrap_err();
+        match error {
+            KvistError::Io { operation, .. } => {
+                assert!(operation == "open prompt editor");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 }

@@ -48,6 +48,7 @@ mod runs;
 mod state;
 mod status;
 mod stream;
+mod style;
 mod tree;
 
 use std::io::{self, BufRead, IsTerminal, Write};
@@ -77,6 +78,7 @@ pub use runs::RecentRun;
 pub use state::DynamicState;
 pub use status::{StatusContext, print_welcome_banner, short_prompt, status_bar_label};
 pub use stream::{AgentFeedback, ProgressSpinner, StreamManager};
+pub use style::{Theme, report_error};
 use tree::build_root;
 
 /// Name of the completion menu registered with the line editor.
@@ -112,25 +114,37 @@ fn journal_entry(command: &str, result: &str) -> JournalEntry {
 }
 
 /// One interactive session: the project root, its append-only journal, the
-/// stream manager, and the current-component focus shared with completion.
+/// stream manager, the resolved theme, the current-component focus shared
+/// with completion, and the last command's exit state for the prompt.
 pub(crate) struct Shell {
     project_dir: PathBuf,
     journal: SessionJournal,
     stream_manager: StreamManager,
+    theme: Theme,
     /// The current component (via `cd`), shared with the completer so it can
     /// be reordered without rebuilding the line editor.
     focus: Arc<Mutex<Option<String>>>,
+    /// Whether the last executed command failed; the next prompt shows the
+    /// failure marker until a command succeeds.
+    last_failed: bool,
 }
 
 impl Shell {
     /// Creates a shell session for one project directory.
-    pub(crate) fn new(project_dir: &Path, focus: Arc<Mutex<Option<String>>>) -> Self {
+    pub(crate) fn new(project_dir: &Path, focus: Arc<Mutex<Option<String>>>, theme: Theme) -> Self {
         Self {
             project_dir: project_dir.to_path_buf(),
             journal: SessionJournal::new(project_dir),
-            stream_manager: StreamManager::new(project_dir),
+            stream_manager: StreamManager::new(project_dir, theme),
+            theme,
             focus,
+            last_failed: false,
         }
+    }
+
+    /// Records the exit state of the last handled line for the prompt.
+    fn note(&mut self, failed: bool) {
+        self.last_failed = failed;
     }
 
     /// The current component focus, when one is set.
@@ -156,23 +170,26 @@ impl Shell {
         let (program, arguments) = match split_raw_command(line) {
             Ok(split) => split,
             Err(error) => {
-                eprintln!("error: {error}");
+                report_error(self.theme, &error.to_string());
                 self.journal.append(journal_entry(line, "syntax error"));
+                self.note(true);
                 return LoopAction::Continue;
             }
         };
 
         match program.as_str() {
             "journal" => {
-                display_session_status(&self.journal);
+                display_session_status(self.theme, &self.journal);
                 self.journal.append(journal_entry(line, "shown"));
+                self.note(false);
             }
             "history" => {
                 self.handle_history(&arguments, line, history);
             }
             "help" => {
-                display_output(&render_help());
+                display_output(&render_help(self.theme));
                 self.journal.append(journal_entry(line, "shown"));
+                self.note(false);
             }
             "cd" => {
                 self.handle_cd(&arguments, line);
@@ -187,11 +204,13 @@ impl Shell {
                 self.handle_last(&arguments, line);
             }
             "locks" if arguments.is_empty() || arguments == ["clean"] => {
-                handle_locks(!arguments.is_empty(), &self.journal);
+                handle_locks(self.theme, !arguments.is_empty(), &self.journal);
+                self.note(false);
             }
             "locks" => {
-                eprintln!("usage: locks [clean]");
+                report_error(self.theme, "usage: locks [clean]");
                 self.journal.append(journal_entry(line, "usage hint"));
+                self.note(true);
             }
             // In the interactive shell REPL, bare 'status' and 'overview'
             // display the human-friendly project overview; anything with
@@ -204,10 +223,12 @@ impl Shell {
             // as prompt text).
             "prompt" => match arguments.len() {
                 0 => {
-                    println!(
-                        "usage: prompt <TASK_ID> — opens your editor seeded with the task context"
+                    report_error(
+                        self.theme,
+                        "usage: prompt <TASK_ID> — opens your editor seeded with the task context",
                     );
                     self.journal.append(journal_entry(line, "usage hint"));
+                    self.note(true);
                 }
                 1 => {
                     self.handle_prompt_authoring(line, &arguments[0]);
@@ -224,7 +245,7 @@ impl Shell {
     }
 
     /// Shows the human-friendly project overview for bare `status`/`overview`.
-    fn handle_overview(&self, line: &str) {
+    fn handle_overview(&mut self, line: &str) {
         let result = (|| {
             let inspection = crate::project_state::inspect(&self.project_dir)?;
             Ok::<String, KvistError>(crate::status::render(
@@ -240,10 +261,12 @@ impl Shell {
                 display_output(&text);
                 self.journal
                     .append(journal_entry(line, &truncate(&text, 100)));
+                self.note(false);
             }
             Err(error) => {
                 let _ = error.print();
                 self.journal.append(journal_entry(line, "error"));
+                self.note(true);
             }
         }
     }
@@ -258,38 +281,49 @@ impl Shell {
                     .current_component()
                     .filter(|c| !c.is_empty() && c != ".")
                     .unwrap_or_else(|| ". (root)".to_owned());
-                println!("Component: {current}");
+                println!("Component: {}", self.theme.bold(&current));
                 self.journal.append(journal_entry(line, "show"));
+                self.note(false);
             }
             CdOutcome::Set(component) => {
                 if let Ok(mut guard) = self.focus.lock() {
                     *guard = Some(component.clone());
                 }
-                println!("Component: {component}");
+                println!("Component: {}", self.theme.bold(&component));
                 self.journal.append(journal_entry(line, &component));
+                self.note(false);
             }
             CdOutcome::Unknown { requested, known } => {
                 if known.is_empty() {
-                    eprintln!("error: no components discovered in this project");
+                    report_error(self.theme, "no components discovered in this project");
                 } else {
-                    eprintln!(
-                        "error: unknown component `{requested}`; known: {}",
-                        known.join(", ")
+                    report_error(
+                        self.theme,
+                        &format!(
+                            "unknown component `{requested}`; known: {}",
+                            known.join(", ")
+                        ),
                     );
                 }
                 self.journal
                     .append(journal_entry(line, "unknown component"));
+                self.note(true);
             }
             CdOutcome::Invalid(requested) => {
-                eprintln!(
-                    "error: `{requested}` is not a valid component path (use a relative path or `.`)"
+                report_error(
+                    self.theme,
+                    &format!(
+                        "`{requested}` is not a valid component path (use a relative path or `.`)"
+                    ),
                 );
                 self.journal
                     .append(journal_entry(line, "invalid component path"));
+                self.note(true);
             }
             CdOutcome::Usage => {
-                eprintln!("usage: cd [COMPONENT_DIR]");
+                report_error(self.theme, "usage: cd [COMPONENT_DIR]");
                 self.journal.append(journal_entry(line, "usage hint"));
+                self.note(true);
             }
         }
         LoopAction::Continue
@@ -300,8 +334,9 @@ impl Shell {
         let parsed = match parse_tasks_args(args) {
             Ok(parsed) => parsed,
             Err(message) => {
-                eprintln!("error: {message}");
+                report_error(self.theme, &message);
                 self.journal.append(journal_entry(line, "usage hint"));
+                self.note(true);
                 return LoopAction::Continue;
             }
         };
@@ -313,23 +348,28 @@ impl Shell {
             .or_else(|| self.current_component())
             .unwrap_or_else(|| ".".to_owned());
         if let Some(hint) = hint {
-            println!("{hint}");
+            println!("{}", self.theme.dim(&hint));
         }
         let state = DynamicState::load(&self.project_dir);
         if !state.components().iter().any(|c| c == &component) {
             let known = state.components().join(", ");
             if known.is_empty() {
-                eprintln!("error: no components discovered in this project");
+                report_error(self.theme, "no components discovered in this project");
             } else {
-                eprintln!("error: unknown component `{component}`; known: {known}");
+                report_error(
+                    self.theme,
+                    &format!("unknown component `{component}`; known: {known}"),
+                );
             }
             self.journal
                 .append(journal_entry(line, "unknown component"));
+            self.note(true);
             return LoopAction::Continue;
         }
         let Some(scope) = state.scopes.get(&component) else {
             println!("No readable task queue in `{component}`.");
             self.journal.append(journal_entry(line, "no queue"));
+            self.note(false);
             return LoopAction::Continue;
         };
         let next_ready = task_queue::next_ready_task_id(&scope.tasks);
@@ -345,9 +385,15 @@ impl Shell {
                 blocked_reason: task.blocked_reason.clone(),
             })
             .collect();
-        display_output(&render_tasks(&component, &rows, next_ready.as_deref()));
+        display_output(&render_tasks(
+            self.theme,
+            &component,
+            &rows,
+            next_ready.as_deref(),
+        ));
         self.journal
             .append(journal_entry(line, &format!("{} tasks", rows.len())));
+        self.note(false);
         LoopAction::Continue
     }
 
@@ -359,8 +405,9 @@ impl Shell {
         let (requested_component, task) = match parse_run_args(args) {
             Ok(parsed) => parsed,
             Err(message) => {
-                eprintln!("error: {message}");
+                report_error(self.theme, &message);
                 self.journal.append(journal_entry(line, "usage hint"));
+                self.note(true);
                 return LoopAction::Continue;
             }
         };
@@ -371,7 +418,7 @@ impl Shell {
             .or_else(|| self.current_component())
             .unwrap_or_else(|| ".".to_owned());
         if let Some(hint) = hint {
-            println!("{hint}");
+            println!("{}", self.theme.dim(&hint));
         }
         let suggested = task.is_none();
         let task = match task {
@@ -380,10 +427,14 @@ impl Shell {
                 match resolve_next_ready_task(&DynamicState::load(&self.project_dir), &component) {
                     Some(task_id) => task_id,
                     None => {
-                        eprintln!(
-                            "error: no ready tasks in `{component}`; pass a TASK_ID or inspect `tasks`"
+                        report_error(
+                            self.theme,
+                            &format!(
+                                "no ready tasks in `{component}`; pass a TASK_ID or inspect `tasks`"
+                            ),
                         );
                         self.journal.append(journal_entry(line, "no ready task"));
+                        self.note(true);
                         return LoopAction::Continue;
                     }
                 }
@@ -399,12 +450,13 @@ impl Shell {
     /// Asks the user to confirm a suggested (next-ready) run. A refusal, or a
     /// confirmation that cannot be obtained in a non-interactive context, aborts
     /// the run without changing durable state.
-    fn confirm_suggested_run(&self, task_id: &str, line: &str) -> bool {
+    fn confirm_suggested_run(&mut self, task_id: &str, line: &str) -> bool {
         match task_commands::confirm_run_suggestion(task_id) {
             Ok(confirmed) => {
                 if !confirmed {
                     println!("Cancelled: did not run the suggested task `{task_id}`.");
                     self.journal.append(journal_entry(line, "run cancelled"));
+                    self.note(false);
                 }
                 confirmed
             }
@@ -412,6 +464,7 @@ impl Shell {
                 let _ = error.print();
                 self.journal
                     .append(journal_entry(line, "confirmation unavailable"));
+                self.note(true);
                 false
             }
         }
@@ -422,15 +475,17 @@ impl Shell {
         let count = match parse_count("last", args, 10) {
             Ok(count) => count,
             Err(message) => {
-                eprintln!("error: {message}");
+                report_error(self.theme, &message);
                 self.journal.append(journal_entry(line, "usage hint"));
+                self.note(true);
                 return LoopAction::Continue;
             }
         };
         let runs = runs::scan_recent_runs(&self.project_dir, count);
-        display_output(&render_recent_runs(&runs, &self.project_dir));
+        display_output(&render_recent_runs(self.theme, &runs, &self.project_dir));
         self.journal
             .append(journal_entry(line, &format!("{} runs", runs.len())));
+        self.note(false);
         LoopAction::Continue
     }
 
@@ -444,8 +499,9 @@ impl Shell {
         let count = match parse_count("history", args, 20) {
             Ok(count) => count,
             Err(message) => {
-                eprintln!("error: {message}");
+                report_error(self.theme, &message);
                 self.journal.append(journal_entry(line, "usage hint"));
+                self.note(true);
                 return LoopAction::Continue;
             }
         };
@@ -462,19 +518,29 @@ impl Shell {
             Ok(items) if items.is_empty() => {
                 println!("Editor history: (empty)");
                 self.journal.append(journal_entry(line, "empty"));
+                self.note(false);
             }
             Ok(items) => {
                 let mut text = format!("Editor history ({} most recent):\n", items.len());
                 for (i, item) in items.iter().enumerate() {
-                    text.push_str(&format!("  {}. {}\n", i + 1, item.command_line));
+                    text.push_str(&format!(
+                        "  {}. {}\n",
+                        self.theme.dim(&format!("{i}")),
+                        item.command_line
+                    ));
                 }
                 display_output(&text);
                 self.journal
                     .append(journal_entry(line, &format!("{} lines", items.len())));
+                self.note(false);
             }
             Err(error) => {
-                eprintln!("error: could not read editor history: {error}");
+                report_error(
+                    self.theme,
+                    &format!("could not read editor history: {error}"),
+                );
                 self.journal.append(journal_entry(line, "history error"));
+                self.note(true);
             }
         }
         LoopAction::Continue
@@ -482,19 +548,24 @@ impl Shell {
 
     /// Runs the `prompt <task_id>` editor flow without ever killing the
     /// session; submission requires explicit confirmation.
-    fn handle_prompt_authoring(&self, line: &str, task_id: &str) -> LoopAction {
+    fn handle_prompt_authoring(&mut self, line: &str, task_id: &str) -> LoopAction {
         let command = match prompt_editor_command(&self.project_dir, task_id) {
             Ok(Some(command)) => command,
             Ok(None) => {
-                eprintln!(
-                    "No such task `{task_id}`. Try `tasks` to list tasks or `overview` for project status."
+                report_error(
+                    self.theme,
+                    &format!(
+                        "no such task `{task_id}`. Try `tasks` to list tasks or `overview` for project status."
+                    ),
                 );
                 self.journal.append(journal_entry(line, "no such task"));
+                self.note(true);
                 return LoopAction::Continue;
             }
             Err(error) => {
                 let _ = error.print();
                 self.journal.append(journal_entry(line, "editor error"));
+                self.note(true);
                 return LoopAction::Continue;
             }
         };
@@ -504,6 +575,7 @@ impl Shell {
         if !confirm("Submit this prompt and start the agent run? [y/N] ") {
             println!("Prompt submission cancelled.");
             self.journal.append(journal_entry(line, "prompt cancelled"));
+            self.note(false);
             return LoopAction::Continue;
         }
 
@@ -521,25 +593,27 @@ impl Shell {
             Err(err) => truncate(&err.to_string(), 100),
         };
         self.journal.append(journal_entry(line, &summary));
+        self.note(result.is_err());
         LoopAction::Continue
     }
 
     /// Dispatches a command line through the CLI, handling streaming,
     /// paging, confirmation gates, and journaling. Total: every failure is
     /// reported and the session continues.
-    fn dispatch(&self, line: &str) {
+    fn dispatch(&mut self, line: &str) {
         self.dispatch_labeled(line, line);
     }
 
     /// Dispatches `command_line` while journaling `journal_line` (used by
     /// builtins that synthesize a CLI command, e.g. `run` → `task run`).
-    fn dispatch_labeled(&self, command_line: &str, journal_line: &str) {
+    fn dispatch_labeled(&mut self, command_line: &str, journal_line: &str) {
         let (program, arguments) = match split_raw_command(command_line) {
             Ok(split) => split,
             Err(error) => {
-                eprintln!("error: {error}");
+                report_error(self.theme, &error.to_string());
                 self.journal
                     .append(journal_entry(journal_line, "syntax error"));
+                self.note(true);
                 return;
             }
         };
@@ -553,6 +627,7 @@ impl Shell {
                 let _ = error.print();
                 self.journal
                     .append(journal_entry(journal_line, "syntax error"));
+                self.note(true);
                 return;
             }
         };
@@ -561,6 +636,7 @@ impl Shell {
             println!("You are already in an active Kvist shell.");
             self.journal
                 .append(journal_entry(journal_line, "already in shell"));
+            self.note(false);
             return;
         }
 
@@ -571,6 +647,7 @@ impl Shell {
             println!("Operation cancelled.");
             self.journal
                 .append(journal_entry(journal_line, "confirmation declined"));
+            self.note(false);
             return;
         }
 
@@ -630,11 +707,21 @@ impl Shell {
             Err(err) => truncate(&err.to_string(), 100),
         };
         self.journal.append(journal_entry(journal_line, &summary));
+        // A cooperative cancellation is not a failure for the prompt state.
+        self.note(matches!(
+            &result,
+            Err(error)
+                if !matches!(
+                    error,
+                    KvistError::AgentSetupCancelled
+                        | KvistError::AgentRuntime(agent_runtime::Error::Cancelled)
+                )
+        ));
     }
 }
 
 /// Lists live and stale task locks; `locks clean` removes the stale ones.
-fn handle_locks(clean: bool, journal: &SessionJournal) -> LoopAction {
+fn handle_locks(theme: Theme, clean: bool, journal: &SessionJournal) -> LoopAction {
     let command = if clean { "locks clean" } else { "locks" };
     let entries = locks::scan();
     let cleaned = if clean {
@@ -647,7 +734,7 @@ fn handle_locks(clean: bool, journal: &SessionJournal) -> LoopAction {
         journal.append(journal_entry(command, "none"));
         return LoopAction::Continue;
     }
-    display_output(&render_locks(&entries, &cleaned, clean));
+    display_output(&render_locks(theme, &entries, &cleaned, clean));
     journal.append(journal_entry(
         command,
         &format!("{} locks, {} cleaned", entries.len(), cleaned.len()),
@@ -656,10 +743,22 @@ fn handle_locks(clean: bool, journal: &SessionJournal) -> LoopAction {
 }
 
 /// Renders the task-lock listing (pure, so it is testable without user state).
-fn render_locks(entries: &[locks::LockEntry], cleaned: &[PathBuf], clean: bool) -> String {
-    let mut text = format!("Task locks ({}):\n", entries.len());
+fn render_locks(
+    theme: Theme,
+    entries: &[locks::LockEntry],
+    cleaned: &[PathBuf],
+    clean: bool,
+) -> String {
+    let mut text = format!(
+        "{}\n",
+        theme.bold(&format!("Task locks ({}):", entries.len()))
+    );
     for entry in entries {
-        let state = if entry.live { "live" } else { "stale" };
+        let state = if entry.live {
+            theme.green("[live]")
+        } else {
+            theme.red("[stale]")
+        };
         let task = entry.task_id.as_deref().unwrap_or("<unknown>");
         let pid = entry
             .pid
@@ -667,14 +766,18 @@ fn render_locks(entries: &[locks::LockEntry], cleaned: &[PathBuf], clean: bool) 
             .unwrap_or_else(|| "<unknown>".to_owned());
         let age = locks::format_age(entry.age_secs);
         text.push_str(&format!(
-            "  [{state}] task {task} · pid {pid} · age {age}\n"
+            "  {state} task {task} · pid {pid} · {}\n",
+            theme.dim(&format!("age {age}"))
         ));
     }
     for path in cleaned {
-        text.push_str(&format!("  cleaned: {}\n", path.display()));
+        text.push_str(&format!(
+            "  {}\n",
+            theme.dim(&format!("cleaned: {}", path.display()))
+        ));
     }
     if clean && cleaned.is_empty() {
-        text.push_str("  no stale locks to clean\n");
+        text.push_str(&format!("  {}\n", theme.dim("no stale locks to clean")));
     }
     text
 }
@@ -863,57 +966,87 @@ fn parse_count(
     }
 }
 
+/// The colored spelling of a durable task status in the `tasks` table.
+fn status_style(theme: Theme, status: TaskStatus) -> String {
+    match status {
+        TaskStatus::Pending => theme.dim(status_label(status)),
+        TaskStatus::InProgress => theme.cyan(status_label(status)),
+        TaskStatus::Blocked => theme.red(status_label(status)),
+        TaskStatus::Completed => theme.green(status_label(status)),
+    }
+}
+
 /// Renders the `tasks` table (pure, so it is testable without a terminal).
-fn render_tasks(component: &str, rows: &[TaskRow], next_ready: Option<&str>) -> String {
+fn render_tasks(
+    theme: Theme,
+    component: &str,
+    rows: &[TaskRow],
+    next_ready: Option<&str>,
+) -> String {
     if rows.is_empty() {
         return format!("No tasks in `{component}` match the filter.");
     }
-    let mut text = format!("Tasks in `{component}` ({} shown):\n", rows.len());
+    let mut text = format!(
+        "{}\n",
+        theme.bold(&format!("Tasks in `{component}` ({} shown):", rows.len()))
+    );
     for row in rows {
         let marker = if next_ready.is_some_and(|n| n == row.id) {
-            "★ "
+            theme.yellow("★ ")
         } else {
-            "  "
+            "  ".to_owned()
         };
         text.push_str(&format!(
-            "{}{:<28} {:<12} {:<16} {}\n",
-            marker,
+            "{}{:<28} {} {:<16} {}\n",
+            style::pad_right(&marker, 2),
             truncate(&row.id, 28),
-            status_label(row.status),
+            style::pad_right(&status_style(theme, row.status), 12),
             kind_label(row.kind),
             truncate(&row.title, 60)
         ));
         if let Some(reason) = &row.blocked_reason {
-            text.push_str(&format!("   blocked: {}\n", truncate(reason, 100)));
+            text.push_str(&format!(
+                "   {}\n",
+                theme.dim(&format!("blocked: {}", truncate(reason, 100)))
+            ));
         }
     }
     if let Some(next) = next_ready {
-        text.push_str(&format!("next ready: {next}\n"));
+        text.push_str(&format!(
+            "{} {}\n",
+            theme.dim("next ready:"),
+            theme.bold(next)
+        ));
     }
     text
 }
 
 /// Renders the `last` builtin run table (pure, so it is testable).
-fn render_recent_runs(runs: &[RecentRun], project_root: &Path) -> String {
+fn render_recent_runs(theme: Theme, runs: &[RecentRun], project_root: &Path) -> String {
     if runs.is_empty() {
         return "No agent runs recorded yet.".to_owned();
     }
-    let mut text = format!("Recent agent runs ({}):\n", runs.len());
+    let mut text = format!(
+        "{}\n",
+        theme.bold(&format!("Recent agent runs ({}):", runs.len()))
+    );
     for run in runs {
         let component = run.component.as_deref().unwrap_or(".");
         let task = run.task_id.as_deref().unwrap_or("<unknown>");
         let status = match run.success {
-            Some(true) => "success",
-            Some(false) => "failed",
-            None => "unknown",
+            Some(true) => theme.green("success"),
+            Some(false) => theme.red("failed"),
+            None => theme.dim("unknown"),
         };
         let tokens = match (run.tokens_input, run.tokens_output) {
             (Some(input), Some(output)) => format!("{input}/{output}"),
             _ => "-".to_owned(),
         };
-        let timestamp = run.timestamp.as_deref().unwrap_or("-");
+        let timestamp = theme.dim(run.timestamp.as_deref().unwrap_or("-"));
         text.push_str(&format!(
-            "  {task:<28} {component:<14} {status:<8} tokens {tokens:<12} {timestamp}\n"
+            "  {task:<28} {component:<14} {} {} {tokens:<12} {timestamp}\n",
+            style::pad_right(&status, 8),
+            theme.dim("tokens")
         ));
         let link = run.record_path.as_ref().or(run.trajectory_path.as_ref());
         if let Some(path) = link
@@ -924,15 +1057,19 @@ fn render_recent_runs(runs: &[RecentRun], project_root: &Path) -> String {
             } else {
                 "trajectory"
             };
-            text.push_str(&format!("    {kind}: ./{rel}\n", rel = rel.display()));
+            text.push_str(&format!(
+                "    {}\n",
+                theme.dim(&format!("{kind}: ./{rel}", rel = rel.display()))
+            ));
         }
     }
     text
 }
 
 /// Renders the `help` builtin text (pure, so it is testable).
-fn render_help() -> String {
-    let mut text = String::from("Kvist shell — builtins:\n");
+fn render_help(theme: Theme) -> String {
+    let mut text = String::new();
+    text.push_str(&format!("{}\n", theme.bold("Kvist shell — builtins:")));
     text.push_str(
         "  cd [COMPONENT]                 set the current component for builtins and completion\n",
     );
@@ -1082,6 +1219,14 @@ fn build_editor(
     // Esc closes the completion menu
     keybindings.add_binding(KeyModifiers::NONE, KeyCode::Esc, ReedlineEvent::Esc);
 
+    // Ctrl+L clears the screen and redraws the prompt (reedline ships no
+    // default binding for it).
+    keybindings.add_binding(
+        KeyModifiers::CONTROL,
+        KeyCode::Char('l'),
+        ReedlineEvent::ClearScreen,
+    );
+
     let edit_mode = Box::new(Emacs::new(keybindings));
 
     // Persistent editor history; a history the editor cannot open must not
@@ -1123,10 +1268,15 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
     // Install the shared SIGINT/SIGTERM handler once for the process.
     agent_runtime::install_handler();
 
+    // Resolve the theme once for the session: NO_COLOR, CLICOLOR,
+    // CLICOLOR_FORCE, TERM=dumb, and terminal detection are all honored, and
+    // the result degrades to plain text.
+    let theme = Theme::detect();
+
     let root = build_root();
     let state = Arc::new(Mutex::new(DynamicState::load(project_dir)));
     let focus = Arc::new(Mutex::new(None));
-    let mut shell = Shell::new(project_dir, focus.clone());
+    let mut shell = Shell::new(project_dir, focus.clone(), theme);
     let completer = Box::new(KvistCompleter::new(root, state.clone(), focus));
     let status = StatusContext::load(project_dir);
 
@@ -1137,6 +1287,7 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
         .ok()
         .and_then(|guard| guard.branch().map(str::to_owned));
     print_welcome_banner(
+        theme,
         &status,
         initial_branch.as_deref(),
         shell.current_component().as_deref(),
@@ -1156,10 +1307,12 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
             .and_then(|guard| guard.branch().map(str::to_owned));
         let prompt = DefaultPrompt {
             left_prompt: DefaultPromptSegment::Basic(short_prompt(
+                theme,
                 branch.as_deref(),
                 shell.current_component().as_deref(),
+                shell.last_failed,
             )),
-            right_prompt: DefaultPromptSegment::Basic(status_bar_label(&current_status)),
+            right_prompt: DefaultPromptSegment::Basic(status_bar_label(theme, &current_status)),
         };
 
         let signal = match editor.read_line(&prompt) {
@@ -1227,7 +1380,7 @@ mod tests {
 
     fn test_shell(dir: &Path) -> (Shell, reedline::FileBackedHistory) {
         (
-            Shell::new(dir, Arc::new(Mutex::new(None))),
+            Shell::new(dir, Arc::new(Mutex::new(None)), Theme::plain()),
             reedline::FileBackedHistory::default(),
         )
     }
@@ -1566,7 +1719,7 @@ mod tests {
             row("a", TaskStatus::Completed),
             row("b", TaskStatus::Pending),
         ];
-        let text = render_tasks("engine", &rows, Some("b"));
+        let text = render_tasks(Theme::plain(), "engine", &rows, Some("b"));
         assert!(text.starts_with("Tasks in `engine` (2 shown):\n"));
         assert!(text.contains("★ b"));
         assert!(text.contains("next ready: b"));
@@ -1578,10 +1731,41 @@ mod tests {
             title: "t".to_owned(),
             blocked_reason: Some("waiting on x".to_owned()),
         }];
-        let text = render_tasks(".", &blocked, None);
+        let text = render_tasks(Theme::plain(), ".", &blocked, None);
         assert!(text.contains("implementation"));
         assert!(text.contains("blocked: waiting on x"));
-        assert!(render_tasks("engine", &[], None).contains("match the filter"));
+        assert!(render_tasks(Theme::plain(), "engine", &[], None).contains("match the filter"));
+
+        // A colored theme keeps every line at the same visible width as the
+        // plain rendering, so styled cells never drift out of their columns.
+        let colored = Theme::enabled();
+        let plain_text = render_tasks(Theme::plain(), "engine", &rows, Some("b"));
+        let styled_text = render_tasks(colored, "engine", &rows, Some("b"));
+        for (plain, styled) in plain_text.lines().zip(styled_text.lines()) {
+            assert_eq!(
+                style::visible_len(styled),
+                style::visible_len(plain),
+                "column drift in {styled:?}"
+            );
+        }
+        let a_row = styled_text
+            .lines()
+            .find(|line| line.contains("completed"))
+            .expect("completed row present");
+        assert!(a_row.contains("\x1b[32m"), "completed row should be green");
+        let b_row = styled_text
+            .lines()
+            .find(|line| line.contains("pending"))
+            .expect("pending row present");
+        assert!(b_row.contains("\x1b[2m"), "pending row should be dim");
+        let star_row = styled_text
+            .lines()
+            .find(|line| line.contains('★'))
+            .expect("next-ready marker present");
+        assert!(
+            star_row.contains("\x1b[33m"),
+            "next-ready marker should be yellow"
+        );
     }
 
     #[test]
@@ -1600,21 +1784,21 @@ mod tests {
             record_path: Some(record.clone()),
             trajectory_path: None,
         }];
-        let text = render_recent_runs(&runs, dir.path());
+        let text = render_recent_runs(Theme::plain(), &runs, dir.path());
         assert!(text.contains("Recent agent runs (1):"));
         assert!(text.contains("t-1"));
         assert!(text.contains("success"));
         assert!(text.contains("100/50"));
         assert!(text.contains("record: ./.kvist/runs/t-1_2026-09-11T22-00-00Z.json"));
         assert_eq!(
-            render_recent_runs(&[], dir.path()),
+            render_recent_runs(Theme::plain(), &[], dir.path()),
             "No agent runs recorded yet."
         );
     }
 
     #[test]
     fn render_help_lists_every_builtin() {
-        let text = render_help();
+        let text = render_help(Theme::plain());
         for name in [
             "cd", "tasks", "run", "last", "history", "journal", "locks", "prompt", "status",
             "help", "exit",
@@ -1687,16 +1871,21 @@ mod tests {
             lock_entry(true, Some("write-tests")),
             lock_entry(false, None),
         ];
-        let text = render_locks(&entries, &[], false);
+        let text = render_locks(Theme::plain(), &entries, &[], false);
         assert!(text.starts_with("Task locks (2):\n"));
         assert!(text.contains("[live] task write-tests · pid 4242 · age 1m"));
         assert!(text.contains("[stale] task <unknown>"));
 
         let cleaned = vec![PathBuf::from("/state/kvist/task-locks-v1/x.lock")];
-        let text = render_locks(&entries, &cleaned, true);
+        let text = render_locks(Theme::plain(), &entries, &cleaned, true);
         assert!(text.contains("cleaned: /state/kvist/task-locks-v1/x.lock"));
 
-        let text = render_locks(&entries, &[], true);
+        let text = render_locks(Theme::plain(), &entries, &[], true);
         assert!(text.contains("no stale locks to clean"));
+
+        // Live and stale locks are color-coded when styling is enabled.
+        let text = render_locks(Theme::enabled(), &entries, &[], false);
+        assert!(text.contains("\x1b[32m[live]\x1b[0m"));
+        assert!(text.contains("\x1b[31m[stale]\x1b[0m"));
     }
 }

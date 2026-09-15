@@ -138,6 +138,21 @@ ENTER accepts; a refusal changes no state). `prompt TASK_ID` opens the external
 editor seeded with
 the task context and submits only after explicit confirmation.
 
+Shell presentation degrades to plain text when `NO_COLOR` is set (any value),
+`CLICOLOR=0`, `TERM=dumb`, or stdout is not a terminal; `CLICOLOR_FORCE` (any
+value but `0`) forces styling even when stdout is not a terminal. Styled
+rendering keeps table columns aligned on visible width. Titled boxes (welcome
+banner, streaming stages) fit the terminal width: at least 40 columns, never
+wider than the terminal width minus a margin or 100 columns, whichever is
+smaller, and a box extends rather than truncating content that is wider than
+the cap. Output is paged only when it would scroll past the terminal height
+minus the prompt row (a 15-line fallback when the height is unknown), and
+`KVIST_NO_PAGER` disables paging. The prompt reports the last command's exit
+state with a failure marker until a command succeeds; Ctrl+L clears the screen
+and redraws the prompt. Completion describes dynamic values (task status and
+title, a next-ready marker in run contexts, the current component), and a
+complete `--` token ends flag parsing and switches to positional completion.
+
 The shell persists an append-only JSONL session journal at
 `.kvist/session.log` and a line-based editor history at `.kvist/history`; both
 are local uninspected state and MUST NOT be treated as compliance evidence.

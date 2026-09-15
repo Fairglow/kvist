@@ -518,7 +518,14 @@ Detailed rationale and task chains are in
 - Lock liveness: the prompt, banner, and `locks [clean]` builtin distinguish live from stale locks using process liveness.
 - Append-only JSONL session journal at `.kvist/session.log` and persistent editor history at `.kvist/history` (`journal` and `history` builtins).
 - Workflow builtins with completion and confirmation gates: `cd`, `tasks`, `run` (first ready task; `task run` without TASK_ID now matches the contract), `help`, `last`, `locks`, destructive-operation confirmations, and prompt-editor submit confirmation.
-- Theming with `NO_COLOR`/`CLICOLOR`/`CLICOLOR_FORCE`/`TERM=dumb` handling, exit-state prompt, `Ctrl+L` clear, terminal-width-aware boxes, and a height-aware pager.
+
+**Implemented (2026-09-15 polish pass):**
+
+- Terminal theming with `NO_COLOR`/`CLICOLOR`/`CLICOLOR_FORCE`/`TERM=dumb` handling: a consistent accent palette, column-aligned styled tables, and plain-text degradation for captured or piped output.
+- Modern prompt and status: the themed prompt shows branch, component focus, and a `✘` exit-state marker until the next success; a dimmed badge reports sandbox backend, live/stale lock counts, and default model.
+- Terminal-width-aware titled boxes for the welcome banner and streaming stages (40-column floor, width cap, extends rather than truncates), a height-aware pager (terminal height minus the prompt row, 15-line fallback, `KVIST_NO_PAGER`), and `Ctrl+L` clear.
+- Rich completion descriptions (task status and title, `★ next ready` in run contexts, current component) and a `--` separator that ends flag parsing and switches to positional completion.
+- Bounded retry of transient editor-launch `ETXTBSY`, and the test matrix: themed/plain rendering of every shell surface, box width bounds, pager policy, prompt exit states, separator semantics, and a pty end-to-end smoke test (banner → `help` → `exit`) plus the non-interactive refusal test.
 
 **Acceptance criteria (remaining qualifications):**
 

@@ -251,7 +251,13 @@ state. Streaming task execution MUST relay sandbox output to the terminal
 while it is produced and MUST retain the full bounded log as evidence. The
 status presentation MUST distinguish live task locks from stale ones and MUST
 NOT present stale locks as active. Destructive operations MUST require an
-explicit in-shell confirmation before executing.
+explicit in-shell confirmation before executing. Shell presentation MUST
+degrade to plain text when `NO_COLOR` is set (any value), `CLICOLOR=0`,
+`TERM=dumb`, or standard output is not a terminal, and `CLICOLOR_FORCE` (any
+value but `0`) MUST force styling even when standard output is not a
+terminal. Styled output MUST keep table columns aligned on visible width,
+and titled boxes MUST fit the probed terminal width without truncating
+content.
 
 ### REQ-COMPLIANCE
 

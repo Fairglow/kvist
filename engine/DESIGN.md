@@ -345,10 +345,31 @@ on a real terminal) covers commands that produce no output of their own.
 Task-lock inspection parses the user-state lock files, treats their contents
 as untrusted bounded input, and classifies each lock live or stale by process
 liveness; the prompt, banner, and status line report the two counts
-separately. Long non-streaming output is paged through `minus` when stdout is
-a terminal and the output exceeds the terminal height; streaming output is
-never paged. Theming honors `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`,
-`TERM=dumb`, and terminal detection, and degrades to plain text.
+separately.
+
+Presentation lives in `shell/style.rs`: a `Theme` resolves once per session
+from `NO_COLOR` (any value), `CLICOLOR`, `CLICOLOR_FORCE`, `TERM=dumb`, and
+terminal detection, and every renderer is a pure function of its inputs plus
+the theme, so styled and plain output are unit-testable without a terminal.
+Styled table cells are padded on visible (ANSI-stripped) width so columns
+stay aligned. `titled_box` sizes its box to the content, applies the
+40-column floor and the terminal-width cap, and extends the box when content
+is wider than the cap so nothing is ever truncated. The prompt shows the
+branch, the component focus (set by `cd`), a failure marker after a failed
+command (cleared by the next success; cooperative cancellations are not
+failures), and the green `❯` indicator; a dimmed status badge on the right
+reports the sandbox backend, lock counts, and default model. The welcome
+banner is a titled box with aligned labels and a key-hint line. Ctrl+L is
+bound to the editor's clear-and-redraw event. Long non-streaming output is
+paged through `minus` only when the pure `pager_policy` (terminal height
+minus the prompt row, 15-line fallback, `KVIST_NO_PAGER` override) says it
+would scroll; a pager that cannot start falls back to direct printing so
+output is never lost. Completion attaches rich descriptions to dynamic
+values (task status and title, a next-ready star in run contexts, the
+current component), and the walker treats a complete `--` token as the end
+of flag parsing, so Tab after `--` completes positionals only. Editor launch
+retries the transient Linux `ETXTBSY` ("text file busy") a bounded number of
+times before reporting it.
 
 ## Failure and recovery
 

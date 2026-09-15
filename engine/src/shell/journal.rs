@@ -14,6 +14,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 
 use super::pager::display_output;
+use super::style::Theme;
 
 /// Session journal file path relative to the project root.
 pub const SESSION_JOURNAL: &str = ".kvist/session.log";
@@ -122,26 +123,35 @@ impl SessionJournal {
     }
 }
 
-/// Displays the session journal entries through the shared pager.
-pub fn display_session_status(journal: &SessionJournal) {
-    let entries = journal.entries();
+/// Renders the session journal entries (pure, so it is testable).
+pub fn render_journal(theme: Theme, entries: &[JournalEntry]) -> String {
     if entries.is_empty() {
-        println!("Session journal: (empty)");
-        return;
+        return "Session journal: (empty)".to_owned();
     }
-    let mut text = format!("Session journal ({} entries):\n", entries.len());
+    let mut text = format!(
+        "{}\n",
+        theme.bold(&format!("Session journal ({} entries):", entries.len()))
+    );
     for (i, entry) in entries.iter().enumerate() {
         text.push_str(&format!(
             "  {}. [{}] {}\n",
-            i + 1,
-            entry.timestamp,
+            theme.dim(&format!("{}", i + 1)),
+            theme.dim(&entry.timestamp),
             entry.command
         ));
         if !entry.result.is_empty() {
-            text.push_str(&format!("     -> {}\n", entry.result));
+            text.push_str(&format!(
+                "     {}\n",
+                theme.dim(&format!("-> {}", entry.result))
+            ));
         }
     }
-    display_output(&text);
+    text
+}
+
+/// Displays the session journal entries through the shared pager.
+pub fn display_session_status(theme: Theme, journal: &SessionJournal) {
+    display_output(&render_journal(theme, &journal.entries()));
 }
 
 #[cfg(test)]
@@ -215,9 +225,63 @@ mod tests {
     fn display_session_status_handles_empty_and_populated() {
         let dir = tempdir().unwrap();
         let journal = SessionJournal::new(dir.path());
-        display_session_status(&journal);
+        display_session_status(Theme::plain(), &journal);
 
         journal.append(entry("status", "ok"));
-        display_session_status(&journal);
+        display_session_status(Theme::plain(), &journal);
+    }
+
+    #[test]
+    fn journal_round_trips_pipe_quote_and_newline_commands() {
+        let dir = tempdir().unwrap();
+        let journal = SessionJournal::new(dir.path());
+        let tricky = "task run . | grep \"x\"\n--flag";
+        journal.append(JournalEntry {
+            command: tricky.to_owned(),
+            ..entry("x", "y")
+        });
+
+        // A second session over the same file parses the escaped JSONL line
+        // back into the exact original command.
+        let reloaded = SessionJournal::new(dir.path());
+        assert_eq!(reloaded.entries().len(), 1);
+        assert_eq!(reloaded.entries()[0].command, tricky);
+    }
+
+    #[test]
+    fn journal_persists_many_entries_across_sessions() {
+        let dir = tempdir().unwrap();
+        let journal = SessionJournal::new(dir.path());
+        for i in 0..100 {
+            journal.append(entry(&format!("command {i}"), "ok"));
+        }
+        assert_eq!(journal.entries().len(), 100);
+
+        // A later session appends to the same file: no entry is lost or
+        // duplicated, and order is preserved.
+        let later = SessionJournal::new(dir.path());
+        later.append(entry("command 100", "ok"));
+        assert_eq!(later.entries().len(), 101);
+        assert_eq!(later.entries()[0].command, "command 0");
+        assert_eq!(later.entries()[100].command, "command 100");
+    }
+
+    #[test]
+    fn render_journal_shows_commands_and_results() {
+        let entries = vec![entry("status", "ok"), entry("task next .", "")];
+        let text = render_journal(Theme::plain(), &entries);
+        assert!(text.starts_with("Session journal (2 entries):"));
+        assert!(text.contains("1. [2026-09-10T12:00:00Z] status"));
+        // Only the entry with a non-empty result prints an arrow line.
+        assert_eq!(text.matches("-> ").count(), 1);
+        assert!(text.contains("2. [2026-09-10T12:00:00Z] task next ."));
+        assert_eq!(
+            render_journal(Theme::plain(), &[]),
+            "Session journal: (empty)"
+        );
+        assert_eq!(
+            render_journal(Theme::plain(), &[]),
+            "Session journal: (empty)"
+        );
     }
 }

@@ -55,9 +55,11 @@ kvist shell
 
 The shell provides:
 
-- **Contextual Auto-Completion:** Press `<TAB>` to autocomplete commands, flags, subcommands, component directory paths, active task IDs, attempt IDs, and configured model names. Completions track durable project state after every command.
-- **Live Status Prompt:** Displays the active VCS branch, the current component focus (set with `cd`), and task-lock state that distinguishes live locks from stale ones.
-- **Built-in Terminal Pager, Spinner & Live Streaming:** Long output is paginated, long-running commands show a spinner with elapsed time, and sandboxed agent output streams to the terminal as it is produced.
+- **Contextual Auto-Completion:** Press `<TAB>` to autocomplete commands, flags, subcommands, component directory paths, active task IDs, attempt IDs, and configured model names. Dynamic values carry rich descriptions (task status and title, a `★ next ready` marker in run contexts, the current component), completions track durable project state after every command, and a complete `--` token switches completion from flags to positionals.
+- **Live Status Prompt:** Displays the active VCS branch, the current component focus (set with `cd`), a `✘` marker after a failed command until the next one succeeds, and a dimmed status badge with the sandbox backend, lock counts (live vs. stale), and default model.
+- **Modern Theming, Plain-Text Fallback:** Output is styled with a consistent accent palette and stays column-aligned; it degrades to plain text under `NO_COLOR`, `CLICOLOR=0`, `TERM=dumb`, or when captured/piped (`CLICOLOR_FORCE` overrides). Banner and streaming stages render as titled boxes that fit your terminal width.
+- **Height-Aware Pager, Spinner & Live Streaming:** Output longer than your terminal is paginated, long-running commands show a spinner with elapsed time, and sandboxed agent output streams to the terminal as it is produced.
+- **Keyboard Shortcuts:** `Ctrl+L` clears the screen and redraws the prompt, `↑`/`↓` pick completion candidates, and `Ctrl+D` exits.
 - **Audit Journaling & History:** An append-only session journal (`.kvist/session.log`, inspect with `journal`) and persistent editor history (`.kvist/history`, inspect with `history`).
 - **Workflow Builtins:** `cd [COMPONENT]` sets the current component, `tasks` lists task status, `run` executes the next ready task, `last` shows recent agent runs, `locks [clean]` inspects or removes stale locks, and `help` lists everything.
 - **Cancellable Execution:** `Ctrl+C` during a running command cancels the supervised process group and returns to the prompt, leaving durable task state for explicit `task finalize` or `task recover`.
@@ -65,10 +67,10 @@ The shell provides:
 Typical session:
 
 ```text
-kvist ❯ cd engine                 # remember the component
-kvist (main) [engine] ❯ tasks     # status of engine's tasks
-kvist (main) [engine] ❯ run       # execute the next ready task
-kvist (main) [engine] ❯ last      # recent agent runs with log links
+kvist (main) ❯ cd engine          # remember the component
+kvist engine/ (main) ❯ tasks      # status of engine's tasks
+kvist engine/ (main) ❯ run        # execute the next ready task
+kvist engine/ (main) ❯ last       # recent agent runs with log links
 ```
 
 ---
