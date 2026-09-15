@@ -117,11 +117,14 @@ pub fn edit_prompt_with_editor(seed: &str, editor: &str) -> Result<String> {
 /// missing editor is never masked while a launch failure still surfaces
 /// promptly.
 fn spawn_editor(program: &str, arguments: &[String]) -> Result<ExitStatus> {
-    // Capped exponential backoff (50ms, 100ms, 200ms, 400ms) limits the total
-    // wait while giving dirty-page flushes increasing room to clear.
+    // Capped exponential backoff (50ms, 100ms, 200ms, 400ms) with equal jitter:
+    // a randomized delay in [backoff / 2, backoff]. The halved floor still gives
+    // dirty-page flushes room to clear; the variance keeps retries from landing
+    // on a fixed period and re-tripping the same transient.
     const MAX_RETRIES: u32 = 4;
     const BACKOFF_BASE_MS: u64 = 50;
     let mut retries = 0u32;
+    let mut rng = rng_seed();
     loop {
         match ProcessCommand::new(program)
             .args(arguments)
@@ -136,7 +139,7 @@ fn spawn_editor(program: &str, arguments: &[String]) -> Result<ExitStatus> {
             {
                 let backoff = std::time::Duration::from_millis(BACKOFF_BASE_MS << retries);
                 retries += 1;
-                std::thread::sleep(backoff);
+                std::thread::sleep(jittered_backoff(backoff, &mut rng));
             }
             Err(error) => {
                 return Err(KvistError::Io {
@@ -147,6 +150,40 @@ fn spawn_editor(program: &str, arguments: &[String]) -> Result<ExitStatus> {
             }
         }
     }
+}
+
+/// Equal-jitter backoff: a delay in `[backoff / 2, backoff]`. Halving the floor
+/// preserves a meaningful minimum wait; the jittered slack desynchronizes
+/// retries without inflating the worst-case delay.
+fn jittered_backoff(backoff: std::time::Duration, rng: &mut u64) -> std::time::Duration {
+    // backoff is bounded well under a second here, so this cast is lossless.
+    let backoff_ms = backoff.as_millis() as u64;
+    let half = backoff_ms / 2;
+    let slack = next_rng(rng) % (half + 1);
+    std::time::Duration::from_millis(half + slack)
+}
+
+/// Advances a small non-cryptographic xorshift64. Jitter needs only entropy to
+/// desynchronize retries, never secrecy, so a hand-rolled PRNG seeded from the
+/// system clock is adequate and keeps the dependency graph unchanged.
+fn next_rng(state: &mut u64) -> u64 {
+    *state ^= *state >> 12;
+    *state ^= *state << 25;
+    *state ^= *state >> 27;
+    let value = state.wrapping_mul(0x9E37_79B9_7F4A_7C15u64);
+    *state = value;
+    value
+}
+
+/// Seeds the jitter PRNG from the system clock. A clock reporting a time before
+/// the Unix epoch (essentially never) falls back to zero, which simply yields
+/// no jitter for that launch.
+fn rng_seed() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos() as u64)
+        .unwrap_or(0)
 }
 
 /// Seeds the editor buffer with the task's recorded context.
