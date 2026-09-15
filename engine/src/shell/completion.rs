@@ -13,7 +13,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use reedline::{Completer, Span, Suggestion};
+use reedline::{Completer, CompletionResult, Span, Suggestion};
 
 use super::state::{DynamicState, ValueDomain};
 use super::tree::{CommandNode, FlagSpec, PositionalSpec};
@@ -159,7 +159,7 @@ impl KvistCompleter {
 }
 
 impl Completer for KvistCompleter {
-    fn complete(&mut self, line: &str, pos: usize) -> Vec<Suggestion> {
+    fn complete(&mut self, line: &str, pos: usize) -> CompletionResult {
         // A poisoned lock means a completer panicked while holding it;
         // degrade to no completions rather than abort the editor.
         let candidates = match (self.state.lock(), self.current_component.lock()) {
@@ -168,17 +168,24 @@ impl Completer for KvistCompleter {
             }
             _ => Vec::new(),
         };
-        candidates
+        // `display_override`/`match_indices` describe fuzzy-match highlighting
+        // UX this completer does not compute, so they stay unset. `fresh` marks
+        // the result authoritative, so the menu renders immediately without
+        // waiting on a follow-up poll (see `poll_completion`).
+        let suggestions: Vec<Suggestion> = candidates
             .into_iter()
             .map(|c| Suggestion {
                 value: c.value,
+                display_override: None,
                 description: c.description,
                 style: None,
                 extra: None,
                 span: Span::new(c.span.0, c.span.1),
                 append_whitespace: c.append_whitespace,
+                match_indices: None,
             })
-            .collect()
+            .collect();
+        CompletionResult::fresh(suggestions)
     }
 }
 

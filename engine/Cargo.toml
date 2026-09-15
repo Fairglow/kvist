@@ -2,7 +2,7 @@
 name = "kvist"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.94"
+rust-version = "1.95"
 authors = ["Stefan Lindblad"]
 description = "Architecture-driven workflow and evidence for human-directed AI development"
 license = "AGPL-3.0-or-later"
@@ -28,7 +28,7 @@ toml_edit = "0.25.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
 agent-runtime = { version = "=0.1.0", path = "../agent_runtime" }
-reedline = "0.38"
+reedline = "0.51"
 minus = { version = "5.7.2", features = ["static_output"] }
 terminal_size = "0.4"
 

@@ -137,7 +137,7 @@ pub fn format_welcome_banner(
     }
     rows.push("Commands: overview, status, task run, help".to_owned());
     rows.push(
-        "Keys: TAB complete · ↑↓ pick · Ctrl+C cancel · Ctrl+L clear · Ctrl+D exit".to_owned(),
+        "Keys: TAB / Ctrl+Space complete · ↑↓ pick · ESC close menu · Ctrl+C cancel · Ctrl+L clear · Ctrl+D exit".to_owned(),
     );
     let titled = style::titled_box(
         theme,

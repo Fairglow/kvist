@@ -1196,6 +1196,17 @@ fn build_editor(
         ]),
     );
 
+    // Ctrl+Space forces the completion menu on demand. `with_quick_completions`
+    // already opens the menu after a few characters, so this lets the user open
+    // or reopen it earlier and at will. It is the same convention fish and
+    // zsh+fzf use; the `>` marker + reverse highlight (reedline defaults)
+    // identify the selected candidate.
+    keybindings.add_binding(
+        KeyModifiers::CONTROL,
+        KeyCode::Char(' '),
+        ReedlineEvent::Menu(COMPLETION_MENU.to_owned()),
+    );
+
     // Shift-Tab cycles to previous candidate
     keybindings.add_binding(
         KeyModifiers::NONE,
@@ -1390,6 +1401,12 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
                     );
                 }
             }
+            // `Signal` is `#[non_exhaustive]`: future reedline releases can add
+            // variants (for example `HostCommand` or `ExternalBreak`). Match the
+            // ones Kvist acts on explicitly and treat anything else as a no-op so
+            // a library release can never break the shell with an exhaustiveness
+            // error.
+            _ => {}
         }
     }
 
