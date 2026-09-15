@@ -1,4 +1,5 @@
 <!-- kvist-requirements-version: 1 -->
+
 # Kvist Engine Requirements
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
@@ -221,6 +222,42 @@ Initial sandboxed task authoring MAY use local agents without model-network or
 credential grants. Future remote model operation MUST keep model transport and
 credential references in a host-owned broker outside the effect sandbox and
 MUST submit only typed authorized tool requests to the runner.
+
+### REQ-INTERACTIVE-SHELL
+
+The `shell` command MUST provide an interactive workspace shell on an
+interactive terminal and MUST fail with an actionable diagnostic when standard
+input is not a terminal. It MUST parse lines against the same command surface
+as the CLI and MUST derive static completion from that surface so completions
+cannot drift from parseable commands. Dynamic completion MUST cover component
+paths, task IDs, attempt IDs, model profile names, and the active VCS branch,
+MUST refresh after every executed command, and MUST degrade per source without
+aborting the session. `task run` without a task ID MUST NOT auto-execute a
+task: it MUST suggest the first ready task of the selected component and run it
+only after an explicit interactive confirmation (a bare ENTER accepts; a
+refusal MUST change no state). When no task is ready, or when standard input is
+not an interactive terminal, it MUST fail with an actionable diagnostic and
+MUST change no durable state.
+
+The shell MUST persist an append-only JSONL session journal of final command
+inputs and result summaries at `.kvist/session.log` and a line-based editor
+history at `.kvist/history`; both are local uninspected state and MUST NOT be
+treated as compliance evidence. Command failures, prompt-editor cancellations,
+and transient terminal read failures MUST NOT terminate the session; repeated
+terminal read failures MUST exit with an actionable diagnostic. SIGINT during
+a running command MUST request cancellation, terminate the supervised process
+group, and return to the prompt without silently discarding durable task
+state. Streaming task execution MUST relay sandbox output to the terminal
+while it is produced and MUST retain the full bounded log as evidence. The
+status presentation MUST distinguish live task locks from stale ones and MUST
+NOT present stale locks as active. Destructive operations MUST require an
+explicit in-shell confirmation before executing. Shell presentation MUST
+degrade to plain text when `NO_COLOR` is set (any value), `CLICOLOR=0`,
+`TERM=dumb`, or standard output is not a terminal, and `CLICOLOR_FORCE` (any
+value but `0`) MUST force styling even when standard output is not a
+terminal. Styled output MUST keep table columns aligned on visible width,
+and titled boxes MUST fit the probed terminal width without truncating
+content.
 
 ### REQ-COMPLIANCE
 

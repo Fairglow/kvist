@@ -91,3 +91,43 @@ tasks:
       completed_at: "2026-09-12T14:32:54Z"
     blocked_reason: null
     recovery_state: null
+  - id: "sandbox-runner-reverification-security-audit"
+    title: "Re-run sandbox runner security audit"
+    description: "Independently re-run the sandbox runner security audit in a genuine agent context, covering request parsing, canonical paths, mount construction, namespace isolation, Bubblewrap substitution, environment and network denial, resource enforcement, and fallback resistance."
+    context: "The branch review found the placeholder-era attempt logs for the completed sandbox runner security audit contain only echo-placeholder agent output, so the recorded completion is not valid independent evidence."
+    purpose: "Replace the placeholder-era security receipts with genuine independent findings before the runner is trusted as the enforcement boundary."
+    expected_outcome: "A genuine independent audit records or remediates every high-confidence finding, and its disposition is retained for human arbitration against the placeholder-era receipts."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sandbox-runner-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sandbox-runner-reverification-compliance-review"
+    title: "Re-run sandbox runner compliance review"
+    description: "Re-derive the observed runner behavior from source and native tests in a clean-slate context, then compare the resulting implementation record with the approved local and parent intent in a separate source-blind context."
+    context: "The placeholder-era compliance receipts, including the committed COMPLIANCE_REVIEW.md, contain only echo-placeholder agent output, so the recorded completion is not valid independent evidence."
+    purpose: "Retain an independent disposition for every protocol, isolation, resource, and failure guarantee."
+    expected_outcome: "A clean-slate record and source-blind comparison classify every clause, retaining discrepancies for explicit human arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sandbox-runner-reverification-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

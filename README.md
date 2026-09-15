@@ -59,7 +59,12 @@ sandboxes, and governance tools.
 | `kvist task log <COMPONENT_DIR> <TASK_ID>`                            | Print the most recent bounded, redacted agent log for a task.                                    |
 | `kvist task approve-policy [PROJECT_DIR]`                             | Record approval of the complete effective execution policy.                                      |
 | `kvist prompt [PROMPT] --allow-host-execution`                        | Run a prompt with optional role/model/reasoning selection; text output is provider content only. |
-| `kvist agent setup [--force]`                                         | Collect, qualify, and bind a reusable profile; force is required to retain failed qualification. |
+| `kvist agent profile add [--force]` (or `setup`)                      | Collect, qualify, and register a new model profile without assigning roles.                      |
+| `kvist agent profile list` (or `list`)                                | List all configured and standalone model profiles with their active role assignments.            |
+| `kvist agent profile remove <MODEL_NAME> [--all]` (or `remove`)       | Remove configured model profile(s) or clear all agent configuration.                             |
+| `kvist agent role [list]`                                             | Inspect current role assignments (developer, architect, security-reviewer).                      |
+| `kvist agent role set <ROLE> <MODEL>`                                 | Bind a configured or standalone profile to a role.                                               |
+| `kvist agent role clear <ROLE> [--all]`                               | Clear role assignment(s).                                                                        |
 
 Delivery is organized into phases. The completed, current, and planned phase
 scope, context, and acceptance criteria are maintained in
@@ -426,9 +431,11 @@ boundaries for possible future restoration.
 
 ## Toolchain and quality gates
 
-Kvist's MSRV is Rust **1.94**. Edition 2024 itself is available from Rust 1.85,
-but 1.94 is the upstream-tested compiler for the exactly pinned Rig 0.42.0
-transport dependency. CI tests Rust 1.94 and current stable on Linux.
+Kvist's MSRV is Rust **1.95**. Edition 2024 itself is available from Rust 1.85,
+but the interactive shell's reedline 0.51 integration raises the floor to 1.95.
+The exactly pinned Rig 0.42.0 transport dependency, whose upstream-tested
+compiler was 1.94, remains supported on the same toolchain. CI tests Rust 1.95
+and current stable on Linux.
 `Cargo.lock` is committed and every CI build/test command uses
 `--locked`. Kvist's own repository dogfoods the component model: the root Rust
 workspace lives at the repository root (`Cargo.toml`), with `engine/`,
@@ -453,7 +460,7 @@ cargo build --locked --workspace --release --all-features
 ```
 
 `just` is an optional wrapper for these commands; `just all` runs the same
-gate, and `just msrv` runs all-feature tests with Rust 1.94.0. Dependency updates must be
+gate, and `just msrv` runs all-feature tests with Rust 1.95.0. Dependency updates must be
 small, intentional changes with a stated purpose, lockfile update, and passing
 MSRV and stable CI.
 

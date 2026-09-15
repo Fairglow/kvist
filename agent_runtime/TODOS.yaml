@@ -95,15 +95,15 @@ tasks:
     purpose: "Define transactional file behavior before any supervisor attempts rollback or output promotion."
     expected_outcome: "Tests prove failed attempts leave live inputs unchanged and successful output is applied only after validated conflict-free approval."
     kind: test
-    status: pending
+    status: completed
     depends_on:
       - "sa-01-compliance-review"
     requirements:
       - "DESIGN.md#Failure-and-recovery"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
+      updated_at: "2026-09-12T21:45:42Z"
+      completed_at: "2026-09-12T21:45:42Z"
     blocked_reason: null
     recovery_state: null
   - id: "sa-02-implement-code"
@@ -113,14 +113,14 @@ tasks:
     purpose: "Provide reliable local side-effect containment before stronger operating-system isolation."
     expected_outcome: "Attempts operate on private state and promotion detects every changed live precondition before writing."
     kind: implementation
-    status: pending
+    status: in-progress
     depends_on:
       - "sa-02-write-tests"
     requirements:
       - "DESIGN.md#Failure-and-recovery"
     timestamps:
       created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
+      updated_at: "2026-09-12T21:49:27Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null
@@ -1641,6 +1641,82 @@ tasks:
     timestamps:
       created_at: "2026-09-01T17:08:25Z"
       updated_at: "2026-09-01T17:08:25Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-01-reverification-security-audit"
+    title: "Re-run standalone supervision security audit"
+    description: "Independently re-run the extracted host execution security audit in a genuine agent context, covering process-group termination, stream handling, prompt files, command parsing, retry classification, and unsupported-platform gates."
+    context: "The branch review found the placeholder-era attempt logs for the completed sa-01 security audit contain only echo-placeholder agent output, so the recorded completion is not valid independent evidence."
+    purpose: "Replace the placeholder-era security receipts with genuine independent findings."
+    expected_outcome: "A genuine independent audit records or remediates every high-confidence finding, and its disposition is retained for human arbitration against the placeholder-era receipts."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "sa-01-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sa-01-reverification-compliance-review"
+    title: "Re-run standalone supervision compliance review"
+    description: "Re-derive the implementation record from source and test evidence in a clean-slate context, then compare it with the agent runtime requirements, contract, and design in a separate source-blind context."
+    context: "The placeholder-era compliance receipts for the completed sa-01 review contain only echo-placeholder agent output, so the recorded completion is not valid independent evidence."
+    purpose: "Preserve independent evidence that the extracted runtime matches its declared behavior."
+    expected_outcome: "A clean-slate record and source-blind comparison classify every clause, retaining discrepancies for explicit human arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "sa-01-reverification-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "msrv-195-docs-align-write-tests"
+    title: "Define MSRV statement consistency tests"
+    description: "Write tests that the MSRV declared by every workspace package manifest matches the toolchain pinned by the CI MSRV job and the just msrv recipe, and that intent documents stating the supported MSRV cite the same floor."
+    context: "The manifest MSRV moved to 1.95 while backlog, requirements, and evaluation documents still cite 1.94, and nothing currently detects that drift."
+    purpose: "Make MSRV drift between manifests, CI, and intent documents detectable."
+    expected_outcome: "Tests fail while the declared MSRV floor disagrees between sources and pass once every source matches the manifest floor."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "msrv-195-docs-align"
+    title: "Align MSRV statements with the 1.95 manifest floor"
+    description: "Update the root TODO.md AGN-09 acceptance criteria, the agent-runtime quality constraints, and the Rig evaluation notes that still state Rust 1.94 as the supported MSRV to the 1.95 floor declared by the workspace manifests, retaining the historical 1.94 Rig rationale as history."
+    context: "The reedline 0.51 shell integration raised the manifest MSRV to 1.95, but intent and evaluation documents still cite 1.94, which a compliance review would flag as drift."
+    purpose: "Keep binding intent documents consistent with the declared toolchain floor."
+    expected_outcome: "Every MSRV statement in the root backlog, agent-runtime requirements, and evaluation docs matches the 1.95 manifest floor."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "msrv-195-docs-align-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

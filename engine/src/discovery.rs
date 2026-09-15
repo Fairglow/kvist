@@ -162,17 +162,20 @@ pub fn discover(component_root: &Path) -> Result<Discovery> {
 /// This is used by project commands after loading `kvist.toml`; the public
 /// [`discover`] API retains its deterministic default limits for direct users.
 pub fn discover_with_limits(component_root: &Path, limits: DiscoveryLimits) -> Result<Discovery> {
+    let component_root = crate::filesystem::normalize_relative_path(component_root);
     tracing::debug!(component_root = %component_root.display(), "starting component discovery");
-    validate_component_root(component_root)?;
+    validate_component_root(&component_root)?;
 
+    let ignore_rules = load_ignore_rules(&component_root);
     let mut context = ScanContext {
         limits,
         scanned_directories: 0,
         components: Vec::new(),
+        ignore_rules,
     };
-    let is_workspace_root = is_workspace_namespace_root(component_root);
+    let is_workspace_root = is_workspace_namespace_root(&component_root);
     scan_directory(
-        component_root,
+        &component_root,
         Path::new(""),
         ScanPosition {
             depth: 0,
@@ -181,7 +184,7 @@ pub fn discover_with_limits(component_root: &Path, limits: DiscoveryLimits) -> R
         &mut context,
     )?;
     if context.components.is_empty() {
-        let root_component = inspect_component(component_root, Path::new(""))?;
+        let root_component = inspect_component(&component_root, Path::new(""))?;
         context.components.push(root_component);
     }
     context
@@ -243,10 +246,147 @@ fn is_workspace_namespace_root(component_root: &Path) -> bool {
     false
 }
 
+#[derive(Debug, Clone)]
+struct GitIgnoreRule {
+    pattern: String,
+    anchored: bool,
+    dir_only: bool,
+    negated: bool,
+}
+
+impl GitIgnoreRule {
+    fn parse(line: &str) -> Option<Self> {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            return None;
+        }
+        let (negated, line) = if let Some(rest) = trimmed.strip_prefix('!') {
+            (true, rest)
+        } else {
+            (false, trimmed)
+        };
+        let (dir_only, line) = if let Some(rest) = line.strip_suffix('/') {
+            (true, rest)
+        } else {
+            (false, line)
+        };
+        let (anchored, pattern) = if let Some(rest) = line.strip_prefix('/') {
+            (true, rest)
+        } else {
+            (false, line)
+        };
+        Some(Self {
+            pattern: pattern.to_owned(),
+            anchored,
+            dir_only,
+            negated,
+        })
+    }
+
+    fn matches(&self, rel_path: &Path, is_dir: bool) -> bool {
+        if self.dir_only && !is_dir {
+            return false;
+        }
+        let rel_str = rel_path.to_string_lossy();
+        let file_name = rel_path
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default();
+        if self.anchored {
+            glob_match(&self.pattern, &rel_str)
+        } else {
+            glob_match(&self.pattern, &file_name) || glob_match(&self.pattern, &rel_str)
+        }
+    }
+}
+
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let p_bytes = pattern.as_bytes();
+    let t_bytes = text.as_bytes();
+    let mut p_idx = 0;
+    let mut t_idx = 0;
+    let mut star_idx = None;
+    let mut match_idx = 0;
+
+    while t_idx < t_bytes.len() {
+        if p_idx < p_bytes.len() && (p_bytes[p_idx] == b'?' || p_bytes[p_idx] == t_bytes[t_idx]) {
+            p_idx += 1;
+            t_idx += 1;
+        } else if p_idx < p_bytes.len() && p_bytes[p_idx] == b'*' {
+            star_idx = Some(p_idx);
+            p_idx += 1;
+            match_idx = t_idx;
+        } else if let Some(star) = star_idx {
+            p_idx = star + 1;
+            match_idx += 1;
+            t_idx = match_idx;
+        } else {
+            return false;
+        }
+    }
+
+    while p_idx < p_bytes.len() && p_bytes[p_idx] == b'*' {
+        p_idx += 1;
+    }
+
+    p_idx == p_bytes.len()
+}
+
+fn is_editor_lock_or_temp_file(name: &str) -> bool {
+    name.starts_with(".#")
+        || (name.starts_with('#') && name.ends_with('#'))
+        || name.ends_with('~')
+        || (name.starts_with('.') && (name.ends_with(".swp") || name.ends_with(".swo")))
+}
+
+fn load_ignore_rules(root: &Path) -> Vec<GitIgnoreRule> {
+    let mut rules = Vec::new();
+    let gitignore_path = root.join(".gitignore");
+    if let Ok(content) = fs::read_to_string(&gitignore_path) {
+        for line in content.lines() {
+            if let Some(rule) = GitIgnoreRule::parse(line) {
+                rules.push(rule);
+            }
+        }
+    } else {
+        let mut current = root.to_path_buf();
+        for _ in 0..3 {
+            if let Some(parent) = current.parent() {
+                let parent_gi = parent.join(".gitignore");
+                if let Ok(content) = fs::read_to_string(&parent_gi) {
+                    for line in content.lines() {
+                        if let Some(rule) = GitIgnoreRule::parse(line) {
+                            rules.push(rule);
+                        }
+                    }
+                    break;
+                }
+                current = parent.to_path_buf();
+            } else {
+                break;
+            }
+        }
+    }
+    rules
+}
+
 struct ScanContext {
     limits: DiscoveryLimits,
     scanned_directories: usize,
     components: Vec<Component>,
+    ignore_rules: Vec<GitIgnoreRule>,
+}
+
+impl ScanContext {
+    fn is_ignored(&self, rel_path: &Path, is_dir: bool) -> bool {
+        let mut ignored = false;
+        for rule in &self.ignore_rules {
+            if rule.matches(rel_path, is_dir) {
+                ignored = !rule.negated;
+            }
+        }
+        ignored
+    }
 }
 
 struct ScanPosition {
@@ -318,6 +458,11 @@ fn scan_directory(
         if is_artifact_name(&name) {
             continue;
         }
+        let name_str = name.to_string_lossy();
+        if is_editor_lock_or_temp_file(&name_str) {
+            continue;
+        }
+        let child_relative_path = relative_path.join(&name);
         let entry_path = entry.path();
         let metadata = fs::symlink_metadata(&entry_path).map_err(|source| KvistError::Io {
             operation: "inspect component directory entry",
@@ -325,15 +470,19 @@ fn scan_directory(
             source,
         })?;
         let file_type = metadata.file_type();
+        let is_dir = file_type.is_dir();
+
+        if is_ignored_directory(&name) || context.is_ignored(&child_relative_path, is_dir) {
+            continue;
+        }
 
         if is_link_like(&metadata) {
             return Err(KvistError::ComponentDiscoveryLinkLikePath { path: entry_path });
         }
-        if !file_type.is_dir() || is_ignored_directory(&name) {
+        if !is_dir {
             continue;
         }
 
-        let child_relative_path = relative_path.join(name);
         if child_relative_path.as_os_str().as_encoded_bytes().len()
             > context.limits.max_relative_path_bytes
         {

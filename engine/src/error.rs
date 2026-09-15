@@ -85,6 +85,15 @@ pub enum KvistError {
         /// Actionable setup diagnostic.
         reason: String,
     },
+    /// Interactive agent configuration was cancelled by the user.
+    #[error("agent setup cancelled")]
+    AgentSetupCancelled,
+    /// The interactive shell could not attach to an interactive terminal.
+    #[error("interactive shell requires an interactive terminal: {reason}")]
+    ShellNotInteractive {
+        /// Actionable explanation of the terminal condition.
+        reason: String,
+    },
     /// The reusable agent runtime rejected or failed an operation.
     #[error(transparent)]
     AgentRuntime(#[from] agent_runtime::Error),
@@ -400,6 +409,21 @@ pub enum KvistError {
         task_id: String,
         /// Blocking condition.
         reason: String,
+    },
+    /// A task run without an explicit task ID suggests the next ready task,
+    /// which must be confirmed interactively before it runs; this context
+    /// cannot confirm, so nothing is executed.
+    #[error(
+        "task run without a TASK_ID suggests the next ready task, which requires an interactive terminal to confirm before it runs; pass an explicit TASK_ID to run without prompting"
+    )]
+    TaskRunSuggestionNotInteractive,
+    /// No task in the selected component queue is ready to run.
+    #[error(
+        "no ready tasks in the queue for component `{component}`; inspect `kvist overview` or pass an explicit TASK_ID"
+    )]
+    NoReadyTasks {
+        /// Component-root-relative component path.
+        component: PathBuf,
     },
     /// A task requires verification but the test-command policy has changed or is not approved.
     #[error(

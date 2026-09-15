@@ -19,12 +19,8 @@ use nix::{
     sys::signal::{Signal, killpg},
     unistd::Pid,
 };
-use signal_hook::{
-    consts::{SIGINT, SIGTERM},
-    iterator::{Handle as SignalHandle, Signals},
-};
 
-use crate::{CancellationToken, Error, Result};
+use crate::{CancellationToken, Error, Result, interrupt};
 
 const MAX_IDLE_TIMEOUT: Duration = Duration::from_secs(3_600);
 const MAX_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(86_400);
@@ -211,10 +207,13 @@ enum AttemptEvent {
     Retry(RetryCause),
 }
 
+/// Tracks interruption for one supervision run.
+///
+/// The shared process-level handler records the interrupt flag; an optional
+/// token additionally covers programmatic cancellation (e.g. model discovery
+/// transports that poll a token directly).
 pub(crate) struct SignalCancellation {
-    requested: CancellationToken,
-    handle: SignalHandle,
-    listener: Option<JoinHandle<()>>,
+    token: Option<CancellationToken>,
 }
 
 struct OutputDestination {
@@ -261,40 +260,33 @@ impl OutputDestination {
 
 impl SignalCancellation {
     fn new() -> Result<Self> {
-        Self::new_with_token(CancellationToken::new())
+        interrupt::install_handler();
+        Ok(Self { token: None })
     }
 
     pub(crate) fn new_with_token(requested: CancellationToken) -> Result<Self> {
-        let mut signals = Signals::new([SIGINT, SIGTERM]).map_err(|source| Error::Io {
-            operation: "install supervision signal handlers",
-            path: PathBuf::from("process signals"),
-            source,
-        })?;
-        let handle = signals.handle();
-        let listener_flag = requested.clone();
-        let listener = std::thread::spawn(move || {
-            if signals.forever().next().is_some() {
-                listener_flag.cancel();
-            }
-        });
+        interrupt::install_handler();
         Ok(Self {
-            requested,
-            handle,
-            listener: Some(listener),
+            token: Some(requested),
         })
     }
 
     fn requested(&self) -> bool {
-        self.requested.is_cancelled()
+        interrupt::take_interrupted()
+            || self
+                .token
+                .as_ref()
+                .is_some_and(|token| token.is_cancelled())
     }
-}
 
-impl Drop for SignalCancellation {
-    fn drop(&mut self) {
-        self.handle.close();
-        if let Some(listener) = self.listener.take() {
-            let _ = listener.join();
-        }
+    /// Registers the supervised child's process group so a signal arrives at
+    /// the whole group, not just this process.
+    fn register_process_group(pgid: i32) {
+        interrupt::set_active_process_group(pgid);
+    }
+
+    fn clear_process_group() {
+        interrupt::clear_active_process_group();
     }
 }
 
@@ -457,6 +449,14 @@ fn run_attempt(
             }
         }
     };
+    // The child runs in its own process group (PGID == child PID). Register it
+    // so a SIGINT/SIGTERM reaches the whole group, not just this process.
+    let pgid = i32::try_from(child.id()).map_err(|_| Error::Io {
+        operation: "register supervised process group",
+        path: PathBuf::from(&specification.program),
+        source: io::Error::other("child process identifier exceeds Linux pid range"),
+    })?;
+    SignalCancellation::register_process_group(pgid);
     let stdout = child.stdout.take().ok_or_else(|| Error::Io {
         operation: "capture supervised stdout",
         path: PathBuf::from("stdout"),
@@ -491,6 +491,8 @@ fn run_attempt(
     let draining = drain_to_end(&receiver, policy.max_output_bytes, &stop_readers, output);
     let stdout_join = join_reader(stdout_reader, "read supervised stdout");
     let stderr_join = join_reader(stderr_reader, "read supervised stderr");
+
+    SignalCancellation::clear_process_group();
 
     if matches!(
         &event,

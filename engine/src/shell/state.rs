@@ -18,7 +18,7 @@ use std::process::Command;
 
 use serde_json::Value;
 
-use crate::{config, project_state, task_queue};
+use crate::{project_state, task_queue};
 
 /// A dynamic value domain the completion engine can resolve.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +31,8 @@ pub enum ValueDomain {
     Attempt,
     /// A model profile name from the agent configuration.
     Model,
+    /// An agent role (developer, architect, security-reviewer).
+    Role,
     /// The active Git branch of the project repository.
     Branch,
 }
@@ -50,7 +52,7 @@ pub struct DynamicState {
     /// Component paths relative to the component root; `.` is the root.
     components: Vec<String>,
     /// Task and attempt scopes keyed by component path.
-    scopes: BTreeMap<String, ComponentScope>,
+    pub(crate) scopes: BTreeMap<String, ComponentScope>,
     /// Model profile names across all roles, sorted and de-duplicated.
     models: Vec<String>,
     /// The active Git branch, when the project is inside a Git repository.
@@ -102,6 +104,50 @@ impl DynamicState {
             .unwrap_or_default()
     }
 
+    /// Runnable (uncompleted) task IDs for one component path.
+    ///
+    /// Excludes completed tasks and moves the next ready task (the first
+    /// pending task whose dependencies are all completed) to the front, so
+    /// completion offers it first.
+    pub fn runnable_task_ids_for(&self, component: &str) -> Vec<String> {
+        let Some(scope) = self.scopes.get(component) else {
+            return Vec::new();
+        };
+        let mut runnable: Vec<String> = scope
+            .tasks
+            .iter()
+            .filter(|task| task.status != task_queue::TaskStatus::Completed)
+            .map(|task| task.id.clone())
+            .collect();
+        if let Some(ready) = task_queue::next_ready_task_id(&scope.tasks)
+            && let Some(position) = runnable.iter().position(|id| *id == ready)
+        {
+            let promoted = runnable.remove(position);
+            runnable.insert(0, promoted);
+        }
+        runnable
+    }
+
+    /// A short human label for one task: its durable status plus, when the
+    /// queue records a title, a truncated title. Used for completion
+    /// descriptions so candidates show `pending · Define the tests` rather
+    /// than a bare ID.
+    pub fn task_label(&self, component: &str, task_id: &str) -> Option<String> {
+        let scope = self.scopes.get(component)?;
+        let task = scope.tasks.iter().find(|task| task.id == task_id)?;
+        let status = match task.status {
+            task_queue::TaskStatus::Pending => "pending",
+            task_queue::TaskStatus::InProgress => "in-progress",
+            task_queue::TaskStatus::Blocked => "blocked",
+            task_queue::TaskStatus::Completed => "completed",
+        };
+        if task.title.is_empty() {
+            Some(status.to_owned())
+        } else {
+            Some(format!("{status} · {}", super::truncate(&task.title, 48)))
+        }
+    }
+
     /// Finds a task by ID across every component, returning its component path.
     pub fn find_task(&self, task_id: &str) -> Option<(&str, &task_queue::Task)> {
         for (component, scope) in &self.scopes {
@@ -126,6 +172,15 @@ impl DynamicState {
         let mut tasks = Vec::new();
         for component in &self.components {
             tasks.extend(self.task_ids_for(component));
+        }
+        tasks
+    }
+
+    /// Every runnable task ID across every component.
+    pub fn all_runnable_task_ids(&self) -> Vec<String> {
+        let mut tasks = Vec::new();
+        for component in &self.components {
+            tasks.extend(self.runnable_task_ids_for(component));
         }
         tasks
     }
@@ -158,17 +213,26 @@ impl DynamicState {
     }
 
     fn load_models(&mut self, project_dir: &Path) {
-        let Ok(cfg) = config::load(project_dir) else {
+        if !project_dir.join("kvist.toml").is_file()
+            && !project_dir.join(".kvist/config.toml").is_file()
+        {
             return;
-        };
+        }
         let mut names: Vec<String> = Vec::new();
-        for profile in [
-            &cfg.agent.architect,
-            &cfg.agent.developer,
-            &cfg.agent.security_reviewer,
-        ] {
-            for model in &profile.models {
-                names.push(model.name.clone());
+        if let Ok(cfg) = crate::config::load(project_dir) {
+            for name in cfg.agent.profiles.keys() {
+                names.push(name.clone());
+            }
+        }
+        if let Some(user_path) = crate::config::global_user_config_path()
+            && let Ok(user_contents) = std::fs::read_to_string(&user_path)
+            && let Ok(user_table) = user_contents.parse::<toml::Value>()
+        {
+            let lookup = user_table.get("agent").unwrap_or(&user_table);
+            if let Some(profiles) = lookup.get("profiles").and_then(toml::Value::as_table) {
+                for name in profiles.keys() {
+                    names.push(name.clone());
+                }
             }
         }
         names.sort();
@@ -407,5 +471,265 @@ tasks:
     fn git_branch_returns_none_outside_a_repository() {
         let dir = tempfile::tempdir().unwrap();
         assert!(git_branch(dir.path()).is_none());
+    }
+
+    fn task(id: &str, status: task_queue::TaskStatus, deps: &[&str]) -> task_queue::Task {
+        task_queue::Task {
+            id: id.to_owned(),
+            title: id.to_owned(),
+            description: String::new(),
+            context: String::new(),
+            purpose: String::new(),
+            expected_outcome: String::new(),
+            kind: task_queue::TaskKind::Test,
+            status,
+            depends_on: deps.iter().map(|dep| (*dep).to_owned()).collect(),
+            requirements: Vec::new(),
+            timestamps: task_queue::TaskTimestamps {
+                created_at: task_queue::Timestamp::default(),
+                updated_at: task_queue::Timestamp::default(),
+                completed_at: None,
+            },
+            blocked_reason: None,
+            recovery_state: None,
+            acceptance_id: None,
+            disposition: None,
+        }
+    }
+
+    fn state_with_tasks(tasks: Vec<task_queue::Task>) -> DynamicState {
+        let mut scopes = BTreeMap::new();
+        scopes.insert(
+            ".".to_owned(),
+            ComponentScope {
+                tasks,
+                attempts: BTreeMap::new(),
+            },
+        );
+        DynamicState::new(vec![".".to_owned()], scopes, Vec::new(), None)
+    }
+
+    #[test]
+    fn runnable_task_ids_promote_the_next_ready_task_to_the_front() {
+        // `later` is listed first but waits on `dep`; `dep` is the ready task.
+        let state = state_with_tasks(vec![
+            task("later", task_queue::TaskStatus::Pending, &["dep"]),
+            task("dep", task_queue::TaskStatus::Pending, &[]),
+        ]);
+        assert_eq!(
+            state.runnable_task_ids_for("."),
+            vec!["dep".to_owned(), "later".to_owned()]
+        );
+
+        // Once `dep` completes, `later` becomes the ready task.
+        let state = state_with_tasks(vec![
+            task("later", task_queue::TaskStatus::Pending, &["dep"]),
+            task("dep", task_queue::TaskStatus::Completed, &[]),
+        ]);
+        assert_eq!(state.runnable_task_ids_for("."), vec!["later".to_owned()]);
+    }
+
+    #[test]
+    fn runnable_task_ids_exclude_completed_and_keep_queue_order_when_nothing_is_ready() {
+        let state = state_with_tasks(vec![
+            task("a", task_queue::TaskStatus::Completed, &[]),
+            task("b", task_queue::TaskStatus::Blocked, &[]),
+            task("c", task_queue::TaskStatus::InProgress, &[]),
+        ]);
+        assert_eq!(
+            state.runnable_task_ids_for("."),
+            vec!["b".to_owned(), "c".to_owned()]
+        );
+    }
+    /// Initializes a bare directory as a Current Kvist project (default
+    /// component root `src`, empty root queue).
+    fn current_project(dir: &Path) {
+        crate::init::initialize(dir).expect("initializes a bare directory");
+    }
+
+    #[test]
+    fn task_label_combines_status_and_title() {
+        let mut tasks = vec![task("a", task_queue::TaskStatus::Pending, &[])];
+        tasks[0].title = "Define the tests".to_owned();
+        let state = state_with_tasks(tasks);
+        assert_eq!(
+            state.task_label(".", "a"),
+            Some("pending · Define the tests".to_owned())
+        );
+        // An empty title leaves the bare status; an unknown task is `None`.
+        let mut bare = vec![task("b", task_queue::TaskStatus::Blocked, &[])];
+        bare[0].title = String::new();
+        let state = state_with_tasks(bare);
+        assert_eq!(state.task_label(".", "b"), Some("blocked".to_owned()));
+        assert_eq!(state.task_label(".", "ghost"), None);
+        // A long title is truncated to 48 characters including the ellipsis.
+        let mut long = vec![task("c", task_queue::TaskStatus::Pending, &[])];
+        long[0].title = "x".repeat(80);
+        let state = state_with_tasks(long);
+        let label = state.task_label(".", "c").expect("label");
+        let title = label.strip_prefix("pending · ").expect("status prefix");
+        assert_eq!(title.chars().count(), 48);
+        assert!(title.ends_with("..."));
+    }
+
+    #[test]
+    fn find_task_locates_a_task_in_its_component() {
+        let mut scopes = BTreeMap::new();
+        scopes.insert(
+            "a".to_owned(),
+            ComponentScope {
+                tasks: vec![task("t1", task_queue::TaskStatus::Pending, &[])],
+                attempts: BTreeMap::new(),
+            },
+        );
+        scopes.insert(
+            "b".to_owned(),
+            ComponentScope {
+                tasks: vec![task("t2", task_queue::TaskStatus::Pending, &[])],
+                attempts: BTreeMap::new(),
+            },
+        );
+        let state = DynamicState::new(
+            vec!["a".to_owned(), "b".to_owned()],
+            scopes,
+            Vec::new(),
+            None,
+        );
+        let (component, found) = state.find_task("t1").expect("task found");
+        assert_eq!(component, "a");
+        assert_eq!(found.id, "t1");
+        assert!(state.find_task("ghost").is_none());
+    }
+
+    #[test]
+    fn all_task_ids_follow_component_then_queue_order() {
+        let mut scopes = BTreeMap::new();
+        scopes.insert(
+            "engine".to_owned(),
+            ComponentScope {
+                tasks: vec![
+                    task("write-tests", task_queue::TaskStatus::Pending, &[]),
+                    task(
+                        "implement-code",
+                        task_queue::TaskStatus::Pending,
+                        &["write-tests"],
+                    ),
+                ],
+                attempts: BTreeMap::new(),
+            },
+        );
+        scopes.insert(
+            ".".to_owned(),
+            ComponentScope {
+                tasks: vec![task("root-task", task_queue::TaskStatus::Completed, &[])],
+                attempts: BTreeMap::new(),
+            },
+        );
+        let state = DynamicState::new(
+            vec![".".to_owned(), "engine".to_owned()],
+            scopes,
+            Vec::new(),
+            None,
+        );
+        assert_eq!(
+            state.all_task_ids(),
+            vec![
+                "root-task".to_owned(),
+                "write-tests".to_owned(),
+                "implement-code".to_owned(),
+            ]
+        );
+        // Runnable means uncompleted: the finished root task drops out, and
+        // the ready task (`write-tests`) is promoted ahead of its dependent.
+        assert_eq!(
+            state.all_runnable_task_ids(),
+            vec!["write-tests".to_owned(), "implement-code".to_owned()]
+        );
+    }
+
+    #[test]
+    fn load_end_to_end_discovers_components_and_tasks() {
+        let dir = tempfile::tempdir().unwrap();
+        current_project(dir.path());
+        // A child component under the default component root `src`.
+        write(
+            &dir.path().join("src").join("demo").join("TODOS.yaml"),
+            QUEUE,
+        );
+        write(
+            &dir.path()
+                .join("src")
+                .join("demo")
+                .join(".kvist-attempts")
+                .join("write-tests.jsonl"),
+            "{\"attempt_id\":\"attempt-0001\"}\n",
+        );
+
+        let state = DynamicState::load(dir.path());
+        assert_eq!(state.components(), &[".".to_owned(), "demo".to_owned()]);
+        assert!(state.task_ids_for(".").is_empty());
+        assert_eq!(
+            state.task_ids_for("demo"),
+            vec!["write-tests".to_owned(), "implement-code".to_owned()]
+        );
+        assert_eq!(
+            state.attempts_for("demo", "write-tests"),
+            &["attempt-0001".to_owned()]
+        );
+        // The ready task comes first: `implement-code` depends on
+        // `write-tests`, so the ready task is `write-tests`.
+        assert_eq!(
+            state.runnable_task_ids_for("demo"),
+            vec!["write-tests".to_owned(), "implement-code".to_owned()]
+        );
+    }
+
+    #[test]
+    fn load_models_reads_the_project_profiles() {
+        let dir = tempfile::tempdir().unwrap();
+        current_project(dir.path());
+        fs::write(
+            dir.path().join("kvist.toml"),
+            "schema_version = 1\ncomponent_root = \"src\"\n\n\
+             [agent.profiles.local-model]\nprovider = \"custom\"\n\n\
+             [agent.profiles.other-model]\nprovider = \"custom\"\n",
+        )
+        .unwrap();
+
+        let state = DynamicState::load(dir.path());
+        let models = state.models();
+        // The project profiles are always offered, whatever the user's global
+        // configuration contains (which tests must not depend on).
+        assert!(models.contains(&"local-model".to_owned()));
+        assert!(models.contains(&"other-model".to_owned()));
+        // The merged list is sorted and de-duplicated.
+        let mut sorted = models.to_vec();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted, *models);
+    }
+
+    #[test]
+    fn git_branch_reads_the_active_branch_inside_a_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = |args: &[&str]| {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir.path())
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "Kvist Test")
+                .env("GIT_AUTHOR_EMAIL", "test@kvist.local")
+                .env("GIT_COMMITTER_NAME", "Kvist Test")
+                .env("GIT_COMMITTER_EMAIL", "test@kvist.local")
+                .output()
+                .expect("runs git")
+        };
+        git(&["init", "-b", "main"]);
+        fs::write(dir.path().join("file.txt"), "x\n").unwrap();
+        git(&["add", "file.txt"]);
+        git(&["commit", "-m", "initial"]);
+
+        assert_eq!(git_branch(dir.path()), Some("main".to_owned()));
     }
 }

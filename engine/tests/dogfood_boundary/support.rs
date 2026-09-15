@@ -57,9 +57,12 @@ pub fn temporary_directory(prefix: &str) -> TempDir {
 }
 
 pub fn run_kvist(project: &Path, arguments: &[&str]) -> Output {
+    // A null stdin keeps the child deterministically non-interactive, so a
+    // blank-task `task run` can never reach a live confirmation prompt.
     Command::new(env!("CARGO_BIN_EXE_kvist"))
         .args(arguments)
         .current_dir(project)
+        .stdin(Stdio::null())
         .output()
         .expect("run kvist")
 }
@@ -69,6 +72,7 @@ pub fn run_kvist_with_path(project: &Path, arguments: &[&str], path: &Path) -> O
         .args(arguments)
         .current_dir(project)
         .env("PATH", path)
+        .stdin(Stdio::null())
         .output()
         .expect("run kvist with controlled PATH")
 }

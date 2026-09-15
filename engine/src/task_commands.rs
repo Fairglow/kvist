@@ -4,7 +4,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{self, OpenOptions},
-    io::{self, Read, Write},
+    io::{self, BufRead, IsTerminal, Read, Write},
     path::{Component, Path, PathBuf},
 };
 
@@ -21,21 +21,19 @@ use crate::{
     filesystem::is_link_like,
     project_state::{self, ComponentState, MAX_ROOT_TEXT_ARTIFACT_BYTES, ProjectState},
     task_queue::{
-        RecoveryState, RecoveryStateKind, Task, TaskKind, TaskQueue, TaskStatus, Timestamp, parse,
-        serialize,
+        RecoveryState, RecoveryStateKind, Task, TaskKind, TaskQueue, TaskStatus, Timestamp,
+        next_ready_task_id, parse, serialize,
     },
     vcs::VcsArtifactState,
 };
 
-/// Selects the first ready task in declared queue order.
+/// Selects the first ready task in declared queue order, using the same
+/// definition as the overview, the shell, and the blank-task `task run`
+/// suggestion.
 pub fn next(component_path: &Path) -> Result<String> {
     let context = validate_context(component_path)?;
     let queue = read_queue(&context.component_dir)?;
-    Ok(queue
-        .tasks
-        .iter()
-        .find(|task| task_is_ready(task, &queue.tasks))
-        .map_or_else(|| "no ready task".to_owned(), |task| task.id.clone()))
+    Ok(next_ready_task_id(&queue.tasks).unwrap_or_else(|| "no ready task".to_owned()))
 }
 
 /// Persists a legal task transition with prepared and committed audit records.
@@ -820,7 +818,7 @@ fn sync_lock_directory(path: &Path) -> Result<()> {
     sync_directory(parent)
 }
 
-fn lock_owner_appears_live(contents: &str) -> bool {
+pub(crate) fn lock_owner_appears_live(contents: &str) -> bool {
     let Some(pid) = contents
         .lines()
         .find_map(|line| line.strip_prefix("pid: "))
@@ -2050,13 +2048,17 @@ pub fn unlock(component_path: &Path, force: bool) -> Result<String> {
                 })?;
 
                 let mut input = String::new();
-                std::io::stdin()
+                let mut reader = crate::interruptible_stdin::interruptible_reader();
+                let read = reader
                     .read_line(&mut input)
                     .map_err(|source| KvistError::Io {
                         operation: "read confirmation input",
                         path: PathBuf::from("stdin"),
                         source,
                     })?;
+                if read == 0 {
+                    return Ok("unlock cancelled by user".to_owned());
+                }
 
                 let trimmed = input.trim().to_lowercase();
                 if trimmed != "y" && trimmed != "yes" {
@@ -4421,6 +4423,152 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
     }
 }
 
+/// Confirms running a suggested (next-ready) task. A bare ENTER, `y`, or
+/// `yes` confirms; anything else refuses. When stdin is not an interactive
+/// terminal the suggestion cannot be confirmed, so this fails instead of
+/// auto-executing, preserving the invariant that supervised runs never
+/// auto-select a task.
+pub(crate) fn confirm_run_suggestion(task_id: &str) -> Result<bool> {
+    if !io::stdin().is_terminal() {
+        return Err(KvistError::TaskRunSuggestionNotInteractive);
+    }
+    eprint!("Run suggested next task `{task_id}`? [Y/n] ");
+    io::stderr().flush().map_err(|source| KvistError::Io {
+        operation: "flush stderr",
+        path: PathBuf::from("stderr"),
+        source,
+    })?;
+    let mut input = String::new();
+    let mut reader = crate::interruptible_stdin::interruptible_reader();
+    let read = reader
+        .read_line(&mut input)
+        .map_err(|source| KvistError::Io {
+            operation: "read confirmation input",
+            path: PathBuf::from("stdin"),
+            source,
+        })?;
+    if read == 0 {
+        // EOF or Ctrl-C: refuse, fail closed.
+        return Ok(false);
+    }
+    Ok(matches!(
+        input.trim().to_ascii_lowercase().as_str(),
+        "" | "y" | "yes"
+    ))
+}
+
+/// Runs a single task, all tasks for a TODO item (e.g. `sa-02`), or all uncompleted tasks for a component.
+///
+/// When `task_spec` is `None`, the next ready task is suggested and run only
+/// after an interactive confirmation; a non-interactive context fails instead
+/// of auto-executing.
+pub fn run_task_or_item(
+    component_path: &Path,
+    task_spec: Option<&str>,
+    stream: bool,
+) -> Result<String> {
+    let context = validate_context(component_path)?;
+    let queue = read_queue(&context.component_dir)?;
+
+    let task_spec = match task_spec {
+        None => {
+            let task_id = next_ready_task_id(&queue.tasks).ok_or(KvistError::NoReadyTasks {
+                component: context.component_path.clone(),
+            })?;
+            if !confirm_run_suggestion(&task_id)? {
+                return Ok(format!(
+                    "Cancelled: did not run the suggested task `{task_id}`."
+                ));
+            }
+            return run_task(component_path, &task_id, stream);
+        }
+        Some(spec) => spec,
+    };
+
+    let target_tasks: Vec<String> = if task_spec == "all" {
+        let uncompleted: Vec<String> = queue
+            .tasks
+            .iter()
+            .filter(|t| t.status != TaskStatus::Completed)
+            .map(|t| t.id.clone())
+            .collect();
+        if uncompleted.is_empty() {
+            return Ok(format!(
+                "all tasks in component `{}` are already completed",
+                component_path.display()
+            ));
+        }
+        uncompleted
+    } else if let Some(task) = queue.tasks.iter().find(|t| t.id == task_spec) {
+        // Exact single task match
+        vec![task.id.clone()]
+    } else {
+        // Check for item / prefix match (e.g. "sa-02" matching "sa-02-write-tests", etc.)
+        let prefix_matches: Vec<String> = queue
+            .tasks
+            .iter()
+            .filter(|t| {
+                (t.id.starts_with(&format!("{task_spec}-")) || t.id == task_spec)
+                    && t.status != TaskStatus::Completed
+            })
+            .map(|t| t.id.clone())
+            .collect();
+
+        if prefix_matches.is_empty() {
+            let all_matching: Vec<&Task> = queue
+                .tasks
+                .iter()
+                .filter(|t| t.id.starts_with(&format!("{task_spec}-")) || t.id == task_spec)
+                .collect();
+            if !all_matching.is_empty() {
+                return Ok(format!(
+                    "all tasks for `{task_spec}` in component `{}` are already completed",
+                    component_path.display()
+                ));
+            }
+            return Err(KvistError::TaskNotFound {
+                component: context.component_path.clone(),
+                task_id: task_spec.to_owned(),
+            });
+        }
+        prefix_matches
+    };
+
+    let total = target_tasks.len();
+    if total == 1 {
+        return run_task(component_path, &target_tasks[0], stream);
+    }
+
+    let mut completed_count = 0;
+    for (idx, task_id) in target_tasks.iter().enumerate() {
+        let step = idx + 1;
+        println!(
+            "\n▶ [{step}/{total}] Running task `{task_id}` in `{}`...",
+            component_path.display()
+        );
+        match run_task(component_path, task_id, stream) {
+            Ok(output) => {
+                println!("✓ [{step}/{total}] Task `{task_id}` completed successfully.");
+                completed_count += 1;
+                if !stream && !output.is_empty() {
+                    let first_line = output.lines().next().unwrap_or("");
+                    println!("  {first_line}");
+                }
+            }
+            Err(err) => {
+                eprintln!("✗ [{step}/{total}] Task `{task_id}` failed: {err}");
+                return Err(err);
+            }
+        }
+    }
+
+    Ok(format!(
+        "Successfully completed all {completed_count} tasks ({}) for `{task_spec}` in component `{}`.",
+        target_tasks.join(", "),
+        component_path.display()
+    ))
+}
+
 fn select_runnable_task(context: &TaskContext, requested: Option<&str>) -> Result<String> {
     let queue = read_queue(&context.component_dir)?;
     let task_id = match requested {
@@ -5563,6 +5711,7 @@ pub fn verify_task(
         output,
         timed_out,
         output_limit_exceeded,
+        cancelled,
     } = crate::sandbox::execute_with_timeout(
         sandbox_config,
         crate::sandbox::ExecutionRequest {
@@ -5583,6 +5732,7 @@ pub fn verify_task(
         crate::sandbox::ExecutionOptions {
             timeout: Some(std::time::Duration::from_secs(policy.timeout_seconds)),
             output_limit: Some(policy.max_output_bytes),
+            live_stdout: None,
         },
         &approved_runner,
     )?;
@@ -5598,7 +5748,7 @@ pub fn verify_task(
         &redactions,
         policy.max_output_bytes.min(MAX_VERIFICATION_EVIDENCE_BYTES),
     );
-    let success = !timed_out && !output_limit_exceeded && output.status.success();
+    let success = !timed_out && !output_limit_exceeded && !cancelled && output.status.success();
     let exit_code = output.status.code();
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let attempt_path = attempt_path(&context.component_dir, task_id)?;

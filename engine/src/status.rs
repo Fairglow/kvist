@@ -1,5 +1,7 @@
 //! Deterministic, read-only project status rendering.
 
+use std::{fs, path::Path};
+
 use clap::ValueEnum;
 
 use crate::{
@@ -14,6 +16,8 @@ pub enum StatusFormat {
     Text,
     /// Stable compact JSON intended for structured automation.
     Json,
+    /// High-level human-friendly project overview with progress and next tasks.
+    Overview,
 }
 
 /// Renders a completed project inspection without performing any filesystem I/O.
@@ -27,6 +31,7 @@ pub fn render(
     match format {
         StatusFormat::Text => render_text(inspection, only_documents, only_impls, unfinished),
         StatusFormat::Json => render_json(inspection, only_documents, only_impls, unfinished),
+        StatusFormat::Overview => render_overview(inspection),
     }
 }
 
@@ -264,4 +269,218 @@ fn staleness_kind_name(kind: StalenessCauseKind) -> &'static str {
         StalenessCauseKind::ComponentDesignRevisionChanged => "component-design-revision-changed",
         StalenessCauseKind::ParentContractRevisionChanged => "parent-contract-revision-changed",
     }
+}
+
+/// Renders a human-oriented overview of the project, including component states,
+/// compact document summaries, task progress, and next tasks.
+pub fn render_overview(inspection: &ProjectInspection) -> String {
+    let mut output = String::new();
+    output.push_str("╭── Project Status ───────────────────────────────────────────────\n");
+    output.push_str(&format!(
+        "│  Project:  {} ({})\n",
+        inspection.project_dir.display(),
+        inspection.state.name()
+    ));
+
+    let mut total_tasks = 0;
+    let mut total_completed = 0;
+    let mut total_in_progress = 0;
+    let mut total_pending = 0;
+    let mut total_blocked = 0;
+
+    struct CompSummary {
+        path: String,
+        state: &'static str,
+        docs_summary: String,
+        tasks_summary: Option<String>,
+        next_task: Option<(String, String)>,
+        guidance: Option<String>,
+    }
+
+    let mut comp_summaries = Vec::new();
+
+    for component in &inspection.components {
+        let comp_path_str = component.path.to_string_lossy().into_owned();
+        let state_name = component.state.name();
+
+        let total_artifacts = component.artifacts.len();
+        let valid_artifacts = component
+            .artifacts
+            .iter()
+            .filter(|a| a.state.name() == "valid")
+            .count();
+
+        let docs_summary = if total_artifacts > 0 && valid_artifacts == total_artifacts {
+            format!("all valid ({valid_artifacts}/{total_artifacts})")
+        } else {
+            let invalid_or_missing: Vec<String> = component
+                .artifacts
+                .iter()
+                .filter(|a| a.state.name() != "valid")
+                .map(|a| format!("{}: {}", a.path, a.state.name()))
+                .collect();
+            if invalid_or_missing.is_empty() {
+                "none".to_owned()
+            } else {
+                format!(
+                    "{valid_artifacts}/{total_artifacts} valid (issues: {})",
+                    invalid_or_missing.join(", ")
+                )
+            }
+        };
+
+        let component_dir = match &inspection.component_root {
+            Some(root) => {
+                if root == Path::new(".") {
+                    inspection.project_dir.join(&component.path)
+                } else {
+                    inspection.project_dir.join(root).join(&component.path)
+                }
+            }
+            None => inspection.project_dir.join(&component.path),
+        };
+
+        let (tasks_summary, next_task) =
+            if let Ok(content) = fs::read_to_string(component_dir.join("TODOS.yaml")) {
+                if let Ok(queue) = crate::task_queue::parse(&content) {
+                    let comp_total = queue.tasks.len();
+                    let comp_completed = queue
+                        .tasks
+                        .iter()
+                        .filter(|t| t.status == crate::task_queue::TaskStatus::Completed)
+                        .count();
+                    let comp_in_progress = queue
+                        .tasks
+                        .iter()
+                        .filter(|t| t.status == crate::task_queue::TaskStatus::InProgress)
+                        .count();
+                    let comp_pending = queue
+                        .tasks
+                        .iter()
+                        .filter(|t| t.status == crate::task_queue::TaskStatus::Pending)
+                        .count();
+                    let comp_blocked = queue
+                        .tasks
+                        .iter()
+                        .filter(|t| t.status == crate::task_queue::TaskStatus::Blocked)
+                        .count();
+
+                    total_tasks += comp_total;
+                    total_completed += comp_completed;
+                    total_in_progress += comp_in_progress;
+                    total_pending += comp_pending;
+                    total_blocked += comp_blocked;
+
+                    let pct = (comp_completed * 100)
+                        .checked_div(comp_total)
+                        .unwrap_or(100);
+                    let mut detail_parts = Vec::new();
+                    if comp_in_progress > 0 {
+                        detail_parts.push(format!("{comp_in_progress} in-progress"));
+                    }
+                    if comp_pending > 0 {
+                        detail_parts.push(format!("{comp_pending} pending"));
+                    }
+                    if comp_blocked > 0 {
+                        detail_parts.push(format!("{comp_blocked} blocked"));
+                    }
+
+                    let summary = if detail_parts.is_empty() {
+                        format!("{comp_completed}/{comp_total} completed ({pct}%)")
+                    } else {
+                        format!(
+                            "{comp_completed}/{comp_total} completed ({pct}%) [{}]",
+                            detail_parts.join(", ")
+                        )
+                    };
+
+                    let next = crate::task_queue::next_ready_task_id(&queue.tasks)
+                        .and_then(|id| queue.tasks.iter().find(|t| t.id == id))
+                        .map(|t| (t.id.clone(), t.title.clone()));
+
+                    (Some(summary), next)
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
+
+        let guidance = match component.state {
+            ComponentState::Stale => Some(format!(
+                "Run 'kvist component accept {comp_path_str}' after review."
+            )),
+            ComponentState::Blocked => Some(format!(
+                "Resolve blocked tasks in {comp_path_str}/TODOS.yaml."
+            )),
+            ComponentState::Invalid => Some(format!(
+                "Run 'kvist component validate {comp_path_str}' to inspect invalid artifacts."
+            )),
+            ComponentState::Missing => Some(format!(
+                "Run 'kvist component new {comp_path_str}' to create missing templates."
+            )),
+            ComponentState::UnsupportedVersion => Some(format!(
+                "Upgrade or adapt the unsupported artifact versions in {comp_path_str}."
+            )),
+            ComponentState::Current => None,
+        };
+
+        comp_summaries.push(CompSummary {
+            path: comp_path_str,
+            state: state_name,
+            docs_summary,
+            tasks_summary,
+            next_task,
+            guidance,
+        });
+    }
+
+    let overall_pct = (total_completed * 100)
+        .checked_div(total_tasks)
+        .unwrap_or(100);
+    let mut overall_details = Vec::new();
+    if total_in_progress > 0 {
+        overall_details.push(format!("{total_in_progress} in-progress"));
+    }
+    if total_pending > 0 {
+        overall_details.push(format!("{total_pending} pending"));
+    }
+    if total_blocked > 0 {
+        overall_details.push(format!("{total_blocked} blocked"));
+    }
+    let details_suffix = if overall_details.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", overall_details.join(", "))
+    };
+    output.push_str(&format!(
+        "│  Progress: {} components · {}/{} tasks completed ({}%){}\n",
+        inspection.components.len(),
+        total_completed,
+        total_tasks,
+        overall_pct,
+        details_suffix
+    ));
+
+    for comp in comp_summaries {
+        output.push_str("│\n");
+        output.push_str(&format!("│  Component: {}\n", comp.path));
+        output.push_str(&format!("│    State:     {}\n", comp.state));
+        output.push_str(&format!("│    Documents: {}\n", comp.docs_summary));
+        if let Some(tasks) = comp.tasks_summary {
+            output.push_str(&format!("│    Tasks:     {}\n", tasks));
+        }
+        if let Some((next_id, next_title)) = comp.next_task {
+            output.push_str(&format!(
+                "│    Next task: {} (\"{}\")\n",
+                next_id, next_title
+            ));
+        }
+        if let Some(hint) = comp.guidance {
+            output.push_str(&format!("│    Action:    {}\n", hint));
+        }
+    }
+
+    output.push_str("╰─────────────────────────────────────────────────────────────────");
+    output
 }

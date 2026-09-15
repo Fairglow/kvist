@@ -389,6 +389,25 @@ pub fn serialize(queue: &TaskQueue) -> std::result::Result<String, TaskQueueErro
     Ok(output)
 }
 
+/// Returns the first task that is ready to run: `pending` with every recorded
+/// dependency `completed`, in queue order.
+///
+/// This is the single definition of "next task" shared by the project
+/// overview, the shell's runnable-task ordering, and task selection.
+pub fn next_ready_task_id(tasks: &[Task]) -> Option<String> {
+    tasks
+        .iter()
+        .find(|task| {
+            task.status == TaskStatus::Pending
+                && task.depends_on.iter().all(|dependency| {
+                    tasks.iter().any(|other| {
+                        &other.id == dependency && other.status == TaskStatus::Completed
+                    })
+                })
+        })
+        .map(|task| task.id.clone())
+}
+
 fn append_component(output: &mut String, component: &ComponentState, indentation: usize) {
     line(
         output,
@@ -1086,4 +1105,63 @@ fn days_in_month(year: u32, month: u32) -> u32 {
 #[derive(Deserialize)]
 struct VersionProbe {
     schema_version: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn task(id: &str, status: TaskStatus, deps: &[&str]) -> Task {
+        Task {
+            id: id.to_owned(),
+            title: id.to_owned(),
+            description: String::new(),
+            context: String::new(),
+            purpose: String::new(),
+            expected_outcome: String::new(),
+            kind: TaskKind::Implementation,
+            status,
+            depends_on: deps.iter().map(|dep| (*dep).to_owned()).collect(),
+            requirements: Vec::new(),
+            timestamps: TaskTimestamps {
+                created_at: Timestamp::default(),
+                updated_at: Timestamp::default(),
+                completed_at: None,
+            },
+            blocked_reason: None,
+            recovery_state: None,
+            acceptance_id: None,
+            disposition: None,
+        }
+    }
+
+    #[test]
+    fn next_ready_task_is_first_pending_with_all_deps_completed() {
+        assert_eq!(next_ready_task_id(&[]), None);
+        assert_eq!(
+            next_ready_task_id(&[task("a", TaskStatus::Pending, &[])]),
+            Some("a".to_owned())
+        );
+        // A pending task whose dependency is not complete is not ready.
+        let tasks = vec![
+            task("a", TaskStatus::Pending, &["b"]),
+            task("b", TaskStatus::Pending, &[]),
+        ];
+        assert_eq!(next_ready_task_id(&tasks), Some("b".to_owned()));
+        // Once the dependency completes, the dependent becomes the next task.
+        let tasks = vec![
+            task("a", TaskStatus::Pending, &["b"]),
+            task("b", TaskStatus::Completed, &[]),
+        ];
+        assert_eq!(next_ready_task_id(&tasks), Some("a".to_owned()));
+        // In-progress and blocked tasks are never ready.
+        let tasks = vec![
+            task("a", TaskStatus::InProgress, &[]),
+            task("b", TaskStatus::Blocked, &[]),
+        ];
+        assert_eq!(next_ready_task_id(&tasks), None);
+        // A dependency missing from the queue is never satisfied.
+        let tasks = vec![task("a", TaskStatus::Pending, &["missing"])];
+        assert_eq!(next_ready_task_id(&tasks), None);
+    }
 }

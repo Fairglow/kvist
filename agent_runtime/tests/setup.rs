@@ -89,7 +89,10 @@ fn llama_server_default_json_encodes_the_rendered_prompt() {
         &mut reader,
         &mut writer,
         std::path::Path::new("."),
-        SetupOptions { force: true },
+        SetupOptions {
+            force: true,
+            ..Default::default()
+        },
     )
     .expect("collect llama-server profile");
     let (_, arguments) = render_command(
@@ -152,7 +155,10 @@ fn llama_server_keeps_explicit_default_when_discovery_is_unavailable() {
         &mut reader,
         &mut writer,
         std::path::Path::new("."),
-        SetupOptions { force: true },
+        SetupOptions {
+            force: true,
+            ..Default::default()
+        },
     )
     .expect("collect default llama-server profile");
     let (_, arguments) = render_command(&profile.command, "hello", &[], std::path::Path::new("."))
@@ -218,7 +224,10 @@ fn ollama_default_materializes_the_selected_endpoint() {
         &mut reader,
         &mut writer,
         std::path::Path::new("."),
-        SetupOptions { force: true },
+        SetupOptions {
+            force: true,
+            ..Default::default()
+        },
     )
     .expect("collect Ollama profile");
     let (program, arguments) =

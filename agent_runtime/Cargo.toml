@@ -2,7 +2,7 @@
 name = "agent-runtime"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.94"
+rust-version = "1.95"
 authors = ["Stefan Lindblad"]
 description = "Bounded provider and agent runtime mechanisms for Kvist"
 license = "AGPL-3.0-or-later"
@@ -31,7 +31,6 @@ rig-core = { version = "=0.42.0", default-features = false, optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11"
-signal-hook = "0.3"
 tempfile = "3.27"
 thiserror = "2.0"
 tokio = { version = "1", features = ["macros", "net", "rt", "time"], optional = true }

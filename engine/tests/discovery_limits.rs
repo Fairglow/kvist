@@ -233,6 +233,11 @@ fn discovery_rejects_unix_directory_links() {
 #[test]
 fn agent_configuration_loading_is_supported_and_validated() {
     let project = TempDir::new().expect("project");
+    let config_dir = project.path().join("empty_config");
+    // Isolate from host user's ~/.config/kvist/config.toml
+    unsafe {
+        std::env::set_var("XDG_CONFIG_HOME", &config_dir);
+    }
     initialize(project.path()).expect("initialize");
 
     // 1. Loading with default agent configurations

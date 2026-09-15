@@ -15,10 +15,9 @@ pub fn render_project(project_root: &Path) -> Result<String> {
         component_root = %config.component_root.display(),
         "rendering component tree"
     );
-    let discovery = discovery::discover_with_limits(
-        &project_root.join(&config.component_root),
-        config.discovery,
-    )?;
+    let resolved_root =
+        crate::filesystem::normalize_relative_path(&project_root.join(&config.component_root));
+    let discovery = discovery::discover_with_limits(&resolved_root, config.discovery)?;
 
     Ok(render(&config.component_root, &discovery))
 }

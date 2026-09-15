@@ -29,9 +29,12 @@ fn assert_attempt_is_fenced_and_unfinalized(project: &std::path::Path) {
 }
 
 #[test]
-fn supervised_cli_requires_explicit_task_and_exposes_recovery_and_finalization() {
+fn supervised_cli_never_auto_executes_a_suggested_task_and_exposes_recovery_and_finalization() {
     let project = create_target_project("pending");
 
+    // A blank-task run must not auto-execute in a non-interactive context:
+    // it offers the next ready task, which requires an interactive terminal to
+    // confirm, so it fails and requests an explicit TASK_ID instead.
     let missing_task = run_kvist(project.path(), &["task", "run", "."]);
     assert!(
         !missing_task.status.success(),
@@ -56,10 +59,10 @@ fn supervised_cli_requires_explicit_task_and_exposes_recovery_and_finalization()
     let run_help = run_kvist(project.path(), &["task", "run", "--help"]);
     assert!(run_help.status.success());
     let help = output_text(&run_help);
-    assert!(help.contains("TASK_ID"));
     assert!(
-        !help.contains("[TASK_ID]"),
-        "TASK_ID must be required, not optional"
+        help.contains("[TASK_ID]"),
+        "TASK_ID must be optional (a suggestion is offered when it is omitted): {}",
+        help
     );
     assert!(
         !help.contains("--max-retries") && !help.contains("--retry"),

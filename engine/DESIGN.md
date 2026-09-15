@@ -1,4 +1,5 @@
 <!-- kvist-design-version: 1 -->
+
 # Kvist Engine Design
 
 ## Design overview
@@ -15,14 +16,15 @@ evidence.
 
 ## Internal structure
 
-| Area | Modules | Responsibility |
-| --- | --- | --- |
-| CLI boundary | `cli`, `main`, `error` | Typed grammar, dispatch, JSON/text output, domain errors |
-| Durable artifacts | `artifacts`, `component_documents`, `file_io`, `filesystem` | Templates, Markdown validation, bounded safe reads, atomic writes |
-| Project model | `config`, `discovery`, `project_state`, `tree`, `status`, `vcs` | Configuration, recursive layout, state classification, deterministic reports |
-| Workflow | `task_queue`, `task_commands`, `sandbox` | Queue schema, lifecycle, locks, policy approval, runner protocol, evidence |
-| Agent integration | `agent`, `prompt_input`, `wizard` | Role selection, prompt sources, standalone runtime integration |
-| Onboarding | `init`, `convert`, `import`, `reverse_discovery` | New projects and explicit source-derived drafts |
+| Area              | Modules                                                                                                            | Responsibility                                                                                                                      |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| CLI boundary      | `cli`, `main`, `error`                                                                                             | Typed grammar, dispatch, JSON/text output, domain errors                                                                            |
+| Durable artifacts | `artifacts`, `component_documents`, `file_io`, `filesystem`                                                        | Templates, Markdown validation, bounded safe reads, atomic writes                                                                   |
+| Project model     | `config`, `discovery`, `project_state`, `tree`, `status`, `vcs`                                                    | Configuration, recursive layout, state classification, deterministic reports                                                        |
+| Workflow          | `task_queue`, `task_commands`, `sandbox`                                                                           | Queue schema, lifecycle, locks, policy approval, runner protocol, evidence                                                          |
+| Agent integration | `agent`, `prompt_input`, `wizard`                                                                                  | Role selection, prompt sources, standalone runtime integration                                                                      |
+| Interactive shell | `shell` (`completion`, `journal`, `locks`, `pager`, `prompt_editor`, `runs`, `state`, `status`, `stream`, `style`) | Reedline host, clap-derived completion tree, dynamic state snapshot, builtins, journal, lock inspection, paging, streaming, theming |
+| Onboarding        | `init`, `convert`, `import`, `reverse_discovery`                                                                   | New projects and explicit source-derived drafts                                                                                     |
 
 The target `engine/` directory is both the root component and Rust workspace.
 Its `agent_runtime/` and `sandbox_runner/` directories are separately packaged
@@ -301,6 +303,73 @@ identifies clauses with passing evidence, failed evidence, or no linked test.
 
 The report is not code coverage and tests are not proof. Independent compliance
 still compares `CONTRACT.md`, `IMPL.md`, and test evidence.
+
+### Interactive shell design
+
+The shell hosts a reedline line editor (Emacs mode, IDE completion menu) over
+the exact `clap` command surface: `shell/tree.rs` introspects the same
+`clap::Command` the parser uses into a static node tree, so static completion
+(verbs, flags, enum literals) cannot drift from parseable commands. Shell
+builtins (`cd`, `tasks`, `run`, `help`, `last`, `history`, `journal`, `locks`,
+`exit`/`quit`) are appended to the root node for completion and are dispatched
+before the line is re-parsed by clap; `prompt TASK_ID` is intercepted as the
+explicit authoring flow and submits only after confirmation.
+
+Dynamic values are snapshotted into `shell/state.rs` after every command:
+component paths, queue tasks, attempt journals, model profiles, and the active
+Git branch. Each source degrades independently to empty, so a missing
+configuration or an unparsable queue never aborts the editor loop. The
+completion engine (`shell/completion.rs`) is a pure function of the line and
+cursor position and is fully testable without a terminal.
+
+The session journal is JSONL at `.kvist/session.log`, appended one line at a
+time with `O_APPEND` so no session can overwrite earlier entries; the editor
+history is reedline's file-backed history at `.kvist/history`. Both are local
+state and are excluded from compliance evidence.
+
+Cancellation is process-level: the shell installs one `sigaction` handler for
+SIGINT/SIGTERM through the shared `agent_runtime::interrupt` registry. The
+handler sets an atomic flag and forwards the signal to the currently active
+process group, which the sandbox supervisor and the runtime supervisor register
+around each child (both spawn with their own process group). The supervision
+loop observes the flag, grants a short grace period, and escalates to
+process-group termination, returning a typed cancelled result so durable task
+state stays explicit.
+
+Streaming task execution threads an optional live-stdout relay sink through
+the runner supervision loop: each drained chunk is echoed to the terminal
+while the bounded capture continues unchanged, so evidence and live output
+cannot diverge. A deferred spinner (visible only after a short grace and only
+on a real terminal) covers commands that produce no output of their own.
+
+Task-lock inspection parses the user-state lock files, treats their contents
+as untrusted bounded input, and classifies each lock live or stale by process
+liveness; the prompt, banner, and status line report the two counts
+separately.
+
+Presentation lives in `shell/style.rs`: a `Theme` resolves once per session
+from `NO_COLOR` (any value), `CLICOLOR`, `CLICOLOR_FORCE`, `TERM=dumb`, and
+terminal detection, and every renderer is a pure function of its inputs plus
+the theme, so styled and plain output are unit-testable without a terminal.
+Styled table cells are padded on visible (ANSI-stripped) width so columns
+stay aligned. `titled_box` sizes its box to the content, applies the
+40-column floor and the terminal-width cap, and extends the box when content
+is wider than the cap so nothing is ever truncated. The prompt shows the
+branch, the component focus (set by `cd`), a failure marker after a failed
+command (cleared by the next success; cooperative cancellations are not
+failures), and the green `❯` indicator; a dimmed status badge on the right
+reports the sandbox backend, lock counts, and default model. The welcome
+banner is a titled box with aligned labels and a key-hint line. Ctrl+L is
+bound to the editor's clear-and-redraw event. Long non-streaming output is
+paged through `minus` only when the pure `pager_policy` (terminal height
+minus the prompt row, 15-line fallback, `KVIST_NO_PAGER` override) says it
+would scroll; a pager that cannot start falls back to direct printing so
+output is never lost. Completion attaches rich descriptions to dynamic
+values (task status and title, a next-ready star in run contexts, the
+current component), and the walker treats a complete `--` token as the end
+of flag parsing, so Tab after `--` completes positionals only. Editor launch
+retries the transient Linux `ETXTBSY` ("text file busy") a bounded number of
+times before reporting it.
 
 ## Failure and recovery
 

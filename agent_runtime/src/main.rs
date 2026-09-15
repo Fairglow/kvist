@@ -631,6 +631,7 @@ fn setup(arguments: SetupArguments) -> agent_runtime::Result<()> {
         &config_path,
         SetupOptions {
             force: arguments.force,
+            ..Default::default()
         },
     )?;
     Ok(())

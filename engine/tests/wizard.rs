@@ -46,10 +46,11 @@ fn test_wizard_ollama_local_config() {
     // Mock inputs:
     // 1. Choose Ollama (Option 3)
     // 2. Enter Ollama base URL (Default)
-    // 3. Enter Ollama model name (llama3.1:8b)
-    // 4. Choose All Roles (Option 4)
-    // 5. Choose Project-local configuration (Option 1)
-    let mock_input = format!("1\n3\n{endpoint}\n2\nselected-profile\n\n4\n1\n");
+    // 3. Select model (Option 2)
+    // 4. Enter profile name (selected-profile)
+    // 5. Keep default command template (Enter)
+    // 6. Choose Project-local configuration (Option 1)
+    let mock_input = format!("3\n{endpoint}\n2\nselected-profile\n\n1\n");
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -58,31 +59,37 @@ fn test_wizard_ollama_local_config() {
 
     let output_str = String::from_utf8(writer).expect("valid utf-8 output");
     assert!(output_str.contains("Kvist Agent Setup Wizard"));
-    assert!(output_str.contains("Successfully configured model"));
+    assert!(output_str.contains("Successfully configured model `selected-profile`"));
 
     // Verify written file
     let toml_path = project_dir.join("kvist.toml");
     assert!(toml_path.is_file());
     let toml_content = fs::read_to_string(&toml_path).expect("read toml");
 
-    assert!(toml_content.contains("[agent.profiles.developer]"));
-    assert!(toml_content.contains("[agent.profiles.architect]"));
-    assert!(toml_content.contains("[agent.profiles.security-reviewer]"));
+    assert!(toml_content.contains("[agent.profiles.selected-profile]"));
     let exact_command =
         format!("env \"OLLAMA_HOST={endpoint}\" ollama run \"selected:model\" '{{prompt}}'");
     let parsed = config::load(project_dir).expect("load selected model configuration");
-    for profile in [
-        &parsed.agent.developer,
-        &parsed.agent.architect,
-        &parsed.agent.security_reviewer,
-    ] {
-        let selected = profile
-            .models
-            .iter()
-            .find(|model| model.name == "selected-profile")
-            .expect("selected model");
-        assert_eq!(selected.command, exact_command);
-    }
+    let selected = parsed
+        .agent
+        .developer
+        .models
+        .iter()
+        .find(|model| model.name == "selected-profile")
+        .expect("selected model");
+    assert_eq!(selected.command, exact_command);
+
+    // Assign to roles using the new agent role command
+    kvist::wizard::set_role_model(
+        &toml_path,
+        project_dir,
+        true,
+        "developer",
+        "selected-profile",
+    )
+    .expect("assign role");
+    let roles_out = kvist::wizard::list_roles(project_dir).expect("list roles");
+    assert!(roles_out.contains("selected-profile"));
     assert!(toml_content.contains("ollama run"));
     assert!(toml_content.contains("selected:model"));
 }
@@ -104,9 +111,8 @@ fn test_wizard_custom_script_local_config() {
     // 2. Enter script path
     // 3. Name the model
     // 4. Keep the default command template
-    // 5. Choose Developer Role (Option 1 / default)
-    // 6. Choose Project-local configuration (Option 1)
-    let mock_input = format!("1\n6\n{}\nlocal-wrapper\n\n1\n1\n", script_path.display());
+    // 5. Choose Project-local configuration (Option 1)
+    let mock_input = format!("6\n{}\nlocal-wrapper\n\n1\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -117,7 +123,7 @@ fn test_wizard_custom_script_local_config() {
     assert!(toml_path.is_file());
     let toml_content = fs::read_to_string(&toml_path).expect("read toml");
 
-    assert!(toml_content.contains("[agent.profiles.developer]"));
+    assert!(toml_content.contains("[agent.profiles.local-wrapper]"));
     assert!(toml_content.contains("local-wrapper"));
     assert!(toml_content.contains("my-llama-cli.sh"));
 }
@@ -126,6 +132,9 @@ fn test_wizard_custom_script_local_config() {
 fn wizard_merges_a_model_into_existing_configuration() {
     let project = TempDir::new().expect("create temp dir");
     let project_dir = project.path();
+    unsafe {
+        std::env::set_var("XDG_CONFIG_HOME", project_dir.join(".config"));
+    }
     fs::write(
         project_dir.join("kvist.toml"),
         r#"# Keep this project configuration comment.
@@ -144,7 +153,7 @@ profiles = { developer = { model = "existing", default_model = "existing", model
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mock_input = format!("1\n6\n{}\nnew-model\n\n1\n1\n", script_path.display());
+    let mock_input = format!("6\n{}\nnew-model\n\n1\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -155,14 +164,13 @@ profiles = { developer = { model = "existing", default_model = "existing", model
     assert!(contents.contains("# Keep this project configuration comment."));
     assert!(contents.contains("custom_setting = \"preserved\""));
     assert!(contents.contains("name = \"existing\""));
-    assert!(contents.contains("name = \"new-model\""));
+    assert!(contents.contains("[agent.profiles.new-model]"));
 
     let parsed = config::load(project_dir).expect("load updated configuration");
     assert_eq!(
         parsed.component_root,
         std::path::PathBuf::from("components")
     );
-    assert_eq!(parsed.agent.developer.model.as_deref(), Some("new-model"));
     assert_eq!(parsed.agent.developer.models.len(), 2);
 }
 
@@ -184,7 +192,7 @@ fn wizard_tests_a_model_before_persisting_it() {
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mock_input = format!("1\n6\n{}\nverified\n\n1\n1\n", script_path.display());
+    let mock_input = format!("6\n{}\nverified\n\n1\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -208,7 +216,7 @@ fn wizard_does_not_persist_a_failed_model_test_without_confirmation() {
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mock_input = format!("1\n6\n{}\nfailing\n\n", script_path.display());
+    let mock_input = format!("6\n{}\nfailing\n\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -237,7 +245,7 @@ fn agent_setup_force_persists_after_failed_qualification() {
         .expect("start forced setup");
     write!(
         child.stdin.take().expect("setup stdin"),
-        "1\n6\n{}\nforced\n\n1\n1\n",
+        "6\n{}\nforced\n\ny\n1\n",
         script_path.display()
     )
     .expect("write setup answers");
@@ -253,7 +261,7 @@ fn agent_setup_force_persists_after_failed_qualification() {
     assert!(stdout.contains("Successfully configured model `forced`"));
     let configuration =
         fs::read_to_string(project.path().join("kvist.toml")).expect("read configuration");
-    assert!(configuration.contains("model = \"forced\""));
+    assert!(configuration.contains("[agent.profiles.forced]"));
 }
 
 #[cfg(unix)]
@@ -279,7 +287,7 @@ fn json_agent_setup_keeps_stdout_machine_readable() {
         .expect("start JSON setup");
     write!(
         child.stdin.take().expect("setup stdin"),
-        "1\n6\n{}\njson-model\n\n1\n1\n",
+        "6\n{}\njson-model\n\n1\n",
         script_path.display()
     )
     .expect("write setup answers");
@@ -325,7 +333,7 @@ fn agent_setup_force_does_not_persist_after_cancellation() {
         .expect("start forced setup");
     write!(
         child.stdin.take().expect("setup stdin"),
-        "1\n6\n{}\ncancelled\n\n",
+        "6\n{}\ncancelled\n\n",
         script_path.display()
     )
     .expect("write setup answers");
@@ -365,7 +373,7 @@ fn wizard_qualification_implies_host_acknowledgement() {
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mock_input = format!("1\n6\n{}\nimplicit\n\n1\n1\n", script_path.display());
+    let mock_input = format!("6\n{}\nimplicit\n\n1\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -393,7 +401,7 @@ models = []
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
         .expect("make provider executable");
 
-    let mock_input = format!("1\n6\n{}\nnew-model\n\n1\n1\n", script_path.display());
+    let mock_input = format!("6\n{}\nnew-model\n\n1\n", script_path.display());
     let mut reader = Cursor::new(mock_input);
     let mut writer = Vec::new();
 
@@ -418,19 +426,185 @@ fn wizard_materializes_a_standalone_profile_into_kvist_roles() {
         },
     )
     .expect("write reusable profile");
-    let mut reader = Cursor::new("2\nshared\n4\n1\n");
+    let mut reader = Cursor::new("shared\n1\n");
     let mut writer = Vec::new();
 
     run_wizard_with_profile_config(&mut reader, &mut writer, project.path(), &profile_config)
         .expect("bind standalone profile");
 
-    let contents =
-        fs::read_to_string(project.path().join("kvist.toml")).expect("read Kvist config");
-    assert_eq!(contents.matches("name = \"shared\"").count(), 3);
-    assert_eq!(
-        contents
-            .matches("command = \"/bin/echo '{prompt}'\"")
-            .count(),
-        3
+    let toml_path = project.path().join("kvist.toml");
+    let contents = fs::read_to_string(&toml_path).expect("read Kvist config");
+    assert!(contents.contains("[agent.profiles.shared]"));
+    assert!(contents.contains("command = \"/bin/echo '{prompt}'\""));
+
+    // Assign to roles via agent role command
+    kvist::wizard::set_role_model(&toml_path, project.path(), true, "developer", "shared")
+        .expect("assign role");
+    let roles_out = kvist::wizard::list_roles(project.path()).expect("list roles");
+    assert!(roles_out.contains("developer"));
+    assert!(roles_out.contains("shared"));
+}
+
+#[test]
+fn wizard_supports_unassigned_model_and_subsequent_removal() {
+    let project = TempDir::new().expect("create project");
+    let script_path = project.path().join("provider.sh");
+    fs::write(&script_path, "#!/bin/sh\nexit 0\n").expect("write provider");
+    #[cfg(unix)]
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    // Configure model (automatically saved to models catalog)
+    let mock_input = format!("6\n{}\nunassigned-model\n\n1\n", script_path.display());
+    let mut reader = Cursor::new(mock_input);
+    let mut writer = Vec::new();
+
+    run_wizard(&mut reader, &mut writer, project.path()).expect("save unassigned model");
+
+    let cfg = config::load(project.path()).expect("load config");
+    // Verify it is present in models
+    assert!(
+        cfg.agent
+            .developer
+            .models
+            .iter()
+            .any(|m| m.name == "unassigned-model")
     );
+    // But NOT set as the active role model
+    assert_ne!(
+        cfg.agent.developer.model.as_deref(),
+        Some("unassigned-model")
+    );
+
+    // List models and check output
+    let list_output = kvist::wizard::list_models(project.path()).expect("list models");
+    assert!(list_output.contains("unassigned-model"));
+    assert!(list_output.contains("unassigned"));
+
+    // Remove the model
+    let config_path = project.path().join("kvist.toml");
+    let remove_msg =
+        kvist::wizard::remove_model(&config_path, project.path(), true, "unassigned-model")
+            .expect("remove model");
+    assert!(remove_msg.contains("Successfully removed"));
+
+    let cfg_after = config::load(project.path()).expect("load config after removal");
+    assert!(
+        !cfg_after
+            .agent
+            .developer
+            .models
+            .iter()
+            .any(|m| m.name == "unassigned-model")
+    );
+}
+
+#[test]
+fn wizard_cancel_via_escape_or_c() {
+    let project = TempDir::new().expect("create project");
+    let script_path = project.path().join("provider.sh");
+    fs::write(&script_path, "#!/bin/sh\nexit 0\n").expect("write provider");
+    #[cfg(unix)]
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    // Input sends 'c' at save location prompt
+    let mock_input = format!("6\n{}\ncancel-model\n\nc\n", script_path.display());
+    let mut reader = Cursor::new(mock_input);
+    let mut writer = Vec::new();
+
+    let err = run_wizard(&mut reader, &mut writer, project.path()).expect_err("should cancel");
+    assert!(matches!(err, kvist::KvistError::AgentSetupCancelled));
+}
+
+#[test]
+fn agent_remove_all_clears_configuration() {
+    let project = TempDir::new().expect("create project");
+    let script_path = project.path().join("provider.sh");
+    fs::write(&script_path, "#!/bin/sh\nexit 0\n").expect("write provider");
+    #[cfg(unix)]
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    // Configure a model
+    let mock_input = format!("6\n{}\ntest-model\n\n1\n", script_path.display());
+    let mut reader = Cursor::new(mock_input);
+    let mut writer = Vec::new();
+    run_wizard(&mut reader, &mut writer, project.path()).expect("save model");
+
+    let config_path = project.path().join("kvist.toml");
+    let clear_msg =
+        kvist::wizard::remove_all_models(&config_path, project.path(), true).expect("remove all");
+    assert!(clear_msg.contains("Successfully cleared all agent configuration"));
+
+    let list_output = kvist::wizard::list_models(project.path()).expect("list models");
+    assert!(list_output.contains("no models configured"));
+}
+
+#[test]
+fn test_agent_role_set_list_clear() {
+    let project = TempDir::new().expect("create project");
+    let script_path = project.path().join("provider.sh");
+    fs::write(&script_path, "#!/bin/sh\nexit 0\n").expect("write provider");
+    #[cfg(unix)]
+    fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
+        .expect("make provider executable");
+
+    // 1. Configure a model profile
+    let mock_input = format!("6\n{}\nfast-llm\n\n1\n", script_path.display());
+    let mut reader = Cursor::new(mock_input);
+    let mut writer = Vec::new();
+    run_wizard(&mut reader, &mut writer, project.path()).expect("save model");
+
+    let config_path = project.path().join("kvist.toml");
+
+    // 2. Initially, roles should be unassigned
+    let roles_initial = kvist::wizard::list_roles(project.path()).expect("list roles");
+    assert!(roles_initial.contains("developer            (unassigned)"));
+    assert!(roles_initial.contains("fast-llm"));
+
+    // 3. Set developer role
+    let set_msg =
+        kvist::wizard::set_role_model(&config_path, project.path(), true, "developer", "fast-llm")
+            .expect("set role");
+    assert!(set_msg.contains("Successfully assigned model profile `fast-llm` to role `developer`"));
+
+    let roles_after_set = kvist::wizard::list_roles(project.path()).expect("list roles");
+    assert!(roles_after_set.contains("developer            fast-llm"));
+
+    // 4. Clear developer role
+    let clear_msg =
+        kvist::wizard::clear_role(&config_path, project.path(), true, Some("developer"), false)
+            .expect("clear role");
+    assert!(clear_msg.contains("Successfully cleared model assignment for role `developer`"));
+
+    let roles_after_clear = kvist::wizard::list_roles(project.path()).expect("list roles");
+    assert!(roles_after_clear.contains("developer            (unassigned)"));
+}
+
+#[test]
+fn test_agent_discovery_configuration_parsing() {
+    let project = TempDir::new().expect("create project");
+    let config_toml = r#"schema_version = 1
+component_root = "src"
+
+[agent.discovery]
+ollama_url = "http://192.168.1.100:11434"
+llama_server_url = "http://192.168.1.100:8080"
+timeout_seconds = 10
+allow_host_discovery = true
+"#;
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
+
+    let cfg = config::load(project.path()).expect("load config with discovery");
+    assert_eq!(
+        cfg.agent.discovery.ollama_url.as_deref(),
+        Some("http://192.168.1.100:11434")
+    );
+    assert_eq!(
+        cfg.agent.discovery.llama_server_url.as_deref(),
+        Some("http://192.168.1.100:8080")
+    );
+    assert_eq!(cfg.agent.discovery.timeout_seconds, Some(10));
+    assert_eq!(cfg.agent.discovery.allow_host_discovery, Some(true));
 }

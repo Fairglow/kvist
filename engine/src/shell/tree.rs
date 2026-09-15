@@ -88,6 +88,11 @@ impl CommandNode {
         self.subcommands.iter().find(|sub| sub.name == name)
     }
 
+    /// Finds a subcommand by exact name, mutably.
+    pub fn find_subcommand_mut(&mut self, name: &str) -> Option<&mut CommandNode> {
+        self.subcommands.iter_mut().find(|sub| sub.name == name)
+    }
+
     /// Finds a flag by long spelling, returning its index in `flags`.
     pub fn find_flag_by_long(&self, long: &str) -> Option<usize> {
         self.flags
@@ -116,10 +121,11 @@ impl CommandNode {
     }
 }
 
-/// Builds the static tree for the public CLI surface.
+/// Builds the static tree for the public CLI surface plus the shell builtins.
 pub fn build_root() -> CommandNode {
     let command = cli::Cli::command();
     let mut root = node_from_command(&command);
+    inject_shell_builtins(&mut root);
     let globals = root
         .flags
         .iter()
@@ -129,6 +135,141 @@ pub fn build_root() -> CommandNode {
     propagate_globals(&mut root, &globals);
     annotate_synthesized(&mut root, true);
     root
+}
+
+/// Appends the shell builtins to the root node so they complete like commands.
+///
+/// The builtins are dispatched by the shell before a line is re-parsed by
+/// clap; injecting them here keeps completion in step with the parseable
+/// surface the user actually gets. The clap `prompt` command is re-pointed at
+/// the task-ID domain because in the shell `prompt TASK_ID` is the explicit
+/// authoring flow, not free prompt text.
+pub fn inject_shell_builtins(root: &mut CommandNode) {
+    fn positional(value_name: &str, help: &str) -> PositionalSpec {
+        PositionalSpec {
+            value_name: Some(value_name.to_owned()),
+            possible_values: Vec::new(),
+            help: Some(help.to_owned()),
+        }
+    }
+
+    let component_help = "Component directory; `.` selects the root component.".to_owned();
+    let status_flag = FlagSpec {
+        long: Some("status".to_owned()),
+        short: None,
+        takes_value: true,
+        value_name: Some("STATUS".to_owned()),
+        possible_values: vec![
+            "pending".to_owned(),
+            "in-progress".to_owned(),
+            "blocked".to_owned(),
+            "completed".to_owned(),
+        ],
+        help: Some("Filter tasks by durable status".to_owned()),
+        global: false,
+    };
+
+    let builtins = [
+        CommandNode {
+            name: "cd".to_owned(),
+            help: Some("Set the current component for builtins and completion".to_owned()),
+            subcommands: Vec::new(),
+            flags: Vec::new(),
+            positionals: vec![positional("COMPONENT_DIR", &component_help)],
+        },
+        CommandNode {
+            name: "tasks".to_owned(),
+            help: Some("List a component's tasks with status".to_owned()),
+            subcommands: Vec::new(),
+            flags: vec![status_flag],
+            positionals: vec![positional("COMPONENT_DIR", &component_help)],
+        },
+        CommandNode {
+            name: "run".to_owned(),
+            help: Some("Run a task, or the next ready task when omitted".to_owned()),
+            subcommands: Vec::new(),
+            flags: Vec::new(),
+            positionals: vec![
+                positional("COMPONENT_DIR", &component_help),
+                positional(
+                    "TASK_ID",
+                    "Task ID or TODO item; defaults to the next ready task.",
+                ),
+            ],
+        },
+        CommandNode {
+            name: "help".to_owned(),
+            help: Some("List shell builtins and top workflow commands".to_owned()),
+            subcommands: Vec::new(),
+            flags: Vec::new(),
+            positionals: Vec::new(),
+        },
+        CommandNode {
+            name: "last".to_owned(),
+            help: Some("Show recent agent runs with tokens and log links".to_owned()),
+            subcommands: Vec::new(),
+            flags: Vec::new(),
+            positionals: vec![positional("COUNT", "How many runs to show (default 10).")],
+        },
+        CommandNode {
+            name: "history".to_owned(),
+            help: Some("Show recent editor history lines".to_owned()),
+            subcommands: Vec::new(),
+            flags: Vec::new(),
+            positionals: vec![positional("COUNT", "How many lines to show (default 20).")],
+        },
+        CommandNode {
+            name: "journal".to_owned(),
+            help: Some("Show the append-only session journal".to_owned()),
+            subcommands: Vec::new(),
+            flags: Vec::new(),
+            positionals: Vec::new(),
+        },
+        CommandNode {
+            name: "locks".to_owned(),
+            help: Some("Inspect live and stale task locks".to_owned()),
+            subcommands: vec![CommandNode {
+                name: "clean".to_owned(),
+                help: Some("Remove stale task locks".to_owned()),
+                subcommands: Vec::new(),
+                flags: Vec::new(),
+                positionals: Vec::new(),
+            }],
+            flags: Vec::new(),
+            positionals: Vec::new(),
+        },
+        CommandNode {
+            name: "exit".to_owned(),
+            help: Some("Leave the shell".to_owned()),
+            subcommands: Vec::new(),
+            flags: Vec::new(),
+            positionals: Vec::new(),
+        },
+        CommandNode {
+            name: "quit".to_owned(),
+            help: Some("Leave the shell".to_owned()),
+            subcommands: Vec::new(),
+            flags: Vec::new(),
+            positionals: Vec::new(),
+        },
+    ];
+    for builtin in builtins {
+        if root.find_subcommand(&builtin.name).is_none() {
+            root.subcommands.push(builtin);
+        }
+    }
+
+    // In the shell, `prompt TASK_ID` authors a prompt for a task; complete the
+    // positional from the task-ID domain instead of free prompt text.
+    if let Some(prompt) = root.find_subcommand_mut("prompt") {
+        for positional in &mut prompt.positionals {
+            if positional.value_name.as_deref() == Some("PROMPT") {
+                positional.value_name = Some("TASK_ID".to_owned());
+                positional.help =
+                    Some("Task ID to author a prompt for; opens the seeded editor.".to_owned());
+            }
+        }
+    }
 }
 
 fn propagate_globals(node: &mut CommandNode, globals: &[FlagSpec]) {
@@ -237,6 +378,7 @@ mod tests {
             "reverse-discover",
             "prompt",
             "status",
+            "overview",
             "task",
             "component",
             "vcs",
@@ -245,7 +387,48 @@ mod tests {
         ] {
             assert!(root.find_subcommand(name).is_some(), "missing {name}");
         }
-        assert_eq!(root.subcommands.len(), 14);
+        assert_eq!(root.subcommands.len(), 15 + 10);
+    }
+
+    #[test]
+    fn root_includes_the_shell_builtins() {
+        let root = root();
+        for name in [
+            "cd", "tasks", "run", "help", "last", "history", "journal", "locks", "exit", "quit",
+        ] {
+            assert!(
+                root.find_subcommand(name).is_some(),
+                "missing builtin {name}"
+            );
+        }
+        let run = node(&root, "run");
+        let value_names: Vec<_> = run
+            .positionals
+            .iter()
+            .map(|pos| pos.value_name.as_deref().unwrap_or("<none>"))
+            .collect();
+        assert_eq!(value_names, vec!["COMPONENT_DIR", "TASK_ID"]);
+        let tasks = node(&root, "tasks");
+        let status = tasks.find_flag_by_long("status").expect("status flag");
+        assert_eq!(
+            tasks.flags[status].possible_values,
+            vec!["pending", "in-progress", "blocked", "completed"]
+        );
+        let locks = node(&root, "locks");
+        assert!(locks.find_subcommand("clean").is_some());
+    }
+
+    #[test]
+    fn prompt_positional_is_the_task_id_domain_in_the_shell() {
+        let root = root();
+        let prompt = node(&root, "prompt");
+        let value_names: Vec<_> = prompt
+            .positionals
+            .iter()
+            .map(|pos| pos.value_name.as_deref().unwrap_or("<none>"))
+            .collect();
+        assert!(value_names.contains(&"TASK_ID"), "got {value_names:?}");
+        assert!(!value_names.contains(&"PROMPT"), "got {value_names:?}");
     }
 
     #[test]
@@ -320,7 +503,12 @@ mod tests {
                 .find_subcommand("commit-accepted")
                 .is_some()
         );
-        assert!(node(&root, "agent").find_subcommand("setup").is_some());
+        let agent = node(&root, "agent");
+        assert!(agent.find_subcommand("profile").is_some());
+        assert!(agent.find_subcommand("role").is_some());
+        assert!(agent.find_subcommand("setup").is_some());
+        assert!(agent.find_subcommand("list").is_some());
+        assert!(agent.find_subcommand("remove").is_some());
     }
 
     #[test]
@@ -403,7 +591,10 @@ mod tests {
         let root = root();
         let status = node(&root, "status");
         let format = status.find_flag_by_long("format").expect("format flag");
-        assert_eq!(status.flags[format].possible_values, vec!["text", "json"]);
+        assert_eq!(
+            status.flags[format].possible_values,
+            vec!["text", "json", "overview"]
+        );
         for flag in ["only-documents", "only-impls", "unfinished"] {
             assert!(!status.flags[status.find_flag_by_long(flag).unwrap()].takes_value);
         }
@@ -478,13 +669,15 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["SHELL"]
         );
+        // In the shell tree the `prompt` positional is re-pointed at the task
+        // ID domain (the explicit authoring flow), not free prompt text.
         assert_eq!(
             node(&root, "prompt")
                 .positionals
                 .iter()
                 .map(|pos| pos.value_name.as_deref().unwrap_or("<none>"))
                 .collect::<Vec<_>>(),
-            vec!["PROMPT"]
+            vec!["TASK_ID"]
         );
     }
 

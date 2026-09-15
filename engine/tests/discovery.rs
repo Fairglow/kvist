@@ -176,6 +176,27 @@ fn rejects_link_like_descendants_without_following_them() {
     assert!(error.to_string().contains("link-like component path"));
 }
 
+#[cfg(unix)]
+#[test]
+fn ignores_emacs_lock_files_and_gitignored_paths_during_discovery() {
+    use std::os::unix::fs::symlink;
+
+    let (_project, component_root) = initialized_component_root();
+    // Simulate an Emacs lock file which is a symlink pointing to an arbitrary string
+    symlink(
+        "stefan@linux.1234:12345678",
+        component_root.join(".#issues.txt"),
+    )
+    .expect("create emacs lockfile symlink");
+
+    // Also simulate a gitignored file
+    fs::write(component_root.join(".gitignore"), "/*.txt\n").expect("write gitignore");
+    symlink("nonexistent", component_root.join("ignored.txt")).expect("create ignored symlink");
+
+    let discovery = discover(&component_root).expect("discovery should succeed despite lockfile");
+    assert_eq!(discovery.components.len(), 1);
+}
+
 #[test]
 fn discovers_top_level_peer_components_when_root_is_dot() {
     let workspace = TempDir::new().expect("workspace");

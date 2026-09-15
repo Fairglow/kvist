@@ -441,3 +441,32 @@ fn parent_requirements_and_design_do_not_stale_a_child() {
     assert!(stdout.contains("component: . state: stale"));
     assert!(stdout.contains("component: child state: current"));
 }
+
+#[test]
+fn status_overview_reports_compact_docs_and_task_progress() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+
+    // Test with --format overview
+    let output = run_kvist(&[
+        "status",
+        "--format",
+        "overview",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 status");
+    assert!(stdout.contains("Project Status"));
+    assert!(stdout.contains("Documents: all valid (5/5)"));
+    assert!(stdout.contains("Progress:"));
+
+    // Test with overview command
+    let output2 = run_kvist(&[
+        "overview",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(output2.status.success());
+    let stdout2 = String::from_utf8(output2.stdout).expect("UTF-8 status");
+    assert!(stdout2.contains("Project Status"));
+    assert!(stdout2.contains("Documents: all valid (5/5)"));
+}

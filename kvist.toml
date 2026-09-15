@@ -22,14 +22,12 @@ kind = "auto"
 # External LLM integration is opt-in. No provider is configured by default.
 provider = "none"
 
-[agent.profiles.developer]
-command_template = "/usr/bin/echo 'Task executed successfully'"
-
-[agent.profiles.security_reviewer]
-command_template = "/usr/bin/echo 'Security audit passed; boundary authority validated'"
-
-[agent.profiles.architect]
-command_template = "/usr/bin/echo 'Compliance review passed; implementation matches intent'"
+# [agent.discovery]
+# Optional provider detection and endpoint configuration for 'agent profile add'.
+# ollama_url = "http://127.0.0.1:11434"
+# llama_server_url = "http://127.0.0.1:8080"
+# timeout_seconds = 5
+# allow_host_discovery = true
 
 [sandbox]
 schema_version = 1
