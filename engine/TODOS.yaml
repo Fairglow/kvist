@@ -1816,3 +1816,434 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "dogfood-boundary-reverification-security-audit"
+    title: "Re-run dogfood boundary security audit"
+    description: "Independently re-run the dogfood execution boundary security audit in a genuine agent context, covering workspace layout, sandbox protocol, typed grants, mediated acquisition, and fail-closed enforcement."
+    context: "The branch review found the placeholder-era attempt logs for the completed dogfood boundary security audit contain only echo-placeholder agent output, so the recorded completion is not valid independent evidence."
+    purpose: "Replace the placeholder-era security receipts with genuine independent findings before the execution boundary is treated as trusted."
+    expected_outcome: "A genuine independent audit records or remediates every high-confidence finding, and its disposition is retained for human arbitration against the placeholder-era receipts."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "dogfood-runner-integrate-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "dogfood-boundary-reverification-compliance-review"
+    title: "Re-run dogfood boundary compliance review"
+    description: "Re-derive the implementation record from source and test evidence in a clean-slate context, then compare it with the dogfood boundary requirements, contract, and design in a separate source-blind context."
+    context: "The placeholder-era compliance receipts for the completed dogfood boundary review contain only echo-placeholder agent output, so the recorded completion is not valid independent evidence."
+    purpose: "Preserve independent evidence that the execution boundary matches its declared guarantees."
+    expected_outcome: "A clean-slate record and source-blind comparison classify every boundary clause, retaining discrepancies for explicit human arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "dogfood-boundary-reverification-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "test-policy-verification-write-tests"
+    title: "Define real test-policy verification tests"
+    description: "Write engine tests that reject placeholder verification commands in the committed project test policy, that supervised execution runs the configured per-component command set, and that policy approval digests the actual command set."
+    context: "The project kvist.toml test policy currently contains /usr/bin/echo 'Verification passed' placeholders for all three components, so a recorded verification success would not have executed any component test."
+    purpose: "Make placeholder verification detectable and replaceable before the dogfood flow relies on recorded verification evidence."
+    expected_outcome: "Tests fail while the committed policy contains placeholder echo commands and pass once real per-component verification commands are committed, approved, and executed."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "test-policy-verification-implement-code"
+    title: "Replace placeholder test-policy commands"
+    description: "Replace the echo placeholder test-policy commands in the project kvist.toml with real per-component verification commands executed through the mediated acquisition path, then re-run kvist task approve-policy so the recorded digest covers the actual command set."
+    context: "Placeholder verification would make every dogfood task run record successful verification without evidence, poisoning the compliance trail from the first dogfood cycle."
+    purpose: "Ensure recorded verification evidence corresponds to commands that actually execute component tests."
+    expected_outcome: "The committed test policy runs real per-component verification, approve-policy records the new digest, and task run evidence reflects actual test execution."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "test-policy-verification-write-tests"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "test-policy-verification-security-audit"
+    title: "Audit real test-policy execution"
+    description: "Independently review how the real verification commands are bound to the approved policy digest, including command substitution, environment allowlist, output caps, and timeout enforcement."
+    context: "Replacing the placeholders with real build and test commands widens the effects that a task run can cause inside the sandbox."
+    purpose: "Confirm the verification boundary stays fail-closed and digest-bound after the policy becomes real."
+    expected_outcome: "Every high-confidence binding, substitution, or limit defect is fixed or retained as an explicit blocker."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "test-policy-verification-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "test-policy-verification-compliance-review"
+    title: "Review real test-policy compliance"
+    description: "Compare source-derived policy approval and verification behavior with the approved policy, contract, and design, retaining discrepancies for human arbitration."
+    context: "Verification evidence is the foundation of dogfood compliance, and its handling cannot be self-certified."
+    purpose: "Preserve independent evidence that recorded verification matches the approved policy."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "test-policy-verification-security-audit"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sandbox-runner-install-policy-write-tests"
+    title: "Define runner installation policy tests"
+    description: "Write tests that an absent configured runner produces an actionable diagnostic naming the installation step, and that the documented installation policy references the configured [sandbox] runner path and the descriptor-bound validation that follows it."
+    context: "The project kvist.toml pins a machine-local absolute runner path, so the installation procedure must be explicit and testable before it is trusted on another host."
+    purpose: "Make the runner installation boundary verifiable before the policy is documented and relied on."
+    expected_outcome: "Tests define the required diagnostic and documentation behavior for the configured runner path."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "sandbox-runner-install-policy"
+    title: "Document sandbox runner installation policy"
+    description: "Record how the project builds and installs the sandbox runner to the configured [sandbox] runner path, keep the fail-closed runner validation, and make missing-runner diagnostics name the installation step."
+    context: "The project kvist.toml pins a machine-local absolute runner path, so another host or a fresh checkout has no documented way to obtain the verified runner bytes."
+    purpose: "Make the approved runner boundary reproducible across hosts without weakening descriptor-bound validation."
+    expected_outcome: "The installation policy is documented, a fresh host can reproduce the configured runner, and an absent runner produces an actionable installation diagnostic."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "sandbox-runner-install-policy-write-tests"
+    requirements:
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "discovery-hardening-write-tests"
+    title: "Define discovery configuration reuse tests"
+    description: "Write discovery tests that workspace namespace classification uses the already-loaded project configuration, that a nested subproject is not misclassified as a workspace namespace root, and that artifact projection surfaces discovery errors instead of silently continuing."
+    context: "The branch review found is_workspace_namespace_root re-parses kvist.toml as raw toml::Value and artifacts_for_project performs a second discovery that swallows errors when component_root is the repository root."
+    purpose: "Make single-parse discovery and error propagation executable before nested subprojects are supported."
+    expected_outcome: "Tests fail while discovery re-parses configuration or swallows errors and pass once classification and artifact projection reuse loaded state."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-PROJECT-LAYOUT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "discovery-hardening-implement-code"
+    title: "Reuse loaded configuration in discovery"
+    description: "Replace the raw toml::Value re-parse in is_workspace_namespace_root with the loaded project configuration, and propagate or explicitly report the second discovery error in artifacts_for_project instead of silently continuing."
+    context: "Duplicated parsing can drift from the validated configuration, and a swallowed discovery error can silently project incomplete artifacts for workspace-rooted projects."
+    purpose: "Keep discovery deterministic, single-parse, and fail-loud."
+    expected_outcome: "Workspace classification and artifact projection use one loaded configuration, and discovery errors surface as actionable diagnostics."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "discovery-hardening-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-PROJECT-LAYOUT"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "discovery-hardening-security-audit"
+    title: "Audit discovery hardening"
+    description: "Independently review the changed discovery paths for configuration trust assumptions, path handling, and the effect of error propagation on authorization decisions."
+    context: "Discovery results feed workspace classification and artifact projection, which gate later authorization behavior."
+    purpose: "Confirm the hardening does not introduce new trust or error-handling weaknesses."
+    expected_outcome: "Every high-confidence finding is fixed or retained as an explicit blocker."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "discovery-hardening-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-PROJECT-LAYOUT"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "discovery-hardening-compliance-review"
+    title: "Review discovery hardening compliance"
+    description: "Compare source-derived discovery behavior with the project layout requirements and provided-interfaces contract, retaining discrepancies for human arbitration."
+    context: "Discovery semantics changed as part of workspace dogfooding and need independent confirmation."
+    purpose: "Preserve independent evidence that discovery matches its declared behavior."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "discovery-hardening-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-config-surface-write-tests"
+    title: "Define agent configuration surface tests"
+    description: "Write configuration tests pinning the accepted surface: provider, profile, and role tables are rejected with actionable diagnostics outside the agent table, legacy migration behavior is explicit and deterministic, and profile equality is well-defined for NaN temperature values."
+    context: "The branch review found top-level provider, profile, and role tables are accepted outside the agent table, the legacy role heuristic is content-based, and ProfileConfig derives Eq despite an unbounded floating-point temperature field."
+    purpose: "Make the configuration surface total, explicit, and equality-safe before agent configuration is trusted further."
+    expected_outcome: "Tests fail on the accepted-but-undeclared tables, the heuristic behavior, and NaN equality, and pass once the surface is pinned."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-config-surface-implement-code"
+    title: "Tighten agent configuration surface"
+    description: "Reject top-level provider, profile, and role tables with actionable diagnostics, make the legacy migration heuristic explicit and documented, and make profile equality total by handling NaN temperature values explicitly."
+    context: "Silently accepting an undeclared configuration surface and an ill-defined Eq implementation can change which profile a role selects without any recorded intent change."
+    purpose: "Keep agent configuration parsing explicit, deterministic, and equality-safe."
+    expected_outcome: "The declared configuration surface is the only accepted one, migration is documented, and profile comparison is total."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "agent-config-surface-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-config-surface-security-audit"
+    title: "Audit agent configuration parsing"
+    description: "Independently review configuration parsing for untrusted-input handling, bounds, legacy migration side effects, and any path where configuration content changes authority or selection behavior."
+    context: "Configuration files are untrusted input that can steer which agent profile executes a task."
+    purpose: "Confirm the tightened surface cannot be exploited to change effective execution policy silently."
+    expected_outcome: "Every high-confidence parsing, bounds, or authority finding is fixed or retained as an explicit blocker."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "agent-config-surface-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-config-surface-compliance-review"
+    title: "Review agent configuration surface compliance"
+    description: "Compare source-derived configuration behavior with the agent integration requirements and provided-interfaces contract, retaining discrepancies for human arbitration."
+    context: "The configuration surface changed with the provider, profile, and role rework and needs independent confirmation."
+    purpose: "Preserve independent evidence that configuration handling matches its declared behavior."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "agent-config-surface-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "locks-clean-confirmation-write-tests"
+    title: "Define locks clean confirmation tests"
+    description: "Write shell tests that the locks clean builtin requests an explicit in-shell confirmation before removing stale lock files, consistent with the contract destructive-confirmation set."
+    context: "The branch review found locks clean removes user-state lock files but is not listed in the contract destructive-confirmation set, which currently covers task unlock --force, agent remove --all, component accept --commit, and vcs commit-accepted."
+    purpose: "Keep every state-removing shell operation covered by the same confirmation rule."
+    expected_outcome: "Tests fail while locks clean acts without confirmation and pass once the behavior and the contract set agree."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-SHELL"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "locks-clean-confirmation-implement-code"
+    title: "Align locks clean with the confirmation set"
+    description: "Add the shell locks clean stale-lock removal to the contract destructive-confirmation set and gate it on the same explicit in-shell confirmation as the other destructive operations."
+    context: "Deleting lock files is a state-removing operation even when limited to stale locks, and the contract set must match the behavior."
+    purpose: "Remove the contract-behavior gap for shell destructive operations."
+    expected_outcome: "locks clean confirms before removal and the contract lists it with the other destructive operations."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "locks-clean-confirmation-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-SHELL"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "locks-clean-confirmation-security-audit"
+    title: "Audit locks clean confirmation"
+    description: "Independently review the confirmation gating, stale classification, and file removal paths for race and authorization weaknesses."
+    context: "Lock files gate task execution, and an unconfirmed or misclassified removal can release a fence around live work."
+    purpose: "Confirm the gated removal cannot act on live, changed, or fenced lock state."
+    expected_outcome: "Every high-confidence race, classification, or authorization finding is fixed or retained as an explicit blocker."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "locks-clean-confirmation-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-SHELL"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "locks-clean-confirmation-compliance-review"
+    title: "Review locks clean confirmation compliance"
+    description: "Compare source-derived shell lock behavior with the interactive shell requirements and provided-interfaces contract, retaining discrepancies for human arbitration."
+    context: "The shell confirmation behavior and the contract set both changed, so both need independent confirmation."
+    purpose: "Preserve independent evidence that the confirmation behavior matches its declared contract."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "locks-clean-confirmation-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "shell-docs-align-write-tests"
+    title: "Define task-run documentation consistency tests"
+    description: "Write tests that the README CLI table and GUIDE task-run examples describe the optional TASK_ID suggestion, the interactive confirmation semantics, and the approve-policy requirement consistently with the provided-interfaces contract."
+    context: "User-facing documentation drifted from the implemented shell and task-run behavior during the shell work."
+    purpose: "Make documentation drift detectable before the first dogfood cycle relies on the README and GUIDE."
+    expected_outcome: "Tests fail while the README or GUIDE contradicts the contracted task-run behavior and pass once they agree."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-SHELL"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "shell-docs-align"
+    title: "Align README and GUIDE task-run wording"
+    description: "Update the README CLI table and GUIDE task examples to match the implemented optional TASK_ID suggestion, interactive confirmation, and approve-policy behavior."
+    context: "The branch review found the README and GUIDE wording slightly stale relative to the confirmed shell and task-run contract."
+    purpose: "Keep the user-facing documentation accurate for the first dogfood cycle."
+    expected_outcome: "README and GUIDE describe the optional TASK_ID flow and confirmation semantics exactly as implemented and contracted."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "shell-docs-align-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-INTERACTIVE-SHELL"
+    timestamps:
+      created_at: "2026-09-15T13:15:00Z"
+      updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
