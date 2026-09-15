@@ -16,7 +16,7 @@ lint:
     cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
 msrv:
-    cargo +1.94.0 test --locked --workspace --all-features
+    cargo +1.95.0 test --locked --workspace --all-features
 
 reformat:
     cargo fmt
