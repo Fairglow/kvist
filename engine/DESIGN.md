@@ -104,6 +104,19 @@ output exclusively for the dispatcher's single result object.
 Selecting an already saved reusable runtime profile skips provider collection
 and qualification and proceeds directly to role binding.
 
+External agent turn execution selects a configured model within the role, then
+resolves the command's numeric loopback gateway endpoint and liveness-probes it
+with a bounded TCP connect before turning; the probe never loads or selects a
+model. When the gateway accepts, the turn is dispatched through the runtime
+transport. Only transient availability failures — a socket connection refused,
+timed out, or interrupted error, plus the overall transport timeout — are
+retried, up to three attempts with a short fixed backoff, to ride out a
+cold-starting gateway that has not finished spawning the model onto its
+ephemeral port. Non-retryable failures (a non-success HTTP status, a malformed
+or oversized response, or cancellation) are returned immediately. An exhausted
+retry or a failed probe yields a single clear, actionable gateway-unreachable
+error instead of an opaque transport failure.
+
 Significant artifact separation rationale is retained in
 `docs/decisions/0001-separate-component-intent.md`.
 
@@ -407,6 +420,11 @@ changed set.
 Sandbox runner launch validates file identity and uses descriptor-bound Linux
 execution to reduce time-of-check/time-of-use substitution. Timeout and output
 overflow terminate the runner process tree and become explicit failures.
+
+An external model turn to a loopback gateway is liveness-probed with a bounded
+TCP connect before it turns; only transient availability failures are retried
+a bounded number of times, and a gateway that never accepts a connection fails
+fast with a clear, actionable error rather than an opaque transport failure.
 
 ## Security and resource design
 
