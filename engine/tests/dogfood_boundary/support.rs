@@ -59,6 +59,13 @@ impl LocalModel {
         // The detached thread owns the socket and serves for the process
         // lifetime; the listening port is released when the test exits.
         thread::spawn(move || {
+            // A production gateway serves every connection for the lifetime of
+            // the process and is unaffected by a liveness probe (a connection
+            // that connects and closes without sending a request). The agent
+            // liveness-probes the endpoint before each turn, so the mock must
+            // tolerate empty and broken connections and keep serving rather than
+            // exiting the thread on the first one; dying would drop the socket
+            // under the subsequent turn and fail the whole run.
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else {
                     continue;
@@ -70,7 +77,10 @@ impl LocalModel {
                 let header_end = loop {
                     let mut buffer = [0u8; 1024];
                     match stream.read(&mut buffer) {
-                        Ok(0) => return,
+                        // A closed or errored connection that carries no request
+                        // headers (a liveness probe or a reset) is skipped, not
+                        // fatal: break with an empty length and continue serving.
+                        Ok(0) | Err(_) => break 0,
                         Ok(n) => {
                             request.extend_from_slice(&buffer[..n]);
                             if let Some(index) =
@@ -79,9 +89,11 @@ impl LocalModel {
                                 break index + 4;
                             }
                         }
-                        Err(_) => return,
                     }
                 };
+                if header_end == 0 {
+                    continue;
+                }
                 let content_length = parse_content_length(&request[..header_end]);
                 while request.len() < header_end + content_length {
                     let mut buffer = [0u8; 1024];
