@@ -22,8 +22,6 @@ pub mod loop_detection;
 mod model;
 mod profile;
 mod prompt;
-#[cfg(feature = "rig-transport")]
-mod rig_transport;
 mod setup;
 mod supervisor;
 pub mod trajectory;
@@ -49,8 +47,6 @@ pub use profile::{
     load_profiles, upsert_profile,
 };
 pub use prompt::{MAX_PROMPT_BYTES, resolve_prompt};
-#[cfg(feature = "rig-transport")]
-pub use rig_transport::RigModelTransport;
 pub use setup::{
     SetupOptions, collect_profile, collect_profile_with_options, run_setup_wizard,
     run_setup_wizard_with_options, verify_profile,

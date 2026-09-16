@@ -1,8 +1,11 @@
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
+    net::TcpListener,
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
+    thread,
+    time::Duration,
 };
 
 use serde_json::{Value, json};
@@ -16,6 +19,11 @@ pub const ACCEPTANCE_ID: &str = "acceptance-0001";
 pub struct TargetProject {
     project: TempDir,
     external_tools: TempDir,
+    /// Marker that a loopback mock model is active for this project. The mock
+    /// socket is owned by a detached serve thread, so this value is retained
+    /// only for bookkeeping and is never read again.
+    #[allow(dead_code)]
+    local_model: Option<LocalModel>,
 }
 
 impl TargetProject {
@@ -26,6 +34,113 @@ impl TargetProject {
     pub fn external_tools_path(&self) -> &Path {
         self.external_tools.path()
     }
+}
+
+/// A hermetic, loopback-only mock model server for the dogfood boundary suite.
+///
+/// It answers every unary `llama-server`/OpenAI-style chat-completion request
+/// with a non-empty response, so the suite never depends on a real, remote,
+/// costly, or single-slot/VRAM-contending local model. A detached serve thread
+/// owns the listening socket for the process lifetime; the returned value is a
+/// bookkeeping marker that a mock is active.
+pub struct LocalModel {
+    address: String,
+}
+
+/// A literal command-template value (TOML single-quoted) that talks to a
+/// loopback endpoint. `{prompt_json}` and `ENDPOINT_PLACEHOLDER` are
+/// substituted by the caller; the host-side turn only needs the endpoint.
+const MOCK_COMMAND_TOML_VALUE: &str = r#"curl --request POST --json "{\"model\":\"kvist-test-mock\",\"messages\":[{\"role\":\"user\",\"content\":{prompt_json}}]}" -- "ENDPOINT_PLACEHOLDER"#;
+
+impl LocalModel {
+    fn spawn() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback mock provider");
+        let address = listener.local_addr().expect("mock address").to_string();
+        // The detached thread owns the socket and serves for the process
+        // lifetime; the listening port is released when the test exits.
+        thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else {
+                    continue;
+                };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+                // Drain the full request (headers + Content-Length body) so the
+                // client cannot break its write before we answer.
+                let mut request: Vec<u8> = Vec::new();
+                let header_end = loop {
+                    let mut buffer = [0u8; 1024];
+                    match stream.read(&mut buffer) {
+                        Ok(0) => return,
+                        Ok(n) => {
+                            request.extend_from_slice(&buffer[..n]);
+                            if let Some(index) =
+                                request.windows(4).position(|chunk| chunk == b"\r\n\r\n")
+                            {
+                                break index + 4;
+                            }
+                        }
+                        Err(_) => return,
+                    }
+                };
+                let content_length = parse_content_length(&request[..header_end]);
+                while request.len() < header_end + content_length {
+                    let mut buffer = [0u8; 1024];
+                    match stream.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(n) => request.extend_from_slice(&buffer[..n]),
+                        Err(_) => break,
+                    }
+                }
+
+                let body = b"{\"model\":\"kvist-test-mock\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"mock verification text\"}}]}";
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(body);
+                let _ = stream.flush();
+            }
+        });
+        LocalModel { address }
+    }
+}
+
+fn parse_content_length(head: &[u8]) -> usize {
+    let text = match std::str::from_utf8(head) {
+        Ok(text) => text,
+        Err(_) => return 0,
+    };
+    text.lines()
+        .find_map(|line| {
+            let rest = line.trim().strip_prefix("Content-Length:")?;
+            rest.trim().parse::<usize>().ok()
+        })
+        .unwrap_or(0)
+}
+
+/// Resolves a loopback model endpoint to inject into a fixture profile.
+///
+/// Precedence:
+/// 1. `KVIST_TEST_MODEL_URL` when set to a loopback URL (explicit opt-in to any
+///    specific real or mock endpoint).
+/// 2. A hermetic loopback mock server (the default: deterministic, cost-free,
+///    and independent of any live single-slot model).
+///
+/// Remote or non-loopback endpoints are never used, so the suite stays free of
+/// cost and external fragility. The returned guard must be retained while the
+/// injected endpoint stays reachable.
+pub fn resolve_local_test_model() -> (String, Option<LocalModel>) {
+    if let Ok(url) = std::env::var("KVIST_TEST_MODEL_URL")
+        && (url.contains("127.0.0.1:") || url.contains("[::1]:"))
+    {
+        return (url, None);
+    }
+    let model = LocalModel::spawn();
+    (
+        format!("http://{}/v1/chat/completions", model.address),
+        Some(model),
+    )
 }
 
 pub fn repository_root() -> PathBuf {
@@ -323,6 +438,11 @@ resolver = "3"
     create_child(&engine, "agent_runtime", "fixture-agent-runtime");
     create_child(&engine, "sandbox_runner", "fixture-sandbox-runner");
     let runner = write_controlled_runner(project.path(), external_tools.path());
+    // The host-side model turn extracts a loopback endpoint from the profile
+    // command template. Inject a reachable one (hermetic mock by default) so the
+    // turn completes without a real, remote, or contended local model.
+    let (model_endpoint, local_model) = resolve_local_test_model();
+    let command_template = MOCK_COMMAND_TOML_VALUE.replace("ENDPOINT_PLACEHOLDER", &model_endpoint);
     fs::write(
         project.path().join("kvist.toml"),
         format!(
@@ -336,7 +456,7 @@ required = false
 kind = "git"
 
 [agent.profiles.developer]
-command_template = "/usr/bin/bash -c 'printf started > tests/supervised-agent-started; printf \"#[test]\\nfn generated() {{}}\\n\" > tests/generated.rs'"
+command_template = '{}'
 timeout_seconds = 5
 max_output_bytes = 65536
 
@@ -359,6 +479,7 @@ max_output_bytes = 65536
 component = "."
 command = "/usr/bin/test -f tests/generated.rs"
 "##,
+            command_template,
             runner.display()
         ),
     )
@@ -399,6 +520,7 @@ command = "/usr/bin/test -f tests/generated.rs"
     TargetProject {
         project,
         external_tools,
+        local_model,
     }
 }
 

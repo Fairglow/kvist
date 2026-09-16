@@ -2,18 +2,28 @@
 
 use std::{
     fs::{self, OpenOptions},
-    io::{self, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
-    time::Duration,
+    process::{Child, Command, ExitStatus, Stdio},
+    sync::{Arc, Mutex},
+    thread,
+    time::{Duration, Instant},
 };
 
+use nix::sys::signal::Signal;
+use nix::unistd::Pid;
 use serde::Deserialize;
 
 use crate::{
     KvistError, Result,
     config::{AgentProfile, SandboxConfig, VcsSelection},
-    sandbox::{self, RunnerIdentity},
+    sandbox,
     task_queue::Timestamp,
+};
+
+use agent_runtime::{
+    CancellationToken, DirectModelTransport, LocalModelProvider, ModelMessage, ModelRequest,
+    ModelTransport, ToolChoice,
 };
 
 /// Structured execution result of an external agent.
@@ -71,6 +81,121 @@ pub fn split_command(
     agent_runtime::render_command(template, prompt, context_paths, target_dir).map_err(Into::into)
 }
 
+/// A resolved model identity plus the command template and system prompt for one selection.
+struct ModelChoice {
+    /// Resolved provider model identifier.
+    model: String,
+    /// Command template for the selected model.
+    command: String,
+    /// System prompt injected at the start of the message, when configured.
+    system_prompt: Option<String>,
+    /// True when the model performs no work (a no-op placeholder).
+    is_none: bool,
+}
+
+/// Selects the model identity, command template, and system prompt for one invocation.
+///
+/// Shared by the curl command path and the host-side transport path so both honor
+/// the same profile, role, and per-invocation override selection.
+fn select_model_choice(
+    profile: &AgentProfile,
+    role: crate::config::Role,
+    model_override: Option<&str>,
+) -> Result<ModelChoice> {
+    let model_name = model_override
+        .or(profile.model.as_deref())
+        .unwrap_or(&profile.default_model);
+    let choice = if matches!(model_name, "default" | "default-model") {
+        if let Some(first) = profile.models.first() {
+            ModelChoice {
+                model: first.name.clone(),
+                command: first.command.clone(),
+                system_prompt: first.system_prompt.clone(),
+                is_none: first.name == "none",
+            }
+        } else if !profile.command_template.is_empty() {
+            ModelChoice {
+                model: model_name.to_owned(),
+                command: profile.command_template.clone(),
+                system_prompt: None,
+                is_none: false,
+            }
+        } else {
+            return Err(KvistError::InvalidModelSelection {
+                model_name: model_name.to_owned(),
+                role,
+                available: profile
+                    .models
+                    .iter()
+                    .map(|m| m.name.clone())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            });
+        }
+    } else if let Some(found) = profile.models.iter().find(|model| model.name == model_name) {
+        ModelChoice {
+            model: found.name.clone(),
+            command: found.command.clone(),
+            system_prompt: found.system_prompt.clone(),
+            is_none: found.name == "none",
+        }
+    } else if !profile.command_template.is_empty()
+        && (model_name == profile.profile || model_name == role.as_str())
+    {
+        ModelChoice {
+            model: model_name.to_owned(),
+            command: profile.command_template.clone(),
+            system_prompt: None,
+            is_none: false,
+        }
+    } else {
+        return Err(KvistError::InvalidModelSelection {
+            model_name: model_name.to_owned(),
+            role,
+            available: profile
+                .models
+                .iter()
+                .map(|m| m.name.clone())
+                .collect::<Vec<_>>()
+                .join(", "),
+        });
+    };
+    Ok(choice)
+}
+
+/// Extracts a numeric loopback endpoint (scheme + host + port) from a command template.
+///
+/// The template embeds the provider URL literally; only the first `http(s)://`
+/// authority is considered. The transport validates that the result is numeric
+/// loopback and rejects anything else, so an unparseable or remote URL fails
+/// closed rather than falling back to a broad connection.
+fn extract_loopback_endpoint(command: &str) -> Result<String> {
+    let (i, proto, scheme_len) = if let Some(i) = command.find("https://") {
+        (i, "https://", 8usize)
+    } else if let Some(i) = command.find("http://") {
+        (i, "http://", 7usize)
+    } else {
+        return Err(KvistError::InvalidModelSelection {
+            model_name: "endpoint".to_owned(),
+            role: crate::config::Role::Developer,
+            available: "a command template containing an http(s):// loopback endpoint".to_owned(),
+        });
+    };
+    let after_scheme = &command[i + scheme_len..];
+    let end = after_scheme
+        .find(|c: char| c.is_whitespace() || c == '"' || c == '\'')
+        .unwrap_or(after_scheme.len());
+    let authority = after_scheme[..end].split('/').next().unwrap_or("");
+    if authority.is_empty() {
+        return Err(KvistError::InvalidModelSelection {
+            model_name: "endpoint".to_owned(),
+            role: crate::config::Role::Developer,
+            available: "a non-empty loopback host:port in the command template".to_owned(),
+        });
+    }
+    Ok(format!("{proto}{authority}"))
+}
+
 /// Gets the effective command for a given agent profile and model selection.
 pub fn get_effective_command(
     profile: &AgentProfile,
@@ -92,57 +217,15 @@ pub fn get_effective_command_with_options(
     context_paths: &[PathBuf],
     target_dir: &Path,
 ) -> Result<(String, Vec<String>)> {
-    let model_name = model_override
-        .or(profile.model.as_deref())
-        .unwrap_or(&profile.default_model);
-
-    let (selected_command, system_prompt, is_none) =
-        if matches!(model_name, "default" | "default-model") {
-            if let Some(first) = profile.models.first() {
-                (
-                    first.command.as_str(),
-                    first.system_prompt.as_deref(),
-                    first.name == "none",
-                )
-            } else if !profile.command_template.is_empty() {
-                (profile.command_template.as_str(), None, false)
-            } else {
-                return Err(KvistError::InvalidModelSelection {
-                    model_name: model_name.to_owned(),
-                    role,
-                    available: profile
-                        .models
-                        .iter()
-                        .map(|m| m.name.clone())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                });
-            }
-        } else if let Some(found) = profile.models.iter().find(|model| model.name == model_name) {
-            (
-                found.command.as_str(),
-                found.system_prompt.as_deref(),
-                found.name == "none",
-            )
-        } else if !profile.command_template.is_empty()
-            && (model_name == profile.profile || model_name == role.as_str())
-        {
-            (profile.command_template.as_str(), None, false)
-        } else {
-            return Err(KvistError::InvalidModelSelection {
-                model_name: model_name.to_owned(),
-                role,
-                available: profile
-                    .models
-                    .iter()
-                    .map(|m| m.name.clone())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            });
-        };
+    let ModelChoice {
+        command: selected_command,
+        system_prompt,
+        is_none,
+        ..
+    } = select_model_choice(profile, role, model_override)?;
 
     if is_none {
-        return split_raw_command(selected_command);
+        return split_raw_command(&selected_command);
     }
 
     let prompt = match system_prompt {
@@ -162,7 +245,7 @@ pub fn get_effective_command_with_options(
     };
 
     agent_runtime::render_command_with_reasoning_effort(
-        selected_command,
+        &selected_command,
         &prompt,
         context_paths,
         target_dir,
@@ -175,26 +258,359 @@ fn split_raw_command(template: &str) -> Result<(String, Vec<String>)> {
     agent_runtime::split_raw_command(template).map_err(Into::into)
 }
 
+/// Maps a command template to the provider wire protocol it targets.
+fn provider_from_command(command: &str) -> LocalModelProvider {
+    if command.contains("/api/chat") || command.contains("/generate") {
+        LocalModelProvider::Ollama
+    } else {
+        LocalModelProvider::LlamaServer
+    }
+}
+
+/// Performs one model turn on the host, outside the effect sandbox. The transport is
+/// constructed from the resolved command template; the turn text is returned for the
+/// caller to record. A failure returns `Err` and writes nothing on success.
+fn execute_host_turn(
+    choice: &ModelChoice,
+    prompt: &str,
+    deadline: Duration,
+    max_response_bytes: usize,
+) -> Result<String> {
+    if choice.is_none {
+        return Err(KvistError::InvalidModelSelection {
+            model_name: choice.model.clone(),
+            role: crate::config::Role::Developer,
+            available: "a model that performs work".to_owned(),
+        });
+    }
+    let provider = provider_from_command(&choice.command);
+    let endpoint = extract_loopback_endpoint(&choice.command)?;
+    let transport = DirectModelTransport::new(provider, &endpoint, deadline, max_response_bytes)?;
+    let cancellation = CancellationToken::new();
+    let mut messages = Vec::new();
+    if let Some(system) = choice
+        .system_prompt
+        .as_ref()
+        .filter(|text| !text.trim().is_empty())
+    {
+        messages.push(ModelMessage::System(system.clone()));
+    }
+    messages.push(ModelMessage::User(prompt.to_owned()));
+    let request = ModelRequest {
+        model: choice.model.clone(),
+        messages,
+        tools: Vec::new(),
+        tool_choice: ToolChoice::None,
+        reasoning_effort: None,
+        output_schema: None,
+    };
+    let turn = transport.complete(&request, &cancellation)?;
+    Ok(turn.text)
+}
+
+/// Bounded result of one host-side model turn.
+///
+/// A turn is successful only when it neither timed out, exceeded the output
+/// budget, was cancelled, nor failed to exit cleanly.
+struct HostTurn {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    success: bool,
+    timed_out: bool,
+    output_limit_exceeded: bool,
+    cancelled: bool,
+}
+
+impl HostTurn {
+    fn failure() -> Self {
+        Self {
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            success: false,
+            timed_out: false,
+            output_limit_exceeded: false,
+            cancelled: false,
+        }
+    }
+
+    fn from_text(text: String) -> Self {
+        // A turn that produced no text is treated as a failure so a silent
+        // model service never masquerades as a successful authoring turn.
+        let empty = text.trim().is_empty();
+        Self {
+            stdout: text.into_bytes(),
+            stderr: Vec::new(),
+            success: !empty,
+            timed_out: false,
+            output_limit_exceeded: false,
+            cancelled: false,
+        }
+    }
+}
+
+/// Bounded result of one authoring sandbox request.
+struct AuthoringTurn {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    success: bool,
+    timed_out: bool,
+    output_limit_exceeded: bool,
+    cancelled: bool,
+}
+
+impl AuthoringTurn {
+    /// No authoring was required. A loopback turn is a pure network call to the
+    /// provider and never issues an authoring sandbox request, so this is
+    /// treated as satisfied and the combined result follows the host turn.
+    fn not_required() -> Self {
+        Self {
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            success: true,
+            timed_out: false,
+            output_limit_exceeded: false,
+            cancelled: false,
+        }
+    }
+
+    fn from_result(result: crate::sandbox::ExecutionResult) -> Self {
+        let success = !result.timed_out
+            && !result.output_limit_exceeded
+            && !result.cancelled
+            && result.output.status.success();
+        Self {
+            stdout: result.output.stdout,
+            stderr: result.output.stderr,
+            success,
+            timed_out: result.timed_out,
+            output_limit_exceeded: result.output_limit_exceeded,
+            cancelled: result.cancelled,
+        }
+    }
+
+    /// An authoring request could not be dispatched (sandbox error or an
+    /// unapproved backend). The turn is treated as failed so the combined
+    /// result transitions the task rather than succeeding blindly.
+    fn failure() -> Self {
+        Self {
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            success: false,
+            timed_out: false,
+            output_limit_exceeded: false,
+            cancelled: false,
+        }
+    }
+}
+
+/// Runs a rendered host command as a bounded, supervised subprocess.
+///
+/// This is host supervision, not a security boundary: the sandbox provides the
+/// authorization and effect boundary. The capture stays bounded and the
+/// process group is terminated on the deadline so a hung or runaway host
+/// command can never block task execution indefinitely.
+fn run_host_subprocess(
+    program: &str,
+    arguments: &[String],
+    timeout: Duration,
+    max_output_bytes: usize,
+) -> HostTurn {
+    let mut command = Command::new(program);
+    command
+        .args(arguments)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(source) => {
+            tracing::warn!(program, %source, "failed to spawn host agent subprocess");
+            return HostTurn::failure();
+        }
+    };
+
+    let stdout_pipe = child.stdout.take().expect("stdout pipe is piped");
+    let stderr_pipe = child.stderr.take().expect("stderr pipe is piped");
+
+    let stdout_cap = StreamCapture::new(max_output_bytes);
+    let stderr_cap = StreamCapture::new(max_output_bytes);
+    let reader_stdout = stdout_cap.clone();
+    let reader_stderr = stderr_cap.clone();
+    let stdout_thread = thread::spawn(move || reader_stdout.feed(stdout_pipe));
+    let stderr_thread = thread::spawn(move || reader_stderr.feed(stderr_pipe));
+
+    let start = Instant::now();
+    let mut timed_out = false;
+    let mut status = None;
+    loop {
+        if let Ok(Some(exit)) = child.try_wait() {
+            status = Some(exit);
+            break;
+        }
+        if start.elapsed() >= timeout {
+            timed_out = true;
+            break;
+        }
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    // When the deadline fired the child is still running; terminate and reap it.
+    let status = match status {
+        Some(exit) => exit,
+        None => reap_terminated(&mut child),
+    };
+
+    let _ = stdout_thread.join();
+    let _ = stderr_thread.join();
+
+    // A timed-out turn is a failure regardless of the reap status.
+    let success = !timed_out && status.success();
+    HostTurn {
+        stdout: stdout_cap.take_bytes(),
+        stderr: stderr_cap.take_bytes(),
+        success,
+        timed_out,
+        output_limit_exceeded: stdout_cap.exceeded() || stderr_cap.exceeded(),
+        cancelled: false,
+    }
+}
+
+/// Reaps a child that has ignored the deadline: SIGTERM its process group, then
+/// force with SIGKILL so a host command that spawned descendants is fully
+/// reaped and never left orphaned. Always returns the child's final status.
+fn reap_terminated(child: &mut Child) -> ExitStatus {
+    let pid = Pid::from_raw(child.id() as i32);
+    let _ = nix::sys::signal::killpg(pid, Signal::SIGTERM);
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status,
+            Ok(None) | Err(_) => {
+                if start.elapsed() < Duration::from_millis(500) {
+                    thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
+                // Grace period exhausted: force the process group to die, then
+                // keep reaping until the kernel reports the final status.
+                let _ = child.kill();
+            }
+        }
+    }
+}
+
+/// A bounded per-stream capture that always drains its source but retains at
+/// most `cap` bytes, flagging overflow when the source exceeds the budget.
+#[derive(Clone)]
+struct StreamCapture {
+    inner: Arc<Mutex<StreamState>>,
+    cap: usize,
+}
+
+struct StreamState {
+    data: Vec<u8>,
+    exceeded: bool,
+}
+
+impl StreamCapture {
+    fn new(cap: usize) -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(StreamState {
+                data: Vec::with_capacity(cap.min(4096)),
+                exceeded: false,
+            })),
+            cap,
+        }
+    }
+
+    fn feed<R: Read>(&self, mut reader: R) {
+        let mut chunk = [0u8; 8192];
+        loop {
+            let n = match reader.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(_) => break,
+            };
+            let mut state = match self.inner.lock() {
+                Ok(state) => state,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            if state.data.len() < self.cap {
+                let take = std::cmp::min(n, self.cap - state.data.len());
+                state.data.extend_from_slice(&chunk[..take]);
+                if take < n {
+                    state.exceeded = true;
+                }
+            } else if n > 0 {
+                state.exceeded = true;
+            }
+        }
+    }
+
+    fn take_bytes(&self) -> Vec<u8> {
+        let mut state = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut state.data)
+    }
+
+    fn exceeded(&self) -> bool {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .exceeded
+    }
+}
+
+/// Builds and dispatches the authoring sandbox request for a successful host
+/// turn of a non-loopback command. Only explicitly authorized effects reach the
+/// sandbox; the model turn itself ran on the host and produced no mutation.
+fn dispatch_authoring(
+    profile: &AgentProfile,
+    sandbox_config: &SandboxConfig,
+    expected_runner: &crate::sandbox::RunnerIdentity,
+    probe: &crate::sandbox::SandboxProbe,
+    request: &AgentExecutionRequest<'_>,
+    program: &str,
+    arguments: &[String],
+) -> Result<crate::sandbox::ExecutionResult> {
+    let execution_request = crate::sandbox::ExecutionRequest {
+        project_root: request.project_root,
+        vcs_selection: request.vcs_selection,
+        component_dir: request.target_dir,
+        phase: crate::sandbox::ExecutionPhase::Authoring,
+        program,
+        arguments,
+        environment: crate::sandbox::allowed_environment(sandbox_config, None),
+        read_only_mounts: request.read_only_mounts,
+        backend: &probe.backend,
+        policy_identity: request.policy_identity,
+    };
+    crate::sandbox::execute_with_timeout(
+        sandbox_config,
+        execution_request,
+        crate::sandbox::ExecutionOptions {
+            timeout: Some(Duration::from_secs(profile.timeout_seconds)),
+            output_limit: Some(profile.max_output_bytes),
+            live_stdout: None,
+        },
+        expected_runner,
+    )
+}
+
 /// Spawns the subprocess, redirects output to log file, and optionally streams to console.
 pub fn execute_agent(
     profile: &AgentProfile,
     sandbox_config: &SandboxConfig,
-    expected_runner: &RunnerIdentity,
-    probe: &sandbox::SandboxProbe,
+    expected_runner: Option<&crate::sandbox::RunnerIdentity>,
+    probe: Option<&crate::sandbox::SandboxProbe>,
     request: AgentExecutionRequest<'_>,
 ) -> Result<AgentRunResult> {
-    let (program, args) = get_effective_command(
-        profile,
-        request.role,
-        request.prompt,
-        request.context_paths,
-        request.target_dir,
-    )?;
+    let choice = select_model_choice(profile, request.role, None)?;
 
     tracing::info!(
         task_id = %request.task_id,
         role = ?request.role,
-        "executing agent for task"
+        model = %choice.model,
+        "executing agent model turn on host (effect sandbox reserved)"
     );
 
     let logs_dir = ensure_logs_directory(request.target_dir)?;
@@ -209,10 +625,10 @@ pub fn execute_agent(
 
     tracing::debug!(
         task_id = %request.task_id,
-        program = %program,
+        model = %choice.model,
         log_path = %log_path.display(),
         timeout_seconds = profile.timeout_seconds,
-        "prepared agent execution in sandbox"
+        "prepared host-side agent model turn"
     );
     let mut log_file = OpenOptions::new()
         .write(true)
@@ -224,51 +640,115 @@ pub fn execute_agent(
             source,
         })?;
 
-    // When streaming, relay each drained chunk to the terminal immediately;
-    // the bounded capture below continues unchanged, so the evidence log and
-    // the live output cannot diverge.
-    let live_stdout = if request.stream_output {
-        Some(Box::new(|chunk: &[u8]| {
-            let _ = io::stdout().write_all(chunk);
-            let _ = io::stdout().flush();
-        }) as sandbox::LiveStdoutSink)
-    } else {
-        None
-    };
-    let sandbox::ExecutionResult {
-        output,
-        timed_out,
-        output_limit_exceeded,
-        cancelled,
-    } = sandbox::execute_with_timeout(
-        sandbox_config,
-        sandbox::ExecutionRequest {
-            project_root: request.project_root,
-            vcs_selection: request.vcs_selection,
-            component_dir: request.target_dir,
-            phase: sandbox::ExecutionPhase::Authoring,
-            program: &program,
-            arguments: &args,
-            environment: sandbox::allowed_environment(sandbox_config, None),
-            read_only_mounts: request.read_only_mounts,
-            backend: &probe.backend,
-            policy_identity: request.policy_identity,
-        },
-        sandbox::ExecutionOptions {
-            timeout: Some(Duration::from_secs(profile.timeout_seconds)),
-            output_limit: Some(profile.max_output_bytes),
-            live_stdout,
-        },
-        expected_runner,
-    )?;
+    // The model turn runs on the host, outside the effect sandbox. A command
+    // that targets a numeric loopback endpoint is served by the direct model
+    // transport; any other command runs as a bounded host subprocess. A
+    // loopback turn is a pure network call to the provider and therefore never
+    // issues an authoring sandbox request.
     let redactions = redaction_values(profile, sandbox_config);
-    let success = output.status.success() && !timed_out && !output_limit_exceeded && !cancelled;
+    let deadline = Duration::from_secs(profile.timeout_seconds);
+    let loopback = extract_loopback_endpoint(&choice.command).is_ok();
+
+    let host_turn: HostTurn = if loopback {
+        match execute_host_turn(&choice, request.prompt, deadline, profile.max_output_bytes) {
+            Ok(text) => HostTurn::from_text(text),
+            Err(source) => {
+                tracing::warn!(
+                    task_id = %request.task_id,
+                    %source,
+                    "agent model turn failed"
+                );
+                HostTurn::failure()
+            }
+        }
+    } else {
+        match get_effective_command(
+            profile,
+            request.role,
+            request.prompt,
+            request.context_paths,
+            request.target_dir,
+        ) {
+            Ok((program, arguments)) => {
+                run_host_subprocess(&program, &arguments, deadline, profile.max_output_bytes)
+            }
+            Err(source) => {
+                tracing::warn!(
+                    task_id = %request.task_id,
+                    %source,
+                    "cannot render host agent command"
+                );
+                HostTurn::failure()
+            }
+        }
+    };
+
+    // A successful non-loopback turn yields model intent that the broker
+    // authorizes and executes as a sandboxed request. The host turn alone never
+    // mutates component state; only the bounded, authorized effect does. This is
+    // the authoring-effect loop: intent is authorized on the host, effects are
+    // applied only through the sandbox.
+    let auth_turn: AuthoringTurn = if loopback || !host_turn.success {
+        AuthoringTurn::not_required()
+    } else if let (Some(expected_runner), Some(probe)) = (expected_runner, probe) {
+        // A sandbox infrastructure failure (e.g. the runner changed after the
+        // probe, or the backend is unavailable) is fatal: fail closed and let
+        // the caller decide. Only a command that the sandbox ran but that
+        // exited, timed out, or overflowed is a soft blocked transition.
+        let (program, arguments) = get_effective_command(
+            profile,
+            request.role,
+            request.prompt,
+            request.context_paths,
+            request.target_dir,
+        )
+        .map_err(|source| {
+            tracing::warn!(
+                task_id = %request.task_id,
+                %source,
+                "cannot render authoring command"
+            );
+            source
+        })?;
+        let result = dispatch_authoring(
+            profile,
+            sandbox_config,
+            expected_runner,
+            probe,
+            &request,
+            &program,
+            &arguments,
+        )
+        .map_err(|source| {
+            tracing::warn!(
+                task_id = %request.task_id,
+                %source,
+                "authoring sandbox request failed"
+            );
+            source
+        })?;
+        AuthoringTurn::from_result(result)
+    } else {
+        AuthoringTurn::failure()
+    };
+
+    // Combine the host turn and the authoring effect into one bounded,
+    // redacted evidence buffer. A failure or overflow on either side fails the
+    // combined turn; the sandbox is the authority for effect-level bounds.
+    let mut combined_stdout = host_turn.stdout;
+    combined_stdout.extend_from_slice(&auth_turn.stdout);
+    let mut combined_stderr = host_turn.stderr;
+    combined_stderr.extend_from_slice(&auth_turn.stderr);
     let stdout = redact_combined_output(
-        output.stdout,
-        output.stderr,
+        combined_stdout,
+        combined_stderr,
         &redactions,
         profile.max_output_bytes,
     );
+    let cancelled = host_turn.cancelled || auth_turn.cancelled;
+    let timed_out = host_turn.timed_out || auth_turn.timed_out;
+    let output_limit_exceeded = host_turn.output_limit_exceeded || auth_turn.output_limit_exceeded;
+    let success = host_turn.success && auth_turn.success;
     log_file
         .write_all(stdout.as_bytes())
         .map_err(|source| KvistError::Io {
@@ -332,23 +812,23 @@ pub fn execute_agent(
     let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::ToolDispatch {
         turn: 1,
         call_id: "call_1".to_owned(),
-        tool: program.clone(),
+        tool: choice.model.clone(),
         args: serde_json::json!({
             "prompt": request.prompt,
             "target_dir": request.target_dir.display().to_string(),
         }),
         action_hash: agent_runtime::compute_action_hash(
-            &program,
+            &choice.model,
             &serde_json::json!({ "prompt": request.prompt }),
         ),
     });
     let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::ToolResult {
         turn: 1,
         call_id: "call_1".to_owned(),
-        tool: program.clone(),
+        tool: choice.model.clone(),
         stdout: stdout.clone(),
         stderr: String::new(),
-        exit_code: output.status.code().unwrap_or(-1),
+        exit_code: if success { 0 } else { 1 },
         bytes: stdout.len(),
         state_mutated: success,
     });
@@ -400,9 +880,9 @@ pub fn execute_agent(
     } else {
         tracing::warn!(
             task_id = %request.task_id,
-            exit_code = ?output.status.code(),
+            exit_code = if success { 0 } else { 1 },
             log_path = %log_path.display(),
-            "agent execution failed"
+            "agent model turn failed"
         );
     }
 
@@ -485,4 +965,99 @@ fn truncate_utf8(value: &mut String, limit: usize) {
         boundary -= 1;
     }
     value.truncate(boundary);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Model;
+
+    #[test]
+    fn extract_loopback_endpoint_strips_path_and_keeps_loopback_authority() {
+        let command = r#"curl --silent --request POST --json '{"model":"m"}' -- "http://127.0.0.1:43329/api/chat""#;
+        assert_eq!(
+            extract_loopback_endpoint(command).expect("endpoint"),
+            "http://127.0.0.1:43329"
+        );
+    }
+
+    #[test]
+    fn extract_loopback_endpoint_preserves_https_scheme() {
+        let command = "curl \"https://127.0.0.1:9931/v1/chat/completions\"";
+        assert_eq!(
+            extract_loopback_endpoint(command).expect("endpoint"),
+            "https://127.0.0.1:9931"
+        );
+    }
+
+    #[test]
+    fn extract_loopback_endpoint_fails_without_a_scheme() {
+        let command = "curl -- \"127.0.0.1:43329/api/chat\"";
+        assert!(extract_loopback_endpoint(command).is_err());
+    }
+
+    #[test]
+    fn provider_from_command_maps_paths_to_wire_protocol() {
+        assert_eq!(
+            provider_from_command("/api/chat"),
+            LocalModelProvider::Ollama
+        );
+        assert_eq!(
+            provider_from_command("/api/generate"),
+            LocalModelProvider::Ollama
+        );
+        assert_eq!(
+            provider_from_command("/v1/chat/completions"),
+            LocalModelProvider::LlamaServer
+        );
+        // A command with no recognized path defaults to the OpenAI seam.
+        assert_eq!(
+            provider_from_command("http://127.0.0.1:9931"),
+            LocalModelProvider::LlamaServer
+        );
+    }
+
+    #[test]
+    fn select_model_choice_prefers_explicit_then_default_then_role_template() {
+        let profile = AgentProfile {
+            role: crate::config::Role::Developer,
+            profile: "twos".to_owned(),
+            command_template: "template-for-role".to_owned(),
+            models: vec![
+                Model {
+                    name: "alpha".to_owned(),
+                    command: "command-alpha".to_owned(),
+                    system_prompt: Some("sys-alpha".to_owned()),
+                },
+                Model {
+                    name: "beta".to_owned(),
+                    command: "command-beta".to_owned(),
+                    system_prompt: None,
+                },
+            ],
+            default_model: "beta".to_owned(),
+            model: None,
+            thinking_effort: None,
+            token_limit: None,
+            timeout_seconds: 5,
+            max_output_bytes: 1_024,
+            redaction_values: vec![],
+        };
+        let alpha = select_model_choice(&profile, crate::config::Role::Developer, Some("alpha"))
+            .expect("alpha selection");
+        assert_eq!(alpha.model, "alpha");
+        assert_eq!(alpha.command, "command-alpha");
+        assert_eq!(alpha.system_prompt.as_deref(), Some("sys-alpha"));
+        let beta =
+            select_model_choice(&profile, crate::config::Role::Developer, None).expect("default");
+        assert_eq!(beta.model, "beta");
+        assert_eq!(beta.command, "command-beta");
+        assert!(beta.system_prompt.is_none());
+        let role = select_model_choice(&profile, crate::config::Role::Developer, Some("twos"))
+            .expect("role template");
+        assert_eq!(role.command, "template-for-role");
+        assert!(
+            select_model_choice(&profile, crate::config::Role::Developer, Some("ghost")).is_err()
+        );
+    }
 }

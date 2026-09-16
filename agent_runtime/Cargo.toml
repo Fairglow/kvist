@@ -10,8 +10,7 @@ repository = "https://github.com/Fairglow/kvist"
 homepage = "https://github.com/Fairglow/kvist"
 
 [features]
-default = ["rig-transport"]
-rig-transport = ["dep:bytes", "dep:futures", "dep:reqwest", "dep:rig-core", "dep:tokio"]
+default = []
 
 [lib]
 name = "agent_runtime"
@@ -21,13 +20,9 @@ name = "agent-run"
 path = "src/main.rs"
 
 [dependencies]
-bytes = { version = "1", optional = true }
 clap = { version = "4.6", features = ["derive"] }
-futures = { version = "0.3", optional = true }
-hex = "0.4"
+hex = { version = "0.4" }
 nix = { version = "0.31", default-features = false, features = ["fs", "poll", "process", "signal"] }
-reqwest = { version = "0.13", default-features = false, optional = true }
-rig-core = { version = "=0.42.0", default-features = false, optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11"

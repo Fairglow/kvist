@@ -8,8 +8,6 @@ use std::{
     time::Duration,
 };
 
-#[cfg(feature = "rig-transport")]
-use agent_runtime::RigModelTransport;
 use agent_runtime::{
     CancellationToken, CatalogProvider, CommandSpec, DirectModelTransport, Error,
     LocalModelProvider, ModelDiscoveryOptions, ModelMessage, ModelRequest, ModelStreamEvent,
@@ -127,8 +125,17 @@ struct ModelArguments {
     #[arg(long, value_enum)]
     provider: ModelProviderArgument,
 
-    #[arg(long, value_enum, default_value_t)]
-    transport: ModelTransportArgument,
+    /// Seconds to wait for the endpoint to begin serving before failing.
+    /// Local servers spawn a requested model on a routed port, which can take
+    /// longer on cold start than any single request; raise this when swapping
+    /// to a model that is not already loaded.
+    #[arg(long, default_value_t = 60)]
+    slot_timeout: u64,
+
+    /// Seconds to wait for the first token before failing. Must be greater
+    /// than `--slot-timeout` and less than `--timeout`.
+    #[arg(long, default_value_t = 120)]
+    ttft_timeout: u64,
 
     #[arg(long, value_name = "HTTP_LOOPBACK_URL")]
     endpoint: String,
@@ -146,14 +153,14 @@ struct ModelArguments {
     max_response_bytes: usize,
 
     #[arg(long, value_enum)]
-    /// Requires `--transport direct`; Rig 0.42 cannot preserve this value.
+    /// Provider reasoning-effort hint (native transport only).
     reasoning_effort: Option<ReasoningEffortArgument>,
 
     /// Apply a provider-native JSON Schema generation constraint.
     #[arg(long, value_name = "JSON_SCHEMA")]
     output_schema: Option<String>,
 
-    /// Show provider-supplied reasoning on stderr; requires `--transport direct`.
+    /// Show provider-supplied reasoning on stderr.
     #[arg(long, conflicts_with = "json")]
     show_reasoning: bool,
 
@@ -166,15 +173,6 @@ struct ModelArguments {
 enum ModelProviderArgument {
     Ollama,
     LlamaServer,
-}
-
-#[derive(Debug, Clone, Copy, Default, ValueEnum)]
-enum ModelTransportArgument {
-    #[cfg_attr(not(feature = "rig-transport"), default)]
-    Direct,
-    #[cfg(feature = "rig-transport")]
-    #[default]
-    Rig,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -458,13 +456,6 @@ fn model(arguments: ModelArguments) -> agent_runtime::Result<()> {
         arguments.file.as_deref(),
         arguments.editor,
     )?;
-    #[cfg(feature = "rig-transport")]
-    if matches!(arguments.transport, ModelTransportArgument::Rig) && arguments.show_reasoning {
-        return Err(Error::UnsupportedCapability {
-            provider: "rig-transport",
-            capability: "provider reasoning output",
-        });
-    }
     let provider = arguments.provider.into();
     let output_schema = arguments
         .output_schema
@@ -475,21 +466,24 @@ fn model(arguments: ModelArguments) -> agent_runtime::Result<()> {
         })
         .transpose()?;
     let timeout = Duration::from_secs(arguments.timeout);
-    let transport: Box<dyn ModelTransport> = match arguments.transport {
-        ModelTransportArgument::Direct => Box::new(DirectModelTransport::new(
-            provider,
-            &arguments.endpoint,
-            timeout,
-            arguments.max_response_bytes,
-        )?),
-        #[cfg(feature = "rig-transport")]
-        ModelTransportArgument::Rig => Box::new(RigModelTransport::new(
-            provider,
-            &arguments.endpoint,
-            timeout,
-            arguments.max_response_bytes,
-        )?),
-    };
+    let slot_timeout = Duration::from_secs(arguments.slot_timeout);
+    let ttft_timeout = Duration::from_secs(arguments.ttft_timeout);
+    if slot_timeout >= ttft_timeout || ttft_timeout >= timeout {
+        return Err(Error::InvalidModelTransport {
+            reason: format!(
+                "--slot-timeout ({}) must be less than --ttft-timeout ({}) which must be less than --timeout ({})",
+                arguments.slot_timeout, arguments.ttft_timeout, arguments.timeout
+            ),
+        });
+    }
+    let transport: Box<dyn ModelTransport> = Box::new(DirectModelTransport::with_watchdogs(
+        provider,
+        &arguments.endpoint,
+        timeout,
+        arguments.max_response_bytes,
+        slot_timeout,
+        ttft_timeout,
+    )?);
     let request = ModelRequest {
         model: arguments.model,
         messages: vec![ModelMessage::User(prompt.clone())],

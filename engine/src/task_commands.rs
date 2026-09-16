@@ -4162,16 +4162,20 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
         tracing::info!(
             task_id = %task_id,
             component = %component_path.display(),
-            "running task via external agent in sandbox"
+            sandbox_backend = %sandbox_probe.backend.kind,
+            "running task model turn on host (effect sandbox reserved)"
         );
         println!("Running task `{task_id}` via external agent...");
 
-        // 6. Execute agent
+        // 6. Execute agent model turn on the host, outside the effect sandbox.
+        // The approved runner identity and capability-confirmed probe are passed
+        // so a successful non-loopback turn can be authorized and applied as a
+        // bounded authoring sandbox request.
         let run_result = crate::agent::execute_agent(
             agent_profile,
             sandbox_config,
-            &approved_runner,
-            &sandbox_probe,
+            Some(&approved_runner),
+            Some(&sandbox_probe),
             crate::agent::AgentExecutionRequest {
                 project_root: &project_dir,
                 vcs_selection: config.vcs,

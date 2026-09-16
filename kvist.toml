@@ -55,3 +55,33 @@ command = "/usr/bin/echo 'Verification passed'"
 [[test_policy.commands]]
 component = "sandbox_runner"
 command = "/usr/bin/echo 'Verification passed'"
+
+[agent]
+
+[agent.providers]
+
+[agent.providers.llama-server]
+type = "llama-server"
+
+[agent.profiles]
+
+[agent.profiles.qwen38-27b-q4]
+provider = "llama-server"
+model = "qwen38-27b-q4"
+command = 'curl --disable --silent --show-error --fail-with-body --request POST --json "{\"model\":\"Qwen3.8-27B-UD-Q4_K_XL\",\"messages\":[{\"role\":\"user\",\"content\":{prompt_json}}]}" -- "http://127.0.0.1:9931/v1/chat/completions"'
+
+[agent.profiles.tiel-coder-35b-q4]
+provider = "llama-server"
+model = "tiel-coder-35b-q4"
+command = 'curl --disable --silent --show-error --fail-with-body --request POST --json "{\"model\":\"Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL\",\"messages\":[{\"role\":\"user\",\"content\":{prompt_json}}]}" -- "http://127.0.0.1:9931/v1/chat/completions"'
+
+[agent.roles]
+
+[agent.roles.developer]
+profile = "tiel-coder-35b-q4"
+
+[agent.roles.architect]
+profile = "qwen38-27b-q4"
+
+[agent.roles.security-reviewer]
+profile = "qwen38-27b-q4"

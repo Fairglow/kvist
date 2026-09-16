@@ -481,6 +481,20 @@ pub enum KvistError {
         #[source]
         source: io::Error,
     },
+    /// An untrusted model tool intent failed brokered-authoring validation or
+    /// authorization (ADR-0007 step 3). The intent is dropped and recorded; it
+    /// never becomes a sandbox effect.
+    #[error(
+        "model tool intent `{call_id}` (tool `{tool}`) was rejected during authoring: {reason}"
+    )]
+    InvalidAuthoringIntent {
+        /// Turn-local call identity of the rejected intent.
+        call_id: String,
+        /// Model-selected tool name that was rejected.
+        tool: String,
+        /// Human-readable reason the intent was not authorized.
+        reason: String,
+    },
 }
 
 /// Result type used by Kvist's domain and command layers.
