@@ -60,20 +60,30 @@ command = "/usr/bin/echo 'Verification passed'"
 
 [agent.providers]
 
+# --- Agent / model transport (local) ------------------------------------------
+# The concrete local model wiring (curl command + endpoint) is machine-specific
+# and is NOT committed. Copy this file to kvist.toml and fill in your local
+# llama-server gateway. kvist.toml is gitignored so your endpoint never lands in
+# the repo. (Alternatively, put [agent.*] in the global user config at
+# ~/.config/kvist/config.toml, which Kvist merges in.)
+#
+# The gateway listens persistently on 127.0.0.1:9931 (--models-max 1). When a
+# request names a model that is not loaded, the gateway spawns that model on an
+# ephemeral port and transparently routes 9931 -> that port; always address 9931
+# with the model name, never the ephemeral port.
+
 [agent.providers.llama-server]
 type = "llama-server"
-
-[agent.profiles]
 
 [agent.profiles.qwen38-27b-q4]
 provider = "llama-server"
 model = "qwen38-27b-q4"
-command = 'curl --disable --silent --show-error --fail-with-body --request POST --json "{\"model\":\"Qwen3.8-27B-UD-Q4_K_XL\",\"messages\":[{\"role\":\"user\",\"content\":{prompt_json}}]}" -- "http://127.0.0.1:9931/v1/chat/completions"'
+command = '# TODO: curl --disable --silent --show-error --fail-with-body --request POST --json "{\"model\":\"Qwen3.8-27B-UD-Q4_K_XL\",\"messages\":[{\"role\":\"user\",\"content\":{prompt_json}}]}" -- "http://127.0.0.1:9931/v1/chat/completions"'
 
 [agent.profiles.tiel-coder-35b-q4]
 provider = "llama-server"
 model = "tiel-coder-35b-q4"
-command = 'curl --disable --silent --show-error --fail-with-body --request POST --json "{\"model\":\"Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL\",\"messages\":[{\"role\":\"user\",\"content\":{prompt_json}}]}" -- "http://127.0.0.1:9931/v1/chat/completions"'
+command = '# TODO: curl --disable --silent --show-error --fail-with-body --request POST --json "{\"model\":\"Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL\",\"messages\":[{\"role\":\"user\",\"content\":{prompt_json}}]}" -- "http://127.0.0.1:9931/v1/chat/completions"'
 
 [agent.roles]
 

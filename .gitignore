@@ -4,6 +4,7 @@
 # Ignore settings
 .cargo
 .kvist
+kvist.toml
 .idea
 .vscode
 .zed
