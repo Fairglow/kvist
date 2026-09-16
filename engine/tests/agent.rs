@@ -89,7 +89,7 @@ fn split_command_decodes_escaped_backslashes_and_quotes() {
     assert_eq!(args, vec![r#"quote: "ready""#]);
 }
 
-/// Serves one Ollama-style unary chat response from a numeric loopback endpoint.
+/// Serves Ollama-style unary chat responses from a numeric loopback endpoint.
 ///
 /// The brokered transport performs the model turn on the host, so a local
 /// provider is all the test needs; no sandbox runner or probe is involved.
@@ -97,26 +97,36 @@ fn split_command_decodes_escaped_backslashes_and_quotes() {
 fn serve_local_ollama(content: &str) -> String {
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider");
+    let listener = Arc::new(TcpListener::bind("127.0.0.1:0").expect("bind fake provider"));
     let addr = listener.local_addr().expect("fake provider address");
     let body = format!(
         "{{\"model\":\"test-model\",\"created_at\":\"2026-08-30T00:00:00Z\",\"message\":{{\"role\":\"assistant\",\"content\":\"{content}\",\"tool_calls\":[]}},\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":10,\"eval_count\":4}}"
     );
-    thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept request");
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
-        let mut buffer = [0u8; 4096];
-        let _ = stream.read(&mut buffer);
-        let head = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        );
-        let _ = stream.write_all(head.as_bytes());
-        let _ = stream.write_all(body.as_bytes());
-        let _ = stream.flush();
-    });
+    // A real model gateway serves many sequential connections: a brokered host
+    // turn liveness-probes the port first, then performs the turn, so the fake
+    // provider must serve more than one connection. Each worker accepts and
+    // serves a single connection; any connection the client never opens simply
+    // blocks on accept until the process exits.
+    for _ in 0..4 {
+        let listener = Arc::clone(&listener);
+        let body = body.clone();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let mut buffer = [0u8; 4096];
+            let _ = stream.read(&mut buffer);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body.as_bytes());
+            let _ = stream.flush();
+        });
+    }
     format!("http://{addr}/api/chat")
 }
 

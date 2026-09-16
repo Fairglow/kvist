@@ -338,11 +338,18 @@ fn is_retryable_transport_error(error: &ModelError) -> bool {
     match error {
         ModelError::ModelTransportTimedOut => true,
         ModelError::ModelTransportIo { source, .. } => {
+            // A refused, timed-out, interrupted, or peer-reset socket is a
+            // gateway that is not ready to serve yet (nothing listening, still
+            // loading a model, or mid-cold-start); it is safe to retry. A
+            // peer reset is included for this reason, because it commonly
+            // accompanies a gateway that accepted the connection before it was
+            // fully up rather than a real rejection of the payload.
             matches!(
                 source.kind(),
                 io::ErrorKind::ConnectionRefused
                     | io::ErrorKind::TimedOut
                     | io::ErrorKind::Interrupted
+                    | io::ErrorKind::ConnectionReset
             )
         }
         _ => false,
