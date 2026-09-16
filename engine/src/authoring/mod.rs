@@ -415,11 +415,8 @@ fn authorize_edit(
     }
     let replacement = string_value(obj.get("replace"));
     let content = string_value(obj.get("content"));
-    match (replacement.is_some(), content.is_some()) {
-        (false, false) => {
-            return Err("edit_file requires either a non-empty `replace` or `content`".to_owned());
-        }
-        _ => {}
+    if !replacement.is_some() && !content.is_some() {
+        return Err("edit_file requires either a non-empty `replace` or `content`".to_owned());
     }
 
     let (content_identity, byte_len) = match content.as_deref() {
@@ -538,7 +535,6 @@ mod tests {
     fn hidden_escape_via_trailing_parent_is_dropped() {
         let dir = tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
-        let deep = format!("src/{}/escape", "a".repeat(3));
         let plan = authorize_intents(dir.path(), &[write_intent("../x/../y", "z")], &policy());
         assert!(plan.effects.is_empty());
         assert_eq!(plan.dropped_count(), 1);

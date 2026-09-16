@@ -22,8 +22,8 @@ use crate::{
 };
 
 use agent_runtime::{
-    CancellationToken, DirectModelTransport, LocalModelProvider, ModelMessage, ModelRequest,
-    ModelTransport, ToolChoice,
+    CancellationToken, DirectModelTransport, Error as ModelError, LocalModelProvider, ModelMessage,
+    ModelRequest, ModelTransport, ModelTurn, ToolChoice,
 };
 
 /// Structured execution result of an external agent.
@@ -267,14 +267,131 @@ fn provider_from_command(command: &str) -> LocalModelProvider {
     }
 }
 
-/// Performs one model turn on the host, outside the effect sandbox. The transport is
-/// constructed from the resolved command template; the turn text is returned for the
-/// caller to record. A failure returns `Err` and writes nothing on success.
+/// Brief connect attempts made while proving the gateway is accepting traffic.
+/// A down gateway fails on the first attempt; these ride out a gateway that is
+/// still starting its listeners.
+const GATEWAY_PROBE_ATTEMPTS: u32 = 3;
+
+/// Pause between gateway liveness-probe connect attempts.
+const GATEWAY_PROBE_BACKOFF: Duration = Duration::from_millis(200);
+
+/// Maximum model-turn attempts when the gateway passes the liveness probe but a
+/// turn still hits a transient availability error (for example the gateway had
+/// not finished spawning the model onto its ephemeral port). This counts the
+/// first attempt plus `MODEL_TURN_MAX_ATTEMPTS - 1` retries.
+const MODEL_TURN_MAX_ATTEMPTS: u32 = 3;
+
+/// Pause between model-turn retries. Short and fixed keeps agent runs
+/// deterministic while still letting a cold-starting gateway recover.
+const MODEL_TURN_RETRY_BACKOFF: Duration = Duration::from_millis(250);
+
+/// Proves a loopback model gateway is accepting connections before a turn runs.
+///
+/// `endpoint` is a numeric loopback URL such as `http://127.0.0.1:9931`. This
+/// performs only a TCP connect; it never issues an HTTP request, so it cannot
+/// load, select, or shift a model slot. It is a pure liveness check that lets a
+/// down gateway fail fast with an actionable message instead of a cryptic
+/// transport error buried deep inside a turn.
+fn probe_gateway_reachable(endpoint: &str) -> Result<()> {
+    let authority = endpoint
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    let addr: std::net::SocketAddr =
+        authority
+            .parse()
+            .map_err(|source| KvistError::LocalModelGatewayUnreachable {
+                endpoint: endpoint.to_owned(),
+                reason: format!("endpoint `{endpoint}` is not a host:port address: {source}"),
+            })?;
+
+    let mut attempt = 1u32;
+    loop {
+        match std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(2)) {
+            Ok(_) => return Ok(()),
+            Err(source) if attempt < GATEWAY_PROBE_ATTEMPTS => {
+                tracing::warn!(
+                    attempt,
+                    %source,
+                    endpoint,
+                    "local model gateway not yet accepting connections; retrying liveness probe"
+                );
+                thread::sleep(GATEWAY_PROBE_BACKOFF);
+                attempt += 1;
+                continue;
+            }
+            Err(source) => {
+                return Err(KvistError::LocalModelGatewayUnreachable {
+                    endpoint: endpoint.to_owned(),
+                    reason: source.to_string(),
+                });
+            }
+        }
+    }
+}
+
+/// Whether a transport failure is worth retrying: only transient gateway
+/// availability problems (nothing is listening yet, or the port is still
+/// starting up). Response-level failures (bad HTTP status, malformed body,
+/// oversized response, cancellation) are never retried, since they indicate a
+/// real answer rather than an unavailable gateway.
+fn is_retryable_transport_error(error: &ModelError) -> bool {
+    match error {
+        ModelError::ModelTransportTimedOut => true,
+        ModelError::ModelTransportIo { source, .. } => {
+            matches!(
+                source.kind(),
+                io::ErrorKind::ConnectionRefused
+                    | io::ErrorKind::TimedOut
+                    | io::ErrorKind::Interrupted
+            )
+        }
+        _ => false,
+    }
+}
+
+/// Performs one model turn, retrying transient gateway-availability failures up
+/// to `MODEL_TURN_MAX_ATTEMPTS` times. Real response failures are returned
+/// immediately so they are never masked by a retry.
+fn complete_turn_with_retries(
+    transport: &DirectModelTransport,
+    request: &ModelRequest,
+    cancellation: &CancellationToken,
+    task_id: &str,
+) -> Result<ModelTurn> {
+    let mut attempt = 1u32;
+    loop {
+        match transport.complete(request, cancellation) {
+            Ok(turn) => return Ok(turn),
+            Err(source)
+                if is_retryable_transport_error(&source) && attempt < MODEL_TURN_MAX_ATTEMPTS =>
+            {
+                tracing::warn!(
+                    task_id,
+                    attempt,
+                    %source,
+                    "local model gateway unreachable during turn; retrying"
+                );
+                thread::sleep(MODEL_TURN_RETRY_BACKOFF);
+                attempt += 1;
+                continue;
+            }
+            Err(source) => return Err(source.into()),
+        }
+    }
+}
+
+/// Performs one model turn on the host, outside the effect sandbox. The transport
+/// is constructed from the resolved command template; the turn text is returned
+/// for the caller to record. A failure returns `Err` and writes nothing on
+/// success. The local model gateway is liveness-probed first, and transient
+/// availability failures are retried, so a down or cold-starting gateway yields
+/// a fast, actionable error rather than a cryptic transport failure.
 fn execute_host_turn(
     choice: &ModelChoice,
     prompt: &str,
     deadline: Duration,
     max_response_bytes: usize,
+    task_id: &str,
 ) -> Result<String> {
     if choice.is_none {
         return Err(KvistError::InvalidModelSelection {
@@ -285,6 +402,13 @@ fn execute_host_turn(
     }
     let provider = provider_from_command(&choice.command);
     let endpoint = extract_loopback_endpoint(&choice.command)?;
+
+    // Liveness pre-check: fail fast with an actionable message when the local
+    // model gateway is down, instead of surfacing a cryptic transport error
+    // inside a turn. A TCP connect only confirms the port; it never loads or
+    // shifts a model slot.
+    probe_gateway_reachable(&endpoint)?;
+
     let transport = DirectModelTransport::new(provider, &endpoint, deadline, max_response_bytes)?;
     let cancellation = CancellationToken::new();
     let mut messages = Vec::new();
@@ -304,7 +428,7 @@ fn execute_host_turn(
         reasoning_effort: None,
         output_schema: None,
     };
-    let turn = transport.complete(&request, &cancellation)?;
+    let turn = complete_turn_with_retries(&transport, &request, &cancellation, task_id)?;
     Ok(turn.text)
 }
 
@@ -650,7 +774,13 @@ pub fn execute_agent(
     let loopback = extract_loopback_endpoint(&choice.command).is_ok();
 
     let host_turn: HostTurn = if loopback {
-        match execute_host_turn(&choice, request.prompt, deadline, profile.max_output_bytes) {
+        match execute_host_turn(
+            &choice,
+            request.prompt,
+            deadline,
+            profile.max_output_bytes,
+            request.task_id,
+        ) {
             Ok(text) => HostTurn::from_text(text),
             Err(source) => {
                 tracing::warn!(
@@ -1059,5 +1189,71 @@ mod tests {
         assert!(
             select_model_choice(&profile, crate::config::Role::Developer, Some("ghost")).is_err()
         );
+    }
+
+    #[test]
+    fn probe_gateway_reachable_reports_when_nothing_is_listening() {
+        // Grab a free loopback port and release it so nothing listens there.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind free port");
+        let dead_port = listener.local_addr().expect("local addr").to_string();
+        drop(listener);
+
+        let endpoint = format!("http://{dead_port}");
+        let error = probe_gateway_reachable(&endpoint).expect_err("gateway should be unreachable");
+        match error {
+            KvistError::LocalModelGatewayUnreachable {
+                endpoint: returned_endpoint,
+                ..
+            } => assert_eq!(returned_endpoint, endpoint),
+            other => panic!("unexpected error kind: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn probe_gateway_reachable_passes_when_a_listener_accepts() {
+        // Hold a listener open for the duration of the probe so the connect
+        // succeeds; dropping it at function end releases the port.
+        let _listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind free port");
+        let endpoint = format!("http://{}", _listener.local_addr().expect("local addr"));
+        probe_gateway_reachable(&endpoint).expect("gateway should be reachable");
+    }
+
+    #[test]
+    fn is_retryable_transport_error_only_flags_transient_availability() {
+        assert!(is_retryable_transport_error(
+            &ModelError::ModelTransportTimedOut
+        ));
+
+        assert!(is_retryable_transport_error(
+            &ModelError::ModelTransportIo {
+                operation: "connect",
+                source: std::io::Error::new(std::io::ErrorKind::ConnectionRefused, "refused"),
+            }
+        ));
+        assert!(is_retryable_transport_error(
+            &ModelError::ModelTransportIo {
+                operation: "connect",
+                source: std::io::Error::new(std::io::ErrorKind::TimedOut, "timed out"),
+            }
+        ));
+        assert!(is_retryable_transport_error(
+            &ModelError::ModelTransportIo {
+                operation: "connect",
+                source: std::io::Error::new(std::io::ErrorKind::Interrupted, "interrupted"),
+            }
+        ));
+
+        // Response-level failures must never be retried.
+        assert!(!is_retryable_transport_error(
+            &ModelError::ModelTransportCancelled
+        ));
+        assert!(!is_retryable_transport_error(
+            &ModelError::ModelProviderStatus { status: 500 }
+        ));
+        assert!(!is_retryable_transport_error(
+            &ModelError::MalformedModelResponse {
+                reason: "bad json".to_owned(),
+            }
+        ));
     }
 }

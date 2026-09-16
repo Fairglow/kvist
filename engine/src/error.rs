@@ -257,6 +257,19 @@ pub enum KvistError {
         /// Available model names for this role.
         available: String,
     },
+    /// The local model gateway never accepted a connection for an agent turn.
+    #[error(
+        "could not reach the local model gateway at `{endpoint}`: {reason}\n\n\n\
+         Make sure the model server (for example llama-server) is running and\n\
+         listening on `{endpoint}`, then retry the task"
+    )]
+    LocalModelGatewayUnreachable {
+        /// Numeric loopback endpoint the agent tried to reach,
+        /// for example `http://127.0.0.1:9931`.
+        endpoint: String,
+        /// Underlying connection diagnostic from the operating system.
+        reason: String,
+    },
     /// The configuration schema version is unsupported.
     #[error(
         "unsupported Kvist project configuration version {version} in `{path}`; \
