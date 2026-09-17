@@ -550,6 +550,83 @@ fn component_accept_resolves_staleness_and_updates_queue_revisions() {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn component_accept_succeeds_when_local_configuration_is_untracked() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    configure_fake_sandbox(&project);
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(project.path())
+            .status()
+            .expect("initialize Git")
+            .success()
+    );
+    fs::write(project.path().join(".gitignore"), "kvist.toml\n").expect("ignore local config");
+    assert!(
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(project.path())
+            .status()
+            .expect("track durable artifacts")
+            .success()
+    );
+
+    let requirements_path = project.path().join("src/REQUIREMENTS.md");
+    let original = fs::read_to_string(&requirements_path).expect("read requirements");
+    fs::write(
+        &requirements_path,
+        original.replace(
+            "## Purpose and scope",
+            "## Purpose and scope\n\nThis is a newly accepted change.",
+        ),
+    )
+    .expect("stale requirements");
+
+    let output = run_kvist(&project, &["component", "accept", "."]);
+    assert!(
+        output.status.success(),
+        "acceptance must not require machine-local configuration to be tracked: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("accepted component document changes")
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn vcs_gate_error_names_the_untracked_durable_artifacts() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    track_project(&project);
+    assert!(
+        Command::new("git")
+            .args(["rm", "--cached", "-q", "src/REQUIREMENTS.md"])
+            .current_dir(project.path())
+            .status()
+            .expect("untrack durable artifact")
+            .success()
+    );
+
+    let output = run_kvist(&project, &["component", "accept", "."]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "Expected failure but got success. Stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(stderr.contains("not completely VCS tracked"), "{stderr}");
+    assert!(
+        stderr.contains("src/REQUIREMENTS.md (untracked)"),
+        "{stderr}"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn component_accept_rejects_invalid_documents() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");

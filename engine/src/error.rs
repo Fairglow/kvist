@@ -400,11 +400,12 @@ pub enum KvistError {
     },
     /// Task mutation and selection require every durable artifact to be tracked.
     #[error(
-        "cannot run task command because durable artifacts are not completely VCS tracked: {summary}"
+        "cannot run task command because durable artifacts are not completely VCS tracked: {details}"
     )]
     TaskVcsNotCurrent {
-        /// VCS inspection summary.
-        summary: String,
+        /// The durable artifacts needing attention with their tracking state,
+        /// or the inspection diagnostic when no artifacts were inspected.
+        details: String,
     },
     /// A task queue unexpectedly changed after component revalidation.
     #[error("cannot use TODO queue `{path}` after revalidation: {reason}")]

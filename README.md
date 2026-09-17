@@ -569,9 +569,11 @@ state; I/O failures exit nonzero.
 ## Version-control policy
 
 Before task execution, durable artifacts (`VISION.md`, `ARCHITECTURE.md`,
-`kvist.toml`, `ROOT_CONTRACT.md`, and each component's `REQUIREMENTS.md`,
+`ROOT_CONTRACT.md`, and each component's `REQUIREMENTS.md`,
 `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, and `IMPL.md`) must be tracked in a
-supported VCS. `kvist doctor` inspects root and discovered artifacts without
+supported VCS. The machine-local `kvist.toml` must exist and be valid, but it
+holds local endpoint and toolchain settings and is not a VCS-tracked durable
+artifact. `kvist doctor` inspects root and discovered artifacts without
 staging or committing.
 
 `[vcs].kind` defaults to `"auto"`, which selects the one detected VCS. Set it

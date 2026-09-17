@@ -124,6 +124,35 @@ struct TaskContext {
     component_dir: PathBuf,
 }
 
+fn untracked_durable_artifacts(inspection: &project_state::ProjectInspection) -> Option<String> {
+    if inspection.vcs.artifacts.is_empty() {
+        let details = inspection
+            .vcs
+            .diagnostic
+            .as_deref()
+            .unwrap_or(&inspection.vcs.summary);
+        return Some(details.to_owned());
+    }
+    let untracked = inspection
+        .vcs
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.state != VcsArtifactState::Tracked)
+        .map(|artifact| {
+            format!(
+                "{} ({})",
+                artifact.path.display(),
+                artifact.state.description()
+            )
+        })
+        .collect::<Vec<_>>();
+    if untracked.is_empty() {
+        None
+    } else {
+        Some(untracked.join(", "))
+    }
+}
+
 fn validate_context(component_path: &Path) -> Result<TaskContext> {
     validate_context_with_blocked(component_path, false)
 }
@@ -149,20 +178,8 @@ fn validate_context_with_blocked(
             state: inspection.state.name().to_owned(),
         });
     }
-    if inspection.vcs.artifacts.is_empty()
-        || inspection
-            .vcs
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.state != VcsArtifactState::Tracked)
-    {
-        return Err(KvistError::TaskVcsNotCurrent {
-            summary: inspection
-                .vcs
-                .diagnostic
-                .clone()
-                .unwrap_or(inspection.vcs.summary),
-        });
+    if let Some(details) = untracked_durable_artifacts(&inspection) {
+        return Err(KvistError::TaskVcsNotCurrent { details });
     }
     let component = inspection
         .components
@@ -1555,20 +1572,8 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
             state: inspection.state.name().to_owned(),
         });
     }
-    if inspection.vcs.artifacts.is_empty()
-        || inspection
-            .vcs
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.state != VcsArtifactState::Tracked)
-    {
-        return Err(KvistError::TaskVcsNotCurrent {
-            summary: inspection
-                .vcs
-                .diagnostic
-                .clone()
-                .unwrap_or(inspection.vcs.summary),
-        });
+    if let Some(details) = untracked_durable_artifacts(&inspection) {
+        return Err(KvistError::TaskVcsNotCurrent { details });
     }
     let component_root =
         inspection

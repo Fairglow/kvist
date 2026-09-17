@@ -72,7 +72,8 @@ fn doctor_reports_git_tracked_and_ignored_durable_artifacts_without_mutation() {
     assert!(output.stderr.is_empty());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("vcs: required durable artifacts need attention"));
-    assert!(stdout.contains("vcs kvist.toml: tracked"));
+    // The machine-local configuration is not a durable VCS-tracked artifact.
+    assert!(!stdout.contains("vcs kvist.toml"));
     let root_documentation = Path::new("src").join("IMPL.md");
     assert!(stdout.contains(&format!("vcs {}: ignored", root_documentation.display())));
     let nested_contract = Path::new("src").join("child").join("CONTRACT.md");
