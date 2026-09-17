@@ -311,7 +311,14 @@ fn node_from_command(command: &clap::Command) -> CommandNode {
             help: arg.get_help().map(|help| help.to_string()),
         })
         .collect();
-    let subcommands = command.get_subcommands().map(node_from_command).collect();
+    // Hidden subcommands (for example the internal in-sandbox effect applier)
+    // are parseable but not part of the interactive surface, so they are
+    // excluded from completion and tree listing.
+    let subcommands = command
+        .get_subcommands()
+        .filter(|sub| !sub.is_hide_set())
+        .map(node_from_command)
+        .collect();
 
     CommandNode {
         name: command.get_name().to_owned(),

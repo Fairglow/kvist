@@ -19,7 +19,7 @@ pub mod config;
 pub mod convert;
 pub mod discovery;
 mod error;
-mod file_io;
+pub(crate) mod file_io;
 mod filesystem;
 pub mod import;
 pub mod init;

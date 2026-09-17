@@ -1,7 +1,7 @@
 use std::{
     fs,
     io::{Read, Write},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
     process::{Command, Output, Stdio},
     thread,
@@ -19,9 +19,9 @@ pub const ACCEPTANCE_ID: &str = "acceptance-0001";
 pub struct TargetProject {
     project: TempDir,
     external_tools: TempDir,
-    /// Marker that a loopback mock model is active for this project. The mock
-    /// socket is owned by a detached serve thread, so this value is retained
-    /// only for bookkeeping and is never read again.
+    /// Guard for the loopback mock model of this project. The field is never
+    /// read again; it is retained so its `Drop` stops the mock serve thread
+    /// deterministically when the test project is torn down.
     #[allow(dead_code)]
     local_model: Option<LocalModel>,
 }
@@ -39,12 +39,28 @@ impl TargetProject {
 /// A hermetic, loopback-only mock model server for the dogfood boundary suite.
 ///
 /// It answers every unary `llama-server`/OpenAI-style chat-completion request
-/// with a non-empty response, so the suite never depends on a real, remote,
-/// costly, or single-slot/VRAM-contending local model. A detached serve thread
-/// owns the listening socket for the process lifetime; the returned value is a
-/// bookkeeping marker that a mock is active.
+/// with a `write_file` tool call, so the suite never depends on a real, remote,
+/// costly, or single-slot/VRAM-contending local model while still exercising
+/// the full brokered effect loop (turn, intent, authorization, staging, and
+/// in-sandbox dispatch). A serve thread owns the listening socket; dropping
+/// the guard stops the thread deterministically.
 pub struct LocalModel {
     address: String,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for LocalModel {
+    fn drop(&mut self) {
+        // Signal the serve loop, unblock its accept with a sentinel connection,
+        // then join the thread so the mock never outlives the test that spawned
+        // it.
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        let _ = TcpStream::connect(self.address.as_str());
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
 }
 
 /// A literal command-template value (TOML single-quoted) that talks to a
@@ -56,17 +72,24 @@ impl LocalModel {
     fn spawn() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind loopback mock provider");
         let address = listener.local_addr().expect("mock address").to_string();
-        // The detached thread owns the socket and serves for the process
-        // lifetime; the listening port is released when the test exits.
-        thread::spawn(move || {
+        // The serve thread owns the socket; the guard's stop flag and sentinel
+        // connection end it deterministically on drop.
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_loop = std::sync::Arc::clone(&stop);
+        let worker = thread::spawn(move || {
             // A production gateway serves every connection for the lifetime of
             // the process and is unaffected by a liveness probe (a connection
             // that connects and closes without sending a request). The agent
             // liveness-probes the endpoint before each turn, so the mock must
             // tolerate empty and broken connections and keep serving rather than
             // exiting the thread on the first one; dying would drop the socket
-            // under the subsequent turn and fail the whole run.
+            // under the subsequent turn and fail the whole run. After the stop
+            // flag is set, the next connection is the drop sentinel and ends
+            // the loop.
             for stream in listener.incoming() {
+                if stop_loop.load(std::sync::atomic::Ordering::Acquire) {
+                    break;
+                }
                 let Ok(mut stream) = stream else {
                     continue;
                 };
@@ -104,7 +127,11 @@ impl LocalModel {
                     }
                 }
 
-                let body = b"{\"model\":\"kvist-test-mock\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"mock verification text\"}}]}";
+                // A single `write_file` tool call for the fixture's test root.
+                // The broker authorizes it and the effect loop dispatches the
+                // in-sandbox applier for it, so every supervised run in this
+                // suite exercises the full effect path end to end.
+                let body = b"{\"model\":\"kvist-test-mock\",\"choices\":[{\"finish_reason\":\"tool_calls\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"destination\\\":\\\"tests/generated.rs\\\",\\\"content\\\":\\\"#[test]\\\\nfn generated() {}\\\\n\\\"}\"}}]}}]}";
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     body.len()
@@ -114,7 +141,11 @@ impl LocalModel {
                 let _ = stream.flush();
             }
         });
-        LocalModel { address }
+        LocalModel {
+            address,
+            stop,
+            worker: Some(worker),
+        }
     }
 }
 

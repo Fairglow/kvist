@@ -2247,3 +2247,85 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "brokered-turn-write-tests"
+    title: "Define brokered model-turn and effect-loop tests"
+    description: "Write failing engine tests for the brokered turn: shared wall-clock budget across probe, attempts, and backoff; bounded transient retry; refusal of non-loopback model commands; the closed authoring tool set; intent authorization and dropping; the in-sandbox effect dispatch; no-follow symbolic-link refusal; edit_file authorization and applier identity re-derivation; tool definitions; and streamed-delta redaction and relay."
+    context: "The branch review found the brokered effect loop was not wired, non-loopback commands ran unsandboxed on the host, the model-phase deadline could exceed the configured timeout, and evidence was merged, discarded, or mislabeled."
+    purpose: "Establish executable evidence for the brokered transport, effect loop, and evidence semantics before the implementation is trusted."
+    expected_outcome: "Tests fail while the loop is unwired, the budget unshared, non-loopback commands executable, or evidence divergent, and pass once the brokered path and its evidence are correct."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-16T12:00:00Z"
+      updated_at: "2026-09-16T14:00:00Z"
+      completed_at: "2026-09-16T14:00:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "brokered-turn-implement-code"
+    title: "Wire the brokered model turn and in-sandbox effect loop"
+    description: "Advertise the closed authoring tool set on the host turn; reduce untrusted intents to capability-bound effects with a deny-by-default broker; refuse non-loopback model commands before any transport work; bound the model phase by one shared wall-clock budget; apply every authorized effect inside the effect sandbox via a read-only staged-intent mount; fail closed on dropped intents and unapplied effects; relay streamed deltas with redaction; and record accurate bounded evidence."
+    context: "The model turn could not produce changes, non-loopback commands ran as a host subprocess and were re-executed in the sandbox, and the model phase could exceed the configured timeout by roughly three times."
+    purpose: "Make every agent command a numeric loopback gateway or a refusal, every effect an in-sandbox application, and the model phase bounded by the configured timeout."
+    expected_outcome: "No agent command runs outside the effect sandbox, every authorized effect is applied only inside it, and the model phase respects one shared wall-clock budget."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "brokered-turn-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-16T12:00:00Z"
+      updated_at: "2026-09-16T16:00:00Z"
+      completed_at: "2026-09-16T16:00:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "brokered-turn-security-audit"
+    title: "Audit the brokered turn and effect loop"
+    description: "Independently review the loopback refusal, the deny-by-default intent broker, the staged-intent staging and identity proof, the no-follow application and symbolic-link handling, the shared wall-clock budget, the streamed-delta redactor, and the evidence path for untrusted-input handling, race, and authority weaknesses."
+    context: "The effect loop applies filesystem effects derived from untrusted model intents, so the broker and applier are the security boundary."
+    purpose: "Confirm the broker and applier cannot be coaxed into an unauthorized, out-of-root, or link-following write."
+    expected_outcome: "Every high-confidence parsing, race, identity, or authorization finding is fixed or retained as an explicit blocker."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "brokered-turn-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-16T12:00:00Z"
+      updated_at: "2026-09-16T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "brokered-turn-compliance-review"
+    title: "Review brokered turn compliance"
+    description: "Compare source-derived brokered-turn and effect-loop behavior with the agent-integration, supervised-execution, and execution-boundary requirements and the behavioral-guarantees contract, retaining discrepancies for human arbitration."
+    context: "The brokered transport, effect loop, budget, and evidence semantics all changed and need independent confirmation."
+    purpose: "Preserve independent evidence that the brokered path matches its declared requirements and contract."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "brokered-turn-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-16T12:00:00Z"
+      updated_at: "2026-09-16T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

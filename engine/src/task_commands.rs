@@ -4380,12 +4380,12 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
             // Transition to Blocked
             let blocker_reason = if run_result.timed_out {
                 format!(
-                    "agent execution timed out and the sandbox runner was terminated. Bounded redacted logs are written to: {}",
+                    "agent execution timed out while contacting the local model gateway. Bounded redacted logs are written to: {}",
                     run_result.log_path.display()
                 )
             } else if run_result.output_limit_exceeded {
                 format!(
-                    "agent execution exceeded the combined output limit and the sandbox runner was terminated. Bounded redacted logs are written to: {}",
+                    "agent execution exceeded the combined output limit while contacting the local model gateway. Bounded redacted logs are written to: {}",
                     run_result.log_path.display()
                 )
             } else {

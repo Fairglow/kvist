@@ -105,17 +105,33 @@ Selecting an already saved reusable runtime profile skips provider collection
 and qualification and proceeds directly to role binding.
 
 External agent turn execution selects a configured model within the role, then
-resolves the command's numeric loopback gateway endpoint and liveness-probes it
-with a bounded TCP connect before turning; the probe never loads or selects a
-model. When the gateway accepts, the turn is dispatched through the runtime
-transport. Only transient availability failures — a socket connection refused,
-timed out, or interrupted error, plus the overall transport timeout — are
-retried, up to three attempts with a short fixed backoff, to ride out a
-cold-starting gateway that has not finished spawning the model onto its
+resolves the command's numeric loopback gateway endpoint. A command that does
+not target a numeric loopback gateway is refused with `AgentCommandNotModelGateway`
+before any transport work, so the model turn always runs on the host against a
+loopback gateway and no agent command is ever spawned outside the effect
+sandbox. The endpoint is liveness-probed with a bounded TCP connect before
+turning; the probe never loads or selects a model. When the gateway accepts, the
+turn is dispatched through the runtime transport and advertises the closed
+authoring tool set. The broker reduces the turn's untrusted tool intents to
+capability-bound effects under a deny-by-default policy; a dropped intent fails
+the turn. Each authorized effect is applied by the engine itself inside the
+effect sandbox against a read-only staged-intent mount, so the host never writes
+component state for an effect. A turn succeeds only when it produced a usable
+result, no intent was dropped, and every authorized effect applied.
+
+The model phase runs under one shared wall-clock budget equal to the configured
+profile timeout, covering the liveness probe, every turn attempt, and every retry
+backoff; the per-attempt transport deadline is the remaining budget, so the model
+phase never exceeds the configured timeout by more than scheduling slack. Only
+transient availability failures — a socket connection refused, timed out,
+interrupted, or reset error, a slot-allocation timeout, or the overall transport
+timeout — are retried, up to three attempts with a short fixed backoff, to ride
+out a cold-starting gateway that has not finished spawning the model onto its
 ephemeral port. Non-retryable failures (a non-success HTTP status, a malformed
-or oversized response, or cancellation) are returned immediately. An exhausted
-retry or a failed probe yields a single clear, actionable gateway-unreachable
-error instead of an opaque transport failure.
+or oversized response, or cancellation) are returned immediately. A streamed
+attempt that has already emitted text is never retried. An exhausted retry or a
+failed probe yields a single clear, actionable gateway-unreachable error instead
+of an opaque transport failure.
 
 Significant artifact separation rationale is retained in
 `docs/decisions/0001-separate-component-intent.md`.

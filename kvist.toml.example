@@ -61,11 +61,24 @@ command = "/usr/bin/echo 'Verification passed'"
 [agent.providers]
 
 # --- Agent / model transport (local) ------------------------------------------
-# The concrete local model wiring (curl command + endpoint) is machine-specific
-# and is NOT committed. Copy this file to kvist.toml and fill in your local
-# llama-server gateway. kvist.toml is gitignored so your endpoint never lands in
-# the repo. (Alternatively, put [agent.*] in the global user config at
-# ~/.config/kvist/config.toml, which Kvist merges in.)
+# The supervised task path (`kvist task run`) performs the model turn on the
+# host against a local model gateway. Only commands that target a numeric
+# loopback endpoint (http://127.0.0.1:<port> or http://[::1]:<port>) are
+# accepted; anything else fails the turn with `AgentCommandNotModelGateway`
+# before any transport work. The gateway endpoint is extracted from the
+# profile command; the runtime transport then issues the actual request.
+#
+# The concrete local model wiring (gateway URL + model names) is
+# machine-specific and is NOT committed. Copy this file to kvist.toml and
+# adjust it for your local llama-server. kvist.toml is gitignored so your
+# endpoint never lands in the repo. (Alternatively, put [agent.*] in the
+# global user config at ~/.config/kvist/config.toml, which Kvist merges in.)
+#
+# A profile without an explicit `command` uses the provider's synthesized
+default: a curl command against <base_url>/v1/chat/completions (llama-server)
+# carrying OpenAI-style chat-completion JSON with the profile's `model` and
+# the rendered {prompt_json}. Set the provider's `base_url` (or a profile
+# `command` override) when your gateway is not on the default address.
 #
 # The gateway listens persistently on 127.0.0.1:9931 (--models-max 1). When a
 # request names a model that is not loaded, the gateway spawns that model on an
@@ -74,16 +87,15 @@ command = "/usr/bin/echo 'Verification passed'"
 
 [agent.providers.llama-server]
 type = "llama-server"
+base_url = "http://127.0.0.1:9931"
 
 [agent.profiles.qwen38-27b-q4]
 provider = "llama-server"
-model = "qwen38-27b-q4"
-command = '# TODO: curl --disable --silent --show-error --fail-with-body --request POST --json "{\"model\":\"Qwen3.8-27B-UD-Q4_K_XL\",\"messages\":[{\"role\":\"user\",\"content\":{prompt_json}}]}" -- "http://127.0.0.1:9931/v1/chat/completions"'
+model = "Qwen3.8-27B-UD-Q4_K_XL"
 
 [agent.profiles.tiel-coder-35b-q4]
 provider = "llama-server"
-model = "tiel-coder-35b-q4"
-command = '# TODO: curl --disable --silent --show-error --fail-with-body --request POST --json "{\"model\":\"Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL\",\"messages\":[{\"role\":\"user\",\"content\":{prompt_json}}]}" -- "http://127.0.0.1:9931/v1/chat/completions"'
+model = "Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL"
 
 [agent.roles]
 

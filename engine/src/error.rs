@@ -260,7 +260,7 @@ pub enum KvistError {
     /// The local model gateway never accepted a connection for an agent turn.
     #[error(
         "could not reach the local model gateway at `{endpoint}`: {reason}\n\n\n\
-         Make sure the model server (for example llama-server) is running and\n\
+         Make sure the model server (for example llama-server) is running and\
          listening on `{endpoint}`, then retry the task"
     )]
     LocalModelGatewayUnreachable {
@@ -268,6 +268,23 @@ pub enum KvistError {
         /// for example `http://127.0.0.1:9931`.
         endpoint: String,
         /// Underlying connection diagnostic from the operating system.
+        reason: String,
+    },
+    /// The selected agent model command does not target a local model gateway.
+    ///
+    /// The supervised task path performs the model turn on the host against a
+    /// numeric loopback gateway only; any other command is refused rather than
+    /// executed, so no agent command ever runs outside the effect sandbox.
+    #[error(
+        "agent model `{model_name}` does not target a numeric loopback model gateway: {reason}\n\n\
+         The supervised task path performs the model turn on the host against a\
+         local gateway only. Configure the profile command to target a local\
+         endpoint (see kvist.toml.example), then retry the task"
+    )]
+    AgentCommandNotModelGateway {
+        /// The model whose command was rejected.
+        model_name: String,
+        /// What was missing from the command, for example the loopback endpoint.
         reason: String,
     },
     /// The configuration schema version is unsupported.
@@ -495,8 +512,8 @@ pub enum KvistError {
         source: io::Error,
     },
     /// An untrusted model tool intent failed brokered-authoring validation or
-    /// authorization (ADR-0007 step 3). The intent is dropped and recorded; it
-    /// never becomes a sandbox effect.
+    /// authorization (ADR-0009). The intent is dropped and recorded; it never
+    /// becomes a sandbox effect.
     #[error(
         "model tool intent `{call_id}` (tool `{tool}`) was rejected during authoring: {reason}"
     )]
@@ -506,6 +523,20 @@ pub enum KvistError {
         /// Model-selected tool name that was rejected.
         tool: String,
         /// Human-readable reason the intent was not authorized.
+        reason: String,
+    },
+    /// An authorized authoring effect could not be staged or applied.
+    ///
+    /// This covers staging failures on the host (serialization, raw-intent
+    /// inconsistency) and in-sandbox application failures (identity mismatch,
+    /// symbolic-link destination, destination drift since authorization). The
+    /// effect is never applied; the turn fails closed and the reason is
+    /// recorded as evidence.
+    #[error("authoring effect `{call_id}` failed: {reason}")]
+    AuthoringEffectFailed {
+        /// Turn-local call identity of the failed effect.
+        call_id: String,
+        /// Human-readable, non-secret reason the effect was not applied.
         reason: String,
     },
 }

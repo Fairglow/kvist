@@ -195,8 +195,10 @@ fn execute_agent_runs_the_model_turn_on_the_host_and_captures_the_response() {
     .expect("agent execution success");
 
     assert!(result.success);
-    assert_eq!(result.tokens_input, None);
-    assert_eq!(result.tokens_output, None);
+    // The provider response carries usage (`prompt_eval_count: 10`,
+    // `eval_count: 4`); the brokered path must surface it, not discard it.
+    assert_eq!(result.tokens_input, Some(10));
+    assert_eq!(result.tokens_output, Some(4));
 
     // Verify the log file exists and contains the model turn response.
     assert!(result.log_path.exists());

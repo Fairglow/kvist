@@ -149,6 +149,20 @@ pub enum Command {
         #[arg(value_name = "SHELL", value_enum)]
         shell: SupportedShell,
     },
+    /// Apply one staged authoring effect inside the effect sandbox.
+    ///
+    /// Internal effect-applier entry point, invoked by the supervised effect
+    /// loop from inside the sandbox against a read-only staged-intent mount.
+    /// It is hidden from help because it is not part of the interactive CLI.
+    #[command(hide = true)]
+    AuthoringApply {
+        /// Component directory the effect destination is relative to.
+        #[arg(long, value_name = "COMPONENT_DIR")]
+        component: PathBuf,
+        /// Read-only staged intent file to apply.
+        #[arg(long, value_name = "INTENT_FILE")]
+        intent_file: PathBuf,
+    },
 }
 
 /// Supported shells for shell completion generation.
@@ -510,6 +524,17 @@ impl std::fmt::Display for CommandOutput {
 /// This dispatch layer deliberately contains no process handling; callers can
 /// test command behavior and choose how errors are presented.
 pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
+    // The in-sandbox effect applier is internal plumbing, not a user-facing
+    // command: dispatch it before any presentation handling so it always
+    // returns the applier's bounded result verbatim.
+    if let Command::AuthoringApply {
+        component,
+        intent_file,
+    } = &command
+    {
+        return crate::authoring::apply::apply_intent(component, intent_file)
+            .map(CommandOutput::message);
+    }
     if json {
         match command {
             Command::Convert { project_dir } => convert::convert(&project_dir).map(|outcome| {
@@ -1082,6 +1107,13 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     "{{\"status\":\"success\",\"command\":\"completions\",\"shell\":\"{shell:?}\",\"script\":{escaped_script}}}"
                 )))
             }
+            // Dispatched above before presentation handling; retained so the
+            // match stays total and the JSON branch never sees it.
+            Command::AuthoringApply {
+                component,
+                intent_file,
+            } => crate::authoring::apply::apply_intent(&component, &intent_file)
+                .map(CommandOutput::message),
         }
     } else {
         match command {
@@ -1500,6 +1532,13 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 let script = String::from_utf8(buffer).expect("valid UTF-8 completion script");
                 Ok(CommandOutput::message(script))
             }
+            // Dispatched above before presentation handling; retained so the
+            // match stays total and the plain branch never sees it.
+            Command::AuthoringApply {
+                component,
+                intent_file,
+            } => crate::authoring::apply::apply_intent(&component, &intent_file)
+                .map(CommandOutput::message),
         }
     }
 }

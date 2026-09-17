@@ -313,21 +313,39 @@ the selected runtime and provider determine which available host authority
 they exercise. The acknowledgement does not extend to subsequent provider
 runs.
 
-When `task run` executes an external agent whose selected command targets a
-numeric loopback model gateway, the engine liveness-probes that gateway with a
-bounded TCP connect to the resolved endpoint before issuing the model turn. The
-probe issues no HTTP request, so it never loads, selects, or shifts a model
-slot; a gateway that does not accept a connection fails fast with
+When `task run` executes an external agent, the engine performs the model turn
+on the host, outside the effect sandbox. The selected model command must target
+a numeric loopback model gateway; any other command is refused before any
+transport work with `AgentCommandNotModelGateway`, so no agent command ever runs
+on the host outside the effect sandbox. The engine liveness-probes the gateway
+with a bounded TCP connect to the resolved endpoint before issuing the model
+turn. The probe issues no HTTP request, so it never loads, selects, or shifts a
+model slot; a gateway that does not accept a connection fails fast with
 `LocalModelGatewayUnreachable` and an actionable "ensure the model server is
-running and listening on `{endpoint}`" hint. When the gateway accepts but a
-turn still hits a transient availability failure — a socket connection refused,
-timed out, or interrupted error, or an overall transport timeout — the engine
-retries it up to three attempts with a short fixed backoff, then surfaces the
-error if it never succeeds. Response-level failures (a non-success HTTP status,
-a malformed or oversized response, or cancellation) are never retried, because
-they indicate a real answer rather than an unavailable gateway. None of this
-retries, weakens, or changes sandbox authorization, effect grants, policy
-approval, or output redaction.
+running and listening on `{endpoint}`" hint.
+
+The turn advertises the closed authoring tool set (`write_file`, `edit_file`).
+The broker reduces the turn's untrusted tool intents to capability-bound effects
+under a deny-by-default policy; a dropped intent fails the turn. Every
+authorized effect is applied by the engine itself inside the effect sandbox
+against a read-only staged-intent mount; the host never writes component state
+for an effect. A turn succeeds only when it produced a usable result, no intent
+was dropped, and every authorized effect applied.
+
+The model phase runs under one shared wall-clock budget equal to the configured
+profile timeout, covering the liveness probe, every turn attempt, and every
+retry backoff; the per-attempt transport deadline is the remaining budget. When
+the gateway accepts but a turn still hits a transient availability failure — a
+socket connection refused, timed out, interrupted, or reset error, a
+slot-allocation timeout, or an overall transport timeout — the engine retries it
+up to three attempts with a short fixed backoff, then surfaces the error if it
+never succeeds. Response-level failures (a non-success HTTP status, a malformed
+or oversized response, or cancellation) are never retried, because they
+indicate a real answer rather than an unavailable gateway. When streaming output
+is requested, text deltas are relayed to standard output with the run's
+redaction values applied; a streamed attempt that has already emitted text is
+never retried. None of this retries, weakens, or changes sandbox authorization,
+effect grants, policy approval, or output redaction.
 
 ## Errors and failure semantics
 
@@ -341,11 +359,17 @@ multi-file filesystem transactions. A failed operation reports the durable
 state left on disk for explicit recovery.
 
 Task execution distinguishes spawn, timeout, output-limit, policy, runner,
-agent, verification, gateway-unreachable, and lifecycle failures. An external
-model turn to a loopback gateway is liveness-probed first; only its transient
-availability failures are retried a bounded number of times before the
-gateway-unreachable failure is surfaced, and response-level failures are never
-retried. Failed verification blocks the task with bounded redacted evidence. Retained locks or a trailing prepared
+agent, verification, gateway-unreachable, and lifecycle failures. A selected
+model command that does not target a numeric loopback gateway fails the turn
+with `AgentCommandNotModelGateway` before any transport work. An external model
+turn to a loopback gateway is liveness-probed first and runs under one shared
+wall-clock budget; only its transient availability failures are retried a
+bounded number of times within that budget before the gateway-unreachable
+failure is surfaced, and response-level failures are never retried. A turn whose
+intents were dropped, or whose authorized effects did not all apply, fails
+closed with the bounded redacted reason recorded in the log. Failed
+verification blocks the task with bounded redacted evidence. Retained locks or
+a trailing prepared
 record fence further writes until explicit recovery. Target recovery can
 reconcile only digest-proven state; uncertain source effects remain fenced for
 human disposition.
