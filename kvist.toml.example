@@ -75,7 +75,7 @@ command = "/usr/bin/echo 'Verification passed'"
 # global user config at ~/.config/kvist/config.toml, which Kvist merges in.)
 #
 # A profile without an explicit `command` uses the provider's synthesized
-default: a curl command against <base_url>/v1/chat/completions (llama-server)
+# default: a curl command against <base_url>/v1/chat/completions (llama-server)
 # carrying OpenAI-style chat-completion JSON with the profile's `model` and
 # the rendered {prompt_json}. Set the provider's `base_url` (or a profile
 # `command` override) when your gateway is not on the default address.
