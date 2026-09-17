@@ -104,6 +104,18 @@ output exclusively for the dispatcher's single result object.
 Selecting an already saved reusable runtime profile skips provider collection
 and qualification and proceeds directly to role binding.
 
+Agent health check parses the selected scope's configuration document (and the
+other scope, whose providers lose on name conflict) with the same bounded
+document rules and lists the target scope's profiles in deterministic name
+order. Each profile's test command is its explicit `command` when present,
+otherwise the merged provider's synthesized template. Testing reuses
+`agent_runtime::verify_profile` with the fixed setup prompt, so supervision,
+capture bounds, and diagnostics match setup qualification exactly; no new
+execution path is introduced. The interactive loop reuses the wizard's
+cancellation-aware input handling, and per-failure removal reuses the standard
+profile removal, so cancellation semantics and configuration edits are the
+same as the dedicated remove command.
+
 External agent turn execution selects a configured model within the role, then
 resolves the command's numeric loopback gateway endpoint. A command that does
 not target a numeric loopback gateway is refused with `AgentCommandNotModelGateway`

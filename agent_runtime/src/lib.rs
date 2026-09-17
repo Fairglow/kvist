@@ -48,8 +48,8 @@ pub use profile::{
 };
 pub use prompt::{MAX_PROMPT_BYTES, resolve_prompt};
 pub use setup::{
-    SetupOptions, collect_profile, collect_profile_with_options, run_setup_wizard,
-    run_setup_wizard_with_options, verify_profile,
+    SETUP_TEST_PROMPT, SetupOptions, collect_profile, collect_profile_with_options,
+    run_setup_wizard, run_setup_wizard_with_options, verify_profile,
 };
 pub use supervisor::{
     ACTION_HASH_RING_CAPACITY, ActionHashRing, ActionRecord, AttemptContext,

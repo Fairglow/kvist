@@ -218,6 +218,17 @@ In JSON mode, setup prompts and status MUST be written to standard error,
 qualification output MUST NOT be forwarded, and standard output MUST contain
 exactly one valid result object.
 
+An explicit interactive agent check MUST live-verify each model profile
+configured in the selected scope by executing that profile's exact configured
+command on the host with the fixed minimal prompt `Reply with exactly: OK`.
+The check MUST NOT execute any test command without an explicit interactive
+acknowledgement, and that acknowledgement MUST itself be a cancellation
+point. For each failing profile, the check MUST offer profile removal (using
+the standard profile removal semantics) or temporary ignore (which leaves the
+configuration unchanged), and it MUST remain cancellable at every prompt.
+`agent role list` MUST present only the predefined roles and their assigned
+model profiles and MUST NOT present model profile names as roles.
+
 Initial sandboxed task authoring MAY use local agents without model-network or
 credential grants. Future remote model operation MUST keep model transport and
 credential references in a host-owned broker outside the effect sandbox and

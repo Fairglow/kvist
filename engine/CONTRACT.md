@@ -54,6 +54,7 @@ The `kvist` executable provides:
   `agent profile remove [MODEL_NAME] [--all] [--global]`
 - `agent role list`, `agent role set ROLE MODEL_NAME [--effort EFFORT]
 [--global]`, and `agent role clear [ROLE] [--all] [--global]`
+- `agent check [--global]`
 - `agent list` and `agent remove [MODEL_NAME] [--all] [--global]`
 - `vcs commit-accepted ACCEPTANCE_ID`
 - `completions SHELL`
@@ -100,6 +101,23 @@ standard error, suppresses qualification-command output, and writes exactly one
 result object to standard output.
 A setup invocation that binds an already saved reusable runtime profile does
 not generate or execute a new qualification command.
+
+`agent check` live-verifies the model profiles configured in the selected
+scope (the project-local `kvist.toml` by default, the user configuration with
+`--global`). It lists the profiles and obtains an explicit interactive
+acknowledgement before executing any profile command; that acknowledgement is
+also a cancellation point. A refusal, cancellation input, exhausted standard
+input, or interruption ends the check without executing a test command and
+without changing configuration. Each profile is tested on the host with the
+runtime's bounded verification and the fixed prompt `Reply with exactly: OK`.
+For each failing profile, the check offers removal (the standard profile
+removal semantics, including role-binding clearance) or ignore for now
+(configuration unchanged), and it remains cancellable at every prompt. With
+global `--json`, the transcript goes to standard error and standard output
+carries exactly one result object, as in the other interactive agent flows.
+`agent role list` presents only the predefined roles (developer, architect,
+security-reviewer) and their assigned model profiles, and never presents model
+profile names as roles.
 
 `init` writes the complete root artifact set only for an uninitialized project,
 is a no-op for a current project, converts an existing Rust package into draft

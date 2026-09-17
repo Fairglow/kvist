@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:6b783c14956f5483fdb1542a4e0e12d37cfa5436a1b37ccad61def04fecec93e"
-  contract_revision: "sha256:04e86e2913745d05480f315b5dbec2e4319aa5f9c03880e2e0050557c67e36e2"
-  design_revision: "sha256:06104f4739e4f1f49f1b86f91a8fd96b23bccd4be118c06fa93a5e43494357c3"
+  requirements_revision: "sha256:4e2da3a51e978d84cc9938e563debb096ea4e12deafe44c4830b82f86d357943"
+  contract_revision: "sha256:01f3305a1bc53429dd5e5476a0743bac35039c3af61d85b629f3fa4aa20241a2"
+  design_revision: "sha256:9765624b7ec9265fe567bad2fa55fa0053102e3564428bb377ac3f350c930548"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-17T17:10:43Z"
+    checked_at: "2026-09-17T21:30:27Z"
     stale_since: null
     causes: []
 tasks:
@@ -2326,6 +2326,85 @@ tasks:
     timestamps:
       created_at: "2026-09-16T12:00:00Z"
       updated_at: "2026-09-16T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-check-write-tests"
+    title: "Define agent role-list presentation and agent check tests"
+    description: "Write failing engine tests that `agent role list` presents only the predefined roles with their assigned profiles (never profile names as roles), and that `agent check` live-verifies scope profiles behind an explicit acknowledgement, refuses to execute without it, removes a failed profile on choice, ignores on choice, cancels at every prompt, reports nothing to check without profiles, and honors the global scope through the user configuration."
+    context: "The shell presented model profile names as roles, and configured profiles had no interactive way to verify they were reachable before a task relied on them."
+    purpose: "Establish executable evidence for the role-list presentation and the live agent check semantics before the implementation is trusted."
+    expected_outcome: "Tests fail while profile names appear as roles or the check executes without acknowledgement, and pass once both behaviors match the contract."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-17T18:00:00Z"
+      updated_at: "2026-09-17T18:30:00Z"
+      completed_at: "2026-09-17T18:30:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-check-implement-code"
+    title: "Implement agent role-list role-only presentation and the agent check command"
+    description: "Stop presenting `[agent.profiles]` names as roles in `agent role list`; add `agent check [--global]` that lists the selected scope's profiles in deterministic order, merges providers from the other scope (target winning), resolves each profile's exact test command, requires an explicit interactive acknowledgement that is itself a cancellation point, verifies each profile with the runtime's bounded supervision and the fixed prompt, and offers standard removal or temporary ignore for each failure."
+    context: "The role table conflated roles with model profiles, and failing or unreachable profiles were only discovered deep inside a blocked task."
+    purpose: "Make the role table unambiguous and give operators a cancellable, acknowledgement-gated way to verify and repair agent profiles."
+    expected_outcome: "`agent role list` shows only predefined roles, and `agent check` verifies, removes, or ignores profiles without ever executing a test command without explicit acknowledgement."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-check-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-17T18:00:00Z"
+      updated_at: "2026-09-17T19:00:00Z"
+      completed_at: "2026-09-17T19:00:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-check-security-audit"
+    title: "Audit the agent check execution path"
+    description: "Independently review the acknowledgement-gated host execution of configured profile commands, the scope merge of providers, the untrusted configuration input handling, and the cancellation and removal paths for security weaknesses."
+    context: "`agent check` executes configured profile commands on the host, so the acknowledgement gate and the config handling are the security boundary."
+    purpose: "Confirm no test command can execute without explicit acknowledgement and configuration input cannot be coaxed into out-of-scope effects."
+    expected_outcome: "Every high-confidence parsing, race, authorization, or information-disclosure finding is fixed or retained as an explicit blocker."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "agent-check-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-17T18:00:00Z"
+      updated_at: "2026-09-17T18:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-check-compliance-review"
+    title: "Review agent check compliance"
+    description: "Compare source-derived agent-check and role-list behavior with the agent-integration requirements and the provided-interfaces contract, retaining discrepancies for human arbitration."
+    context: "A new interactive command surface and a presentation change need independent confirmation."
+    purpose: "Preserve independent evidence that the agent check matches its declared requirements and contract."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "agent-check-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-17T18:00:00Z"
+      updated_at: "2026-09-17T18:00:00Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

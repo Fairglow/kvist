@@ -319,6 +319,12 @@ pub enum AgentCommand {
         #[arg(long)]
         force: bool,
     },
+    /// Live-verify that configured model profiles are reachable and working.
+    Check {
+        /// Check profiles in the global user configuration instead of the project configuration.
+        #[arg(long)]
+        global: bool,
+    },
     /// List configured and available agent models (alias for 'agent profile list').
     List,
     /// Remove configured agent model(s) (alias for 'agent profile remove').
@@ -793,6 +799,24 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 Ok(CommandOutput::message(format!(
                     r#"{{"status":"success","command":"agent-remove","message":{msg_json}}}"#
                 )))
+            },
+            Command::Agent { command: AgentCommand::Check { global } } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                let mut reader = crate::interruptible_stdin::interruptible_reader();
+                let mut writer = std::io::BufWriter::new(std::io::stderr());
+                match wizard::check_agents(&mut reader, &mut writer, &current_dir, global) {
+                    Ok(()) => Ok(CommandOutput::message(
+                        r#"{"status":"success","command":"agent-check","message":"agent check complete"}"#.to_owned()
+                    )),
+                    Err(KvistError::AgentSetupCancelled) => Ok(CommandOutput::message(
+                        r#"{"status":"cancelled","command":"agent-check","message":"agent check cancelled"}"#.to_owned()
+                    )),
+                    Err(source) => Err(source),
+                }
             },
             Command::Shell(_) => Err(KvistError::SandboxUnavailable {
                 runner: "shell".to_owned(),
@@ -1342,6 +1366,24 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                             "specify a model name or use --all to clear all agent configuration"
                                 .to_owned(),
                     })
+                }
+            }
+            Command::Agent {
+                command: AgentCommand::Check { global },
+            } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                let mut reader = crate::interruptible_stdin::interruptible_reader();
+                let mut writer = std::io::BufWriter::new(std::io::stdout());
+                match wizard::check_agents(&mut reader, &mut writer, &current_dir, global) {
+                    Ok(()) => Ok(CommandOutput::message("agent check complete".to_owned())),
+                    Err(KvistError::AgentSetupCancelled) => {
+                        Ok(CommandOutput::message("agent check cancelled".to_owned()))
+                    }
+                    Err(source) => Err(source),
                 }
             }
             Command::Shell(project) => {
