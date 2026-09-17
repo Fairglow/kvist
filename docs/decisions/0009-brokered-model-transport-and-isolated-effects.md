@@ -126,4 +126,6 @@ authority model. The model phase is bounded by one shared wall-clock budget,
 every agent command is either a numeric loopback gateway or refused, and every
 authorized effect is applied only inside the effect sandbox by the kvist
 binary itself. Remote providers remain out of scope until the deferred TLS
-experiment is built and reviewed.
+experiment is built and reviewed. Committed attempt journals retain the
+machine-absolute paths recorded at execution time; rewriting them would
+falsify the evidence record, so they are preserved as-is.
