@@ -2125,3 +2125,95 @@ fn malformed<T>(reason: &str) -> Result<T> {
         reason: reason.to_owned(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    fn test_request() -> ModelRequest {
+        ModelRequest {
+            model: "Tiel-Coder-35B-Test".to_owned(),
+            messages: vec![ModelMessage::User("hi".to_owned())],
+            tools: Vec::new(),
+            tool_choice: ToolChoice::None,
+            reasoning_effort: None,
+            output_schema: None,
+        }
+    }
+
+    // Regression: the native transport must tolerate a reasoning preamble that
+    // precedes textual content (the exact pattern Rig closed on as
+    // "unsupported non-text provider content").
+    #[test]
+    fn streaming_decoder_accumulates_reasoning_before_content() {
+        let request = test_request();
+        let mut decoder = StreamDecoder::new(LocalModelProvider::LlamaServer, &request);
+        let cancellation = CancellationToken::new();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut events = 0usize;
+        let records = [
+            r#"{"choices":[{"delta":{"role":"assistant","content":null,"reasoning_content":"We "}}]}"#,
+            r#"{"choices":[{"delta":{"role":"assistant","content":null,"reasoning_content":"reply"}}]}"#,
+            r#"{"choices":[{"delta":{"role":"assistant","content":"hello"}}]}"#,
+            r#"{"choices":[{"delta":{"role":"assistant","content":" world","finish_reason":"stop"}}]}"#,
+            "[DONE]",
+        ];
+        for record in records {
+            let line = format!("data: {record}\n");
+            decoder
+                .push(line.as_bytes(), &cancellation, deadline, &mut |_event| {
+                    events += 1;
+                    Ok(())
+                })
+                .expect("push should succeed");
+        }
+        let turn = decoder
+            .finish(&mut |_event| Ok(()))
+            .expect("finish should succeed");
+        assert_eq!(turn.text, "hello world");
+        assert_eq!(turn.reasoning.as_deref(), Some("We reply"));
+        assert_eq!(turn.finish_reason, FinishReason::Stop);
+        assert!(events >= 2, "expected text/reasoning deltas to be emitted");
+    }
+
+    // Unary (non-streaming) responses must likewise carry reasoning alongside
+    // text without failing.
+    #[test]
+    fn unary_openai_response_carries_reasoning_and_text() {
+        let request = test_request();
+        let body = json!({
+            "model": "Tiel-Coder-35B",
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": "hi",
+                    "reasoning_content": "because"
+                }
+            }]
+        });
+        let turn =
+            parse_openai_unary(body.to_string().as_bytes(), &request).expect("unary should parse");
+        assert_eq!(turn.text, "hi");
+        assert_eq!(turn.reasoning.as_deref(), Some("because"));
+        assert_eq!(turn.finish_reason, FinishReason::Stop);
+    }
+
+    // A streaming response that never emits the terminal marker must fail.
+    #[test]
+    fn streaming_without_terminal_record_fails() {
+        let request = test_request();
+        let mut decoder = StreamDecoder::new(LocalModelProvider::LlamaServer, &request);
+        let cancellation = CancellationToken::new();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let line = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n";
+        decoder
+            .push(line.as_bytes(), &cancellation, deadline, &mut |_| Ok(()))
+            .expect("push should succeed");
+        let err = decoder
+            .finish(&mut |_| Ok(()))
+            .expect_err("finish should fail without a terminal record");
+        matches!(err, Error::MalformedModelResponse { .. });
+    }
+}

@@ -279,6 +279,7 @@ pub struct ExecutionRequest<'a> {
 }
 
 /// One host file exposed to the sandbox at a fixed read-only path.
+#[derive(Clone)]
 pub struct ReadOnlyMount {
     pub source: PathBuf,
     pub destination: String,

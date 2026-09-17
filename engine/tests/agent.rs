@@ -89,26 +89,69 @@ fn split_command_decodes_escaped_backslashes_and_quotes() {
     assert_eq!(args, vec![r#"quote: "ready""#]);
 }
 
+/// Serves Ollama-style unary chat responses from a numeric loopback endpoint.
+///
+/// The brokered transport performs the model turn on the host, so a local
+/// provider is all the test needs; no sandbox runner or probe is involved.
+#[cfg(target_os = "linux")]
+fn serve_local_ollama(content: &str) -> String {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+    let listener = Arc::new(TcpListener::bind("127.0.0.1:0").expect("bind fake provider"));
+    let addr = listener.local_addr().expect("fake provider address");
+    let body = format!(
+        "{{\"model\":\"test-model\",\"created_at\":\"2026-08-30T00:00:00Z\",\"message\":{{\"role\":\"assistant\",\"content\":\"{content}\",\"tool_calls\":[]}},\"done\":true,\"done_reason\":\"stop\",\"prompt_eval_count\":10,\"eval_count\":4}}"
+    );
+    // A real model gateway serves many sequential connections: a brokered host
+    // turn liveness-probes the port first, then performs the turn, so the fake
+    // provider must serve more than one connection. Each worker accepts and
+    // serves a single connection; any connection the client never opens simply
+    // blocks on accept until the process exits.
+    for _ in 0..4 {
+        let listener = Arc::clone(&listener);
+        let body = body.clone();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let mut buffer = [0u8; 4096];
+            let _ = stream.read(&mut buffer);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body.as_bytes());
+            let _ = stream.flush();
+        });
+    }
+    format!("http://{addr}/api/chat")
+}
+
 #[test]
 #[cfg(target_os = "linux")]
-fn execute_agent_captures_stdout_and_stderr_in_log_file() {
+fn execute_agent_runs_the_model_turn_on_the_host_and_captures_the_response() {
     kvist::init_test_logging();
-    let workspace = TempDir::new().expect("workspace");
-    let status = std::process::Command::new("git")
-        .args(["init", "--quiet"])
-        .current_dir(workspace.path())
-        .status()
-        .expect("initialize Git");
-    assert!(status.success());
+    let target_dir = TempDir::new().expect("workspace");
 
-    // We use a basic command available on standard platforms like 'echo'
+    // A local Ollama-style provider stands in for the host model service.
+    let endpoint = serve_local_ollama("brokered host turn ok");
+    let prompt = "Read the approved contract";
+    let command = format!(
+        "curl --silent --request POST --json '{{\"model\":\"test-model\"}}' -- \"{endpoint}\""
+    );
+
+    // The profile command embeds the numeric loopback endpoint; the brokered
+    // transport extracts it and performs the turn on the host.
     let profile = AgentProfile {
         role: Role::Developer,
         profile: "default".to_owned(),
-        command_template: "/usr/bin/echo '{prompt}'".to_owned(),
+        command_template: command.clone(),
         models: vec![Model {
             name: "default".to_owned(),
-            command: "/usr/bin/echo '{prompt}'".to_owned(),
+            command,
             system_prompt: None,
         }],
         default_model: "default".to_owned(),
@@ -120,76 +163,29 @@ fn execute_agent_captures_stdout_and_stderr_in_log_file() {
         redaction_values: vec![],
     };
 
-    let prompt = "hello external agent";
     let context_paths: Vec<PathBuf> = vec![];
-    let target_dir = workspace.path();
     let task_id = "test-task";
-    let runner_workspace = TempDir::new().expect("external runner workspace");
-    let runner = runner_workspace.path().join("fake-sandbox-runner");
-    // Single-file runner: emits the version-one JSON probe on the probe argument
-    // and a deterministic response for a request. It ignores the request body.
-    fs::write(
-        &runner,
-        r#"#!/usr/bin/bash
-set -eu
-if [ "${1-}" = "--kvist-sandbox-probe-v1" ]; then
-  runner_digest=$(sha256sum "$0" | cut -d' ' -f1)
-  backend_digest=$(sha256sum /usr/bin/true | cut -d' ' -f1)
-  printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"/usr/bin/true","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend_digest"
-  exit 0
-fi
-cat >/dev/null
-printf 'sandboxed agent output\n'
-"#,
-    )
-    .expect("write runner");
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(&runner, fs::Permissions::from_mode(0o755))
-        .expect("make runner executable");
     let sandbox = SandboxConfig {
-        runner: runner.to_string_lossy().into_owned(),
+        runner: "/usr/bin/true".to_owned(),
         backend: "/usr/bin/true".to_owned(),
         environment_allowlist: vec![],
         acquisition: kvist::config::AcquisitionConfig::default(),
     };
-    // The secure authoring boundary grants only explicit writable roots.
-    fs::create_dir_all(target_dir.join("tests")).expect("create authoring test root");
-    for document in [
-        "REQUIREMENTS.md",
-        "CONTRACT.md",
-        "DESIGN.md",
-        "TODOS.yaml",
-        "IMPL.md",
-    ] {
-        fs::write(target_dir.join(document), format!("fixture {document}\n"))
-            .expect("write component context document");
-    }
-    let runner_identity = kvist::sandbox::runner_identity(&sandbox, target_dir, VcsSelection::Git)
-        .expect("runner identity");
-    let backend_identity =
-        kvist::sandbox::backend_identity(&sandbox, target_dir, VcsSelection::Git)
-            .expect("backend identity");
-    let probe = kvist::sandbox::ensure_available(
-        &sandbox,
-        target_dir,
-        VcsSelection::Git,
-        &runner_identity,
-        &backend_identity,
-    )
-    .expect("sandbox probe");
 
     let result = execute_agent(
         &profile,
         &sandbox,
-        &runner_identity,
-        &probe,
+        // A loopback host turn needs no authoring sandbox; the runner and
+        // probe are None so no authoring request is ever dispatched.
+        None,
+        None,
         kvist::agent::AgentExecutionRequest {
-            project_root: target_dir,
+            project_root: target_dir.path(),
             vcs_selection: VcsSelection::Git,
             prompt,
             context_paths: &context_paths,
             read_only_mounts: &[],
-            target_dir,
+            target_dir: target_dir.path(),
             task_id,
             stream_output: false,
             role: Role::Developer,
@@ -199,13 +195,18 @@ printf 'sandboxed agent output\n'
     .expect("agent execution success");
 
     assert!(result.success);
-    assert_eq!(result.tokens_input, None);
-    assert_eq!(result.tokens_output, None);
+    // The provider response carries usage (`prompt_eval_count: 10`,
+    // `eval_count: 4`); the brokered path must surface it, not discard it.
+    assert_eq!(result.tokens_input, Some(10));
+    assert_eq!(result.tokens_output, Some(4));
 
-    // Verify log file exists and contains the echoed prompt
+    // Verify the log file exists and contains the model turn response.
     assert!(result.log_path.exists());
     let log_contents = fs::read_to_string(&result.log_path).expect("read log contents");
-    assert!(log_contents.contains("sandboxed agent output"));
+    assert!(
+        log_contents.contains("brokered host turn ok"),
+        "log contents were: {log_contents}"
+    );
 }
 
 #[cfg(target_os = "linux")]

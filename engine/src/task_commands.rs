@@ -124,6 +124,35 @@ struct TaskContext {
     component_dir: PathBuf,
 }
 
+fn untracked_durable_artifacts(inspection: &project_state::ProjectInspection) -> Option<String> {
+    if inspection.vcs.artifacts.is_empty() {
+        let details = inspection
+            .vcs
+            .diagnostic
+            .as_deref()
+            .unwrap_or(&inspection.vcs.summary);
+        return Some(details.to_owned());
+    }
+    let untracked = inspection
+        .vcs
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.state != VcsArtifactState::Tracked)
+        .map(|artifact| {
+            format!(
+                "{} ({})",
+                artifact.path.display(),
+                artifact.state.description()
+            )
+        })
+        .collect::<Vec<_>>();
+    if untracked.is_empty() {
+        None
+    } else {
+        Some(untracked.join(", "))
+    }
+}
+
 fn validate_context(component_path: &Path) -> Result<TaskContext> {
     validate_context_with_blocked(component_path, false)
 }
@@ -149,20 +178,8 @@ fn validate_context_with_blocked(
             state: inspection.state.name().to_owned(),
         });
     }
-    if inspection.vcs.artifacts.is_empty()
-        || inspection
-            .vcs
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.state != VcsArtifactState::Tracked)
-    {
-        return Err(KvistError::TaskVcsNotCurrent {
-            summary: inspection
-                .vcs
-                .diagnostic
-                .clone()
-                .unwrap_or(inspection.vcs.summary),
-        });
+    if let Some(details) = untracked_durable_artifacts(&inspection) {
+        return Err(KvistError::TaskVcsNotCurrent { details });
     }
     let component = inspection
         .components
@@ -1555,20 +1572,8 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
             state: inspection.state.name().to_owned(),
         });
     }
-    if inspection.vcs.artifacts.is_empty()
-        || inspection
-            .vcs
-            .artifacts
-            .iter()
-            .any(|artifact| artifact.state != VcsArtifactState::Tracked)
-    {
-        return Err(KvistError::TaskVcsNotCurrent {
-            summary: inspection
-                .vcs
-                .diagnostic
-                .clone()
-                .unwrap_or(inspection.vcs.summary),
-        });
+    if let Some(details) = untracked_durable_artifacts(&inspection) {
+        return Err(KvistError::TaskVcsNotCurrent { details });
     }
     let component_root =
         inspection
@@ -4162,16 +4167,20 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
         tracing::info!(
             task_id = %task_id,
             component = %component_path.display(),
-            "running task via external agent in sandbox"
+            sandbox_backend = %sandbox_probe.backend.kind,
+            "running task model turn on host (effect sandbox reserved)"
         );
         println!("Running task `{task_id}` via external agent...");
 
-        // 6. Execute agent
+        // 6. Execute agent model turn on the host, outside the effect sandbox.
+        // The approved runner identity and capability-confirmed probe are passed
+        // so a successful non-loopback turn can be authorized and applied as a
+        // bounded authoring sandbox request.
         let run_result = crate::agent::execute_agent(
             agent_profile,
             sandbox_config,
-            &approved_runner,
-            &sandbox_probe,
+            Some(&approved_runner),
+            Some(&sandbox_probe),
             crate::agent::AgentExecutionRequest {
                 project_root: &project_dir,
                 vcs_selection: config.vcs,
@@ -4376,12 +4385,12 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
             // Transition to Blocked
             let blocker_reason = if run_result.timed_out {
                 format!(
-                    "agent execution timed out and the sandbox runner was terminated. Bounded redacted logs are written to: {}",
+                    "agent execution timed out while contacting the local model gateway. Bounded redacted logs are written to: {}",
                     run_result.log_path.display()
                 )
             } else if run_result.output_limit_exceeded {
                 format!(
-                    "agent execution exceeded the combined output limit and the sandbox runner was terminated. Bounded redacted logs are written to: {}",
+                    "agent execution exceeded the combined output limit while contacting the local model gateway. Bounded redacted logs are written to: {}",
                     run_result.log_path.display()
                 )
             } else {

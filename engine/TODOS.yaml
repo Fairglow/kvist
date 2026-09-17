@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:b78ecf8dca7798d1b92d1b00514f5380642082f586865128709c4923af017d9a"
-  contract_revision: "sha256:31c7919dd60c92f2e341a99f76f276debba7ec07259edc46c3f4208ac82e8a5a"
-  design_revision: "sha256:84e679b67bf4d314a1428c74e9fbea72391d6249f2a1575ffe586f32cf770f0c"
+  requirements_revision: "sha256:4e2da3a51e978d84cc9938e563debb096ea4e12deafe44c4830b82f86d357943"
+  contract_revision: "sha256:01f3305a1bc53429dd5e5476a0743bac35039c3af61d85b629f3fa4aa20241a2"
+  design_revision: "sha256:9765624b7ec9265fe567bad2fa55fa0053102e3564428bb377ac3f350c930548"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-13T20:46:07Z"
+    checked_at: "2026-09-17T21:30:27Z"
     stale_since: null
     causes: []
 tasks:
@@ -2244,6 +2244,167 @@ tasks:
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
       updated_at: "2026-09-15T13:15:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "brokered-turn-write-tests"
+    title: "Define brokered model-turn and effect-loop tests"
+    description: "Write failing engine tests for the brokered turn: shared wall-clock budget across probe, attempts, and backoff; bounded transient retry; refusal of non-loopback model commands; the closed authoring tool set; intent authorization and dropping; the in-sandbox effect dispatch; no-follow symbolic-link refusal; edit_file authorization and applier identity re-derivation; tool definitions; and streamed-delta redaction and relay."
+    context: "The branch review found the brokered effect loop was not wired, non-loopback commands ran unsandboxed on the host, the model-phase deadline could exceed the configured timeout, and evidence was merged, discarded, or mislabeled."
+    purpose: "Establish executable evidence for the brokered transport, effect loop, and evidence semantics before the implementation is trusted."
+    expected_outcome: "Tests fail while the loop is unwired, the budget unshared, non-loopback commands executable, or evidence divergent, and pass once the brokered path and its evidence are correct."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-16T12:00:00Z"
+      updated_at: "2026-09-16T14:00:00Z"
+      completed_at: "2026-09-16T14:00:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "brokered-turn-implement-code"
+    title: "Wire the brokered model turn and in-sandbox effect loop"
+    description: "Advertise the closed authoring tool set on the host turn; reduce untrusted intents to capability-bound effects with a deny-by-default broker; refuse non-loopback model commands before any transport work; bound the model phase by one shared wall-clock budget; apply every authorized effect inside the effect sandbox via a read-only staged-intent mount; fail closed on dropped intents and unapplied effects; relay streamed deltas with redaction; and record accurate bounded evidence."
+    context: "The model turn could not produce changes, non-loopback commands ran as a host subprocess and were re-executed in the sandbox, and the model phase could exceed the configured timeout by roughly three times."
+    purpose: "Make every agent command a numeric loopback gateway or a refusal, every effect an in-sandbox application, and the model phase bounded by the configured timeout."
+    expected_outcome: "No agent command runs outside the effect sandbox, every authorized effect is applied only inside it, and the model phase respects one shared wall-clock budget."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "brokered-turn-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-16T12:00:00Z"
+      updated_at: "2026-09-16T16:00:00Z"
+      completed_at: "2026-09-16T16:00:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "brokered-turn-security-audit"
+    title: "Audit the brokered turn and effect loop"
+    description: "Independently review the loopback refusal, the deny-by-default intent broker, the staged-intent staging and identity proof, the no-follow application and symbolic-link handling, the shared wall-clock budget, the streamed-delta redactor, and the evidence path for untrusted-input handling, race, and authority weaknesses."
+    context: "The effect loop applies filesystem effects derived from untrusted model intents, so the broker and applier are the security boundary."
+    purpose: "Confirm the broker and applier cannot be coaxed into an unauthorized, out-of-root, or link-following write."
+    expected_outcome: "Every high-confidence parsing, race, identity, or authorization finding is fixed or retained as an explicit blocker."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "brokered-turn-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-16T12:00:00Z"
+      updated_at: "2026-09-16T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "brokered-turn-compliance-review"
+    title: "Review brokered turn compliance"
+    description: "Compare source-derived brokered-turn and effect-loop behavior with the agent-integration, supervised-execution, and execution-boundary requirements and the behavioral-guarantees contract, retaining discrepancies for human arbitration."
+    context: "The brokered transport, effect loop, budget, and evidence semantics all changed and need independent confirmation."
+    purpose: "Preserve independent evidence that the brokered path matches its declared requirements and contract."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "brokered-turn-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-16T12:00:00Z"
+      updated_at: "2026-09-16T12:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-check-write-tests"
+    title: "Define agent role-list presentation and agent check tests"
+    description: "Write failing engine tests that `agent role list` presents only the predefined roles with their assigned profiles (never profile names as roles), and that `agent check` live-verifies scope profiles behind an explicit acknowledgement, refuses to execute without it, removes a failed profile on choice, ignores on choice, cancels at every prompt, reports nothing to check without profiles, and honors the global scope through the user configuration."
+    context: "The shell presented model profile names as roles, and configured profiles had no interactive way to verify they were reachable before a task relied on them."
+    purpose: "Establish executable evidence for the role-list presentation and the live agent check semantics before the implementation is trusted."
+    expected_outcome: "Tests fail while profile names appear as roles or the check executes without acknowledgement, and pass once both behaviors match the contract."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-17T18:00:00Z"
+      updated_at: "2026-09-17T18:30:00Z"
+      completed_at: "2026-09-17T18:30:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-check-implement-code"
+    title: "Implement agent role-list role-only presentation and the agent check command"
+    description: "Stop presenting `[agent.profiles]` names as roles in `agent role list`; add `agent check [--global]` that lists the selected scope's profiles in deterministic order, merges providers from the other scope (target winning), resolves each profile's exact test command, requires an explicit interactive acknowledgement that is itself a cancellation point, verifies each profile with the runtime's bounded supervision and the fixed prompt, and offers standard removal or temporary ignore for each failure."
+    context: "The role table conflated roles with model profiles, and failing or unreachable profiles were only discovered deep inside a blocked task."
+    purpose: "Make the role table unambiguous and give operators a cancellable, acknowledgement-gated way to verify and repair agent profiles."
+    expected_outcome: "`agent role list` shows only predefined roles, and `agent check` verifies, removes, or ignores profiles without ever executing a test command without explicit acknowledgement."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-check-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-17T18:00:00Z"
+      updated_at: "2026-09-17T19:00:00Z"
+      completed_at: "2026-09-17T19:00:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-check-security-audit"
+    title: "Audit the agent check execution path"
+    description: "Independently review the acknowledgement-gated host execution of configured profile commands, the scope merge of providers, the untrusted configuration input handling, and the cancellation and removal paths for security weaknesses."
+    context: "`agent check` executes configured profile commands on the host, so the acknowledgement gate and the config handling are the security boundary."
+    purpose: "Confirm no test command can execute without explicit acknowledgement and configuration input cannot be coaxed into out-of-scope effects."
+    expected_outcome: "Every high-confidence parsing, race, authorization, or information-disclosure finding is fixed or retained as an explicit blocker."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "agent-check-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-17T18:00:00Z"
+      updated_at: "2026-09-17T18:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-check-compliance-review"
+    title: "Review agent check compliance"
+    description: "Compare source-derived agent-check and role-list behavior with the agent-integration requirements and the provided-interfaces contract, retaining discrepancies for human arbitration."
+    context: "A new interactive command surface and a presentation change need independent confirmation."
+    purpose: "Preserve independent evidence that the agent check matches its declared requirements and contract."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "agent-check-security-audit"
+    requirements:
+      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-17T18:00:00Z"
+      updated_at: "2026-09-17T18:00:00Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

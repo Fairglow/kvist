@@ -39,6 +39,12 @@ pub const REQUIRED_ROOT_ARTIFACT_PATHS: [&str; 9] = [
     ROOT_IMPLEMENTATION_RECORD_PATH,
 ];
 
+/// Root artifact that is machine-local configuration. It must exist and be
+/// valid for a current project, but it is not a durable VCS-tracked artifact:
+/// local endpoint and toolchain settings must not be forced into version
+/// control.
+pub const LOCAL_ROOT_ARTIFACT_PATH: &str = "kvist.toml";
+
 /// Maximum supported size for root contract, TODO queue, and implementation records.
 pub const MAX_ROOT_TEXT_ARTIFACT_BYTES: u64 = 1024 * 1024;
 
@@ -930,6 +936,7 @@ fn inspect_vcs(project_dir: &Path, state: ProjectState) -> VcsInspection {
 
     let mut required_paths = REQUIRED_ROOT_ARTIFACT_PATHS[..4]
         .iter()
+        .filter(|path| **path != LOCAL_ROOT_ARTIFACT_PATH)
         .map(PathBuf::from)
         .collect::<Vec<_>>();
     for component in discovery.components {

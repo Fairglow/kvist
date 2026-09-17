@@ -13,13 +13,15 @@ const COMPONENT_ARTIFACTS: [&str; 5] = [
 #[test]
 fn workspace_is_owned_by_the_repository_root() {
     let root = repository_root();
+    // kvist.toml is machine-local (gitignored); the tracked template is the
+    // durable configuration artifact owned by the repository root.
     let required = [
         "Cargo.toml",
         "Cargo.lock",
         "VISION.md",
         "ARCHITECTURE.md",
         "ROOT_CONTRACT.md",
-        "kvist.toml",
+        "kvist.toml.example",
     ];
     let missing = required
         .iter()
@@ -84,9 +86,12 @@ fn retired_nested_paths_have_no_aliases() {
             "retired nested path `{retired_nested}` must not remain as an alias"
         );
     }
-    let config: toml::Value =
-        toml::from_str(&fs::read_to_string(root.join("kvist.toml")).expect("read kvist.toml"))
-            .expect("parse kvist.toml");
+    // The machine-local kvist.toml is not present in a bare VCS checkout, so
+    // the component root shape is asserted against the tracked template.
+    let config: toml::Value = toml::from_str(
+        &fs::read_to_string(root.join("kvist.toml.example")).expect("read kvist.toml.example"),
+    )
+    .expect("parse kvist.toml.example");
     assert_eq!(
         config.get("component_root").and_then(toml::Value::as_str),
         Some("."),

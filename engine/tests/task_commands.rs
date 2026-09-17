@@ -73,30 +73,12 @@ request=$(cat)
 printf '%s' "$request" > sandbox-request.json
 printf '%s' "${KVIST_UNAPPROVED_ENV-unset}" > runner-ambient-env.txt
 case "$request" in
-  *'/workspace/context/ROOT_CONTRACT.md'*)
+  *'authoring-apply'*)
     printf '%s' "$request" > agent-sandbox-request.json
     ;;
 esac
 case "$request" in
   *'"argv":["/usr/bin/false"'*) exit 1 ;;
-  *'agent-overflow'*)
-    i=0
-    while [ "$i" -lt 10000 ]; do
-      printf 'secret-agent-output'
-      printf 'secret-agent-output' >&2
-      i=$((i + 1))
-    done
-    ;;
-  *'agent-sleep'*) sleep 2 ;;
-  *'delete-lock'*)
-    rm -f src/.kvist-task.lock
-    sleep 2
-    ;;
-  *'split-secret'*)
-    printf 'cross-stream-'
-    printf 'secret' >&2
-    exit 0
-    ;;
   *'verification-secret'*)
     printf 'agent-redaction-secret'
     printf '%s' "$KVIST_TEST_SECRET" >&2
@@ -133,6 +115,237 @@ printf 'fake sandbox runner\n'
     // The secure authoring boundary grants only explicit writable roots, so the
     // component needs a real test directory to author into.
     let _ = fs::create_dir_all(project.path().join("src/tests"));
+}
+
+/// A hermetic, loopback-only mock model gateway for the task-command suite.
+///
+/// The brokered design performs the model turn on the host against a numeric
+/// loopback gateway, so these tests stand in for the local model with a small
+/// TCP server. It answers each chat-completion request with a preconfigured
+/// JSON body (optionally after a delay, to exercise the turn wall-clock
+/// budget), so the suite never depends on a real, remote, costly, or
+/// single-slot/VRAM-contended local model. Dropping the guard stops the serve
+/// thread deterministically.
+#[cfg(target_os = "linux")]
+struct MockGateway {
+    /// The loopback URL the agent command addresses, e.g.
+    /// `http://127.0.0.1:54321/v1/chat/completions`.
+    endpoint: String,
+    /// The bare `host:port` address, for the drop sentinel connection.
+    address: String,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for MockGateway {
+    fn drop(&mut self) {
+        // Signal the serve loop, unblock its accept with a sentinel connection,
+        // then join the thread so the mock never outlives the test.
+        self.stop.store(true, std::sync::atomic::Ordering::Release);
+        let _ = std::net::TcpStream::connect(self.address.as_str());
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl MockGateway {
+    /// Spawns the gateway answering every request with the fixed `body`.
+    fn spawn(body: &str, delay: std::time::Duration) -> Self {
+        let body = body.to_owned();
+        Self::serve(move |_| body.clone(), delay)
+    }
+
+    /// Spawns a gateway that echoes the request's user-message content back as a
+    /// text response, so a test can observe the rendered prompt the engine sent.
+    fn spawn_echo_prompt(delay: std::time::Duration) -> Self {
+        Self::serve(
+            move |request| {
+                let prompt = extract_user_content(request).unwrap_or_default();
+                gateway_text_body(&prompt)
+            },
+            delay,
+        )
+    }
+
+    fn serve(
+        respond: impl Fn(&[u8]) -> String + Send + 'static,
+        delay: std::time::Duration,
+    ) -> Self {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::thread;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock gateway");
+        let address = listener
+            .local_addr()
+            .expect("mock gateway address")
+            .to_string();
+        let endpoint = format!("http://{address}/v1/chat/completions");
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_loop = Arc::clone(&stop);
+        let worker = thread::spawn(move || {
+            // A production gateway serves every connection; the agent
+            // liveness-probes the endpoint before each turn, so the mock must
+            // tolerate empty and broken connections and keep serving. After the
+            // stop flag is set, the next connection is the drop sentinel.
+            for stream in listener.incoming() {
+                if stop_loop.load(std::sync::atomic::Ordering::Acquire) {
+                    break;
+                }
+                let Ok(mut stream) = stream else {
+                    continue;
+                };
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(10)));
+                // Drain the full request (headers + Content-Length body) so the
+                // client cannot break its write before we answer; a probe or
+                // reset with no headers is skipped, not fatal.
+                let mut request: Vec<u8> = Vec::new();
+                let mut header_end = 0usize;
+                loop {
+                    let mut buffer = [0u8; 1024];
+                    match stream.read(&mut buffer) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            request.extend_from_slice(&buffer[..n]);
+                            if let Some(index) =
+                                request.windows(4).position(|chunk| chunk == b"\r\n\r\n")
+                            {
+                                header_end = index + 4;
+                                break;
+                            }
+                        }
+                    }
+                }
+                if header_end == 0 {
+                    continue;
+                }
+                // Find `content-length:` (case-insensitively) in the headers
+                // and parse the full digit run after it.
+                let lower = ascii_lowercase(&request[..header_end]);
+                let content_length = lower
+                    .windows(b"content-length:".len())
+                    .position(|window| window == b"content-length:")
+                    .map(|index| &lower[index + b"content-length:".len()..])
+                    .and_then(|rest| {
+                        let digits = rest
+                            .iter()
+                            .copied()
+                            .skip_while(|byte| *byte == b' ' || *byte == b'\t')
+                            .take_while(u8::is_ascii_digit)
+                            .collect::<Vec<u8>>();
+                        std::str::from_utf8(&digits).ok()?.parse().ok()
+                    })
+                    .unwrap_or(0);
+                while request.len() < header_end + content_length {
+                    let mut buffer = [0u8; 1024];
+                    match stream.read(&mut buffer) {
+                        Ok(0) => break,
+                        Ok(n) => request.extend_from_slice(&buffer[..n]),
+                        Err(_) => break,
+                    }
+                }
+                if !delay.is_zero() {
+                    thread::sleep(delay);
+                }
+                let body = respond(&request[header_end..]);
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+                let _ = stream.write_all(body.as_bytes());
+                let _ = stream.flush();
+            }
+        });
+        MockGateway {
+            endpoint,
+            address,
+            stop,
+            worker: Some(worker),
+        }
+    }
+}
+
+/// Extracts the user-message content from an OpenAI-style request body, for the
+/// echo-prompt gateway. The serializer may emit the message's `content` field
+/// before or after its `role` field, so take the nearest `"content":"` around
+/// the `"role":"user"` marker. The prompts in these tests carry no quotes, so
+/// reading to the next quote is sufficient.
+#[cfg(target_os = "linux")]
+fn extract_user_content(bytes: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    let user_pos = text.find("\"role\":\"user\"")?;
+    let marker = "\"content\":\"";
+    let start = text[..user_pos]
+        .rfind(marker)
+        .map(|pos| pos + marker.len())
+        .or_else(|| {
+            text[user_pos..]
+                .find(marker)
+                .map(|pos| user_pos + pos + marker.len())
+        })?;
+    let rest = &text[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_owned())
+}
+
+/// Lowercases an ASCII byte slice (for header inspection).
+#[cfg(target_os = "linux")]
+fn ascii_lowercase(bytes: &[u8]) -> Vec<u8> {
+    bytes.iter().map(|byte| byte.to_ascii_lowercase()).collect()
+}
+
+/// An SSE (OpenAI-style) chat-completion stream. `deltas` are the text
+/// fragments, emitted one `data:` record each and terminated by `[DONE]`.
+/// Splitting a redaction value across two deltas exercises the streamed relay's
+/// cross-delta redaction.
+#[cfg(target_os = "linux")]
+fn gateway_stream_body(deltas: &[&str]) -> String {
+    let mut body = String::new();
+    for delta in deltas {
+        let escaped = serde_json::to_string(delta).expect("valid JSON string");
+        body.push_str("data: ");
+        body.push_str(&format!(
+            "{{\"model\":\"kvist-test-mock\",\"choices\":[{{\"delta\":{{\"content\":{escaped}}}}}]}}"
+        ));
+        body.push('\n');
+    }
+    body.push_str("data: [DONE]\n");
+    body
+}
+
+/// A chat-completion body carrying assistant text and no tool calls.
+#[cfg(target_os = "linux")]
+fn gateway_text_body(content: &str) -> String {
+    serde_json::json!({
+        "model": "kvist-test-mock",
+        "choices": [{
+            "finish_reason": "stop",
+            "index": 0,
+            "message": { "role": "assistant", "content": content }
+        }],
+    })
+    .to_string()
+}
+/// A chat-completion body carrying a single `write_file` tool call, so the
+/// brokered effect loop stages the intent and dispatches the in-sandbox
+/// applier (the full effect path end to end).
+#[cfg(target_os = "linux")]
+const GATEWAY_WRITE_FILE_BODY: &str = r##"{"model":"kvist-test-mock","choices":[{"finish_reason":"tool_calls","index":0,"message":{"role":"assistant","content":"","tool_calls":[{"id":"call_1","type":"function","function":{"name":"write_file","arguments":"{\"destination\":\"tests/generated.rs\",\"content\":\"#[test]\\nfn generated() {}\\n\"}"}}]}}]}"##;
+
+/// The literal (TOML single-quoted) command template that talks to the gateway.
+///
+/// The host-side turn only extracts the loopback endpoint and provider from the
+/// command; the actual request is issued by the runtime transport. The shape
+/// mirrors a real local gateway invocation.
+#[cfg(target_os = "linux")]
+fn gateway_command(endpoint: &str) -> String {
+    r#"curl --request POST --json "{\"model\":\"kvist-test-mock\",\"messages\":[{\"role\":\"user\",\"content\":{prompt_json}}]}" -- "ENDPOINT_PLACEHOLDER""#
+        .replace("ENDPOINT_PLACEHOLDER", endpoint)
 }
 
 fn queue() -> String {
@@ -337,6 +550,83 @@ fn component_accept_resolves_staleness_and_updates_queue_revisions() {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn component_accept_succeeds_when_local_configuration_is_untracked() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    configure_fake_sandbox(&project);
+    assert!(
+        Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(project.path())
+            .status()
+            .expect("initialize Git")
+            .success()
+    );
+    fs::write(project.path().join(".gitignore"), "kvist.toml\n").expect("ignore local config");
+    assert!(
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(project.path())
+            .status()
+            .expect("track durable artifacts")
+            .success()
+    );
+
+    let requirements_path = project.path().join("src/REQUIREMENTS.md");
+    let original = fs::read_to_string(&requirements_path).expect("read requirements");
+    fs::write(
+        &requirements_path,
+        original.replace(
+            "## Purpose and scope",
+            "## Purpose and scope\n\nThis is a newly accepted change.",
+        ),
+    )
+    .expect("stale requirements");
+
+    let output = run_kvist(&project, &["component", "accept", "."]);
+    assert!(
+        output.status.success(),
+        "acceptance must not require machine-local configuration to be tracked: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("accepted component document changes")
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn vcs_gate_error_names_the_untracked_durable_artifacts() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    track_project(&project);
+    assert!(
+        Command::new("git")
+            .args(["rm", "--cached", "-q", "src/REQUIREMENTS.md"])
+            .current_dir(project.path())
+            .status()
+            .expect("untrack durable artifact")
+            .success()
+    );
+
+    let output = run_kvist(&project, &["component", "accept", "."]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "Expected failure but got success. Stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(stderr.contains("not completely VCS tracked"), "{stderr}");
+    assert!(
+        stderr.contains("src/REQUIREMENTS.md (untracked)"),
+        "{stderr}"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn component_accept_rejects_invalid_documents() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
@@ -534,11 +824,15 @@ fn task_run_executes_successfully_and_transitions_completed() {
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
 
-    // Configure a mock echo command in kvist.toml for developer agent profile and test policy
-    let config_toml = r#"schema_version = 1
+    // The brokered turn runs on the host against a loopback gateway; the mock
+    // answers with a write_file tool call so the full effect loop (staging and
+    // in-sandbox applier) runs.
+    let gateway = MockGateway::spawn(GATEWAY_WRITE_FILE_BODY, std::time::Duration::ZERO);
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo 'mocking execute' {context_files}"
+command_template = '{}'
 
 [test_policy]
 schema_version = 1
@@ -549,7 +843,9 @@ max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
 command = "/usr/bin/echo 'mocking verify'"
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
 
@@ -654,10 +950,15 @@ fn child_task_run_mounts_the_nearest_parent_contract_read_only() {
     );
     fs::write(child_dir.join("TODOS.yaml"), child_queue).expect("write child queue");
 
-    let config_toml = r#"schema_version = 1
+    // The brokered turn runs on the host against a loopback gateway; the mock
+    // answers with a write_file tool call so the child's effect loop runs and its
+    // authoring request mounts the nearest parent contract.
+    let gateway = MockGateway::spawn(GATEWAY_WRITE_FILE_BODY, std::time::Duration::ZERO);
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo 'mocking execute' {context_files}"
+command_template = '{}'
 
 [test_policy]
 schema_version = 1
@@ -668,7 +969,9 @@ max_output_bytes = 1000
 [[test_policy.commands]]
 component = "ordinary/component"
 command = "/usr/bin/echo 'mocking verify'"
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
     let approval = run_kvist(&project, &["task", "approve-policy"]);
@@ -980,12 +1283,16 @@ fn runner_changed_after_probe_is_not_spawned_for_request() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    // The brokered turn runs on the host against a loopback gateway so the flow
+    // proceeds to the sandbox request, where the mutated runner is detected.
+    let gateway = MockGateway::spawn(&gateway_text_body("ok"), std::time::Duration::ZERO);
     fs::write(
         project.path().join("kvist.toml"),
-        r#"schema_version = 1
+        format!(
+            r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo agent"
+command_template = '{}'
 [test_policy]
 schema_version = 1
 working_directory = "component"
@@ -996,6 +1303,8 @@ max_output_bytes = 1000
 component = "."
 command = "/usr/bin/echo verify"
 "#,
+            gateway_command(&gateway.endpoint)
+        ),
     )
     .expect("write config");
     let runner = fake_sandbox_runner_path(&project);
@@ -1054,8 +1363,21 @@ printf 'approved request runner\n' > sandbox-request.json
 
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
 
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("runner identity or content changed"));
+    // The mutated runner is refused before it can service the verification
+    // request: the run reports the blocked transition and the mutated runner
+    // never writes a request file.
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout_str = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout_str.contains("verification blocked and transitioned to blocked"));
+    assert!(stdout_str.contains("runner identity or content has changed"));
+    let queue_contents =
+        fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(queue_contents.contains("status: blocked"));
+    assert!(queue_contents.contains("runner identity or content has changed"));
     assert!(!project.path().join("sandbox-request.json").exists());
 }
 
@@ -1268,10 +1590,13 @@ fn task_run_explicit_task_id_executes_and_verifies() {
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
 
-    let config_toml = r#"schema_version = 1
+    // The brokered turn runs on the host against a loopback gateway.
+    let gateway = MockGateway::spawn(&gateway_text_body("ok"), std::time::Duration::ZERO);
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo 'mock auto select'"
+command_template = '{}'
 
 [test_policy]
 schema_version = 1
@@ -1282,7 +1607,9 @@ max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
 command = "/usr/bin/echo 'mocking verify'"
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
 
@@ -1351,10 +1678,16 @@ fn task_run_cancels_agent_output_and_persists_redacted_bounded_evidence() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
-    let config_toml = r#"schema_version = 1
+    // The brokered turn's model response must exceed the 64-byte output bound;
+    // the oversized response fails with an output-limit error and the secret it
+    // carries must not reach the evidence.
+    let content = "the value is secret-agent-output";
+    let gateway = MockGateway::spawn(&gateway_text_body(content), std::time::Duration::ZERO);
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo agent-overflow"
+command_template = '{}'
 timeout_seconds = 5
 max_output_bytes = 64
 [agent.profiles.developer.redaction]
@@ -1369,7 +1702,9 @@ max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
 command = "/usr/bin/echo verify"
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
     assert!(
@@ -1412,10 +1747,14 @@ fn task_run_cancels_agent_timeout_with_durable_evidence() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
-    let config_toml = r#"schema_version = 1
+    // The brokered turn runs on the host; the gateway delays 2s before answering
+    // so the 1s shared wall-clock budget is exhausted and the turn times out.
+    let gateway = MockGateway::spawn(&gateway_text_body("ok"), std::time::Duration::from_secs(2));
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo agent-sleep"
+command_template = '{}'
 timeout_seconds = 1
 max_output_bytes = 1024
 
@@ -1428,7 +1767,9 @@ max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
 command = "/usr/bin/echo verify"
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
     assert!(
@@ -1458,10 +1799,18 @@ fn task_run_redacts_a_secret_split_across_streams_before_log_and_streaming() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
-    let config_toml = r#"schema_version = 1
+    // The brokered turn runs on the host; the gateway streams the secret split
+    // across two deltas ("cross-" / "stream-secret"), so the relay's redactor
+    // must reassemble it before it reaches the console or the durable log.
+    let gateway = MockGateway::spawn(
+        &gateway_stream_body(&["the value is cross-", "stream-secret here"]),
+        std::time::Duration::ZERO,
+    );
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo split-secret"
+command_template = '{}'
 timeout_seconds = 5
 max_output_bytes = 1024
 [agent.profiles.developer.redaction]
@@ -1476,7 +1825,9 @@ max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
 command = "/usr/bin/echo verify"
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
     assert!(
@@ -1514,12 +1865,16 @@ fn task_run_redacts_all_verification_evidence_blockers_and_cli_output() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
+    // The brokered turn runs on the host against a loopback gateway; the
+    // verification command still runs in the sandbox and emits the secrets.
+    let gateway = MockGateway::spawn(&gateway_text_body("ok"), std::time::Duration::ZERO);
     fs::write(
         project.path().join("kvist.toml"),
-        r#"schema_version = 1
+        format!(
+            r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo agent"
+command_template = '{}'
 [agent.profiles.developer.redaction]
 values = ["agent-redaction-secret"]
 
@@ -1541,6 +1896,8 @@ max_output_bytes = 1000
 component = "."
 command = "/usr/bin/echo verification-secret"
 "#,
+            gateway_command(&gateway.endpoint)
+        ),
     )
     .expect("write config");
     configure_fake_sandbox(&project);
@@ -1597,13 +1954,16 @@ fn task_run_lifecycle_lock_survives_agent_component_lock_deletion() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
-    fs::write(
-        project.path().join("kvist.toml"),
+    // The brokered turn runs on the host against a loopback gateway; the mock
+    // delays its reply so the background run stays alive (and holds the
+    // lifecycle lock) while this test exercises the locking behavior.
+    let gateway = MockGateway::spawn(&gateway_text_body("ok"), std::time::Duration::from_secs(3));
+    let config_toml = format!(
         r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo delete-lock"
-timeout_seconds = 5
+command_template = '{}'
+timeout_seconds = 10
 [test_policy]
 schema_version = 1
 working_directory = "component"
@@ -1614,8 +1974,9 @@ max_output_bytes = 1000
 component = "."
 command = "/usr/bin/echo verify"
 "#,
-    )
-    .expect("write config");
+        gateway_command(&gateway.endpoint)
+    );
+    fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
     assert!(
         run_kvist(&project, &["task", "approve-policy"])
@@ -1628,18 +1989,29 @@ command = "/usr/bin/echo verify"
         .current_dir(project.path())
         .spawn()
         .expect("start first run");
-    let request = project.path().join("sandbox-request.json");
+    // Wait until the first run has taken the lifecycle lock and advanced the
+    // task; only then is the lock held while the turn runs against the
+    // delayed gateway.
     for _ in 0..100 {
-        if fs::read_to_string(&request).is_ok_and(|contents| contents.contains("delete-lock")) {
+        let queue_contents =
+            fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+        if queue_contents.contains("status: in-progress") {
             break;
         }
         thread::sleep(Duration::from_millis(20));
     }
     assert!(
-        fs::read_to_string(&request).is_ok_and(|contents| contents.contains("delete-lock")),
-        "first run did not reach sandboxed execution"
+        fs::read_to_string(project.path().join("src/TODOS.yaml"))
+            .expect("read queue")
+            .contains("status: in-progress"),
+        "first run did not reach in-progress state"
     );
-    assert!(!project.path().join("src/.kvist-task.lock").exists());
+    // The agent-visible component lock is not the lifecycle lock: removing it
+    // (as an agent working in the component might) must not release the lock
+    // the first run still holds.
+    let agent_lock = project.path().join("src/.kvist-task.lock");
+    let _ = fs::remove_file(&agent_lock);
+    assert!(!agent_lock.exists());
 
     let second = run_kvist(&project, &["task", "run", ".", "implement-code"]);
     assert!(!second.status.success());
@@ -1663,8 +2035,6 @@ command = "/usr/bin/echo verify"
     assert!(intermediate.contains("status: in-progress"));
 
     assert!(first.wait().expect("wait first").success());
-    let queue = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
-    assert!(queue.contains("status: completed"));
     let attempts = fs::read_to_string(
         project
             .path()
@@ -1672,6 +2042,20 @@ command = "/usr/bin/echo verify"
     )
     .expect("read attempts");
     assert_eq!(attempts.matches("\"phase\":\"agent-execution\"").count(), 1);
+    // The run must have actually finished and verified, not merely exited:
+    // the journal carries the success records, and the verified task awaits
+    // human finalization (its status stays in-progress until `task finalize`).
+    assert!(attempts.contains(r#""phase":"execution-finished""#));
+    assert!(attempts.contains(r#""phase":"verification-finished""#));
+    assert!(attempts.contains(r#""phase":"pending-human-disposition""#));
+    let queue = fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+    assert!(
+        queue
+            .split("id: \"implement-code\"")
+            .nth(1)
+            .is_some_and(|after| after.contains("status: in-progress")),
+        "implement-code did not reach pending finalization: {queue}"
+    );
 }
 
 #[test]
@@ -1681,11 +2065,17 @@ fn task_log_reads_and_outputs_the_most_recent_log_file() {
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
 
-    // Configure a developer agent that echoes some specific log content
-    let config_toml = r#"schema_version = 1
+    // The brokered turn runs on the host against a loopback gateway; the mock
+    // returns specific text that must appear in the durable log.
+    let gateway = MockGateway::spawn(
+        &gateway_text_body("my expected log output"),
+        std::time::Duration::ZERO,
+    );
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo 'my expected log output'"
+command_template = '{}'
 
 [test_policy]
 schema_version = 1
@@ -1696,7 +2086,9 @@ max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
 command = "/usr/bin/echo 'mocking verify'"
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
 
@@ -1721,7 +2113,7 @@ command = "/usr/bin/echo 'mocking verify'"
     );
     let stdout_str = String::from_utf8_lossy(&log_output.stdout);
     assert!(
-        stdout_str.contains("fake sandbox runner"),
+        stdout_str.contains("my expected log output"),
         "Expected log contents not found in output: {}",
         stdout_str
     );
@@ -1770,11 +2162,14 @@ fn task_run_fails_with_missing_test_command() {
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
 
-    // Configure test policy but NO commands matching .
-    let config_toml = r#"schema_version = 1
+    // Configure test policy but NO commands matching . The brokered turn runs
+    // on the host against a loopback gateway.
+    let gateway = MockGateway::spawn(&gateway_text_body("ok"), std::time::Duration::ZERO);
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo 'mocking execute' {context_files}"
+command_template = '{}'
 
 [test_policy]
 schema_version = 1
@@ -1783,7 +2178,9 @@ environment_allowlist = ["PATH"]
 timeout_seconds = 5
 max_output_bytes = 1000
 commands = []
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
 
@@ -1812,11 +2209,14 @@ fn task_run_fails_when_test_command_fails() {
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
 
-    // Configure test policy with a failing test command (false/exit 1)
-    let config_toml = r#"schema_version = 1
+    // Configure test policy with a failing test command (false/exit 1). The
+    // brokered turn runs on the host against a loopback gateway.
+    let gateway = MockGateway::spawn(&gateway_text_body("ok"), std::time::Duration::ZERO);
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo 'mocking execute' {context_files}"
+command_template = '{}'
 
 [test_policy]
 schema_version = 1
@@ -1827,7 +2227,9 @@ max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
 command = "/usr/bin/false"
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
 
@@ -1856,11 +2258,14 @@ fn task_run_handles_test_command_timeout() {
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
 
-    // Configure test policy with a 1 second timeout and a sleeping test command
-    let config_toml = r#"schema_version = 1
+    // Configure test policy with a 1 second timeout and a sleeping test command.
+    // The brokered turn runs on the host against a loopback gateway.
+    let gateway = MockGateway::spawn(&gateway_text_body("ok"), std::time::Duration::ZERO);
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo 'mocking execute' {context_files}"
+command_template = '{}'
 
 [test_policy]
 schema_version = 1
@@ -1871,7 +2276,9 @@ max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
 command = "/usr/bin/sleep 5"
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
 
@@ -1907,10 +2314,13 @@ fn task_run_caps_test_command_output_and_records_persistence() {
 
     // Configure test policy with max_output_bytes = 10 and a command that outputs a long string
     // we use a failing command so we can inspect stdout in the blocked reason
-    let config_toml = r#"schema_version = 1
+    // The brokered turn runs on the host against a loopback gateway.
+    let gateway = MockGateway::spawn(&gateway_text_body("ok"), std::time::Duration::ZERO);
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo 'mocking execute' {context_files}"
+command_template = '{}'
 
 [test_policy]
 schema_version = 1
@@ -1921,7 +2331,9 @@ max_output_bytes = 10
 [[test_policy.commands]]
 component = "."
 command = "/usr/bin/echo emit-and-fail"
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
 
@@ -1958,13 +2370,21 @@ command = "/usr/bin/echo emit-and-fail"
 #[test]
 #[cfg(target_os = "linux")]
 fn task_unlock_removes_orphaned_locks() {
+    use std::thread::sleep;
+    use std::time::Duration;
+
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
-    let config_toml = r#"schema_version = 1
+    // The brokered turn runs on the host against a loopback gateway; the mock
+    // delays its reply so the background run stays alive long enough for the
+    // test to observe the held lifecycle lock and kill the owner.
+    let gateway = MockGateway::spawn(&gateway_text_body("ok"), std::time::Duration::from_secs(3));
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/sleep 10"
+command_template = '{}'
 timeout_seconds = 10
 
 [test_policy]
@@ -1976,7 +2396,9 @@ max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
 command = "/usr/bin/echo verify"
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
     assert!(
@@ -1991,7 +2413,21 @@ command = "/usr/bin/echo verify"
         .spawn()
         .expect("start bg run");
 
-    std::thread::sleep(std::time::Duration::from_millis(250));
+    // Wait until the background run holds the lifecycle lock (task in-progress).
+    for _ in 0..100 {
+        let queue_contents =
+            fs::read_to_string(project.path().join("src/TODOS.yaml")).expect("read queue");
+        if queue_contents.contains("status: in-progress") {
+            break;
+        }
+        sleep(Duration::from_millis(20));
+    }
+    assert!(
+        fs::read_to_string(project.path().join("src/TODOS.yaml"))
+            .expect("read queue")
+            .contains("status: in-progress"),
+        "background run did not reach in-progress state"
+    );
 
     let live_unlock = run_kvist(&project, &["task", "unlock", ".", "--force"]);
     assert!(
@@ -2120,17 +2556,16 @@ if [ "$1" = "--kvist-sandbox-probe-v1" ]; then
   printf '{"protocol":"kvist-sandbox-probe-v1","protocol_version":1,"runner":{"path":"%s","digest":"sha256:%s"},"backend":{"kind":"bubblewrap","path":"/usr/bin/true","digest":"sha256:%s"},"capabilities":{"namespaces":{"mount":true,"network":true,"pid":true,"ipc":true,"uts":true,"user":true},"new_session":true,"parent_death_signal":true}}\n' "$0" "$runner_digest" "$backend_digest"
   exit 0
 fi
-request=$(cat)
-case "$request" in
-  *CUSTOM_RUST_BKM*)
-    printf 'Prompt: CUSTOM_RUST_BKM: write-test-fixtures - Write some fixtures\n'
-    ;;
-esac
 "#,
     )
     .expect("write fake sandbox runner");
     fs::set_permissions(&runner, fs::Permissions::from_mode(0o755))
         .expect("make runner executable");
+
+    // The brokered turn runs on the host against a loopback gateway. The mock
+    // echoes the rendered prompt back as the model response, so the durable
+    // log reveals which language-specific template was interpolated.
+    let gateway = MockGateway::spawn_echo_prompt(std::time::Duration::ZERO);
 
     // Write customized kvist.toml
     let config_content = format!(
@@ -2152,7 +2587,7 @@ mount = "component"
 environment_allowlist = []
 
 [agent.profiles.developer]
-command_template = "/usr/bin/echo 'Prompt: {{prompt}}'"
+command_template = '{}'
 
 [test_policy]
 schema_version = 1
@@ -2164,7 +2599,8 @@ max_output_bytes = 1000
 component = "."
 command = "/usr/bin/echo verify"
 "#,
-        runner.display().to_string().replace('\\', "/")
+        runner.display().to_string().replace('\\', "/"),
+        gateway_command(&gateway.endpoint)
     );
     fs::write(project.path().join("kvist.toml"), config_content).expect("write custom config");
     track_project(&project);
@@ -2248,7 +2684,7 @@ tasks:
     let mut log_content = String::new();
     for entry in log_entries.flatten() {
         let content = fs::read_to_string(entry.path()).expect("read log file");
-        if content.contains("Prompt:") {
+        if content.contains("CUSTOM_RUST_BKM") {
             log_content = content;
             break;
         }
@@ -2328,10 +2764,13 @@ fn task_run_batch_item_prefix_or_all() {
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
 
-    let config_toml = r#"schema_version = 1
+    // The brokered turn runs on the host against a loopback gateway.
+    let gateway = MockGateway::spawn(&gateway_text_body("ok"), std::time::Duration::ZERO);
+    let config_toml = format!(
+        r#"schema_version = 1
 component_root = "src"
 [agent.profiles.developer]
-command_template = "/usr/bin/echo 'mocking execute' {context_files}"
+command_template = '{}'
 
 [test_policy]
 schema_version = 1
@@ -2342,7 +2781,9 @@ max_output_bytes = 1000
 [[test_policy.commands]]
 component = "."
 command = "/usr/bin/echo 'mocking verify'"
-"#;
+"#,
+        gateway_command(&gateway.endpoint)
+    );
     fs::write(project.path().join("kvist.toml"), config_toml).expect("write config");
     track_project(&project);
 

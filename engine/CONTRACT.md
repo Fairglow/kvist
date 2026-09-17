@@ -54,6 +54,7 @@ The `kvist` executable provides:
   `agent profile remove [MODEL_NAME] [--all] [--global]`
 - `agent role list`, `agent role set ROLE MODEL_NAME [--effort EFFORT]
 [--global]`, and `agent role clear [ROLE] [--all] [--global]`
+- `agent check [--global]`
 - `agent list` and `agent remove [MODEL_NAME] [--all] [--global]`
 - `vcs commit-accepted ACCEPTANCE_ID`
 - `completions SHELL`
@@ -100,6 +101,23 @@ standard error, suppresses qualification-command output, and writes exactly one
 result object to standard output.
 A setup invocation that binds an already saved reusable runtime profile does
 not generate or execute a new qualification command.
+
+`agent check` live-verifies the model profiles configured in the selected
+scope (the project-local `kvist.toml` by default, the user configuration with
+`--global`). It lists the profiles and obtains an explicit interactive
+acknowledgement before executing any profile command; that acknowledgement is
+also a cancellation point. A refusal, cancellation input, exhausted standard
+input, or interruption ends the check without executing a test command and
+without changing configuration. Each profile is tested on the host with the
+runtime's bounded verification and the fixed prompt `Reply with exactly: OK`.
+For each failing profile, the check offers removal (the standard profile
+removal semantics, including role-binding clearance) or ignore for now
+(configuration unchanged), and it remains cancellable at every prompt. With
+global `--json`, the transcript goes to standard error and standard output
+carries exactly one result object, as in the other interactive agent flows.
+`agent role list` presents only the predefined roles (developer, architect,
+security-reviewer) and their assigned model profiles, and never presents model
+profile names as roles.
 
 `init` writes the complete root artifact set only for an uninitialized project,
 is a no-op for a current project, converts an existing Rust package into draft
@@ -313,6 +331,40 @@ the selected runtime and provider determine which available host authority
 they exercise. The acknowledgement does not extend to subsequent provider
 runs.
 
+When `task run` executes an external agent, the engine performs the model turn
+on the host, outside the effect sandbox. The selected model command must target
+a numeric loopback model gateway; any other command is refused before any
+transport work with `AgentCommandNotModelGateway`, so no agent command ever runs
+on the host outside the effect sandbox. The engine liveness-probes the gateway
+with a bounded TCP connect to the resolved endpoint before issuing the model
+turn. The probe issues no HTTP request, so it never loads, selects, or shifts a
+model slot; a gateway that does not accept a connection fails fast with
+`LocalModelGatewayUnreachable` and an actionable "ensure the model server is
+running and listening on `{endpoint}`" hint.
+
+The turn advertises the closed authoring tool set (`write_file`, `edit_file`).
+The broker reduces the turn's untrusted tool intents to capability-bound effects
+under a deny-by-default policy; a dropped intent fails the turn. Every
+authorized effect is applied by the engine itself inside the effect sandbox
+against a read-only staged-intent mount; the host never writes component state
+for an effect. A turn succeeds only when it produced a usable result, no intent
+was dropped, and every authorized effect applied.
+
+The model phase runs under one shared wall-clock budget equal to the configured
+profile timeout, covering the liveness probe, every turn attempt, and every
+retry backoff; the per-attempt transport deadline is the remaining budget. When
+the gateway accepts but a turn still hits a transient availability failure — a
+socket connection refused, timed out, interrupted, or reset error, a
+slot-allocation timeout, or an overall transport timeout — the engine retries it
+up to three attempts with a short fixed backoff, then surfaces the error if it
+never succeeds. Response-level failures (a non-success HTTP status, a malformed
+or oversized response, or cancellation) are never retried, because they
+indicate a real answer rather than an unavailable gateway. When streaming output
+is requested, text deltas are relayed to standard output with the run's
+redaction values applied; a streamed attempt that has already emitted text is
+never retried. None of this retries, weakens, or changes sandbox authorization,
+effect grants, policy approval, or output redaction.
+
 ## Errors and failure semantics
 
 Invalid, oversized, unsupported, non-UTF-8, missing, non-regular, or link-like
@@ -325,8 +377,17 @@ multi-file filesystem transactions. A failed operation reports the durable
 state left on disk for explicit recovery.
 
 Task execution distinguishes spawn, timeout, output-limit, policy, runner,
-agent, verification, and lifecycle failures. Failed verification blocks the
-task with bounded redacted evidence. Retained locks or a trailing prepared
+agent, verification, gateway-unreachable, and lifecycle failures. A selected
+model command that does not target a numeric loopback gateway fails the turn
+with `AgentCommandNotModelGateway` before any transport work. An external model
+turn to a loopback gateway is liveness-probed first and runs under one shared
+wall-clock budget; only its transient availability failures are retried a
+bounded number of times within that budget before the gateway-unreachable
+failure is surfaced, and response-level failures are never retried. A turn whose
+intents were dropped, or whose authorized effects did not all apply, fails
+closed with the bounded redacted reason recorded in the log. Failed
+verification blocks the task with bounded redacted evidence. Retained locks or
+a trailing prepared
 record fence further writes until explicit recovery. Target recovery can
 reconcile only digest-proven state; uncertain source effects remain fenced for
 human disposition.

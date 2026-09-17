@@ -702,53 +702,27 @@ pub fn list_roles(project_dir: &Path) -> Result<String> {
 
     if existing_contents.is_some()
         && let Some(agent) = document.get("agent").and_then(Item::as_table)
+        && let Some(roles) = agent.get("roles").and_then(Item::as_table)
     {
-        if let Some(roles) = agent.get("roles").and_then(Item::as_table) {
-            for (role_key, role_item) in roles.iter() {
-                if let Some(role_table) = role_item.as_table() {
-                    let active = role_table
-                        .get("profile")
-                        .or_else(|| role_table.get("model"))
-                        .and_then(Item::as_value)
-                        .and_then(Value::as_str)
-                        .map(str::to_owned);
-                    let effort = role_table
-                        .get("thinking_effort")
-                        .and_then(Item::as_value)
-                        .and_then(Value::as_str)
-                        .map(str::to_owned);
-                    let norm_key = if role_key == "security_reviewer" {
-                        "security-reviewer"
-                    } else {
-                        role_key
-                    };
-                    role_models.insert(norm_key.to_owned(), (active, effort));
-                }
-            }
-        }
-        if let Some(profiles) = agent.get("profiles").and_then(Item::as_table) {
-            for (role_key, profile_item) in profiles.iter() {
-                if let Some(profile_table) = profile_item.as_table() {
-                    let active = profile_table
-                        .get("model")
-                        .and_then(Item::as_value)
-                        .and_then(Value::as_str)
-                        .map(str::to_owned);
-                    if active.is_some() {
-                        let norm_key = if role_key == "security_reviewer" {
-                            "security-reviewer"
-                        } else {
-                            role_key
-                        };
-                        if role_models
-                            .get(norm_key)
-                            .map(|(a, _)| a.is_none())
-                            .unwrap_or(true)
-                        {
-                            role_models.insert(norm_key.to_owned(), (active, None));
-                        }
-                    }
-                }
+        for (role_key, role_item) in roles.iter() {
+            if let Some(role_table) = role_item.as_table() {
+                let active = role_table
+                    .get("profile")
+                    .or_else(|| role_table.get("model"))
+                    .and_then(Item::as_value)
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let effort = role_table
+                    .get("thinking_effort")
+                    .and_then(Item::as_value)
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                let norm_key = if role_key == "security_reviewer" {
+                    "security-reviewer"
+                } else {
+                    role_key
+                };
+                role_models.insert(norm_key.to_owned(), (active, effort));
             }
         }
     }
@@ -796,6 +770,265 @@ pub fn list_roles(project_dir: &Path) -> Result<String> {
     output.push_str("│    Add profile:   kvist agent profile add\n");
     output.push_str("╰──────────────────────────────────────────────────────────────────");
     Ok(output)
+}
+
+/// One configured profile collected from the selected scope's document.
+struct CheckProfile {
+    name: String,
+    provider: Option<String>,
+    model: Option<String>,
+    command: Option<String>,
+}
+
+impl CheckProfile {
+    fn from_table(name: &str, table: &Table) -> Self {
+        let string = |key: &str| {
+            table
+                .get(key)
+                .and_then(Item::as_value)
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        };
+        Self {
+            name: name.to_owned(),
+            provider: string("provider"),
+            model: string("model"),
+            command: string("command"),
+        }
+    }
+}
+
+/// Inserts every typed provider of one scope's document into the merged map.
+fn collect_providers(
+    document: &DocumentMut,
+    providers: &mut std::collections::BTreeMap<String, config::ProviderConfig>,
+) {
+    if let Some(agent) = document.get("agent").and_then(Item::as_table)
+        && let Some(table) = agent.get("providers").and_then(Item::as_table)
+    {
+        for (name, item) in table.iter() {
+            let Some(provider_table) = item.as_table() else {
+                continue;
+            };
+            let Some(provider_type) = provider_table
+                .get("type")
+                .and_then(Item::as_value)
+                .and_then(Value::as_str)
+            else {
+                continue;
+            };
+            let base_url = provider_table
+                .get("base_url")
+                .and_then(Item::as_value)
+                .and_then(Value::as_str)
+                .map(str::to_owned);
+            providers.insert(
+                name.to_owned(),
+                config::ProviderConfig {
+                    name: name.to_owned(),
+                    provider_type: provider_type.to_owned(),
+                    base_url,
+                    command_template: None,
+                    timeout_seconds: None,
+                },
+            );
+        }
+    }
+}
+
+/// Offers removal or temporary ignore for one failed profile, reusing the
+/// standard removal semantics; remains cancellable at every prompt.
+fn handle_failed_profile<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    config_path: &Path,
+    project_dir: &Path,
+    project_local: bool,
+    name: &str,
+    reason: &str,
+) -> Result<()> {
+    write_output(writer, &format!("{name} ... FAILED: {reason}\n"))?;
+    write_output(
+        writer,
+        &format!(
+            "What should happen to `{name}`?\n\
+             1) Remove the profile\n\
+             2) Ignore for now (configuration unchanged)\n\
+             Choice [2]: "
+        ),
+    )?;
+    loop {
+        match read_input(reader)?.as_str() {
+            "1" => {
+                let message = remove_model(config_path, project_dir, project_local, name)?;
+                write_output(writer, &format!("{message}\n"))?;
+                return Ok(());
+            }
+            "2" | "" => {
+                write_output(
+                    writer,
+                    &format!("{name} ignored for now; configuration unchanged\n"),
+                )?;
+                return Ok(());
+            }
+            other => {
+                write_output(
+                    writer,
+                    &format!(
+                        "Invalid choice `{other}`; enter 1 to remove or 2 (or press enter) to ignore.\n"
+                    ),
+                )?;
+            }
+        }
+    }
+}
+
+/// Live-verifies the model profiles of the selected scope behind an explicit
+/// interactive acknowledgement; failed profiles may be removed or ignored.
+pub fn check_agents<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    project_dir: &Path,
+    global: bool,
+) -> Result<()> {
+    let config_path = if global {
+        config::global_user_config_path().ok_or_else(|| KvistError::AgentSetupFailed {
+            reason: "cannot resolve user configuration directory".to_owned(),
+        })?
+    } else {
+        project_dir.join("kvist.toml")
+    };
+    let scope = if global {
+        "the global user configuration"
+    } else {
+        "the project configuration"
+    };
+    let (document, existing_contents) = load_document(&config_path, !global)?;
+    let mut profiles: Vec<CheckProfile> = Vec::new();
+    if existing_contents.is_some()
+        && let Some(agent) = document.get("agent").and_then(Item::as_table)
+        && let Some(table) = agent.get("profiles").and_then(Item::as_table)
+    {
+        for (name, item) in table.iter() {
+            if let Some(profile_table) = item.as_table() {
+                profiles.push(CheckProfile::from_table(name, profile_table));
+            }
+        }
+    }
+    if profiles.is_empty() {
+        write_output(
+            writer,
+            &format!("No model profiles configured in {scope}; nothing to check.\n"),
+        )?;
+        return Ok(());
+    }
+
+    // Merged providers: the other scope first, so the target scope wins conflicts.
+    let mut providers: std::collections::BTreeMap<String, config::ProviderConfig> =
+        std::collections::BTreeMap::new();
+    let other_config_path = if global {
+        Some(project_dir.join("kvist.toml"))
+    } else {
+        config::global_user_config_path()
+    };
+    if let Some(other_config_path) = other_config_path
+        && let Ok((other_document, Some(_))) = load_document(&other_config_path, global)
+    {
+        collect_providers(&other_document, &mut providers);
+    }
+    collect_providers(&document, &mut providers);
+
+    let mut checks: Vec<(String, String, std::result::Result<String, String>)> = Vec::new();
+    for profile in &profiles {
+        let provider_label = profile
+            .provider
+            .clone()
+            .unwrap_or_else(|| "unconfigured".to_owned());
+        let command = match (&profile.provider, &profile.command) {
+            (_, Some(command)) => Ok(command.clone()),
+            (Some(provider_name), None) => match providers.get(provider_name) {
+                Some(provider) => {
+                    let model_name = profile.model.as_deref().unwrap_or(&profile.name);
+                    let mut template = provider.effective_command_template();
+                    template = template.replace("{model}", model_name);
+                    let model_json = serde_json::to_string(model_name)
+                        .unwrap_or_else(|_| format!("\"{model_name}\""));
+                    template = template.replace("{model_json}", &model_json);
+                    let base_url = provider.base_url.as_deref().unwrap_or("");
+                    template = template.replace("{base_url}", base_url);
+                    Ok(template)
+                }
+                None => Err(format!(
+                    "provider `{provider_name}` is not configured in {scope} or the other scope"
+                )),
+            },
+            (None, None) => {
+                Err("profile has neither a `provider` nor an explicit `command`".to_owned())
+            }
+        };
+        checks.push((profile.name.clone(), provider_label, command));
+    }
+
+    write_output(writer, &format!("Model profiles to check in {scope}:\n"))?;
+    for (name, _, _) in &checks {
+        write_output(writer, &format!("  - {name}\n"))?;
+    }
+    write_output(
+        writer,
+        "Each profile command will be executed on the host with the fixed prompt \
+         `Reply with exactly: OK`.\n",
+    )?;
+    write_output(writer, "Execute these test commands? [y/N]: ")?;
+    match read_input(reader)?.to_ascii_lowercase().as_str() {
+        "y" | "yes" => {}
+        _ => {
+            write_output(
+                writer,
+                "agent check cancelled; no test command was executed\n",
+            )?;
+            return Ok(());
+        }
+    }
+
+    for (name, provider, command) in checks {
+        let failure_reason = match command {
+            Err(reason) => Some(reason),
+            Ok(command) => {
+                let profile = agent_runtime::ModelProfile {
+                    name: name.clone(),
+                    provider,
+                    command,
+                };
+                match agent_runtime::verify_profile(
+                    &profile,
+                    agent_runtime::SETUP_TEST_PROMPT,
+                    project_dir,
+                    true,
+                ) {
+                    Ok(()) => {
+                        write_output(writer, &format!("{name} ... ok\n"))?;
+                        None
+                    }
+                    Err(agent_runtime::Error::Cancelled) => {
+                        return Err(KvistError::AgentSetupCancelled);
+                    }
+                    Err(error) => Some(error.to_string()),
+                }
+            }
+        };
+        if let Some(reason) = failure_reason {
+            handle_failed_profile(
+                reader,
+                writer,
+                &config_path,
+                project_dir,
+                !global,
+                &name,
+                &reason,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 /// Sets the active model profile for a given role in project or global configuration.

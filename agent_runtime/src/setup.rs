@@ -14,7 +14,8 @@ use crate::{
 
 const OLLAMA_DEFAULT_URL: &str = "http://127.0.0.1:11434";
 const LLAMA_SERVER_DEFAULT_URL: &str = "http://127.0.0.1:9931";
-const SETUP_TEST_PROMPT: &str = "Reply with exactly: OK";
+/// The fixed minimal qualification prompt used for live profile verification.
+pub const SETUP_TEST_PROMPT: &str = "Reply with exactly: OK";
 
 /// Controls the non-interactive qualification decision made by setup.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -149,6 +149,20 @@ pub enum Command {
         #[arg(value_name = "SHELL", value_enum)]
         shell: SupportedShell,
     },
+    /// Apply one staged authoring effect inside the effect sandbox.
+    ///
+    /// Internal effect-applier entry point, invoked by the supervised effect
+    /// loop from inside the sandbox against a read-only staged-intent mount.
+    /// It is hidden from help because it is not part of the interactive CLI.
+    #[command(hide = true)]
+    AuthoringApply {
+        /// Component directory the effect destination is relative to.
+        #[arg(long, value_name = "COMPONENT_DIR")]
+        component: PathBuf,
+        /// Read-only staged intent file to apply.
+        #[arg(long, value_name = "INTENT_FILE")]
+        intent_file: PathBuf,
+    },
 }
 
 /// Supported shells for shell completion generation.
@@ -304,6 +318,12 @@ pub enum AgentCommand {
         /// Save a profile even when mandatory live qualification fails.
         #[arg(long)]
         force: bool,
+    },
+    /// Live-verify that configured model profiles are reachable and working.
+    Check {
+        /// Check profiles in the global user configuration instead of the project configuration.
+        #[arg(long)]
+        global: bool,
     },
     /// List configured and available agent models (alias for 'agent profile list').
     List,
@@ -510,6 +530,17 @@ impl std::fmt::Display for CommandOutput {
 /// This dispatch layer deliberately contains no process handling; callers can
 /// test command behavior and choose how errors are presented.
 pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
+    // The in-sandbox effect applier is internal plumbing, not a user-facing
+    // command: dispatch it before any presentation handling so it always
+    // returns the applier's bounded result verbatim.
+    if let Command::AuthoringApply {
+        component,
+        intent_file,
+    } = &command
+    {
+        return crate::authoring::apply::apply_intent(component, intent_file)
+            .map(CommandOutput::message);
+    }
     if json {
         match command {
             Command::Convert { project_dir } => convert::convert(&project_dir).map(|outcome| {
@@ -768,6 +799,24 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 Ok(CommandOutput::message(format!(
                     r#"{{"status":"success","command":"agent-remove","message":{msg_json}}}"#
                 )))
+            },
+            Command::Agent { command: AgentCommand::Check { global } } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                let mut reader = crate::interruptible_stdin::interruptible_reader();
+                let mut writer = std::io::BufWriter::new(std::io::stderr());
+                match wizard::check_agents(&mut reader, &mut writer, &current_dir, global) {
+                    Ok(()) => Ok(CommandOutput::message(
+                        r#"{"status":"success","command":"agent-check","message":"agent check complete"}"#.to_owned()
+                    )),
+                    Err(KvistError::AgentSetupCancelled) => Ok(CommandOutput::message(
+                        r#"{"status":"cancelled","command":"agent-check","message":"agent check cancelled"}"#.to_owned()
+                    )),
+                    Err(source) => Err(source),
+                }
             },
             Command::Shell(_) => Err(KvistError::SandboxUnavailable {
                 runner: "shell".to_owned(),
@@ -1082,6 +1131,13 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     "{{\"status\":\"success\",\"command\":\"completions\",\"shell\":\"{shell:?}\",\"script\":{escaped_script}}}"
                 )))
             }
+            // Dispatched above before presentation handling; retained so the
+            // match stays total and the JSON branch never sees it.
+            Command::AuthoringApply {
+                component,
+                intent_file,
+            } => crate::authoring::apply::apply_intent(&component, &intent_file)
+                .map(CommandOutput::message),
         }
     } else {
         match command {
@@ -1312,6 +1368,24 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     })
                 }
             }
+            Command::Agent {
+                command: AgentCommand::Check { global },
+            } => {
+                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+                    operation: "determine current project directory",
+                    path: PathBuf::from("."),
+                    source,
+                })?;
+                let mut reader = crate::interruptible_stdin::interruptible_reader();
+                let mut writer = std::io::BufWriter::new(std::io::stdout());
+                match wizard::check_agents(&mut reader, &mut writer, &current_dir, global) {
+                    Ok(()) => Ok(CommandOutput::message("agent check complete".to_owned())),
+                    Err(KvistError::AgentSetupCancelled) => {
+                        Ok(CommandOutput::message("agent check cancelled".to_owned()))
+                    }
+                    Err(source) => Err(source),
+                }
+            }
             Command::Shell(project) => {
                 crate::shell::run_shell(&project.path)?;
                 Ok(CommandOutput::none())
@@ -1500,6 +1574,13 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 let script = String::from_utf8(buffer).expect("valid UTF-8 completion script");
                 Ok(CommandOutput::message(script))
             }
+            // Dispatched above before presentation handling; retained so the
+            // match stays total and the plain branch never sees it.
+            Command::AuthoringApply {
+                component,
+                intent_file,
+            } => crate::authoring::apply::apply_intent(&component, &intent_file)
+                .map(CommandOutput::message),
         }
     }
 }
