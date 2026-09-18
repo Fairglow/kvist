@@ -41,20 +41,24 @@ environment_allowlist = ["PATH", "RUST_BACKTRACE", "CARGO_HOME", "RUSTC", "TERM"
 schema_version = 1
 working_directory = "component"
 environment_allowlist = ["PATH", "RUST_BACKTRACE", "CARGO_HOME", "RUSTC", "TERM"]
-timeout_seconds = 180
+timeout_seconds = 1800
 max_output_bytes = 1048576
 
+# Per-component verification commands run inside the effect sandbox with the
+# component directory as working directory and denied network. They must be
+# real test executions (resolved offline from the approved Cargo home cache),
+# never placeholders: recorded verification success is compliance evidence.
 [[test_policy.commands]]
 component = "engine"
-command = "/usr/bin/echo 'Verification passed'"
+command = "cargo test"
 
 [[test_policy.commands]]
 component = "agent_runtime"
-command = "/usr/bin/echo 'Verification passed'"
+command = "cargo test"
 
 [[test_policy.commands]]
 component = "sandbox_runner"
-command = "/usr/bin/echo 'Verification passed'"
+command = "cargo test"
 
 [agent]
 
