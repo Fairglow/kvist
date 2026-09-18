@@ -1,12 +1,12 @@
 schema_version: 1
 component:
   requirements_revision: "sha256:b79d7e4e17a002cba6c8bbf4bffd9231c7d294375bb9a452b1a038c8a40d2780"
-  contract_revision: "sha256:79864e44e637eac1c0382ff485c0de319c87db35e90b6b9776ccca5819895e54"
+  contract_revision: "sha256:d299678c719c844b10e8735ab711a39419e85a01800630784b206847e98ec5d4"
   design_revision: "sha256:fe89197f432a8103756b3646c8273d52d438dab464337656b4e9ec1d06338230"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-18T07:06:54Z"
+    checked_at: "2026-09-18T13:29:08Z"
     stale_since: null
     causes: []
 tasks:
@@ -183,7 +183,7 @@ tasks:
   - id: "sa-08-implement-code"
     title: "Implement layered runtime contracts"
     description: "Implement provider-independent backend classification, canonical model and tool-intent types, capability descriptors, cancellation and budget types, typed provider extensions, host-service traits, and redacted runtime events without selecting a transport framework."
-    context: "The standalone runtime must own reusable protocol interfaces before either a host broker or Rig/direct transport adapter depends on them."
+    context: "The standalone runtime must own reusable protocol interfaces before either a host broker or direct transport adapter depends on them."
     purpose: "Create a small stable seam that keeps provider libraries replaceable and leaves authorization, execution, promotion, and compliance evidence with the embedding host."
     expected_outcome: "Public runtime contracts contain no Kvist, Rig, or provider SDK type and cannot directly execute tools, access credentials, broaden resources, promote artifacts, or write canonical compliance evidence."
     kind: implementation
@@ -875,7 +875,7 @@ tasks:
     recovery_state: null
   - id: "sa-15-implement-code"
     title: "Implement isolated stream delivery"
-    description: "Replace or supplement the synchronous callback with the approved pull-based or async boundary, preserving canonical event ordering, bounded backpressure, cancellation, deadlines, consumer errors, and terminal-turn ownership for direct and Rig transports."
+    description: "Replace or supplement the synchronous callback with the approved pull-based or async boundary, preserving canonical event ordering, bounded backpressure, cancellation, deadlines, consumer errors, and terminal-turn ownership for the direct transport."
     context: "Running a borrowed synchronous callback inside transport polling prevents safe preemption and makes arbitrary caller latency part of the transport control path."
     purpose: "Keep provider I/O supervision enforceable independently of caller-controlled event processing."
     expected_outcome: "A stalled consumer cannot block transport deadline or cancellation enforcement, exceed bounded memory, detach provider work, or reorder canonical stream events."
@@ -952,7 +952,7 @@ tasks:
   - id: "sa-16-implement-code"
     title: "Rename component to agent runtime"
     description: "Rename the component directory, Cargo package, Rust crate, executable, imports, user-facing commands, documentation paths, and canonical profile directory to agent-runtime, preserving deterministic legacy profile discovery when no canonical file exists."
-    context: "Agent runtime is the conventional provider-neutral name for transport, supervision, retry, broker, and future isolation infrastructure; Rig remains a private adapter and does not define the component identity."
+    context: "Agent runtime is the conventional provider-neutral name for transport, supervision, retry, broker, and future isolation infrastructure; it does not define the component identity."
     purpose: "Align names with the component's layered runtime responsibility before downstream API adoption grows."
     expected_outcome: "Kvist and standalone usage consistently expose agent-runtime, agent_runtime, and agent-run with no stale technical identifier outside deliberate migration references."
     kind: implementation

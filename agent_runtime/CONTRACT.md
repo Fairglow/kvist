@@ -216,6 +216,6 @@ backward-compatibility commitment. Profile schema and provider-neutral types
 remain explicitly versioned before a compatibility promise is made.
 
 Conformance uses deterministic command, profile, setup, supervisor, direct
-transport, stream, cancellation, and Rig adapter tests. Real provider
+transport, stream, and cancellation tests. Real provider
 promotion requires comparison with the direct adapter, dependency review,
 security audit, and independent compliance review.
