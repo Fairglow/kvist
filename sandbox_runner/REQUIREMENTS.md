@@ -1,4 +1,5 @@
 <!-- kvist-requirements-version: 1 -->
+
 # Sandbox Runner Requirements
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
@@ -9,33 +10,35 @@ all capitals.
 ## Purpose and scope
 
 `sandbox-runner` is the independently installed Linux enforcement component
-for approved Kvist task grants. This component revision is a
-*protocol-and-acquisition-capable, OS-enforcement-unavailable* intermediate
-state: it strictly parses and validates the redefined version-one probe and
-request contracts, rejects every superseded ("legacy") shape, and implements
-the mediated Cargo validation and immutable-generation primitives (exact Cargo
-phase argv, environment, toolchain/grant binding, independently derived source
-identities, transport-policy value types, and bounded descriptor-relative cache
-generation construction). It does not yet perform
-Bubblewrap-backed Linux isolation, network-namespace source transport, or
-mount resolution. It MUST NOT claim to enforce a request or report a probe as
-confirmed before the queued Bubblewrap implementation task is completed, and
-every otherwise valid request MUST still fail closed.
+for approved Kvist task grants. This component strictly parses and validates
+the redefined version-one probe and request contracts, rejects every
+superseded ("legacy") shape, implements the mediated Cargo validation and
+immutable-generation primitives (exact Cargo phase argv, environment,
+toolchain/grant binding, independently derived source identities,
+transport-policy value types, and bounded descriptor-relative cache
+generation construction), and enforces approved requests through
+Bubblewrap-backed Linux isolation: user, IPC, PID, UTS, cgroup, and network
+namespace boundaries, `prlimit` resource caps, source-aware network egress
+mediation, and process supervision. It never falls back to unconstrained host
+execution and never reports an unconstrained request as enforced; whenever
+verified enforcement prerequisites are unavailable, every otherwise valid
+request MUST fail closed.
 
 ## Stakeholders and concerns
 
 - Kvist engine integrators need a separately packaged executable boundary that
   agrees with the engine on one bounded version-one wire contract.
-- Security reviewers need fail-closed behavior until native enforcement exists.
-- Operators need an honest distinction between a protocol-validating,
-  unenforced intermediate runner and a production runner.
-- Future implementers need the accepted ADR 0004 boundary retained without
-  prematurely claiming enforcement behavior.
+- Security reviewers need fail-closed behavior whenever enforcement
+  prerequisites are unavailable.
+- Operators need an honest distinction between a verified enforcement
+  capability and a failed probe.
+- Implementers need the accepted ADR 0004 boundary retained, with every
+  enforcement claim backed by the verified probe.
 
 ## Functional requirements
 
-The protocol-validation boundary and the later production enforcement have
-separate, explicit requirements so protocol capability cannot be confused with
+The protocol-validation boundary and production enforcement have separate,
+explicit requirements so protocol capability cannot be confused with
 enforcement readiness.
 
 ### SR-REQ-PROTOCOL-BOUNDARY
@@ -64,9 +67,9 @@ closed, phase-specific environment allowlists, exact Cargo argv, and exact
 cache/scratch/lockfile grant topology. In either Cargo phase the runner MUST
 require `Toolchain::Cargo`, `toolchain.cargo == argv[0]`,
 `toolchain.identity == identities.toolchain`, and one matching read-only
-toolchain grant. Because Bubblewrap enforcement is not yet integrated, it MUST
-fail closed for an otherwise valid request and MUST NOT fall back to
-unconstrained host execution or report a probe as confirmed.
+toolchain grant. It MUST NOT fall back to unconstrained host execution, MUST
+NOT report an unconstrained request as enforced, and MUST fail closed whenever
+verified enforcement prerequisites are unavailable.
 
 ### SR-REQ-ACQUISITION-POLICY
 
@@ -98,13 +101,13 @@ validate nonzero bounded limits, traverse and copy descriptor-relatively with
 no-follow, reject links and special entries, stream/hash/recheck staged bytes,
 normalize modes, fsync, and atomically publish one complete immutable
 generation with no replacement. It MUST not claim generic mutable-destination
-promotion. Actual transport, DNS/address pinning, redirects, namespace,
-mount, and process enforcement, as well as final project-cache-generation
-selection, remain deferred; an otherwise valid request still fails closed.
+promotion. The cache primitive performs no transport, resolution, or
+promotion; network, namespace, mount, and process enforcement belong to the
+production-runner requirement below.
 
 ### SR-REQ-PRODUCTION-RUNNER
 
-The later implementation MUST follow
+The component MUST follow
 [`../../docs/decisions/0004-bubblewrap-runner-and-sandbox-v1.md`](../../docs/decisions/0004-bubblewrap-runner-and-sandbox-v1.md):
 Bubblewrap-backed Linux isolation, verified backend and kernel-capability
 probing, phase-specific mount construction, explicit resource enforcement,
@@ -112,8 +115,7 @@ process-tree cleanup, and fail-closed backend verification, built on the
 version-one parsing, validation, and acquisition semantics established by the
 protocol and acquisition boundaries. It wires the source origin matcher and
 cache promotion primitives to real network namespaces and resolved mounts
-rather than reinventing them. This requirement is approved target intent, not a
-claim about the current revision.
+rather than reinventing them.
 
 ## Quality requirements and constraints
 
@@ -140,5 +142,6 @@ immutable-generation primitive (root/file replacement, symlink, hardlink,
 special-file, count, size, aggregate, checksum, extra-entry, overlap, zero
 bounds, collision, tamper/recheck, cleanup, and bounded generation identity
 cases). Production Bubblewrap and native network, namespace, mount, redirect,
-and process evidence belongs to later tasks and MUST NOT be inferred from a
+and process evidence comes from the executable-enforcement tests and the
+queued security audit and compliance review, and MUST NOT be inferred from a
 successful protocol-and-acquisition-validation build.
