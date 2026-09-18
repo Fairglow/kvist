@@ -6,7 +6,7 @@ component:
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-17T21:30:27Z"
+    checked_at: "2026-09-18T07:06:55Z"
     stale_since: null
     causes: []
 tasks:
@@ -22,7 +22,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-TASK-QUEUE"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-01"
     timestamps:
       created_at: "2026-08-13T20:19:53Z"
       updated_at: "2026-08-13T20:20:00Z"
@@ -47,7 +46,7 @@ tasks:
       - "REQUIREMENTS.md#REQ-PROJECT-LAYOUT"
       - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "TODO.md#TODO-DOG-01"
+      - "TODO.md#DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
       updated_at: "2026-09-01T20:58:49Z"
@@ -68,7 +67,7 @@ tasks:
       - "ARCHITECTURE.md#Component-model"
       - "REQUIREMENTS.md#REQ-PROJECT-LAYOUT"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "TODO.md#TODO-DOG-01"
+      - "TODO.md#DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
       updated_at: "2026-09-01T21:26:05Z"
@@ -90,7 +89,7 @@ tasks:
       - "DESIGN.md#Failure-and-recovery"
       - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#TODO-DOG-01"
+      - "TODO.md#DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
       updated_at: "2026-09-01T22:32:02Z"
@@ -112,7 +111,7 @@ tasks:
       - "DESIGN.md#Planned-dogfooding-execution-boundary"
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "TODO.md#TODO-DOG-01"
+      - "TODO.md#DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
       updated_at: "2026-09-02T06:23:09Z"
@@ -134,7 +133,7 @@ tasks:
       - "DESIGN.md#Planned-dogfooding-execution-boundary"
       - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "TODO.md#TODO-DOG-01"
+      - "TODO.md#DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
       updated_at: "2026-09-02T07:15:00Z"
@@ -157,7 +156,7 @@ tasks:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#TODO-DOG-01"
+      - "TODO.md#DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
       updated_at: "2026-09-02T08:15:00Z"
@@ -179,7 +178,7 @@ tasks:
       - "DESIGN.md#Planned-dogfooding-execution-boundary"
       - "REQUIREMENTS.md#REQ-ACCEPTED-VCS-COMMIT"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#TODO-DOG-01"
+      - "TODO.md#DOG-01"
     timestamps:
       created_at: "2026-09-01T20:24:06Z"
       updated_at: "2026-09-12T14:22:21Z"
@@ -202,7 +201,7 @@ tasks:
       - "REQUIREMENTS.md#REQ-DEPENDENCY-ACQUISITION"
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#TODO-DOG-01"
+      - "TODO.md#DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
       updated_at: "2026-09-12T14:36:21Z"
@@ -226,7 +225,7 @@ tasks:
       - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#TODO-DOG-01"
+      - "TODO.md#DOG-01"
     timestamps:
       created_at: "2026-09-01T19:57:32Z"
       updated_at: "2026-09-12T14:37:09Z"
@@ -681,7 +680,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-TASK-QUEUE"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "TODO.md#P2-01"
     timestamps:
       created_at: "2026-08-13T20:19:53Z"
       updated_at: "2026-08-13T20:30:00Z"
@@ -701,7 +699,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-TASK-QUEUE"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-01"
     timestamps:
       created_at: "2026-08-13T20:19:53Z"
       updated_at: "2026-08-13T21:07:00Z"
@@ -719,10 +716,10 @@ tasks:
     depends_on:
       - "p2-01-security-audit"
     requirements:
+      - "REQUIREMENTS.md#REQ-TASK-QUEUE"
       - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-01"
     timestamps:
       created_at: "2026-08-13T20:19:53Z"
       updated_at: "2026-08-16T12:10:01Z"
@@ -741,7 +738,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-02"
     timestamps:
       created_at: "2026-08-16T12:19:23Z"
       updated_at: "2026-08-16T12:20:09Z"
@@ -761,7 +757,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "TODO.md#P2-02"
     timestamps:
       created_at: "2026-08-16T12:19:23Z"
       updated_at: "2026-08-16T12:22:01Z"
@@ -781,7 +776,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-02"
     timestamps:
       created_at: "2026-08-16T12:19:23Z"
       updated_at: "2026-08-16T12:24:05Z"
@@ -799,10 +793,10 @@ tasks:
     depends_on:
       - "p2-02-security-audit"
     requirements:
+      - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
       - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-02"
     timestamps:
       created_at: "2026-08-16T12:19:23Z"
       updated_at: "2026-08-16T12:28:42Z"
@@ -821,7 +815,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-03"
     timestamps:
       created_at: "2026-08-16T12:54:50Z"
       updated_at: "2026-08-16T12:55:20Z"
@@ -841,7 +834,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "TODO.md#P2-03"
     timestamps:
       created_at: "2026-08-16T12:54:50Z"
       updated_at: "2026-08-16T13:04:51Z"
@@ -861,7 +853,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-03"
     timestamps:
       created_at: "2026-08-16T12:54:50Z"
       updated_at: "2026-08-16T13:09:54Z"
@@ -879,10 +870,10 @@ tasks:
     depends_on:
       - "p2-03-security-audit"
     requirements:
+      - "REQUIREMENTS.md#REQ-TASK-LIFECYCLE"
       - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-03"
     timestamps:
       created_at: "2026-08-16T12:54:50Z"
       updated_at: "2026-08-16T13:15:52Z"
@@ -899,8 +890,8 @@ tasks:
     status: completed
     depends_on: []
     requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
-      - "TODO.md#P2-04"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
       updated_at: "2026-08-21T20:59:47Z"
@@ -918,8 +909,8 @@ tasks:
     depends_on:
       - "p2-04-write-tests"
     requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
-      - "TODO.md#P2-04"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
       updated_at: "2026-08-21T20:59:48Z"
@@ -937,8 +928,8 @@ tasks:
     depends_on:
       - "p2-04-implement-code"
     requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
-      - "TODO.md#P2-04"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
       updated_at: "2026-08-21T20:59:48Z"
@@ -956,8 +947,8 @@ tasks:
     depends_on:
       - "p2-04-security-audit"
     requirements:
+      - "REQUIREMENTS.md#REQ-AGENT-INTEGRATION"
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
-      - "TODO.md#P2-04"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
       updated_at: "2026-08-21T20:59:49Z"
@@ -975,7 +966,6 @@ tasks:
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
-      - "TODO.md#P2-05"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
       updated_at: "2026-08-21T20:59:49Z"
@@ -994,7 +984,6 @@ tasks:
       - "p2-05-write-tests"
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
-      - "TODO.md#P2-05"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
       updated_at: "2026-08-21T20:59:50Z"
@@ -1013,7 +1002,6 @@ tasks:
       - "p2-05-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
-      - "TODO.md#P2-05"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
       updated_at: "2026-08-21T20:59:50Z"
@@ -1032,7 +1020,6 @@ tasks:
       - "p2-05-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
-      - "TODO.md#P2-05"
     timestamps:
       created_at: "2026-08-16T14:00:52Z"
       updated_at: "2026-08-21T20:59:51Z"
@@ -1051,7 +1038,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-05b"
     timestamps:
       created_at: "2026-08-21T06:10:05Z"
       updated_at: "2026-08-21T06:20:40Z"
@@ -1071,7 +1057,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "TODO.md#P2-05b"
     timestamps:
       created_at: "2026-08-21T06:10:05Z"
       updated_at: "2026-08-21T06:20:40Z"
@@ -1091,7 +1076,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-05b"
     timestamps:
       created_at: "2026-08-21T06:10:05Z"
       updated_at: "2026-08-21T06:20:40Z"
@@ -1112,7 +1096,6 @@ tasks:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-05b"
     timestamps:
       created_at: "2026-08-21T06:10:05Z"
       updated_at: "2026-08-21T20:59:51Z"
@@ -1131,7 +1114,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-05c"
     timestamps:
       created_at: "2026-08-21T18:07:16Z"
       updated_at: "2026-08-21T18:07:16Z"
@@ -1151,7 +1133,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "TODO.md#P2-05c"
     timestamps:
       created_at: "2026-08-21T18:07:16Z"
       updated_at: "2026-08-21T18:07:16Z"
@@ -1171,7 +1152,6 @@ tasks:
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-05c"
     timestamps:
       created_at: "2026-08-21T18:07:16Z"
       updated_at: "2026-08-21T18:22:44Z"
@@ -1192,7 +1172,6 @@ tasks:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
       - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-05c"
     timestamps:
       created_at: "2026-08-21T18:07:16Z"
       updated_at: "2026-08-21T20:59:52Z"
@@ -1210,8 +1189,8 @@ tasks:
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-05d"
     timestamps:
       created_at: "2026-08-21T20:35:03Z"
       updated_at: "2026-08-21T20:35:03Z"
@@ -1230,8 +1209,8 @@ tasks:
       - "p2-05d-write-tests"
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-      - "TODO.md#P2-05d"
     timestamps:
       created_at: "2026-08-21T20:35:03Z"
       updated_at: "2026-08-21T20:35:03Z"
@@ -1250,8 +1229,8 @@ tasks:
       - "p2-05d-implement-code"
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-05d"
     timestamps:
       created_at: "2026-08-21T20:35:03Z"
       updated_at: "2026-08-21T20:48:52Z"
@@ -1270,9 +1249,9 @@ tasks:
       - "p2-05d-security-audit"
     requirements:
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
+      - "REQUIREMENTS.md#REQ-SUPERVISED-EXECUTION"
       - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-      - "TODO.md#P2-05d"
     timestamps:
       created_at: "2026-08-21T20:35:03Z"
       updated_at: "2026-08-21T20:59:52Z"
