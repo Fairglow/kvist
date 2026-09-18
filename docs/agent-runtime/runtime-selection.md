@@ -2,6 +2,11 @@
 
 Status: architecture guidance and roadmap, 2026-09-01.
 
+> **Update (2026-09-18):** the `rig-core` provider transport was rejected and
+> removed from the mainline (ADR 0009); the direct transport is the sole
+> provider transport. The `rig-run` and `rig-agent-container` loop drivers
+> remain future candidates, not current support.
+
 ## Decision summary
 
 Kvist will support several agent-loop implementations behind Kvist-owned
@@ -10,7 +15,7 @@ eventually choose a loop driver per profile or task purpose. Provider
 transport, loop driver, and execution backend are independent choices:
 
 ```text
-provider transport: direct | rig-core
+provider transport: direct
 loop driver: external-command | kvist-native | rig-run | rig-agent-container
 execution backend: acknowledged-host | approved-sandbox | disposable-container
 ```
@@ -21,14 +26,14 @@ or changes which durable records are canonical.
 
 ## Current support
 
-| Choice | Current status | Appropriate use |
-| --- | --- | --- |
-| External command | Implemented | Copilot, Gemini, Claude, Aider, Goose, or another complete coding agent executed as an opaque process through the approved sandbox runner. |
-| Kvist model transport with `rig-core` | Implemented on `rig-integration` | Unary or streamed local Ollama and llama-server model calls, structured generation, and untrusted tool-intent decoding. It is not yet a complete coding-agent loop. |
-| Kvist direct model transport | Implemented fallback and conformance oracle | Explicit fallback, provider comparison, reasoning features not preserved by Rig 0.42, and diagnosing framework conversion differences. |
-| Kvist-native loop | Planned | Compliance-sensitive component work where Kvist must own every context, policy, tool, retry, and evidence transition. |
-| `rig-agent` loop | Not integrated | Candidate for an opaque disposable-container backend and effect-free advisory work; not canonical workflow state. |
-| `rig-run` loop | Unavailable in the pinned release | Candidate for a future Kvist-driven sans-I/O loop after it is published in an immutable Rig release. |
+| Choice                                | Current status                    | Appropriate use                                                                                                                             |
+| ------------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| External command                      | Implemented                       | Copilot, Gemini, Claude, Aider, Goose, or another complete coding agent executed as an opaque process through the approved sandbox runner.  |
+| Kvist model transport with `rig-core` | Removed (ADR 0009)                | Was an experiment on the `rig-integration` branch; rejected in favor of the direct transport as the sole provider transport.                |
+| Kvist direct model transport          | Implemented (sole transport)      | Unary or streamed local Ollama and llama-server model calls, structured generation, untrusted tool-intent decoding, and provider reasoning. |
+| Kvist-native loop                     | Planned                           | Compliance-sensitive component work where Kvist must own every context, policy, tool, retry, and evidence transition.                       |
+| `rig-agent` loop                      | Not integrated                    | Candidate for an opaque disposable-container backend and effect-free advisory work; not canonical workflow state.                           |
+| `rig-run` loop                        | Unavailable in the pinned release | Candidate for a future Kvist-driven sans-I/O loop after it is published in an immutable Rig release.                                        |
 
 Current `kvist.toml` agent profiles contain shell-free external command
 templates. They do not select `RigModelTransport`, `rig-agent`, or `rig-run`
