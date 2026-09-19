@@ -247,6 +247,11 @@ impl CancellationToken {
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
     }
+
+    /// Re-arms the token after a cancelled turn so the next turn starts fresh.
+    pub fn reset(&self) {
+        self.cancelled.store(false, Ordering::Release);
+    }
 }
 
 /// Provider-neutral model transport boundary.
