@@ -46,6 +46,11 @@ pub struct Stats {
     pub utilization: f64,
     /// How close compaction is to the hard limit (`0.0..=1.0`).
     pub compaction_progress: f64,
+    /// Estimated seconds until the live context reaches the hard limit, forecast
+    /// from the observed context growth rate. `None` when the estimate is not
+    /// meaningful (no prior sample, flat or declining context, or growth below a
+    /// floor), so a misleading ETA is never shown.
+    pub eta_secs: Option<f64>,
     /// Cumulative provider tokens observed across the session.
     pub total_tokens: u64,
     /// Wall-clock seconds since the run started.
@@ -72,6 +77,9 @@ pub struct App {
     pub prompt_tx: Option<mpsc::Sender<String>>,
     /// Latest stats, when the loop has reported any.
     pub stats: Option<Stats>,
+    /// Most recent `(elapsed_secs, context_tokens)` progress sample, used to
+    /// forecast the time until the live context reaches its hard limit.
+    last_growth: Option<(f64, usize)>,
     /// Whether reasoning lines are collapsed in the transcript for an overview.
     pub collapse_reasoning: bool,
     /// Reasoning lines removed by a collapse, restored on reveal, in order.
@@ -100,6 +108,7 @@ impl App {
             rx: None,
             prompt_tx: None,
             stats: None,
+            last_growth: None,
             collapse_reasoning: false,
             hidden_reasoning: Vec::new(),
         };
@@ -157,12 +166,20 @@ impl App {
                 elapsed_secs,
                 ..
             } => {
+                let eta_secs = estimate_eta(
+                    self.last_growth,
+                    elapsed_secs,
+                    context_tokens,
+                    context_limit,
+                );
+                self.last_growth = Some((elapsed_secs, context_tokens));
                 self.stats = Some(Stats {
                     tokens_per_sec,
                     context_tokens,
                     context_limit,
                     utilization: context_utilization,
                     compaction_progress,
+                    eta_secs,
                     total_tokens,
                     elapsed_secs,
                 });
@@ -252,10 +269,17 @@ impl App {
             stats.context_tokens,
             stats.context_limit
         );
+        let eta_suffix = match stats.eta_secs {
+            Some(secs) if stats.compaction_progress > 0.0 => {
+                format!(" (in {})", format_eta(secs))
+            }
+            _ => String::new(),
+        };
         let compaction = format!(
-            "compaction {}{:.0}%",
+            "compaction {}{:.0}%{}",
             bargraph(stats.compaction_progress, 8),
-            stats.compaction_progress.clamp(0.0, 1.0) * 100.0
+            stats.compaction_progress.clamp(0.0, 1.0) * 100.0,
+            eta_suffix
         );
         let progress = format!(
             " · {total} tok · {elapsed}",
@@ -548,6 +572,51 @@ fn collapse_placeholder() -> ScreenLine {
     }
 }
 
+/// Estimates seconds until the live context reaches `context_limit`, forecast
+/// from the growth between the previous and current progress samples. Returns
+/// `None` when the estimate is not meaningful: no prior sample, a non-positive
+/// time gap, flat or declining context (as after a compaction reset), or growth
+/// below the floor. Never fabricates a number.
+fn estimate_eta(
+    prev: Option<(f64, usize)>,
+    elapsed: f64,
+    context_tokens: usize,
+    context_limit: usize,
+) -> Option<f64> {
+    let (prev_elapsed, prev_tokens) = prev?;
+    let dt = elapsed - prev_elapsed;
+    if dt <= 0.0 || context_tokens <= prev_tokens {
+        return None;
+    }
+    let rate = (context_tokens - prev_tokens) as f64 / dt;
+    if rate < ETA_MIN_RATE {
+        return None;
+    }
+    Some(context_limit.saturating_sub(context_tokens) as f64 / rate)
+}
+
+/// The minimum observed context fill rate (tokens/sec) below which an extrapolated
+/// ETA would be too noisy to trust and is suppressed instead.
+const ETA_MIN_RATE: f64 = 1.0;
+
+/// Formats an estimated time-to-limit as `45s`, `2m12s`, or `3h05m`.
+fn format_eta(secs: f64) -> String {
+    if !secs.is_finite() {
+        return "∞".to_owned();
+    }
+    let secs = secs.round().clamp(0.0, f64::MAX) as u64;
+    let hours = secs / 3600;
+    let minutes = (secs % 3600) / 60;
+    let seconds = secs % 60;
+    if hours > 0 {
+        format!("{hours}h{minutes:02}m")
+    } else if minutes > 0 {
+        format!("{minutes}m{seconds:02}s")
+    } else {
+        format!("{seconds}s")
+    }
+}
+
 /// Formats elapsed session time as `m:ss`, or `h:mm:ss` past an hour.
 fn format_elapsed(secs: f64) -> String {
     let secs = secs.round().clamp(0.0, f64::MAX) as u64;
@@ -759,6 +828,122 @@ mod tests {
         assert!(line.contains("8192"));
         assert!(line.contains("512 tok"));
         assert!(line.contains("3:46"));
+    }
+
+    #[test]
+    fn eta_is_none_without_a_prior_sample() {
+        let mut app = App::new("local", "medium", 40, 24);
+        app.push_event(Event::Progress {
+            input_tokens: 0,
+            output_tokens: 0,
+            context_tokens: 4000,
+            context_limit: 8192,
+            context_utilization: 0.5,
+            compaction_progress: 0.4,
+            tokens_per_sec: 50.0,
+            total_tokens: 1024,
+            elapsed_secs: 20.0,
+        });
+        assert_eq!(app.stats.unwrap().eta_secs, None);
+    }
+
+    #[test]
+    fn eta_estimates_time_to_limit_when_climbing_past_warmup() {
+        let mut app = App::new("local", "medium", 40, 24);
+        // First sample: establishes the growth baseline.
+        app.push_event(Event::Progress {
+            input_tokens: 0,
+            output_tokens: 0,
+            context_tokens: 3000,
+            context_limit: 8192,
+            context_utilization: 0.4,
+            compaction_progress: 0.3,
+            tokens_per_sec: 50.0,
+            total_tokens: 1024,
+            elapsed_secs: 10.0,
+        });
+        // Second sample, 10s later: 1000 tokens added => 100 tok/s.
+        app.push_event(Event::Progress {
+            input_tokens: 0,
+            output_tokens: 0,
+            context_tokens: 4000,
+            context_limit: 8192,
+            context_utilization: 0.5,
+            compaction_progress: 0.45,
+            tokens_per_sec: 50.0,
+            total_tokens: 2048,
+            elapsed_secs: 20.0,
+        });
+        let eta = app.stats.unwrap().eta_secs;
+        // 4192 tokens remain at 100 tok/s => ~42s.
+        let secs = eta.expect("an ETA should be forecast while climbing");
+        assert!((40.0..44.0).contains(&secs), "eta was {secs}");
+    }
+
+    #[test]
+    fn eta_is_none_when_growth_is_flat() {
+        let mut app = App::new("local", "medium", 40, 24);
+        let push = |app: &mut App, ctx: usize, elapsed: f64| {
+            app.push_event(Event::Progress {
+                input_tokens: 0,
+                output_tokens: 0,
+                context_tokens: ctx,
+                context_limit: 8192,
+                context_utilization: 0.5,
+                compaction_progress: 0.4,
+                tokens_per_sec: 50.0,
+                total_tokens: 1024,
+                elapsed_secs: elapsed,
+            });
+        };
+        push(&mut app, 4000, 10.0);
+        push(&mut app, 4000, 20.0);
+        assert_eq!(app.stats.unwrap().eta_secs, None);
+    }
+
+    #[test]
+    fn eta_is_none_after_a_compaction_reset() {
+        let mut app = App::new("local", "medium", 40, 24);
+        let push = |app: &mut App, ctx: usize, elapsed: f64| {
+            app.push_event(Event::Progress {
+                input_tokens: 0,
+                output_tokens: 0,
+                context_tokens: ctx,
+                context_limit: 8192,
+                context_utilization: 0.5,
+                compaction_progress: 0.4,
+                tokens_per_sec: 50.0,
+                total_tokens: 1024,
+                elapsed_secs: elapsed,
+            });
+        };
+        push(&mut app, 4000, 10.0);
+        // A compaction rolled the context back down.
+        push(&mut app, 2500, 20.0);
+        assert_eq!(app.stats.unwrap().eta_secs, None);
+    }
+
+    #[test]
+    fn eta_suffix_appears_in_stats_line_only_when_climbing() {
+        let mut app = App::new("local", "medium", 60, 24);
+        let push = |app: &mut App, ctx: usize, elapsed: f64| {
+            app.push_event(Event::Progress {
+                input_tokens: 0,
+                output_tokens: 0,
+                context_tokens: ctx,
+                context_limit: 8192,
+                context_utilization: 0.5,
+                compaction_progress: 0.4,
+                tokens_per_sec: 50.0,
+                total_tokens: 1024,
+                elapsed_secs: elapsed,
+            });
+        };
+        push(&mut app, 6292, 10.0);
+        assert!(!app.stats_line().contains("(in"));
+        // 100s later: 1000 tokens added => 10 tok/s; 900 remain => 90s ETA.
+        push(&mut app, 7292, 110.0);
+        assert!(app.stats_line().contains("(in 1m30s"));
     }
 
     #[test]

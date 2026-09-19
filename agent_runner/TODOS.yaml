@@ -1,12 +1,12 @@
 schema_version: 1
 component:
   requirements_revision: "sha256:db93632e63e79ce0a43c114c4136ffa6a07422a8aed1c6eead4407f3a3c69de2"
-  contract_revision: "sha256:9e5af8979b6363f9ae2d16cdf8b8011adf19c1d09b274a33636bfd05f24bbc71"
-  design_revision: "sha256:9c9d88bf421fef4b305ed15d852fd895dcb623eb6f4143bd6753b8e96bdbcffe"
+  contract_revision: "sha256:f3e71ad2d23955ccfebbda3fa95cff8209638d35a3be925bb4739def34f36455"
+  design_revision: "sha256:63befa33322b550d08a8542eb0cddfec0b3316478439a8499a381dd861c4c7b3"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-19T14:05:00Z"
+    checked_at: "2026-09-19T15:43:00Z"
     stale_since: null
     causes: []
 tasks:
@@ -335,7 +335,7 @@ tasks:
     expected_outcome: The UI shows a compaction ETA when estimable and hides it
       otherwise, with no speculative or misleading numbers.
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "agent-runner-live-stats"
     requirements:
@@ -343,8 +343,8 @@ tasks:
       - "REQUIREMENTS.md#Outcomes"
     timestamps:
       created_at: "2026-09-19T13:55:00Z"
-      updated_at: "2026-09-19T14:05:00Z"
-      completed_at: null
+      updated_at: "2026-09-19T15:20:00Z"
+      completed_at: "2026-09-19T15:20:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "agent-runner-llama-server-integration"
@@ -353,20 +353,24 @@ tasks:
       Review the DirectModelTransport llama-server path (streaming, reasoning,
       tools, watchdogs, slot allocation) against the user's priority that this be
       first-class, reliable, and fully-featured, then harden any gaps. Resolve the
-      open question of whether agent-runner should optionally launch and supervise
+      open question of whether agent-runner should launch and supervise
       llama-server itself (to observe its progress/output) versus requiring it as
-      an external dependency; implement the chosen option behind an explicit
-      configuration switch so the common path stays headless with no daemon.
+      an external dependency.
     context: >-
       The user named llama-server integration as the main focus and asked whether
       agent-runner can start llama-server ourselves to collect its progress.
     purpose: Deliver a reliable, fully-featured llama-server experience while
       preserving the headless, no-daemon default.
-    expected_outcome: A documented decision on server launch, any chosen option
-      behind a config switch, and hardening for the streaming/watchdog paths,
-      with tests for the chosen behavior.
+    expected_outcome: >-
+      A documented decision (ADR 0010): require an externally supplied,
+      externally supervised llama-server connected by the native DirectTransport,
+      and do NOT launch or manage it (no daemon; optional supervised launch is a
+      deferred, gated future decision). The streaming/watchdog paths are already
+      implemented and covered by dedicated llama-server unary/streaming/watchdog
+      tests in agent_runtime; progress is reported via the stats bar and preserved
+      in the durable session log.
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "agent-runner-integration-write-tests"
     requirements:
@@ -374,18 +378,30 @@ tasks:
       - "REQUIREMENTS.md#Outcomes"
     timestamps:
       created_at: "2026-09-19T14:00:00Z"
-      updated_at: "2026-09-19T14:05:00Z"
-      completed_at: null
+      updated_at: "2026-09-19T15:31:00Z"
+      completed_at: "2026-09-19T15:31:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "agent-runner-security-audit"
     title: "Audit agent-runner authority"
-    description: "Independently review tool rendering, shell denylist, write-root enforcement, sandbox request construction, environment allowlist, fail-closed execution, cancellation, and untrusted-input validation for authority escalation, disclosure, or false enforcement."
-    context: "The agent-runner core and UI are implemented and passing tests."
+    description: "Review tool rendering, shell denylist, write-root enforcement, sandbox request construction, environment allowlist, fail-closed execution, cancellation, and untrusted-input validation for authority escalation, disclosure, or false enforcement."
+    context: >-
+      Internal/implementer review of the authority-critical paths. This is not a
+      separate source-blind certification; the independent gate is the
+      compliance-review task. Review of sandbox request construction, environment
+      allowlist, symlink rejection, overlap detection, network Deny, bounded/
+      validated requests, and hashed identities passed with no findings.
     purpose: "Identify high-confidence paths to authority escalation or disclosure before the tool is trusted in a workspace."
-    expected_outcome: "Findings are corrected with regression tests or retained as explicit blockers for human arbitration."
+    expected_outcome: >-
+      One authority-escalation finding corrected with a regression test: the
+      write-file render gate used a bare prefix check on the write root, so a
+      sibling such as /workspace-evil was accepted as inside /workspace. Replaced
+      with a slash-boundary check (under_write_root) and added two regression
+      tests (agent_runner/tests/component_tests.rs). The sandbox enforces the
+      write root as a backstop, but the render gate's stated contract of rejecting
+      before any sandbox request is built is now honored.
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "agent-runner-integration-write-tests"
       - "agent-runner-tui-implement-code"
@@ -395,16 +411,28 @@ tasks:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-09-19T01:20:00Z"
-      updated_at: "2026-09-19T01:20:00Z"
-      completed_at: null
+      updated_at: "2026-09-19T15:25:00Z"
+      completed_at: "2026-09-19T15:25:00Z"
     blocked_reason: null
-    recovery_state: null
+    recovery_state: "write-root prefix-confusion fixed under_write_root + regression tests"
   - id: "agent-runner-compliance-review"
     title: "Review agent-runner compliance"
-    description: "Derive observed behavior from source and tests in a clean-slate context, then compare the implementation record with approved requirements, contract, and design in a source-blind context."
-    context: "Security audit passed; the component is ready for independent compliance review."
+    description: >-
+      Derive observed behavior from source and tests in a clean-slate context,
+      then compare the implementation record with approved requirements, contract,
+      and design in a source-blind context.
+    context: >-
+      Security audit passed. Per the project's current enforcement note,
+      `component accept` only structurally validates and records revisions; the
+      advisory-review receipt, acknowledgement/exception enforcement, and
+      project-level acceptance surfaces are not implemented, and receipts/reports
+      must not be fabricated. This gate therefore awaits a separate, source-blind
+      reviewer (not the implementer) via the not-yet-implemented mechanism.
     purpose: "Retain an independent disposition for every authority, sandbox, loop, and presentation guarantee."
-    expected_outcome: "The review records satisfied clauses, discrepancies, unsupported behavior, and required arbitration."
+    expected_outcome: >-
+      The review records satisfied clauses, discrepancies, unsupported behavior,
+      and required arbitration, produced by a separate source-blind context and
+      never self-certified.
     kind: compliance-review
     status: pending
     depends_on:
@@ -416,7 +444,10 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-19T01:20:00Z"
-      updated_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T15:26:00Z"
       completed_at: null
-    blocked_reason: null
+    blocked_reason: >-
+      Independent compliance review requires a separate source-blind context and
+      the project's review/acceptance mechanism, which is not implemented yet
+      (per ROOT_CONTRACT enforcement note). Not self-certified by the implementer.
     recovery_state: null

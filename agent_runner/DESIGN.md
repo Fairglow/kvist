@@ -177,6 +177,15 @@ time (`m:ss` or `h:mm:ss`). Each stat is derived from `Event::Progress`, and the
 stats line is unit-tested without a terminal so the presentation model stays
 verifiable.
 
+The compaction bar also carries an ETA (`compaction ...% (in 2m12s)`), forecast
+from the context growth rate observed between consecutive progress samples. The
+ETA is computed in the presentation layer (`App`), not the transport-facing
+`Event`, so the event contract stays stable and the estimate is derived from the
+observed event stream. It is shown only while the live context steadily climbs
+toward the hard limit (`compaction_progress > 0`), and suppressed when the
+context is flat, was just rolled back by a compaction, or grows too slowly to
+trust. No speculative or misleading number is ever shown.
+
 ## Edge cases covered by tests
 
 - Empty prompt is ignored, not submitted.
