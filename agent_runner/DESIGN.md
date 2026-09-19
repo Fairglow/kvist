@@ -1,4 +1,4 @@
-<!-- agent-runner-design-version: 2 -->
+<!-- agent-runner-design-version: 3 -->
 
 # Agent Runner — Design
 
@@ -145,11 +145,14 @@ of them keeps the request auditable and self-consistent, and `identities.toolcha
 is required to equal the toolchain block identity.
 
 Grants: one read-write `authoring` grant (working directory → sandbox write
-root), one read-write `scratch` grant (a tmpfs-backed scratch area), and one
-read-only `context` grant per declared read root. Destinations are disjoint, so
-the runner's overlap check passes; writable sources contain no symlinks, so the
-writable-scope check passes. If the working directory contains symlinks in its
-writable scope the build fails closed with an actionable message.
+root) and one read-only `context` grant per declared read root. No scratch
+grant is declared: the runner already mounts a private `/tmp` tmpfs in every
+sandbox, so that area serves as scratch and `HOME` points at `/tmp` (a dangling
+`HOME` would break tools that write home-relative state). Destinations are
+disjoint, so the runner's overlap check passes; writable sources contain no
+symlinks, so the writable-scope check passes. If the working directory
+contains symlinks in its writable scope the build fails closed with an
+actionable message.
 
 Network is `Deny` and no Cargo cache is declared, which is what the `Authoring`
 phase requires. Resources are bounded well below the runner's maxima.
@@ -203,6 +206,10 @@ trust. No speculative or misleading number is ever shown.
 - Compaction keeps recent turns in full and fits under the limit; when the
   window is tight it reduces the number of full turns (flooring at one) while
   always keeping the most recent turn.
+- The rolling summary contains each rolled turn line exactly once, even when a
+  tight window forces multiple compaction passes.
+- Progress accounting is emitted after every turn with cumulative input/output
+  tokens, so the live stats and the compaction ETA update during the session.
 - The stats line is empty until progress is reported, then reports speed,
   context, compaction, cumulative tokens, and elapsed time.
 

@@ -1,4 +1,4 @@
-<!-- agent-runner-contract-version: 2 -->
+<!-- agent-runner-contract-version: 3 -->
 
 # Agent Runner — Contract
 
@@ -122,9 +122,9 @@ argv and passes it here. It:
 
 - resolves and hashes the runner and backend identities,
 - builds one read-write `authoring` grant mapping the working directory to the
-  sandbox write root, one read-write `scratch` grant, and one read-only
-  `context` grant per declared read root (destinations disjoint from the write
-  root),
+  sandbox write root, and one read-only `context` grant per declared read root
+  (destinations disjoint from the write root); no scratch grant is declared —
+  the sandbox's private `/tmp` tmpfs serves as scratch and `HOME` points there,
 - sets `Network::Deny`, bounded `Resources`, and a `System` toolchain whose
   identity equals `identities.toolchain`,
 - computes `identities.{runner,policy,toolchain,command,mount_plan}` as
@@ -370,8 +370,9 @@ and the runner's closed version-one protocol. Guarantees:
 - `argv[0]` is an absolute canonical path; every entry is bounded and NUL-free.
 - The working directory is absolute and canonical.
 - Exactly one read-write `authoring` grant (working directory → sandbox write
-  root), one read-write `scratch` grant, and zero or more read-only `context`
-  grants, with disjoint destinations and no symlinked writable sources.
+  root) and zero or more read-only `context` grants, with disjoint
+  destinations and no symlinked writable sources; the environment sets
+  `HOME=/tmp`, the runner's private tmpfs scratch area.
 - `resources` are nonzero and within the runner's safe maxima.
 - Every identity is a `sha256:` digest; `identities.toolchain` equals the
   toolchain block identity.

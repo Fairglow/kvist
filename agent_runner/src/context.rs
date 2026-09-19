@@ -230,15 +230,20 @@ impl ContextManager {
 
         // Accumulated summary lines, oldest first; appended to as `keep` shrinks,
         // so each pass folds one more older segment into the rolling summary.
+        // Each segment is summarized exactly once: `summarized` tracks how many
+        // leading segments already have a line, so a second pass only adds the
+        // newly compacted segment instead of re-duplicating the earlier ones.
         let mut summary_parts: Vec<String> = Vec::new();
+        let mut summarized = 0usize;
         loop {
             let (compactable, kept) = segments.split_at(total - keep);
-            for segment in compactable {
+            for segment in &compactable[summarized..] {
                 let line = turn_summary(segment);
                 if !line.is_empty() {
                     summary_parts.push(line);
                 }
             }
+            summarized = compactable.len();
             let rolled = bounded_summary(&summary_parts);
 
             let mut condensed = Vec::new();
@@ -534,6 +539,32 @@ mod tests {
         assert!(joined.contains("task 5"));
         assert!(manager.summary().contains("task 0"));
         assert!(estimate_messages(&condensed, 4) < manager.limit_tokens());
+    }
+
+    #[test]
+    fn compaction_summary_contains_each_rolled_turn_exactly_once() {
+        // Regression: when the window forces more than one pass of `keep` shrinking,
+        // each pass must add only the newly compacted segment; older turn lines must
+        // not be duplicated in the rolling summary.
+        let mut manager = ContextManager::with_bounds(120, 90, 3);
+        let mut msgs = vec![ModelMessage::System("system".to_owned())];
+        for i in 0..6 {
+            let text = "w".repeat(120);
+            msgs.push(user(&format!("ask {i}")));
+            msgs.push(assistant(&text));
+            msgs.push(result("shell", "o".repeat(40).as_str()));
+        }
+        let (_, compaction) = manager.compact(&msgs, 4);
+        assert!(compaction.compacted_turns >= 2, "force at least two passes");
+        let summary = manager.summary().to_owned();
+        for i in 0..compaction.compacted_turns {
+            let needle = format!("ask {i}");
+            let count = summary.matches(&needle).count();
+            assert_eq!(
+                count, 1,
+                "summary line for turn {i} appears {count} times\nsummary:\n{summary}"
+            );
+        }
     }
 
     #[test]

@@ -592,6 +592,66 @@ fn progress_events_report_speed_utilization_and_compaction_progress() {
 }
 
 #[test]
+fn progress_is_emitted_after_each_turn_with_cumulative_totals() {
+    // A three-turn session (two tool turns + one answer) must report progress
+    // after every turn — plus the final report after the loop — carrying the
+    // cumulative input/output token totals of the scripted provider usage, so
+    // the live stats bar tracks the session while it runs.
+    let transport = ScriptedTransport::new(vec![
+        tool_turn(
+            "looking at the first part",
+            "shell",
+            json!({ "command": "echo one" }),
+        ),
+        tool_turn(
+            "looking at the second part",
+            "shell",
+            json!({ "command": "echo two" }),
+        ),
+        answer_turn("all done"),
+    ]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let cancellation = CancellationToken::new();
+
+    let mut session = make_session();
+    session.push_user("do the thing");
+    let (summary, sink) = run_collected(
+        &mut session,
+        &transport,
+        &executor,
+        &cancellation,
+        &mut context,
+        &mut recorder,
+    );
+
+    assert_eq!(summary.turns, 3);
+    let progress: Vec<Event> = sink
+        .events()
+        .into_iter()
+        .filter(|e| matches!(e, Event::Progress { .. }))
+        .collect();
+    // Exactly one progress report per turn; the final turn's report is the
+    // session's last accounting, emitted before the loop stops.
+    assert_eq!(progress.len(), 3, "one progress report per turn");
+    let Event::Progress {
+        input_tokens,
+        output_tokens,
+        total_tokens,
+        ..
+    } = progress.last().expect("a progress report exists")
+    else {
+        panic!("last event is a Progress");
+    };
+    // tool_turn usage is 20 in / 10 out / 30 total (twice); the answer turn is
+    // 12 in / 6 out / 18 total.
+    assert_eq!(*input_tokens, 52);
+    assert_eq!(*output_tokens, 26);
+    assert_eq!(*total_tokens, 78);
+}
+
+#[test]
 fn cancellation_before_a_tool_is_executed_stops_the_loop() {
     let transport = ScriptedTransport::new(vec![
         tool_turn("about to work", "shell", json!({ "command": "echo hi" })),

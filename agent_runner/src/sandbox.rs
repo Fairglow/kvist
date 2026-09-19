@@ -384,7 +384,10 @@ fn check_writable_scope(workdir: &Path) -> Result<()> {
 fn filter_environment(provided: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     let mut environment = BTreeMap::new();
     environment.insert("PATH".to_owned(), SANDBOX_PATH.to_owned());
-    environment.insert("HOME".to_owned(), "/scratch".to_owned());
+    // The runner mounts a private `/tmp` tmpfs in every sandbox, so it is the
+    // only scratch area that is guaranteed to exist; tool homes and caches land
+    // there and vanish with the short-lived sandbox.
+    environment.insert("HOME".to_owned(), "/tmp".to_owned());
     for (name, value) in provided {
         if is_portable_name(name) && !is_dangerous_name(name) {
             environment.insert(name.clone(), value.clone());

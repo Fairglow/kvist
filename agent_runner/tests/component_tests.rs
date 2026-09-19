@@ -380,6 +380,12 @@ fn build_request_produces_a_closed_authoring_request() {
     assert!(req.identities.runner.starts_with("sha256:"));
     assert!(req.identities.toolchain.starts_with("sha256:"));
     assert_eq!(req.working_directory, DEFAULT_WRITE_ROOT);
+    // HOME must point at the sandbox's guaranteed `/tmp` tmpfs, never at a
+    // scratch path the request does not declare.
+    assert_eq!(
+        req.environment.get("HOME").map(String::as_str),
+        Some("/tmp")
+    );
 }
 
 #[test]

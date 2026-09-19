@@ -320,6 +320,8 @@ impl AgentRunner {
         let mut turn = 0u32;
         let started_at = Instant::now();
         let mut cumulative_tokens: u64 = 0;
+        let mut cumulative_input: u64 = 0;
+        let mut cumulative_output: u64 = 0;
 
         // Record the durable session boundary before any turn, so the record
         // has a clean start (and a matching finish) even for an empty run.
@@ -381,68 +383,87 @@ impl AgentRunner {
             }
             if let Some(usage) = &turn_value.usage {
                 cumulative_tokens += usage.total_tokens;
+                cumulative_input += usage.input_tokens;
+                cumulative_output += usage.output_tokens;
             }
 
             // No tools proposed: this assistant text is the final answer.
             let tool_intents = session.apply_assistant(turn_value);
-            if tool_intents.is_empty() {
-                self.emit_progress(sink, session, context, cumulative_tokens, started_at)?;
+            let terminal = tool_intents.is_empty();
+
+            if !terminal {
+                for intent in tool_intents {
+                    if cancellation.is_cancelled() {
+                        summary.cancelled = true;
+                        return Ok(summary);
+                    }
+                    match executor.execute(&intent, cancellation) {
+                        Ok(outcome) => {
+                            summary.tools_executed += 1;
+                            session.record_tool_result(&intent.id, &intent.name, &outcome);
+                            if let Some(recorder) = recorder.as_mut() {
+                                recorder.tool_result(
+                                    turn_index.unwrap_or(0),
+                                    &intent.id,
+                                    &intent.name,
+                                    &intent.arguments,
+                                    &outcome,
+                                );
+                            }
+                            let _ = sink.send(Event::ToolResult {
+                                name: intent.name.clone(),
+                                failed: outcome.failed(),
+                            });
+                        }
+                        Err(error) => {
+                            // A rejected or failed tool is reported, not fatal.
+                            if let Some(recorder) = recorder.as_mut() {
+                                recorder.tool_result(
+                                    turn_index.unwrap_or(0),
+                                    &intent.id,
+                                    &intent.name,
+                                    &intent.arguments,
+                                    &crate::sandbox::ToolOutcome::rejected(),
+                                );
+                            }
+                            let _ = sink.send(Event::ToolResult {
+                                name: intent.name.clone(),
+                                failed: true,
+                            });
+                            let _ = sink.send(Event::Failed(error.describe()));
+                        }
+                    }
+
+                    // Compact the model context now that this turn is fully
+                    // recorded, so the next request stays within the model's
+                    // window. The record is untouched.
+                    if let Some(compaction) = session.maybe_compact(context, tool_definitions)
+                        && compaction.compacted_turns > 0
+                    {
+                        let _ = sink.send(Event::Note(format!(
+                        "context compacted: {} earlier turn(s) rolled into a summary (kept in the session log)",
+                        compaction.compacted_turns
+                    )));
+                    }
+                }
+            }
+
+            // Report accounting after every turn — including the final one,
+            // whose report doubles as the session's last — so the live stats
+            // bar (speed, context utilization, compaction progress, and the
+            // compaction ETA) tracks the session while it runs, not only when
+            // it ends.
+            self.emit_progress(
+                sink,
+                session,
+                context,
+                cumulative_input,
+                cumulative_output,
+                cumulative_tokens,
+                started_at,
+            )?;
+            if terminal {
                 break;
-            }
-
-            for intent in tool_intents {
-                if cancellation.is_cancelled() {
-                    summary.cancelled = true;
-                    return Ok(summary);
-                }
-                match executor.execute(&intent, cancellation) {
-                    Ok(outcome) => {
-                        summary.tools_executed += 1;
-                        session.record_tool_result(&intent.id, &intent.name, &outcome);
-                        if let Some(recorder) = recorder.as_mut() {
-                            recorder.tool_result(
-                                turn_index.unwrap_or(0),
-                                &intent.id,
-                                &intent.name,
-                                &intent.arguments,
-                                &outcome,
-                            );
-                        }
-                        let _ = sink.send(Event::ToolResult {
-                            name: intent.name.clone(),
-                            failed: outcome.failed(),
-                        });
-                    }
-                    Err(error) => {
-                        // A rejected or failed tool is reported, not fatal.
-                        if let Some(recorder) = recorder.as_mut() {
-                            recorder.tool_result(
-                                turn_index.unwrap_or(0),
-                                &intent.id,
-                                &intent.name,
-                                &intent.arguments,
-                                &crate::sandbox::ToolOutcome::rejected(),
-                            );
-                        }
-                        let _ = sink.send(Event::ToolResult {
-                            name: intent.name.clone(),
-                            failed: true,
-                        });
-                        let _ = sink.send(Event::Failed(error.describe()));
-                    }
-                }
-            }
-
-            // Compact the model context now that this turn is fully recorded,
-            // so the next request stays within the model's window. The record
-            // is untouched.
-            if let Some(compaction) = session.maybe_compact(context, tool_definitions)
-                && compaction.compacted_turns > 0
-            {
-                let _ = sink.send(Event::Note(format!(
-                    "context compacted: {} earlier turn(s) rolled into a summary (kept in the session log)",
-                    compaction.compacted_turns
-                )));
             }
         }
 
@@ -451,7 +472,6 @@ impl AgentRunner {
         }
         summary.turns = turn;
         summary.answer = session.answer.clone();
-        self.emit_progress(sink, session, context, cumulative_tokens, started_at)?;
         if let Some(answer) = &summary.answer {
             let _ = sink.send(Event::Finished {
                 message: answer.clone(),
@@ -470,27 +490,30 @@ impl AgentRunner {
     /// Emits a single accounting event so the UI can update the speed stat, the
     /// context bargraph, and the compaction progress bar. Non-fatal: a dropped
     /// sink only means the UI is gone.
+    #[allow(clippy::too_many_arguments)]
     fn emit_progress<S: EventSink>(
         &self,
         sink: &S,
         session: &AgentSession,
         context: &ContextManager,
-        cumulative_tokens: u64,
+        input_tokens: u64,
+        output_tokens: u64,
+        total_tokens: u64,
         started_at: Instant,
     ) -> Result<()> {
         let context_tokens = session.estimate_context_tokens(session.tool_definitions().len());
         let elapsed = started_at.elapsed().as_secs_f64().max(1e-9);
-        let tokens_per_sec = cumulative_tokens as f64 / elapsed;
+        let tokens_per_sec = total_tokens as f64 / elapsed;
         sink.send(Event::Progress {
-            input_tokens: 0,
-            output_tokens: 0,
+            input_tokens,
+            output_tokens,
             context_tokens,
             context_limit: context.limit_tokens(),
             context_utilization: session.utilization(context, session.tool_definitions().len()),
             compaction_progress: session
                 .compaction_progress(context, session.tool_definitions().len()),
             tokens_per_sec,
-            total_tokens: cumulative_tokens,
+            total_tokens,
             elapsed_secs: elapsed,
         })
     }

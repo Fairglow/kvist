@@ -1,12 +1,12 @@
 schema_version: 1
 component:
   requirements_revision: "sha256:db93632e63e79ce0a43c114c4136ffa6a07422a8aed1c6eead4407f3a3c69de2"
-  contract_revision: "sha256:f3e71ad2d23955ccfebbda3fa95cff8209638d35a3be925bb4739def34f36455"
-  design_revision: "sha256:63befa33322b550d08a8542eb0cddfec0b3316478439a8499a381dd861c4c7b3"
+  contract_revision: "sha256:4b17ef0aba73699d4029bb6fdc677aaab45beffde72ce4423778f78190285d64"
+  design_revision: "sha256:7cfd0ca55c2b7ce617ec76499cebd78f296b4aad535fdbeab2fa7160f31a87af"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-19T15:43:00Z"
+    checked_at: "2026-09-19T18:15:00Z"
     stale_since: null
     causes: []
 tasks:
@@ -382,6 +382,240 @@ tasks:
       completed_at: "2026-09-19T15:31:00Z"
     blocked_reason: null
     recovery_state: null
+  - id: "agent-runner-compaction-summary-dedup-write-tests"
+    title: "Define regression test for compaction summary line duplication"
+    description: >-
+      Write a failing test that forces a multi-pass compaction (tight window,
+      keep_full_turns above the floor) and asserts the rolling summary contains
+      each rolled turn line exactly once.
+    context: >-
+      Independent implementation review found compact() re-pushing summary lines
+      for every compactable segment on each pass, so a window tight enough to
+      force more than one pass duplicated older turn lines in the rolling
+      summary.
+    purpose: Pin the rolling summary to one line per compacted turn before the
+      code change, so the fix is test-proven.
+    expected_outcome: >-
+      The regression test fails against the duplicated summary and passes once
+      compact() summarizes each segment exactly once.
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "DESIGN.md#Rolling-context-management"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T18:15:00Z"
+      completed_at: "2026-09-19T18:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-compaction-summary-dedup-implement-code"
+    title: "Summarize each compacted segment exactly once"
+    description: >-
+      Fix ContextManager::compact so each pass of the keep-shrinking loop adds
+      only the newly compacted segment to the summary, tracked with a
+      summarized counter, eliminating duplicated turn lines.
+    context: The multi-pass duplication regression test is defined and failing.
+    purpose: Keep the rolling summary bounded and honest so compaction saves the
+      context it is meant to save.
+    expected_outcome: >-
+      compact() emits one summary line per compacted turn even when multiple
+      passes are required, and the regression test passes.
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-compaction-summary-dedup-write-tests"
+    requirements:
+      - "CONTRACT.md#ContextManager"
+      - "DESIGN.md#Rolling-context-management"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T18:15:00Z"
+      completed_at: "2026-09-19T18:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-per-turn-progress-write-tests"
+    title: "Define per-turn progress emission tests"
+    description: >-
+      Write a failing test that runs a three-turn scripted session and asserts
+      exactly one Progress event per turn (the final turn's report being the
+      session's last), carrying cumulative input/output token totals.
+    context: >-
+      Independent implementation review found Event::Progress was emitted only
+      at run end, with input_tokens/output_tokens hardcoded to zero, so the live
+      stats bar and the compaction ETA never updated during a multi-turn
+      session, contradicting the contract.
+    purpose: Establish executable evidence that progress accounting is per-turn
+      with real cumulative totals before the loop change.
+    expected_outcome: >-
+      The test fails while progress is emitted only at run end and passes once
+      the loop reports after every turn with cumulative input/output tokens.
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#AgentRunner"
+      - "CONTRACT.md#Event"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T18:15:00Z"
+      completed_at: "2026-09-19T18:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-per-turn-progress-implement-code"
+    title: "Emit progress accounting after every turn"
+    description: >-
+      Restructure AgentRunner::run to report Progress after every turn (the
+      final turn's report doubling as the session's last) and accumulate real
+      cumulative input/output token totals from provider usage.
+    context: The per-turn progress test is defined and failing.
+    purpose: Make the live stats bar and the compaction ETA track the session
+      while it runs, as the contract describes.
+    expected_outcome: >-
+      One Progress event per turn with cumulative input/output/total tokens,
+      verified by the integration test.
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-per-turn-progress-write-tests"
+    requirements:
+      - "CONTRACT.md#AgentRunner"
+      - "CONTRACT.md#Event"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T18:15:00Z"
+      completed_at: "2026-09-19T18:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-scratch-home-write-tests"
+    title: "Define sandbox HOME and grant-set regression test"
+    description: >-
+      Extend the closed-authoring request test to assert HOME points at the
+      sandbox's guaranteed /tmp tmpfs and that the grant set matches the
+      documented shape (authoring plus context grants only).
+    context: >-
+      Independent implementation review found the contract and design claimed a
+      read-write scratch grant the code never builds, leaving the environment
+      HOME=/scratch pointing at a path that does not exist inside the sandbox.
+    purpose: Pin the environment/grant contract so HOME can never dangle again.
+    expected_outcome: >-
+      The test fails against HOME=/scratch and passes with HOME=/tmp and the
+      documented grant set.
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Sandbox-request-contract"
+      - "CONTRACT.md#SandboxRequestBuilder"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T18:15:00Z"
+      completed_at: "2026-09-19T18:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-scratch-home-implement-code"
+    title: "Point sandbox HOME at the guaranteed /tmp tmpfs and realign docs"
+    description: >-
+      Set the sandbox environment HOME to /tmp (the runner's private tmpfs
+      scratch area) and remove the unimplemented scratch-grant claims from
+      CONTRACT.md and DESIGN.md, bumping their revisions.
+    context: The HOME/grant-set regression test is defined and failing.
+    purpose: Keep the sandbox environment functional and the contract honest
+      about the exact grant set the request declares.
+    expected_outcome: >-
+      Tool homes and caches land in the guaranteed /tmp area, the contract and
+      design describe the implemented grant set, and the test passes.
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-scratch-home-write-tests"
+    requirements:
+      - "CONTRACT.md#Sandbox-request-contract"
+      - "CONTRACT.md#SandboxRequestBuilder"
+      - "DESIGN.md#Sandbox-request-construction"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T18:15:00Z"
+      completed_at: "2026-09-19T18:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-exit-codes-and-list-models"
+    title: "Honor error exit codes in the binary and fix --list-models labels"
+    description: >-
+      Route Error::exit_code() through main() so distinct failure classes keep
+      their documented exit codes (today every binary failure exits 2), and fix
+      the --list-models output that prints providers in Debug form
+      (LlamaServer/Ollama) instead of the kebab-case names used in
+      configuration.
+    context: >-
+      Independent implementation review found main() discards the exit code at
+      each error site (ExitCode::from(2) for all errors) and list_models formats
+      the provider with a Debug flag.
+    purpose: Make the CLI's documented exit-code and naming contract observable.
+    expected_outcome: >-
+      Distinct failure classes exit with their documented codes and
+      --list-models prints the llama-server/ollama spellings.
+    kind: implementation
+    status: pending
+    depends_on:
+      - "agent-runner-llama-server-integration"
+    requirements:
+      - "CONTRACT.md#Command-line-interface"
+      - "CONTRACT.md#Error-Result"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T17:40:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-docs-drift-reconcile"
+    title: "Reconcile remaining documentation drift from the implementation review"
+    description: >-
+      Reconcile the residual doc/impl drift recorded by the independent
+      implementation review: (1) REQUIREMENTS claims additional read roots may
+      be declared in configuration, but no config field exists, and
+      BuildRequest.read_roots is documented as directories while
+      build_context_grant silently skips anything that is not a file; (2)
+      check_writable_scope checks only the top level while docs say the writable
+      scope; (3) DESIGN says Ctrl+Up/Down scrolls while the UI binds plain
+      Up/Down to both scrolling and prompt history; (4) emit_progress's doc
+      comment calls a dropped sink non-fatal while the call propagates the
+      error; (5) session_log's header claims only argument shapes are recorded
+      while full argument values are written, and state_mutated is derived from
+      output presence; (6) record_tool_result is documented redacted and bounded
+      while only bounded is implemented; (7) cosmetic: leading-ellipsis
+      truncation in summarize_path and context truncate/bounded_summary,
+      MAX_SUMMARY_BYTES counting chars, the Debug effort label (Medium vs
+      medium), the config search name agent-runner.toml versus the contract's
+      kvist.toml-style wording, and leading spaces on wrapped lines. Update the
+      affected intent documents and code together for each deliberate decision,
+      with tests where behavior changes.
+    context: >-
+      Findings recorded during the independent implementation review of the
+      branch; none affect the sandbox authority boundary, all are local to
+      agent-runner.
+    purpose: Keep the contract, design, and implementation mutually truthful
+      before the independent compliance review.
+    expected_outcome: >-
+      Every listed discrepancy is resolved by a code fix or a deliberate doc
+      realignment, with the component queue and document revisions updated.
+    kind: implementation
+    status: pending
+    depends_on:
+      - "agent-runner-compaction-summary-dedup-implement-code"
+      - "agent-runner-per-turn-progress-implement-code"
+      - "agent-runner-scratch-home-implement-code"
+    requirements:
+      - "CONTRACT.md#Command-line-interface"
+      - "DESIGN.md#Security-posture"
+      - "DESIGN.md#Terminal-UI"
+      - "REQUIREMENTS.md#Constraints"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T17:40:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
   - id: "agent-runner-security-audit"
     title: "Audit agent-runner authority"
     description: "Review tool rendering, shell denylist, write-root enforcement, sandbox request construction, environment allowlist, fail-closed execution, cancellation, and untrusted-input validation for authority escalation, disclosure, or false enforcement."
@@ -414,7 +648,7 @@ tasks:
       updated_at: "2026-09-19T15:25:00Z"
       completed_at: "2026-09-19T15:25:00Z"
     blocked_reason: null
-    recovery_state: "write-root prefix-confusion fixed under_write_root + regression tests"
+    recovery_state: null
   - id: "agent-runner-compliance-review"
     title: "Review agent-runner compliance"
     description: >-
@@ -436,6 +670,8 @@ tasks:
     kind: compliance-review
     status: pending
     depends_on:
+      - "agent-runner-docs-drift-reconcile"
+      - "agent-runner-exit-codes-and-list-models"
       - "agent-runner-security-audit"
     requirements:
       - "CONTRACT.md#AgentRunner"
@@ -446,8 +682,5 @@ tasks:
       created_at: "2026-09-19T01:20:00Z"
       updated_at: "2026-09-19T15:26:00Z"
       completed_at: null
-    blocked_reason: >-
-      Independent compliance review requires a separate source-blind context and
-      the project's review/acceptance mechanism, which is not implemented yet
-      (per ROOT_CONTRACT enforcement note). Not self-certified by the implementer.
+    blocked_reason: null
     recovery_state: null
