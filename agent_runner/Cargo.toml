@@ -1,0 +1,37 @@
+[package]
+name = "agent-runner"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+authors = ["Stefan Lindblad"]
+description = "First-class, sandbox-integrated interactive agent runner shell for Kvist"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/Fairglow/kvist"
+homepage = "https://github.com/Fairglow/kvist"
+
+[lib]
+name = "agent_runner"
+
+[[bin]]
+name = "agent-runner"
+path = "src/main.rs"
+
+[dependencies]
+agent-runtime = { version = "=0.1.0", path = "../agent_runtime" }
+kvist-sandbox-runner = { version = "=0.1.0", path = "../sandbox_runner" }
+clap = { version = "4.6", features = ["derive"] }
+ratatui = "0.30"
+crossterm = "0.29"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.1"
+sha2 = "0.11"
+hex = "0.4"
+nix = { version = "0.31", default-features = false, features = ["fs", "poll", "process", "signal", "term"] }
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
+
+[dev-dependencies]
+tempfile = "3.27"
+serde_json = "1.0"

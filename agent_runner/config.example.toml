@@ -1,0 +1,35 @@
+# Example agent-runner configuration.
+schema_version = 1
+
+# Optional override for the working directory; defaults to the process
+# current directory when omitted. Must be absolute and exist.
+working_directory = "/absolute/path/to/your/project"
+
+default_model = "local"
+default_thinking_effort = "medium"
+
+# Models selectable in the UI with -m/--model.
+[[models]]
+id = "local"
+provider = "llama-server"
+base_url = "http://127.0.0.1:9931"
+model = "qwen2.5-14b"
+deadline_secs = 120
+
+[[models]]
+id = "ollama"
+provider = "ollama"
+base_url = "http://127.0.0.1:11434"
+model = "qwen2.5"
+deadline_secs = 120
+
+# The independent sandbox enforcement boundary.
+[sandbox]
+runner = "/usr/local/bin/kvist-sandbox-runner"
+backend = "/usr/bin/bwrap"
+
+# Tool policy. The denylist entries below are appended to the built-in safe
+# minimum, which already forbids clearly destructive commands.
+[tool_policy]
+shell_deny_substrings = []
+shell_deny_prefixes = []
