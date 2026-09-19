@@ -100,6 +100,11 @@ request is built. Defaults forbid clearly destructive commands
 (`rm -rf`, `mkfs`, `dd`, `:(){ :|:& };`, kernel reloads, etc.). Defaults are
 safe; configuration may add entries but must not remove the built-in minimum.
 
+- The `write_root` confines every `write_file` target. Enforcement is on a
+  slash boundary, so a sibling such as `/workspace-evil` is rejected when the
+  write root is `/workspace`, not merely rejected when it fails a bare
+  `starts_with` prefix check. `render` rejects any `write_file` target outside
+  the write root before a sandbox request is built.
 - `ToolPolicy::shell_permitted(&self, command: &str) -> bool` applies the deny
   prefixes and substrings to a candidate shell command.
 - `ToolPolicy::identity(&self) -> String` is a stable `sha256:` digest bound into

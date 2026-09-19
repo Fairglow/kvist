@@ -124,9 +124,11 @@ write root `/workspace`); the agent works in the sandbox view, so tool output
 paths are consistent.
 
 Write scope is enforced in two places. The registry rejects `write_file` when the
-target does not start with the configured `write_root`, and the sandbox grants
-read-write authority only at the write root, so any other write fails inside the
-sandbox regardless.
+target is not inside the configured `write_root` on a slash boundary (so a sibling
+such as `/workspace-evil` is rejected when the write root is `/workspace`, not
+merely when it fails a bare `starts_with`), and the sandbox grants read-write
+authority only at the write root, so any other write fails inside the sandbox
+regardless.
 
 ## Sandbox request construction
 
@@ -179,7 +181,9 @@ verifiable.
 
 - Empty prompt is ignored, not submitted.
 - A model turn with zero tool intents ends the loop and returns the answer.
-- A tool that renders outside the write root is rejected before the sandbox.
+- A tool that renders outside the write root is rejected before the sandbox; a
+  sibling prefix such as `/workspace-evil` is rejected when the write root is
+  `/workspace`.
 - A shell command matching the denylist is rejected before the sandbox.
 - A missing runner/backend path fails the session, not the host.
 - A request whose working directory contains symlinks fails the sandbox build.

@@ -243,6 +243,48 @@ fn write_file_inside_write_root_is_allowed() {
 }
 
 #[test]
+fn write_file_to_a_sibling_prefix_outside_write_root_is_rejected() {
+    // Regression: a bare `starts_with` on the write root accepted `/workspace-evil`,
+    // a sibling of `/workspace`. The render gate must reject it before any sandbox
+    // request is built.
+    let reg = registry();
+    let err = reg
+        .render(
+            &tool_intent(
+                "write_file",
+                json!({ "path": "/workspace-evil/passwd", "content": "x" }),
+            ),
+            &ExecContext::new("/tmp/work", "c"),
+        )
+        .expect_err("write to a sibling prefix must be rejected");
+    assert!(matches!(err, Error::ToolPolicy { .. }));
+}
+
+#[test]
+fn write_root_is_enforced_on_a_slash_boundary_for_custom_roots() {
+    // With a configured root `/work`, `/works/x` must not be accepted.
+    let policy = ToolPolicy {
+        write_root: "/work".to_owned(),
+        ..ToolPolicy::minimum()
+    };
+    let reg = ToolRegistry::new(policy);
+    let rejected = reg
+        .render(
+            &tool_intent("write_file", json!({ "path": "/works/x", "content": "x" })),
+            &ExecContext::new("/tmp/work", "c"),
+        )
+        .expect_err("/works must be outside root /work");
+    assert!(matches!(rejected, Error::ToolPolicy { .. }));
+    let accepted = reg
+        .render(
+            &tool_intent("write_file", json!({ "path": "/work/x", "content": "x" })),
+            &ExecContext::new("/tmp/work", "c"),
+        )
+        .expect("/work/x is inside root /work");
+    assert!(accepted.staged_write.is_some());
+}
+
+#[test]
 fn denylisted_shell_command_is_rejected() {
     let reg = registry();
     let err = reg

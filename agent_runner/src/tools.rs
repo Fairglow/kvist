@@ -316,7 +316,7 @@ impl ToolRegistry {
         context: &ExecContext,
     ) -> crate::error::Result<RenderedTool> {
         let path = string_arg(intent, "path")?;
-        if !path.starts_with(&self.policy.write_root) {
+        if !under_write_root(&path, &self.policy.write_root) {
             return Err(crate::error::Error::ToolPolicy {
                 tool: "write_file".to_owned(),
                 reason: format!(
@@ -376,6 +376,14 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Object(_) => "object",
         Value::Null => "null",
     }
+}
+
+/// Whether `path` is inside `root` on a `/`-separated sandbox path namespace.
+///
+/// Requires the root boundary, not a bare `starts_with`, so that a sibling such
+/// as `/workspace-evil` cannot be accepted when the write root is `/workspace`.
+fn under_write_root(path: &str, root: &str) -> bool {
+    path == root || path.starts_with(&format!("{root}/"))
 }
 
 fn summarize_path(path: &str) -> String {
