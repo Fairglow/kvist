@@ -193,16 +193,15 @@ impl App {
                 );
             }
             Event::Reasoning(text) => self.plain_reasoning(&text),
-            // Streamed answer text arrives in fragments; accumulate it and only
-            // wrap at paragraph boundaries so a sentence stays on its lines
-            // instead of one word per line.
+            // Streamed answer text arrives fragment-by-fragment. A model often
+            // emits a trailing newline after each token or line; a lone newline
+            // is a soft break (a space), while a blank line is a real paragraph
+            // boundary. Accumulate and flush only at paragraph boundaries so a
+            // sentence wraps horizontally instead of one token per line.
             Event::Text(text) => {
-                self.pending_text.push_str(&text);
-                if let Some(pos) = self.pending_text.rfind('\n') {
-                    let ready = self.pending_text[..pos].to_owned();
-                    self.pending_text = self.pending_text[pos + 1..].to_owned();
-                    self.push_wrapped(Style::default().fg(Color::Reset), &ready);
-                }
+                let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+                self.pending_text.push_str(&normalized);
+                self.flush_paragraphs();
             }
             Event::ToolCall { name } => {
                 self.flush_pending_text();
@@ -578,11 +577,31 @@ impl App {
         );
     }
 
-    /// Flushes accumulated streamed text into the transcript as one paragraph.
+    /// Flushes accumulated streamed text into the transcript, normalizing soft
+    /// line breaks to spaces so the trailing fragment reads horizontally.
     fn flush_pending_text(&mut self) {
         if !self.pending_text.is_empty() {
             let text = std::mem::take(&mut self.pending_text);
-            self.push_wrapped(Style::default().fg(Color::Reset), &text);
+            self.push_wrapped(
+                Style::default().fg(Color::Reset),
+                &normalize_soft_breaks(&text),
+            );
+        }
+    }
+
+    /// Flushes every complete paragraph in the pending buffer. A paragraph
+    /// breaks on a blank line (`\n\n`); lone newlines are soft breaks kept in
+    /// the buffer until a flush trigger, when they become spaces. This keeps a
+    /// streamed sentence on flowing rows instead of one short row per token.
+    fn flush_paragraphs(&mut self) {
+        while let Some(pos) = self.pending_text.find("\n\n") {
+            let head = self.pending_text[..pos].to_owned();
+            let tail = self.pending_text[pos + 2..].to_owned();
+            self.push_wrapped(
+                Style::default().fg(Color::Reset),
+                &normalize_soft_breaks(&head),
+            );
+            self.pending_text = tail;
         }
     }
 
@@ -800,6 +819,13 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
         }
     }
     lines
+}
+
+/// Converts soft line breaks (lone `\r`/`\n`) to spaces so a streamed answer
+/// reads horizontally. Blank lines already delimited paragraphs and never
+/// reach here; paragraph breaks are handled by [`App::flush_paragraphs`].
+fn normalize_soft_breaks(text: &str) -> String {
+    text.replace('\n', " ")
 }
 
 fn split_long(word: &str, width: usize) -> Vec<String> {
@@ -1169,9 +1195,9 @@ mod tests {
     fn text_newlines_flush_complete_paragraphs() {
         let mut app = app();
         let before = app.lines.len();
-        app.push_event(Event::Text("para one\npara two".to_owned()));
-        // "para one" is complete and wrapped immediately; "para two" stays
-        // pending until the next flush trigger.
+        // A blank line is a paragraph boundary; the first paragraph flushes
+        // immediately, the second stays pending until the next flush trigger.
+        app.push_event(Event::Text("para one\n\npara two".to_owned()));
         assert!(app.lines.iter().any(|line| line.text.contains("para one")));
         assert!(!app.lines.iter().any(|line| line.text.contains("para two")));
         app.push_event(Event::Finished {
@@ -1179,6 +1205,26 @@ mod tests {
         });
         assert!(app.lines.iter().any(|line| line.text.contains("para two")));
         assert!(app.lines.len() > before);
+    }
+
+    #[test]
+    /// Regression: streamed fragments that each end with a newline (as a model
+    /// frequently emits) must concatenate into flowing text rather than one
+    /// short row per token.
+    fn streamed_newlines_concatenate_into_flowing_text() {
+        let mut app = app();
+        for frag in ["The ", "quick\n", "brown\n", "fox"] {
+            app.push_event(Event::Text(frag.to_owned()));
+        }
+        // No blank line yet: nothing flushed, still pending.
+        app.flush_pending_text();
+        assert!(
+            app.lines
+                .iter()
+                .any(|line| line.text == "The quick brown fox"),
+            "tokens should concatenate horizontally, not one per line:\n{:?}",
+            app.lines.iter().map(|l| &l.text).collect::<Vec<_>>()
+        );
     }
 
     #[test]
