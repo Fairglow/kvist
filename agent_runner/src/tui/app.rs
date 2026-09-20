@@ -88,6 +88,9 @@ pub enum KeyAction {
 pub struct App {
     pub lines: Vec<ScreenLine>,
     pub scroll: u16,
+    /// Auto-follow pin: while true the transcript stays pinned to the newest
+    /// line as output arrives. Scrolling up unpins; Ctrl+End re-pins.
+    following: bool,
     /// Scroll offset of the help overlay while it is shown, so the full
     /// (taller-than-the-transcript-box) help stays reachable on short terminals.
     pub help_scroll: u16,
@@ -110,8 +113,11 @@ pub struct App {
     /// The staged prompt awaiting dispatch, if any.
     pending_prompt: Option<String>,
     /// Streamed answer text not yet flushed to the transcript (incomplete
-    /// paragraphs); flushed on newlines and on any non-text event.
+    /// paragraphs); flushed at paragraph boundaries and on any non-text event.
     pending_text: String,
+    /// Streamed reasoning text not yet flushed to the transcript, kept
+    /// separately from the answer and tagged as reasoning on flush.
+    pending_reasoning: String,
     /// The resolved configuration path, shown in the help overlay.
     pub config_path: Option<PathBuf>,
     /// Latest stats, when the loop has reported any.
@@ -152,6 +158,7 @@ impl App {
         let mut app = App {
             lines: Vec::new(),
             scroll: 0,
+            following: true,
             help_scroll: 0,
             editor,
             history: Vec::new(),
@@ -167,6 +174,7 @@ impl App {
             height,
             pending_prompt: None,
             pending_text: String::new(),
+            pending_reasoning: String::new(),
             config_path,
             stats: None,
             last_growth: None,
@@ -184,7 +192,7 @@ impl App {
     pub fn push_event(&mut self, event: Event) {
         match event {
             Event::TurnStart { model } => {
-                self.flush_pending_text();
+                self.flush_pending();
                 self.running = true;
                 self.status = "thinking".to_owned();
                 self.note(
@@ -192,23 +200,27 @@ impl App {
                     &format!("▍ {model} is working…"),
                 );
             }
-            Event::Reasoning(text) => self.plain_reasoning(&text),
+            Event::Reasoning(text) => self.stream_reasoning(&text),
             // Streamed answer text arrives fragment-by-fragment. A model often
             // emits a trailing newline after each token or line; a lone newline
             // is a soft break (a space), while a blank line is a real paragraph
             // boundary. Accumulate and flush only at paragraph boundaries so a
             // sentence wraps horizontally instead of one token per line.
             Event::Text(text) => {
+                // Reasoning generated before this answer text is temporally
+                // older, so flush any pending reasoning first to keep the
+                // transcript in generation order.
+                self.flush_pending_reasoning();
                 let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
                 self.pending_text.push_str(&normalized);
                 self.flush_paragraphs();
             }
             Event::ToolCall { name } => {
-                self.flush_pending_text();
+                self.flush_pending();
                 self.note(Style::default().fg(Color::Blue), &format!("→ tool: {name}"));
             }
             Event::ToolResult { name, failed } => {
-                self.flush_pending_text();
+                self.flush_pending();
                 let style = if failed {
                     Style::default().fg(Color::Red)
                 } else {
@@ -217,19 +229,19 @@ impl App {
                 self.note(style, &format!("✓ tool {name} finished"));
             }
             Event::Finished { message } => {
-                self.flush_pending_text();
+                self.flush_pending();
                 self.running = false;
                 self.status = "done".to_owned();
                 self.note(Style::default().fg(Color::Green), &format!("✓ {message}"));
             }
             Event::Failed(text) => {
-                self.flush_pending_text();
+                self.flush_pending();
                 self.running = false;
                 self.status = "error".to_owned();
                 self.note(Style::default().fg(Color::Red), &text);
             }
             Event::Note(text) => {
-                self.flush_pending_text();
+                self.flush_pending();
                 self.note(Style::default().fg(Color::DarkGray), &text);
             }
             Event::Progress {
@@ -267,10 +279,39 @@ impl App {
         self.clamp_scroll();
     }
 
-    /// Pushes a reasoning fragment, tagged so it can be collapsed later.
-    fn plain_reasoning(&mut self, text: &str) {
-        let wrapped = wrap(text, self.width as usize);
-        for line in wrapped {
+    /// Accumulates streamed reasoning fragments and flushes completed paragraphs.
+    /// Like streamed answer text, a lone newline is a soft break (a space) while
+    /// a blank line is a real paragraph boundary, so thinking flows on rows
+    /// instead of one short row per delta.
+    fn stream_reasoning(&mut self, text: &str) {
+        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+        self.pending_reasoning.push_str(&normalized);
+        self.flush_reasoning_paragraphs();
+    }
+
+    /// Flushes every completed reasoning paragraph in the pending buffer.
+    fn flush_reasoning_paragraphs(&mut self) {
+        while let Some(pos) = self.pending_reasoning.find("\n\n") {
+            let head = self.pending_reasoning[..pos].to_owned();
+            let tail = self.pending_reasoning[pos + 2..].to_owned();
+            self.push_reasoning_lines(&normalize_soft_breaks(&head));
+            self.pending_reasoning = tail;
+        }
+    }
+
+    /// Flushes all pending reasoning, normalizing soft breaks to spaces so the
+    /// trailing fragment of thinking reads horizontally.
+    fn flush_pending_reasoning(&mut self) {
+        if !self.pending_reasoning.is_empty() {
+            let text = std::mem::take(&mut self.pending_reasoning);
+            self.push_reasoning_lines(&normalize_soft_breaks(&text));
+        }
+    }
+
+    /// Pushes wrapped reasoning lines, dimmed and tagged so they can be
+    /// collapsed later, then keeps the transcript bounded and followed.
+    fn push_reasoning_lines(&mut self, text: &str) {
+        for line in wrap(text, self.width as usize) {
             self.lines.push(ScreenLine {
                 style: Style::default()
                     .fg(Color::Gray)
@@ -279,11 +320,8 @@ impl App {
                 kind: LineKind::Reasoning,
             });
         }
-        if self.lines.len() > MAX_LINES {
-            let overflow = self.lines.len() - MAX_LINES;
-            self.lines.drain(0..overflow);
-            self.scroll = self.scroll.saturating_sub(overflow as u16);
-        }
+        self.maybe_truncate();
+        self.follow();
     }
 
     /// Collapses or reveals reasoning lines in the transcript for a cleaner
@@ -325,6 +363,7 @@ impl App {
             self.lines = next;
         }
         self.clamp_scroll();
+        self.follow();
     }
 
     /// Whether any reasoning has been collapsed and can be revealed.
@@ -443,11 +482,23 @@ impl App {
                 KeyAction::Idle
             }
             (KeyCode::PageUp, _) => {
+                self.following = false;
                 self.scroll_back(self.visible_rows());
                 KeyAction::Idle
             }
             (KeyCode::PageDown, _) => {
                 self.scroll_forward(self.visible_rows());
+                self.clamp_scroll();
+                if self.scroll == self.bottom_offset() {
+                    self.following = true;
+                }
+                KeyAction::Idle
+            }
+            // Ctrl+End jumps to the newest output and resumes auto-follow;
+            // plain End stays with the editor for cursor motions.
+            (KeyCode::End, KeyModifiers::CONTROL) => {
+                self.scroll = self.bottom_offset();
+                self.following = true;
                 KeyAction::Idle
             }
             (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
@@ -605,6 +656,38 @@ impl App {
         }
     }
 
+    /// Flushes accumulated streamed text and reasoning together so the transcript
+    /// advances at the same boundaries (tool events, turn finish, notes, ...).
+    fn flush_pending(&mut self) {
+        self.flush_pending_text();
+        self.flush_pending_reasoning();
+    }
+
+    /// Evicts the oldest lines past MAX_LINES so the transcript stays bounded,
+    /// keeping the scroll offset anchored to the bottom while doing so.
+    fn maybe_truncate(&mut self) {
+        if self.lines.len() > MAX_LINES {
+            let overflow = self.lines.len() - MAX_LINES;
+            self.lines.drain(0..overflow);
+            self.scroll = self.scroll.saturating_sub(overflow as u16);
+        }
+    }
+
+    /// The scroll offset that views the newest (last) line, i.e. the bottom.
+    fn bottom_offset(&self) -> u16 {
+        self.lines
+            .len()
+            .saturating_sub(self.visible_rows() as usize) as u16
+    }
+
+    /// While the view is pinned to the bottom (auto-follow), keep it pinned as
+    /// new lines are appended. Escaping upward with a scroll unpins this.
+    fn follow(&mut self) {
+        if self.following {
+            self.scroll = self.bottom_offset();
+        }
+    }
+
     fn clear_screen(&mut self) {
         self.lines.clear();
         self.scroll = 0;
@@ -622,31 +705,35 @@ impl App {
                 kind: LineKind::Normal,
             });
         }
-        if self.lines.len() > MAX_LINES {
-            let overflow = self.lines.len() - MAX_LINES;
-            self.lines.drain(0..overflow);
-            self.scroll = self.scroll.saturating_sub(overflow as u16);
-        }
+        self.maybe_truncate();
+        self.follow();
     }
 
     /// Scrolls the transcript up (toward older lines) by `amount` rows.
     /// Scrolls up. While the help overlay is open this scrolls the help;
     /// otherwise it scrolls the transcript.
+    /// Scrolls up (toward older lines). Moving away from the bottom unpins
+    /// auto-follow so the user can read without the view being yanked down.
     pub fn scroll_up(&mut self, amount: u16) {
         if self.show_help {
             self.help_scroll = self.help_scroll.saturating_sub(self.help_visible_rows());
         } else {
+            self.following = false;
             self.scroll_back(amount);
         }
     }
 
-    /// Scrolls down. While the help overlay is open this scrolls the help;
-    /// otherwise it scrolls the transcript.
+    /// Scrolls down (toward newer lines). While the help overlay is open this
+    /// scrolls the help; otherwise reaching the bottom re-pins auto-follow.
     pub fn scroll_down(&mut self, amount: u16) {
         if self.show_help {
             self.help_scroll += self.help_visible_rows();
         } else {
             self.scroll_forward(amount);
+            self.clamp_scroll();
+            if self.scroll == self.bottom_offset() {
+                self.following = true;
+            }
         }
     }
 
@@ -665,15 +752,15 @@ impl App {
         self.scroll += amount;
     }
 
+    /// The number of content rows visible inside the transcript box, used for
+    /// scroll bounds and page-scroll steps. Equal to the full height minus the
+    /// header, stats, input rows, and the box's two borders.
     fn visible_rows(&self) -> u16 {
-        self.height.saturating_sub(3).max(1)
+        self.height.saturating_sub(8).max(1)
     }
 
     fn clamp_scroll(&mut self) {
-        let max = self
-            .lines
-            .len()
-            .saturating_sub(self.visible_rows() as usize) as u16;
+        let max = self.bottom_offset();
         if self.scroll > max {
             self.scroll = max;
         }
@@ -1450,5 +1537,79 @@ mod tests {
             narrow_lines > wide_lines,
             "a narrower width should rewrap into more lines (wide={wide_lines}, narrow={narrow_lines})"
         );
+    }
+
+    #[test]
+    fn streamed_reasoning_concatenates_into_flowing_lines() {
+        // Regression: each reasoning delta used to wrap into its own row, so
+        // thinking broke into one short line per fragment.
+        let mut app = app();
+        let before = app.lines.len();
+        for frag in ["The ", "quick ", "brown ", "fox"] {
+            app.push_event(Event::Reasoning(frag.to_owned()));
+        }
+        // Still pending: no blank line to flush a reasoning paragraph yet.
+        assert_eq!(app.lines.len(), before);
+        // A non-reasoning event flushes the accumulated reasoning, concatenated.
+        app.push_event(Event::Finished {
+            message: "done".to_owned(),
+        });
+        let reasoning: Vec<&str> = app
+            .lines
+            .iter()
+            .filter(|line| line.kind == LineKind::Reasoning)
+            .map(|line| line.text.as_str())
+            .collect();
+        assert!(
+            reasoning.contains(&"The quick brown fox"),
+            "reasoning should concatenate horizontally, not one row per delta:\n{:?}",
+            app.lines.iter().map(|l| &l.text).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn auto_follows_new_output_to_the_bottom() {
+        // By default the transcript is pinned to the newest line: appending far
+        // more rows than fit must keep the view at the bottom.
+        let mut app = app();
+        assert!(app.following);
+        for i in 0..50 {
+            app.push_event(Event::Note(format!("line {i}")));
+        }
+        assert_eq!(app.scroll, app.bottom_offset());
+        assert!(app.following);
+    }
+
+    #[test]
+    fn scrolling_unpins_and_stays_put() {
+        let mut app = app();
+        for i in 0..50 {
+            app.push_event(Event::Note(format!("line {i}")));
+        }
+        assert_eq!(app.scroll, app.bottom_offset());
+        // Scroll up to read older output: auto-follow must unpin.
+        app.scroll_up(10);
+        assert!(!app.following);
+        let pinned = app.scroll;
+        // New output arrives; the view must not jump back down.
+        app.push_event(Event::Note("newest line".to_owned()));
+        assert_eq!(app.scroll, pinned);
+        assert!(!app.following);
+    }
+
+    #[test]
+    fn ctrl_end_refollows_to_the_bottom() {
+        let mut app = app();
+        for i in 0..50 {
+            app.push_event(Event::Note(format!("line {i}")));
+        }
+        app.scroll_up(15);
+        assert!(!app.following);
+        let above_bottom = app.scroll;
+        assert!(above_bottom < app.bottom_offset());
+        // Ctrl+End jumps to the newest output and resumes auto-follow.
+        app.on_key(ctrl(KeyCode::End));
+        assert_eq!(app.scroll, app.bottom_offset());
+        assert!(app.following);
     }
 }
