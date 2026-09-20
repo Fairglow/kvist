@@ -15,8 +15,8 @@ use tempfile::tempdir;
 use agent_runner::sandbox;
 use agent_runner::{
     Config, DEFAULT_WRITE_ROOT, Error, ExecContext, Model, ModelProvider, SandboxExecutor,
-    SandboxPaths, ToolExecutor, ToolPolicy, ToolProfile, ToolRegistry, parse_effort,
-    resolve_config_path,
+    SandboxPaths, ToolExecutor, ToolPolicy, ToolProfile, ToolRegistry, describe_tool_call,
+    parse_effort, resolve_config_path,
 };
 
 const VALID_CONFIG: &str = r#"
@@ -240,6 +240,113 @@ fn write_file_inside_write_root_is_allowed() {
         )
         .expect("write inside root renders");
     assert!(rendered.staged_write.is_some());
+}
+
+#[test]
+fn write_file_stages_under_the_working_directory_not_the_root() {
+    // Regression: the host staging path reused the sandbox form (`/.agent-writes`,
+    // leading slash) joined onto the workdir, which `PathBuf::join` treats as
+    // absolute and replaces with the filesystem root, so staging failed with
+    // permission denied at `/`. The host path must stay relative so it joins
+    // under the working directory.
+    let reg = registry();
+    let rendered = reg
+        .render(
+            &tool_intent(
+                "write_file",
+                json!({ "path": "/workspace/main.txt", "content": "x" }),
+            ),
+            &ExecContext::new("/tmp/work", "call-1"),
+        )
+        .expect("write inside root renders");
+    let staged = rendered.staged_write.expect("write stages a host file");
+    assert_eq!(
+        staged.host_path,
+        PathBuf::from("/tmp/work/.agent-writes/call-1"),
+        "host staging stays under the working directory"
+    );
+    assert!(
+        staged.host_path.starts_with("/tmp/work"),
+        "host path is scoped to the workdir, not the filesystem root"
+    );
+    // The sandbox form keeps its leading slash; inside the sandbox root it is
+    // still under the writable scope.
+    assert_eq!(staged.sandbox_path, "/.agent-writes/call-1");
+}
+
+#[test]
+fn describe_tool_call_names_the_target_and_matches_the_rendered_summary() {
+    // `describe_tool_call` is the single source for `RenderedTool.summary`, so
+    // the live "tool proposed" line shows the same target as execution and names
+    // the file, directory, or command rather than just the tool.
+    let reg = registry();
+
+    let read = reg
+        .render(
+            &tool_intent("read_file", json!({ "path": "/workspace/main.txt" })),
+            &ExecContext::new("/tmp/work", "c"),
+        )
+        .expect("read renders");
+    let list = reg
+        .render(
+            &tool_intent("list_dir", json!({ "path": "/workspace/src" })),
+            &ExecContext::new("/tmp/work", "c"),
+        )
+        .expect("list renders");
+    let write = reg
+        .render(
+            &tool_intent(
+                "write_file",
+                json!({ "path": "/workspace/new.txt", "content": "x" }),
+            ),
+            &ExecContext::new("/tmp/work", "c"),
+        )
+        .expect("write renders");
+    let shell = reg
+        .render(
+            &tool_intent("shell", json!({ "command": "cargo build" })),
+            &ExecContext::new("/tmp/work", "c"),
+        )
+        .expect("shell renders");
+
+    assert_eq!(
+        describe_tool_call(&tool_intent(
+            "read_file",
+            json!({ "path": "/workspace/main.txt" })
+        )),
+        read.summary
+    );
+    assert_eq!(
+        describe_tool_call(&tool_intent(
+            "list_dir",
+            json!({ "path": "/workspace/src" })
+        )),
+        list.summary
+    );
+    assert_eq!(
+        describe_tool_call(&tool_intent(
+            "write_file",
+            json!({ "path": "/workspace/new.txt", "content": "x" })
+        )),
+        write.summary
+    );
+    assert_eq!(
+        describe_tool_call(&tool_intent("shell", json!({ "command": "cargo build" }))),
+        shell.summary
+    );
+
+    // The descriptions name the target, not just the tool name.
+    assert_eq!(
+        describe_tool_call(&tool_intent(
+            "read_file",
+            json!({ "path": "/workspace/a.rs" })
+        )),
+        "read /workspace/a.rs"
+    );
+    assert_eq!(
+        describe_tool_call(&tool_intent("shell", json!({ "command": "ls -la" }))),
+        "ls -la"
+    );
 }
 
 #[test]

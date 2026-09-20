@@ -114,7 +114,10 @@ happens on our argv.
 "<sandbox-staging>", "<path>"]` moves it into place inside the sandbox. Staging
   lets arbitrarily large files be written without exceeding the sandbox argv byte
   limit; the staged file already lives under the read-write write root, so the
-  move stays inside the writable scope.
+  move stays inside the writable scope. The host staging path is the sandbox
+  staging path without its leading slash, so it stays relative and joins under
+  the working directory instead of the filesystem root (`PathBuf::join` treats an
+  absolute path as a full replacement).
 - `list_dir { path }` → `["<bash>", "-c", "exec ls -la -- \"$1\"",
 "agent-runner", "<path>"]`.
 
@@ -166,7 +169,10 @@ model, the selected effort, the running flag, the input buffer, a scroll
 offset, and a help-overlay flag. Rendering is a pure function of `App` state, so
 the transcript model is unit-tested without a terminal.
 
-Events from `run::spawn` are folded into `App` each frame. Key handling: Enter
+Transcript text is wrapped to the box's inner width (the full terminal width
+minus the two vertical borders) so no line extends past the visible area, and
+tool-call events carry a short description of what applied where (file,
+directory, or command). Events from `run::spawn` are folded into `App` each frame. Key handling: Enter
 submits the input as a prompt, Ctrl+C cancels the current turn (and quits when
 idle), Esc toggles help, and Ctrl+Up/Down, PageUp/PageDown scroll the transcript.
 The status bar shows `model | effort | status` and a cancel hint; the prompt line

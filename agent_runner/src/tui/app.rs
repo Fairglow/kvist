@@ -215,18 +215,25 @@ impl App {
                 self.pending_text.push_str(&normalized);
                 self.flush_paragraphs();
             }
-            Event::ToolCall { name } => {
+            Event::ToolCall { description, .. } => {
                 self.flush_pending();
-                self.note(Style::default().fg(Color::Blue), &format!("→ tool: {name}"));
+                self.note(
+                    Style::default().fg(Color::Blue),
+                    &format!("→ tool: {description}"),
+                );
             }
-            Event::ToolResult { name, failed } => {
+            Event::ToolResult {
+                description,
+                failed,
+                ..
+            } => {
                 self.flush_pending();
                 let style = if failed {
                     Style::default().fg(Color::Red)
                 } else {
                     Style::default().fg(Color::Green)
                 };
-                self.note(style, &format!("✓ tool {name} finished"));
+                self.note(style, &format!("✓ tool {description} finished"));
             }
             Event::Finished { message } => {
                 self.flush_pending();
@@ -311,7 +318,7 @@ impl App {
     /// Pushes wrapped reasoning lines, dimmed and tagged so they can be
     /// collapsed later, then keeps the transcript bounded and followed.
     fn push_reasoning_lines(&mut self, text: &str) {
-        for line in wrap(text, self.width as usize) {
+        for line in wrap(text, self.content_width()) {
             self.lines.push(ScreenLine {
                 style: Style::default()
                     .fg(Color::Gray)
@@ -698,7 +705,7 @@ impl App {
     }
 
     fn push_wrapped(&mut self, style: Style, text: &str) {
-        for line in wrap(text, self.width as usize) {
+        for line in wrap(text, self.content_width()) {
             self.lines.push(ScreenLine {
                 style,
                 text: line,
@@ -750,6 +757,12 @@ impl App {
 
     fn scroll_forward(&mut self, amount: u16) {
         self.scroll += amount;
+    }
+
+    /// The transcript's inner character width, subtracting the box's left and
+    /// right borders so pre-wrapped lines never extend past the visible area.
+    fn content_width(&self) -> usize {
+        self.width.saturating_sub(2).max(1) as usize
     }
 
     /// The number of content rows visible inside the transcript box, used for
@@ -856,7 +869,7 @@ impl App {
             .lines
             .iter()
             .flat_map(|screen_line| {
-                wrap(&screen_line.text, self.width as usize)
+                wrap(&screen_line.text, self.content_width())
                     .into_iter()
                     .map(|text| ScreenLine {
                         style: screen_line.style,
@@ -1062,9 +1075,11 @@ mod tests {
         app.push_event(Event::Reasoning("because".to_owned()));
         app.push_event(Event::Text("answer here".to_owned()));
         app.push_event(Event::ToolCall {
+            description: "ls".to_owned(),
             name: "shell".to_owned(),
         });
         app.push_event(Event::ToolResult {
+            description: "ls".to_owned(),
             name: "shell".to_owned(),
             failed: false,
         });

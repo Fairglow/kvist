@@ -38,7 +38,9 @@ pub use session::{
     AgentRunner, AgentSession, Event, EventSink, MAX_TURNS, Recorder, RunSummary, ToolExecutor,
 };
 pub use session_log::{DEFAULT_LOG_DIR, SessionLog};
-pub use tools::{ExecContext, RenderedTool, StagedWrite, ToolProfile, ToolRegistry};
+pub use tools::{
+    ExecContext, RenderedTool, StagedWrite, ToolProfile, ToolRegistry, describe_tool_call,
+};
 
 /// Initializes logging for the binary.
 pub fn init_logging() {

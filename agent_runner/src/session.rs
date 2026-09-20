@@ -32,10 +32,15 @@ pub enum Event {
     Reasoning(String),
     /// A fragment of model answer text.
     Text(String),
-    /// A tool call was proposed by the model.
-    ToolCall { name: String },
+    /// A tool call was proposed by the model, with a short human description of
+    /// what it applies to (the file, directory, or command).
+    ToolCall { description: String, name: String },
     /// A tool call finished; `failed` marks a non-zero or non-exiting result.
-    ToolResult { name: String, failed: bool },
+    ToolResult {
+        description: String,
+        name: String,
+        failed: bool,
+    },
     /// The session produced a final answer.
     Finished { message: String },
     /// The session failed before producing an answer.
@@ -358,7 +363,9 @@ impl AgentRunner {
                     Ok(())
                 }
                 ModelStreamEvent::ToolIntent(intent) => {
+                    let description = crate::tools::describe_tool_call(&intent);
                     let _ = sink.send(Event::ToolCall {
+                        description,
                         name: intent.name.clone(),
                     });
                     Ok(())
@@ -411,6 +418,7 @@ impl AgentRunner {
                                 );
                             }
                             let _ = sink.send(Event::ToolResult {
+                                description: crate::tools::describe_tool_call(&intent),
                                 name: intent.name.clone(),
                                 failed: outcome.failed(),
                             });
@@ -427,6 +435,7 @@ impl AgentRunner {
                                 );
                             }
                             let _ = sink.send(Event::ToolResult {
+                                description: crate::tools::describe_tool_call(&intent),
                                 name: intent.name.clone(),
                                 failed: true,
                             });

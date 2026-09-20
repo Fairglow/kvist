@@ -406,11 +406,11 @@ fn tool_call_is_executed_and_result_is_fed_back() {
     assert!(
         events
             .iter()
-            .any(|e| matches!(e, Event::ToolCall { name } if name == "shell"))
+            .any(|e| matches!(e, Event::ToolCall { name, .. } if name == "shell"))
     );
     assert!(events.iter().any(|e| matches!(
         e,
-        Event::ToolResult { name, failed } if name == "shell" && !failed
+        Event::ToolResult { name, failed, .. } if name == "shell" && !failed
     )));
     assert_eq!(recorder.turns.load(Ordering::SeqCst), 2);
     assert_eq!(recorder.reasoning().len(), 2);
@@ -451,7 +451,7 @@ fn a_denied_shell_command_is_reported_but_not_fatal() {
     let events = sink.events();
     assert!(events.iter().any(|e| matches!(
         e,
-        Event::ToolResult { name, failed } if name == "shell" && *failed
+        Event::ToolResult { name, failed, .. } if name == "shell" && *failed
     )));
     assert!(events.iter().any(|e| matches!(e, Event::Failed(_))));
 }

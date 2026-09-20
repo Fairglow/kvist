@@ -218,8 +218,8 @@ enum Event {
     TurnStart { model: String },
     Reasoning(String),
     Text(String),
-    ToolCall { name: String },
-    ToolResult { name: String, failed: bool },
+    ToolCall { description: String, name: String },
+    ToolResult { description: String, name: String, failed: bool },
     Finished { message: String },
     Failed(String),
     Note(String),
@@ -236,6 +236,12 @@ enum Event {
     },
 }
 ```
+
+`Event::ToolCall` and `Event::ToolResult` carry both the raw `name` and a short
+human `description` of what the call applies to (the file, directory, or
+command). The description is produced by `tools::describe_tool_call`, the same
+function that builds each `RenderedTool.summary`, so the live "tool proposed"
+line matches the executed one.
 
 `Event::Progress` carries the live stats the UI shows: working speed
 (`tokens_per_sec`), context utilization and the compaction progress bar, plus

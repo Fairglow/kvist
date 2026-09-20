@@ -13,10 +13,15 @@ use serde_json::Value;
 // Re-export the policy type so consumers can refer to it as `agent_runner::tools::ToolPolicy`.
 pub use crate::config::ToolPolicy;
 
-/// The sandbox path every staged write lands under before it is moved into
-/// place. Kept hidden under the write root so it does not collide with user
-/// files and stays within the writable scope.
+/// The staging directory in the sandbox namespace, where a leading `/` is the
+/// sandbox root (the mounted write root). Kept hidden so it does not collide
+/// with user files and stays inside the writable scope.
 const STAGING_DIR: &str = "/.agent-writes";
+/// The staging directory on the host: the sandbox form [`STAGING_DIR`] with the
+/// leading slash removed, so it joins under the working directory instead of the
+/// filesystem root. `PathBuf::join` treats an absolute path as a full
+/// replacement, so the host path must stay relative.
+const HOST_STAGING_DIR: &str = ".agent-writes";
 /// The number of leading characters kept in a tool summary.
 const MAX_SUMMARY_BYTES: usize = 120;
 /// The number of leading characters kept in a path summary.
@@ -274,7 +279,7 @@ impl ToolRegistry {
                     command.clone(),
                     "agent-runner".to_owned(),
                 ],
-                summary: summarize(&command),
+                summary: describe_tool_call(intent),
                 staged_write: None,
             })
         }
@@ -290,7 +295,7 @@ impl ToolRegistry {
                 "agent-runner".to_owned(),
                 path.clone(),
             ],
-            summary: format!("read {}", summarize_path(&path)),
+            summary: describe_tool_call(intent),
             staged_write: None,
         })
     }
@@ -305,7 +310,7 @@ impl ToolRegistry {
                 "agent-runner".to_owned(),
                 path.clone(),
             ],
-            summary: format!("list {}", summarize_path(&path)),
+            summary: describe_tool_call(intent),
             staged_write: None,
         })
     }
@@ -330,7 +335,10 @@ impl ToolRegistry {
         // be written without exceeding the sandbox argv byte limit, then moved
         // into place.
         let sandbox_staging = format!("{STAGING_DIR}/{}", context.call_id);
-        let host_staging = context.workdir.join(STAGING_DIR).join(&context.call_id);
+        let host_staging = context
+            .workdir
+            .join(HOST_STAGING_DIR)
+            .join(&context.call_id);
         Ok(RenderedTool {
             argv: vec![
                 self.bash.to_string_lossy().into_owned(),
@@ -340,7 +348,7 @@ impl ToolRegistry {
                 sandbox_staging.clone(),
                 path.clone(),
             ],
-            summary: format!("write {}", summarize_path(&path)),
+            summary: describe_tool_call(intent),
             staged_write: Some(StagedWrite {
                 host_path: host_staging,
                 sandbox_path: sandbox_staging,
@@ -408,5 +416,38 @@ fn summarize(command: &str) -> String {
         "<shell command>".to_owned()
     } else {
         first
+    }
+}
+
+/// A short, human-readable description of a tool call, shown in the UI and logs.
+///
+/// This is the single source for the `RenderedTool.summary` each renderer
+/// produces (`read {path}`, `list {path}`, `write {path}`, or the shell command
+/// summary), so the live "tool proposed" line matches the executed one. It needs
+/// only the intent name and arguments, so it also works in the streaming loop
+/// before the call has been rendered and executed.
+pub fn describe_tool_call(intent: &ToolIntent) -> String {
+    match intent.name.as_str() {
+        "shell" => match string_arg(intent, "command") {
+            Ok(command) => summarize(&command),
+            Err(_) => "<shell command>".to_owned(),
+        },
+        // Path-based tools: a literal verb prefixes the target path.
+        "read_file" | "list_dir" | "write_file" => match string_arg(intent, "path") {
+            Ok(path) => {
+                let verb = match intent.name.as_str() {
+                    "read_file" => "read",
+                    "list_dir" => "list",
+                    _ => "write",
+                };
+                format!("{verb} {}", summarize_path(&path))
+            }
+            Err(_) => intent.name.clone(),
+        },
+        // Any other path-accepting tool falls back to its own name as the verb.
+        other => match string_arg(intent, "path") {
+            Ok(path) => format!("{other} {}", summarize_path(&path)),
+            Err(_) => other.to_owned(),
+        },
     }
 }
