@@ -313,4 +313,47 @@ mod tests {
             "bottom of the help is reachable:\n{text}"
         );
     }
+
+    #[test]
+    fn repro_streaming_dump() {
+        use crate::session::Event;
+
+        eprintln!("=== SCENARIO A: fragments WITHOUT newlines, width 80 ===");
+        let mut a = App::new(
+            &["local".to_owned()],
+            "local",
+            agent_runtime::ReasoningEffort::Medium,
+            None,
+            80,
+            24,
+        );
+        for frag in ["The ", "quick ", "brown ", "fox "] {
+            a.push_event(Event::Text(frag.to_owned()));
+        }
+        a.push_event(Event::Finished {
+            message: "done".to_owned(),
+        });
+        for line in &a.lines {
+            eprintln!("  A LINE[{}] {:?}", line.text.chars().count(), line.text);
+        }
+
+        eprintln!("=== SCENARIO B: each fragment has a trailing newline, width 80 ===");
+        let mut b = App::new(
+            &["local".to_owned()],
+            "local",
+            agent_runtime::ReasoningEffort::Medium,
+            None,
+            80,
+            24,
+        );
+        for frag in ["Hel\n", "lo \n", "wor\n", "ld\n"] {
+            b.push_event(Event::Text(frag.to_owned()));
+        }
+        b.push_event(Event::Finished {
+            message: "done".to_owned(),
+        });
+        for line in &b.lines {
+            eprintln!("  B LINE[{}] {:?}", line.text.chars().count(), line.text);
+        }
+    }
 }
