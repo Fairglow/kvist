@@ -115,8 +115,9 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
             Style::default().fg(Color::Cyan).bold(),
         )),
         Line::from(""),
-        Line::from("  Ctrl+Enter       submit your prompt"),
-        Line::from("  Enter            insert a newline (prompts are multiline)"),
+        Line::from("  Ctrl+Enter       submit the prompt"),
+        Line::from("  Enter            submit on a blank line, else a newline"),
+        Line::from("  Shift+Enter      always insert a blank line"),
         Line::from("  Tab / Shift+Tab  next model / next thinking effort (per prompt)"),
         Line::from("  Ctrl+P / Ctrl+N  previous / next prompt history"),
         Line::from("  Ctrl+C           cancel a running turn, or quit when idle"),
@@ -124,7 +125,7 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from("  PageUp / PageDown scroll the transcript"),
         Line::from("  Ctrl+L           clear the transcript"),
         Line::from("  Ctrl+T           collapse/reveal reasoning in the transcript"),
-        Line::from("  ? / Esc          toggle this help"),
+        Line::from("  Ctrl+H / Esc     toggle this help"),
         Line::from(""),
         Line::from("  The top bar shows model, thinking effort, and status."),
         Line::from(""),
@@ -260,8 +261,8 @@ mod tests {
             52,
         );
         app.on_key(crossterm::event::KeyEvent::new(
-            KeyCode::Char('?'),
-            crossterm::event::KeyModifiers::NONE,
+            KeyCode::Char('h'),
+            crossterm::event::KeyModifiers::CONTROL,
         ));
         assert!(app.show_help);
         let backend = draw(&app);
@@ -290,8 +291,8 @@ mod tests {
             20,
         );
         app.on_key(crossterm::event::KeyEvent::new(
-            KeyCode::Char('?'),
-            crossterm::event::KeyModifiers::NONE,
+            KeyCode::Char('h'),
+            crossterm::event::KeyModifiers::CONTROL,
         ));
         // Top of the help is visible without scrolling.
         assert!(

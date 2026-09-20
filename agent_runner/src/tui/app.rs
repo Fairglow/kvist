@@ -138,11 +138,14 @@ impl App {
         let width = width.max(20);
         let mut editor = TextArea::new(vec![String::new()]);
         editor.set_wrap_mode(tui_textarea::WrapMode::Word);
+        // The cursor line is underlined by default; disable it because the
+        // underline looks odd and is unnecessary in a short prompt box.
+        editor.set_cursor_line_style(Style::default());
         editor.set_block(
             ratatui::widgets::Block::default()
                 .borders(ratatui::widgets::Borders::ALL)
                 .title(Span::styled(
-                    " prompt · Ctrl+Enter send · Enter newline · Tab model · Shift+Tab effort · Ctrl+P/N history · ? help ",
+                    " prompt · Enter/Ctrl+Enter send · Shift+Enter · Tab model · Shift+Tab effort · Ctrl+H help ",
                     Style::default().fg(Color::DarkGray),
                 )),
         );
@@ -172,7 +175,7 @@ impl App {
         };
         app.note(
             Style::default().fg(Color::Cyan),
-            "agent-runner ready. Type a prompt and press Ctrl+Enter. Press ? for help.",
+            "agent-runner ready. Type a prompt and press Ctrl+Enter. Press Ctrl+H for help.",
         );
         app
     }
@@ -394,9 +397,25 @@ impl App {
                     KeyAction::Idle
                 }
             }
+            // Ctrl+Enter always submits. Enter submits when the cursor is on a
+            // blank line below the first (so a double-Enter sends) and otherwise
+            // inserts a newline. Shift+Enter always inserts a newline, which is
+            // the safe way to add blank lines inside a multi-line prompt.
             (KeyCode::Enter, KeyModifiers::CONTROL) => {
                 self.submit();
                 KeyAction::Submit
+            }
+            (KeyCode::Enter, KeyModifiers::SHIFT) => {
+                self.editor.input(key);
+                KeyAction::Idle
+            }
+            (KeyCode::Enter, KeyModifiers::NONE) => {
+                if self.submit_on_blank_line() {
+                    KeyAction::Submit
+                } else {
+                    self.editor.input(key);
+                    KeyAction::Idle
+                }
             }
             (KeyCode::Tab, KeyModifiers::NONE) => {
                 self.cycle_model(true);
@@ -420,7 +439,7 @@ impl App {
                 self.show_help = false;
                 KeyAction::Idle
             }
-            (KeyCode::Char('?'), _) => {
+            (KeyCode::Char('h'), KeyModifiers::CONTROL) => {
                 self.show_help = true;
                 KeyAction::Idle
             }
@@ -479,6 +498,24 @@ impl App {
             self.status = "queued".to_owned();
         }
         self.pending_prompt = Some(text);
+    }
+
+    /// Inserts a newline unless the cursor sits on a blank line below the first
+    /// line, in which case it submits the prompt and returns true. This makes a
+    /// double-Enter send while still allowing multi-line prompts to be edited.
+    fn submit_on_blank_line(&mut self) -> bool {
+        let (row, _) = self.editor.cursor();
+        let blank = self
+            .editor
+            .lines()
+            .get(row)
+            .is_none_or(|line| line.is_empty());
+        if row >= 1 && blank {
+            self.submit();
+            true
+        } else {
+            false
+        }
     }
 
     /// Takes the staged prompt out of the app state, if one is pending.
@@ -961,11 +998,12 @@ mod tests {
     }
 
     #[test]
-    fn help_overlay_toggles_with_question_and_esc() {
+    fn help_overlay_toggles_with_ctrl_h_and_esc() {
         let mut app = app();
         assert!(!app.show_help);
-        // `?` opens help (consumed, not submitted) while idle.
-        assert_eq!(app.on_key(ch(KeyCode::Char('?'))), KeyAction::Idle);
+        // Ctrl+H opens help (consumed, not submitted) while idle, so a literal
+        // `?` reaches the editor instead.
+        assert_eq!(app.on_key(ctrl(KeyCode::Char('h'))), KeyAction::Idle);
         assert!(app.show_help);
         // While help is open, `Esc` closes it and is reported as idle (not a
         // submit); typing is ignored while help is open.
@@ -1019,6 +1057,43 @@ mod tests {
         assert_eq!(app.take_pending_prompt().as_deref(), Some("first\nsecond"));
         assert!(app.lines.iter().any(|line| line.text.contains("first")));
         assert!(app.lines.iter().any(|line| line.text.contains("second")));
+    }
+
+    #[test]
+    fn enter_submits_on_a_blank_line_and_shift_enter_adds_one() {
+        let mut app = app();
+
+        // First Enter on the empty first line inserts a newline (no submit).
+        assert_eq!(app.on_key(ch(KeyCode::Enter)), KeyAction::Idle);
+        assert_eq!(editor_text(&app), "\n");
+
+        // Second Enter is on a blank line below the first: it submits, but the
+        // prompt is empty so nothing is staged.
+        assert_eq!(app.on_key(ch(KeyCode::Enter)), KeyAction::Submit);
+        assert!(app.take_pending_prompt().is_none());
+
+        // Type a prompt, then Shift+Enter inserts a blank line instead of
+        // submitting.
+        app.editor.insert_str("note");
+        assert_eq!(editor_text(&app), "\nnote");
+        assert_eq!(
+            app.on_key(key(KeyCode::Enter, KeyModifiers::SHIFT)),
+            KeyAction::Idle
+        );
+        assert!(app.take_pending_prompt().is_none());
+        assert_eq!(editor_text(&app), "\nnote\n");
+
+        // Type on the new line, then Enter on a line that already has text
+        // inserts a newline rather than submitting.
+        app.editor.insert_str("more");
+        assert_eq!(editor_text(&app), "\nnote\nmore");
+        assert_eq!(app.on_key(ch(KeyCode::Enter)), KeyAction::Idle);
+        assert!(app.take_pending_prompt().is_none());
+        assert_eq!(editor_text(&app), "\nnote\nmore\n");
+
+        // Now on a blank line below the first; Enter submits the whole prompt.
+        assert_eq!(app.on_key(ch(KeyCode::Enter)), KeyAction::Submit);
+        assert_eq!(app.take_pending_prompt().as_deref(), Some("\nnote\nmore\n"));
     }
 
     #[test]
