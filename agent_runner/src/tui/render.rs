@@ -7,8 +7,8 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::app::App;
 
-/// The number of header + input rows reserved around the transcript.
-const FRAME_ROWS: u16 = 2;
+/// Rows reserved for the multiline prompt editor around the transcript.
+const INPUT_ROWS: u16 = 4;
 
 /// Renders one frame of the application.
 pub fn render(f: &mut ratatui::Frame, app: &App) {
@@ -17,7 +17,7 @@ pub fn render(f: &mut ratatui::Frame, app: &App) {
         Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(1),
-        Constraint::Length(1),
+        Constraint::Length(INPUT_ROWS),
     ]);
     let areas = vertical.split(area);
     let mut split = areas.iter();
@@ -64,7 +64,7 @@ fn render_header(f: &mut ratatui::Frame, app: &App, area: Rect) {
     let title = format!(
         " agent-runner  ·  model: {}  ·  thinking: {}  ·  status: {}{}",
         highlight(&app.model, app.running),
-        app.effort,
+        app.effort.as_str(),
         app.status,
         running
     );
@@ -91,41 +91,51 @@ fn render_transcript(f: &mut ratatui::Frame, app: &App, area: Rect) {
 }
 
 fn render_input(f: &mut ratatui::Frame, app: &App, area: Rect) {
-    let mut spans = vec![Span::styled("› ", Style::default().fg(Color::Cyan).bold())];
-    spans.push(Span::styled(
-        app.input.clone(),
-        Style::default().fg(Color::White),
-    ));
-    let toggle = if app.can_reveal_reasoning() {
-        "Ctrl+T reveal thinking"
-    } else {
-        "Ctrl+T collapse thinking"
-    };
-    let hint = format!("  Ctrl+C cancel/quit · {toggle} · ? help · ↑/↓ history · scroll");
-    let block = Block::default()
-        .borders(Borders::TOP)
-        .title(Span::styled(hint, Style::default().fg(Color::DarkGray)));
-    let paragraph = Paragraph::new(Line::from(spans)).block(block);
-    f.render_widget(paragraph, area);
+    f.render_widget(&app.editor, area);
+    // The editor reports the terminal-relative cursor position from the most
+    // recent render; park the real terminal cursor there so typing is visible.
+    if let Some(position) = app.editor.rendered_cursor_position() {
+        f.set_cursor_position(position);
+    }
 }
 
-fn render_help(f: &mut ratatui::Frame, _app: &App, area: Rect) {
+fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let config_path = app
+        .config_path
+        .as_ref()
+        .map(|path| path.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "(none found)".to_owned());
+    let config_hint = format!(
+        "  {} models are configured; Tab / Shift+Tab switch model and effort per prompt.",
+        app.models.len()
+    );
     let lines = vec![
         Line::from(Span::styled(
             "agent-runner help",
             Style::default().fg(Color::Cyan).bold(),
         )),
         Line::from(""),
-        Line::from("  Enter            submit your prompt"),
+        Line::from("  Ctrl+Enter       submit your prompt"),
+        Line::from("  Enter            insert a newline (prompts are multiline)"),
+        Line::from("  Tab / Shift+Tab  next model / next thinking effort (per prompt)"),
+        Line::from("  Ctrl+P / Ctrl+N  previous / next prompt history"),
         Line::from("  Ctrl+C           cancel a running turn, or quit when idle"),
-        Line::from("  Ctrl+D           quit when idle"),
-        Line::from("  ↑ / ↓            previous / next prompt history"),
+        Line::from("  Ctrl+D           quit when the prompt is empty"),
         Line::from("  PageUp / PageDown scroll the transcript"),
         Line::from("  Ctrl+L           clear the transcript"),
         Line::from("  Ctrl+T           collapse/reveal reasoning in the transcript"),
         Line::from("  ? / Esc          toggle this help"),
         Line::from(""),
         Line::from("  The top bar shows model, thinking effort, and status."),
+        Line::from(""),
+        Line::from("  Configuration (add agents / models here):"),
+        Line::from(format!("    {config_path}")),
+        Line::from("    Add a [[models]] entry: id, provider (llama-server or"),
+        Line::from("    ollama), base_url, provider model name, deadline_secs."),
+        Line::from("    Reuse agents declared in Kvist's kvist.toml:"),
+        Line::from("    agent-runner --import-kvist  (prints [[models]] to paste)."),
+        Line::from(config_hint),
+        Line::from(""),
         Line::from("  The stats bar shows: working speed (tok/s), context"),
         Line::from("  utilization of the model window, and how close we are to"),
         Line::from("  an automatic compaction. A compaction 'in ...' ETA is"),
@@ -143,9 +153,18 @@ fn render_help(f: &mut ratatui::Frame, _app: &App, area: Rect) {
         " help",
         Style::default().fg(Color::Cyan).bold(),
     ));
+    // Clamp the scroll to the rendered content so a short terminal never shows
+    // a blank box: the help is taller than the transcript box, so it scrolls,
+    // but the offset must stay within the help's own lines.
+    let content_height = lines.len() as u16;
+    let inner_height = area.height.saturating_sub(2).max(1);
+    let scroll = app
+        .help_scroll
+        .min(content_height.saturating_sub(inner_height));
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
-        .alignment(Alignment::Left);
+        .alignment(Alignment::Left)
+        .scroll((scroll, 0));
     f.render_widget(paragraph, area);
 }
 
@@ -160,6 +179,137 @@ fn highlight(text: &str, active: bool) -> Span<'static> {
     )
 }
 
-// Retained to document the frame row budget; unused directly.
-#[allow(dead_code)]
-const _FRAME_ROWS: u16 = FRAME_ROWS;
+#[cfg(test)]
+mod tests {
+    use super::render;
+    use crate::tui::app::App;
+    use agent_runtime::ReasoningEffort;
+    use crossterm::event::KeyCode;
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    /// Draws one frame and returns the test backend for inspection.
+    fn draw(app: &App) -> TestBackend {
+        // Frame the app in its own reported size so tall frames actually render
+        // tall (a fixed size would ignore the app's height).
+        let backend = TestBackend::new(app.width, app.height);
+        let mut terminal = Terminal::new(backend).expect("test terminal");
+        terminal
+            .draw(|frame| render(frame, app))
+            .expect("frame draws");
+        terminal.backend().clone()
+    }
+
+    fn buffer_text(backend: &TestBackend) -> String {
+        let buffer = backend.buffer();
+        let mut out = String::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                match buffer.cell((x, y)) {
+                    Some(cell) => out.push_str(cell.symbol()),
+                    None => out.push(' '),
+                }
+            }
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn frame_shows_header_editor_text_and_parked_cursor() {
+        let mut app = App::new(
+            &["local".to_owned(), "ollama".to_owned()],
+            "local",
+            ReasoningEffort::Medium,
+            None,
+            60,
+            20,
+        );
+        app.editor.insert_str("hello world");
+        let mut backend = draw(&app);
+        let text = buffer_text(&backend);
+        // Header reports the selection; the editor shows the prompt text.
+        assert!(
+            text.contains("model: local"),
+            "header shows the model:\n{text}"
+        );
+        assert!(
+            text.contains("thinking: medium"),
+            "header shows the effort:\n{text}"
+        );
+        assert!(
+            text.contains("hello world"),
+            "editor shows the typed text:\n{text}"
+        );
+        // The terminal cursor is parked exactly where the editor says it is.
+        let expected = app
+            .editor
+            .rendered_cursor_position()
+            .expect("cursor visible after render");
+        backend.assert_cursor_position(expected);
+    }
+
+    #[test]
+    fn help_overlay_documents_configuration_and_import() {
+        let mut app = App::new(
+            &["local".to_owned()],
+            "local",
+            ReasoningEffort::Medium,
+            Some(std::path::PathBuf::from("/cfg/agent-runner.toml")),
+            60,
+            52,
+        );
+        app.on_key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('?'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        assert!(app.show_help);
+        let backend = draw(&app);
+        let text = buffer_text(&backend);
+        assert!(text.contains("Ctrl+Enter"), "help lists the send key:");
+        assert!(
+            text.contains("/cfg/agent-runner.toml"),
+            "help names the config path:"
+        );
+        assert!(
+            text.contains("--import-kvist"),
+            "help documents reusing Kvist agents:"
+        );
+    }
+
+    #[test]
+    fn help_overlay_is_scrollable_top_and_bottom() {
+        // On a short frame the help overflows the transcript box; scrolling
+        // reaches content that is not visible at scroll zero.
+        let mut app = App::new(
+            &["local".to_owned()],
+            "local",
+            ReasoningEffort::Medium,
+            Some(std::path::PathBuf::from("/cfg/agent-runner.toml")),
+            60,
+            20,
+        );
+        app.on_key(crossterm::event::KeyEvent::new(
+            KeyCode::Char('?'),
+            crossterm::event::KeyModifiers::NONE,
+        ));
+        // Top of the help is visible without scrolling.
+        assert!(
+            buffer_text(&draw(&app)).contains("agent-runner help"),
+            "top of help visible at scroll 0"
+        );
+        // Scrolling down several pages reaches the bottom of the help.
+        for _ in 0..8 {
+            app.on_key(crossterm::event::KeyEvent::new(
+                KeyCode::PageDown,
+                crossterm::event::KeyModifiers::NONE,
+            ));
+        }
+        let text = buffer_text(&draw(&app));
+        assert!(app.help_scroll > 0, "help scrolled");
+        assert!(
+            text.contains("sandbox. Writes stay inside the working directory."),
+            "bottom of the help is reachable:\n{text}"
+        );
+    }
+}

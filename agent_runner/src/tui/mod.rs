@@ -4,12 +4,15 @@ mod app;
 mod render;
 
 use std::io::IsTerminal;
+use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use agent_runtime::ReasoningEffort;
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyEventKind,
+    MouseEventKind,
 };
 use crossterm::execute;
 use crossterm::terminal::{
@@ -18,7 +21,7 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
-use self::app::App;
+use self::app::{App, KeyAction};
 use crate::config::{Config, Model};
 use crate::context::ContextManager;
 use crate::error::{Error, Result};
@@ -35,16 +38,18 @@ pub struct Overrides {
     /// The thinking effort to select for this session.
     pub effort: Option<ReasoningEffort>,
     /// The working directory to select for this session.
-    pub cwd: Option<std::path::PathBuf>,
+    pub cwd: Option<PathBuf>,
     /// The language tool profile to select for this session.
     pub profile: Option<crate::tools::ToolProfile>,
     /// Directory for the session journal + transcript. `None` means the
     /// default (`.agent-runner/runs` under the working directory).
-    pub log_dir: Option<std::path::PathBuf>,
+    pub log_dir: Option<PathBuf>,
     /// Model context window in tokens. `None` uses the default (8192).
     pub context_limit: Option<usize>,
     /// Disable durable session logging entirely.
     pub no_logs: bool,
+    /// The resolved configuration path, shown in the help overlay.
+    pub config_path: Option<PathBuf>,
 }
 
 /// Runs the interactive UI to completion and returns the process exit code.
@@ -101,71 +106,124 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
     }
     let tool_defs = registry.tool_definitions();
 
-    let executor =
-        SandboxExecutor::new(registry, config.sandbox.clone(), working_directory.clone());
+    let executor = Arc::new(SandboxExecutor::new(
+        registry,
+        config.sandbox.clone(),
+        working_directory.clone(),
+    ));
 
-    let transport = match build_transport(&model) {
-        Ok(transport) => transport,
+    let builder = SessionBuilder {
+        config: config.clone(),
+        executor,
+        tool_defs,
+        context_limit: overrides
+            .context_limit
+            .unwrap_or(crate::context::DEFAULT_CONTEXT_TOKENS),
+        log_dir: overrides.log_dir.clone(),
+        no_logs: overrides.no_logs,
+        working_directory,
+    };
+
+    let initial = match builder.start(&model, effort) {
+        Ok(worker) => worker,
         Err(error) => {
             eprintln!("{}", error.describe());
             return ExitCode::from(error.exit_code());
         }
     };
 
-    let session_label = app_model_id(&config, &model);
-    let session = AgentSession::new(
-        model,
-        effort,
-        tool_defs,
-        run::system_prompt(&config.tool_policy.write_root),
-    );
-
-    // Bound the model context via automatic compaction, and open a durable log
-    // (journal + readable transcript, including reasoning) unless disabled.
-    let context = ContextManager::new(
-        overrides
-            .context_limit
-            .unwrap_or(crate::context::DEFAULT_CONTEXT_TOKENS),
-        6,
-    );
-    let recorder = if overrides.no_logs {
-        None
-    } else {
-        let dir = overrides
-            .log_dir
-            .clone()
-            .unwrap_or_else(|| working_directory.join(crate::session_log::DEFAULT_LOG_DIR));
-        match SessionLog::open(&dir, format!("agent-runner-{}", session_label)) {
-            Ok(log) => Some(Box::new(log) as Box<dyn Recorder>),
-            Err(error) => {
-                eprintln!(
-                    "{}",
-                    Error::Io {
-                        operation: "open session log directory".to_owned(),
-                        path: Some(dir.to_string_lossy().into_owned()),
-                        source: error,
-                    }
-                    .describe()
-                );
-                None
-            }
-        }
-    };
-
-    let (handle, rx, prompt_tx) = start(session, transport, executor, context, recorder);
-
     let (width, height) = size().unwrap_or((100, 30));
-    let mut app = App::new(&app_model_label, &config.effort_label(), width, height);
-    app.handle = Some(handle);
-    app.rx = Some(rx);
-    app.prompt_tx = Some(prompt_tx);
+    let model_ids: Vec<String> = config.models.iter().map(|model| model.id.clone()).collect();
+    let app = App::new(
+        &model_ids,
+        &app_model_label,
+        effort,
+        overrides.config_path,
+        width,
+        height,
+    );
 
-    match ui_loop(app) {
+    match ui_loop(app, &builder, Some(initial)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{}", error.describe());
             ExitCode::from(error.exit_code())
         }
+    }
+}
+
+/// Builds session workers for the selected model and effort. Each worker owns
+/// its transport, conversation, context window, and durable log; switching the
+/// model or the effort starts a fresh worker (the model's conversation context
+/// restarts, which the UI announces).
+struct SessionBuilder {
+    config: Config,
+    executor: Arc<SandboxExecutor>,
+    tool_defs: Vec<agent_runtime::ToolDefinition>,
+    context_limit: usize,
+    log_dir: Option<PathBuf>,
+    no_logs: bool,
+    working_directory: PathBuf,
+}
+
+/// One live session worker: the model loop thread plus its channels.
+struct Worker {
+    handle: run::SessionHandle,
+    rx: mpsc::Receiver<crate::session::Event>,
+    prompt_tx: mpsc::Sender<String>,
+    model_id: String,
+    effort: ReasoningEffort,
+}
+
+impl SessionBuilder {
+    /// Starts a session worker for `model` with `effort`.
+    fn start(&self, model: &Model, effort: ReasoningEffort) -> Result<Worker> {
+        let transport = build_transport(model)?;
+        let session = AgentSession::new(
+            model.clone(),
+            effort,
+            self.tool_defs.clone(),
+            run::system_prompt(&self.config.tool_policy.write_root),
+        );
+        let context = ContextManager::new(self.context_limit, 6);
+        let recorder = if self.no_logs {
+            None
+        } else {
+            let dir = self.log_dir.clone().unwrap_or_else(|| {
+                self.working_directory
+                    .join(crate::session_log::DEFAULT_LOG_DIR)
+            });
+            match SessionLog::open(&dir, format!("agent-runner-{}", model.id)) {
+                Ok(log) => Some(Box::new(log) as Box<dyn Recorder>),
+                Err(error) => {
+                    // Logging is best-effort: report, then continue without it.
+                    eprintln!(
+                        "{}",
+                        Error::Io {
+                            operation: "open session log directory".to_owned(),
+                            path: Some(dir.to_string_lossy().into_owned()),
+                            source: error,
+                        }
+                        .describe()
+                    );
+                    None
+                }
+            }
+        };
+        let (handle, rx, prompt_tx) = start(
+            session,
+            transport,
+            Arc::clone(&self.executor),
+            context,
+            recorder,
+        );
+        Ok(Worker {
+            handle,
+            rx,
+            prompt_tx,
+            model_id: model.id.clone(),
+            effort,
+        })
     }
 }
 
@@ -188,25 +246,14 @@ fn build_transport(model: &Model) -> Result<agent_runtime::DirectModelTransport>
         })
 }
 
-/// Trait shim so the UI can display the current effort as a label.
-trait EffortLabel {
-    fn effort_label(&self) -> String;
-}
-
-impl EffortLabel for Config {
-    fn effort_label(&self) -> String {
-        format!("{:?}", self.default_thinking_effort)
-    }
-}
-
-fn ui_loop(mut app: App) -> Result<()> {
+fn ui_loop(mut app: App, builder: &SessionBuilder, mut worker: Option<Worker>) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run_ui(&mut terminal, &mut app);
+    let result = run_ui(&mut terminal, &mut app, builder, &mut worker);
 
     disable_raw_mode()?;
     execute!(
@@ -221,22 +268,69 @@ fn ui_loop(mut app: App) -> Result<()> {
 fn run_ui<M: std::io::Write>(
     terminal: &mut Terminal<CrosstermBackend<M>>,
     app: &mut App,
+    builder: &SessionBuilder,
+    worker: &mut Option<Worker>,
 ) -> Result<()> {
     loop {
         terminal.draw(|frame| render::render(frame, app))?;
 
         // Drain loop events without blocking.
-        if app.pump()? {
-            // nothing else to do this iteration
+        if let Some(current) = worker.as_ref() {
+            app.pump(&current.rx)?;
         }
 
         if event::poll(Duration::from_millis(150))? {
             match event::read()? {
                 CrosstermEvent::Resize(width, height) => app.resize(width, height),
                 CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
-                    app.on_key(key);
+                    match app.on_key(key) {
+                        KeyAction::Submit => {
+                            let text = app.take_pending_prompt();
+                            let changed = match worker.as_ref() {
+                                Some(current) => {
+                                    current.model_id != app.model || current.effort != app.effort
+                                }
+                                None => true,
+                            };
+                            if text.is_some() && changed {
+                                // A model or effort change applies to the next
+                                // prompt: the old worker is cancelled and
+                                // joined (dropped), then a fresh session starts.
+                                let model = builder.config.model(&app.model).ok_or_else(|| {
+                                    Error::ModelNotFound {
+                                        requested: app.model.clone(),
+                                        available: builder
+                                            .config
+                                            .models
+                                            .iter()
+                                            .map(|model| model.id.clone())
+                                            .collect(),
+                                    }
+                                })?;
+                                *worker = Some(builder.start(model, app.effort)?);
+                            }
+                            if let (Some(text), Some(current)) = (text, worker.as_ref()) {
+                                let _ = current.prompt_tx.send(text);
+                            }
+                        }
+                        KeyAction::Cancel => {
+                            if let Some(current) = worker.as_ref() {
+                                current.handle.cancel();
+                            }
+                        }
+                        KeyAction::Quit => {
+                            app.should_quit = true;
+                        }
+                        KeyAction::Idle => {}
+                    }
                 }
-                CrosstermEvent::Key(key) if key.kind == KeyEventKind::Release => {}
+                CrosstermEvent::Key(_) => {}
+                CrosstermEvent::Mouse(mouse) if mouse.kind == MouseEventKind::ScrollUp => {
+                    app.scroll_up(3);
+                }
+                CrosstermEvent::Mouse(mouse) if mouse.kind == MouseEventKind::ScrollDown => {
+                    app.scroll_down(3);
+                }
                 _ => {}
             }
         }

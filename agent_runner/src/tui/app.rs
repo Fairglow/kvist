@@ -1,12 +1,15 @@
 //! Terminal UI application state: transcript rows, selectors, input, and keys.
 
+use std::path::PathBuf;
 use std::sync::mpsc;
 
+use agent_runtime::ReasoningEffort;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::{Color, Style};
+use ratatui::text::Span;
+use tui_textarea::TextArea;
 
 use crate::error::Result;
-use crate::run::SessionHandle;
 use crate::session::Event;
 
 /// Classifies a transcript line so it can be collapsed for a cleaner overview.
@@ -30,8 +33,19 @@ pub struct ScreenLine {
 
 /// Maximum number of transcript lines retained before dropping the oldest.
 const MAX_LINES: usize = 5000;
-/// Maximum length of a single input line.
-const MAX_INPUT: usize = 4096;
+/// Maximum total characters of a single prompt before it is rejected.
+const MAX_PROMPT_CHARS: usize = 16_384;
+/// The selectable thinking effort levels, in ascending order; the UI can only
+/// present these valid choices.
+const EFFORTS: [ReasoningEffort; 7] = [
+    ReasoningEffort::None,
+    ReasoningEffort::Minimal,
+    ReasoningEffort::Low,
+    ReasoningEffort::Medium,
+    ReasoningEffort::High,
+    ReasoningEffort::Xhigh,
+    ReasoningEffort::Max,
+];
 
 /// The latest context/token accounting from the loop, driving the stats bar.
 #[derive(Debug, Clone, Copy, Default)]
@@ -57,24 +71,49 @@ pub struct Stats {
     pub elapsed_secs: f64,
 }
 
+/// What a key press asked the runner to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyAction {
+    /// Nothing beyond local UI state.
+    Idle,
+    /// A prompt was staged; the runner sends `App::take_pending_prompt()`.
+    Submit,
+    /// Cancel the running turn.
+    Cancel,
+    /// Quit the application.
+    Quit,
+}
+
 /// The interactive application state driven by events and key input.
 pub struct App {
     pub lines: Vec<ScreenLine>,
     pub scroll: u16,
-    pub input: String,
+    /// Scroll offset of the help overlay while it is shown, so the full
+    /// (taller-than-the-transcript-box) help stays reachable on short terminals.
+    pub help_scroll: u16,
+    /// The multiline prompt editor.
+    pub editor: TextArea<'static>,
     pub history: Vec<String>,
     pub history_index: Option<usize>,
+    /// The model ids selectable in this session, in configuration order.
+    pub models: Vec<String>,
+    /// The currently selected model id.
     pub model: String,
-    pub effort: String,
+    /// The currently selected thinking effort (a valid enum value).
+    pub effort: ReasoningEffort,
     pub running: bool,
     pub show_help: bool,
     pub status: String,
     pub should_quit: bool,
     pub width: u16,
     pub height: u16,
-    pub handle: Option<SessionHandle>,
-    pub rx: Option<mpsc::Receiver<Event>>,
-    pub prompt_tx: Option<mpsc::Sender<String>>,
+    /// The staged prompt awaiting dispatch, if any.
+    pending_prompt: Option<String>,
+    /// Streamed answer text not yet flushed to the transcript (incomplete
+    /// paragraphs); flushed on newlines and on any non-text event.
+    pending_text: String,
+    /// The resolved configuration path, shown in the help overlay.
+    pub config_path: Option<PathBuf>,
     /// Latest stats, when the loop has reported any.
     pub stats: Option<Stats>,
     /// Most recent `(elapsed_secs, context_tokens)` progress sample, used to
@@ -88,25 +127,44 @@ pub struct App {
 
 impl App {
     /// Creates a new application for a selected model and thinking effort.
-    pub fn new(model: &str, effort: &str, width: u16, height: u16) -> Self {
+    pub fn new(
+        models: &[String],
+        model_id: &str,
+        effort: ReasoningEffort,
+        config_path: Option<PathBuf>,
+        width: u16,
+        height: u16,
+    ) -> Self {
         let width = width.max(20);
+        let mut editor = TextArea::new(vec![String::new()]);
+        editor.set_wrap_mode(tui_textarea::WrapMode::Word);
+        editor.set_block(
+            ratatui::widgets::Block::default()
+                .borders(ratatui::widgets::Borders::ALL)
+                .title(Span::styled(
+                    " prompt · Ctrl+Enter send · Enter newline · Tab model · Shift+Tab effort · Ctrl+P/N history · ? help ",
+                    Style::default().fg(Color::DarkGray),
+                )),
+        );
         let mut app = App {
             lines: Vec::new(),
             scroll: 0,
-            input: String::new(),
+            help_scroll: 0,
+            editor,
             history: Vec::new(),
             history_index: None,
-            model: model.to_owned(),
-            effort: effort.to_owned(),
+            models: models.to_vec(),
+            model: model_id.to_owned(),
+            effort,
             running: false,
             show_help: false,
             status: "idle".to_owned(),
             should_quit: false,
             width,
             height,
-            handle: None,
-            rx: None,
-            prompt_tx: None,
+            pending_prompt: None,
+            pending_text: String::new(),
+            config_path,
             stats: None,
             last_growth: None,
             collapse_reasoning: false,
@@ -114,7 +172,7 @@ impl App {
         };
         app.note(
             Style::default().fg(Color::Cyan),
-            "agent-runner ready. Type a prompt and press Enter. Press ? for help.",
+            "agent-runner ready. Type a prompt and press Ctrl+Enter. Press ? for help.",
         );
         app
     }
@@ -123,6 +181,7 @@ impl App {
     pub fn push_event(&mut self, event: Event) {
         match event {
             Event::TurnStart { model } => {
+                self.flush_pending_text();
                 self.running = true;
                 self.status = "thinking".to_owned();
                 self.note(
@@ -131,11 +190,23 @@ impl App {
                 );
             }
             Event::Reasoning(text) => self.plain_reasoning(&text),
-            Event::Text(text) => self.note(Style::default().fg(Color::Reset), &text),
+            // Streamed answer text arrives in fragments; accumulate it and only
+            // wrap at paragraph boundaries so a sentence stays on its lines
+            // instead of one word per line.
+            Event::Text(text) => {
+                self.pending_text.push_str(&text);
+                if let Some(pos) = self.pending_text.rfind('\n') {
+                    let ready = self.pending_text[..pos].to_owned();
+                    self.pending_text = self.pending_text[pos + 1..].to_owned();
+                    self.push_wrapped(Style::default().fg(Color::Reset), &ready);
+                }
+            }
             Event::ToolCall { name } => {
+                self.flush_pending_text();
                 self.note(Style::default().fg(Color::Blue), &format!("→ tool: {name}"));
             }
             Event::ToolResult { name, failed } => {
+                self.flush_pending_text();
                 let style = if failed {
                     Style::default().fg(Color::Red)
                 } else {
@@ -144,16 +215,19 @@ impl App {
                 self.note(style, &format!("✓ tool {name} finished"));
             }
             Event::Finished { message } => {
+                self.flush_pending_text();
                 self.running = false;
                 self.status = "done".to_owned();
                 self.note(Style::default().fg(Color::Green), &format!("✓ {message}"));
             }
             Event::Failed(text) => {
+                self.flush_pending_text();
                 self.running = false;
                 self.status = "error".to_owned();
                 self.note(Style::default().fg(Color::Red), &text);
             }
             Event::Note(text) => {
+                self.flush_pending_text();
                 self.note(Style::default().fg(Color::DarkGray), &text);
             }
             Event::Progress {
@@ -252,6 +326,7 @@ impl App {
     }
 
     /// Whether any reasoning has been collapsed and can be revealed.
+    #[allow(dead_code)]
     pub fn can_reveal_reasoning(&self) -> bool {
         self.collapse_reasoning && !self.hidden_reasoning.is_empty()
     }
@@ -289,110 +364,188 @@ impl App {
         format!("{speed}{context}{compaction}{progress}")
     }
 
-    /// Processes one key event, returning whether a prompt should be submitted.
-    pub fn on_key(&mut self, key: KeyEvent) -> bool {
+    /// Processes one key event and reports what the runner should do.
+    ///
+    /// Editing keys (characters, Enter as newline, Backspace, arrows, Home/
+    /// End, Delete, word motions) are handled by the embedded multiline editor;
+    /// the control keys below are intercepted first.
+    pub fn on_key(&mut self, key: KeyEvent) -> KeyAction {
         if self.show_help {
-            let closed = self.handle_help_key(key);
-            if closed {
+            if self.handle_help_key(key) {
                 self.show_help = false;
             }
-            return closed;
+            return KeyAction::Idle;
         }
         match (key.code, key.modifiers) {
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                 if self.running {
                     self.status = "cancelling".to_owned();
-                    if let Some(handle) = &self.handle {
-                        handle.cancel();
-                    }
+                    KeyAction::Cancel
                 } else {
                     self.should_quit = true;
+                    KeyAction::Quit
                 }
-                false
             }
             (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
-                if self.input.is_empty() {
+                if self.editor.is_empty() {
                     self.should_quit = true;
+                    KeyAction::Quit
+                } else {
+                    KeyAction::Idle
                 }
-                false
+            }
+            (KeyCode::Enter, KeyModifiers::CONTROL) => {
+                self.submit();
+                KeyAction::Submit
+            }
+            (KeyCode::Tab, KeyModifiers::NONE) => {
+                self.cycle_model(true);
+                KeyAction::Idle
+            }
+            // Shift+Tab arrives as `BackTab` on most terminals (or as Tab with
+            // SHIFT on others); both cycle the thinking effort.
+            (KeyCode::BackTab, _) | (KeyCode::Tab, KeyModifiers::SHIFT) => {
+                self.cycle_effort(true);
+                KeyAction::Idle
+            }
+            (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                self.history_prev();
+                KeyAction::Idle
+            }
+            (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                self.history_next();
+                KeyAction::Idle
             }
             (KeyCode::Esc, _) => {
                 self.show_help = false;
-                false
+                KeyAction::Idle
             }
             (KeyCode::Char('?'), _) => {
                 self.show_help = true;
-                false
-            }
-            (KeyCode::Up, _) => {
-                self.scroll_back(1);
-                self.history_prev();
-                false
-            }
-            (KeyCode::Down, _) => {
-                self.scroll_forward(1);
-                self.history_next();
-                false
+                KeyAction::Idle
             }
             (KeyCode::PageUp, _) => {
                 self.scroll_back(self.visible_rows());
-                false
+                KeyAction::Idle
             }
             (KeyCode::PageDown, _) => {
                 self.scroll_forward(self.visible_rows());
-                false
+                KeyAction::Idle
             }
             (KeyCode::Char('l'), KeyModifiers::CONTROL) => {
                 self.clear_screen();
-                false
+                KeyAction::Idle
             }
             (KeyCode::Char('t'), KeyModifiers::CONTROL) => {
                 if self.running {
-                    false
+                    KeyAction::Idle
                 } else {
                     let reveal = self.collapse_reasoning && !self.hidden_reasoning.is_empty();
                     self.set_collapse_reasoning(!reveal);
-                    false
+                    KeyAction::Idle
                 }
             }
-            (KeyCode::Enter, _) => {
-                self.submit();
-                true
+            // Everything else goes to the multiline editor, which handles Enter
+            // as a newline, characters, Backspace, and cursor motions.
+            _ => {
+                self.editor.input(key);
+                KeyAction::Idle
             }
-            (KeyCode::Backspace, _) => {
-                self.input.pop();
-                self.history_index = None;
-                false
-            }
-            (KeyCode::Char(ch), _) => {
-                if self.input.len() < MAX_INPUT {
-                    self.input.push(ch);
-                    self.history_index = None;
-                }
-                false
-            }
-            _ => false,
         }
     }
 
     fn submit(&mut self) {
-        let text = std::mem::take(&mut self.input);
-        if text.is_empty() {
+        let text: String = self.editor.lines().join("\n");
+        if text.trim().is_empty() {
             return;
         }
-        if !self.running {
-            self.history.push(text.clone());
-            self.history_index = None;
+        if text.chars().count() > MAX_PROMPT_CHARS {
+            self.note(
+                Style::default().fg(Color::Yellow),
+                &format!(
+                    "prompt is longer than {MAX_PROMPT_CHARS} characters; shorten it before sending"
+                ),
+            );
+            return;
         }
+        self.history.push(text.clone());
+        self.history_index = None;
         self.note(
             Style::default().fg(Color::White).bold(),
             &format!("You: {text}"),
         );
+        self.editor.clear();
         if self.running {
             self.status = "queued".to_owned();
         }
-        if let Some(tx) = &self.prompt_tx {
-            let _ = tx.send(text);
+        self.pending_prompt = Some(text);
+    }
+
+    /// Takes the staged prompt out of the app state, if one is pending.
+    pub fn take_pending_prompt(&mut self) -> Option<String> {
+        self.pending_prompt.take()
+    }
+
+    /// Cycles the selected model to the next configured id (Tab). The change
+    /// applies to the next prompt; the runner restarts the session for it.
+    fn cycle_model(&mut self, forward: bool) {
+        if self.models.len() <= 1 {
+            return;
+        }
+        let current = self
+            .models
+            .iter()
+            .position(|id| id == &self.model)
+            .unwrap_or(0);
+        let next = if forward {
+            (current + 1) % self.models.len()
+        } else {
+            if current == 0 {
+                self.models.len() - 1
+            } else {
+                current - 1
+            }
+        };
+        self.model = self.models[next].clone();
+        self.note(
+            Style::default().fg(Color::DarkGray),
+            &format!(
+                "model → {} (applies to the next prompt; the session restarts)",
+                self.model
+            ),
+        );
+    }
+
+    /// Cycles the thinking effort through the valid enum values (Shift+Tab).
+    fn cycle_effort(&mut self, forward: bool) {
+        let current = EFFORTS
+            .iter()
+            .position(|effort| *effort == self.effort)
+            .unwrap_or(3);
+        let next = if forward {
+            (current + 1) % EFFORTS.len()
+        } else {
+            if current == 0 {
+                EFFORTS.len() - 1
+            } else {
+                current - 1
+            }
+        };
+        self.effort = EFFORTS[next];
+        self.note(
+            Style::default().fg(Color::DarkGray),
+            &format!(
+                "thinking effort → {} (applies to the next prompt; the session restarts)",
+                self.effort.as_str()
+            ),
+        );
+    }
+
+    /// Flushes accumulated streamed text into the transcript as one paragraph.
+    fn flush_pending_text(&mut self) {
+        if !self.pending_text.is_empty() {
+            let text = std::mem::take(&mut self.pending_text);
+            self.push_wrapped(Style::default().fg(Color::Reset), &text);
         }
     }
 
@@ -418,6 +571,34 @@ impl App {
             self.lines.drain(0..overflow);
             self.scroll = self.scroll.saturating_sub(overflow as u16);
         }
+    }
+
+    /// Scrolls the transcript up (toward older lines) by `amount` rows.
+    /// Scrolls up. While the help overlay is open this scrolls the help;
+    /// otherwise it scrolls the transcript.
+    pub fn scroll_up(&mut self, amount: u16) {
+        if self.show_help {
+            self.help_scroll = self.help_scroll.saturating_sub(self.help_visible_rows());
+        } else {
+            self.scroll_back(amount);
+        }
+    }
+
+    /// Scrolls down. While the help overlay is open this scrolls the help;
+    /// otherwise it scrolls the transcript.
+    pub fn scroll_down(&mut self, amount: u16) {
+        if self.show_help {
+            self.help_scroll += self.help_visible_rows();
+        } else {
+            self.scroll_forward(amount);
+        }
+    }
+
+    /// The number of help rows visible inside the transcript box, used as the
+    /// per-page help scroll step (full height minus the header, stats, input,
+    /// and the box's two borders).
+    fn help_visible_rows(&self) -> u16 {
+        self.height.saturating_sub(8).max(1)
     }
 
     fn scroll_back(&mut self, amount: u16) {
@@ -451,8 +632,8 @@ impl App {
             None => self.history.len() - 1,
         };
         self.history_index = Some(index);
-        if let Some(text) = self.history.get(index) {
-            self.input = text.clone();
+        if let Some(text) = self.history.get(index).cloned() {
+            self.restore_editor(&text);
         }
     }
 
@@ -460,25 +641,54 @@ impl App {
         match self.history_index {
             Some(i) if i + 1 < self.history.len() => {
                 self.history_index = Some(i + 1);
-                if let Some(text) = self.history.get(i + 1) {
-                    self.input = text.clone();
+                if let Some(text) = self.history.get(i + 1).cloned() {
+                    self.restore_editor(&text);
                 }
             }
             _ => {
                 self.history_index = None;
+                self.editor.clear();
             }
         }
     }
 
-    fn handle_help_key(&mut self, key: KeyEvent) -> bool {
-        matches!(key.code, KeyCode::Esc | KeyCode::Char('q'))
+    /// Replaces the editor contents with a history entry, preserving the
+    /// multiline shape.
+    fn restore_editor(&mut self, text: &str) {
+        self.editor
+            .set_lines(text.split('\n').map(str::to_owned).collect(), (0, 0));
     }
 
-    /// Drains available loop events without blocking. Returns true if any event
-    /// was processed.
-    pub fn pump(&mut self) -> Result<bool> {
+    fn handle_help_key(&mut self, key: KeyEvent) -> bool {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => true,
+            // The help is taller than the transcript box on short terminals, so
+            // PageUp/PageDown (and Ctrl+P/Ctrl+N) scroll through it.
+            KeyCode::PageDown => {
+                self.help_scroll += self.help_visible_rows();
+                false
+            }
+            KeyCode::PageUp => {
+                self.help_scroll = self.help_scroll.saturating_sub(self.help_visible_rows());
+                false
+            }
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.help_scroll += self.help_visible_rows();
+                false
+            }
+            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.help_scroll = self.help_scroll.saturating_sub(self.help_visible_rows());
+                false
+            }
+            _ => false,
+        }
+    }
+
+    /// Drains available loop events from `rx` without blocking. Returns true if
+    /// any event was processed.
+    pub fn pump(&mut self, rx: &mpsc::Receiver<Event>) -> Result<bool> {
         let mut processed = false;
-        while let Ok(event) = self.rx.as_ref().unwrap().try_recv() {
+        while let Ok(event) = rx.try_recv() {
             self.push_event(event);
             processed = true;
         }
@@ -655,9 +865,22 @@ fn bargraph(fraction: f64, width: u16) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{App, LineKind};
+    use super::{App, KeyAction, LineKind};
     use crate::session::Event;
+    use agent_runtime::ReasoningEffort;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+    fn models() -> Vec<String> {
+        vec!["local".to_owned(), "ollama".to_owned()]
+    }
+
+    fn app() -> App {
+        App::new(&models(), "local", ReasoningEffort::Medium, None, 40, 24)
+    }
+
+    fn app_at(width: u16) -> App {
+        App::new(&models(), "local", ReasoningEffort::Medium, None, width, 24)
+    }
 
     fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
         KeyEvent {
@@ -672,9 +895,17 @@ mod tests {
         key(code, KeyModifiers::NONE)
     }
 
+    fn ctrl(code: KeyCode) -> KeyEvent {
+        key(code, KeyModifiers::CONTROL)
+    }
+
+    fn editor_text(app: &App) -> String {
+        app.editor.lines().join("\n")
+    }
+
     #[test]
     fn push_event_folds_every_event_type_into_lines() {
-        let mut app = App::new("local", "medium", 40, 24);
+        let mut app = app();
         app.push_event(Event::TurnStart {
             model: "local".to_owned(),
         });
@@ -696,7 +927,7 @@ mod tests {
 
     #[test]
     fn status_transitions_follow_events() {
-        let mut app = App::new("local", "medium", 40, 24);
+        let mut app = app();
         app.push_event(Event::TurnStart {
             model: "local".to_owned(),
         });
@@ -711,7 +942,7 @@ mod tests {
 
     #[test]
     fn failed_event_sets_error_status() {
-        let mut app = App::new("local", "medium", 40, 24);
+        let mut app = app();
         app.push_event(Event::Failed("boom".to_owned()));
         assert_eq!(app.status, "error");
         assert!(!app.running);
@@ -719,7 +950,7 @@ mod tests {
 
     #[test]
     fn scroll_is_clamped_to_line_count() {
-        let mut app = App::new("local", "medium", 40, 24);
+        let mut app = app();
         for i in 0..200 {
             app.push_event(Event::Text(format!("line {i}")));
         }
@@ -731,42 +962,43 @@ mod tests {
 
     #[test]
     fn help_overlay_toggles_with_question_and_esc() {
-        let mut app = App::new("local", "medium", 40, 24);
+        let mut app = app();
         assert!(!app.show_help);
         // `?` opens help (consumed, not submitted) while idle.
-        assert!(!app.on_key(ch(KeyCode::Char('?'))));
+        assert_eq!(app.on_key(ch(KeyCode::Char('?'))), KeyAction::Idle);
         assert!(app.show_help);
-        // While help is open, `Esc` closes it and is reported as consumed (true);
-        // when idle outside help, `Esc` simply clears help and is not submitted.
-        assert!(app.on_key(key(KeyCode::Esc, KeyModifiers::NONE)));
+        // While help is open, `Esc` closes it and is reported as idle (not a
+        // submit); typing is ignored while help is open.
+        assert_eq!(app.on_key(ch(KeyCode::Esc)), KeyAction::Idle);
         assert!(!app.show_help);
     }
 
     #[test]
     fn ctrl_c_quits_when_idle_but_cancels_when_running() {
-        let mut idle = App::new("local", "medium", 40, 24);
-        assert!(!idle.on_key(key(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+        let mut idle = app();
+        assert_eq!(idle.on_key(ctrl(KeyCode::Char('c'))), KeyAction::Quit);
         assert!(idle.should_quit);
 
-        let mut running = App::new("local", "medium", 40, 24);
+        let mut running = app();
         running.running = true;
         running.status = "thinking".to_owned();
-        assert!(!running.on_key(key(KeyCode::Char('c'), KeyModifiers::CONTROL)));
+        assert_eq!(running.on_key(ctrl(KeyCode::Char('c'))), KeyAction::Cancel);
         assert_eq!(running.status, "cancelling");
         assert!(running.running);
     }
 
     #[test]
     fn empty_prompt_is_not_submitted_but_text_is() {
-        let mut app = App::new("local", "medium", 40, 24);
-        // Enter on empty input records nothing in the transcript.
-        app.on_key(ch(KeyCode::Enter));
-        assert_eq!(app.input, "");
+        let mut app = app();
+        // Ctrl+Enter on an empty editor records nothing in the transcript.
+        assert_eq!(app.on_key(ctrl(KeyCode::Enter)), KeyAction::Submit);
+        assert!(app.take_pending_prompt().is_none());
         assert!(!app.lines.iter().any(|line| line.text.contains("You:")));
 
-        // Enter with text records the prompt as a line.
-        app.input = "hello".to_owned();
-        assert!(app.on_key(ch(KeyCode::Enter)));
+        // Ctrl+Enter with text stages the prompt as a line and a pending send.
+        app.editor.insert_str("hello");
+        assert_eq!(app.on_key(ctrl(KeyCode::Enter)), KeyAction::Submit);
+        assert_eq!(app.take_pending_prompt().as_deref(), Some("hello"));
         assert!(
             app.lines
                 .iter()
@@ -775,8 +1007,124 @@ mod tests {
     }
 
     #[test]
+    fn enter_inserts_a_newline_and_ctrl_enter_sends_multiline() {
+        let mut app = app();
+        app.editor.insert_str("first");
+        app.on_key(ch(KeyCode::Enter));
+        app.editor.insert_str("second");
+        assert_eq!(editor_text(&app), "first\nsecond");
+        assert!(app.take_pending_prompt().is_none());
+
+        assert_eq!(app.on_key(ctrl(KeyCode::Enter)), KeyAction::Submit);
+        assert_eq!(app.take_pending_prompt().as_deref(), Some("first\nsecond"));
+        assert!(app.lines.iter().any(|line| line.text.contains("first")));
+        assert!(app.lines.iter().any(|line| line.text.contains("second")));
+    }
+
+    #[test]
+    fn tab_cycles_models_and_shift_tab_cycles_effort() {
+        let mut app = app();
+        assert_eq!(app.model, "local");
+        assert_eq!(app.effort, ReasoningEffort::Medium);
+
+        // Tab wraps forward through the configured models.
+        app.on_key(ch(KeyCode::Tab));
+        assert_eq!(app.model, "ollama");
+        app.on_key(ch(KeyCode::Tab));
+        assert_eq!(app.model, "local");
+
+        // Shift+Tab (reported as BackTab on most terminals) walks the effort
+        // enum in order; only valid enum values are ever selectable.
+        app.on_key(key(KeyCode::BackTab, KeyModifiers::NONE));
+        assert_eq!(app.effort, ReasoningEffort::High);
+        app.on_key(key(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert_eq!(app.effort, ReasoningEffort::Xhigh);
+        app.on_key(key(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert_eq!(app.effort, ReasoningEffort::Max);
+        app.on_key(key(KeyCode::BackTab, KeyModifiers::SHIFT));
+        assert_eq!(app.effort, ReasoningEffort::None);
+    }
+
+    #[test]
+    fn ctrl_p_and_ctrl_n_navigate_prompt_history() {
+        let mut app = app();
+        for prompt in ["alpha", "beta\ngamma", "delta"] {
+            app.editor.insert_str(prompt);
+            app.on_key(ctrl(KeyCode::Enter));
+            app.take_pending_prompt();
+        }
+        app.on_key(ctrl(KeyCode::Char('p')));
+        assert_eq!(editor_text(&app), "delta");
+        app.on_key(ctrl(KeyCode::Char('p')));
+        assert_eq!(editor_text(&app), "beta\ngamma");
+        app.on_key(ctrl(KeyCode::Char('p')));
+        assert_eq!(editor_text(&app), "alpha");
+        app.on_key(ctrl(KeyCode::Char('n')));
+        assert_eq!(editor_text(&app), "beta\ngamma");
+        app.on_key(ctrl(KeyCode::Char('n')));
+        assert_eq!(editor_text(&app), "delta");
+        app.on_key(ctrl(KeyCode::Char('n')));
+        assert_eq!(editor_text(&app), "");
+    }
+
+    #[test]
+    fn streamed_text_fragments_accumulate_into_one_line() {
+        // Regression: streamed word fragments used to become one line each.
+        let mut app = app();
+        let before = app.lines.len();
+        app.push_event(Event::Text("one ".to_owned()));
+        app.push_event(Event::Text("two ".to_owned()));
+        app.push_event(Event::Text("three".to_owned()));
+        // The fragments are still pending (no newline, no flush trigger yet),
+        // and once flushed they form a single transcript line.
+        app.flush_pending_text();
+        assert_eq!(
+            app.lines.len() - before,
+            1,
+            "the streamed sentence occupies exactly one line"
+        );
+        assert!(
+            app.lines
+                .iter()
+                .any(|line| line.text.contains("one two three"))
+        );
+    }
+
+    #[test]
+    fn text_newlines_flush_complete_paragraphs() {
+        let mut app = app();
+        let before = app.lines.len();
+        app.push_event(Event::Text("para one\npara two".to_owned()));
+        // "para one" is complete and wrapped immediately; "para two" stays
+        // pending until the next flush trigger.
+        assert!(app.lines.iter().any(|line| line.text.contains("para one")));
+        assert!(!app.lines.iter().any(|line| line.text.contains("para two")));
+        app.push_event(Event::Finished {
+            message: "done".to_owned(),
+        });
+        assert!(app.lines.iter().any(|line| line.text.contains("para two")));
+        assert!(app.lines.len() > before);
+    }
+
+    #[test]
+    fn oversized_prompt_is_rejected() {
+        let mut app = app();
+        let long = "x".repeat(super::MAX_PROMPT_CHARS + 1);
+        app.editor.insert_str(&long);
+        assert_eq!(app.on_key(ctrl(KeyCode::Enter)), KeyAction::Submit);
+        assert!(app.take_pending_prompt().is_none());
+        assert!(
+            app.lines
+                .iter()
+                .any(|line| line.text.contains("shorten it"))
+        );
+        // The editor keeps the text so the user can trim it.
+        assert_eq!(editor_text(&app), long);
+    }
+
+    #[test]
     fn collapse_then_reveal_reasoning_restores_lines() {
-        let mut app = App::new("local", "medium", 40, 24);
+        let mut app = app();
         app.push_event(Event::Reasoning("a reason".to_owned()));
         app.push_event(Event::Text("an answer".to_owned()));
         assert!(
@@ -808,10 +1156,10 @@ mod tests {
 
     #[test]
     fn stats_line_is_empty_until_progress_then_reports_values() {
-        let app = App::new("local", "medium", 40, 24);
-        assert!(app.stats_line().is_empty());
+        let idle = app();
+        assert!(idle.stats_line().is_empty());
 
-        let mut app = App::new("local", "medium", 40, 24);
+        let mut app = app();
         app.push_event(Event::Progress {
             input_tokens: 0,
             output_tokens: 0,
@@ -832,7 +1180,7 @@ mod tests {
 
     #[test]
     fn eta_is_none_without_a_prior_sample() {
-        let mut app = App::new("local", "medium", 40, 24);
+        let mut app = app();
         app.push_event(Event::Progress {
             input_tokens: 0,
             output_tokens: 0,
@@ -849,7 +1197,7 @@ mod tests {
 
     #[test]
     fn eta_estimates_time_to_limit_when_climbing_past_warmup() {
-        let mut app = App::new("local", "medium", 40, 24);
+        let mut app = app();
         // First sample: establishes the growth baseline.
         app.push_event(Event::Progress {
             input_tokens: 0,
@@ -882,7 +1230,7 @@ mod tests {
 
     #[test]
     fn eta_is_none_when_growth_is_flat() {
-        let mut app = App::new("local", "medium", 40, 24);
+        let mut app = app();
         let push = |app: &mut App, ctx: usize, elapsed: f64| {
             app.push_event(Event::Progress {
                 input_tokens: 0,
@@ -903,7 +1251,7 @@ mod tests {
 
     #[test]
     fn eta_is_none_after_a_compaction_reset() {
-        let mut app = App::new("local", "medium", 40, 24);
+        let mut app = app();
         let push = |app: &mut App, ctx: usize, elapsed: f64| {
             app.push_event(Event::Progress {
                 input_tokens: 0,
@@ -925,7 +1273,7 @@ mod tests {
 
     #[test]
     fn eta_suffix_appears_in_stats_line_only_when_climbing() {
-        let mut app = App::new("local", "medium", 60, 24);
+        let mut app = app_at(60);
         let push = |app: &mut App, ctx: usize, elapsed: f64| {
             app.push_event(Event::Progress {
                 input_tokens: 0,
@@ -967,34 +1315,19 @@ mod tests {
         // Same content at two widths: the narrower view must wrap into more
         // transcript rows. Using two independent apps avoids confounding the
         // init note and re-wrap with a resize measurement.
-        let mut wide = App::new("local", "medium", 40, 24);
-        let mut narrow = App::new("local", "medium", 20, 24);
+        let mut wide = app();
+        let mut narrow = app();
+        narrow.resize(20, 24);
         let text = "alpha beta gamma delta epsilon zeta eta theta iota kappa".to_owned();
         wide.push_event(Event::Text(text.clone()));
+        wide.flush_pending_text();
         narrow.push_event(Event::Text(text));
+        narrow.flush_pending_text();
         let wide_lines = wide.line_count();
         let narrow_lines = narrow.line_count();
         assert!(
             narrow_lines > wide_lines,
             "a narrower width should rewrap into more lines (wide={wide_lines}, narrow={narrow_lines})"
         );
-    }
-
-    #[test]
-    fn prompt_history_cycles_through_submitted_prompts() {
-        let mut app = App::new("local", "medium", 40, 24);
-        app.input = "a".to_owned();
-        app.on_key(ch(KeyCode::Enter));
-        app.input = "b".to_owned();
-        app.on_key(ch(KeyCode::Enter));
-        app.input = "c".to_owned();
-        app.on_key(ch(KeyCode::Enter));
-        // Navigate back through the history to the oldest, then forward one.
-        app.on_key(ch(KeyCode::Up));
-        app.on_key(ch(KeyCode::Up));
-        app.on_key(ch(KeyCode::Up));
-        assert_eq!(app.input, "a");
-        app.on_key(ch(KeyCode::Down));
-        assert_eq!(app.input, "b");
     }
 }

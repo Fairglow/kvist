@@ -42,6 +42,24 @@ impl ModelProvider {
             ModelProvider::Ollama => "http://127.0.0.1:11434",
         }
     }
+
+    /// Parses the kebab-case provider spelling used in configuration files.
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "llama-server" => Some(Self::LlamaServer),
+            "ollama" => Some(Self::Ollama),
+            _ => None,
+        }
+    }
+}
+
+impl FromStr for ModelProvider {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        Self::parse(value)
+            .ok_or_else(|| format!("invalid provider `{value}`; expected llama-server or ollama"))
+    }
 }
 
 /// One selectable model.

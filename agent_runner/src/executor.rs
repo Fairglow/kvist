@@ -7,6 +7,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use agent_runtime::{CancellationToken, ToolIntent};
 
@@ -42,6 +43,16 @@ impl SandboxExecutor {
     /// The enabled tool profiles.
     pub fn profiles(&self) -> Vec<&'static str> {
         self.registry.profiles()
+    }
+}
+
+impl ToolExecutor for Arc<SandboxExecutor> {
+    fn execute(
+        &self,
+        intent: &ToolIntent,
+        cancellation: &CancellationToken,
+    ) -> Result<ToolOutcome> {
+        self.as_ref().execute(intent, cancellation)
     }
 }
 

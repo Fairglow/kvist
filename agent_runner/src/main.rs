@@ -24,6 +24,12 @@ fn main() -> ExitCode {
 fn run() -> std::result::Result<ExitCode, String> {
     let cli = Cli::parse();
 
+    // Importing Kvist agent profiles is a read-only, non-interactive command
+    // that does not need an agent-runner configuration.
+    if cli.import_kvist {
+        return import_kvist(cli.kvist_config.clone());
+    }
+
     // Resolve the configuration once so both `--config` and `--list-models`
     // share the same discovery rules and error messages.
     let config_path = agent_runner::resolve_config_path(cli.config.clone())?;
@@ -54,9 +60,20 @@ fn run() -> std::result::Result<ExitCode, String> {
         log_dir: cli.log_dir.clone(),
         context_limit: cli.context_limit,
         no_logs: cli.no_logs,
+        config_path: Some(config_path.clone()),
     };
 
     Ok(tui::run(config, overrides))
+}
+
+/// Prints `[[models]]` entries derived from a Kvist project configuration so
+/// the project's agents can be reused in the agent-runner configuration.
+fn import_kvist(kvist_config: Option<std::path::PathBuf>) -> std::result::Result<ExitCode, String> {
+    let path = agent_runner::resolve_kvist_config_path(kvist_config)?;
+    let snippet = agent_runner::import_models(&path).map_err(|error| error.describe())?;
+    println!("# imported from {}", path.display());
+    print!("{snippet}");
+    Ok(ExitCode::SUCCESS)
 }
 
 fn list_models(config_path: &Path) -> std::result::Result<ExitCode, String> {

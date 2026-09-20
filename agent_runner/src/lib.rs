@@ -10,6 +10,7 @@
 #![forbid(unsafe_code)]
 
 mod cli;
+mod kvist_import;
 mod logging;
 mod run;
 
@@ -30,6 +31,7 @@ pub use context::{
 };
 pub use error::{Error, Result};
 pub use executor::SandboxExecutor;
+pub use kvist_import::{KVIST_CONFIG_FILE, import_models, resolve_kvist_config_path};
 pub use run::system_prompt;
 pub use sandbox::ToolOutcome;
 pub use session::{

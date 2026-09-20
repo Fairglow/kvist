@@ -14,6 +14,9 @@ kvist.toml
 /*.log
 /_*.md
 
+# Ignore agent-runner runtime data (session journals + transcripts)
+.agent-runner/
+
 # Ignore Gemini CLI deps
 /node_modules
 /package-lock.json
