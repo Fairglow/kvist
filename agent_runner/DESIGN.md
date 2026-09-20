@@ -152,10 +152,12 @@ root) and one read-only `context` grant per declared read root. No scratch
 grant is declared: the runner already mounts a private `/tmp` tmpfs in every
 sandbox, so that area serves as scratch and `HOME` points at `/tmp` (a dangling
 `HOME` would break tools that write home-relative state). Destinations are
-disjoint, so the runner's overlap check passes; writable sources contain no
-symlinks, so the writable-scope check passes. If the working directory
-contains symlinks in its writable scope the build fails closed with an
-actionable message.
+disjoint, so the runner's overlap check passes; the writable-scope check
+rejects only symlinks whose resolved target escapes the working directory
+(symlinks that stay inside the scope are allowed), so the build succeeds for
+real projects that ship in-project links. If the working directory contains a
+symlink that could write outside the scope the build fails closed with an
+actionable message naming the link and its target.
 
 Network is `Deny` and no Cargo cache is declared, which is what the `Authoring`
 phase requires. Resources are bounded well below the runner's maxima.
@@ -204,7 +206,8 @@ trust. No speculative or misleading number is ever shown.
   `/workspace`.
 - A shell command matching the denylist is rejected before the sandbox.
 - A missing runner/backend path fails the session, not the host.
-- A request whose working directory contains symlinks fails the sandbox build.
+- A request whose working directory contains a symlink that escapes the writable
+  scope fails the sandbox build (in-project links that stay inside are allowed).
 - Cancellation during a turn reports `cancelled` and stops the loop.
 - Oversized output is truncated and reported, not buffered unbounded.
 - Config with wrong `schema_version` or unknown model selector fails to load.

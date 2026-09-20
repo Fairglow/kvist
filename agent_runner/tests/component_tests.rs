@@ -496,25 +496,61 @@ fn build_request_produces_a_closed_authoring_request() {
 }
 
 #[test]
-fn build_request_rejects_symlinked_writable_scope() {
+fn build_request_rejects_symlink_that_escapes_writable_scope() {
+    // The scope is symlink-free only in the sense that no link may escape it: a
+    // link whose resolved target lies outside the working directory could write
+    // through and leave the sandbox, so the build fails closed up front and names
+    // both the offending link and the target it points at. This holds at any
+    // depth, including the depth-two links real projects ship (Node's `.bin`).
+    let scope = tempdir().expect("temp scope");
+    let sb = fake_sandbox(&scope);
+    let workdir = tempdir().expect("temp workdir");
+    let nested = workdir.path().join("sub");
+    std::fs::create_dir_all(&nested).expect("nested dir");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(std::path::Path::new("/etc"), nested.join("escape"))
+        .expect("create out-of-scope symlink");
+    let argv = shell_argv();
+    let read_roots: Vec<PathBuf> = Vec::new();
+    let environment: BTreeMap<String, String> = BTreeMap::new();
+    let policy = ToolPolicy::minimum();
+    let err = sandbox::build_request(
+        &sb,
+        &build(&argv, workdir.path(), &read_roots, environment, &policy),
+    )
+    .expect_err("a scope-escaping symlink must fail the build");
+    assert_sandbox_build_reason(&err, "escape");
+    assert_sandbox_build_reason(&err, "escapes the writable scope");
+}
+
+#[test]
+fn build_request_allows_symlinks_that_stay_in_writable_scope() {
+    // In-project links (Node's `.bin`, aliases) are common and safe: a link that
+    // resolves inside the scope cannot write through and leave it, so the build
+    // succeeds whether the link is immediate or nested.
     let scope = tempdir().expect("temp scope");
     let sb = fake_sandbox(&scope);
     let workdir = tempdir().expect("temp workdir");
     let target = workdir.path().join("real.txt");
     std::fs::write(&target, b"data").expect("write target");
+    let nested = workdir.path().join("sub");
+    std::fs::create_dir_all(&nested).expect("nested dir");
     #[cfg(unix)]
-    std::os::unix::fs::symlink(&target, workdir.path().join("link.txt")).expect("create symlink");
-    let argv: Vec<String> = Vec::new();
+    {
+        std::os::unix::fs::symlink(&target, workdir.path().join("link.txt"))
+            .expect("create immediate in-scope symlink");
+        std::os::unix::fs::symlink(&target, nested.join("nested-link"))
+            .expect("create nested in-scope symlink");
+    }
+    let argv = shell_argv();
     let read_roots: Vec<PathBuf> = Vec::new();
     let environment: BTreeMap<String, String> = BTreeMap::new();
     let policy = ToolPolicy::minimum();
-    assert!(matches!(
-        sandbox::build_request(
-            &sb,
-            &build(&argv, workdir.path(), &read_roots, environment, &policy)
-        ),
-        Err(Error::SandboxBuild { .. })
-    ));
+    sandbox::build_request(
+        &sb,
+        &build(&argv, workdir.path(), &read_roots, environment, &policy),
+    )
+    .expect("in-scope symlinks must be allowed");
 }
 
 #[test]

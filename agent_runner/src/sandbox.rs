@@ -346,39 +346,123 @@ fn build_context_grant(root: &Path, index: usize) -> Option<GrantWire> {
 }
 
 fn check_writable_scope(workdir: &Path) -> Result<()> {
-    let metadata = std::fs::symlink_metadata(workdir).map_err(|source| {
-        io_error(
-            "inspect working directory scope for the sandbox",
-            Some(&workdir.to_string_lossy()),
-            source,
-        )
-    })?;
-    if metadata.file_type().is_symlink() {
-        return Err(Error::SandboxBuild {
-            reason: format!(
-                "working directory `{}` is a symbolic link",
-                workdir.display()
-            ),
-        });
-    }
-    if let Ok(entries) = std::fs::read_dir(workdir) {
+    // `workdir` is canonical in the caller, so it is a real directory: the scope
+    // root. The sandbox bind-mounts it read-write, so every symlink inside it is
+    // live to the sandboxed process. The escape risk is a symlink whose resolved
+    // target lies OUTSIDE the scope -- following it for writing leaves the write
+    // root. Symlinks that stay inside the scope are common (Node's `.bin` links,
+    // in-project aliases) and safe, so they are allowed; only scope-escaping links
+    // fail the build, named with the target they point at.
+    let mut stack: Vec<PathBuf> = vec![workdir.to_path_buf()];
+    let mut visited: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
+    while let Some(dir) = stack.pop() {
+        if !visited.insert(dir.clone()) {
+            continue;
+        }
+        let entries = std::fs::read_dir(&dir).map_err(|source| {
+            io_error(
+                "inspect working directory scope for the sandbox",
+                Some(&dir.display().to_string()),
+                source,
+            )
+        })?;
         for entry in entries.flatten() {
-            if entry
-                .file_type()
-                .map(|type_| type_.is_symlink())
-                .unwrap_or(false)
-            {
+            let path = entry.path();
+            let file_type = entry.file_type().map_err(|source| {
+                io_error(
+                    "inspect working directory scope for the sandbox",
+                    Some(&path.display().to_string()),
+                    source,
+                )
+            })?;
+            if file_type.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            if !file_type.is_symlink() {
+                continue;
+            }
+            let target = std::fs::read_link(&path).unwrap_or_default();
+            let resolved = resolve_link_target(&target, &path);
+            if target_escapes_scope(&resolved, workdir) {
                 return Err(Error::SandboxBuild {
                     reason: format!(
-                        "working directory `{}` contains a symbolic link in its writable scope; \
-                         run in a symlink-free directory or narrow the working directory",
-                        workdir.display()
+                        "working directory `{}` contains a symbolic link `{}` pointing at
+                         `{}` which escapes the writable scope `{}`; a write through such a
+                         link could leave the scope, so remove the link, move its target
+                         inside the working directory, or narrow the working directory",
+                        workdir.display(),
+                        path.display(),
+                        target.to_string_lossy(),
+                        workdir.display(),
                     ),
                 });
+            }
+            // In-scope link is allowed, but if it points at a directory keep
+            // walking its canonical target so links reachable through it are still
+            // checked -- without ever following the link at sandbox runtime.
+            if let Ok(canonical) = std::fs::canonicalize(&path)
+                && canonical.starts_with(workdir)
+                && canonical.is_dir()
+            {
+                stack.push(canonical);
             }
         }
     }
     Ok(())
+}
+
+/// Join a link target onto the directory that holds it: absolute targets are
+/// returned unchanged, relative targets resolve against the link's own
+/// directory (matching how the kernel resolves the link).
+fn resolve_link_target(target: &Path, link_path: &Path) -> PathBuf {
+    if target.is_absolute() {
+        target.to_path_buf()
+    } else {
+        link_path
+            .parent()
+            .map(|parent| parent.join(target))
+            .unwrap_or_else(|| target.to_path_buf())
+    }
+}
+
+/// Whether `candidate` resolves to a location outside `scope_root`. Symlinks in
+/// the path are resolved when they exist; a dangling candidate is normalized
+/// lexically, and one that cannot be proven inside the scope is treated as an
+/// escape (fail safe).
+fn target_escapes_scope(candidate: &Path, scope_root: &Path) -> bool {
+    match std::fs::canonicalize(candidate) {
+        Ok(resolved) => !resolved.starts_with(scope_root),
+        Err(_) => lexical_escapes(candidate, scope_root),
+    }
+}
+
+fn lexical_escapes(candidate: &Path, scope_root: &Path) -> bool {
+    !lexical_normalizes_inside(candidate, scope_root)
+}
+
+/// Lexically resolve `candidate` against `scope_root` without touching the
+/// filesystem, for symlink targets that cannot be canonicalized (dangling or
+/// looping). Returns whether the result stays inside the scope.
+fn lexical_normalizes_inside(candidate: &Path, scope_root: &Path) -> bool {
+    let mut resolved: PathBuf = PathBuf::from(scope_root);
+    for component in candidate.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !resolved.pop() {
+                    return false;
+                }
+            }
+            std::path::Component::RootDir => {
+                resolved.clear();
+                resolved.push(std::path::Component::RootDir);
+            }
+            std::path::Component::Prefix(_) => return false,
+            std::path::Component::Normal(part) => resolved.push(part),
+        }
+    }
+    resolved.starts_with(scope_root)
 }
 
 fn filter_environment(provided: &BTreeMap<String, String>) -> BTreeMap<String, String> {

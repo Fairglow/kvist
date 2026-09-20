@@ -129,8 +129,14 @@ argv and passes it here. It:
   identity equals `identities.toolchain`,
 - computes `identities.{runner,policy,toolchain,command,mount_plan}` as
   `sha256:` digests, and
-- returns `Err` if the working directory does not exist, contains symlinks in
-  its writable scope, or a read root overlaps the write root.
+- returns `Err` if the working directory does not exist, contains a symbolic
+  link whose resolved target escapes the writable scope (following such a link
+  for writing could leave the sandbox), or a read root overlaps the write root.
+  Symlinks that stay inside the scope are allowed -- Node's `.bin` links and
+  in-project aliases are common and cannot escape -- so real projects work
+  unchanged. The escaping link and the path it points at are named in the error
+  so the cause is actionable. The check is recursive and de-duplicated, and the
+  runner re-validates the immediate scope as a second line.
 
 ### `execute` (sandbox executor)
 
@@ -377,8 +383,9 @@ and the runner's closed version-one protocol. Guarantees:
 - The working directory is absolute and canonical.
 - Exactly one read-write `authoring` grant (working directory → sandbox write
   root) and zero or more read-only `context` grants, with disjoint
-  destinations and no symlinked writable sources; the environment sets
-  `HOME=/tmp`, the runner's private tmpfs scratch area.
+  destinations and only in-scope writable sources (a writable symlink whose
+  resolved target escapes the scope is rejected, not declared); the environment
+  sets `HOME=/tmp`, the runner's private tmpfs scratch area.
 - `resources` are nonzero and within the runner's safe maxima.
 - Every identity is a `sha256:` digest; `identities.toolchain` equals the
   toolchain block identity.
