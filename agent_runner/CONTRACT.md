@@ -90,7 +90,11 @@ Result<RenderedTool>` — maps a model tool intent to an argv to execute inside
 - `StagedWrite { host_path: PathBuf, sandbox_path: String, target: String }` —
   stages `write_file` content on the host inside the working directory before the
   rendered `mv` moves it into place, so large files can be written without
-  exceeding the sandbox argv byte limit.
+  exceeding the sandbox argv byte limit. `sandbox_path` is the staged file's path
+  inside the sandbox; it is anchored under the configured `write_root` (where the
+  host working directory is bind-mounted read-write), never at the sandbox
+  filesystem root, so the `mv` locates the staged file for any configured root.
+  `host_path` is the equivalent path under the host working directory.
 - `ToolProfile` (ids `generic`, `rust`, `python`) surfaces the relevant package
   and build tools for each language; the generic profile is always present.
 

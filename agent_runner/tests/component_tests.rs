@@ -293,9 +293,10 @@ fn write_file_stages_under_the_working_directory_not_the_root() {
         staged.host_path.starts_with("/tmp/work"),
         "host path is scoped to the workdir, not the filesystem root"
     );
-    // The sandbox form keeps its leading slash; inside the sandbox root it is
-    // still under the writable scope.
-    assert_eq!(staged.sandbox_path, "/.agent-writes/call-1");
+    // The sandbox staging path is anchored under the configured write root
+    // (/workspace by default), so it resolves inside the bind-mounted write scope
+    // rather than at the sandbox filesystem root.
+    assert_eq!(staged.sandbox_path, "/workspace/.agent-writes/call-1");
 }
 
 #[test]

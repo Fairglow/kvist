@@ -13,14 +13,10 @@ use serde_json::Value;
 // Re-export the policy type so consumers can refer to it as `agent_runner::tools::ToolPolicy`.
 pub use crate::config::ToolPolicy;
 
-/// The staging directory in the sandbox namespace, where a leading `/` is the
-/// sandbox root (the mounted write root). Kept hidden so it does not collide
-/// with user files and stays inside the writable scope.
-const STAGING_DIR: &str = "/.agent-writes";
-/// The staging directory on the host: the sandbox form [`STAGING_DIR`] with the
-/// leading slash removed, so it joins under the working directory instead of the
-/// filesystem root. `PathBuf::join` treats an absolute path as a full
-/// replacement, so the host path must stay relative.
+/// The staging directory tail shared by the host and sandbox staging paths.
+/// On the host it joins under the working directory; in the sandbox it joins
+/// under the configured write root. Kept hidden so it does not collide with
+/// user files and stays inside the writable scope.
 const HOST_STAGING_DIR: &str = ".agent-writes";
 /// The number of leading characters kept in a tool summary.
 const MAX_SUMMARY_BYTES: usize = 120;
@@ -341,7 +337,11 @@ impl ToolRegistry {
         // read-write as the sandbox write root) so arbitrarily large files can
         // be written without exceeding the sandbox argv byte limit, then moved
         // into place.
-        let sandbox_staging = format!("{STAGING_DIR}/{}", context.call_id);
+        // The sandbox staging path is anchored under the configured write root
+        // (the bind-mounted write scope), not the sandbox filesystem root, so the
+        // in-sandbox `mv` locates the staged file regardless of the configured root.
+        let root = self.policy.write_root.trim_end_matches('/');
+        let sandbox_staging = format!("{root}/{}/{}", HOST_STAGING_DIR, context.call_id);
         let host_staging = context
             .workdir
             .join(HOST_STAGING_DIR)

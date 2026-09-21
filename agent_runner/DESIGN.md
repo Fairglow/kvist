@@ -114,10 +114,11 @@ happens on our argv.
 "<sandbox-staging>", "<path>"]` moves it into place inside the sandbox. Staging
   lets arbitrarily large files be written without exceeding the sandbox argv byte
   limit; the staged file already lives under the read-write write root, so the
-  move stays inside the writable scope. The host staging path is the sandbox
-  staging path without its leading slash, so it stays relative and joins under
-  the working directory instead of the filesystem root (`PathBuf::join` treats an
-  absolute path as a full replacement).
+  move stays inside the writable scope. Both staging paths share the same
+  `.agent-writes/<call_id>` tail: the host staging path joins under the working
+  directory (`PathBuf::join` keeps it relative), and the sandbox staging path
+  joins under the configured `write_root`, so the in-sandbox `mv` finds the file
+  regardless of the configured root (`write_root` is not assumed to be `/`).
 - `list_dir { path }` → `["<bash>", "-c", "exec ls -la -- \"$1\"",
 "agent-runner", "<path>"]`.
 
