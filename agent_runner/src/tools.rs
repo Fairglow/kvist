@@ -119,12 +119,17 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
-    /// Builds a registry with the built-in minimal (generic) profile set.
+    /// Builds a registry advertising the built-in generic Linux tooling plus the
+    /// Rust/Cargo toolchain. Building and testing the project are essential
+    /// agent capabilities, so the Rust toolchain is advertised by default; the
+    /// sandbox enforces exactly a `System` and a `Cargo` toolchain, so these are
+    /// the honest defaults. Language profiles can still be narrowed with
+    /// [`ToolRegistry::with_profiles`].
     pub fn new(policy: ToolPolicy) -> Self {
         ToolRegistry {
             bash: PathBuf::from("/usr/bin/bash"),
             policy,
-            profiles: vec![ToolProfile::Generic],
+            profiles: vec![ToolProfile::Generic, ToolProfile::Rust],
         }
     }
 
@@ -449,5 +454,49 @@ pub fn describe_tool_call(intent: &ToolIntent) -> String {
             Ok(path) => format!("{other} {}", summarize_path(&path)),
             Err(_) => other.to_owned(),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Building and testing the project are essential, so the default registry
+    /// must advertise both the generic Linux tools and the Rust/Cargo toolchain;
+    /// otherwise an agent reasonably concludes it has no compiler and declines.
+    #[test]
+    fn default_registry_advertises_generic_and_rust_toolchains() {
+        let registry = ToolRegistry::new(ToolPolicy::minimum());
+        let advertised = registry.profiles();
+        assert!(
+            advertised.contains(&"generic"),
+            "expected generic tooling, got {advertised:?}"
+        );
+        assert!(
+            advertised.contains(&"rust"),
+            "expected the Rust toolchain to be advertised by default, got {advertised:?}"
+        );
+    }
+
+    #[test]
+    fn shell_tool_description_names_the_rust_toolchain() {
+        let registry = ToolRegistry::new(ToolPolicy::minimum());
+        let shell = registry
+            .tool_definitions()
+            .into_iter()
+            .find(|d| d.name == "shell")
+            .expect("the shell tool is always available");
+        let description = shell.description.to_string();
+        assert!(
+            description.to_lowercase().contains("cargo"),
+            "the shell tool must advertise the Rust toolchain it can build with: {description}"
+        );
+    }
+
+    #[test]
+    fn explicit_profile_replaces_the_default_set() {
+        let registry =
+            ToolRegistry::new(ToolPolicy::minimum()).with_profiles(vec![ToolProfile::Python]);
+        assert_eq!(registry.profiles(), vec!["python"]);
     }
 }
