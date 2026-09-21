@@ -1,4 +1,4 @@
-<!-- agent-runner-requirements-version: 1 -->
+<!-- agent-runner-requirements-version: 2 -->
 
 # Agent Runner — Requirements
 
@@ -86,6 +86,15 @@ Successful use produces:
 - Invalid state MUST be modeled out of existence with types. Recoverable
   failures (filesystem, parsing, subprocess, model transport) MUST use
   explicit errors, never unwrap/expect/panic.
+- A turn that fails on a temporal, recoverable model-transport error (a dropped
+  connection, a provider timeout, or a transient server error) MUST be retried
+  with backoff and recover when a fresh attempt can finish. Each retry is
+  granted a larger time budget than the last — the per-turn deadline grows with
+  the attempt number and is capped at the base deadline times the attempt
+  budget — so a turn that merely ran past one deadline can complete once an
+  attempt has room for the whole generation rather than timing out identically
+  on every identical try. Cancellation is never retried, and a failure that
+  exhausts the budget is reported, not hidden.
 - Shared mutable state, blocking I/O in async paths, and background processes
   MUST NOT be introduced without a documented boundary and targeted tests.
 - Filesystem data, configuration, YAML/TOML, subprocess output, environment
@@ -114,3 +123,7 @@ Successful use produces:
   the model and effort, and Ctrl+C cancels a running turn cleanly.
 - Every behavior above is covered by an automated test with an injected
   transport or a captured sandbox request.
+- A turn that fails a temporal model-transport error at least once is retried
+  with backoff and completes when a later attempt finishes; each retry reports
+  that it is in progress with its enlarged budget, and a failure that exhausts
+  the retry budget is reported as a terminal failure without crashing.

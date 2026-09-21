@@ -26,6 +26,7 @@ use crate::config::{Config, Model};
 use crate::context::ContextManager;
 use crate::error::{Error, Result};
 use crate::executor::SandboxExecutor;
+use crate::retry::RetryPolicy;
 use crate::run::{self, start};
 use crate::session::{AgentSession, Recorder};
 use crate::session_log::SessionLog;
@@ -179,6 +180,13 @@ impl SessionBuilder {
     /// Starts a session worker for `model` with `effort`.
     fn start(&self, model: &Model, effort: ReasoningEffort) -> Result<Worker> {
         let transport = build_transport(model)?;
+        // Derive the retry policy from the model's own settings so a turn that
+        // is generation-bound recovers from transient failures with back-off.
+        let retry = RetryPolicy::new(
+            model.max_attempts,
+            Duration::from_secs(model.retry_base_delay_secs),
+            Duration::from_secs(model.retry_max_delay_secs),
+        );
         let session = AgentSession::new(
             model.clone(),
             effort,
@@ -216,6 +224,7 @@ impl SessionBuilder {
             Arc::clone(&self.executor),
             context,
             recorder,
+            retry,
         );
         Ok(Worker {
             handle,
@@ -239,11 +248,24 @@ fn app_model_id(config: &Config, model: &Model) -> String {
 fn build_transport(model: &Model) -> Result<agent_runtime::DirectModelTransport> {
     let provider = model.provider.to_agent_provider();
     let deadline = Duration::from_secs(model.deadline_secs.max(1));
-    agent_runtime::DirectModelTransport::new(provider, &model.base_url, deadline, 8 * 1024 * 1024)
-        .map_err(|error| Error::ModelTransport {
-            model: Some(model.id.clone()),
-            reason: error.to_string(),
-        })
+    let mut transport = agent_runtime::DirectModelTransport::new(
+        provider,
+        &model.base_url,
+        deadline,
+        8 * 1024 * 1024,
+    )
+    .map_err(|error| Error::ModelTransport {
+        model: Some(model.id.clone()),
+        reason: error.to_string(),
+    })?;
+    // A generous per-turn deadline is safe to relax because the inter-token
+    // cadence watchdog bounds a stalled provider: if no token arrives within
+    // `cadence_timeout_secs` after the first token, the turn is retried instead
+    // of hanging until the (long) deadline. `0` disables the watchdog.
+    if model.cadence_timeout_secs > 0 {
+        transport = transport.with_cadence_timeout(Duration::from_secs(model.cadence_timeout_secs));
+    }
+    Ok(transport)
 }
 
 fn ui_loop(mut app: App, builder: &SessionBuilder, mut worker: Option<Worker>) -> Result<()> {

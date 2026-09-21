@@ -857,6 +857,59 @@ fn deadline_interrupts_a_stalled_provider() {
 }
 
 #[test]
+fn stream_with_deadline_applies_the_override_not_the_base() {
+    // A caller-supplied deadline overrides the transport's configured one, so a
+    // retrying loop can grant an attempt more time without changing the
+    // transport's deadline. The configured deadline and watchdogs are set long
+    // here so only the short override can stop the stalled turn, proving the
+    // override is honored rather than the configured deadline.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider");
+    let endpoint = format!(
+        "http://{}",
+        listener.local_addr().expect("fake provider address")
+    );
+    thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept request");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set read timeout");
+        let mut request = [0_u8; 8192];
+        let _ = stream.read(&mut request).expect("read request");
+        // Hang without responding; only the override deadline can end the turn.
+        thread::sleep(Duration::from_secs(30));
+    });
+
+    let transport = DirectModelTransport::new(
+        LocalModelProvider::Ollama,
+        &endpoint,
+        Duration::from_secs(30),
+        1024,
+    )
+    .expect("transport")
+    .with_slot_timeout(Duration::from_secs(60))
+    .with_ttft_timeout(Duration::from_secs(60));
+
+    let start = Instant::now();
+    let error = transport
+        .stream_with_deadline(
+            &request(ToolChoice::Auto),
+            &CancellationToken::new(),
+            &mut |_| Ok(()),
+            Duration::from_millis(150),
+        )
+        .expect_err("the override deadline aborts the stalled turn");
+    assert!(
+        error.to_string().contains("timed out"),
+        "unexpected error: {error:?}"
+    );
+    // It must stop near the 150ms override, not after the 30s configured deadline.
+    assert!(
+        start.elapsed() < Duration::from_secs(5),
+        "the override deadline was not honored"
+    );
+}
+
+#[test]
 fn close_delimited_body_is_bounded_before_stream_events() {
     let record = "data: {\"model\":\"server-model\",\"choices\":[{\"delta\":{\"content\":\"must-not-emit\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
     let response = format!(

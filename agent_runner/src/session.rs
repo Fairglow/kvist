@@ -6,7 +6,7 @@
 //! [`EventSink`]. Nothing here performs blocking subprocess I/O directly; the
 //! executor is injected so the loop is unit-testable with fakes.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use agent_runtime::{
     CancellationToken, ModelMessage, ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn,
@@ -16,12 +16,64 @@ use agent_runtime::{
 use crate::config::Model;
 use crate::context::ContextManager;
 use crate::error::Result;
+use crate::retry::RetryPolicy;
 use crate::sandbox::ToolOutcome;
 
 /// The maximum number of model turns in one session before the loop stops.
 pub const MAX_TURNS: u32 = 50;
 /// The maximum bytes of a tool result folded back to the model.
 pub const MAX_TOOL_RESULT_BYTES: usize = 64 * 1024;
+
+/// Minimum gap between live progress updates emitted while a turn streams, so
+/// the stats bar tracks progress without flooding the sink on every token.
+const LIVE_PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
+
+/// Read-only, turn-scoped state the streaming loop uses to emit live progress.
+///
+/// The provider's token usage is not known until the turn ends, so the running
+/// output estimate is derived from the characters streamed so far; the context
+/// figures come from the session's live context, which does not change mid-turn.
+struct LiveProgress<'a> {
+    session: &'a AgentSession,
+    context: &'a ContextManager,
+    tool_defs: usize,
+    started_at: Instant,
+    cumulative_total: u64,
+}
+
+/// Emits a single live progress update while a turn streams, so the stats bar
+/// shows working speed, context, and elapsed time as the model generates rather
+/// than only after the turn completes. Best-effort: a closed sink only means the
+/// UI is gone. The running output is estimated from streamed characters because
+/// the provider reports usage only when the turn ends.
+fn emit_live_progress<S: EventSink>(
+    sink: &S,
+    progress: &LiveProgress,
+    output_chars: u64,
+    at: Instant,
+) -> Result<()> {
+    let output_tokens = output_chars.div_ceil(4);
+    let elapsed = at
+        .saturating_duration_since(progress.started_at)
+        .as_secs_f64()
+        .max(1e-9);
+    let total_tokens = progress.cumulative_total.saturating_add(output_tokens);
+    sink.send(Event::Progress {
+        input_tokens: progress.cumulative_total,
+        output_tokens,
+        context_tokens: progress.session.estimate_context_tokens(progress.tool_defs),
+        context_limit: progress.context.limit_tokens(),
+        context_utilization: progress
+            .session
+            .utilization(progress.context, progress.tool_defs),
+        compaction_progress: progress
+            .session
+            .compaction_progress(progress.context, progress.tool_defs),
+        tokens_per_sec: total_tokens as f64 / elapsed,
+        total_tokens,
+        elapsed_secs: elapsed,
+    })
+}
 
 /// A progress event emitted while a session runs.
 #[derive(Debug, Clone)]
@@ -284,13 +336,23 @@ fn finish_reason_str(reason: &agent_runtime::FinishReason) -> &str {
 /// The multi-turn loop driver.
 pub struct AgentRunner {
     pub max_turns: u32,
+    /// How to retry a turn that ends in a transient, recoverable failure.
+    pub retry: RetryPolicy,
 }
 
 impl Default for AgentRunner {
     fn default() -> Self {
         AgentRunner {
             max_turns: MAX_TURNS,
+            retry: RetryPolicy::default(),
         }
+    }
+}
+
+impl AgentRunner {
+    /// Creates a loop driver with an explicit retry policy.
+    pub fn with_retry(max_turns: u32, retry: RetryPolicy) -> Self {
+        AgentRunner { max_turns, retry }
     }
 }
 
@@ -344,39 +406,33 @@ impl AgentRunner {
                 model: session.model_selector().to_owned(),
             })?;
 
-            // Stream the turn, forwarding text/reasoning to the UI and recording
-            // each tool intent the model proposes so the UI can show it live.
-            // The callback must return `agent_runtime::Result`, so forwarding to
-            // the sink is best-effort: a closed channel only means the UI is gone,
-            // which the loop surfaces on the next turn's own `sink.send`.
-            let result = transport.stream(&request, cancellation, &mut |event| match event {
-                ModelStreamEvent::TextDelta(delta) => {
-                    if !delta.is_empty() {
-                        let _ = sink.send(Event::Text(delta));
-                    }
-                    Ok(())
-                }
-                ModelStreamEvent::ReasoningDelta(delta) => {
-                    if !delta.is_empty() {
-                        let _ = sink.send(Event::Reasoning(delta));
-                    }
-                    Ok(())
-                }
-                ModelStreamEvent::ToolIntent(intent) => {
-                    let description = crate::tools::describe_tool_call(&intent);
-                    let _ = sink.send(Event::ToolCall {
-                        description,
-                        name: intent.name.clone(),
-                    });
-                    Ok(())
-                }
-            });
-
-            let turn_value = match result {
+            // Stream the turn, forwarding text/reasoning/tool intents to the UI
+            // and retrying transient failures with backoff (see `drive_turn`).
+            // A turn that cannot be recovered after exhausting the policy is
+            // surfaced as an `Event::Failed` and stops the session, matching the
+            // pre-retry contract rather than aborting the run with an error.
+            let turn_value = match self.drive_turn(
+                &request,
+                transport,
+                sink,
+                cancellation,
+                &LiveProgress {
+                    session,
+                    context,
+                    tool_defs: tool_definitions,
+                    started_at,
+                    cumulative_total: cumulative_input + cumulative_output,
+                },
+            ) {
                 Ok(turn) => turn,
                 Err(error) => {
                     sink.send(Event::Failed(error.to_string()))?;
                     summary.cancelled = cancellation.is_cancelled();
+                    // Account for the turn that was attempted before stopping, so
+                    // the failure summary mirrors the normal completion path
+                    // (which sets `turns` and `answer` after the loop).
+                    summary.turns = turn;
+                    summary.answer = session.answer.clone();
                     return Ok(summary);
                 }
             };
@@ -494,6 +550,121 @@ impl AgentRunner {
             recorder.session_finish(success);
         }
         Ok(summary)
+    }
+
+    /// Streams one turn, retrying transient failures with bounded backoff.
+    ///
+    /// The loop reuses the same [`ModelRequest`] (rebuildable from the session,
+    /// which excludes any partial output of a failed attempt) across attempts so
+    /// a retry replays the turn from a clean state. Each attempt is a fresh
+    /// transport call, so it also gets a fresh per-turn deadline: a turn that
+    /// merely ran past its deadline once can finish on the next attempt.
+    ///
+    ///
+    /// While a turn streams, a live progress update is emitted at a bounded rate
+    /// so the stats bar tracks working speed, context, and elapsed time as the
+    /// model generates, not only after the turn ends.
+    ///
+    /// A failure is retried only when [`agent_runtime::Error::is_retryable`]
+    /// reports it as a temporal, recoverable condition (network drop, provider
+    /// timeout, transient server error). Cancellation is never retried, and once
+    /// the policy's attempt budget is spent the final error is returned so the
+    /// caller reports it. Between attempts an [`Event::Note`] is emitted so the
+    /// user sees the retry is in progress; the best-effort sink send only means
+    /// the UI is gone.
+    fn drive_turn<M, S>(
+        &self,
+        request: &ModelRequest,
+        transport: &M,
+        sink: &S,
+        cancellation: &CancellationToken,
+        progress: &LiveProgress,
+    ) -> agent_runtime::Result<ModelTurn>
+    where
+        M: ModelTransport,
+        S: EventSink,
+    {
+        // Each retryable attempt is granted a larger budget than the last so a
+        // turn that merely ran past one deadline can finish once an attempt has
+        // room for the whole generation. The budget grows linearly with the
+        // attempt number and is capped at `base × max_attempts`, so a recoverable
+        // timeout can never turn a single transport call into an unbounded wait;
+        // the first attempt uses the transport's configured deadline unchanged.
+        let base = transport.deadline();
+        let mut attempt = 1u32;
+        loop {
+            let attempt_deadline = base
+                .saturating_mul(attempt)
+                .min(base.saturating_mul(self.retry.max_attempts));
+            let attempt_deadline_secs = attempt_deadline.as_secs_f64();
+            // Running output estimate and last live-update time for this attempt,
+            // so the stats bar refreshes at a bounded rate while the model streams
+            // rather than only after the turn completes.
+            let mut attempt_output_chars: u64 = 0;
+            let mut last_emit = Instant::now();
+            // The callback must return `agent_runtime::Result`, so forwarding to
+            // the sink is best-effort: a closed channel only means the UI is gone,
+            // which the loop surfaces on the next turn's own `sink.send`.
+            let result = transport.stream_with_deadline(
+                request,
+                cancellation,
+                &mut |event| {
+                    match event {
+                        ModelStreamEvent::TextDelta(delta) => {
+                            if !delta.is_empty() {
+                                attempt_output_chars += delta.chars().count() as u64;
+                                let _ = sink.send(Event::Text(delta));
+                            }
+                        }
+                        ModelStreamEvent::ReasoningDelta(delta) => {
+                            if !delta.is_empty() {
+                                attempt_output_chars += delta.chars().count() as u64;
+                                let _ = sink.send(Event::Reasoning(delta));
+                            }
+                        }
+                        ModelStreamEvent::ToolIntent(intent) => {
+                            let description = crate::tools::describe_tool_call(&intent);
+                            let _ = sink.send(Event::ToolCall {
+                                description,
+                                name: intent.name.clone(),
+                            });
+                        }
+                    }
+                    // Refresh the live stats bar at a bounded rate so the user
+                    // sees the turn making progress while the model streams.
+                    let now = Instant::now();
+                    if now.saturating_duration_since(last_emit) >= LIVE_PROGRESS_INTERVAL {
+                        last_emit = now;
+                        let _ = emit_live_progress(sink, progress, attempt_output_chars, now);
+                    }
+                    Ok(())
+                },
+                attempt_deadline,
+            );
+
+            match result {
+                Ok(turn) => return Ok(turn),
+                // Retry only temporal, recoverable failures, and only while the
+                // attempt budget remains and the turn was not cancelled.
+                Err(error) if error.is_retryable() => {
+                    if attempt >= self.retry.max_attempts || cancellation.is_cancelled() {
+                        return Err(error);
+                    }
+                    let next = attempt + 1;
+                    let delay = self.retry.backoff_delay(next);
+                    let delay_secs = delay.as_secs_f64();
+                    // Show the turn is recovering and that a longer budget is
+                    // being granted, not just another identical try.
+                    let _ = sink.send(Event::Note(format!(
+                        "model request failed ({error}); retrying {next}/{max} in {delay_secs:.1}s with a {attempt_deadline_secs:.0}s budget",
+                        max = self.retry.max_attempts,
+                    )));
+                    attempt = next;
+                    std::thread::sleep(delay);
+                }
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     /// Emits a single accounting event so the UI can update the speed stat, the

@@ -14,14 +14,21 @@ id = "local"
 provider = "llama-server"
 base_url = "http://127.0.0.1:9931"
 model = "qwen2.5-14b"
-deadline_secs = 120
+# Per-turn generation budget. Long-context turns (large prefill plus thousands
+# of generated tokens) can take a couple of minutes; a stalled provider is still
+# caught by the slot/TTFT/cadence watchdogs, so this can be generous.
+deadline_secs = 300
+# Inter-token cadence watchdog: abort and retry a turn that sends no token for
+# this many seconds after the first token. `0` disables it.
+cadence_timeout_secs = 30
 
 [[models]]
 id = "ollama"
 provider = "ollama"
 base_url = "http://127.0.0.1:11434"
 model = "qwen2.5"
-deadline_secs = 120
+deadline_secs = 300
+cadence_timeout_secs = 30
 
 # The independent sandbox enforcement boundary.
 [sandbox]

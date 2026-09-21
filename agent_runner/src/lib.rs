@@ -19,6 +19,7 @@ pub mod config;
 pub mod context;
 pub mod error;
 pub mod executor;
+pub mod retry;
 pub mod sandbox;
 pub mod session;
 pub mod session_log;
@@ -34,6 +35,9 @@ pub use error::{Error, Result};
 pub use executor::SandboxExecutor;
 pub use kvist_import::{KVIST_CONFIG_FILE, import_models, resolve_kvist_config_path};
 pub use markdown::{MarkdownStyles, RenderedLine, render_document};
+pub use retry::{
+    DEFAULT_MAX_ATTEMPTS, DEFAULT_RETRY_BASE_DELAY, DEFAULT_RETRY_MAX_DELAY, RetryPolicy,
+};
 pub use run::system_prompt;
 pub use sandbox::ToolOutcome;
 pub use session::{

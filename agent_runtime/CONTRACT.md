@@ -1,4 +1,4 @@
-<!-- kvist-contract-version: 1 -->
+<!-- kvist-contract-version: 2 -->
 
 # Agent Runtime Contract
 
@@ -112,6 +112,12 @@ The direct transport is the sole model transport. Structured-output schemas
 and callable tools cannot be requested in the same turn; that combination
 fails before provider I/O. Callers must parse and validate returned content
 independently.
+
+A streaming transport call may carry an explicit per-call deadline that
+overrides the transport's configured deadline, so a retrying caller can grant
+an individual attempt more time without changing that configured bound. The
+default streaming call uses the configured deadline; transports that cannot vary
+the deadline keep their fixed bound via the default streaming path.
 
 The supervisor retries only configured idle timeouts and deterministic repeated
 output. Nonzero exit, spawn failure, stream failure, invalid input,

@@ -12,7 +12,10 @@ use agent_runtime::{CancellationToken, ModelTransport};
 
 use crate::context::ContextManager;
 use crate::error::{Error, Result};
-use crate::session::{AgentRunner, AgentSession, Event, EventSink, Recorder, ToolExecutor};
+use crate::retry::RetryPolicy;
+use crate::session::{
+    AgentRunner, AgentSession, Event, EventSink, MAX_TURNS, Recorder, ToolExecutor,
+};
 
 /// Receives [`Event`]s from the worker; implements [`EventSink`].
 struct ChannelSink(mpsc::SyncSender<Event>);
@@ -63,6 +66,7 @@ pub fn start<M, E>(
     executor: E,
     mut context: ContextManager,
     mut recorder: Option<Box<dyn Recorder>>,
+    retry: RetryPolicy,
 ) -> (SessionHandle, mpsc::Receiver<Event>, mpsc::Sender<String>)
 where
     M: ModelTransport + Send + 'static,
@@ -81,7 +85,7 @@ where
         // turn so a cancelled turn does not end the session.
         while let Some(text) = wait_for_prompt(&prompt_rx) {
             session.push_user(text);
-            let runner = AgentRunner::default();
+            let runner = AgentRunner::with_retry(MAX_TURNS, retry);
             // Borrow the recorder only for this run; the borrow ends before the
             // next iteration, and each run starts and finishes its own record.
             let _ = runner

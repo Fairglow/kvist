@@ -45,12 +45,7 @@ fn render_stats(f: &mut ratatui::Frame, app: &App, area: Rect) {
     } else {
         stats_text
     };
-    let block = Block::default()
-        .borders(Borders::BOTTOM)
-        .title(Span::styled(
-            " stats ",
-            Style::default().fg(Color::DarkGray),
-        ));
+    let block = Block::default();
     let paragraph = Paragraph::new(Line::from(Span::styled(
         text,
         Style::default().fg(Color::Green),
@@ -183,6 +178,7 @@ fn highlight(text: &str, active: bool) -> Span<'static> {
 #[cfg(test)]
 mod tests {
     use super::render;
+    use crate::session::Event;
     use crate::tui::app::App;
     use agent_runtime::ReasoningEffort;
     use crossterm::event::KeyCode;
@@ -199,6 +195,62 @@ mod tests {
             .draw(|frame| render(frame, app))
             .expect("frame draws");
         terminal.backend().clone()
+    }
+
+    #[test]
+    fn stats_row_shows_live_content_when_populated() {
+        // The stats bar must render real statistics on its single row, not just a
+        // border or heading, so the user sees working speed, context, and total
+        // tokens while the session runs.
+        let mut app = App::new(
+            &["local".to_owned()],
+            "local",
+            ReasoningEffort::Medium,
+            None,
+            100,
+            30,
+        );
+        app.push_event(Event::Progress {
+            input_tokens: 70000,
+            output_tokens: 6350,
+            context_tokens: 76350,
+            context_limit: 81920,
+            context_utilization: 0.93,
+            compaction_progress: 0.88,
+            tokens_per_sec: 62.0,
+            total_tokens: 45200,
+            elapsed_secs: 332.5,
+        });
+        let backend = draw(&app);
+        let text = buffer_text(&backend);
+        // Row 0 is the header, row 1 is the stats bar.
+        let stats_row = text.lines().nth(1).expect("stats row");
+        assert!(
+            stats_row.contains("tok/s")
+                && stats_row.contains("81920")
+                && stats_row.contains("45200 tok"),
+            "stats content must be visible, got: {stats_row:?}"
+        );
+    }
+
+    #[test]
+    fn stats_row_is_placeholder_when_idle() {
+        // Before any progress the stats bar shows a static placeholder hint.
+        let app = App::new(
+            &["local".to_owned()],
+            "local",
+            ReasoningEffort::Medium,
+            None,
+            100,
+            30,
+        );
+        let backend = draw(&app);
+        let text = buffer_text(&backend);
+        let stats_row = text.lines().nth(1).expect("stats row");
+        assert!(
+            stats_row.contains("tok/s") && stats_row.contains("compaction"),
+            "placeholder:\n{stats_row:?}"
+        );
     }
 
     fn buffer_text(backend: &TestBackend) -> String {

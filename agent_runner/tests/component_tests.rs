@@ -138,6 +138,26 @@ fn rejects_out_of_bound_deadline() {
 }
 
 #[test]
+fn cadence_timeout_secs_defaults_when_omitted() {
+    let (_dir, path) = valid_dir(None);
+    let cfg = Config::load(&path).expect("config loads");
+    // `cadence_timeout_secs` is optional and defaults to 30, keeping the
+    // inter-token watchdog enabled without an explicit value.
+    assert_eq!(cfg.model("local").expect("local").cadence_timeout_secs, 30);
+}
+
+#[test]
+fn rejects_out_of_bound_cadence() {
+    let (dir, path) = valid_dir(None);
+    let contents = std::fs::read_to_string(&path).unwrap();
+    // A cadence value above the deadline bound is meaningless and rejected.
+    let contents = contents.replace("deadline_secs = 120", "cadence_timeout_secs = 99999");
+    write_config(&dir, &contents);
+    let err = Config::load(&path).expect_err("cadence too large");
+    assert!(matches!(err, Error::Config { .. }));
+}
+
+#[test]
 fn rejects_unknown_top_level_fields() {
     let dir = tempdir().expect("temp dir");
     let contents = VALID_CONFIG.replace("schema_version = 1", "schema_version = 1\nnope = 1");
@@ -154,6 +174,10 @@ fn from_parts_rejects_unknown_model() {
         base_url: "http://127.0.0.1:9931".to_owned(),
         model: "m".to_owned(),
         deadline_secs: 120,
+        max_attempts: 3,
+        retry_base_delay_secs: 2,
+        retry_max_delay_secs: 30,
+        cadence_timeout_secs: 30,
     };
     let err = Config::from_parts(
         tempdir().unwrap().path().to_path_buf(),

@@ -1,4 +1,4 @@
-<!-- kvist-design-version: 1 -->
+<!-- kvist-design-version: 2 -->
 
 # Agent Runtime Design
 
@@ -128,6 +128,13 @@ for the rejected Rig experiment lives in
 Every recoverable input, filesystem, HTTP, stream, subprocess, and provider
 failure returns a typed error. Automatic retry is deliberately narrow because
 provider processes may have caused non-idempotent side effects.
+
+The direct transport honors a caller-supplied per-call streaming deadline when
+one is provided, clamped to a hard maximum, instead of its configured deadline;
+the plain streaming call uses the configured deadline. This lets a retrying loop
+extend an attempt's budget across retries — so a turn that merely ran past one
+deadline can complete once an attempt has room for the whole generation — while
+a plain call keeps its fixed bound.
 
 Linux cleanup signals the process group, waits, drains bounded output, and
 fails if escaped descendants retain descriptors beyond the grace period.

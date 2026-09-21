@@ -12,6 +12,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::Duration;
 
 use agent_runtime::{
@@ -22,8 +23,8 @@ use serde_json::json;
 
 use agent_runner::{
     AgentRunner, AgentSession, ContextManager, DEFAULT_CONTEXT_TOKENS, Error, Event, EventSink,
-    Model, ModelProvider, Recorder, RunSummary, ToolExecutor, ToolOutcome, ToolPolicy,
-    ToolRegistry,
+    MAX_TURNS, Model, ModelProvider, Recorder, RetryPolicy, RunSummary, ToolExecutor, ToolOutcome,
+    ToolPolicy, ToolRegistry,
 };
 
 /// A transport that yields a scripted sequence of turns, streaming each one's
@@ -284,6 +285,10 @@ fn make_session() -> AgentSession {
         base_url: "http://127.0.0.1:9931".to_owned(),
         model: "test-model".to_owned(),
         deadline_secs: 30,
+        max_attempts: 3,
+        retry_base_delay_secs: 2,
+        retry_max_delay_secs: 30,
+        cadence_timeout_secs: 30,
     };
     let tool_defs = ToolRegistry::new(ToolPolicy::minimum()).tool_definitions();
     AgentSession::new(
@@ -681,4 +686,405 @@ fn cancellation_before_a_tool_is_executed_stops_the_loop() {
     let events = sink.events();
     assert!(events.iter().any(|e| matches!(e, Event::TurnStart { .. })));
     assert!(!events.iter().any(|e| matches!(e, Event::ToolResult { .. })));
+}
+
+/// A transport that fails the first `failures` attempts with a transient error,
+/// then yields a single successful turn. Exercises the loop's retry/back-off
+/// without any real network or timing cost.
+struct RetryingTransport {
+    failures: usize,
+    attempts: Arc<Mutex<usize>>,
+    turn: ModelTurn,
+}
+
+impl RetryingTransport {
+    fn new(failures: usize, turn: ModelTurn) -> Self {
+        RetryingTransport {
+            failures,
+            attempts: Arc::new(Mutex::new(0)),
+            turn,
+        }
+    }
+}
+
+impl ModelTransport for RetryingTransport {
+    fn complete(
+        &self,
+        _request: &ModelRequest,
+        _cancellation: &CancellationToken,
+    ) -> agent_runtime::Result<ModelTurn> {
+        Err(agent_runtime::Error::ModelTransportCancelled)
+    }
+
+    fn stream(
+        &self,
+        _request: &ModelRequest,
+        _cancellation: &CancellationToken,
+        on_event: &mut dyn FnMut(ModelStreamEvent) -> agent_runtime::Result<()>,
+    ) -> agent_runtime::Result<ModelTurn> {
+        let mut attempts = self.attempts.lock().unwrap();
+        *attempts += 1;
+        let attempt = *attempts;
+        drop(attempts);
+
+        if attempt <= self.failures {
+            // A temporal, recoverable failure: the provider timed out mid-turn.
+            return Err(agent_runtime::Error::ModelTransportTimedOut);
+        }
+
+        if let Some(reasoning) = &self.turn.reasoning {
+            on_event(ModelStreamEvent::ReasoningDelta(reasoning.clone()))?;
+        }
+        if !self.turn.text.is_empty() {
+            on_event(ModelStreamEvent::TextDelta(self.turn.text.clone()))?;
+        }
+        Ok(self.turn.clone())
+    }
+
+    fn deadline(&self) -> Duration {
+        Duration::from_secs(30)
+    }
+}
+
+fn fast_retry() -> RetryPolicy {
+    // A tiny budget and sub-millisecond back-off so the loop recovers quickly
+    // in tests while still exercising the real back-off code path.
+    RetryPolicy::new(3, Duration::from_millis(1), Duration::from_millis(5))
+}
+
+#[test]
+fn a_transient_failure_is_retried_until_success() {
+    // Fail twice with a temporal timeout, then succeed: the loop should retry
+    // with back-off and still deliver the answer, reporting each retry.
+    let transport = RetryingTransport::new(2, answer_turn("recovered"));
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let cancellation = CancellationToken::new();
+
+    let mut session = make_session();
+    session.push_user("go");
+    let summary = AgentRunner::with_retry(MAX_TURNS, fast_retry()).run(
+        &mut session,
+        &transport,
+        &executor,
+        &Collector::default(),
+        &cancellation,
+        &mut context,
+        Some(&mut recorder),
+    );
+
+    let summary = summary.expect("loop recovers and completes");
+    assert_eq!(summary.turns, 1);
+    assert_eq!(summary.answer.as_deref(), Some("recovered"));
+    // Three attempts total: two failures plus the successful retry.
+    assert_eq!(*transport.attempts.lock().unwrap(), 3);
+    assert!(recorder.session_finished.load(Ordering::SeqCst));
+}
+
+#[test]
+fn a_retry_is_reported_as_a_note_before_each_attempt() {
+    // Each retry must surface an in-progress note so the user sees the back-off
+    // rather than a silent hang, even though the turn has not yet completed.
+    let transport = RetryingTransport::new(2, answer_turn("recovered"));
+    let sink = Collector::default();
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let cancellation = CancellationToken::new();
+
+    let mut session = make_session();
+    session.push_user("go");
+    let _ = AgentRunner::with_retry(MAX_TURNS, fast_retry())
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &sink,
+            &cancellation,
+            &mut context,
+            Some(&mut recorder),
+        )
+        .expect("loop recovers and completes");
+
+    // A note is emitted before each of the two retries; the compaction path
+    // does not fire here, so every note is a retry notice.
+    let notes: Vec<Event> = sink
+        .events()
+        .iter()
+        .filter(|e| matches!(e, Event::Note(_)))
+        .cloned()
+        .collect();
+    assert_eq!(notes.len(), 2, "one retry note per attempted retry");
+}
+
+#[test]
+fn exhausted_retries_report_the_failure() {
+    // Fail more times than the attempt budget allows: the loop gives up after
+    // the budget and reports the failure rather than retrying forever.
+    let transport = RetryingTransport::new(5, answer_turn("never reached"));
+    let sink = Collector::default();
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let cancellation = CancellationToken::new();
+
+    let mut session = make_session();
+    session.push_user("go");
+    let result = AgentRunner::with_retry(MAX_TURNS, fast_retry()).run(
+        &mut session,
+        &transport,
+        &executor,
+        &sink,
+        &cancellation,
+        &mut context,
+        Some(&mut recorder),
+    );
+
+    // After exhausting the budget the loop reports the failure as an
+    // `Event::Failed` and returns a normal summary (matching the pre-retry
+    // contract), rather than aborting the run with an error.
+    let summary = result.expect("loop reports failure via Event::Failed");
+    assert_eq!(summary.turns, 1);
+    assert!(summary.answer.is_none());
+    // 1 initial attempt + 2 retries = 3, then it stops.
+    assert_eq!(*transport.attempts.lock().unwrap(), 3);
+    let events = sink.events();
+    assert!(events.iter().any(|e| matches!(e, Event::Failed(_))));
+    // No answer is produced when the turn never completes.
+    assert!(!events.iter().any(|e| matches!(e, Event::Finished { .. })));
+}
+
+#[test]
+fn a_non_retryable_failure_is_not_retried() {
+    // A permanent failure (cancellation) must not be retried, even though it is
+    // a transport error: retrying a user-cancelled turn would be wrong.
+    struct CancelOnceTransport {
+        attempts: Arc<Mutex<usize>>,
+    }
+
+    impl ModelTransport for CancelOnceTransport {
+        fn complete(
+            &self,
+            _request: &ModelRequest,
+            _cancellation: &CancellationToken,
+        ) -> agent_runtime::Result<ModelTurn> {
+            Err(agent_runtime::Error::ModelTransportCancelled)
+        }
+
+        fn stream(
+            &self,
+            _request: &ModelRequest,
+            _cancellation: &CancellationToken,
+            _on_event: &mut dyn FnMut(ModelStreamEvent) -> agent_runtime::Result<()>,
+        ) -> agent_runtime::Result<ModelTurn> {
+            *self.attempts.lock().unwrap() += 1;
+            Err(agent_runtime::Error::ModelTransportCancelled)
+        }
+
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(30)
+        }
+    }
+
+    let transport = CancelOnceTransport {
+        attempts: Arc::new(Mutex::new(0)),
+    };
+    let sink = Collector::default();
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let cancellation = CancellationToken::new();
+
+    let mut session = make_session();
+    session.push_user("go");
+    let result = AgentRunner::with_retry(MAX_TURNS, fast_retry()).run(
+        &mut session,
+        &transport,
+        &executor,
+        &sink,
+        &cancellation,
+        &mut context,
+        Some(&mut recorder),
+    );
+
+    // A non-retryable error is surfaced as an `Event::Failed` on the first
+    // attempt only: no retry note is emitted, proving the loop did not back off
+    // and replay the cancelled turn.
+    let summary = result.expect("loop reports the cancellation as a failure");
+    assert_eq!(summary.turns, 1);
+    assert_eq!(*transport.attempts.lock().unwrap(), 1);
+    assert!(sink.events().iter().any(|e| matches!(e, Event::Failed(_))));
+    assert!(!sink.events().iter().any(|e| matches!(e, Event::Note(_))));
+}
+
+/// A transport that records the per-attempt deadline it was granted and fails
+/// its first `failures` attempts with a temporal timeout, forcing the loop to
+/// back off and retry. Lets the test observe how the retry loop grows the
+/// budget each attempt.
+struct DeadlineRecordingTransport {
+    failures: usize,
+    deadlines: Arc<Mutex<Vec<Duration>>>,
+}
+
+impl ModelTransport for DeadlineRecordingTransport {
+    fn complete(
+        &self,
+        _request: &ModelRequest,
+        _cancellation: &CancellationToken,
+    ) -> agent_runtime::Result<ModelTurn> {
+        Err(agent_runtime::Error::ModelTransportCancelled)
+    }
+
+    fn stream(
+        &self,
+        _request: &ModelRequest,
+        _cancellation: &CancellationToken,
+        _on_event: &mut dyn FnMut(ModelStreamEvent) -> agent_runtime::Result<()>,
+    ) -> agent_runtime::Result<ModelTurn> {
+        // The loop calls `stream_with_deadline`, which this transport overrides,
+        // so the plain `stream` is never reached.
+        Err(agent_runtime::Error::ModelTransportCancelled)
+    }
+
+    fn deadline(&self) -> Duration {
+        Duration::from_secs(30)
+    }
+
+    fn stream_with_deadline(
+        &self,
+        _request: &ModelRequest,
+        _cancellation: &CancellationToken,
+        _on_event: &mut dyn FnMut(ModelStreamEvent) -> agent_runtime::Result<()>,
+        deadline: Duration,
+    ) -> agent_runtime::Result<ModelTurn> {
+        let count = {
+            let mut recorded = self.deadlines.lock().unwrap();
+            recorded.push(deadline);
+            recorded.len()
+        };
+        if count <= self.failures {
+            // A temporal, recoverable failure; the loop should retry with a
+            // larger budget on the next attempt.
+            Err(agent_runtime::Error::ModelTransportTimedOut)
+        } else {
+            Ok(answer_turn("recovered"))
+        }
+    }
+}
+
+#[test]
+fn each_retry_grants_a_larger_and_capped_budget() {
+    // A turn that runs past one deadline must be granted more time on each retry,
+    // so an attempt eventually has room to finish the whole generation. The
+    // budget grows linearly with the attempt number and is capped at
+    // base × max_attempts.
+    let deadlines = Arc::new(Mutex::new(Vec::new()));
+    let transport = DeadlineRecordingTransport {
+        failures: 3,
+        deadlines: deadlines.clone(),
+    };
+    let sink = Collector::default();
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let cancellation = CancellationToken::new();
+
+    let mut session = make_session();
+    session.push_user("go");
+    let _ = AgentRunner::with_retry(MAX_TURNS, fast_retry()).run(
+        &mut session,
+        &transport,
+        &executor,
+        &sink,
+        &cancellation,
+        &mut context,
+        Some(&mut recorder),
+    );
+
+    // The base deadline is 30s with a 3-attempt budget, so attempts get 30s,
+    // 60s, then 90s (30 × max_attempts) before giving up.
+    assert_eq!(
+        *deadlines.lock().unwrap(),
+        vec![
+            Duration::from_secs(30),
+            Duration::from_secs(60),
+            Duration::from_secs(90),
+        ],
+        "each retry grants a larger, capped budget"
+    );
+}
+
+/// A transport that streams text slowly, crossing the live-progress interval, so
+/// the loop must emit at least one progress update while the turn is still
+/// streaming (not only after it completes).
+struct SlowStreamingTransport {
+    turn: ModelTurn,
+}
+
+impl ModelTransport for SlowStreamingTransport {
+    fn complete(
+        &self,
+        _request: &ModelRequest,
+        _cancellation: &CancellationToken,
+    ) -> agent_runtime::Result<ModelTurn> {
+        Err(agent_runtime::Error::ModelTransportCancelled)
+    }
+
+    fn stream(
+        &self,
+        _request: &ModelRequest,
+        _cancellation: &CancellationToken,
+        on_event: &mut dyn FnMut(ModelStreamEvent) -> agent_runtime::Result<()>,
+    ) -> agent_runtime::Result<ModelTurn> {
+        for _ in 0..4 {
+            thread::sleep(Duration::from_millis(130));
+            on_event(ModelStreamEvent::TextDelta("word ".to_owned()))?;
+        }
+        Ok(self.turn.clone())
+    }
+
+    fn deadline(&self) -> Duration {
+        Duration::from_secs(30)
+    }
+}
+
+#[test]
+fn a_streaming_turn_emits_live_progress_mid_turn() {
+    // A turn that streams for longer than the live-progress interval must surface
+    // progress while it is still generating, so the stats bar tracks the run.
+    // Exactly one progress is emitted after the turn ends, so a count of two or
+    // more proves a live update fired during streaming.
+    let transport = SlowStreamingTransport {
+        turn: answer_turn("done"),
+    };
+    let sink = Collector::default();
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let cancellation = CancellationToken::new();
+
+    let mut session = make_session();
+    session.push_user("go");
+    AgentRunner::with_retry(MAX_TURNS, fast_retry())
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &sink,
+            &cancellation,
+            &mut context,
+            Some(&mut recorder),
+        )
+        .expect("loop recovers and completes");
+
+    let progresses = sink
+        .events()
+        .iter()
+        .filter(|e| matches!(e, Event::Progress { .. }))
+        .count();
+    assert!(
+        progresses >= 2,
+        "expected live progress during streaming plus the post-turn report, got {progresses}"
+    );
 }

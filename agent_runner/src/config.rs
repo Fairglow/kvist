@@ -77,10 +77,48 @@ pub struct Model {
     /// The per-turn deadline in seconds.
     #[serde(default = "default_deadline")]
     pub deadline_secs: u64,
+    /// Total attempts (the initial try plus retries) for one turn before giving
+    /// up on a transient, recoverable failure.
+    #[serde(default = "default_max_attempts")]
+    pub max_attempts: u32,
+    /// Base backoff delay, in seconds, before the first retry.
+    #[serde(default = "default_retry_base_delay_secs")]
+    pub retry_base_delay_secs: u64,
+    /// Upper bound, in seconds, on any single retry backoff delay.
+    #[serde(default = "default_retry_max_delay_secs")]
+    pub retry_max_delay_secs: u64,
+    /// Inter-token cadence watchdog timeout, in seconds. If the provider sends
+    /// no token for longer than this gap after the first token, the turn is
+    /// treated as stalled and retried, so a generous per-turn deadline can never
+    /// turn a hung provider into a silent multi-minute hang. `0` disables the
+    /// watchdog. Defaults to 30s, comfortably above the ~1s gap of a healthy
+    /// stream but well below a genuine stall.
+    #[serde(default = "default_cadence_timeout_secs")]
+    pub cadence_timeout_secs: u64,
 }
 
 fn default_deadline() -> u64 {
-    120
+    // A single long-context turn (large prefill plus thousands of generated
+    // tokens) can take over a couple of minutes, so the default per-turn budget
+    // comfortably covers one attempt. A stalled provider is still caught quickly
+    // by the slot/TTFT/cadence watchdogs, and retries add further headroom.
+    300
+}
+
+fn default_max_attempts() -> u32 {
+    crate::retry::DEFAULT_MAX_ATTEMPTS
+}
+
+fn default_retry_base_delay_secs() -> u64 {
+    2
+}
+
+fn default_retry_max_delay_secs() -> u64 {
+    30
+}
+
+fn default_cadence_timeout_secs() -> u64 {
+    30
 }
 
 /// Paths to the independent sandbox enforcement boundary.
@@ -264,6 +302,14 @@ struct RawModel {
     model: String,
     #[serde(default = "default_deadline")]
     deadline_secs: u64,
+    #[serde(default = "default_max_attempts")]
+    max_attempts: u32,
+    #[serde(default = "default_retry_base_delay_secs")]
+    retry_base_delay_secs: u64,
+    #[serde(default = "default_retry_max_delay_secs")]
+    retry_max_delay_secs: u64,
+    #[serde(default = "default_cadence_timeout_secs")]
+    cadence_timeout_secs: u64,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -369,12 +415,49 @@ impl Config {
                     ),
                 });
             }
+            if model.retry_base_delay_secs > model.retry_max_delay_secs {
+                return Err(Error::Config {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    reason: format!(
+                        "models[{index}].retry_base_delay_secs must not exceed retry_max_delay_secs"
+                    ),
+                });
+            }
+            if model.max_attempts < 1 {
+                return Err(Error::Config {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    reason: format!("models[{index}].max_attempts must be at least 1"),
+                });
+            }
+            if !(0..=MAX_DEADLINE_SECS).contains(&model.cadence_timeout_secs) {
+                return Err(Error::Config {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    reason: format!(
+                        "models[{index}].cadence_timeout_secs must be between 0 and {MAX_DEADLINE_SECS}"
+                    ),
+                });
+            }
+            const MAX_RETRY_DELAY_SECS: u64 = 3600;
+            if model.retry_base_delay_secs > MAX_RETRY_DELAY_SECS
+                || model.retry_max_delay_secs > MAX_RETRY_DELAY_SECS
+            {
+                return Err(Error::Config {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    reason: format!(
+                        "models[{index}].retry_*_delay_secs must be between 0 and {MAX_RETRY_DELAY_SECS}"
+                    ),
+                });
+            }
             models.push(Model {
                 id: model.id.clone(),
                 provider: model.provider,
                 base_url,
                 model: model.model.clone(),
                 deadline_secs: model.deadline_secs,
+                max_attempts: model.max_attempts,
+                retry_base_delay_secs: model.retry_base_delay_secs,
+                retry_max_delay_secs: model.retry_max_delay_secs,
+                cadence_timeout_secs: model.cadence_timeout_secs,
             });
         }
 

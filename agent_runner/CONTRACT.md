@@ -1,4 +1,4 @@
-<!-- agent-runner-contract-version: 3 -->
+<!-- agent-runner-contract-version: 4 -->
 
 # Agent Runner — Contract
 
@@ -34,8 +34,17 @@ struct Config {
 ```
 
 - `Model { id: String, provider: ModelProvider, base_url: String, model: String,
-deadline_secs: u64 }` — `provider` is one of `llama-server`, `ollama`. The
-  `id` is the user-facing selector; `model` is the provider-facing selector.
+deadline_secs: u64, max_attempts: u32, retry_base_delay_secs: u64,
+retry_max_delay_secs: u64, cadence_timeout_secs: u64 }` — `provider` is one of
+  `llama-server`, `ollama`. The `id` is the user-facing selector; `model` is the
+  provider-facing selector. The retry fields bound transient-failure recovery for a
+  turn (see `AgentRunner`); `max_attempts` defaults to `DEFAULT_MAX_ATTEMPTS`,
+  delays to `DEFAULT_RETRY_BASE_DELAY` / `DEFAULT_RETRY_MAX_DELAY`. `deadline_secs`
+  is the per-turn generation budget (default 300s). `cadence_timeout_secs` sets the
+  inter-token cadence watchdog: a turn that sends no token for this many seconds
+  after the first token is treated as stalled and retried, so a generous
+  `deadline_secs` cannot become a silent multi-minute hang; `0` disables the
+  watchdog (default 30s).
 - `SandboxPaths { runner: PathBuf, backend: PathBuf }` — absolute paths to the
   `kvist-sandbox-runner` executable and the Bubblewrap backend. Either may point
   at a binary on disk; both are hashed at request construction and the backend
@@ -271,6 +280,23 @@ stop on `FinishReason::Stop` or zero pending tool intents. Compaction trims only
 the model context; the optional `recorder` is the durable source of truth. The
 loop reports token accounting and compaction via `Event::Progress`.
 
+`AgentRunner` also carries a `RetryPolicy` that makes a turn resilient to
+temporal, recoverable failures. When `drive_turn` sees an error for which
+`agent_runtime::Error::is_retryable` returns `true` (a dropped connection, a
+provider timeout, or a transient server error), it waits `RetryPolicy::backoff_delay`
+— exponential growth capped at the policy's maximum delay — and replays the turn
+with a fresh request. Each retry is granted a larger budget than the last: the
+streaming call's per-turn deadline is the transport's configured deadline
+multiplied by the attempt number, capped at that deadline times `max_attempts`,
+so a turn that merely ran past one deadline can finish once an attempt has room
+for the whole generation instead of timing out identically on every identical
+try. Cancellation is never retried. Between attempts the loop emits an
+`Event::Note` (`retrying N/M in Xs with a Ys budget`) so the user sees the retry
+is in progress and that a longer budget is being granted; the retry budget is
+`max_attempts` total tries. A turn that exhausts the budget, or one that fails
+with a non-retryable error, is surfaced as `Event::Failed` and stops the session
+while still returning a completed [`RunSummary`] with `turns` set.
+
 ### `RunSummary`
 
 ```
@@ -318,14 +344,16 @@ id = "local"
 provider = "llama-server"
 base_url = "http://127.0.0.1:9931"
 model = "qwen2.5-14b"
-deadline_secs = 120
+deadline_secs = 300
+cadence_timeout_secs = 30
 
 [[models]]
 id = "ollama"
 provider = "ollama"
 base_url = "http://127.0.0.1:11434"
 model = "qwen2.5"
-deadline_secs = 120
+deadline_secs = 300
+cadence_timeout_secs = 30
 
 [sandbox]
 runner = "/usr/local/bin/kvist-sandbox-runner"
@@ -339,7 +367,8 @@ shell_deny_prefixes = []
 
 `schema_version` must be `1`. Unknown top-level fields fail. Each `[[models]]`
 needs a unique `id`, a known `provider`, a non-empty `base_url` and `model`, and
-a bounded `deadline_secs` (1..=600). `sandbox.runner` and `sandbox.backend`
+a bounded `deadline_secs` (1..=600) and `cadence_timeout_secs` (0..=600; `0`
+disables the inter-token cadence watchdog). `sandbox.runner` and `sandbox.backend`
 default to resolved system locations when omitted.
 
 ## Command-line interface
