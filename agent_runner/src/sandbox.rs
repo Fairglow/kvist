@@ -117,11 +117,19 @@ impl ToolOutcome {
     /// policy or failed before producing real output (so the record stays
     /// faithful without inventing sandbox results).
     pub fn rejected() -> Self {
+        Self::rejected_with("")
+    }
+
+    /// A rejected outcome whose reason is carried in `stderr`, so a tool the
+    /// loop refused (policy denial, or a failure before it produced real output)
+    /// still reports *why* to the model on the next turn instead of an empty
+    /// result. The process never ran, so it is not reported as exited.
+    pub fn rejected_with(reason: impl Into<String>) -> Self {
         ToolOutcome {
             exited: false,
             status: None,
             stdout: Vec::new(),
-            stderr: Vec::new(),
+            stderr: reason.into().into_bytes(),
             timed_out: false,
             output_limit_exceeded: false,
             cancelled: false,

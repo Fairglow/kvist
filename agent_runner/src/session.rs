@@ -481,13 +481,22 @@ impl AgentRunner {
                         }
                         Err(error) => {
                             // A rejected or failed tool is reported, not fatal.
+                            // Record the rejection into the conversation as well so
+                            // the model sees the reason and the assistant->tool
+                            // message sequence stays valid: an unanswered assistant
+                            // message with tool_calls would leave the next request
+                            // ending on it, which an OpenAI-compatible backend
+                            // rejects with 400 "Cannot continue an assistant message
+                            // that contains tool calls".
+                            let rejected = ToolOutcome::rejected_with(error.describe());
+                            session.record_tool_result(&intent.id, &intent.name, &rejected);
                             if let Some(recorder) = recorder.as_mut() {
                                 recorder.tool_result(
                                     turn_index.unwrap_or(0),
                                     &intent.id,
                                     &intent.name,
                                     &intent.arguments,
-                                    &crate::sandbox::ToolOutcome::rejected(),
+                                    &ToolOutcome::rejected(),
                                 );
                             }
                             let _ = sink.send(Event::ToolResult {

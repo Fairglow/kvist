@@ -16,8 +16,8 @@ use std::thread;
 use std::time::Duration;
 
 use agent_runtime::{
-    CancellationToken, FinishReason, LocalModelProvider, ModelRequest, ModelStreamEvent,
-    ModelTransport, ModelTurn, ModelUsage, ReasoningEffort, ToolIntent,
+    CancellationToken, FinishReason, LocalModelProvider, ModelMessage, ModelRequest,
+    ModelStreamEvent, ModelTransport, ModelTurn, ModelUsage, ReasoningEffort, ToolIntent,
 };
 use serde_json::json;
 
@@ -1087,4 +1087,129 @@ fn a_streaming_turn_emits_live_progress_mid_turn() {
         progresses >= 2,
         "expected live progress during streaming plus the post-turn report, got {progresses}"
     );
+}
+
+/// A transport that yields scripted turns while recording every request it is
+/// asked to send, so tests can assert the loop never sends a request whose final
+/// turn is an unanswered assistant tool call (which a real backend rejects with
+/// 400).
+struct CapturingTransport {
+    turns: Arc<Mutex<Vec<ModelTurn>>>,
+    requests: Arc<Mutex<Vec<ModelRequest>>>,
+}
+
+impl CapturingTransport {
+    fn new(turns: Vec<ModelTurn>) -> Self {
+        CapturingTransport {
+            turns: Arc::new(Mutex::new(turns)),
+            requests: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn requests(&self) -> Vec<ModelRequest> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+impl ModelTransport for CapturingTransport {
+    fn complete(
+        &self,
+        _request: &ModelRequest,
+        _cancellation: &CancellationToken,
+    ) -> agent_runtime::Result<ModelTurn> {
+        Err(agent_runtime::Error::ModelTransportCancelled)
+    }
+
+    fn stream(
+        &self,
+        request: &ModelRequest,
+        _cancellation: &CancellationToken,
+        on_event: &mut dyn FnMut(ModelStreamEvent) -> agent_runtime::Result<()>,
+    ) -> agent_runtime::Result<ModelTurn> {
+        self.requests.lock().unwrap().push(request.clone());
+        let turn = {
+            let mut turns = self.turns.lock().unwrap();
+            if turns.is_empty() {
+                answer_turn("(no more turns)")
+            } else {
+                turns.remove(0)
+            }
+        };
+        if let Some(reasoning) = &turn.reasoning {
+            on_event(ModelStreamEvent::ReasoningDelta(reasoning.clone()))?;
+        }
+        if !turn.text.is_empty() {
+            on_event(ModelStreamEvent::TextDelta(turn.text.clone()))?;
+        }
+        for intent in &turn.tool_intents {
+            on_event(ModelStreamEvent::ToolIntent(intent.clone()))?;
+        }
+        Ok(turn)
+    }
+
+    fn deadline(&self) -> Duration {
+        Duration::from_secs(30)
+    }
+}
+
+/// Counts assistant tool calls not yet answered by a following tool result.
+/// Zero means every proposed tool call has a result, so the model can be asked
+/// to continue. A positive count means the last turn left an assistant message
+/// with tool_calls unanswered, which is exactly the sequence an OpenAI backend
+/// rejects with 400.
+fn unanswered_tool_calls(messages: &[ModelMessage]) -> usize {
+    let mut pending = 0usize;
+    for message in messages {
+        match message {
+            ModelMessage::Assistant { tool_intents, .. } => pending += tool_intents.len(),
+            ModelMessage::ToolResult { .. } => pending = pending.saturating_sub(1),
+            _ => {}
+        }
+    }
+    pending
+}
+
+#[test]
+fn a_denied_tool_still_records_a_tool_result_for_the_next_turn() {
+    // A tool the executor refuses must still produce a tool result in the
+    // conversation, so the next request never ends on an unanswered assistant
+    // tool call. A real OpenAI-compatible backend rejects such a request with
+    // 400 "Cannot continue an assistant message that contains tool calls".
+    let transport = CapturingTransport::new(vec![
+        tool_turn("thinking", "shell", json!({ "command": "rm -rf /" })), // denied by policy
+        answer_turn("refused and continued"),
+    ]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let cancellation = CancellationToken::new();
+
+    let mut session = make_session();
+    session.push_user("please go");
+    let runner = AgentRunner::default();
+    let sink = Collector::default();
+    let summary = runner
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &sink,
+            &cancellation,
+            &mut context,
+            Some(&mut recorder),
+        )
+        .expect("loop completes without error");
+
+    assert_eq!(summary.turns, 2);
+    assert_eq!(summary.tools_executed, 0);
+    assert_eq!(summary.answer.as_deref(), Some("refused and continued"));
+    // Every request the loop sent kept the assistant->tool sequence valid, so a
+    // backend would never reject it.
+    for request in transport.requests() {
+        assert_eq!(
+            unanswered_tool_calls(&request.messages),
+            0,
+            "request ended on unanswered assistant tool calls"
+        );
+    }
 }
