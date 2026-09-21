@@ -119,17 +119,19 @@ pub struct ToolRegistry {
 }
 
 impl ToolRegistry {
-    /// Builds a registry advertising the built-in generic Linux tooling plus the
-    /// Rust/Cargo toolchain. Building and testing the project are essential
+    /// Builds a registry advertising the built-in generic Linux tooling plus
+    /// the Rust/Cargo toolchain. Building and testing the project are essential
     /// agent capabilities, so the Rust toolchain is advertised by default; the
     /// sandbox enforces exactly a `System` and a `Cargo` toolchain, so these are
-    /// the honest defaults. Language profiles can still be narrowed with
-    /// [`ToolRegistry::with_profiles`].
+    /// the honest defaults. Python is also advertised by default: it runs under
+    /// the generic `System` path from the read-only host layout, and `python3`
+    /// is present on the host, so advertising it is honest. Language profiles
+    /// can still be narrowed with [`ToolRegistry::with_profiles`].
     pub fn new(policy: ToolPolicy) -> Self {
         ToolRegistry {
             bash: PathBuf::from("/usr/bin/bash"),
             policy,
-            profiles: vec![ToolProfile::Generic, ToolProfile::Rust],
+            profiles: vec![ToolProfile::Generic, ToolProfile::Python, ToolProfile::Rust],
         }
     }
 
@@ -462,19 +464,18 @@ mod tests {
     use super::*;
 
     /// Building and testing the project are essential, so the default registry
-    /// must advertise both the generic Linux tools and the Rust/Cargo toolchain;
-    /// otherwise an agent reasonably concludes it has no compiler and declines.
+    /// must advertise the generic Linux tools, the Rust/Cargo toolchain, and
+    /// the Python interpreter; otherwise an agent reasonably concludes it has
+    /// no compiler and declines.
     #[test]
     fn default_registry_advertises_generic_and_rust_toolchains() {
         let registry = ToolRegistry::new(ToolPolicy::minimum());
         let advertised = registry.profiles();
-        assert!(
-            advertised.contains(&"generic"),
-            "expected generic tooling, got {advertised:?}"
-        );
-        assert!(
-            advertised.contains(&"rust"),
-            "expected the Rust toolchain to be advertised by default, got {advertised:?}"
+        // `profiles()` sorts and dedupes, so the default set is stable order.
+        assert_eq!(
+            advertised,
+            vec!["generic", "python", "rust"],
+            "default registry must advertise generic, python, and rust, got {advertised:?}"
         );
     }
 
