@@ -9,6 +9,9 @@ all: format lint build test
 build:
     cargo build --locked --workspace --all-features
 
+fix:
+    cargo clippy --fix --locked --workspace --all-targets --all-features
+
 format:
     cargo fmt --check
 

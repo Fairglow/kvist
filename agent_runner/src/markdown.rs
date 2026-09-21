@@ -238,7 +238,7 @@ impl<'a> Render<'a> {
                 self.flush_current();
                 let line = Line::from(vec![Span::styled(
                     String::from('-').repeat(self.content_width().min(60)),
-                    self.styles.rule.clone(),
+                    self.styles.rule,
                 )]);
                 self.emit(RenderedLine {
                     line,
@@ -280,7 +280,7 @@ impl<'a> Render<'a> {
             }
             return;
         }
-        let style = self.styles.code_inline.clone();
+        let style = self.styles.code_inline;
         match self.runs.last_mut() {
             Some(Run::Text(s, st)) if *st == style => s.push_str(code),
             _ => self.runs.push(Run::Text(code.to_owned(), style)),
@@ -306,8 +306,7 @@ impl<'a> Render<'a> {
         if let Some(Run::Text(s, _)) = self.runs.last_mut() {
             s.push_str(html);
         } else {
-            self.runs
-                .push(Run::Text(html.to_owned(), self.styles.html.clone()));
+            self.runs.push(Run::Text(html.to_owned(), self.styles.html));
         }
     }
 
@@ -373,7 +372,7 @@ impl<'a> Render<'a> {
             Tag::Emphasis => self.layers.push(Layer::Emphasis),
             Tag::Strong => self.layers.push(Layer::Strong),
             Tag::Strikethrough => self.layers.push(Layer::Strike),
-            Tag::Link { .. } => self.layers.push(Layer::Link(self.styles.link.clone())),
+            Tag::Link { .. } => self.layers.push(Layer::Link(self.styles.link)),
             _ => {}
         }
     }
@@ -415,7 +414,7 @@ impl<'a> Render<'a> {
             }
             TagEnd::TableCell => {
                 if let Some(t) = &mut self.table {
-                    t.row.push(std::mem::replace(&mut t.cell, String::new()));
+                    t.row.push(std::mem::take(&mut t.cell));
                 }
             }
             TagEnd::TableHead => {
@@ -449,13 +448,13 @@ impl<'a> Render<'a> {
             }
         }
         if let Some(Layer::Link(style)) = self.layers.last() {
-            let mut style = style.clone();
+            let mut style = *style;
             if strike {
                 style = style.add_modifier(Modifier::CROSSED_OUT);
             }
             return style;
         }
-        let mut style = self.styles.paragraph.clone();
+        let mut style = self.styles.paragraph;
         if bold {
             style = style.add_modifier(Modifier::BOLD);
         }
@@ -492,14 +491,13 @@ impl<'a> Render<'a> {
             _ => return,
         };
         let style = self.styles.heading[(level as usize).saturating_sub(1).min(5)]
-            .clone()
             .add_modifier(Modifier::BOLD);
         let forced: Vec<Run> = self
             .runs
             .iter()
             .map(|run| match run {
                 Run::HardBreak => Run::HardBreak,
-                Run::Text(text, _) => Run::Text(text.clone(), style.clone()),
+                Run::Text(text, _) => Run::Text(text.clone(), style),
             })
             .collect();
         for line in wrap_runs(&forced, self.content_width()) {
@@ -518,7 +516,7 @@ impl<'a> Render<'a> {
             let mut line = Line::from(vec![]);
             for _ in 0..self.quote_depth {
                 line.spans
-                    .push(Span::styled(GUTTER, self.styles.quote_gutter.clone()));
+                    .push(Span::styled(GUTTER, self.styles.quote_gutter));
             }
             line.spans.extend(rendered.line.spans);
             rendered.line = line;
@@ -537,8 +535,8 @@ impl<'a> Render<'a> {
         let lang = parse_language(&code.info);
         if let Some(lang) = &lang {
             let label = Line::from(vec![
-                Span::styled(" ", self.styles.code_gutter.clone()),
-                Span::styled(lang.clone(), self.styles.code_label.clone()),
+                Span::styled(" ", self.styles.code_gutter),
+                Span::styled(lang.clone(), self.styles.code_label),
             ]);
             self.emit(RenderedLine {
                 line: label,
@@ -557,8 +555,8 @@ impl<'a> Render<'a> {
                 .unwrap_or_else(|_| vec![(SStyle::default(), source)]);
             let spans = clip_ranges(ranges, area, bg);
             let mut line = Line::from(vec![
-                Span::styled(GUTTER, self.styles.code_gutter.clone()),
-                Span::styled(" ", self.styles.code_gutter.clone()),
+                Span::styled(GUTTER, self.styles.code_gutter),
+                Span::styled(" ", self.styles.code_gutter),
             ]);
             line.spans.extend(spans);
             self.emit(RenderedLine {
@@ -571,24 +569,24 @@ impl<'a> Render<'a> {
     fn flush_item(&mut self) {
         let list = self.lists.last();
         let (prefix, marker_style) = match list {
-            Some(s) if s.ordered => (format!("{}.", s.next), self.styles.list_bullet.clone()),
-            Some(_) => (BULLET.to_owned(), self.styles.list_bullet.clone()),
-            None => (String::new(), self.styles.list_bullet.clone()),
+            Some(s) if s.ordered => (format!("{}.", s.next), self.styles.list_bullet),
+            Some(_) => (BULLET.to_owned(), self.styles.list_bullet),
+            None => (String::new(), self.styles.list_bullet),
         };
         let marker = match self.item_task {
-            Some(true) => Some((CHECKED.to_owned(), self.styles.task_closed.clone())),
-            Some(false) => Some((UNCHECKED.to_owned(), self.styles.task_open.clone())),
+            Some(true) => Some((CHECKED.to_owned(), self.styles.task_closed)),
+            Some(false) => Some((UNCHECKED.to_owned(), self.styles.task_open)),
             None => None,
         };
         let mut lines = wrap_runs(&self.runs, self.content_width());
         if let Some(first) = lines.first_mut() {
             let mut spans = Vec::new();
             if let Some((marker_text, marker_style)) = &marker {
-                spans.push(Span::styled(marker_text.clone(), marker_style.clone()));
+                spans.push(Span::styled(marker_text.clone(), *marker_style));
             } else {
                 spans.push(Span::styled(prefix, marker_style));
             }
-            spans.extend(first.spans.drain(..));
+            spans.append(&mut first.spans);
             first.spans = spans;
         }
         for line in lines {
@@ -597,10 +595,10 @@ impl<'a> Render<'a> {
                 is_code: false,
             });
         }
-        if let Some(s) = self.lists.last_mut() {
-            if s.ordered {
-                s.next += 1;
-            }
+        if let Some(s) = self.lists.last_mut()
+            && s.ordered
+        {
+            s.next += 1;
         }
     }
 
@@ -634,7 +632,7 @@ impl<'a> Render<'a> {
             })
             .collect();
         let sum_widths: usize = widths.iter().sum();
-        let needed = sum_widths + (ncols as usize) + 1;
+        let needed = sum_widths + ncols + 1;
         if needed > self.content_width() {
             let overflow = needed - self.content_width();
             for w in widths.iter_mut() {
@@ -642,25 +640,21 @@ impl<'a> Render<'a> {
             }
         }
         if let Some(header_line) =
-            render_table_row(&header, &widths, &aligns, self.styles.table_header.clone())
+            render_table_row(&header, &widths, &aligns, self.styles.table_header)
         {
             self.emit(RenderedLine {
                 line: header_line,
                 is_code: false,
             });
         }
-        if let Some(sep_spans) =
-            render_table_separator(&widths, &aligns, self.styles.table_sep.clone())
-        {
+        if let Some(sep_spans) = render_table_separator(&widths, &aligns, self.styles.table_sep) {
             self.emit(RenderedLine {
                 line: Line::from(sep_spans),
                 is_code: false,
             });
         }
         for row in rows {
-            if let Some(line) =
-                render_table_row(&row, &widths, &aligns, self.styles.paragraph.clone())
-            {
+            if let Some(line) = render_table_row(&row, &widths, &aligns, self.styles.paragraph) {
                 self.emit(RenderedLine {
                     line,
                     is_code: false,
@@ -682,7 +676,7 @@ fn parse_language(info: &str) -> Option<String> {
     Some(lang.to_ascii_lowercase())
 }
 
-fn find_syntax<'a, 'b>(ss: &'a SyntaxSet, info: &'b str) -> Option<&'a SyntaxReference> {
+fn find_syntax<'a>(ss: &'a SyntaxSet, info: &str) -> Option<&'a SyntaxReference> {
     let lang = parse_language(info)?;
     const ALIASES: [(&str, &str); 24] = [
         ("rs", "Rust"),
@@ -710,10 +704,10 @@ fn find_syntax<'a, 'b>(ss: &'a SyntaxSet, info: &'b str) -> Option<&'a SyntaxRef
         ("c", "C"),
         ("cpp", "C++"),
     ];
-    if let Some((_, name)) = ALIASES.iter().find(|(alias, _)| *alias == lang) {
-        if let Some(s) = ss.find_syntax_by_name(name) {
-            return Some(s);
-        }
+    if let Some((_, name)) = ALIASES.iter().find(|(alias, _)| *alias == lang)
+        && let Some(s) = ss.find_syntax_by_name(name)
+    {
+        return Some(s);
     }
     ss.find_syntax_by_extension(&lang)
         .or_else(|| ss.find_syntax_by_name(&lang))
@@ -749,13 +743,13 @@ fn wrap_runs(runs: &[Run], width: usize) -> Vec<Line<'static>> {
         let mut merged: Vec<(String, RStyle)> = Vec::new();
         for run in chunk {
             if let Run::Text(text, style) = run {
-                if let Some((last, last_style)) = merged.last_mut() {
-                    if last_style == style {
-                        last.push_str(text);
-                        continue;
-                    }
+                if let Some((last, last_style)) = merged.last_mut()
+                    && last_style == style
+                {
+                    last.push_str(text);
+                    continue;
                 }
-                merged.push((text.clone(), style.clone()));
+                merged.push((text.clone(), *style));
             }
         }
         let mut words: Vec<Word> = Vec::new();
@@ -788,7 +782,7 @@ fn greedy_wrap(words: Vec<Word>, width: usize, lines: &mut Vec<Line<'static>>) {
                 .chunks(width)
                 .map(|c| c.iter().collect::<String>())
             {
-                lines.push(Line::from(vec![Span::styled(chunk, word.style.clone())]));
+                lines.push(Line::from(vec![Span::styled(chunk, word.style)]));
             }
             continue;
         }
@@ -805,8 +799,7 @@ fn greedy_wrap(words: Vec<Word>, width: usize, lines: &mut Vec<Line<'static>>) {
         if !last.spans.is_empty() && word.space_before {
             last.spans.push(Span::styled(" ", RStyle::default()));
         }
-        last.spans
-            .push(Span::styled(word.text.clone(), word.style.clone()));
+        last.spans.push(Span::styled(word.text.clone(), word.style));
     }
 }
 
@@ -897,7 +890,7 @@ fn render_table_separator(
 /// the column width keeps the separator row straight with the cells.
 fn separator_cell(width: usize, align: Alignment) -> String {
     let width = width.max(1);
-    let mut cell: Vec<char> = std::iter::repeat('-').take(width).collect();
+    let mut cell: Vec<char> = std::iter::repeat_n('-', width).collect();
     match align {
         Alignment::None | Alignment::Left => {}
         Alignment::Center => {

@@ -925,7 +925,7 @@ impl App {
                     .line
                     .spans
                     .first()
-                    .map(|span| span.style.clone())
+                    .map(|span| span.style)
                     .unwrap_or_default();
                 let text = self.lines[index].line.to_string();
                 for line in wrap(&text, target) {
@@ -1017,10 +1017,12 @@ fn next_block_end(pending: &str) -> Option<usize> {
             let line_end = rest.find('\n').unwrap_or(rest.len());
             let line = &rest[..line_end];
             consumed += line_end;
-            if let Some((closer, clo_len, rest_str)) = fence_split(line) {
-                if closer == ch && clo_len >= len && rest_str.trim().is_empty() {
-                    return Some(consumed);
-                }
+            if let Some((closer, clo_len, rest_str)) = fence_split(line)
+                && closer == ch
+                && clo_len >= len
+                && rest_str.trim().is_empty()
+            {
+                return Some(consumed);
             }
             if line_end >= rest.len() {
                 // Reached the end without a matching closer.
