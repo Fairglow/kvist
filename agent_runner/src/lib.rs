@@ -12,6 +12,7 @@
 mod cli;
 mod kvist_import;
 mod logging;
+mod markdown;
 mod run;
 
 pub mod config;
@@ -32,6 +33,7 @@ pub use context::{
 pub use error::{Error, Result};
 pub use executor::SandboxExecutor;
 pub use kvist_import::{KVIST_CONFIG_FILE, import_models, resolve_kvist_config_path};
+pub use markdown::{MarkdownStyles, RenderedLine, render_document};
 pub use run::system_prompt;
 pub use sandbox::ToolOutcome;
 pub use session::{

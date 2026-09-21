@@ -78,7 +78,7 @@ fn render_transcript(f: &mut ratatui::Frame, app: &App, area: Rect) {
     let lines: Vec<Line> = app
         .lines
         .iter()
-        .map(|screen_line| Line::from(Span::styled(screen_line.text.clone(), screen_line.style)))
+        .map(|screen_line| screen_line.line.clone())
         .collect();
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         format!(" transcript [{}] ", app.lines.len()),
@@ -334,7 +334,8 @@ mod tests {
             message: "done".to_owned(),
         });
         for line in &a.lines {
-            eprintln!("  A LINE[{}] {:?}", line.text.chars().count(), line.text);
+            let text = line.line.to_string();
+            eprintln!("  A LINE[{}] {:?}", text.chars().count(), text);
         }
 
         eprintln!("=== SCENARIO B: each fragment has a trailing newline, width 80 ===");
@@ -353,7 +354,8 @@ mod tests {
             message: "done".to_owned(),
         });
         for line in &b.lines {
-            eprintln!("  B LINE[{}] {:?}", line.text.chars().count(), line.text);
+            let text = line.line.to_string();
+            eprintln!("  B LINE[{}] {:?}", text.chars().count(), text);
         }
     }
 }

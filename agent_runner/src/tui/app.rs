@@ -6,10 +6,11 @@ use std::sync::mpsc;
 use agent_runtime::ReasoningEffort;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::{Color, Style};
-use ratatui::text::Span;
+use ratatui::text::{Line, Span};
 use tui_textarea::TextArea;
 
 use crate::error::Result;
+use crate::markdown::render_document;
 use crate::session::Event;
 
 /// Classifies a transcript line so it can be collapsed for a cleaner overview.
@@ -23,12 +24,29 @@ pub enum LineKind {
     Placeholder,
 }
 
-/// A single pre-wrapped, styled transcript line.
+/// A single pre-wrapped, styled transcript row.
+///
+/// A row holds one or more styled spans so Markdown inline formatting
+/// (bold, italic, inline code, links) can mix on a single line. [`ScreenLine::md`]
+/// carries the raw Markdown that produced the row; it is `Some` only on the
+/// first row of a Markdown block, which lets [`App::resize`] re-render the whole
+/// block at a new width instead of reflowing already-styled spans.
 #[derive(Debug, Clone)]
 pub struct ScreenLine {
-    pub style: Style,
-    pub text: String,
+    pub line: Line<'static>,
     pub kind: LineKind,
+    pub md: Option<String>,
+}
+
+impl ScreenLine {
+    /// A plain, single-span row styled uniformly.
+    fn plain(text: impl Into<String>, style: Style, kind: LineKind) -> Self {
+        ScreenLine {
+            line: Line::from(vec![Span::styled(text.into(), style)]),
+            kind,
+            md: None,
+        }
+    }
 }
 
 /// Maximum number of transcript lines retained before dropping the oldest.
@@ -318,14 +336,12 @@ impl App {
     /// Pushes wrapped reasoning lines, dimmed and tagged so they can be
     /// collapsed later, then keeps the transcript bounded and followed.
     fn push_reasoning_lines(&mut self, text: &str) {
+        let style = Style::default()
+            .fg(Color::Gray)
+            .add_modifier(ratatui::style::Modifier::DIM);
         for line in wrap(text, self.content_width()) {
-            self.lines.push(ScreenLine {
-                style: Style::default()
-                    .fg(Color::Gray)
-                    .add_modifier(ratatui::style::Modifier::DIM),
-                text: line,
-                kind: LineKind::Reasoning,
-            });
+            self.lines
+                .push(ScreenLine::plain(line, style, LineKind::Reasoning));
         }
         self.maybe_truncate();
         self.follow();
@@ -635,32 +651,49 @@ impl App {
         );
     }
 
-    /// Flushes accumulated streamed text into the transcript, normalizing soft
-    /// line breaks to spaces so the trailing fragment reads horizontally.
+    /// Flushes accumulated streamed text into the transcript. Whatever remains
+    /// (an incomplete paragraph or an unclosed fence) is rendered as Markdown so
+    /// a trailing fragment still reads horizontally.
     fn flush_pending_text(&mut self) {
         if !self.pending_text.is_empty() {
-            let text = std::mem::take(&mut self.pending_text);
-            self.push_wrapped(
-                Style::default().fg(Color::Reset),
-                &normalize_soft_breaks(&text),
-            );
+            let block = std::mem::take(&mut self.pending_text);
+            self.push_markdown_block(block);
         }
     }
 
-    /// Flushes every complete paragraph in the pending buffer. A paragraph
-    /// breaks on a blank line (`\n\n`); lone newlines are soft breaks kept in
-    /// the buffer until a flush trigger, when they become spaces. This keeps a
-    /// streamed sentence on flowing rows instead of one short row per token.
+    /// Flushes every complete block in the pending buffer. A block is either a
+    /// paragraph (terminated by a blank line, `\n\n`) or a fenced code block
+    /// (terminated by its closing fence). Lone newlines are soft breaks kept in
+    /// the buffer until a flush trigger, so a streamed sentence flows on rows
+    /// rather than one short row per token. Fences are matched so a code block
+    /// is never split across flushes even when it contains blank lines.
     fn flush_paragraphs(&mut self) {
-        while let Some(pos) = self.pending_text.find("\n\n") {
-            let head = self.pending_text[..pos].to_owned();
-            let tail = self.pending_text[pos + 2..].to_owned();
-            self.push_wrapped(
-                Style::default().fg(Color::Reset),
-                &normalize_soft_breaks(&head),
-            );
+        while let Some(end) = next_block_end(&self.pending_text) {
+            let block = self.pending_text[..end].to_owned();
+            let tail = self.pending_text[end..].to_owned();
+            self.push_markdown_block(block);
             self.pending_text = tail;
         }
+    }
+
+    /// Renders one Markdown block and appends its styled rows to the transcript.
+    /// Blank-only blocks (e.g. the separator consumed with a paragraph) add
+    /// nothing, and the raw source is retained on the first row so resize can
+    /// re-render the block at a new width.
+    fn push_markdown_block(&mut self, md: String) {
+        if md.trim().is_empty() {
+            return;
+        }
+        let rows = render_document(&md, self.content_width());
+        for (index, row) in rows.into_iter().enumerate() {
+            self.lines.push(ScreenLine {
+                line: row.line,
+                kind: LineKind::Normal,
+                md: if index == 0 { Some(md.clone()) } else { None },
+            });
+        }
+        self.maybe_truncate();
+        self.follow();
     }
 
     /// Flushes accumulated streamed text and reasoning together so the transcript
@@ -706,11 +739,8 @@ impl App {
 
     fn push_wrapped(&mut self, style: Style, text: &str) {
         for line in wrap(text, self.content_width()) {
-            self.lines.push(ScreenLine {
-                style,
-                text: line,
-                kind: LineKind::Normal,
-            });
+            self.lines
+                .push(ScreenLine::plain(line, style, LineKind::Normal));
         }
         self.maybe_truncate();
         self.follow();
@@ -865,19 +895,45 @@ impl App {
         }
         self.width = width;
         self.height = height;
-        let wrapped: Vec<ScreenLine> = self
-            .lines
-            .iter()
-            .flat_map(|screen_line| {
-                wrap(&screen_line.text, self.content_width())
-                    .into_iter()
-                    .map(|text| ScreenLine {
-                        style: screen_line.style,
-                        text,
-                        kind: screen_line.kind,
-                    })
-            })
-            .collect();
+        let target = self.content_width();
+        let mut wrapped: Vec<ScreenLine> = Vec::new();
+        let mut index = 0;
+        while index < self.lines.len() {
+            if let Some(source) = &self.lines[index].md.clone() {
+                // Re-render a whole Markdown block at the new width, preserving
+                // its block marker on the first row for any later resize.
+                let rows = render_document(source, target);
+                let mut next = index + 1;
+                while next < self.lines.len() && self.lines[next].md.is_none() {
+                    next += 1;
+                }
+                for (offset, row) in rows.into_iter().enumerate() {
+                    wrapped.push(ScreenLine {
+                        line: row.line,
+                        kind: LineKind::Normal,
+                        md: if offset == 0 {
+                            Some(source.clone())
+                        } else {
+                            None
+                        },
+                    });
+                }
+                index = next;
+            } else {
+                // A plain row reflows at the new width using its style and kind.
+                let style = self.lines[index]
+                    .line
+                    .spans
+                    .first()
+                    .map(|span| span.style.clone())
+                    .unwrap_or_default();
+                let text = self.lines[index].line.to_string();
+                for line in wrap(&text, target) {
+                    wrapped.push(ScreenLine::plain(line, style, self.lines[index].kind));
+                }
+                index += 1;
+            }
+        }
         self.lines = wrapped;
         self.clamp_scroll();
     }
@@ -936,13 +992,77 @@ fn split_long(word: &str, width: usize) -> Vec<String> {
         .collect()
 }
 
+/// Returns the byte length of the next complete Markdown block in `pending`, or
+/// `None` when the pending buffer holds no *closed* block yet (only an open
+/// paragraph without a blank line, or an unmatched code fence). The caller
+/// removes that prefix before flushing the next block.
+///
+/// A paragraph block ends at the next blank line (`\n\n`); a fenced code block
+/// ends at a matching closing fence. Blank lines between the opening fence and
+/// its closer are part of the code, never a paragraph boundary.
+fn next_block_end(pending: &str) -> Option<usize> {
+    let stripped = pending.trim_start_matches('\n');
+    let lead = pending.len() - stripped.len();
+    if stripped.is_empty() {
+        // Only trailing newlines remain; nothing to flush.
+        return None;
+    }
+    let first_line_end = stripped.find('\n').unwrap_or(stripped.len());
+    let first_line = &stripped[..first_line_end];
+    if let Some((ch, len, _info)) = fence_split(first_line) {
+        // Scan for a matching closer fence; only fence characters, no content.
+        let mut rest = &stripped[first_line_end + 1..];
+        let mut consumed = first_line_end + 1;
+        loop {
+            let line_end = rest.find('\n').unwrap_or(rest.len());
+            let line = &rest[..line_end];
+            consumed += line_end;
+            if let Some((closer, clo_len, rest_str)) = fence_split(line) {
+                if closer == ch && clo_len >= len && rest_str.trim().is_empty() {
+                    return Some(consumed);
+                }
+            }
+            if line_end >= rest.len() {
+                // Reached the end without a matching closer.
+                return None;
+            }
+            consumed += 1; // the newline after this line
+            rest = &rest[line_end + 1..];
+        }
+    } else {
+        // A paragraph: flush up to and including the next blank line.
+        stripped.find("\n\n").map(|pos| lead + pos + 2)
+    }
+}
+
+/// Recognises a code fence opener or closer and returns its character, run
+/// length, and the (possibly empty) info string that follows the run. Opening
+/// fences allow an info string (`rust`, `python 3`, ...); closers must contain
+/// only fence characters.
+fn fence_split(line: &str) -> Option<(char, usize, &str)> {
+    let trimmed = line.trim_start();
+    let chars: Vec<char> = trimmed.chars().collect();
+    if chars.is_empty() {
+        return None;
+    }
+    let ch = chars[0];
+    if ch != '`' && ch != '~' {
+        return None;
+    }
+    let run = chars.iter().take_while(|c| **c == ch).count();
+    if run < 3 {
+        return None;
+    }
+    Some((ch, run, &trimmed[run..]))
+}
+
 /// The dim placeholder line shown where thinking has been collapsed.
 fn collapse_placeholder() -> ScreenLine {
-    ScreenLine {
-        style: Style::default().fg(Color::DarkGray),
-        text: "▸ thinking hidden — press T to reveal".to_owned(),
-        kind: LineKind::Placeholder,
-    }
+    ScreenLine::plain(
+        "▸ thinking hidden — press T to reveal",
+        Style::default().fg(Color::DarkGray),
+        LineKind::Placeholder,
+    )
 }
 
 /// Estimates seconds until the live context reaches `context_limit`, forecast
@@ -1039,6 +1159,14 @@ mod tests {
 
     fn app() -> App {
         App::new(&models(), "local", ReasoningEffort::Medium, None, 40, 24)
+    }
+
+    /// An app with the startup welcome note cleared, so markdown-rendering
+    /// tests can index the transcript from the first rendered row.
+    fn clean_app() -> App {
+        let mut app = app();
+        app.lines.clear();
+        app
     }
 
     fn app_at(width: u16) -> App {
@@ -1159,7 +1287,12 @@ mod tests {
         // Ctrl+Enter on an empty editor records nothing in the transcript.
         assert_eq!(app.on_key(ctrl(KeyCode::Enter)), KeyAction::Submit);
         assert!(app.take_pending_prompt().is_none());
-        assert!(!app.lines.iter().any(|line| line.text.contains("You:")));
+        assert!(
+            !app.lines
+                .iter()
+                .any(|line| line.line.to_string().contains("You:")),
+            "user prompt lines should be plain text"
+        );
 
         // Ctrl+Enter with text stages the prompt as a line and a pending send.
         app.editor.insert_str("hello");
@@ -1168,7 +1301,7 @@ mod tests {
         assert!(
             app.lines
                 .iter()
-                .any(|line| line.text.contains("You: hello"))
+                .any(|line| line.line.to_string().contains("You: hello"))
         );
     }
 
@@ -1183,8 +1316,16 @@ mod tests {
 
         assert_eq!(app.on_key(ctrl(KeyCode::Enter)), KeyAction::Submit);
         assert_eq!(app.take_pending_prompt().as_deref(), Some("first\nsecond"));
-        assert!(app.lines.iter().any(|line| line.text.contains("first")));
-        assert!(app.lines.iter().any(|line| line.text.contains("second")));
+        assert!(
+            app.lines
+                .iter()
+                .any(|line| line.line.to_string().contains("first"))
+        );
+        assert!(
+            app.lines
+                .iter()
+                .any(|line| line.line.to_string().contains("second"))
+        );
     }
 
     #[test]
@@ -1289,7 +1430,7 @@ mod tests {
         assert!(
             app.lines
                 .iter()
-                .any(|line| line.text.contains("one two three"))
+                .any(|line| line.line.to_string().contains("one two three"))
         );
     }
 
@@ -1300,12 +1441,24 @@ mod tests {
         // A blank line is a paragraph boundary; the first paragraph flushes
         // immediately, the second stays pending until the next flush trigger.
         app.push_event(Event::Text("para one\n\npara two".to_owned()));
-        assert!(app.lines.iter().any(|line| line.text.contains("para one")));
-        assert!(!app.lines.iter().any(|line| line.text.contains("para two")));
+        assert!(
+            app.lines
+                .iter()
+                .any(|line| line.line.to_string().contains("para one"))
+        );
+        assert!(
+            !app.lines
+                .iter()
+                .any(|line| line.line.to_string().contains("para two"))
+        );
         app.push_event(Event::Finished {
             message: "done".to_owned(),
         });
-        assert!(app.lines.iter().any(|line| line.text.contains("para two")));
+        assert!(
+            app.lines
+                .iter()
+                .any(|line| line.line.to_string().contains("para two"))
+        );
         assert!(app.lines.len() > before);
     }
 
@@ -1323,9 +1476,12 @@ mod tests {
         assert!(
             app.lines
                 .iter()
-                .any(|line| line.text == "The quick brown fox"),
+                .any(|line| line.line.to_string() == "The quick brown fox"),
             "tokens should concatenate horizontally, not one per line:\n{:?}",
-            app.lines.iter().map(|l| &l.text).collect::<Vec<_>>()
+            app.lines
+                .iter()
+                .map(|l| l.line.to_string())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -1339,7 +1495,7 @@ mod tests {
         assert!(
             app.lines
                 .iter()
-                .any(|line| line.text.contains("shorten it"))
+                .any(|line| line.line.to_string().contains("shorten it"))
         );
         // The editor keeps the text so the user can trim it.
         assert_eq!(editor_text(&app), long);
@@ -1569,16 +1725,19 @@ mod tests {
         app.push_event(Event::Finished {
             message: "done".to_owned(),
         });
-        let reasoning: Vec<&str> = app
+        let reasoning: Vec<String> = app
             .lines
             .iter()
             .filter(|line| line.kind == LineKind::Reasoning)
-            .map(|line| line.text.as_str())
+            .map(|line| line.line.to_string())
             .collect();
         assert!(
-            reasoning.contains(&"The quick brown fox"),
+            reasoning.iter().any(|line| line == "The quick brown fox"),
             "reasoning should concatenate horizontally, not one row per delta:\n{:?}",
-            app.lines.iter().map(|l| &l.text).collect::<Vec<_>>()
+            app.lines
+                .iter()
+                .map(|l| l.line.to_string())
+                .collect::<Vec<_>>()
         );
     }
 
@@ -1626,5 +1785,87 @@ mod tests {
         app.on_key(ctrl(KeyCode::End));
         assert_eq!(app.scroll, app.bottom_offset());
         assert!(app.following);
+    }
+
+    fn rendered_text(app: &App) -> Vec<String> {
+        app.lines.iter().map(|line| line.line.to_string()).collect()
+    }
+
+    #[test]
+    fn markdown_fence_renders_a_marked_code_block() {
+        let mut app = clean_app();
+        let before = app.lines.len();
+        app.push_event(Event::Text("```rust\nfn main() {}\n```".to_owned()));
+        app.flush_pending_text();
+        // A fenced block renders two rows: a marked language label, then the source.
+        let lines = rendered_text(&app);
+        assert_eq!(
+            lines.len() - before,
+            2,
+            "a fence label and one source row: {lines:?}"
+        );
+        assert!(
+            lines[0].contains("rust"),
+            "the fence is marked with its language: {lines:?}"
+        );
+        assert!(
+            lines[1].contains("fn main() {}"),
+            "the source is shown: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn markdown_fence_streamed_across_fragments_flushes_whole() {
+        let mut app = clean_app();
+        // The closing fence arrives later; an open fence must stay pending.
+        app.push_event(Event::Text("```sh\necho hi".to_owned()));
+        assert_eq!(
+            app.lines.len(),
+            0,
+            "an unclosed fence renders nothing: {:?}",
+            rendered_text(&app)
+        );
+        app.push_event(Event::Text("\n```".to_owned()));
+        app.flush_pending_text();
+        let lines = rendered_text(&app);
+        assert!(
+            lines.iter().any(|line| line.contains("echo hi")),
+            "the block renders whole once the fence closes: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn markdown_heading_and_bold_render_as_formatted_rows() {
+        let mut app = clean_app();
+        app.push_event(Event::Text("# Title\n\n**bold** text".to_owned()));
+        app.flush_pending_text();
+        let lines = rendered_text(&app);
+        assert_eq!(lines[0], "Title", "the heading text: {lines:?}");
+        let bold_row = app
+            .lines
+            .iter()
+            .find(|line| line.line.to_string().contains("bold"))
+            .expect("the bold paragraph rendered");
+        assert!(
+            bold_row.line.spans.len() > 1,
+            "bold text is a distinct styled span, not plain text: {:?}",
+            bold_row.line.spans
+        );
+    }
+
+    #[test]
+    fn markdown_table_renders_header_separator_and_row() {
+        let mut app = clean_app();
+        app.push_event(Event::Text(
+            "| a | b |\n| --- | --- |\n| 1 | 2 |\n".to_owned(),
+        ));
+        app.flush_pending_text();
+        let lines = rendered_text(&app);
+        assert_eq!(lines.len(), 3, "a GFM table is three rows: {lines:?}");
+        assert!(
+            lines[1].chars().all(|c| matches!(c, '-' | ':' | ' ')),
+            "a separator row: {lines:?}"
+        );
+        assert!(lines[2].contains("1") && lines[2].contains("2"));
     }
 }
