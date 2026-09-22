@@ -28,7 +28,7 @@ use crate::error::{Error, Result};
 use crate::executor::SandboxExecutor;
 use crate::retry::RetryPolicy;
 use crate::run::{self, start};
-use crate::session::{AgentSession, Recorder};
+use crate::session::{AgentSession, MAX_TURNS, Recorder};
 use crate::session_log::SessionLog;
 use crate::tools::ToolRegistry;
 
@@ -51,6 +51,11 @@ pub struct Overrides {
     pub no_logs: bool,
     /// The resolved configuration path, shown in the help overlay.
     pub config_path: Option<PathBuf>,
+    /// When true, each prompt may drive an autonomous multi-turn loop rather
+    /// than a single model turn. A single turn is the safe default.
+    pub multi_turn: bool,
+    /// A prefilled prompt that is auto-started when the session begins.
+    pub prompt: Option<String>,
 }
 
 /// Runs the interactive UI to completion and returns the process exit code.
@@ -150,6 +155,7 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         log_dir: overrides.log_dir.clone(),
         no_logs: overrides.no_logs,
         working_directory,
+        max_turns: if overrides.multi_turn { MAX_TURNS } else { 1 },
     };
 
     let initial = match builder.start(&model, effort) {
@@ -162,7 +168,7 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
 
     let (width, height) = size().unwrap_or((100, 30));
     let model_ids: Vec<String> = config.models.iter().map(|model| model.id.clone()).collect();
-    let app = App::new(
+    let mut app = App::new(
         &model_ids,
         &app_model_label,
         effort,
@@ -170,6 +176,12 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         width,
         height,
     );
+    // Prefill and auto-start a caller-supplied prompt (for example one produced
+    // by `kvist prompt`). The startup dispatch in `run_ui` sends the staged
+    // text to the worker before the interactive loop begins.
+    if let Some(prompt) = overrides.prompt.clone() {
+        app.stage_initial_prompt(prompt);
+    }
 
     match ui_loop(app, &builder, Some(initial)) {
         Ok(()) => ExitCode::SUCCESS,
@@ -192,6 +204,7 @@ struct SessionBuilder {
     log_dir: Option<PathBuf>,
     no_logs: bool,
     working_directory: PathBuf,
+    max_turns: u32,
 }
 
 /// One live session worker: the model loop thread plus its channels.
@@ -252,6 +265,7 @@ impl SessionBuilder {
             context,
             recorder,
             retry,
+            self.max_turns,
         );
         Ok(Worker {
             handle,
@@ -320,6 +334,16 @@ fn run_ui<M: std::io::Write>(
     builder: &SessionBuilder,
     worker: &mut Option<Worker>,
 ) -> Result<()> {
+    // Dispatch any prefilled, auto-started prompt (for example one supplied by
+    // `kvist prompt`) before the interactive loop, and clear the input so the
+    // same text cannot be submitted again.
+    if let Some(text) = app.take_pending_prompt() {
+        app.editor.clear();
+        if let Some(current) = worker.as_ref() {
+            let _ = current.prompt_tx.send(text);
+        }
+    }
+
     loop {
         terminal.draw(|frame| render::render(frame, app))?;
 

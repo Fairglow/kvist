@@ -31,6 +31,7 @@ pub fn prompt_editor_command(project_dir: &Path, task_id: &str) -> Result<Option
         detect_loops: false,
         max_restarts: 3,
         allow_host_execution: false,
+        multi_turn: false,
     }))
 }
 

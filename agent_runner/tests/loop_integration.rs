@@ -783,6 +783,80 @@ fn a_transient_failure_is_retried_until_success() {
 }
 
 #[test]
+fn a_single_turn_cap_limits_one_prompt_to_one_model_turn() {
+    // The transport keeps proposing tools, so only the cap stops the loop. With
+    // a per-prompt cap of one turn the loop performs a single model turn and one
+    // tool, even though more work was queued: multi-turn autonomy is an explicit
+    // opt-in, so a default prompt must not run past one turn.
+    let transport = ScriptedTransport::new(vec![
+        tool_turn("plan first", "shell", json!({ "command": "echo hi" })),
+        tool_turn("plan again", "shell", json!({ "command": "echo hi" })),
+        tool_turn("plan again", "shell", json!({ "command": "echo hi" })),
+    ]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let cancellation = CancellationToken::new();
+
+    let mut session = make_session();
+    session.push_user("go");
+    let summary = AgentRunner::with_retry(1, fast_retry())
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &Collector::default(),
+            &cancellation,
+            &mut context,
+            Some(&mut recorder),
+        )
+        .expect("loop completes within the cap");
+
+    assert_eq!(
+        summary.turns, 1,
+        "the cap stops the loop after one model turn"
+    );
+    assert_eq!(
+        summary.tools_executed, 1,
+        "only the first turn's tool executes"
+    );
+    assert!(
+        summary.exhausted,
+        "a prompt cut off before it produced an answer is exhausted"
+    );
+}
+
+#[test]
+fn a_single_turn_that_produces_an_answer_is_a_clean_completion() {
+    // A single-turn prompt whose model gives a final answer must be recorded as
+    // a clean completion, even though it consumed its one permitted turn.
+    let transport = ScriptedTransport::new(vec![answer_turn("all done")]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let cancellation = CancellationToken::new();
+
+    let mut session = make_session();
+    session.push_user("go");
+    let summary = AgentRunner::with_retry(1, fast_retry())
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &Collector::default(),
+            &cancellation,
+            &mut context,
+            Some(&mut recorder),
+        )
+        .expect("loop completes within the cap");
+
+    assert_eq!(summary.turns, 1);
+    assert_eq!(summary.answer.as_deref(), Some("all done"));
+    assert!(!summary.exhausted, "a final answer is a clean completion");
+    assert!(!summary.cancelled);
+}
+
+#[test]
 fn a_retry_is_reported_as_a_note_before_each_attempt() {
     // Each retry must surface an in-progress note so the user sees the back-off
     // rather than a silent hang, even though the turn has not yet completed.

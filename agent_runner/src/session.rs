@@ -541,7 +541,11 @@ impl AgentRunner {
             }
         }
 
-        if turn >= self.max_turns {
+        // A prompt that stopped because the model gave a final answer is a clean
+        // completion even when it consumed every permitted turn. Only report
+        // exhaustion when the turn limit cut the model off before it produced an
+        // answer, which is the case where work still remained.
+        if turn >= self.max_turns && session.answer.is_none() {
             summary.exhausted = true;
         }
         summary.turns = turn;

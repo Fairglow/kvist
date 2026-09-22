@@ -13,9 +13,7 @@ use agent_runtime::{CancellationToken, ModelTransport};
 use crate::context::ContextManager;
 use crate::error::{Error, Result};
 use crate::retry::RetryPolicy;
-use crate::session::{
-    AgentRunner, AgentSession, Event, EventSink, MAX_TURNS, Recorder, ToolExecutor,
-};
+use crate::session::{AgentRunner, AgentSession, Event, EventSink, Recorder, ToolExecutor};
 
 /// Receives [`Event`]s from the worker; implements [`EventSink`].
 struct ChannelSink(mpsc::SyncSender<Event>);
@@ -60,6 +58,11 @@ impl Drop for SessionHandle {
 /// `context` bounds the model's context across the whole session, and an
 /// optional `recorder` captures the durable record (journal + transcript,
 /// including reasoning) for later inspection.
+///
+/// `max_turns` caps how many model turns one submitted prompt may drive before
+/// the loop stops. A value of one yields a single-shot prompt (the model takes
+/// one turn, its tools run, and control returns); a larger value permits the
+/// autonomous multi-turn loop that a caller opts into explicitly.
 pub fn start<M, E>(
     mut session: AgentSession,
     transport: M,
@@ -67,6 +70,7 @@ pub fn start<M, E>(
     mut context: ContextManager,
     mut recorder: Option<Box<dyn Recorder>>,
     retry: RetryPolicy,
+    max_turns: u32,
 ) -> (SessionHandle, mpsc::Receiver<Event>, mpsc::Sender<String>)
 where
     M: ModelTransport + Send + 'static,
@@ -85,7 +89,7 @@ where
         // turn so a cancelled turn does not end the session.
         while let Some(text) = wait_for_prompt(&prompt_rx) {
             session.push_user(text);
-            let runner = AgentRunner::with_retry(MAX_TURNS, retry);
+            let runner = AgentRunner::with_retry(max_turns, retry);
             // Borrow the recorder only for this run; the borrow ends before the
             // next iteration, and each run starts and finishes its own record.
             let _ = runner

@@ -222,6 +222,39 @@ impl App {
         app
     }
 
+    /// Stages a prefilled, auto-started prompt for a caller (for example
+    /// `kvist prompt`) that wants the agent to begin working immediately without
+    /// the user typing. The text is shown in the editor so it stays editable,
+    /// announced in the transcript, and queued for dispatch on the next loop
+    /// tick. The same length guard as interactive submission keeps the agent
+    /// transcript valid; an over-long prompt is shown but left editable rather
+    /// than submitted.
+    pub fn stage_initial_prompt(&mut self, text: String) {
+        if text.trim().is_empty() {
+            return;
+        }
+        if text.chars().count() > MAX_PROMPT_CHARS {
+            self.note(
+                Style::default().fg(Color::White).bold(),
+                &format!("You: {text} (too long; shown but not started)"),
+            );
+            self.note(
+                Style::default().fg(Color::Yellow),
+                &format!(
+                    "prompt is longer than {MAX_PROMPT_CHARS} characters; shorten it before sending"
+                ),
+            );
+            return;
+        }
+        self.editor.set_lines(vec![text.clone()], (0, 0));
+        self.note(
+            Style::default().fg(Color::White).bold(),
+            &format!("You: {text} (auto-started)"),
+        );
+        self.pending_prompt = Some(text);
+        self.status = "queued".to_owned();
+    }
+
     /// Feeds one loop event into the transcript, wrapping at the current width.
     pub fn push_event(&mut self, event: Event) {
         match event {

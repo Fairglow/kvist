@@ -63,6 +63,8 @@ fn run() -> std::result::Result<ExitCode, String> {
         context_limit: cli.context_limit,
         no_logs: cli.no_logs,
         config_path: Some(config_path.clone()),
+        multi_turn: cli.multi_turn,
+        prompt: cli.prompt.clone(),
     };
 
     Ok(tui::run(config, overrides))

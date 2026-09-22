@@ -68,6 +68,13 @@ pub struct Cli {
 
     /// An initial prompt to submit (optional).
     pub prompt: Option<String>,
+
+    /// Allow a single prompt to drive an autonomous, multi-turn loop. Off by
+    /// default: a prompt takes exactly one model turn, and its tools run once
+    /// before control returns. Enable this explicitly to permit the agent to
+    /// keep working across turns.
+    #[arg(long)]
+    pub multi_turn: bool,
 }
 
 /// The per-app configuration directory name under the XDG config directories.
@@ -202,6 +209,21 @@ mod tests {
         assert_eq!(cli.profile.as_deref(), Some("rust"));
         assert_eq!(cli.prompt.as_deref(), Some("do the thing"));
         assert!(!cli.list_models);
+    }
+
+    #[test]
+    fn prompt_defaults_to_a_single_model_turn() {
+        let cli = Cli::try_parse_from(["agent-runner", "explain this"]).expect("valid prompt");
+        assert!(!cli.multi_turn, "a prompt defaults to a single model turn");
+        assert_eq!(cli.prompt.as_deref(), Some("explain this"));
+    }
+
+    #[test]
+    fn multi_turn_is_enabled_only_when_explicit() {
+        let cli = Cli::try_parse_from(["agent-runner", "--multi-turn", "refactor this"])
+            .expect("valid prompt");
+        assert!(cli.multi_turn, "autonomy requires an explicit flag");
+        assert_eq!(cli.prompt.as_deref(), Some("refactor this"));
     }
 
     #[test]
