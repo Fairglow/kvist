@@ -551,6 +551,70 @@ fn context_compacts_across_prompts_but_the_record_keeps_everything() {
     assert_eq!(last_answer.as_deref(), Some("finished third"));
 }
 
+/// Whether a request carries a given user message verbatim.
+fn carries_user_message(messages: &[ModelMessage], text: &str) -> bool {
+    messages
+        .iter()
+        .any(|message| matches!(message, ModelMessage::User(found) if found == text))
+}
+
+#[test]
+fn a_follow_up_prompt_carries_the_earlier_prompt_in_context() {
+    // Within one session the model conversation accumulates, so a follow-up
+    // ("continue") is sent with the whole prior conversation. This is why the
+    // agent can pick up an earlier task instead of starting blind, and it is the
+    // guarantee the interactive UI relies on when the user asks it to continue.
+    let transport = CapturingTransport::new(vec![answer_turn("first"), answer_turn("second")]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let cancellation = CancellationToken::new();
+
+    let mut session = make_session();
+    session.push_user("first task text");
+    let summary1 = AgentRunner::default()
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &Collector::default(),
+            &cancellation,
+            &mut context,
+            Some(&mut recorder),
+        )
+        .expect("first prompt completes");
+    assert_eq!(summary1.answer.as_deref(), Some("first"));
+
+    session.push_user("second task text");
+    let summary2 = AgentRunner::default()
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &Collector::default(),
+            &cancellation,
+            &mut context,
+            Some(&mut recorder),
+        )
+        .expect("follow-up completes");
+    assert_eq!(summary2.answer.as_deref(), Some("second"));
+
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 2, "one request per prompt");
+    assert!(
+        carries_user_message(&requests[0].messages, "first task text"),
+        "the first prompt is in its own request"
+    );
+    assert!(
+        carries_user_message(&requests[1].messages, "first task text"),
+        "the follow-up did not carry the earlier prompt's text"
+    );
+    assert!(
+        carries_user_message(&requests[1].messages, "second task text"),
+        "the follow-up prompt is missing"
+    );
+}
+
 #[test]
 fn progress_events_report_speed_utilization_and_compaction_progress() {
     let transport = ScriptedTransport::new(vec![answer_turn("all done")]);

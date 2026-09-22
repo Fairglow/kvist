@@ -3,6 +3,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::time::Instant;
 
 use agent_runtime::ReasoningEffort;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -53,6 +54,11 @@ impl ScreenLine {
 
 /// Maximum number of transcript lines retained before dropping the oldest.
 const MAX_LINES: usize = 5000;
+/// The braille spinner frames cycled in the header while a turn generates.
+const SPINNER_FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧"];
+/// Milliseconds per spinner frame; the loop redraws each tick, so this sets the
+/// visible spin rate.
+const SPINNER_FRAME_MS: u128 = 100;
 /// Maximum total characters of a single prompt before it is rejected.
 const MAX_PROMPT_CHARS: usize = 16_384;
 /// The selectable thinking effort levels, in ascending order; the UI can only
@@ -144,6 +150,11 @@ pub struct App {
     /// The currently selected thinking effort (a valid enum value).
     pub effort: ReasoningEffort,
     pub running: bool,
+    /// Wall-clock time the current turn began generating, so the header can
+    /// derive an animated spinner frame and the UI can tell "working" from
+    /// "done"/"awaiting". `None` while idle, set on `TurnStart`, cleared on any
+    /// terminal event (`Finished`, `PromptEnd`, `Failed`).
+    pub running_since: Option<Instant>,
     pub show_help: bool,
     pub overlay: Overlay,
     pub status: String,
@@ -235,6 +246,7 @@ impl App {
             model: model_id.to_owned(),
             effort,
             running: false,
+            running_since: None,
             show_help: false,
             overlay: Overlay::None,
             status: "idle".to_owned(),
@@ -307,6 +319,7 @@ impl App {
             Event::TurnStart { model } => {
                 self.flush_pending();
                 self.running = true;
+                self.running_since = Some(Instant::now());
                 self.status = "thinking".to_owned();
                 self.note(
                     Style::default().fg(Color::Magenta),
@@ -350,13 +363,42 @@ impl App {
             }
             Event::Finished { message } => {
                 self.flush_pending();
-                self.running = false;
+                self.quit_running();
                 self.status = "done".to_owned();
                 self.note(Style::default().fg(Color::Green), &format!("✓ {message}"));
             }
+            // The prompt loop exited with no answer. Without this the UI would
+            // keep showing "working…" forever once the single-turn cap (or the
+            // multi-turn limit) returns control, so the user cannot tell the
+            // agent stopped. A clear, distinct state removes that ambiguity.
+            Event::PromptEnd {
+                exhausted,
+                cancelled,
+            } => {
+                self.quit_running();
+                if cancelled {
+                    self.status = "cancelled".to_owned();
+                    self.note(
+                        Style::default().fg(Color::Yellow),
+                        "cancelled — type a prompt to continue",
+                    );
+                } else if exhausted {
+                    self.status = "exhausted".to_owned();
+                    self.note(
+                        Style::default().fg(Color::Yellow),
+                        "single-turn cap reached with no answer — send a follow-up to continue",
+                    );
+                } else {
+                    self.status = "awaiting".to_owned();
+                    self.note(
+                        Style::default().fg(Color::Yellow),
+                        "no answer this turn — send a follow-up to continue",
+                    );
+                }
+            }
             Event::Failed(text) => {
                 self.flush_pending();
-                self.running = false;
+                self.quit_running();
                 self.status = "error".to_owned();
                 self.note(Style::default().fg(Color::Red), &text);
             }
@@ -929,6 +971,25 @@ impl App {
 
     fn note(&mut self, style: Style, text: &str) {
         self.push_wrapped(style, text);
+    }
+
+    /// Leaves the "working" state: clears the running flag and its spinner
+    /// timer so the header stops animating once control has returned to the
+    /// caller. Shared by every terminal event so the UI never looks stuck.
+    fn quit_running(&mut self) {
+        self.running = false;
+        self.running_since = None;
+    }
+
+    /// The animated spinner frame for the header, or `None` while idle. The
+    /// frame advances with wall-clock time (the loop redraws each tick), so a
+    /// running turn shows motion an idle one does not — a quick way to tell the
+    /// agent is generating versus having stopped.
+    pub fn spinner(&self) -> Option<&'static str> {
+        let since = self.running_since?;
+        let frame = since.elapsed().as_millis() / SPINNER_FRAME_MS;
+        let index = (frame % SPINNER_FRAMES.len() as u128) as usize;
+        Some(SPINNER_FRAMES[index])
     }
 
     fn push_wrapped(&mut self, style: Style, text: &str) {

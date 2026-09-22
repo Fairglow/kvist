@@ -60,13 +60,19 @@ fn render_stats(f: &mut ratatui::Frame, app: &App, area: Rect) {
 }
 
 fn render_header(f: &mut ratatui::Frame, app: &App, area: Rect) {
-    let running = if app.running { " · running" } else { "" };
+    // A leading spinner that advances with wall-clock time gives a motion cue
+    // an idle header lacks, so "is it working?" is answerable at a glance: it
+    // spins only while a turn generates and stops on any terminal event.
+    let spinner = match app.spinner() {
+        Some(frame) => Span::styled(frame, Style::default().fg(Color::Magenta).bold()),
+        None => Span::from(" "),
+    };
     let title = format!(
-        " agent-runner  ·  model: {}  ·  thinking: {}  ·  status: {}{}",
+        "{} agent-runner  ·  model: {}  ·  thinking: {}  ·  status: {}",
+        spinner,
         highlight(&app.model, app.running),
         app.effort.as_str(),
-        app.status,
-        running
+        app.status
     );
     let block = Block::default()
         .borders(Borders::BOTTOM)

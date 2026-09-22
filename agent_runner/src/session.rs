@@ -95,6 +95,14 @@ pub enum Event {
     },
     /// The session produced a final answer.
     Finished { message: String },
+    /// The prompt loop has exited and control has returned to the caller, even
+    /// though the model produced no answer. Emitted on every loop exit that
+    /// `Finished` does not already cover (the single-turn tool cap, or a user
+    /// cancellation before a tool ran) so the UI always learns control has
+    /// returned and stops showing "working…"; without it `running` would stay
+    /// `true` forever and the UI looks stuck after the single-turn cap cuts a
+    /// prompt off. `exhausted` marks a cap cutoff; `cancelled` marks a cancel.
+    PromptEnd { exhausted: bool, cancelled: bool },
     /// The session failed before producing an answer.
     Failed(String),
     /// A non-terminal notice (for example, a compaction that trimmed the model
@@ -458,6 +466,13 @@ impl AgentRunner {
                 for intent in tool_intents {
                     if cancellation.is_cancelled() {
                         summary.cancelled = true;
+                        // Cancel before a tool ran: tell the UI control has
+                        // returned so it stops showing "working…" (this path
+                        // previously emitted no terminal event at all).
+                        let _ = sink.send(Event::PromptEnd {
+                            exhausted: false,
+                            cancelled: true,
+                        });
                         return Ok(summary);
                     }
                     match executor.execute(&intent, cancellation) {
@@ -550,10 +565,22 @@ impl AgentRunner {
         }
         summary.turns = turn;
         summary.answer = session.answer.clone();
-        if let Some(answer) = &summary.answer {
-            let _ = sink.send(Event::Finished {
-                message: answer.clone(),
-            });
+        match &session.answer {
+            Some(answer) => {
+                let _ = sink.send(Event::Finished {
+                    message: answer.clone(),
+                });
+            }
+            None => {
+                // The loop exited with no answer (the single-turn tool cap, or
+                // the multi-turn limit cutting the model off). Emit a terminal
+                // event so the UI stops showing "working…"; without it `running`
+                // stays `true` after control returns and the UI looks stuck.
+                let _ = sink.send(Event::PromptEnd {
+                    exhausted: summary.exhausted,
+                    cancelled: false,
+                });
+            }
         }
         // Close the durable session record. A run that was cancelled or
         // exhausted after too many turns is recorded as unsuccessful; a normal

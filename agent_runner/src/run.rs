@@ -143,3 +143,118 @@ pub fn system_prompt(write_root: &str) -> String {
          layout. Prefer small, reversible steps. When editing files, write complete files. State what you did."
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc::RecvTimeoutError;
+    use std::time::Duration;
+
+    use crate::{
+        ContextManager, DEFAULT_CONTEXT_TOKENS, Model, ModelProvider, RetryPolicy, ToolExecutor,
+        ToolOutcome, ToolPolicy, ToolRegistry,
+    };
+    use agent_runtime::{
+        CancellationToken, Error as AgentError, ModelRequest, ModelStreamEvent, ModelTransport,
+        ModelTurn, ReasoningEffort, ToolIntent,
+    };
+
+    /// A transport the worker never calls in these tests (no prompt is sent),
+    /// so every method just reports a cancelled turn.
+    struct NoopTransport;
+
+    impl ModelTransport for NoopTransport {
+        fn complete(
+            &self,
+            _request: &ModelRequest,
+            _cancellation: &CancellationToken,
+        ) -> agent_runtime::Result<ModelTurn> {
+            Err(AgentError::ModelTransportCancelled)
+        }
+
+        fn stream(
+            &self,
+            _request: &ModelRequest,
+            _cancellation: &CancellationToken,
+            _on_event: &mut dyn FnMut(ModelStreamEvent) -> agent_runtime::Result<()>,
+        ) -> agent_runtime::Result<ModelTurn> {
+            Err(AgentError::ModelTransportCancelled)
+        }
+
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(30)
+        }
+    }
+
+    struct NoopExecutor;
+
+    impl ToolExecutor for NoopExecutor {
+        fn execute(
+            &self,
+            _intent: &ToolIntent,
+            _cancellation: &CancellationToken,
+        ) -> Result<ToolOutcome> {
+            Ok(ToolOutcome {
+                exited: true,
+                status: Some(0),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+                timed_out: false,
+                output_limit_exceeded: false,
+                cancelled: false,
+            })
+        }
+    }
+
+    fn test_session() -> AgentSession {
+        let model = Model {
+            id: "test".to_owned(),
+            provider: ModelProvider::LlamaServer,
+            base_url: "http://127.0.0.1:1".to_owned(),
+            model: "test-model".to_owned(),
+            deadline_secs: 30,
+            max_attempts: 1,
+            retry_base_delay_secs: 1,
+            retry_max_delay_secs: 1,
+            cadence_timeout_secs: 0,
+        };
+        let tool_defs = ToolRegistry::new(ToolPolicy::minimum()).tool_definitions();
+        AgentSession::new(model, ReasoningEffort::None, tool_defs, "system".to_owned())
+    }
+
+    #[test]
+    fn worker_exits_when_the_prompt_sender_is_dropped() {
+        // The quit teardown drops the prompt sender before the session handle so
+        // the worker's recv() unblocks and the thread finishes before join(). If
+        // the channel could never close, join() would hang forever and force
+        // Ctrl-C. Dropping the sender here and then joining proves the channel
+        // closing ends the worker, which is the invariant the fix relies on.
+        let context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+        let (handle, _rx, prompt_tx) = start(
+            test_session(),
+            NoopTransport,
+            NoopExecutor,
+            context,
+            None,
+            RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
+            1,
+        );
+        drop(prompt_tx);
+
+        // join() (inside SessionHandle::drop) must return promptly. Run it on a
+        // helper thread and wait for that thread with a timeout: if the worker
+        // ever hung, the helper would finish last and this assertion fails.
+        let handle = handle;
+        let (done_tx, done_rx) = mpsc::channel();
+        thread::spawn(move || {
+            drop(handle);
+            let _ = done_tx.send(());
+        });
+        match done_rx.recv_timeout(Duration::from_secs(5)) {
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => {}
+            Err(RecvTimeoutError::Timeout) => {
+                panic!("worker did not exit after the prompt channel closed: join hung")
+            }
+        }
+    }
+}

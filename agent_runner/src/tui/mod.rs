@@ -428,6 +428,18 @@ fn run_ui<M: std::io::Write>(
         }
 
         if app.should_quit {
+            // Graceful teardown before the loop exits. The worker blocks on
+            // rx.recv() waiting for the next prompt, so it can only exit once
+            // every prompt sender is dropped. Dropping the session handle first
+            // would join() a thread that can never unblock: the only prompt
+            // sender lives in the worker we are dropping. That ordering made
+            // the TUI hang after it closed and forced Ctrl-C. So cancel the
+            // running turn, then drop the sender to unblock recv(), and let the
+            // handle (which joins) drop last.
+            if let Some(worker) = worker.take() {
+                worker.handle.cancel();
+                drop(worker.prompt_tx);
+            }
             break;
         }
     }
