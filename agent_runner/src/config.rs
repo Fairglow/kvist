@@ -1,11 +1,13 @@
 //! Configuration model, loading, and validation.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result, io_error};
+use crate::toolchain::{ProfileSetting, ToolProfile};
 
 /// Maximum encoded size of a configuration file.
 pub const MAX_CONFIG_BYTES: u64 = 64 * 1024;
@@ -270,6 +272,9 @@ pub struct Config {
     pub models: Vec<Model>,
     /// The tool authority policy.
     pub tool_policy: crate::tools::ToolPolicy,
+    /// Per-language tool-chain enablement. `Generic` is always present and is
+    /// never represented here; every configurable profile defaults to `Auto`.
+    pub tool_profiles: BTreeMap<ToolProfile, ProfileSetting>,
     /// The sandbox boundary paths.
     pub sandbox: SandboxPaths,
 }
@@ -290,6 +295,10 @@ struct RawConfig {
     sandbox: RawSandbox,
     #[serde(default)]
     tool_policy: RawToolPolicy,
+    // Language tool profiles keyed by their id (`python`, `rust`, ...); `generic`
+    // is always on and never configured. Unknown names are rejected in `validate`.
+    #[serde(default)]
+    tool_profiles: BTreeMap<String, ProfileSetting>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -482,6 +491,25 @@ impl Config {
 
         let tool_policy = crate::tools::ToolPolicy::from_policy_table(&raw.tool_policy)?;
 
+        let mut tool_profiles: BTreeMap<ToolProfile, ProfileSetting> = BTreeMap::new();
+        for (name, setting) in &raw.tool_profiles {
+            match ToolProfile::from_id(name) {
+                Some(ToolProfile::Generic) => {}
+                Some(profile) => {
+                    tool_profiles.insert(profile, *setting);
+                }
+                None => {
+                    return Err(Error::Config {
+                        path: Some(path.to_string_lossy().into_owned()),
+                        reason: format!(
+                            "unknown tool profile `{name}` in `[tool_profiles]`; expected one of
+                             generic, python, rust, javascript, go, c"
+                        ),
+                    });
+                }
+            }
+        }
+
         Ok(Config {
             schema_version: SCHEMA_VERSION,
             working_directory,
@@ -501,6 +529,7 @@ impl Config {
                     .map(PathBuf::from)
                     .unwrap_or_else(SandboxPaths::default_backend),
             },
+            tool_profiles,
         })
     }
 
@@ -517,6 +546,11 @@ impl Config {
                 available: models.iter().map(|model| model.id.clone()).collect(),
             });
         }
+        let tool_profiles = ToolProfile::CONFIGURABLE
+            .iter()
+            .copied()
+            .map(|profile| (profile, ProfileSetting::Auto))
+            .collect();
         Ok(Config {
             schema_version: SCHEMA_VERSION,
             working_directory,
@@ -524,6 +558,7 @@ impl Config {
             default_thinking_effort: agent_runtime::ReasoningEffort::Medium,
             models,
             tool_policy,
+            tool_profiles,
             sandbox: SandboxPaths::default(),
         })
     }

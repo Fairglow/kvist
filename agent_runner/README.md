@@ -35,6 +35,11 @@ complete, commented example. Key points:
   executable and the Bubblewrap backend; they default to resolved system paths.
 - `tool_policy` exposes the shell denylist and the sandbox write root; the safe
   minimum denylist is always enforced.
+- `[tool_profiles]` advertises language tool-chains only against what reaches the
+  sandbox: each profile (`python`, `rust`, `javascript`, `go`, `c`) is `on`,
+  `auto`, or `off`. `auto` advertises when the interpreter is available; `on`
+  fails startup if it is not; `off` never advertises. The `Generic` base is
+  always present.
 
 ## Tools
 
@@ -42,7 +47,8 @@ The agent is offered a small, robust tool set that maps to sandbox-executed
 commands: `shell`, `read_file`, `write_file`, and `list_dir`. Writes are confined
 to the working directory (the sandbox write root); reading is lenient within the
 sandbox view. The shell enforces a safe-by-default denylist over destructive
-commands.
+commands, and advertises only the language tool-chains (`python`, `rust`,
+`javascript`, `go`, `c`) that actually reach the sandbox.
 
 ## Authority and safety
 

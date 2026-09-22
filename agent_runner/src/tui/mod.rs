@@ -95,16 +95,43 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         .clone()
         .unwrap_or_else(|| config.working_directory.clone());
 
-    let mut registry = match ToolRegistry::discover(config.tool_policy.clone()) {
+    // Advertise only tool-chains that genuinely reach the sandbox, gated on the
+    // per-language profile settings. Detection is advisory logging; the gate is
+    // the sole authority for what is advertised. An explicit/forced profile or a
+    // profile set to `on` that is missing fails here rather than lying.
+    let probe = crate::toolchain::HostProbe;
+    let forced = overrides.profile;
+    let entry_names: Vec<String> = std::fs::read_dir(&working_directory)
+        .map(|dir| {
+            dir.flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    let names: Vec<&str> = entry_names.iter().map(String::as_str).collect();
+    let detected = crate::toolchain::detect_languages(&names);
+    if !detected.is_empty() {
+        eprintln!(
+            "detected project language(s): {}",
+            detected
+                .iter()
+                .map(|profile| profile.id())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    let registry = match ToolRegistry::resolve(
+        config.tool_policy.clone(),
+        &config.tool_profiles,
+        &probe,
+        forced,
+    ) {
         Ok(registry) => registry,
         Err(error) => {
             eprintln!("{}", error.describe());
             return ExitCode::from(error.exit_code());
         }
     };
-    if let Some(profile) = overrides.profile {
-        registry = registry.with_profiles(vec![profile]);
-    }
     let tool_defs = registry.tool_definitions();
 
     let executor = Arc::new(SandboxExecutor::new(

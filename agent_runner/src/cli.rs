@@ -44,7 +44,7 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub cwd: Option<PathBuf>,
 
-    /// Select a language tool profile (generic, rust, python).
+    /// Select a language tool profile (generic, python, rust, javascript, go, c).
     #[arg(short, long, value_name = "NAME")]
     pub profile: Option<String>,
 

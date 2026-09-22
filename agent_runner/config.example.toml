@@ -40,3 +40,15 @@ backend = "/usr/bin/bwrap"
 [tool_policy]
 shell_deny_substrings = []
 shell_deny_prefixes = []
+
+# Per-language tool-chain advertisement. Each key is a configurable profile id
+# (python, rust, javascript, go, c). `Generic` is always present and is not
+# configured. `auto` advertises the profile only when its interpreter reaches the
+# sandbox; `on` advertises and fails at startup when it does not; `off` never
+# advertises. Unknown profile keys and unrecognized settings fail at load.
+[tool_profiles]
+python = "auto"
+rust = "auto"
+javascript = "auto"
+go = "auto"
+c = "auto"

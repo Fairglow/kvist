@@ -23,6 +23,7 @@ pub mod retry;
 pub mod sandbox;
 pub mod session;
 pub mod session_log;
+pub mod toolchain;
 pub mod tools;
 pub mod tui;
 
@@ -44,9 +45,8 @@ pub use session::{
     AgentRunner, AgentSession, Event, EventSink, MAX_TURNS, Recorder, RunSummary, ToolExecutor,
 };
 pub use session_log::{DEFAULT_LOG_DIR, SessionLog};
-pub use tools::{
-    ExecContext, RenderedTool, StagedWrite, ToolProfile, ToolRegistry, describe_tool_call,
-};
+pub use toolchain::{ProfileSetting, ToolProfile, ToolchainProbe};
+pub use tools::{ExecContext, RenderedTool, StagedWrite, ToolRegistry, describe_tool_call};
 
 /// Initializes logging for the binary.
 pub fn init_logging() {

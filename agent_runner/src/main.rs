@@ -47,7 +47,9 @@ fn run() -> std::result::Result<ExitCode, String> {
     };
     let profile = match &cli.profile {
         Some(name) => Some(ToolProfile::from_id(name).ok_or_else(|| {
-            format!("unknown tool profile `{name}`; expected generic, rust, or python")
+            format!(
+                "unknown tool profile `{name}`; expected generic, python, rust, javascript, go, or c"
+            )
         })?),
         None => None,
     };

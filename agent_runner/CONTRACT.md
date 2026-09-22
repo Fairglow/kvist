@@ -29,6 +29,7 @@ struct Config {
     default_thinking_effort: ReasoningEffort,  // required
     models: Vec<Model>,                        // required, >= 1, unique ids
     tool_policy: ToolPolicy,                   // required
+    tool_profiles: BTreeMap<ToolProfile, ProfileSetting>,  // per-language gating
     sandbox: SandboxPaths,                     // required
 }
 ```
@@ -67,12 +68,19 @@ renders a sandbox command for an approved tool intent.
 struct ToolRegistry { /* bash, policy, profiles */ }
 ```
 
-- `ToolRegistry::new(policy: ToolPolicy) -> ToolRegistry` builds a registry with
-  the built-in minimal (generic) profile set; it never panics.
-- `ToolRegistry::discover(policy: ToolPolicy) -> Result<ToolRegistry>` resolves
-  the canonical `bash` path and builds a registry, failing if `bash` is missing.
-- `ToolRegistry::with_profiles(self, Vec<ToolProfile>)` adds language tool
-  profiles (`Generic`, `Rust`, `Python`).
+- `ToolRegistry::new(policy: ToolPolicy) -> ToolRegistry` builds a registry
+  advertising the built-in generic base plus the Python interpreter, a fixed and
+  honest default for the authoring sandbox (see `ToolProfile`); it never panics.
+- `ToolRegistry::resolve(policy, settings, probe, forced) ->
+Result<ToolRegistry>` resolves the canonical `bash` path and the honest, gated
+  profile set (see `ToolProfile`, `ProfileSetting`, `ToolchainProbe`,
+  `resolve_profiles`). `Generic` is always advertised; each configurable profile
+  follows its setting — `On` (including a `forced` CLI profile) advertises the
+  profile and fails with `Error::ToolchainUnavailable` if its interpreter does not
+  reach the sandbox, `Auto` advertises only when available, and `Off` never does.
+  `resolve` fails if `bash` is missing or a requested profile is unavailable.
+- `ToolRegistry::with_profiles(self, Vec<ToolProfile>)` narrows the advertised
+  profiles (used by tests); otherwise `new`/`resolve` decide the set.
 - `ToolRegistry::tool_definitions(&self) -> Vec<ToolDefinition>` — the
   `agent_runtime::ToolDefinition` list exposed to the model (stable order).
 - `ToolRegistry::profiles(&self) -> Vec<&'static str>` — the enabled profile
@@ -95,8 +103,39 @@ Result<RenderedTool>` — maps a model tool intent to an argv to execute inside
   host working directory is bind-mounted read-write), never at the sandbox
   filesystem root, so the `mv` locates the staged file for any configured root.
   `host_path` is the equivalent path under the host working directory.
-- `ToolProfile` (ids `generic`, `rust`, `python`) surfaces the relevant package
-  and build tools for each language; the generic profile is always present.
+- `ToolProfile` (ids `generic`, `python`, `rust`, `javascript`, `go`, `c`)
+  surfaces the relevant package and build tools for each language; `Generic` is
+  the always-present base and is never configured or gated (see
+  `Tool profiles, settings, and detection`).
+
+### `Tool profiles, settings, and detection`
+
+`agent_runner::toolchain` owns the honest advertisement of language tool-chains.
+
+- `ToolProfile` — the set of profiles (`Generic`, `Python`, `Rust`, `JavaScript`,
+  `Go`, `C`). `Generic` is the always-on base (coreutils, git, the read-only
+  `/usr` layout) and is never configured or gated; the other five are the
+  configurable set (`ToolProfile::CONFIGURABLE`), each named by `id()` and mapped
+  by `from_id()` (also the CLI/config spelling). `toolkit()` describes the
+  package and build tools each profile surfaces.
+- `ProfileSetting` (`On` | `Auto` | `Off`) — how a configurable profile is
+  enabled. `parse`/`FromStr` accept synonyms (`automatic`, `detect`, `disabled`,
+  `none`, …).
+- `ToolchainProbe` — whether a profile reaches the tool. `HostProbe` is the
+  production probe; availability is judged against the sandbox's read-only
+  `MOUNTED_SYSTEM_DIRS` (`/usr`, `/lib`, `/lib64`, `/bin`, `/sbin`), never the
+  host `PATH`. `language_available` canonicalises a candidate and ignores any
+  interpreter whose path ends in `rustup` (a `rustup` stub is not a real
+  compiler), so a stubbed `cargo`/`rustc` cannot be advertised as usable.
+- `detect_languages` — advisory: a `BTreeSet<ToolProfile>` derived from root
+  manifests (`Cargo.toml`, `pyproject.toml`, `package.json`, `go.mod`,
+  `CMakeLists.txt`, …). It informs logging and recommendations and never gates
+  use.
+- `resolve_profiles` — the gate: from the configured settings, a probe, and an
+  optional `forced` profile it returns the ordered set of configurable profiles
+  to advertise. `On` requires availability (else `Error::ToolchainUnavailable`),
+  `Auto` advertises only when available, `Off` never does. `ToolRegistry::resolve`
+  always prepends `Generic`.
 
 ### `ToolPolicy`
 
@@ -367,13 +406,27 @@ backend = "/usr/bin/bwrap"
 # Denylist entries are appended to the built-in safe minimum.
 shell_deny_substrings = []
 shell_deny_prefixes = []
+
+# Per-language tool-chain advertisement. Each key is a configurable profile id
+# (python, rust, javascript, go, c). `Generic` is always present and is not
+# configured. `auto` advertises only when the interpreter reaches the sandbox;
+# `on` advertises and fails at startup when it does not; `off` never advertises.
+[tool_profiles]
+python = "auto"
+rust = "auto"
+javascript = "auto"
+go = "auto"
+c = "auto"
 ```
 
 `schema_version` must be `1`. Unknown top-level fields fail. Each `[[models]]`
 needs a unique `id`, a known `provider`, a non-empty `base_url` and `model`, and
 a bounded `deadline_secs` (1..=600) and `cadence_timeout_secs` (0..=600; `0`
 disables the inter-token cadence watchdog). `sandbox.runner` and `sandbox.backend`
-default to resolved system locations when omitted.
+default to resolved system locations when omitted. `[tool_profiles]` accepts the
+ids `python`, `rust`, `javascript`, `go`, and `c` (any other key fails); each
+value is `on`, `auto`, or `off`. Unknown profile keys and unrecognized settings
+fail at load.
 
 ## Command-line interface
 
@@ -387,7 +440,8 @@ Options:
   -m, --model <ID>            Select a configured model id for this session
   -e, --effort <LEVEL>        Set the thinking effort for this session
       --cwd <PATH>            Set the working directory (must exist)
-  -p, --profile <NAME>        Select a language tool profile for this session
+  -p, --profile <NAME>        Select a language tool profile
+                              (generic, python, rust, javascript, go, c)
   --log-dir <PATH>            Directory for the session journal and transcript
   --context-limit <TOKENS>    Model context window in tokens (default 8192)
   --no-logs                   Skip the durable session journal and transcript
@@ -402,8 +456,11 @@ Options:
   session can continue with further input in the UI.
 - `--list-models` is non-interactive and exits zero.
 - `--config`, `--model`, `--effort`, `--cwd`, `--profile` override configuration
-  and are validated before the UI starts. `--log-dir`, `--context-limit`, and
-  `--no-logs` configure the durable session record and the compaction window.
+  and are validated before the UI starts. A `--profile` name is one of
+  `generic`, `python`, `rust`, `javascript`, `go`, `c`; selecting an unavailable
+  profile (via `-p` or a setting of `on`) fails startup rather than advertising a
+  tool the sandbox cannot run. `--log-dir`, `--context-limit`, and `--no-logs`
+  configure the durable session record and the compaction window.
 
 ## Sandbox request contract
 

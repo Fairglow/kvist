@@ -66,6 +66,14 @@ pub enum Error {
         /// Why the call violates policy.
         reason: String,
     },
+    /// A language tool-chain was requested but is not available inside the
+    /// sandbox. This fires only for an explicit request (a forced profile or a
+    /// configuration setting of `on`), so a user's clear intent never resolves to
+    /// a silent, dishonest tool list.
+    ToolchainUnavailable {
+        /// The profile whose interpreter could not be found in the sandbox.
+        profile: String,
+    },
     /// A tool argument was malformed or could not be rendered.
     ToolRender {
         /// The tool that could not be rendered.
@@ -114,6 +122,7 @@ impl Error {
             Error::ModelNotFound { .. } => 2,
             Error::InvalidEffort { .. } => 2,
             Error::ToolPolicy { .. } => 3,
+            Error::ToolchainUnavailable { .. } => 2,
             _ => 1,
         }
     }
@@ -159,6 +168,11 @@ impl Error {
             Error::ToolPolicy { tool, reason } => {
                 format!("tool `{tool}` is not permitted: {reason}")
             }
+            Error::ToolchainUnavailable { profile } => format!(
+                "tool profile `{profile}` is required, but the tool-chain is not available \
+                 inside the sandbox (only the read-only /usr layout is mounted); install it \
+                 system-wide or set it to `auto` or `off` in `[tool_profiles]"
+            ),
             Error::ToolRender { tool, reason } => {
                 format!("could not render tool `{tool}`: {reason}")
             }

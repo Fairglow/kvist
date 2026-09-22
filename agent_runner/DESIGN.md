@@ -1,11 +1,11 @@
-<!-- agent-runner-design-version: 3 -->
+<!-- agent-runner-design-version: 4 -->
 
 # Agent Runner — Design
 
 This document explains how `agent-runner` realizes the requirements and contract.
-It covers module layout, the agent loop, tool rendering, sandbox request
-construction, the terminal UI, cancellation, and the edge cases that the tests
-cover.
+It covers module layout, the agent loop, tool rendering, tool-chain advertisement
+and gating, sandbox request construction, the terminal UI, cancellation, and the
+edge cases that the tests cover.
 
 ## Module layout
 
@@ -17,6 +17,7 @@ src/
   error.rs      Error/Result, exit codes, actionable messages
   logging.rs    tracing subscriber (mirrors Kvist conventions)
   config.rs     Config, Model, SandboxPaths, loading and validation
+  toolchain.rs  ToolProfile/ProfileSetting/ToolchainProbe, detection and gating
   tools.rs      ToolRegistry, ToolPolicy, tool -> sandbox command rendering
   sandbox.rs    request construction (Authoring phase) + executor
   session.rs    AgentSession (turn model) + AgentRunner (loop + events)
@@ -29,8 +30,9 @@ tests/
   config.rs, tools.rs, sandbox.rs, session.rs, run.rs, cli.rs, tui.rs, integration.rs
 ```
 
-Separation of concerns: `config`/`tools`/`sandbox` build trusted structures from
-untrusted inputs; `session` owns the model-agnostic conversation and loop policy;
+Separation of concerns: `config`/`toolchain`/`tools`/`sandbox` build trusted
+structures from untrusted inputs; `session` owns the model-agnostic conversation
+and loop policy;
 `run` owns process/thread plumbing; `tui` owns only presentation. Nothing in
 `session` performs blocking subprocess I/O directly — it hands argv to an
 `Executor` trait, which the worker implements over the sandbox. Tests inject a
@@ -134,6 +136,38 @@ merely when it fails a bare `starts_with`), and the sandbox grants read-write
 authority only at the write root, so any other write fails inside the sandbox
 regardless.
 
+## Tool-chain advertisement and gating
+
+The `shell` tool advertises the tool-chains available inside the authoring
+sandbox through the `toolkit()` strings of the enabled `ToolProfile`s. Advertisement
+must be honest: the sandbox mounts only the read-only `/usr` layout and clears the
+environment, so a profile is advertised only when its interpreter genuinely reaches
+the sandbox, never against the host `PATH`.
+
+The gate lives in `ToolRegistry::resolve` (wired in `tui::run` and the CLI). It
+combines three inputs:
+
+- the per-profile `ProfileSetting` from `[tool_profiles]` (default `Auto` for every
+  configurable profile, per `Config::from_parts`);
+- a `ToolchainProbe` — `HostProbe` in production, which judges availability against
+  the sandbox's read-only `MOUNTED_SYSTEM_DIRS` (`/usr`, `/lib`, `/lib64`, `/bin`,
+  `/sbin`) rather than the host `PATH`; and
+- an optional forced profile from `-p`/`--profile`.
+
+`Generic` is always advertised. A configurable profile set to `On` (or forced by
+the CLI) advertises only if its interpreter reaches the sandbox and otherwise fails
+startup with `Error::ToolchainUnavailable`; `Auto` advertises only when available;
+`Off` never does. `language_available` canonicalises each candidate and ignores any
+interpreter whose path ends in `rustup`, so a `rustup` stub named `cargo`/`rustc`
+is not advertised as a buildable tool-chain.
+
+Project-language detection (`detect_languages`) is advisory only: it scans root
+manifests (`Cargo.toml`, `pyproject.toml`, `package.json`, `go.mod`,
+`CMakeLists.txt`, …) and is logged to inform the operator. It never gates what is
+advertised — availability does. A setting of `on` for a profile the sandbox cannot
+run is treated as an explicit, user-intended request and fails closed, so the model
+never receives a tool list that promises a compiler it cannot invoke.
+
 ## Sandbox request construction
 
 `sandbox::build_request` assembles a version-one `SandboxRequest` in the
@@ -212,6 +246,12 @@ trust. No speculative or misleading number is ever shown.
 - Cancellation during a turn reports `cancelled` and stops the loop.
 - Oversized output is truncated and reported, not buffered unbounded.
 - Config with wrong `schema_version` or unknown model selector fails to load.
+- A profile set to `on` or forced via `-p` that is not available inside the
+  sandbox fails startup with `ToolchainUnavailable`; `auto` advertises only the
+  profiles whose interpreter reaches the read-only `/usr` layout, and `rustup`
+  stubs are not treated as usable tool-chains.
+- `detect_languages` reports the project's detected language without gating
+  advertisement.
 - Deterministic ordering of tool definitions, grants, and identities.
 - Compaction keeps recent turns in full and fits under the limit; when the
   window is tight it reduces the number of full turns (flooring at one) while

@@ -5,6 +5,7 @@
 //! optional staged write that lets the agent create files larger than the
 //! sandbox argv byte limit without leaving the write root.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use agent_runtime::{ToolDefinition, ToolIntent};
@@ -12,6 +13,11 @@ use serde_json::Value;
 
 // Re-export the policy type so consumers can refer to it as `agent_runner::tools::ToolPolicy`.
 pub use crate::config::ToolPolicy;
+
+// The language tool profiles, their on/auto/off setting, and the sandbox-aware
+// availability probe live in `toolchain`; re-export them here so consumers can
+// refer to them as `agent_runner::tools::ToolProfile`, etc.
+pub use crate::toolchain::{ProfileSetting, ToolProfile, ToolchainProbe};
 
 /// The staging directory tail shared by the host and sandbox staging paths.
 /// On the host it joins under the working directory; in the sandbox it joins
@@ -65,47 +71,6 @@ pub struct RenderedTool {
     pub staged_write: Option<StagedWrite>,
 }
 
-/// Language tool profiles known to the registry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolProfile {
-    /// No language assumptions; generic Linux tools only.
-    Generic,
-    /// The Rust toolchain (cargo, rustc).
-    Rust,
-    /// The Python toolchain (python3, pip).
-    Python,
-}
-
-impl ToolProfile {
-    /// The profile identifier accepted in configuration and on the CLI.
-    pub const fn id(self) -> &'static str {
-        match self {
-            ToolProfile::Generic => "generic",
-            ToolProfile::Rust => "rust",
-            ToolProfile::Python => "python",
-        }
-    }
-
-    /// A human description of the toolchain the profile surfaces.
-    pub const fn toolkit(self) -> &'static str {
-        match self {
-            ToolProfile::Generic => "coreutils, git, and common Linux tools",
-            ToolProfile::Rust => "cargo, rustc, and the Rust standard toolchain",
-            ToolProfile::Python => "python3, pip, and common Python build tools",
-        }
-    }
-
-    /// Parses a profile identifier.
-    pub fn from_id(id: &str) -> Option<Self> {
-        match id {
-            "generic" => Some(Self::Generic),
-            "rust" => Some(Self::Rust),
-            "python" => Some(Self::Python),
-            _ => None,
-        }
-    }
-}
-
 /// The registry of model-facing tools and their sandbox rendering.
 #[derive(Debug, Clone)]
 pub struct ToolRegistry {
@@ -116,19 +81,47 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     /// Builds a registry advertising the built-in generic Linux tooling plus
-    /// the Rust/Cargo toolchain. Building and testing the project are essential
-    /// agent capabilities, so the Rust toolchain is advertised by default; the
-    /// sandbox enforces exactly a `System` and a `Cargo` toolchain, so these are
-    /// the honest defaults. Python is also advertised by default: it runs under
-    /// the generic `System` path from the read-only host layout, and `python3`
-    /// is present on the host, so advertising it is honest. Language profiles
-    /// can still be narrowed with [`ToolRegistry::with_profiles`].
+    /// the Python interpreter. Advertising a Rust/Cargo toolchain here would be
+    /// dishonest: the authoring sandbox uses a single `System` toolchain rooted
+    /// at the read-only `/usr` host layout, and `CONTRACT.md`/`DESIGN.md`
+    /// document that the authoring phase declares no `Cargo` toolchain. The only
+    /// `cargo`/`rustc` reachable inside `/usr` is a `rustup` stub with no
+    /// installed toolchain, so it cannot build. Python is advertised because it
+    /// is a real interpreter at `/usr/bin/python3` on that same read-only layout,
+    /// so advertising it is honest. Language profiles can still be narrowed with
+    /// [`ToolRegistry::with_profiles`].
     pub fn new(policy: ToolPolicy) -> Self {
         ToolRegistry {
             bash: PathBuf::from("/usr/bin/bash"),
             policy,
-            profiles: vec![ToolProfile::Generic, ToolProfile::Python, ToolProfile::Rust],
+            profiles: vec![ToolProfile::Generic, ToolProfile::Python],
         }
+    }
+
+    /// Resolves the canonical `bash` path and the honest, gated profile set,
+    /// advertising only tool-chains that actually reach the sandbox.
+    ///
+    /// `Generic` is always advertised. Every configurable profile follows its
+    /// configured [`ProfileSetting`]: `On` (including a `forced` profile from the
+    /// CLI) advertises the profile and fails with [`crate::error::Error::ToolchainUnavailable`]
+    /// if its interpreter does not reach the sandbox, `Auto` advertises it only
+    /// when available, and `Off` never does. An explicit request therefore never
+    /// resolves to a dishonest tool list. The `probe` is judged against what
+    /// reaches the sandbox, never against the host `PATH`.
+    pub fn resolve(
+        policy: ToolPolicy,
+        settings: &BTreeMap<ToolProfile, ProfileSetting>,
+        probe: &dyn ToolchainProbe,
+        forced: Option<ToolProfile>,
+    ) -> crate::error::Result<Self> {
+        let bash = crate::sandbox::resolve_executable("bash")?;
+        let mut profiles = vec![ToolProfile::Generic];
+        profiles.extend(crate::toolchain::resolve_profiles(settings, probe, forced)?);
+        Ok(ToolRegistry {
+            bash,
+            policy,
+            profiles,
+        })
     }
 
     /// Overrides the resolved `bash` path (used by tests).
@@ -235,12 +228,6 @@ impl ToolRegistry {
                 }),
             },
         ]
-    }
-
-    /// Resolves the canonical `bash` path and builds a registry.
-    pub fn discover(policy: ToolPolicy) -> crate::error::Result<Self> {
-        let bash = crate::sandbox::resolve_executable("bash")?;
-        Ok(ToolRegistry::new(policy).with_bash(bash))
     }
 
     /// Renders a tool intent to a sandbox argv.
@@ -463,34 +450,39 @@ pub fn describe_tool_call(intent: &ToolIntent) -> String {
 mod tests {
     use super::*;
 
-    /// Building and testing the project are essential, so the default registry
-    /// must advertise the generic Linux tools, the Rust/Cargo toolchain, and
-    /// the Python interpreter; otherwise an agent reasonably concludes it has
-    /// no compiler and declines.
+    /// The authoring sandbox provides only the generic Linux tools and the
+    /// Python interpreter (both real binaries under the read-only `/usr` host
+    /// layout); it does not provide a working Rust/Cargo toolchain, so the
+    /// default registry must advertise generic and python only. Advertising a
+    /// Rust toolchain would falsely promise the agent a compiler it cannot run.
     #[test]
-    fn default_registry_advertises_generic_and_rust_toolchains() {
+    fn default_registry_advertises_generic_and_python_toolchains() {
         let registry = ToolRegistry::new(ToolPolicy::minimum());
         let advertised = registry.profiles();
         // `profiles()` sorts and dedupes, so the default set is stable order.
         assert_eq!(
             advertised,
-            vec!["generic", "python", "rust"],
-            "default registry must advertise generic, python, and rust, got {advertised:?}"
+            vec!["generic", "python"],
+            "default registry must advertise generic and python only, got {advertised:?}"
         );
     }
 
     #[test]
-    fn shell_tool_description_names_the_rust_toolchain() {
+    fn shell_tool_description_does_not_claim_the_unavailable_rust_toolchain() {
         let registry = ToolRegistry::new(ToolPolicy::minimum());
         let shell = registry
             .tool_definitions()
             .into_iter()
             .find(|d| d.name == "shell")
             .expect("the shell tool is always available");
-        let description = shell.description.to_string();
+        let description = shell.description.to_lowercase();
         assert!(
-            description.to_lowercase().contains("cargo"),
-            "the shell tool must advertise the Rust toolchain it can build with: {description}"
+            description.contains("python3") || description.contains("python"),
+            "the shell tool must advertise the Python interpreter it actually has: {description}"
+        );
+        assert!(
+            !description.contains("cargo"),
+            "the shell tool must not advertise a Rust/Cargo toolchain the authoring sandbox does not provide: {description}"
         );
     }
 

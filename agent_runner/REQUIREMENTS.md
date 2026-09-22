@@ -1,4 +1,4 @@
-<!-- agent-runner-requirements-version: 2 -->
+<!-- agent-runner-requirements-version: 3 -->
 
 # Agent Runner — Requirements
 
@@ -31,6 +31,11 @@ Successful use produces:
 - tools that are pre-approved in configuration and never prompt for permission:
   a generous set of common Linux tools plus a package manager and build tools
   for one or more language profiles;
+- a shell tool that advertises only the language tool-chains that genuinely reach
+  the sandbox: each profile is configurable (`on`, `auto`, or `off`), `auto`
+  advertises only when the interpreter is available inside the sandbox, and an
+  explicitly requested or `on` profile that is unavailable fails startup rather
+  than advertising a tool the sandbox cannot run;
 - enforced authority boundaries — writes stay within the working directory, and
   the agent runs only in the sandbox, with process, output, and network limits;
 - clear, actionable errors and structured logging instead of panics; and
@@ -50,6 +55,10 @@ Successful use produces:
   tool, file read/write helpers, and a directory lister.
 - Command policy enforcement (an allow-by-default shell with a safe denylist and
   language profiles that surface the relevant package and build tools).
+- Language tool-chain detection, configuration, and gating: advertise profiles
+  only against what reaches the sandbox read-only `/usr` layout, let each
+  configurable profile be `on`/`auto`/`off`, detect the project language
+  advisingly, and fail at startup when a requested or `on` profile is missing.
 - Construction and execution of a version-one Authoring-phase sandbox request
   against the installed `kvist-sandbox-runner`, reusing its closed protocol and
   Bubblewrap enforcement.
@@ -103,6 +112,14 @@ Successful use produces:
 - Behavior MUST be deterministic and safe: stable ordering, explicit
   configuration, reproducible output, and no hidden network or filesystem side
   effects.
+- The shell tool MUST advertise a language tool-chain only when its interpreter
+  reaches the sandbox's read-only `/usr` layout, never against the host `PATH`;
+  `rustup` stubs MUST NOT be advertised as buildable tool-chains. Each
+  configurable profile is gated by its `on`/`auto`/`off` setting, an explicit
+  forced profile, or the default; `auto` advertises only when available, `off`
+  never advertises, and an explicit or `on` request for an unavailable profile
+  MUST fail startup with an actionable diagnostic rather than advertise a tool
+  the sandbox cannot run.
 
 ## Acceptance criteria
 
@@ -119,6 +136,13 @@ Successful use produces:
   rejects the call with a clear reason.
 - Given a missing or misconfigured sandbox runner or backend, the tool reports
   the problem and exits without executing anything on the host.
+- Given an explicit or `on` language profile whose interpreter does not reach the
+  sandbox, `agent-runner` fails startup with a `ToolchainUnavailable` diagnostic
+  instead of advertising a tool the sandbox cannot run; a profile set to `auto`
+  is advertised only when its interpreter is available.
+- Given a project whose root manifest names a language, `agent-runner` may log
+  the detected language but does not advertise that profile unless its interpreter
+  is available or the profile is explicitly enabled.
 - Given interactive input, the UI renders a transcript, the status bar reflects
   the model and effort, and Ctrl+C cancels a running turn cleanly.
 - Every behavior above is covered by an automated test with an injected
