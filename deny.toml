@@ -4,6 +4,7 @@ all-features = true
 
 [advisories]
 ignore = []
+unmaintained = "none"
 
 [licenses]
 allow = [
@@ -11,6 +12,7 @@ allow = [
   "Apache-2.0",
   "MIT",
   "Unicode-3.0",
+  "Zlib",
 ]
 confidence-threshold = 0.8
 

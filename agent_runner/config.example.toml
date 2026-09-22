@@ -1,0 +1,54 @@
+# Example agent-runner configuration.
+schema_version = 1
+
+# Optional override for the working directory; defaults to the process
+# current directory when omitted. Must be absolute and exist.
+working_directory = "/absolute/path/to/your/project"
+
+default_model = "local"
+default_thinking_effort = "medium"
+
+# Models selectable in the UI with -m/--model.
+[[models]]
+id = "local"
+provider = "llama-server"
+base_url = "http://127.0.0.1:9931"
+model = "qwen2.5-14b"
+# Per-turn generation budget. Long-context turns (large prefill plus thousands
+# of generated tokens) can take a couple of minutes; a stalled provider is still
+# caught by the slot/TTFT/cadence watchdogs, so this can be generous.
+deadline_secs = 300
+# Inter-token cadence watchdog: abort and retry a turn that sends no token for
+# this many seconds after the first token. `0` disables it.
+cadence_timeout_secs = 30
+
+[[models]]
+id = "ollama"
+provider = "ollama"
+base_url = "http://127.0.0.1:11434"
+model = "qwen2.5"
+deadline_secs = 300
+cadence_timeout_secs = 30
+
+# The independent sandbox enforcement boundary.
+[sandbox]
+runner = "/usr/local/bin/kvist-sandbox-runner"
+backend = "/usr/bin/bwrap"
+
+# Tool policy. The denylist entries below are appended to the built-in safe
+# minimum, which already forbids clearly destructive commands.
+[tool_policy]
+shell_deny_substrings = []
+shell_deny_prefixes = []
+
+# Per-language tool-chain advertisement. Each key is a configurable profile id
+# (python, rust, javascript, go, c). `Generic` is always present and is not
+# configured. `auto` advertises the profile only when its interpreter reaches the
+# sandbox; `on` advertises and fails at startup when it does not; `off` never
+# advertises. Unknown profile keys and unrecognized settings fail at load.
+[tool_profiles]
+python = "auto"
+rust = "auto"
+javascript = "auto"
+go = "auto"
+c = "auto"

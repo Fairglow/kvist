@@ -26,11 +26,13 @@ evidence.
 | Interactive shell | `shell` (`completion`, `journal`, `locks`, `pager`, `prompt_editor`, `runs`, `state`, `status`, `stream`, `style`) | Reedline host, clap-derived completion tree, dynamic state snapshot, builtins, journal, lock inspection, paging, streaming, theming |
 | Onboarding        | `init`, `convert`, `import`, `reverse_discovery`                                                                   | New projects and explicit source-derived drafts                                                                                     |
 
-The target `engine/` directory is both the root component and Rust workspace.
-Its `agent_runtime/` and `sandbox_runner/` directories are separately packaged
-child components with their own requirements, contracts, designs, queues,
-records, tests, and manifests. The one-way migration from the current `src/`
-layout is described in
+`engine/`, `agent_runtime/`, and `sandbox_runner/` are top-level peer
+components under the root Rust workspace manifest (`/Cargo.toml`). Each owns
+its own requirements, contract, design, queue, records, tests, and manifest.
+`kvist.engine` depends on `agent-runtime` as a Rust library, while
+`sandbox-runner` is an independent execution boundary that communicates with
+the engine only through the versioned protocol. The one-way migration from the
+original `src/` layout is recorded in
 [`../docs/decisions/0003-align-rust-workspace-with-components.md`](../docs/decisions/0003-align-rust-workspace-with-components.md).
 
 ## Interactions and state

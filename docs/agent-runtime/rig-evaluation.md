@@ -1,10 +1,17 @@
 # Rig Evaluation for Kvist
 
+> **Status (2026-09-18): historical record.** The Rig experiment was rejected
+> and `rig-core` was removed from the dependency graph, the queue, and the
+> intent documents (ADR 0009); the direct transport is the sole provider
+> transport on mainline. This evaluation is retained as evidence for that
+> decision. Statements below describe the `rig-integration` experiment branch,
+> not the mainline.
+
 ## Decision
 
 Evaluation date: 2026-09-01.
 
-Rig is a default-enabled experiment on the `rig-integration` branch, not yet an
+Rig was a default-enabled experiment on the `rig-integration` branch, not an
 accepted production preference. Exactly pinned `rig-core` 0.42.0 implements the
 private `agent-runtime` model-transport boundary after Kvist deliberately raised
 its MSRV to Rust 1.94, the compiler used by that Rig release's repository and
@@ -31,15 +38,15 @@ review.
 
 ## Branch experiment assessment
 
-| Question | Finding |
-| --- | --- |
-| What improves? | Rig centralizes provider request/response conversion, SSE/NDJSON assembly, finish reasons, usage, tool-call fragments, and provider evolution. The branch also gains provider-native structured-output requests without exposing Rig types. |
-| What remains Kvist-owned? | Canonical messages and turns, endpoint policy, limits, cancellation semantics, schema subset and returned-output validation, retry decisions, tool authorization/execution, redaction, and durable evidence. |
-| What does it cost? | The current target-specific normal/build graph is 148 unique packages with Rig versus 49 for the direct-only build, a delta of 99. The private Rig adapter is 1,086 source lines while the hardened direct transport is 1,856; retaining both means the experiment adds code rather than deleting it. |
-| Does usage change? | Normal branch builds include Rig and `agent-run model` defaults to it. `--transport direct` is the explicit fallback. `--output-schema '<object>'` adds a generation constraint. Reasoning effort and provider reasoning still require the direct transport. Project configuration and Kvist task flow do not change. |
-| Should fallback remain? | Yes, while Rig is pre-1.0 and live deployment conformance is incomplete. Fallback must be manually selected before a request; automatic replay is unsafe after uncertain acceptance. A later production decision may keep direct only as a test oracle or remove it after multiple stable Rig upgrades. |
-| Is Rig robust enough? | The pinned completion/provider core is robust enough for a contained experiment and fake-provider conformance. It is not yet proven robust enough to be Kvist's sole production transport because upstream warns of breaking changes, declares no MSRV, and exact local model/server/template matrices remain unevaluated. |
-| Best future boundary | Rig has the better future for provider-wire breadth if its smaller crate split stabilizes. Kvist's own canonical contract and authority layers have the better future for deterministic workflow, security, and evidence. The best implementation is therefore hybrid, not full framework adoption. |
+| Question                  | Finding                                                                                                                                                                                                                                                                                                                    |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| What improves?            | Rig centralizes provider request/response conversion, SSE/NDJSON assembly, finish reasons, usage, tool-call fragments, and provider evolution. The branch also gains provider-native structured-output requests without exposing Rig types.                                                                                |
+| What remains Kvist-owned? | Canonical messages and turns, endpoint policy, limits, cancellation semantics, schema subset and returned-output validation, retry decisions, tool authorization/execution, redaction, and durable evidence.                                                                                                               |
+| What does it cost?        | The current target-specific normal/build graph is 148 unique packages with Rig versus 49 for the direct-only build, a delta of 99. The private Rig adapter is 1,086 source lines while the hardened direct transport is 1,856; retaining both means the experiment adds code rather than deleting it.                      |
+| Does usage change?        | Normal branch builds include Rig and `agent-run model` defaults to it. `--transport direct` is the explicit fallback. `--output-schema '<object>'` adds a generation constraint. Reasoning effort and provider reasoning still require the direct transport. Project configuration and Kvist task flow do not change.      |
+| Should fallback remain?   | Yes, while Rig is pre-1.0 and live deployment conformance is incomplete. Fallback must be manually selected before a request; automatic replay is unsafe after uncertain acceptance. A later production decision may keep direct only as a test oracle or remove it after multiple stable Rig upgrades.                    |
+| Is Rig robust enough?     | The pinned completion/provider core is robust enough for a contained experiment and fake-provider conformance. It is not yet proven robust enough to be Kvist's sole production transport because upstream warns of breaking changes, declares no MSRV, and exact local model/server/template matrices remain unevaluated. |
+| Best future boundary      | Rig has the better future for provider-wire breadth if its smaller crate split stabilizes. Kvist's own canonical contract and authority layers have the better future for deterministic workflow, security, and evidence. The best implementation is therefore hybrid, not full framework adoption.                        |
 
 Raw source-line counts are only maintenance indicators: the direct file also
 contains component-specific hardening and bounded HTTP helpers that Rig does
@@ -216,16 +223,16 @@ rig-core = { version = "=0.42.0", default-features = false }
 
 The original throwaway experiment and the integrated adapter measured:
 
-| Gate | Result |
-| --- | --- |
-| Rust 1.85 | Historical fail. `rig-core` itself uses Edition 2024 let-chains stabilized in Rust 1.88. |
-| Rust 1.94 | Pass for the complete `agent-runtime --all-features` suite. This is the upstream-tested compiler, not a Rig-declared MSRV. |
-| Current Rust 1.98 | Pass for the integrated unary, streaming, tool-intent, bounds, cancellation, CLI, and tracing tests. |
-| Locked package count | Advisory. Current target-specific normal/build count is 148 packages with `rig-transport` versus 49 for the direct-only build: delta 99, above the 75-package review guideline. Package count informs maintenance and supply-chain review but does not block promotion by itself. |
-| Release binary size | Pass. 6,747,168 bytes with `rig-transport` versus 2,473,416 direct-only bytes: delta 4,273,752 bytes, below the 15 MiB limit. |
-| TLS with defaults disabled | As intended for local-only scope: no Rustls, native-tls, or OpenSSL selected. |
-| Advisories, bans, sources | Pass under `cargo deny`. |
-| Licenses | Pass. The workspace packages declare AGPL-3.0-or-later, every resolved dependency has an allowed license choice, and the all-feature graph passes `cargo-deny`. |
+| Gate                       | Result                                                                                                                                                                                                                                                                            |
+| -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Rust 1.85                  | Historical fail. `rig-core` itself uses Edition 2024 let-chains stabilized in Rust 1.88.                                                                                                                                                                                          |
+| Rust 1.94                  | Pass for the complete `agent-runtime --all-features` suite. This is the upstream-tested compiler, not a Rig-declared MSRV.                                                                                                                                                        |
+| Current Rust 1.98          | Pass for the integrated unary, streaming, tool-intent, bounds, cancellation, CLI, and tracing tests.                                                                                                                                                                              |
+| Locked package count       | Advisory. Current target-specific normal/build count is 148 packages with `rig-transport` versus 49 for the direct-only build: delta 99, above the 75-package review guideline. Package count informs maintenance and supply-chain review but does not block promotion by itself. |
+| Release binary size        | Pass. 6,747,168 bytes with `rig-transport` versus 2,473,416 direct-only bytes: delta 4,273,752 bytes, below the 15 MiB limit.                                                                                                                                                     |
+| TLS with defaults disabled | As intended for local-only scope: no Rustls, native-tls, or OpenSSL selected.                                                                                                                                                                                                     |
+| Advisories, bans, sources  | Pass under `cargo deny`.                                                                                                                                                                                                                                                          |
+| Licenses                   | Pass. The workspace packages declare AGPL-3.0-or-later, every resolved dependency has an allowed license choice, and the all-feature graph passes `cargo-deny`.                                                                                                                   |
 
 The integrated measurement builds the actual standalone executable from fresh
 target directories. The package count uses the direct adapter as the marginal

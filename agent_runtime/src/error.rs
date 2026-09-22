@@ -136,11 +136,138 @@ pub enum Error {
     Cancelled,
 
     /// A filesystem, process, or stream operation failed.
-    #[error("cannot {operation} `{path}`: {source}")]
+    #[error("cannot {operation}`{path}`: {source}")]
     Io {
         operation: &'static str,
         path: PathBuf,
         #[source]
         source: io::Error,
     },
+}
+
+impl Error {
+    /// Whether this failure is a transient, temporal condition that a bounded
+    /// retry may recover from.
+    ///
+    /// Returns `true` for network drops, provider read/generation timeouts,
+    /// transient slot-allocation stalls, and transient server errors (HTTP
+    /// 429/5xx). Returns `false` for persistent failures that retry would not
+    /// fix: cooperative cancellation, malformed responses, response-size limits,
+    /// bad requests, and configuration errors.
+    ///
+    /// This lets a caller retry only the failures it can plausibly recover from,
+    /// so a genuinely broken request is reported immediately instead of
+    /// wasting retries.
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            // Temporal: the provider was slow, stalled, or the turn's deadline
+            // elapsed while it was still generating. A fresh attempt gets a new
+            // deadline and can finish.
+            Error::ModelTransportTimedOut
+            | Error::SlotAllocationTimedOut { .. }
+            | Error::TtftTimedOut { .. }
+            | Error::InterTokenCadenceTimedOut { .. } => true,
+            // Network transport errors: resets, aborts, and timeouts are
+            // transient; a protocol/encoding error is not.
+            Error::ModelTransportIo { source, .. } => matches!(
+                source.kind(),
+                io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::ConnectionAborted
+                    | io::ErrorKind::BrokenPipe
+                    | io::ErrorKind::TimedOut
+                    | io::ErrorKind::ConnectionRefused
+                    | io::ErrorKind::UnexpectedEof
+            ),
+            // Transient server-side failures.
+            Error::ModelProviderStatus { status } => {
+                matches!(*status, 429 | 500 | 502 | 503 | 504 | 507)
+            }
+            // Everything else is treated as persistent: do not retry.
+            _ => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn io_error(kind: io::ErrorKind) -> Error {
+        Error::ModelTransportIo {
+            operation: "reading",
+            source: io::Error::new(kind, "boom"),
+        }
+    }
+
+    #[test]
+    fn temporal_failures_are_retryable() {
+        assert!(Error::ModelTransportTimedOut.is_retryable());
+        assert!(
+            Error::SlotAllocationTimedOut {
+                timeout: Duration::from_secs(1)
+            }
+            .is_retryable()
+        );
+        assert!(
+            Error::TtftTimedOut {
+                timeout: Duration::from_secs(1)
+            }
+            .is_retryable()
+        );
+        assert!(
+            Error::InterTokenCadenceTimedOut {
+                timeout: Duration::from_secs(1)
+            }
+            .is_retryable()
+        );
+        for kind in [
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::BrokenPipe,
+            io::ErrorKind::TimedOut,
+            io::ErrorKind::ConnectionRefused,
+            io::ErrorKind::UnexpectedEof,
+        ] {
+            assert!(
+                io_error(kind).is_retryable(),
+                "{kind:?} should be retryable"
+            );
+        }
+        for status in [429, 500, 502, 503, 504, 507] {
+            assert!(
+                Error::ModelProviderStatus { status }.is_retryable(),
+                "{status} should be retryable"
+            );
+        }
+    }
+
+    #[test]
+    fn persistent_failures_are_not_retryable() {
+        assert!(!Error::ModelTransportCancelled.is_retryable());
+        assert!(
+            !Error::InvalidModelRequest {
+                reason: "too large".to_owned()
+            }
+            .is_retryable()
+        );
+        assert!(
+            !Error::MalformedModelResponse {
+                reason: "bad json".to_owned()
+            }
+            .is_retryable()
+        );
+        assert!(!Error::ModelResponseLimitExceeded { max_bytes: 1024 }.is_retryable());
+        assert!(!Error::DuplicateToolCall.is_retryable());
+        assert!(
+            !Error::InvalidModelTransport {
+                reason: "bad endpoint".to_owned()
+            }
+            .is_retryable()
+        );
+        // A non-transient socket error (bad input) is not retryable.
+        assert!(!io_error(io::ErrorKind::InvalidInput).is_retryable());
+        // A client error the server will not retry is not retryable.
+        assert!(!Error::ModelProviderStatus { status: 422 }.is_retryable());
+    }
 }

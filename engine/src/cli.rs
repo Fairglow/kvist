@@ -95,9 +95,17 @@ pub enum Command {
         /// Maximum number of automatic restarts allowed.
         #[arg(long, default_value_t = 3)]
         max_restarts: u32,
-        /// Acknowledge that this command runs the provider with your host permissions.
+        /// Run the agent on the host, bypassing the Bubblewrap sandbox. Interactive
+        /// work is sandboxed (protected) by default; with this flag agent-runner
+        /// runs with host privileges and is single-turn unless --multi-turn allows
+        /// more turns. Never the default.
         #[arg(long)]
         allow_host_execution: bool,
+        /// Allow the agent to work across multiple model turns. Meaningful only with
+        /// --allow-host-execution (host execution is single-turn by default);
+        /// sandboxed interactive work is multi-turn by default.
+        #[arg(long)]
+        multi_turn: bool,
     },
     /// Render a versioned project and component status report.
     Status {
@@ -588,11 +596,31 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 detect_loops,
                 max_restarts,
                 allow_host_execution,
+                multi_turn,
             } => {
+                let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
+
+                // Interactive custom prompt work runs in the standalone
+                // agent-runner shell. Kvist authors the prompt and preselects the
+                // model/effort; agent-runner owns the interactive transcript and the
+                // execution scope, and its stdio is inherited so the shell is the
+                // view. By default the sandbox confines and multiplies the work; the
+                // one-shot host path below only applies when there is no interactive
+                // terminal or host execution was not acknowledged.
+                if delegate_interactive_prompt(
+                    &resolved_prompt,
+                    &role,
+                    model.as_deref(),
+                    reasoning_effort.map(Into::into),
+                    allow_host_execution,
+                    multi_turn,
+                )? {
+                    return Ok(CommandOutput::none());
+                }
+
                 if !allow_host_execution {
                     return Err(agent_runtime::Error::HostExecutionNotAcknowledged.into());
                 }
-                let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
                 let content = execute_prompt(
                     &resolved_prompt,
                     PromptExecutionOptions {
@@ -1163,11 +1191,29 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 detect_loops,
                 max_restarts,
                 allow_host_execution,
+                multi_turn,
             } => {
+                let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
+
+                // `kvist shell` is itself interactive, so prompt work runs in the
+                // standalone agent-runner shell. By default the sandbox confines and
+                // multiplies the work; the one-shot host path below only applies when
+                // there is no interactive terminal or host execution was not
+                // acknowledged.
+                if delegate_interactive_prompt(
+                    &resolved_prompt,
+                    &role,
+                    model.as_deref(),
+                    reasoning_effort.map(Into::into),
+                    allow_host_execution,
+                    multi_turn,
+                )? {
+                    return Ok(CommandOutput::none());
+                }
+
                 if !allow_host_execution {
                     return Err(agent_runtime::Error::HostExecutionNotAcknowledged.into());
                 }
-                let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
                 execute_prompt(
                     &resolved_prompt,
                     PromptExecutionOptions {
@@ -1686,6 +1732,152 @@ fn execute_prompt(prompt: &str, options: PromptExecutionOptions<'_>) -> Result<O
     }
 }
 
+/// Resolve the standalone `agent-runner` executable: an explicit path via the
+/// `KVIST_AGENT_RUNNER` environment variable, otherwise the first `agent-runner`
+/// found on `PATH`. Returns an actionable message when it is not installed, so a
+/// missing agent fails closed rather than falling back to unconstrained host
+/// execution.
+fn resolve_agent_runner() -> std::result::Result<PathBuf, String> {
+    let explicit = std::env::var_os("KVIST_AGENT_RUNNER");
+    let path = std::env::var_os("PATH");
+    resolve_agent_runner_from(explicit, path)
+}
+
+/// Pure resolution used by [`resolve_agent_runner`]. An explicit executable path
+/// wins; otherwise the `PATH` directories are scanned for an `agent-runner` file.
+/// Kept free of direct I/O so it is unit-testable without touching the process
+/// environment.
+fn resolve_agent_runner_from(
+    explicit: Option<std::ffi::OsString>,
+    path: Option<std::ffi::OsString>,
+) -> std::result::Result<PathBuf, String> {
+    if let Some(path) = explicit {
+        let candidate = PathBuf::from(path);
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+        return Err(format!(
+            "KVIST_AGENT_RUNNER points at `{}` which is not an executable file",
+            candidate.display()
+        ));
+    }
+    let Some(paths) = path else {
+        return Err("PATH is not set; cannot locate the agent-runner executable".to_owned());
+    };
+    for dir in std::env::split_paths(&paths) {
+        let candidate = dir.join("agent-runner");
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+    Err(
+        "the `agent-runner` executable was not found on PATH; build it with \
+         `cargo build -p agent-runner` and add its output to PATH, or set \
+         KVIST_AGENT_RUNNER to its path"
+            .to_owned(),
+    )
+}
+
+/// Resolve a role-name argument to its configured role profile, mirroring the
+/// selection the one-shot host path performs.
+fn resolve_role_config<'a>(
+    config: &'a crate::config::ProjectConfig,
+    role_name: &str,
+) -> Result<&'a crate::config::RoleConfig> {
+    let profile = match role_name {
+        "developer" => &config.agent.developer,
+        "architect" => &config.agent.architect,
+        "security-reviewer" | "security_reviewer" => &config.agent.security_reviewer,
+        _ => {
+            return Err(KvistError::AgentSetupFailed {
+                reason: format!("unknown role profile: {role_name}"),
+            });
+        }
+    };
+    Ok(profile)
+}
+
+/// The autonomous turn cap the engine grants when a user opts into multi-turn
+/// host execution via `kvist prompt --allow-host-execution --multi-turn`. It
+/// mirrors the sandbox's own default cap: sandboxed interactive work is
+/// multi-turn by default, while host work is single-turn unless this opts in.
+const HOST_AUTONOMOUS_CAP: u32 = 50;
+
+/// Launch the standalone `agent-runner` shell for an interactive, sandboxed
+/// custom prompt. Kvist supplies the authored prompt and the preselected model
+/// and thinking effort, and inherits the child's stdio so the terminal UI is the
+/// transcript; the child's exit status is surfaced.
+///
+/// Returns `Ok(true)` when delegation happened, `Ok(false)` when there is no
+/// interactive terminal (so the caller can fall back to the one-shot host path),
+/// and `Err` on a recoverable failure.
+fn delegate_interactive_prompt(
+    prompt: &str,
+    role_name: &str,
+    model: Option<&str>,
+    effort: Option<agent_runtime::ReasoningEffort>,
+    allow_host_execution: bool,
+    multi_turn: bool,
+) -> Result<bool> {
+    if !std::io::stdin().is_terminal() {
+        return Ok(false);
+    }
+
+    let binary = resolve_agent_runner().map_err(|reason| KvistError::AgentSetupFailed {
+        reason: format!("could not start agent-runner: {reason}"),
+    })?;
+
+    let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+        operation: "determine current project directory",
+        path: PathBuf::from("."),
+        source,
+    })?;
+    let config = crate::config::load(&current_dir)?;
+    let role_config = resolve_role_config(&config, role_name)?;
+    // Preselect the model the role is configured to use; an explicit `--model`
+    // override wins. The id must exist in agent-runner's own configuration.
+    let model = model.or(Some(role_config.profile.as_str()));
+    let effort = effort.or(role_config.thinking_effort);
+
+    let mut command = std::process::Command::new(&binary);
+    command
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .current_dir(&current_dir);
+    if let Some(model) = model {
+        command.arg("--model").arg(model);
+    }
+    if let Some(effort) = effort {
+        command.arg("--effort").arg(effort.as_str());
+    }
+    // Bypassing the Bubblewrap sandbox runs the agent with host privileges, so it
+    // is single-turn by default; --multi-turn lifts that cap only in the
+    // elevated (host) case, where sandboxed multi-turn is already the default.
+    if allow_host_execution {
+        command.arg("--allow-host-execution");
+        if multi_turn {
+            command
+                .arg("--host-turns")
+                .arg(HOST_AUTONOMOUS_CAP.to_string());
+        }
+    }
+    // The prompt is positional; agent-runner prefills and auto-starts it.
+    command.arg(prompt);
+
+    let status = command.status().map_err(|source| KvistError::Io {
+        operation: "run agent-runner",
+        path: binary,
+        source,
+    })?;
+    if !status.success() {
+        return Err(KvistError::AgentSetupFailed {
+            reason: format!("agent-runner exited with status {status}"),
+        });
+    }
+    Ok(true)
+}
+
 fn validate_component_documents(
     component_dir: &std::path::Path,
 ) -> Result<Vec<(PathBuf, component_documents::DocumentValidation)>> {
@@ -1740,6 +1932,82 @@ mod tests {
         };
 
         assert_eq!(project.path, PathBuf::from("projects/demo"));
+    }
+
+    #[test]
+    fn prompt_command_parses_multi_turn_flag() {
+        let cli = Cli::try_parse_from(["kvist", "prompt", "refactor this", "--multi-turn"])
+            .expect("valid prompt command");
+        let Command::Prompt { multi_turn, .. } = cli.command else {
+            panic!("expected prompt command");
+        };
+        assert!(multi_turn, "--multi-turn opts into an autonomous loop");
+    }
+
+    #[test]
+    fn prompt_command_defaults_to_a_single_model_turn() {
+        let cli = Cli::try_parse_from(["kvist", "prompt", "explain this"]).expect("valid prompt");
+        let Command::Prompt { multi_turn, .. } = cli.command else {
+            panic!("expected prompt command");
+        };
+        assert!(!multi_turn, "a prompt defaults to a single model turn");
+    }
+
+    #[test]
+    fn resolve_agent_runner_prefers_explicit_file_path() {
+        // An explicit `KVIST_AGENT_RUNNER` wins when it names an executable file,
+        // even when a different `agent-runner` also sits on `PATH`.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let explicit = dir.path().join("explicit-agent-runner");
+        std::fs::write(&explicit, "").expect("seed explicit executable");
+        let on_path = dir.path().join("path-agent-runner");
+        std::fs::write(&on_path, "").expect("seed path executable");
+        let path_value = on_path.to_string_lossy().into_owned();
+        let resolved = resolve_agent_runner_from(
+            Some(std::ffi::OsString::from(explicit.clone())),
+            Some(std::ffi::OsString::from(path_value)),
+        )
+        .expect("the explicit path should resolve");
+        assert_eq!(resolved, explicit);
+    }
+
+    #[test]
+    fn resolve_agent_runner_rejects_a_non_file_explicit_path() {
+        // An explicit path that is not an executable file fails closed rather
+        // than falling back to the host path.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let not_a_file = dir.path().join("is-a-directory");
+        std::fs::create_dir_all(&not_a_file).expect("create directory");
+        let message = resolve_agent_runner_from(Some(not_a_file.into_os_string()), None)
+            .expect_err("a directory is not an executable file");
+        assert!(
+            message.contains("not an executable file"),
+            "expected a not-an-executable-file message, got: {message}"
+        );
+    }
+
+    #[test]
+    fn resolve_agent_runner_scans_path_for_the_binary() {
+        // Without an explicit path, the first `agent-runner` file found on `PATH`
+        // wins.
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let found = dir.path().join("agent-runner");
+        std::fs::write(&found, "").expect("seed executable");
+        let path_value = dir.path().to_string_lossy().into_owned();
+        let resolved = resolve_agent_runner_from(None, Some(std::ffi::OsString::from(path_value)))
+            .expect("the PATH binary should resolve");
+        assert_eq!(resolved, found);
+    }
+
+    #[test]
+    fn resolve_agent_runner_fails_closed_when_absent_from_path() {
+        // Empty PATH yields the actionable not-found message rather than a panic.
+        let message = resolve_agent_runner_from(None, Some(std::ffi::OsString::new()))
+            .expect_err("a binary missing from PATH should fail closed");
+        assert!(
+            message.contains("was not found on PATH"),
+            "expected a not-found message, got: {message}"
+        );
     }
 
     #[test]

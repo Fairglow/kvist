@@ -434,7 +434,7 @@ includes independent review and closure of deferred provider/bounds cases.
   over exact command bytes; do not dynamically import mutable profile content
   during task execution.
 
-### [PARTIAL] TODO AGN-09 — Layered Native Agent Runtime and Rig Transport Spike
+### [PARTIAL] TODO AGN-09 — Layered Native Agent Runtime
 
 **Context:** Inference backends such as llama-server and Ollama can propose
 structured tool calls but do not provide a trusted coding-agent loop. Gemini,
@@ -442,8 +442,9 @@ Copilot, and similar CLIs contain useful but opaque loops. Kvist must preserve
 its own policy, execution, and evidence boundaries while reusing provider
 transport work where practical.
 
-Canonical transport seams, direct local transports, the text-only model
-command, and optional Rig spike exist. Independent review, promotion decisions,
+Canonical transport seams, direct local transports, and the text-only model
+command exist. The optional Rig transport spike was rejected and removed from
+the dependency graph (ADR 0009). Independent review of the direct transport,
 native-loop prerequisites, and deferred hardening remain incomplete.
 
 **Acceptance criteria:**
@@ -457,23 +458,14 @@ native-loop prerequisites, and deferred hardening remain incomplete.
 - Implement Kvist task-policy, grant, approved-binding, execution-tier,
   promotion, and compliance-evidence adapters in the root `agn-authority`
   lifecycle chain; child loop tests use deterministic fake host services.
-- Keep the exactly pinned `rig-core` 0.42.0 adapter optional behind
-  `rig-transport`. Rust 1.94 is the supported MSRV because it is Rig's
-  upstream-tested release toolchain; Rust 1.85 remains recorded as the
-  historical failure caused by Rust 1.88 let-chain syntax.
+- Rust 1.95 is the supported MSRV.
 - The first private local Ollama/llama-server transport and text-only
   `agent-run model` command are implemented; complete their independent
   security audit and compliance review before the native loop depends on them.
-  Keep the seam replaceable and do not adopt `rig-agent`, Rig tools, MCP
-  conversion, or Rig persistence as Kvist authority. Complete the optional
-  Rig adapter's independent security and compliance reviews before promotion.
-- Gate every future immutable Rig upgrade on locked Rust 1.94 and current
-  stable builds, local Ollama/llama-server conformance,
-  structured tool-intent conversion, cancellation, malformed-stream handling,
-  TRACE leakage tests, endpoint/credential policy, dependency features,
-  advisories, licenses, TLS, and objective dependency/binary-size thresholds.
-- Record an explicit promotion decision. A failed Rig experiment or upgrade
-  must leave the canonical interface and direct provider adapter usable.
+  Keep the transport seam replaceable.
+- Record an explicit promotion decision for any future provider-transport
+  framework. A failed experiment must leave the canonical interface and the
+  direct provider adapter usable.
 - Build the bounded native loop only after the transport, broker, transactional
   workspace, and Linux execution boundaries pass independent review.
 - Harden Gemini, Copilot, and other external agents as whole sandboxed

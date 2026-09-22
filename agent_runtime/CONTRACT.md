@@ -1,4 +1,5 @@
-<!-- kvist-contract-version: 1 -->
+<!-- kvist-contract-version: 2 -->
+
 # Agent Runtime Contract
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
@@ -25,24 +26,19 @@ compliance evidence.
 The Rust library exposes bounded prompt acquisition, command-template
 rendering, typed supervision policy and attempt context, supervised host
 execution, named profile storage and setup operations, provider-neutral model
-messages/turns, local direct transports, and a private Rig transport adapter.
+messages/turns, and local direct transports.
 
 The standalone `agent-run` CLI provides:
 
 - `setup [--force]` for profile creation, automatic qualification, and update;
 - `models --provider PROVIDER [--endpoint URL] [--executable PATH]
-  [--allow-host-discovery] [--json]` for bounded provider-model discovery;
+[--allow-host-discovery] [--json]` for bounded provider-model discovery;
 - `run` for supervised provider command execution from positional, file,
   editor, or redirected prompt input, with named profile selection,
   `--reasoning-effort`, and optional `--json` output; and
 - `model` for text-only unary or streaming local model requests, with explicit
-  provider/model selection, `--transport`, an optional `--output-schema`
-  JSON Schema, `--reasoning-effort`, `--show-reasoning`, and optional `--json`
-  output. In the Rig integration build, Rig is the default transport and
-  `--transport direct` selects the retained conformance/fallback adapter.
-  Provider reasoning and reasoning effort are direct-transport capabilities;
-  the Rig adapter rejects those requests because it cannot preserve them
-  through its current canonical conversion.
+  provider/model selection, an optional `--output-schema` JSON Schema,
+  `--reasoning-effort`, `--show-reasoning`, and optional `--json` output.
 
 `run` requires exactly one command template or stored profile and explicit
 `--allow-host-execution`. `model` exposes no tools and performs no host process
@@ -112,12 +108,16 @@ mutually exclusive with `--show-reasoning`.
 Plain text does not add line termination that was absent from provider answer
 content.
 
-The Rig integration build selects Rig when `--transport` is omitted. The
-direct adapter remains selectable explicitly. A failed or uncertain Rig
-request is never replayed automatically through the direct adapter.
-Structured-output schemas and callable tools cannot be requested in the same
-turn; that combination fails before provider I/O. Callers must parse and
-validate returned content independently.
+The direct transport is the sole model transport. Structured-output schemas
+and callable tools cannot be requested in the same turn; that combination
+fails before provider I/O. Callers must parse and validate returned content
+independently.
+
+A streaming transport call may carry an explicit per-call deadline that
+overrides the transport's configured deadline, so a retrying caller can grant
+an individual attempt more time without changing that configured bound. The
+default streaming call uses the configured deadline; transports that cannot vary
+the deadline keep their fixed bound via the default streaming path.
 
 The supervisor retries only configured idle timeouts and deterministic repeated
 output. Nonzero exit, spawn failure, stream failure, invalid input,
@@ -166,12 +166,12 @@ failures use stderr and nonzero status.
 
 The provider input matrix is:
 
-| Provider | Discovery input | Default |
-| --- | --- | --- |
-| `ollama` | numeric-loopback HTTP endpoint, default `http://127.0.0.1:11434` | first advertised model |
-| `llama-server` | numeric-loopback HTTP endpoint, default `http://127.0.0.1:9931` | first advertised model |
-| `copilot` | executable, default `copilot`; ACP host acknowledgement required outside setup | advertised current model |
-| `gemini` | executable, default `gemini`; ACP host acknowledgement required outside setup | advertised current model |
+| Provider       | Discovery input                                                                | Default                  |
+| -------------- | ------------------------------------------------------------------------------ | ------------------------ |
+| `ollama`       | numeric-loopback HTTP endpoint, default `http://127.0.0.1:11434`               | first advertised model   |
+| `llama-server` | numeric-loopback HTTP endpoint, default `http://127.0.0.1:9931`                | first advertised model   |
+| `copilot`      | executable, default `copilot`; ACP host acknowledgement required outside setup | advertised current model |
+| `gemini`       | executable, default `gemini`; ACP host acknowledgement required outside setup  | advertised current model |
 
 `llama-cli` and custom wrappers return an explicit unsupported-catalog error
 without spawning discovery. Their setup paths request an explicit file or
@@ -222,6 +222,6 @@ backward-compatibility commitment. Profile schema and provider-neutral types
 remain explicitly versioned before a compatibility promise is made.
 
 Conformance uses deterministic command, profile, setup, supervisor, direct
-transport, stream, cancellation, and Rig adapter tests. Real provider
+transport, stream, and cancellation tests. Real provider
 promotion requires comparison with the direct adapter, dependency review,
 security audit, and independent compliance review.

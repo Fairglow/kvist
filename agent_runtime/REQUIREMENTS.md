@@ -1,4 +1,5 @@
 <!-- kvist-requirements-version: 1 -->
+
 # Agent Runtime Requirements
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
@@ -112,14 +113,11 @@ streamed text and structured tool-intent translation without executing tools.
 Endpoints, requests, responses, deadlines, cancellation, identities, usage,
 finish reason, and errors MUST remain explicit.
 
-The Rig integration experiment MUST use the exact pinned Rig release as the
-preferred provider-wire adapter while retaining the direct adapter as an
-explicit, non-automatic fallback and conformance oracle. Both adapters MUST
-accept a bounded host-owned common JSON Schema 2020-12 provider subset for provider-native structured output,
-MUST reject incompatible schema-and-tool requests rather than silently dropping
-either constraint, and MUST NOT represent provider enforcement as output
-validation. Rig failures MUST NOT automatically replay through the direct
-adapter because request acceptance may be uncertain.
+The direct transport MUST accept a bounded host-owned common JSON Schema
+2020-12 provider subset for provider-native structured output, MUST reject
+incompatible schema-and-tool requests before provider I/O rather than silently
+dropping either constraint, and MUST NOT represent provider enforcement as
+output validation.
 
 ### AR-REQ-NATIVE-RUNTIME
 
@@ -136,8 +134,7 @@ evidence, or public serialized state.
 
 ## Quality requirements and constraints
 
-- Rust 1.94 and edition 2024 are supported for the currently pinned optional
-  Rig release; unsafe Rust is forbidden.
+- Rust 1.95 (MSRV) and edition 2024 are supported; unsafe Rust is forbidden.
 - Linux is the only executable target.
 - Prompt input is nonblank UTF-8 at most 1 MiB.
 - Profile configuration is UTF-8 TOML at most 64 KiB with at most 128 unique

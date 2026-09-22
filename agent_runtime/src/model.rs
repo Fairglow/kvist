@@ -247,6 +247,11 @@ impl CancellationToken {
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
     }
+
+    /// Re-arms the token after a cancelled turn so the next turn starts fresh.
+    pub fn reset(&self) {
+        self.cancelled.store(false, Ordering::Release);
+    }
 }
 
 /// Provider-neutral model transport boundary.
@@ -265,6 +270,30 @@ pub trait ModelTransport {
         cancellation: &CancellationToken,
         on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>,
     ) -> Result<ModelTurn>;
+
+    /// Performs one streaming model turn with an explicit per-call `deadline`,
+    /// overriding the transport's configured [`ModelTransport::deadline`].
+    ///
+    /// The default implementation ignores the override and delegates to
+    /// [`ModelTransport::stream`], which applies the transport's own deadline.
+    /// A transport that bounds each request by a caller-controlled wall-clock
+    /// limit — such as the direct HTTP transport, whose retrying loop needs to
+    /// grant an individual attempt more time without changing its configured
+    /// deadline — overrides this to apply the supplied deadline. This lets a
+    /// loop extend a turn's budget across retries while transports that cannot
+    /// vary the deadline keep their fixed behavior.
+    fn stream_with_deadline(
+        &self,
+        request: &ModelRequest,
+        cancellation: &CancellationToken,
+        on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>,
+        deadline: Duration,
+    ) -> Result<ModelTurn> {
+        // The override is intentionally dropped for transports that do not
+        // support a caller-controlled deadline; their `stream` keeps its own.
+        let _ = deadline;
+        self.stream(request, cancellation, on_event)
+    }
 
     /// Overall deadline applied to each transport call.
     fn deadline(&self) -> Duration;

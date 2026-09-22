@@ -1,0 +1,686 @@
+schema_version: 1
+component:
+  requirements_revision: "sha256:c3ceed49fb368e67d1417a601969381e7fd573096b615c4143d3aee665a91be7"
+  contract_revision: "sha256:973a9be3f6ae3241e8a88b8be367c75472803744b3e0fe5cd24cfab6bcaa5410"
+  design_revision: "sha256:0d800fcc32718b7d56a0ce723fdc23a5cae512edde0b47ffd1995d3f077431b2"
+  parent_contract: null
+  revalidation:
+    state: current
+    checked_at: "2026-09-22T09:37:16Z"
+    stale_since: null
+    causes: []
+tasks:
+  - id: "agent-runner-foundation-write-tests"
+    title: "Define foundation tests for agent-runner"
+    description: "Write failing tests for configuration loading and validation, the error/exit-code contract, logging initialization idempotence, and CLI argument parsing (model/effort/cwd/profile overrides, list-models, non-interactive refusal)."
+    context: "Only the workspace member manifest exists; no library or binary code is present yet."
+    purpose: "Establish executable evidence for the configuration, error, and CLI boundaries before their implementation."
+    expected_outcome: "Tests reject bad schema versions, unknown model selectors, invalid effort levels, missing working directories, and confirm deterministic parsing of all documented options."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Command-line-interface"
+      - "CONTRACT.md#Config"
+      - "REQUIREMENTS.md#Constraints"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T10:15:00Z"
+      completed_at: "2026-09-19T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-foundation-implement-code"
+    title: "Implement foundation (config, error, logging, CLI)"
+    description: "Implement Config with TOML loading and validation, the Error/Result/exit-code/describe contract, the Kvist-aligned tracing subscriber, and the clap CLI with model/effort/cwd/profile overrides and list-models."
+    context: "The failing foundation tests are defined; no code exists."
+    purpose: "Provide the trusted configuration and error surfaces the rest of the component depends on."
+    expected_outcome: "Config loads and rejects per the contract, errors print actionable non-secret messages, and the CLI parses every documented option deterministically."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-foundation-write-tests"
+    requirements:
+      - "CONTRACT.md#Command-line-interface"
+      - "CONTRACT.md#Config"
+      - "REQUIREMENTS.md#Outcomes"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T10:15:00Z"
+      completed_at: "2026-09-19T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-tools-write-tests"
+    title: "Define tool registry and policy tests"
+    description: "Write failing tests for tool definition ordering, shell/read/write/list rendering to absolute argv, write-root enforcement, and the shell denylist covering the built-in destructive commands."
+    context: "Foundation is implemented; the tool registry is not yet written."
+    purpose: "Establish executable evidence for the authority-widening surface: tool rendering and command policy."
+    expected_outcome: "Tests reject writes outside the write root and denylisted shell commands, and confirm deterministic absolute-argv rendering for every tool."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#ToolPolicy"
+      - "CONTRACT.md#ToolRegistry"
+      - "DESIGN.md#Security-posture"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T10:15:00Z"
+      completed_at: "2026-09-19T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-tools-implement-code"
+    title: "Implement tool registry and policy"
+    description: "Implement ToolRegistry exposing four model-facing tools (shell, read_file, write_file, list_dir), absolute-argv rendering, write-root enforcement, and a safe-by-default shell denylist with language profiles surfacing package and build tools."
+    context: "The tool tests are defined."
+    purpose: "Provide the generous but authority-bounded tool surface the agent calls."
+    expected_outcome: "Every tool renders safe absolute argv, writes are confined to the write root, and denylisted commands are rejected before any sandbox request."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-tools-write-tests"
+    requirements:
+      - "CONTRACT.md#ToolPolicy"
+      - "CONTRACT.md#ToolRegistry"
+      - "REQUIREMENTS.md#Outcomes"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T10:15:00Z"
+      completed_at: "2026-09-19T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-sandbox-write-tests"
+    title: "Define sandbox request and executor tests"
+    description: "Write failing tests for Authoring-phase request construction (grants, identities, network deny, resource bounds, disjoint destinations), working-directory symlink rejection, read-root overlap rejection, and the executor bounding output and honoring cancellation."
+    context: "Foundation and tools are implemented; the sandbox builder and executor are not yet written."
+    purpose: "Establish executable evidence for the sandbox request contract and fail-closed execution before any request can cause effects."
+    expected_outcome: "Tests validate the closed version-one shape, reject symlinks and overlapping roots, and confirm the executor fails closed when the runner or backend is missing."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#SandboxRequestBuilder"
+      - "CONTRACT.md#execute"
+      - "DESIGN.md#Sandbox-request-construction"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T10:15:00Z"
+      completed_at: "2026-09-19T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-sandbox-implement-code"
+    title: "Implement sandbox request builder and executor"
+    description: "Implement sandbox::build_request producing a closed version-one Authoring request via shared protocol types, and sandbox::execute spawning the runner with bounded, cancellable, supervised execution that fails closed."
+    context: "The sandbox tests are defined."
+    purpose: "Provide the shared-protocol sandbox integration that runs every agent tool in the enforcement boundary."
+    expected_outcome: "Requests satisfy the runner's validator and the executor never falls back to host execution."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-sandbox-write-tests"
+    requirements:
+      - "CONTRACT.md#SandboxRequestBuilder"
+      - "CONTRACT.md#execute"
+      - "REQUIREMENTS.md#Constraints"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T10:15:00Z"
+      completed_at: "2026-09-19T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-session-write-tests"
+    title: "Define agent session and loop tests"
+    description: "Write failing tests for session turn folding, the multi-turn loop with an injected transport and recording executor, tool-result feedback, cancellation mid-turn, and end-on-zero-tool-intents."
+    context: "Foundation, tools, and sandbox are implemented; the session and loop are not yet written."
+    purpose: "Establish executable evidence for the transport-agnostic loop policy in isolation."
+    expected_outcome: "Tests confirm correct message folding, bounded retries, clean cancellation, and correct loop termination."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#AgentRunner"
+      - "CONTRACT.md#AgentSession"
+      - "DESIGN.md#The-agent-loop"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T10:15:00Z"
+      completed_at: "2026-09-19T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-session-implement-code"
+    title: "Implement agent session and loop worker"
+    description: "Implement AgentSession turn state and AgentRunner loop emitting typed events, plus run::spawn driving the loop on a worker thread with a bounded event channel and cancellation."
+    context: "The session tests are defined."
+    purpose: "Provide the streaming agent loop that bridges the model transport and sandbox tool execution to the UI."
+    expected_outcome: "The loop streams reasoning/text/tool events, executes approved tools, and terminates correctly under normal and cancelled paths."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-session-write-tests"
+    requirements:
+      - "CONTRACT.md#AgentRunner"
+      - "CONTRACT.md#AgentSession"
+      - "REQUIREMENTS.md#Outcomes"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T10:15:00Z"
+      completed_at: "2026-09-19T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-tui-write-tests"
+    title: "Define TUI transcript and rendering tests"
+    description: "Write failing tests for the pure transcript model folding events, scroll bounds, and help-overlay toggling, without a real terminal."
+    context: "Foundation, tools, sandbox, and session are implemented; the terminal UI is not yet written."
+    purpose: "Establish executable evidence for presentation state transitions before adding a rendering dependency."
+    expected_outcome: "Tests fold every event type, keep the scroll offset in range, and toggle help deterministically."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Command-line-interface"
+      - "DESIGN.md#Terminal-UI"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T10:15:00Z"
+      completed_at: "2026-09-19T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-tui-implement-code"
+    title: "Implement the ratatui terminal UI"
+    description: "Implement the full-screen transcript UI with model/thinking selectors, status bar, input line, help overlay, scrolling, and responsive Ctrl+C cancellation wired to the worker thread."
+    context: "The TUI transcript tests are defined."
+    purpose: "Deliver the first-class, production-ready interactive surface that makes the tool feel like gemini/copilot."
+    expected_outcome: "The UI renders a live transcript, reflects model and effort, and cancels turns cleanly."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-session-implement-code"
+      - "agent-runner-tui-write-tests"
+    requirements:
+      - "CONTRACT.md#Command-line-interface"
+      - "REQUIREMENTS.md#Outcomes"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T10:15:00Z"
+      completed_at: "2026-09-19T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-integration-write-tests"
+    title: "Define end-to-end integration tests"
+    description: "Write failing integration tests that exercise the full loop with a fake transport and a no-op sandbox command, including a write into the working directory and a denied destructive command."
+    context: "All components are implemented; no end-to-end coverage exists yet."
+    purpose: "Provide executable evidence that the pieces cooperate under realistic conditions."
+    expected_outcome: "The integration tests show an approved write producing a file and a denylisted command blocked before the sandbox."
+    kind: test
+    status: completed
+    depends_on:
+      - "agent-runner-tui-implement-code"
+    requirements:
+      - "DESIGN.md#Edge-cases-covered-by-tests"
+      - "REQUIREMENTS.md#Acceptance-criteria"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T10:15:00Z"
+      completed_at: "2026-09-19T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-docs-reconcile"
+    title: Reconcile intent documents with the implemented API
+    description: >-
+      The CONTRACT.md public-API surface (ToolRegistry build/discover/render,
+      ExecContext/StagedWrite, SandboxRequestBuilder/execute signatures,
+      ToolOutcome field types, AgentSession push_user/apply_assistant/
+      record_tool_result, the Event enum with Note/Progress, the non-generic
+      AgentRunner loop, RunSummary, ToolExecutor, Recorder) and the DESIGN.md
+      write_file staged-write path had drifted from the implementation. Bring
+      CONTRACT.md, DESIGN.md, and REQUIREMENTS.md back into exact agreement with
+      the code so the binding artifacts stay trustworthy.
+    context: >-
+      Foundation through integration tasks were all marked done, but the intent
+      documents described a simpler, older API than what was shipped, which is a
+      trust hazard for the audit/compliance flow that diff against them.
+    purpose: Restore exact traceability between the binding artifacts and the code.
+    expected_outcome: Every documented signature, field, and event matches the
+      crate; DESIGN.md describes the staged write, the rolling-context contract,
+      and the live stats bar; revision hashes in TODOS.yaml match the files.
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-integration-write-tests"
+      - "agent-runner-tui-implement-code"
+    requirements:
+      - "CONTRACT.md#AgentRunner"
+      - "CONTRACT.md#ContextManager"
+      - "CONTRACT.md#ToolRegistry"
+    timestamps:
+      created_at: "2026-09-19T13:00:00Z"
+      updated_at: "2026-09-19T13:40:00Z"
+      completed_at: "2026-09-19T13:40:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-context-compaction-hardening"
+    title: Guarantee compaction keeps the live context under the limit
+    description: >-
+      Rework ContextManager::compact so it keeps as many of the most recent turns
+      in full as fit under the hard limit_tokens, rolling the rest into the
+      summary and reducing the number of full turns (flooring at the single most
+      recent turn) until the estimated context is bounded. Previously a session
+      with large turns could stay over the window and repeatedly send requests
+      the model rejects. Add tests: compaction fits under the window while keeping
+      recent turns in full, and reduces full turns (floor of one) when the window
+      is tight.
+    context: >-
+      The user's central reliability requirement is that a long-running runner
+      keeps working uninterrupted via reliable, bounded context. The prior
+      compaction did not guarantee the result stayed under the window.
+    purpose: Make long-duration sessions robust by guaranteeing a bounded live
+      context after every compaction.
+    expected_outcome: Compaction never leaves the estimated context at/over the
+      limit when it can avoid it, always keeps the most recent turn, and the
+      rolling summary stays bounded; covered by targeted tests.
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-session-implement-code"
+    requirements:
+      - "CONTRACT.md#ContextManager"
+      - "REQUIREMENTS.md#Constraints"
+    timestamps:
+      created_at: "2026-09-19T13:10:00Z"
+      updated_at: "2026-09-19T13:45:00Z"
+      completed_at: "2026-09-19T13:45:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-live-stats"
+    title: Add cumulative tokens and elapsed time to the live stats bar
+    description: >-
+      Extend Event::Progress with total_tokens and elapsed_secs, thread them
+      through AgentRunner::emit_progress into the App stats, and render them in
+      the stats line (cumulative tokens and m:ss/h:mm:ss elapsed) so the user can
+      see cumulative progress alongside the existing speed, context, and
+      compaction stats. Add a test asserting the stats line reports them.
+    context: >-
+      The user asked for live progress stats; the bar showed speed/context/
+      compaction but no cumulative progress or elapsed time.
+    purpose: Give the user an always-visible, honest sense of how far a run has
+      progressed.
+    expected_outcome: The stats line reports speed, context utilization, the
+      compaction progress bar, cumulative tokens, and elapsed time; covered by a
+      unit test.
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-tui-implement-code"
+    requirements:
+      - "CONTRACT.md#Event"
+      - "REQUIREMENTS.md#Outcomes"
+    timestamps:
+      created_at: "2026-09-19T13:20:00Z"
+      updated_at: "2026-09-19T13:50:00Z"
+      completed_at: "2026-09-19T13:50:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-tui-progress-eta"
+    title: Add a compaction progress bar with ETA
+    description: >-
+      Provide a bounded ETA for the compaction progress bar: forecast how long
+      until the live context reaches the hard limit from the observed context
+      growth rate, and show it when the estimate is meaningful (never fabricate a
+      number when the growth is flat or unknown). Keep the existing compaction
+      progress bar as the source of truth and surface the ETA only when it can be
+      estimated reliably.
+    context: >-
+      The user explicitly requested "Progress bar, at least for compaction, with
+      ETA (when possible)"; only the progress fraction exists today.
+    purpose: Let the user anticipate an upcoming compaction and steer accordingly.
+    expected_outcome: The UI shows a compaction ETA when estimable and hides it
+      otherwise, with no speculative or misleading numbers.
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-live-stats"
+    requirements:
+      - "CONTRACT.md#ContextManager"
+      - "REQUIREMENTS.md#Outcomes"
+    timestamps:
+      created_at: "2026-09-19T13:55:00Z"
+      updated_at: "2026-09-19T15:20:00Z"
+      completed_at: "2026-09-19T15:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-llama-server-integration"
+    title: Make llama-server integration first-class and decide on server launch
+    description: >-
+      Review the DirectModelTransport llama-server path (streaming, reasoning,
+      tools, watchdogs, slot allocation) against the user's priority that this be
+      first-class, reliable, and fully-featured, then harden any gaps. Resolve the
+      open question of whether agent-runner should launch and supervise
+      llama-server itself (to observe its progress/output) versus requiring it as
+      an external dependency.
+    context: >-
+      The user named llama-server integration as the main focus and asked whether
+      agent-runner can start llama-server ourselves to collect its progress.
+    purpose: Deliver a reliable, fully-featured llama-server experience while
+      preserving the headless, no-daemon default.
+    expected_outcome: >-
+      A documented decision (ADR 0010): require an externally supplied,
+      externally supervised llama-server connected by the native DirectTransport,
+      and do NOT launch or manage it (no daemon; optional supervised launch is a
+      deferred, gated future decision). The streaming/watchdog paths are already
+      implemented and covered by dedicated llama-server unary/streaming/watchdog
+      tests in agent_runtime; progress is reported via the stats bar and preserved
+      in the durable session log.
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-integration-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#Constraints"
+      - "REQUIREMENTS.md#Outcomes"
+    timestamps:
+      created_at: "2026-09-19T14:00:00Z"
+      updated_at: "2026-09-19T15:31:00Z"
+      completed_at: "2026-09-19T15:31:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-compaction-summary-dedup-write-tests"
+    title: "Define regression test for compaction summary line duplication"
+    description: >-
+      Write a failing test that forces a multi-pass compaction (tight window,
+      keep_full_turns above the floor) and asserts the rolling summary contains
+      each rolled turn line exactly once.
+    context: >-
+      Independent implementation review found compact() re-pushing summary lines
+      for every compactable segment on each pass, so a window tight enough to
+      force more than one pass duplicated older turn lines in the rolling
+      summary.
+    purpose: Pin the rolling summary to one line per compacted turn before the
+      code change, so the fix is test-proven.
+    expected_outcome: >-
+      The regression test fails against the duplicated summary and passes once
+      compact() summarizes each segment exactly once.
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "DESIGN.md#Rolling-context-management"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T18:15:00Z"
+      completed_at: "2026-09-19T18:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-compaction-summary-dedup-implement-code"
+    title: "Summarize each compacted segment exactly once"
+    description: >-
+      Fix ContextManager::compact so each pass of the keep-shrinking loop adds
+      only the newly compacted segment to the summary, tracked with a
+      summarized counter, eliminating duplicated turn lines.
+    context: The multi-pass duplication regression test is defined and failing.
+    purpose: Keep the rolling summary bounded and honest so compaction saves the
+      context it is meant to save.
+    expected_outcome: >-
+      compact() emits one summary line per compacted turn even when multiple
+      passes are required, and the regression test passes.
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-compaction-summary-dedup-write-tests"
+    requirements:
+      - "CONTRACT.md#ContextManager"
+      - "DESIGN.md#Rolling-context-management"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T18:15:00Z"
+      completed_at: "2026-09-19T18:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-per-turn-progress-write-tests"
+    title: "Define per-turn progress emission tests"
+    description: >-
+      Write a failing test that runs a three-turn scripted session and asserts
+      exactly one Progress event per turn (the final turn's report being the
+      session's last), carrying cumulative input/output token totals.
+    context: >-
+      Independent implementation review found Event::Progress was emitted only
+      at run end, with input_tokens/output_tokens hardcoded to zero, so the live
+      stats bar and the compaction ETA never updated during a multi-turn
+      session, contradicting the contract.
+    purpose: Establish executable evidence that progress accounting is per-turn
+      with real cumulative totals before the loop change.
+    expected_outcome: >-
+      The test fails while progress is emitted only at run end and passes once
+      the loop reports after every turn with cumulative input/output tokens.
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#AgentRunner"
+      - "CONTRACT.md#Event"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T18:15:00Z"
+      completed_at: "2026-09-19T18:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-per-turn-progress-implement-code"
+    title: "Emit progress accounting after every turn"
+    description: >-
+      Restructure AgentRunner::run to report Progress after every turn (the
+      final turn's report doubling as the session's last) and accumulate real
+      cumulative input/output token totals from provider usage.
+    context: The per-turn progress test is defined and failing.
+    purpose: Make the live stats bar and the compaction ETA track the session
+      while it runs, as the contract describes.
+    expected_outcome: >-
+      One Progress event per turn with cumulative input/output/total tokens,
+      verified by the integration test.
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-per-turn-progress-write-tests"
+    requirements:
+      - "CONTRACT.md#AgentRunner"
+      - "CONTRACT.md#Event"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T18:15:00Z"
+      completed_at: "2026-09-19T18:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-scratch-home-write-tests"
+    title: "Define sandbox HOME and grant-set regression test"
+    description: >-
+      Extend the closed-authoring request test to assert HOME points at the
+      sandbox's guaranteed /tmp tmpfs and that the grant set matches the
+      documented shape (authoring plus context grants only).
+    context: >-
+      Independent implementation review found the contract and design claimed a
+      read-write scratch grant the code never builds, leaving the environment
+      HOME=/scratch pointing at a path that does not exist inside the sandbox.
+    purpose: Pin the environment/grant contract so HOME can never dangle again.
+    expected_outcome: >-
+      The test fails against HOME=/scratch and passes with HOME=/tmp and the
+      documented grant set.
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Sandbox-request-contract"
+      - "CONTRACT.md#SandboxRequestBuilder"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T18:15:00Z"
+      completed_at: "2026-09-19T18:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-scratch-home-implement-code"
+    title: "Point sandbox HOME at the guaranteed /tmp tmpfs and realign docs"
+    description: >-
+      Set the sandbox environment HOME to /tmp (the runner's private tmpfs
+      scratch area) and remove the unimplemented scratch-grant claims from
+      CONTRACT.md and DESIGN.md, bumping their revisions.
+    context: The HOME/grant-set regression test is defined and failing.
+    purpose: Keep the sandbox environment functional and the contract honest
+      about the exact grant set the request declares.
+    expected_outcome: >-
+      Tool homes and caches land in the guaranteed /tmp area, the contract and
+      design describe the implemented grant set, and the test passes.
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-scratch-home-write-tests"
+    requirements:
+      - "CONTRACT.md#Sandbox-request-contract"
+      - "CONTRACT.md#SandboxRequestBuilder"
+      - "DESIGN.md#Sandbox-request-construction"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T18:15:00Z"
+      completed_at: "2026-09-19T18:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-exit-codes-and-list-models"
+    title: "Honor error exit codes in the binary and fix --list-models labels"
+    description: >-
+      Route Error::exit_code() through main() so distinct failure classes keep
+      their documented exit codes (today every binary failure exits 2), and fix
+      the --list-models output that prints providers in Debug form
+      (LlamaServer/Ollama) instead of the kebab-case names used in
+      configuration.
+    context: >-
+      Independent implementation review found main() discards the exit code at
+      each error site (ExitCode::from(2) for all errors) and list_models formats
+      the provider with a Debug flag.
+    purpose: Make the CLI's documented exit-code and naming contract observable.
+    expected_outcome: >-
+      Distinct failure classes exit with their documented codes and
+      --list-models prints the llama-server/ollama spellings.
+    kind: implementation
+    status: pending
+    depends_on:
+      - "agent-runner-llama-server-integration"
+    requirements:
+      - "CONTRACT.md#Command-line-interface"
+      - "CONTRACT.md#Error-Result"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T17:40:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-docs-drift-reconcile"
+    title: "Reconcile remaining documentation drift from the implementation review"
+    description: >-
+      Reconcile the residual doc/impl drift recorded by the independent
+      implementation review: (1) REQUIREMENTS claims additional read roots may
+      be declared in configuration, but no config field exists, and
+      BuildRequest.read_roots is documented as directories while
+      build_context_grant silently skips anything that is not a file; (2)
+      check_writable_scope checks only the top level while docs say the writable
+      scope; (3) DESIGN says Ctrl+Up/Down scrolls while the UI binds plain
+      Up/Down to both scrolling and prompt history; (4) emit_progress's doc
+      comment calls a dropped sink non-fatal while the call propagates the
+      error; (5) session_log's header claims only argument shapes are recorded
+      while full argument values are written, and state_mutated is derived from
+      output presence; (6) record_tool_result is documented redacted and bounded
+      while only bounded is implemented; (7) cosmetic: leading-ellipsis
+      truncation in summarize_path and context truncate/bounded_summary,
+      MAX_SUMMARY_BYTES counting chars, the Debug effort label (Medium vs
+      medium), the config search name agent-runner.toml versus the contract's
+      kvist.toml-style wording, and leading spaces on wrapped lines. Update the
+      affected intent documents and code together for each deliberate decision,
+      with tests where behavior changes.
+    context: >-
+      Findings recorded during the independent implementation review of the
+      branch; none affect the sandbox authority boundary, all are local to
+      agent-runner.
+    purpose: Keep the contract, design, and implementation mutually truthful
+      before the independent compliance review.
+    expected_outcome: >-
+      Every listed discrepancy is resolved by a code fix or a deliberate doc
+      realignment, with the component queue and document revisions updated.
+    kind: implementation
+    status: pending
+    depends_on:
+      - "agent-runner-compaction-summary-dedup-implement-code"
+      - "agent-runner-per-turn-progress-implement-code"
+      - "agent-runner-scratch-home-implement-code"
+    requirements:
+      - "CONTRACT.md#Command-line-interface"
+      - "DESIGN.md#Security-posture"
+      - "DESIGN.md#Terminal-UI"
+      - "REQUIREMENTS.md#Constraints"
+    timestamps:
+      created_at: "2026-09-19T17:40:00Z"
+      updated_at: "2026-09-19T17:40:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-security-audit"
+    title: "Audit agent-runner authority"
+    description: "Review tool rendering, shell denylist, write-root enforcement, sandbox request construction, environment allowlist, fail-closed execution, cancellation, and untrusted-input validation for authority escalation, disclosure, or false enforcement."
+    context: >-
+      Internal/implementer review of the authority-critical paths. This is not a
+      separate source-blind certification; the independent gate is the
+      compliance-review task. Review of sandbox request construction, environment
+      allowlist, symlink rejection, overlap detection, network Deny, bounded/
+      validated requests, and hashed identities passed with no findings.
+    purpose: "Identify high-confidence paths to authority escalation or disclosure before the tool is trusted in a workspace."
+    expected_outcome: >-
+      One authority-escalation finding corrected with a regression test: the
+      write-file render gate used a bare prefix check on the write root, so a
+      sibling such as /workspace-evil was accepted as inside /workspace. Replaced
+      with a slash-boundary check (under_write_root) and added two regression
+      tests (agent_runner/tests/component_tests.rs). The sandbox enforces the
+      write root as a backstop, but the render gate's stated contract of rejecting
+      before any sandbox request is built is now honored.
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "agent-runner-integration-write-tests"
+      - "agent-runner-tui-implement-code"
+    requirements:
+      - "DESIGN.md#Security-posture"
+      - "REQUIREMENTS.md#Constraints"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T15:25:00Z"
+      completed_at: "2026-09-19T15:25:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-compliance-review"
+    title: "Review agent-runner compliance"
+    description: >-
+      Derive observed behavior from source and tests in a clean-slate context,
+      then compare the implementation record with approved requirements, contract,
+      and design in a source-blind context.
+    context: >-
+      Security audit passed. Per the project's current enforcement note,
+      `component accept` only structurally validates and records revisions; the
+      advisory-review receipt, acknowledgement/exception enforcement, and
+      project-level acceptance surfaces are not implemented, and receipts/reports
+      must not be fabricated. This gate therefore awaits a separate, source-blind
+      reviewer (not the implementer) via the not-yet-implemented mechanism.
+    purpose: "Retain an independent disposition for every authority, sandbox, loop, and presentation guarantee."
+    expected_outcome: >-
+      The review records satisfied clauses, discrepancies, unsupported behavior,
+      and required arbitration, produced by a separate source-blind context and
+      never self-certified.
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "agent-runner-docs-drift-reconcile"
+      - "agent-runner-exit-codes-and-list-models"
+      - "agent-runner-security-audit"
+    requirements:
+      - "CONTRACT.md#AgentRunner"
+      - "CONTRACT.md#SandboxRequestBuilder"
+      - "REQUIREMENTS.md#Acceptance-criteria"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-19T01:20:00Z"
+      updated_at: "2026-09-19T15:26:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

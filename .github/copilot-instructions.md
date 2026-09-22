@@ -126,3 +126,11 @@ advisory input, not a Kvist receipt.
   Do not modify licensing terms without explicit authorization; Kvist uses
   AGPL-3.0-or-later with optional separate commercial licensing as defined by
   the project.
+
+## Conventional wisdom
+
+- When things get complicated, remember the principle of divide and conquer
+- Always maintain a structure with proper separation of concerns
+- Logging and transparency, be honest and informative about what's going on in the system, at all times, but never spamming. Do it responsibly and at an appropriate log level
+- Error handling must be robust and resilient, always informative and useful
+- All source code for Rust dependencies can be under `~/.cargo/registry/cache/index.crates.io-*/`.

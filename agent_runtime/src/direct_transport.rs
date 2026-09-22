@@ -203,6 +203,7 @@ impl DirectModelTransport {
         request: &ModelRequest,
         stream: bool,
         cancellation: &CancellationToken,
+        deadline: Duration,
         on_body: &mut dyn FnMut(&[u8]) -> Result<()>,
     ) -> Result<()> {
         check_cancelled(cancellation)?;
@@ -223,7 +224,7 @@ impl DirectModelTransport {
             });
         }
 
-        let deadline = Instant::now() + self.deadline;
+        let deadline = Instant::now() + deadline;
         let mut socket = self.connect(cancellation, deadline)?;
         let path = match self.provider {
             LocalModelProvider::Ollama => "/api/chat",
@@ -360,7 +361,7 @@ impl ModelTransport for DirectModelTransport {
             "dispatching direct model request"
         );
         let mut body = Vec::new();
-        self.execute_with_body(request, false, cancellation, &mut |chunk| {
+        self.execute_with_body(request, false, cancellation, self.deadline, &mut |chunk| {
             body.extend_from_slice(chunk);
             Ok(())
         })?;
@@ -376,6 +377,19 @@ impl ModelTransport for DirectModelTransport {
         cancellation: &CancellationToken,
         on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>,
     ) -> Result<ModelTurn> {
+        self.stream_with_deadline(request, cancellation, on_event, self.deadline)
+    }
+
+    fn stream_with_deadline(
+        &self,
+        request: &ModelRequest,
+        cancellation: &CancellationToken,
+        on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>,
+        deadline: Duration,
+    ) -> Result<ModelTurn> {
+        // Clamp to the hard maximum so a retrying loop can never ask a single
+        // transport call to run without bound.
+        let deadline = deadline.min(MAX_DEADLINE);
         tracing::debug!(
             provider = ?self.provider,
             endpoint = %self.endpoint.authority,
@@ -383,7 +397,7 @@ impl ModelTransport for DirectModelTransport {
             "dispatching direct streaming model request"
         );
         let mut decoder = StreamDecoder::new(self.provider, request);
-        let decode_deadline = Instant::now() + self.deadline;
+        let decode_deadline = Instant::now() + deadline;
         let mut deliver = |event| {
             check_cancelled(cancellation)?;
             check_deadline(decode_deadline)?;
@@ -392,7 +406,7 @@ impl ModelTransport for DirectModelTransport {
             check_deadline(decode_deadline)?;
             result
         };
-        self.execute_with_body(request, true, cancellation, &mut |chunk| {
+        self.execute_with_body(request, true, cancellation, deadline, &mut |chunk| {
             decoder.push(chunk, cancellation, decode_deadline, &mut deliver)
         })?;
         check_cancelled(cancellation)?;

@@ -4,10 +4,13 @@
 # README.md. The default recipes do not depend on cargo-nextest, cargo-outdated,
 # unbuffer, nightly Rust, or generated log files.
 
-all: format lint build test
+all: audit format lint build test
 
 build:
     cargo build --locked --workspace --all-features
+
+fix:
+    cargo clippy --fix --locked --workspace --all-targets --all-features
 
 format:
     cargo fmt --check

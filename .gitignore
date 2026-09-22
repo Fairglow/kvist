@@ -3,15 +3,20 @@
 
 # Ignore settings
 .cargo
-.kvist
-kvist.toml
 .idea
+.kvist
 .vscode
 .zed
+agent_runner.toml
+kvist.toml
 
 # Ignore temporal files
 /*.txt
 /*.log
+/_*.md
+
+# Ignore agent-runner runtime data (session journals + transcripts)
+.agent-runner/
 
 # Ignore Gemini CLI deps
 /node_modules

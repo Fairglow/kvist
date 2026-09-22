@@ -314,12 +314,34 @@ fn validate_grants(request: &SandboxRequest) -> Result<(), ProtocolError> {
             && source_path.is_dir()
             && let Ok(entries) = std::fs::read_dir(source_path)
         {
+            // The writable scope may legitimately contain symlinks that stay
+            // inside it (Node's `.bin` links, in-project aliases); only a link
+            // whose resolved target escapes the scope is unsafe. The client
+            // performs the thorough recursive check; the runner re-validates the
+            // immediate scope here as a cheap second line.
             for e in entries.flatten() {
-                if e.file_type().map(|t| t.is_symlink()).unwrap_or(false) {
-                    return Err(invalid(format!(
-                        "{label} writable scope `{}` contains a symbolic link",
-                        grant.source
-                    )));
+                if let Ok(file_type) = e.file_type()
+                    && file_type.is_symlink()
+                {
+                    let link = e.path();
+                    let target = std::fs::read_link(&link).unwrap_or_default();
+                    let resolved = if target.is_absolute() {
+                        target.clone()
+                    } else {
+                        link.parent()
+                            .unwrap_or(std::path::Path::new("."))
+                            .join(&target)
+                    };
+                    if !symlink_target_inside_scope(&resolved, std::path::Path::new(&grant.source))
+                    {
+                        return Err(invalid(format!(
+                            "{label} writable scope `{}` contains a symbolic link `{}`
+                             pointing at `{}` which escapes the scope",
+                            grant.source,
+                            link.display(),
+                            target.to_string_lossy()
+                        )));
+                    }
                 }
             }
         }
@@ -1131,4 +1153,38 @@ fn path_contains(ancestor: &str, descendant: &str) -> bool {
         || descendant
             .strip_prefix(ancestor)
             .is_some_and(|suffix| suffix.starts_with('/'))
+}
+
+/// Whether a symlink target stays inside `scope_root`. Symlinks in the path are
+/// resolved when they exist; a dangling target is normalized lexically, and one
+/// that cannot be proven inside the scope is treated as an escape (fail safe).
+fn symlink_target_inside_scope(candidate: &std::path::Path, scope_root: &std::path::Path) -> bool {
+    match std::fs::canonicalize(candidate) {
+        Ok(resolved) => resolved.starts_with(scope_root),
+        Err(_) => lexical_normalizes_inside(candidate, scope_root),
+    }
+}
+
+/// Lexically resolve `candidate` against `scope_root` without touching the
+/// filesystem, for symlink targets that cannot be canonicalized (dangling or
+/// looping). Returns whether the result stays inside the scope.
+fn lexical_normalizes_inside(candidate: &std::path::Path, scope_root: &std::path::Path) -> bool {
+    let mut resolved: std::path::PathBuf = std::path::PathBuf::from(scope_root);
+    for component in candidate.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !resolved.pop() {
+                    return false;
+                }
+            }
+            std::path::Component::RootDir => {
+                resolved.clear();
+                resolved.push(std::path::Component::RootDir);
+            }
+            std::path::Component::Prefix(_) => return false,
+            std::path::Component::Normal(part) => resolved.push(part),
+        }
+    }
+    resolved.starts_with(scope_root)
 }

@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:58849618584e9af48dd94cd0aea2806fd6f1905484846a9907a76806caa502e7"
-  contract_revision: "sha256:2b7478dcc6d7667c475e6128ef91f9ea031dffd94e1863630931b52a810f115e"
-  design_revision: "sha256:d290df050d46ccafd0bc0aabf75b22f79eeb8920058dca293bd7d33586eff366"
+  requirements_revision: "sha256:b79d7e4e17a002cba6c8bbf4bffd9231c7d294375bb9a452b1a038c8a40d2780"
+  contract_revision: "sha256:d299678c719c844b10e8735ab711a39419e85a01800630784b206847e98ec5d4"
+  design_revision: "sha256:fe89197f432a8103756b3646c8273d52d438dab464337656b4e9ec1d06338230"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-02T06:23:00Z"
+    checked_at: "2026-09-18T13:29:08Z"
     stale_since: null
     causes: []
 tasks:
@@ -88,90 +88,16 @@ tasks:
       completed_at: "2026-09-12T14:35:15Z"
     blocked_reason: null
     recovery_state: null
-  - id: "sa-02-write-tests"
-    title: "Define transactional workspace tests"
-    description: "Specify failing tests for bounded immutable input snapshots, private writable overlays, link and special-file rejection, deterministic diffs, conflict detection, and explicit promotion."
-    context: "Retry notices and archived copies can aid recovery but cannot safely undo partial edits or concurrent user changes."
-    purpose: "Define transactional file behavior before any supervisor attempts rollback or output promotion."
-    expected_outcome: "Tests prove failed attempts leave live inputs unchanged and successful output is applied only after validated conflict-free approval."
-    kind: test
-    status: completed
-    depends_on:
-      - "sa-01-compliance-review"
-    requirements:
-      - "DESIGN.md#Failure-and-recovery"
-    timestamps:
-      created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-09-12T21:45:42Z"
-      completed_at: "2026-09-12T21:45:42Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-02-implement-code"
-    title: "Implement transactional workspaces"
-    description: "Create bounded content-addressed input snapshots and attempt-local writable overlays that emit reviewed patches or artifacts without destructive source-control reset."
-    context: "A disposable attempt workspace makes retries predictable and avoids overwriting live user edits after failure."
-    purpose: "Provide reliable local side-effect containment before stronger operating-system isolation."
-    expected_outcome: "Attempts operate on private state and promotion detects every changed live precondition before writing."
-    kind: implementation
-    status: in-progress
-    depends_on:
-      - "sa-02-write-tests"
-    requirements:
-      - "DESIGN.md#Failure-and-recovery"
-    timestamps:
-      created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-09-12T21:49:27Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-02-security-audit"
-    title: "Audit transactional workspaces"
-    description: "Review snapshot traversal, hard links, symbolic links, metadata, races, resource bounds, patch application, concurrent mutation, and cleanup."
-    context: "A flawed recovery layer can destroy user work or expose files that were not granted."
-    purpose: "Find path and transaction vulnerabilities before workspace promotion is trusted."
-    expected_outcome: "Independent findings are remediated or retained as explicit blockers."
-    kind: security-audit
-    status: pending
-    depends_on:
-      - "sa-02-implement-code"
-    requirements:
-      - "DESIGN.md#Failure-and-recovery"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-02-compliance-review"
-    title: "Review transactional workspace compliance"
-    description: "Compare source-derived workspace behavior with the snapshot, overlay, conflict, and promotion contract."
-    context: "Recovery guarantees must be independently verified before retries can rely on them."
-    purpose: "Prevent archive or reset behavior from being described as transactional without evidence."
-    expected_outcome: "A source-blind review records compliance or an explicit discrepancy."
-    kind: compliance-review
-    status: pending
-    depends_on:
-      - "sa-02-security-audit"
-    requirements:
-      - "DESIGN.md#Failure-and-recovery"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-08-29T20:50:32Z"
-      updated_at: "2026-08-29T20:50:32Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
   - id: "sa-03-write-tests"
-    title: "Define strict Linux isolation tests"
-    description: "Write negative tests for ungranted reads and writes, inherited descriptors, credentials, process escape, network access, executable substitution, resource exhaustion, and unavailable backends."
+    title: "Define execution-backend delegation tests"
+    description: "Write tests for the selected execution-backend seam: runner and backend capability probing, protocol binding of delegated effects to the installed kvist-sandbox-runner, and fail-closed refusal when the runner or its backend is unavailable."
     context: "Host mode, restricted users, and fakeroot do not independently provide complete mediation."
-    purpose: "Make the exact Linux assurance tier executable before choosing or integrating isolation primitives."
+    purpose: "Make delegation to the approved isolation layer executable and fail closed without it."
     expected_outcome: "Tests fail closed unless every declared filesystem, process, environment, network, and resource restriction is enforced."
     kind: test
     status: pending
     depends_on:
-      - "sa-02-compliance-review"
+      - "sa-01-compliance-review"
     requirements:
       - "DESIGN.md#Security-and-resource-design"
     timestamps:
@@ -181,10 +107,10 @@ tasks:
     blocked_reason: null
     recovery_state: null
   - id: "sa-03-implement-code"
-    title: "Implement strict Linux backend"
-    description: "Add a replaceable Linux backend using a dedicated identity and Bubblewrap namespaces with explicit mounts, environment, network, process, and resource policy; evaluate Landlock as defense in depth."
+    title: "Implement pluggable execution-backend interface"
+    description: "Add a replaceable execution-backend interface that resolves and binds the installed kvist-sandbox-runner, probes its verified backend capabilities, and delegates every approved effect through its version-one protocol without constructing isolation primitives in this crate."
     context: "The standalone runtime needs a real reference monitor before strict mode can replace explicit host execution."
-    purpose: "Enforce least authority with no silent fallback when required kernel or backend features are unavailable."
+    purpose: "Delegate least-authority isolation to the approved layer with no silent fallback when the runner or backend is unavailable."
     expected_outcome: "Strict Linux runs expose only approved resources and tools, report backend capabilities, and fail before launch on incomplete enforcement."
     kind: implementation
     status: pending
@@ -199,8 +125,8 @@ tasks:
     blocked_reason: null
     recovery_state: null
   - id: "sa-03-security-audit"
-    title: "Audit strict Linux backend"
-    description: "Review namespace construction, mount topology, uid and gid mapping, seccomp, Landlock compatibility, cgroups, terminal isolation, sockets, procfs, TOCTOU, and cleanup."
+    title: "Audit execution-backend delegation"
+    description: "Independently review runner resolution, probe trust, protocol binding, environment and credential handling, timeout and output bounds, fail-closed refusal paths, and cleanup for every delegation outcome."
     context: "Sandbox construction errors can turn a strict-mode claim into ambient host execution."
     purpose: "Independently challenge every claimed Linux isolation guarantee."
     expected_outcome: "No strict mode ships with an unresolved high-confidence escape or silent degradation."
@@ -218,8 +144,8 @@ tasks:
     blocked_reason: null
     recovery_state: null
   - id: "sa-03-compliance-review"
-    title: "Review Linux isolation compliance"
-    description: "Compare observed backend behavior and capability reporting with the strict Linux contract without inspecting implementation during the comparison."
+    title: "Review execution-backend delegation compliance"
+    description: "Compare observed delegation behavior and capability reporting with the execution-backend contract without inspecting implementation during the comparison."
     context: "A sandbox implementer cannot certify the boundary that contains agent-controlled code."
     purpose: "Retain independent assurance evidence and explicit limitations."
     expected_outcome: "The review either confirms the documented assurance tier or blocks release with precise discrepancies."
@@ -257,11 +183,11 @@ tasks:
   - id: "sa-08-implement-code"
     title: "Implement layered runtime contracts"
     description: "Implement provider-independent backend classification, canonical model and tool-intent types, capability descriptors, cancellation and budget types, typed provider extensions, host-service traits, and redacted runtime events without selecting a transport framework."
-    context: "The standalone runtime must own reusable protocol interfaces before either a host broker or Rig/direct transport adapter depends on them."
+    context: "The standalone runtime must own reusable protocol interfaces before either a host broker or direct transport adapter depends on them."
     purpose: "Create a small stable seam that keeps provider libraries replaceable and leaves authorization, execution, promotion, and compliance evidence with the embedding host."
     expected_outcome: "Public runtime contracts contain no Kvist, Rig, or provider SDK type and cannot directly execute tools, access credentials, broaden resources, promote artifacts, or write canonical compliance evidence."
     kind: implementation
-    status: pending
+    status: blocked
     depends_on:
       - "sa-08-write-tests"
     requirements:
@@ -269,9 +195,9 @@ tasks:
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-09-01T18:57:19Z"
+      updated_at: "2026-09-17T22:05:39Z"
       completed_at: null
-    blocked_reason: null
+    blocked_reason: "agent failed during task execution. Bounded redacted logs are written to: /opt/proj/kvist/./agent_runtime/.kvist/logs/sa-08-implement-code_2026-09-17T22-05-39Z.log"
     recovery_state: null
   - id: "sa-08-security-audit"
     title: "Audit layered runtime boundaries"
@@ -928,165 +854,6 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "sa-09-write-tests"
-    title: "Define pinned Rig transport tests"
-    description: "For immutable rig-core 0.42.0, reuse the direct-transport conformance suite and add framework-containment tests for exact features, private types, tool schema/call conversion, cancellation, TRACE sentinels, locked Rust 1.94 and current stable builds, marginal dependencies and binary size, licenses, advisories, and TLS."
-    context: "The project deliberately raises its MSRV to Rig's upstream-tested Rust 1.94 toolchain. The earlier 128-package delta over bare Tokio remains a preliminary footprint warning; the meaningful comparison uses the reviewed direct adapter."
-    purpose: "Permit evidence-based reevaluation without exposing Rig types or placing a speculative framework on the native runtime critical path."
-    expected_outcome: "Tests define a removable optional adapter that converts Rig output into canonical text and untrusted tool intents without exposing or invoking Rig tools."
-    kind: test
-    status: completed
-    depends_on:
-      - "sa-12-implement-code"
-    requirements:
-      - "DESIGN.md#Algorithms-and-decisions"
-      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
-      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-    timestamps:
-      created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-08-30T11:50:26Z"
-      completed_at: "2026-08-30T11:50:26Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-09-implement-code"
-    title: "Prototype the private Rig transport"
-    description: "Build a removable adapter over exact rig-core 0.42.0 for canonical text, streaming, and untrusted structured tool intent; reject Rig tool execution, hosted tools, arbitrary additional parameters, persistence, and raw default evidence."
-    context: "Rig may reuse provider conversion while the standalone boundary and embedding host retain endpoint, credential, cancellation, capability, redaction, policy, execution, and evidence contracts."
-    purpose: "Determine whether Rig reduces provider maintenance enough to justify its marginal dependency and compatibility cost over the direct adapter."
-    expected_outcome: "The experiment records a go or no-go result; a go exposes only standalone-owned types, while a no-go leaves production behavior unchanged."
-    kind: implementation
-    status: completed
-    depends_on:
-      - "sa-09-write-tests"
-    requirements:
-      - "DESIGN.md#Algorithms-and-decisions"
-      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
-      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-    timestamps:
-      created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-08-30T12:39:12Z"
-      completed_at: "2026-08-30T12:39:12Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-09-security-audit"
-    title: "Audit Rig transport prototype"
-    description: "Independently inspect dependency features, endpoint and credential routing, raw provider extensions, hosted tools, tool-call parsing and identity, cancellation, malformed streams, TRACE/error leakage, TLS, advisories, and every translation between Rig and standalone types."
-    context: "A private adapter can still bypass policy or leak sensitive provider payloads if its boundary is incomplete."
-    purpose: "Establish whether the prototype is safe enough to retain as an optional transport implementation."
-    expected_outcome: "The audit resolves or blocks every high-confidence authority, network, credential, deserialization, cancellation, and evidence defect."
-    kind: security-audit
-    status: pending
-    depends_on:
-      - "sa-09-implement-code"
-    requirements:
-      - "DESIGN.md#Algorithms-and-decisions"
-      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-08-30T07:33:10Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-09-compliance-review"
-    title: "Review Rig prototype decision"
-    description: "Compare source-derived prototype behavior and measured build evidence with every Rig go/no-go gate, then record an exact-version decision matrix and whether to retain, revise, upstream-patch, or remove the dependency."
-    context: "Prototype success cannot be inferred from compiling one provider example or from Rig's advertised capabilities."
-    purpose: "Produce an independent, reversible dependency decision before production code relies on Rig."
-    expected_outcome: "The review records a complete go/no-go matrix, exact dependency version and features, marginal package/binary deltas versus the direct adapter, license/advisory disposition, TLS scope, unresolved gaps, and the approved transport path."
-    kind: compliance-review
-    status: pending
-    depends_on:
-      - "sa-09-security-audit"
-    requirements:
-      - "DESIGN.md#Algorithms-and-decisions"
-      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-08-30T07:05:12Z"
-      updated_at: "2026-08-30T07:33:10Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-14-write-tests"
-    title: "Define hosted Rig provider tests"
-    description: "After the local Rig adapter is independently approved, write failing tests for a deliberately selected hosted-provider matrix covering Rustls roots, endpoint and redirect policy, proxy denial, credential references, model qualification, unary and streaming text, structured tool intents, cancellation, rate-limit status, bounded redaction, and provider-specific capability differences."
-    context: "Rig can reduce provider maintenance beyond Ollama and llama-server, but each hosted provider adds credential, destination, TLS, semantic, and data-governance requirements that the local-only prototype intentionally excludes."
-    purpose: "Expand provider coverage through one canonical boundary without treating advertised Rig support as Kvist deployment conformance."
-    expected_outcome: "A named provider/version/model matrix has deterministic fake coverage and opt-in live qualification criteria before hosted network access is implemented."
-    kind: test
-    status: pending
-    depends_on:
-      - "sa-09-compliance-review"
-    requirements:
-      - "DESIGN.md#Algorithms-and-decisions"
-      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
-      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-    timestamps:
-      created_at: "2026-08-30T12:05:00Z"
-      updated_at: "2026-08-30T12:05:00Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-14-implement-code"
-    title: "Implement approved hosted Rig providers"
-    description: "Add only the hosted Rig providers approved by the conformance matrix, with explicit Rustls configuration, endpoint and credential bindings, capability descriptors, bounded canonical conversion, and no Rig tool execution or persistence."
-    context: "The local prototype proves the adapter seam but deliberately has no TLS, credentials, redirects, proxies, or arbitrary remote destinations."
-    purpose: "Gain wider provider support while preserving standalone-owned policy and evidence boundaries."
-    expected_outcome: "Approved hosted profiles use private Rig conversion and fail closed for every unqualified endpoint, credential, model, capability, or provider response."
-    kind: implementation
-    status: pending
-    depends_on:
-      - "sa-14-write-tests"
-    requirements:
-      - "DESIGN.md#Algorithms-and-decisions"
-      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
-      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-    timestamps:
-      created_at: "2026-08-30T12:05:00Z"
-      updated_at: "2026-08-30T12:05:00Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-14-security-audit"
-    title: "Audit hosted Rig providers"
-    description: "Independently review certificate roots, DNS and redirect behavior, proxy and environment handling, credential attachment, cross-provider routing, provider-hosted tool exclusion, request and response bounds, cancellation, tracing, error redaction, and dependency advisories for every enabled hosted provider."
-    context: "Remote providers move sensitive prompts and credentials across a network boundary and have materially different risks from numeric-loopback HTTP."
-    purpose: "Prevent destination escape, credential disclosure, provider confusion, payload leakage, and silent capability downgrade."
-    expected_outcome: "Every approved hosted provider has no unresolved high-confidence network, credential, authority, or data-protection defect."
-    kind: security-audit
-    status: pending
-    depends_on:
-      - "sa-14-implement-code"
-    requirements:
-      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-08-30T12:05:00Z"
-      updated_at: "2026-08-30T12:05:00Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-14-compliance-review"
-    title: "Review hosted Rig provider compliance"
-    description: "Derive the enabled provider, endpoint, TLS, credential, capability, conversion, redaction, dependency, and live qualification behavior from code and tests, then compare it with the approved provider matrix in a separate review context."
-    context: "Framework support and successful compilation do not establish that a hosted provider preserves Kvist's contract."
-    purpose: "Make provider promotion evidence-based and reversible."
-    expected_outcome: "The review approves exact provider/version/model combinations, records every unsupported behavior, and leaves all unevaluated combinations disabled."
-    kind: compliance-review
-    status: pending
-    depends_on:
-      - "sa-14-security-audit"
-    requirements:
-      - "DESIGN.md#Algorithms-and-decisions"
-      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-08-30T12:05:00Z"
-      updated_at: "2026-08-30T12:05:00Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
   - id: "sa-15-write-tests"
     title: "Define isolated stream delivery tests"
     description: "Write failing contract tests for a pull-based or async model stream boundary covering ordered text and tool events, bounded buffering, slow-consumer backpressure, callback-free cancellation and deadlines, consumer failure, terminal-turn assembly, and clean shutdown without detached work."
@@ -1096,7 +863,7 @@ tasks:
     kind: test
     status: pending
     depends_on:
-      - "sa-09-compliance-review"
+      - "sa-12-implement-code"
     requirements:
       - "CONTRACT.md#Behavioral-guarantees"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
@@ -1108,7 +875,7 @@ tasks:
     recovery_state: null
   - id: "sa-15-implement-code"
     title: "Implement isolated stream delivery"
-    description: "Replace or supplement the synchronous callback with the approved pull-based or async boundary, preserving canonical event ordering, bounded backpressure, cancellation, deadlines, consumer errors, and terminal-turn ownership for direct and Rig transports."
+    description: "Replace or supplement the synchronous callback with the approved pull-based or async boundary, preserving canonical event ordering, bounded backpressure, cancellation, deadlines, consumer errors, and terminal-turn ownership for the direct transport."
     context: "Running a borrowed synchronous callback inside transport polling prevents safe preemption and makes arbitrary caller latency part of the transport control path."
     purpose: "Keep provider I/O supervision enforceable independently of caller-controlled event processing."
     expected_outcome: "A stalled consumer cannot block transport deadline or cancellation enforcement, exceed bounded memory, detach provider work, or reorder canonical stream events."
@@ -1172,7 +939,7 @@ tasks:
     kind: test
     status: completed
     depends_on:
-      - "sa-09-implement-code"
+      - "sa-12-implement-code"
     requirements:
       - "CONTRACT.md#Provided-interfaces"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
@@ -1185,7 +952,7 @@ tasks:
   - id: "sa-16-implement-code"
     title: "Rename component to agent runtime"
     description: "Rename the component directory, Cargo package, Rust crate, executable, imports, user-facing commands, documentation paths, and canonical profile directory to agent-runtime, preserving deterministic legacy profile discovery when no canonical file exists."
-    context: "Agent runtime is the conventional provider-neutral name for transport, supervision, retry, broker, and future isolation infrastructure; Rig remains a private adapter and does not define the component identity."
+    context: "Agent runtime is the conventional provider-neutral name for transport, supervision, retry, broker, and future isolation infrastructure; it does not define the component identity."
     purpose: "Align names with the component's layered runtime responsibility before downstream API adoption grows."
     expected_outcome: "Kvist and standalone usage consistently expose agent-runtime, agent_runtime, and agent-run with no stale technical identifier outside deliberate migration references."
     kind: implementation
@@ -1479,169 +1246,6 @@ tasks:
       created_at: "2026-09-01T06:27:02Z"
       updated_at: "2026-09-01T07:01:22Z"
       completed_at: "2026-09-01T07:01:22Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-20-write-tests"
-    title: "Define promoted Rig integration tests"
-    description: "Write failing parity tests for Rig-default selection, explicit direct fallback, provider-native JSON Schema requests, incompatible schema-and-tool rejection, and non-replay failure behavior."
-    context: "The isolated integration branch needs to exercise Rig in normal builds and evaluate one high-value structured-output capability without weakening Kvist authority."
-    purpose: "Make the experiment's preferred transport and fallback semantics executable before promotion."
-    expected_outcome: "Tests distinguish the default and fallback paths and prove both encode bounded structured-output constraints without executing tools."
-    kind: test
-    status: completed
-    depends_on: []
-    requirements:
-      - "CONTRACT.md#Behavioral-guarantees"
-      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-09-01T08:34:52Z"
-      updated_at: "2026-09-01T08:49:35Z"
-      completed_at: "2026-09-01T08:49:35Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-20-implement-code"
-    title: "Promote Rig on integration branch"
-    description: "Enable exact-pinned Rig by default, select it for model calls, retain explicit direct selection, map canonical output schemas through both adapters, and document measured tradeoffs."
-    context: "Rig reduces provider-wire maintenance but must remain replaceable and must not own policy, retries, tools, validation, or evidence."
-    purpose: "Create a complete branch-level trial that exercises Rig under realistic default build and CLI flow."
-    expected_outcome: "Normal integration-branch builds use Rig, explicit direct fallback remains available, and structured generation stays behind Kvist-owned canonical types."
-    kind: implementation
-    status: completed
-    depends_on:
-      - "sa-20-write-tests"
-    requirements:
-      - "CONTRACT.md#Provided-interfaces"
-      - "DESIGN.md#Algorithms-and-decisions"
-      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
-      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
-    timestamps:
-      created_at: "2026-09-01T08:34:52Z"
-      updated_at: "2026-09-01T08:49:35Z"
-      completed_at: "2026-09-01T08:49:35Z"
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-20-security-audit"
-    title: "Audit promoted Rig integration"
-    description: "Independently review default dependency activation, schema conversion and bounds, provider enforcement claims, tracing suppression, request replay semantics, and fallback isolation."
-    context: "Making the framework path normal increases exposure to upstream provider conversion, async runtime, HTTP, and supply-chain defects."
-    purpose: "Prevent branch findings from being represented as production-ready without an independent authority and leakage review."
-    expected_outcome: "Every high-confidence issue is fixed or retained as an explicit promotion blocker."
-    kind: security-audit
-    status: pending
-    depends_on:
-      - "sa-20-implement-code"
-    requirements:
-      - "DESIGN.md#Security-and-resource-design"
-      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-09-01T08:34:52Z"
-      updated_at: "2026-09-01T08:34:52Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-20-compliance-review"
-    title: "Review promoted Rig integration compliance"
-    description: "Independently derive default selection, schema, fallback, error, and dependency behavior and compare it with the accepted experiment intent."
-    context: "The integration implementer cannot certify that framework reuse preserved the canonical contract."
-    purpose: "Provide a separate promotion verdict and retain every discrepancy for human arbitration."
-    expected_outcome: "The review either supports a bounded transport-only promotion or records precise blockers."
-    kind: compliance-review
-    status: pending
-    depends_on:
-      - "sa-20-security-audit"
-    requirements:
-      - "CONTRACT.md#Compatibility-and-verification"
-      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-09-01T08:34:52Z"
-      updated_at: "2026-09-01T08:34:52Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-21-write-tests"
-    title: "Define optional Rig promotion tests"
-    description: "Write failing regression and qualification tests for a direct-default build, explicit per-request Rig or direct selection in a Rig-enabled build, both feature modes in CI, and an exact live Ollama and llama-server version/model/template matrix covering unary text, streaming, structured output, tool intent, malformed or truncated responses, cancellation, and deadlines."
-    context: "The integration branch proves the private adapter against deterministic providers, but optional promotion to main must not impose Rig by default or represent unevaluated local deployments as qualified."
-    purpose: "Make the user-selectable experimental boundary and remaining live-provider evidence executable before changing the main-branch default."
-    expected_outcome: "Tests fail until default builds retain the direct adapter, Rig-enabled builds can choose either transport per request, both modes remain covered in CI, and unavailable live combinations are recorded as unevaluated."
-    kind: test
-    status: pending
-    depends_on:
-      - "sa-20-compliance-review"
-    requirements:
-      - "CONTRACT.md#Behavioral-guarantees"
-      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
-      - "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-09-01T17:08:25Z"
-      updated_at: "2026-09-01T17:08:25Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-21-implement-code"
-    title: "Expose optional Rig transport"
-    description: "Make Rig an explicit opt-in Cargo feature on main while keeping direct transport as the default even when Rig is compiled, add direct-only and all-feature CI coverage, document exact build and per-prompt selection commands, supported local-provider matrices and limitations, and retain non-automatic fallback semantics."
-    context: "Users should be able to evaluate the contained Rig adapter without changing project profile configuration, enlarging every default build, or mistaking the low-level model command for a complete Kvist agent loop."
-    purpose: "Offer a reversible experimental integration that users can select deliberately while preserving current Kvist task and prompt behavior."
-    expected_outcome: "A documented Rig-enabled build accepts explicit `--transport rig` or `--transport direct` for each model request, normal builds remain direct-only, and no configuration or failure path silently changes transports."
-    kind: implementation
-    status: pending
-    depends_on:
-      - "sa-21-write-tests"
-    requirements:
-      - "CONTRACT.md#Provided-interfaces"
-      - "DESIGN.md#Algorithms-and-decisions"
-      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
-      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
-    timestamps:
-      created_at: "2026-09-01T17:08:25Z"
-      updated_at: "2026-09-01T17:08:25Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-21-security-audit"
-    title: "Audit optional Rig promotion"
-    description: "Independently review feature isolation, per-request transport selection, endpoint routing, live provider conversion, schema and tool-intent handling, malformed streams, cancellation races, tracing and error leakage, CI coverage, dependency advisories, and the retained direct fallback."
-    context: "Opt-in status reduces default exposure but does not make framework parsing, network, resource, or authority defects acceptable for users who enable the feature."
-    purpose: "Prevent the experimental option from weakening Kvist boundaries or making unsafe capability and fallback claims."
-    expected_outcome: "Every high-confidence authority, leakage, routing, deserialization, cancellation, and dependency defect is fixed or retained as an explicit promotion blocker."
-    kind: security-audit
-    status: pending
-    depends_on:
-      - "sa-21-implement-code"
-    requirements:
-      - "DESIGN.md#Security-and-resource-design"
-      - "REQUIREMENTS.md#Quality-requirements-and-constraints"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-09-01T17:08:25Z"
-      updated_at: "2026-09-01T17:08:25Z"
-      completed_at: null
-    blocked_reason: null
-    recovery_state: null
-  - id: "sa-21-compliance-review"
-    title: "Review optional Rig promotion"
-    description: "Compare source-derived default and feature behavior, live-provider results, CI evidence, user documentation, fallback semantics, tool-descriptor scope, and the exact dependency decision matrix with the accepted transport intent."
-    context: "The package-count guideline is advisory rather than a hard gate, but its maintenance and supply-chain cost, all unevaluated provider combinations, and every contract discrepancy still require explicit human arbitration."
-    purpose: "Produce a bounded decision on retaining Rig as a user-selectable experimental transport without promoting it to Kvist's authority or agent-loop layer."
-    expected_outcome: "The review records exact qualified combinations, unsupported behavior, package and binary costs, license and advisory status, resolved or arbitrated contract gaps, and whether optional main-branch promotion is supported."
-    kind: compliance-review
-    status: pending
-    depends_on:
-      - "sa-21-security-audit"
-    requirements:
-      - "CONTRACT.md#Compatibility-and-verification"
-      - "REQUIREMENTS.md#AR-REQ-ADAPTER-BOUNDARY"
-      - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"
-      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
-    timestamps:
-      created_at: "2026-09-01T17:08:25Z"
-      updated_at: "2026-09-01T17:08:25Z"
-      completed_at: null
     blocked_reason: null
     recovery_state: null
   - id: "sa-01-reverification-security-audit"

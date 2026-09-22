@@ -1,34 +1,34 @@
-<!-- kvist-design-version: 1 -->
+<!-- kvist-design-version: 2 -->
+
 # Agent Runtime Design
 
 ## Design overview
 
 The crate separates command rendering, prompt acquisition, profile storage and
-setup, process supervision, direct model transport, private Rig transport, and
-canonical provider-neutral types. Reusable mechanisms remain independent of
+setup, process supervision, direct model transport, and canonical
+provider-neutral types. Reusable mechanisms remain independent of
 host policy and durable evidence.
 
 Native model mode is the preferred long-term path because the embedding host
 can observe and authorize every proposed effect. External coding agents remain
-supported as opaque processes constrained by an outer execution backend. On
-the `rig-integration` experiment branch, Rig is the preferred provider-wire
-adapter while the direct implementation remains an explicit conformance oracle
-and fallback.
+supported as opaque processes constrained by an outer execution backend.
 
 ## Internal structure
 
-| Module | Responsibility |
-| --- | --- |
-| `model` | Canonical messages, turns, tool intent, capability and error types |
-| `command` | Shell-free parsing, placeholders, and per-attempt command specs |
-| `prompt` | Positional, file, standard-input, terminal, and editor acquisition |
-| `profile` | Strict bounded profile parsing and formatting-preserving persistence |
-| `setup` | Provider selection, probes, model/executable collection, qualification |
-| `catalog` | Bounded HTTP, ACP, and fallback provider-model discovery |
-| `supervisor` | Process groups, forward-or-capture streams, idle/loop/wall/output limits, retry, cancellation |
-| `direct_transport` | Bounded loopback Ollama and llama-server HTTP adapters |
-| `rig_transport` | Pinned default-enabled experiment adapter to canonical types |
-| `lib` / `main` | Public library surface and standalone CLI boundary |
+| Module             | Responsibility                                                                                |
+| ------------------ | --------------------------------------------------------------------------------------------- |
+| `model`            | Canonical messages, turns, tool intent, capability and error types                            |
+| `command`          | Shell-free parsing, placeholders, and per-attempt command specs                               |
+| `prompt`           | Positional, file, standard-input, terminal, and editor acquisition                            |
+| `profile`          | Strict bounded profile parsing and formatting-preserving persistence                          |
+| `setup`            | Provider selection, probes, model/executable collection, qualification                        |
+| `catalog`          | Bounded HTTP, ACP, and fallback provider-model discovery                                      |
+| `supervisor`       | Process groups, forward-or-capture streams, idle/loop/wall/output limits, retry, cancellation |
+| `direct_transport` | Bounded loopback Ollama and llama-server HTTP adapters                                        |
+| `trajectory`       | Bounded recorded event stream for agent execution trajectories                                |
+| `gbnf`             | GBNF grammar escaping for provider tool schemas                                               |
+| `interrupt`        | Process-level interrupt registry shared with the engine supervisor                            |
+| `lib` / `main`     | Public library surface and standalone CLI boundary                                            |
 
 The future runtime layers are run coordinator, model transport, native loop,
 typed catalog and broker, host policy interface, selected execution backend,
@@ -104,34 +104,37 @@ capture instead of forwarding provider streams, so callers retain ownership of
 their presentation boundary. Restricting qualification to a narrower
 tool/filesystem authority is deferred with the broader execution backend work.
 
-Direct transports implement the minimal provider wire surface explicitly. Rig
-0.42.0 is exact-pinned, enabled by default for this experiment, supplied with a
-constrained component-owned HTTP client, and translated immediately into
-canonical types. It cannot own tools, persistence, policy, evidence, or public
-provider types. The current Rig conversion cannot preserve requested reasoning
-effort or provider reasoning content, so those requests fail before provider
-I/O rather than being silently dropped. Selecting the direct adapter is always
-explicit; transport failure never triggers automatic replay.
+Direct transports implement the minimal provider wire surface explicitly.
+They cannot own tools, persistence, policy, evidence, or public provider
+types. A requested reasoning effort fails before provider I/O when the
+selected command does not declare the placeholder; transport failure never
+triggers automatic replay.
 
 An optional canonical JSON object schema is validated against a bounded common
-provider subset. Ollama maps through Rig's `CompletionRequest.output_schema`.
-For llama-server, the adapter supplies a private typed
-`response_format.json_schema` extension with the stable `kvist_output` name so
-Rig cannot sanitize or rename the host-owned schema. The direct adapter emits
-the same envelopes. Schema requests are rejected when tools are enabled because
-llama.cpp may otherwise defer or ignore one constraint. Provider-native
-enforcement is only a generation aid; returned JSON parsing and validation
-remain a host responsibility.
+provider subset. Ollama sends it unchanged as `format`; for llama-server the
+adapter supplies a private typed `response_format.json_schema` extension with
+the stable `kvist_output` name. Schema requests are rejected when tools are
+enabled because llama.cpp may otherwise defer or ignore one constraint.
+Provider-native enforcement is only a generation aid; returned JSON parsing
+and validation remain a host responsibility.
 
 Detailed authority rationale and delivery ordering live in
-`../../docs/agent-runtime/architecture.md`; dependency and transport evaluation
-evidence lives in `../../docs/agent-runtime/rig-evaluation.md`.
+`../../docs/agent-runtime/architecture.md`; the historical evaluation evidence
+for the rejected Rig experiment lives in
+`../../docs/agent-runtime/rig-evaluation.md` (ADR 0009).
 
 ## Failure and recovery
 
 Every recoverable input, filesystem, HTTP, stream, subprocess, and provider
 failure returns a typed error. Automatic retry is deliberately narrow because
 provider processes may have caused non-idempotent side effects.
+
+The direct transport honors a caller-supplied per-call streaming deadline when
+one is provided, clamped to a hard maximum, instead of its configured deadline;
+the plain streaming call uses the configured deadline. This lets a retrying loop
+extend an attempt's budget across retries — so a turn that merely ran past one
+deadline can complete once an attempt has room for the whole generation — while
+a plain call keeps its fixed bound.
 
 Linux cleanup signals the process group, waits, drains bounded output, and
 fails if escaped descendants retain descriptors beyond the grace period.
@@ -149,9 +152,8 @@ bounds. Provider children receive null standard input where interaction would
 conflict with the controlling setup process.
 
 Direct HTTP rejects ambient proxies, redirects, TLS, DNS names, non-loopback
-addresses, oversized request/response bodies, and unbounded streaming. Rig
-payload tracing is suppressed and raw provider bodies do not enter canonical
-errors.
+addresses, oversized request/response bodies, and unbounded streaming. Raw
+provider bodies do not enter canonical errors.
 
 Catalog HTTP requests reuse the numeric-loopback endpoint parser and
 component-owned direct HTTP restrictions rather than curl, while ACP discovery
@@ -163,13 +165,20 @@ The broker cannot broaden host grants. Capability states distinguish
 advertised, conformance-tested, and policy-enabled behavior. Provider
 permission flags are defense in depth rather than proof of isolation.
 
+Tool effects are delegated to the installed `kvist-sandbox-runner` through a
+replaceable execution-backend interface. The runner binary and its verified
+backend capabilities are resolved and bound before any effect is delegated.
+Unavailability of the runner, its backend, or its prerequisites fails closed;
+this crate constructs no isolation namespaces of its own and never falls back
+to unconstrained host execution.
+
 ## Verification strategy
 
 Unit tests cover parsing, placeholder encoding, canonical types, limits,
 profile validation, model conversion, and loop detection. Integration tests
 cover CLI prompt sources, profile persistence, provider setup, fake
 subprocesses, process groups, signal cancellation, output/backpressure,
-loopback HTTP, streaming, malformed provider data, and Rig parity.
+loopback HTTP, streaming, and malformed provider data.
 Focused output tests distinguish live text forwarding from captured JSON,
 verify that no success trailer contaminates content, and cover reasoning-event
 separation, per-prompt profile/model/effort selection, the fixed setup prompt,
@@ -179,7 +188,7 @@ deterministic list output. Negative ACP cases cover wrong response IDs,
 unsolicited requests, incomplete initialization, empty or inconsistent model
 state, oversized records, timeout, cancellation, and retained descendants.
 
-Conformance tests compare canonical behavior across direct Ollama,
-llama-server, and Rig adapters. Platform support requires native
+Conformance tests compare canonical behavior across the direct Ollama and
+llama-server transports. Platform support requires native
 process, filesystem, and transport tests. Security audit and independent
 compliance review gate promotion of each provider or execution capability.
