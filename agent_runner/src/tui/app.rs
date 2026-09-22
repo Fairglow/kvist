@@ -11,6 +11,7 @@ use ratatui::text::{Line, Span};
 use tui_textarea::TextArea;
 
 use crate::error::Result;
+use crate::history::{self, SessionEntry};
 use crate::markdown::render_document;
 use crate::session::Event;
 
@@ -103,6 +104,25 @@ pub enum KeyAction {
     Quit,
 }
 
+/// A modal overlay that takes over the transcript box. While any overlay other
+/// than [`Overlay::None`] is active, navigation keys drive the overlay and the
+/// prompt editor is inert, so menus and replays never mix with live input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Overlay {
+    /// The normal transcript, editor, and live session.
+    None,
+    /// The `Esc` action menu: new session, session history, and quit.
+    Menu,
+    /// The scrollable list of past sessions.
+    History,
+    /// A read-only replay of one past session's transcript.
+    Replay,
+}
+
+/// The `Esc` menu actions, in display order, with their single-letter hotkeys.
+pub const MENU_ITEMS: [&str; 3] = ["New session", "Session history", "Quit"];
+pub const MENU_HOTKEYS: [char; 3] = ['n', 'h', 'q'];
+
 /// The interactive application state driven by events and key input.
 pub struct App {
     pub lines: Vec<ScreenLine>,
@@ -125,8 +145,25 @@ pub struct App {
     pub effort: ReasoningEffort,
     pub running: bool,
     pub show_help: bool,
+    pub overlay: Overlay,
     pub status: String,
     pub should_quit: bool,
+    /// The highlighted index into [`MENU_ITEMS`] while the action menu is open.
+    pub menu_selection: usize,
+    /// The past sessions available when the history overlay is open.
+    pub history_items: Vec<SessionEntry>,
+    /// The scroll offset of the history list.
+    pub history_scroll: u16,
+    /// The highlighted index into `history_items`.
+    pub history_selection: usize,
+    /// The transcript lines shown while the replay overlay is open.
+    pub replay_lines: Vec<String>,
+    /// The session id labelled on the replay overlay.
+    pub replay_title: String,
+    /// The scroll offset of the replay transcript.
+    pub replay_scroll: u16,
+    /// Where to look for past-session transcripts, resolved from overrides.
+    log_dir: Option<PathBuf>,
     pub width: u16,
     pub height: u16,
     /// The staged prompt awaiting dispatch, if any.
@@ -182,7 +219,7 @@ impl App {
             ratatui::widgets::Block::default()
                 .borders(ratatui::widgets::Borders::ALL)
                 .title(Span::styled(
-                    " prompt · Enter/Ctrl+Enter send · Shift+Enter · Tab model · Shift+Tab effort · Ctrl+Insert copy · Ctrl+S scroll · Ctrl+H help ",
+                    " prompt · Enter/Ctrl+Enter send · Shift+Enter · Tab model · Shift+Tab effort · Ctrl+Insert copy · Ctrl+S scroll · Ctrl-Q quit · Esc menu · Ctrl+H help ",
                     Style::default().fg(Color::DarkGray),
                 )),
         );
@@ -199,8 +236,17 @@ impl App {
             effort,
             running: false,
             show_help: false,
+            overlay: Overlay::None,
             status: "idle".to_owned(),
             should_quit: false,
+            menu_selection: 0,
+            history_items: Vec::new(),
+            history_scroll: 0,
+            history_selection: 0,
+            replay_lines: Vec::new(),
+            replay_title: String::new(),
+            replay_scroll: 0,
+            log_dir: None,
             width,
             height,
             pending_prompt: None,
@@ -217,7 +263,7 @@ impl App {
         };
         app.note(
             Style::default().fg(Color::Cyan),
-            "agent-runner ready. Type a prompt and press Ctrl+Enter. Press Ctrl+H for help.",
+            "agent-runner ready. Type a prompt and press Ctrl+Enter. Ctrl-Q quits; Esc opens the menu; Ctrl+H helps.",
         );
         app
     }
@@ -483,6 +529,13 @@ impl App {
     /// End, Delete, word motions) are handled by the embedded multiline editor;
     /// the control keys below are intercepted first.
     pub fn on_key(&mut self, key: KeyEvent) -> KeyAction {
+        // Modal overlays intercept their own keys before the editor or live keys.
+        match self.overlay {
+            Overlay::Menu => return self.handle_menu_key(key),
+            Overlay::History => return self.handle_history_key(key),
+            Overlay::Replay => return self.handle_replay_key(key),
+            Overlay::None => {}
+        }
         if self.show_help {
             if self.handle_help_key(key) {
                 self.show_help = false;
@@ -498,6 +551,13 @@ impl App {
                     self.should_quit = true;
                     KeyAction::Quit
                 }
+            }
+            // Ctrl-Q is the reliable, immediate exit: it quits regardless of a
+            // running turn or a staged prompt, unlike Ctrl+C which needs a
+            // second press once idle and Ctrl-D only quits with an empty prompt.
+            (KeyCode::Char('q'), KeyModifiers::CONTROL) => {
+                self.should_quit = true;
+                KeyAction::Quit
             }
             (KeyCode::Char('d'), KeyModifiers::CONTROL) => {
                 if self.editor.is_empty() {
@@ -546,7 +606,12 @@ impl App {
                 KeyAction::Idle
             }
             (KeyCode::Esc, _) => {
-                self.show_help = false;
+                // Esc closes the help overlay, otherwise it opens the action menu.
+                if self.show_help {
+                    self.show_help = false;
+                } else {
+                    self.open_menu();
+                }
                 KeyAction::Idle
             }
             (KeyCode::Char('h'), KeyModifiers::CONTROL) => {
@@ -881,24 +946,46 @@ impl App {
     /// Scrolls up (toward older lines). Moving away from the bottom unpins
     /// auto-follow so the user can read without the view being yanked down.
     pub fn scroll_up(&mut self, amount: u16) {
-        if self.show_help {
-            self.help_scroll = self.help_scroll.saturating_sub(self.help_visible_rows());
-        } else {
-            self.following = false;
-            self.scroll_back(amount);
+        match self.overlay {
+            Overlay::History => self.history_scroll_up(),
+            Overlay::Replay => {
+                self.following = false;
+                let bottom = self.replay_bottom();
+                self.replay_scroll = self.replay_scroll.saturating_sub(amount).min(bottom);
+            }
+            _ => {
+                if self.show_help {
+                    self.help_scroll = self.help_scroll.saturating_sub(self.help_visible_rows());
+                } else {
+                    self.following = false;
+                    self.scroll_back(amount);
+                }
+            }
         }
     }
 
-    /// Scrolls down (toward newer lines). While the help overlay is open this
-    /// scrolls the help; otherwise reaching the bottom re-pins auto-follow.
+    /// Scrolls down (toward newer lines). While a history overlay is open this
+    /// scrolls the list; while a replay is open it scrolls the transcript;
+    /// while the help overlay is open it scrolls the help; otherwise reaching
+    /// the bottom re-pins auto-follow.
     pub fn scroll_down(&mut self, amount: u16) {
-        if self.show_help {
-            self.help_scroll += self.help_visible_rows();
-        } else {
-            self.scroll_forward(amount);
-            self.clamp_scroll();
-            if self.scroll == self.bottom_offset() {
-                self.following = true;
+        match self.overlay {
+            Overlay::History => self.history_scroll_down(),
+            Overlay::Replay => {
+                self.following = false;
+                let bottom = self.replay_bottom();
+                self.replay_scroll = self.replay_scroll.saturating_add(amount).min(bottom);
+            }
+            _ => {
+                if self.show_help {
+                    self.help_scroll += self.help_visible_rows();
+                } else {
+                    self.scroll_forward(amount);
+                    self.clamp_scroll();
+                    if self.scroll == self.bottom_offset() {
+                        self.following = true;
+                    }
+                }
             }
         }
     }
@@ -972,6 +1059,222 @@ impl App {
     fn restore_editor(&mut self, text: &str) {
         self.editor
             .set_lines(text.split('\n').map(str::to_owned).collect(), (0, 0));
+    }
+
+    /// Opens the action overlay menu.
+    pub fn open_menu(&mut self) {
+        self.menu_selection = 0;
+        self.overlay = Overlay::Menu;
+    }
+
+    /// Opens the session-history overlay, listing past transcripts.
+    fn open_history(&mut self) {
+        let dir = self
+            .log_dir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(crate::session_log::DEFAULT_LOG_DIR));
+        self.history_items = history::list_sessions(&dir);
+        self.history_selection = 0;
+        self.history_scroll = 0;
+        if self.history_items.is_empty() {
+            self.note(
+                Style::default().fg(Color::Yellow),
+                "no past sessions found in the log directory",
+            );
+        }
+        self.overlay = Overlay::History;
+    }
+
+    /// Loads one past session's transcript for a read-only replay.
+    fn start_replay(&mut self, entry: &SessionEntry) {
+        match history::transcript_lines(&entry.path) {
+            Ok(lines) => {
+                self.replay_lines = lines;
+                self.replay_title = entry.id.clone();
+                self.replay_scroll = self.replay_bottom();
+                self.following = false;
+                self.overlay = Overlay::Replay;
+            }
+            Err(error) => {
+                self.note(
+                    Style::default().fg(Color::Red),
+                    &format!("could not load transcript: {error}"),
+                );
+            }
+        }
+    }
+
+    /// Starts a fresh slate: clears the transcript and returns to idle while
+    /// keeping the selected model and effort.
+    fn new_session(&mut self) {
+        self.clear_screen();
+        self.following = true;
+        self.status = "idle".to_owned();
+        self.note(
+            Style::default().fg(Color::Cyan),
+            "new session — transcript cleared; type a prompt below",
+        );
+    }
+
+    /// Runs the action chosen by the highlighted menu item.
+    fn dispatch_menu(&mut self) {
+        match self.menu_selection {
+            0 => self.new_session(),
+            1 => self.open_history(),
+            _ => self.should_quit = true,
+        }
+    }
+
+    /// Handles keys while the action menu is open.
+    fn handle_menu_key(&mut self, key: KeyEvent) -> KeyAction {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('r') => {
+                self.overlay = Overlay::None;
+                KeyAction::Idle
+            }
+            KeyCode::Char('q') => {
+                self.should_quit = true;
+                KeyAction::Quit
+            }
+            KeyCode::Char('n') => {
+                self.new_session();
+                KeyAction::Idle
+            }
+            KeyCode::Char('h') => {
+                self.open_history();
+                KeyAction::Idle
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.menu_selection = self
+                    .menu_selection
+                    .saturating_add(1)
+                    .min(MENU_ITEMS.len() - 1);
+                KeyAction::Idle
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.menu_selection = self.menu_selection.saturating_sub(1);
+                KeyAction::Idle
+            }
+            KeyCode::Enter => {
+                self.dispatch_menu();
+                KeyAction::Idle
+            }
+            _ => KeyAction::Idle,
+        }
+    }
+
+    /// Handles keys while the session-history list is open.
+    fn handle_history_key(&mut self, key: KeyEvent) -> KeyAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.overlay = Overlay::Menu;
+                KeyAction::Idle
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.history_scroll_up();
+                KeyAction::Idle
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.history_scroll_down();
+                KeyAction::Idle
+            }
+            KeyCode::PageUp => {
+                for _ in 0..self.visible_rows() {
+                    self.history_scroll_up();
+                }
+                KeyAction::Idle
+            }
+            KeyCode::PageDown => {
+                for _ in 0..self.visible_rows() {
+                    self.history_scroll_down();
+                }
+                KeyAction::Idle
+            }
+            KeyCode::Enter => {
+                if let Some(entry) = self.history_items.get(self.history_selection).cloned() {
+                    self.start_replay(&entry);
+                }
+                KeyAction::Idle
+            }
+            _ => KeyAction::Idle,
+        }
+    }
+
+    /// Handles keys while a past session's transcript is replayed. The editor is
+    /// inert here: navigation scrolls the transcript, Esc returns to the list.
+    fn handle_replay_key(&mut self, key: KeyEvent) -> KeyAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.overlay = Overlay::History;
+                KeyAction::Idle
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.replay_scroll = self.replay_scroll.saturating_sub(1);
+                KeyAction::Idle
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.replay_scroll = self.replay_scroll.min(self.replay_bottom());
+                KeyAction::Idle
+            }
+            KeyCode::PageUp => {
+                self.replay_scroll = self.replay_scroll.saturating_sub(self.visible_rows());
+                KeyAction::Idle
+            }
+            KeyCode::PageDown => {
+                self.replay_scroll = self.replay_scroll.min(self.replay_bottom());
+                KeyAction::Idle
+            }
+            _ => KeyAction::Idle,
+        }
+    }
+
+    /// Scrolls the history list up by one row, keeping the selection and bounds
+    /// in step. A short list needs no scrolling.
+    fn history_scroll_up(&mut self) {
+        if self.history_items.is_empty() {
+            return;
+        }
+        self.history_scroll = self
+            .history_scroll
+            .saturating_sub(1)
+            .min(self.history_max_scroll());
+        self.history_selection = self.history_selection.saturating_sub(1);
+    }
+
+    /// Scrolls the history list down by one row, clamping to the last item.
+    fn history_scroll_down(&mut self) {
+        if self.history_items.is_empty() {
+            return;
+        }
+        self.history_scroll = self
+            .history_scroll
+            .saturating_add(1)
+            .min(self.history_max_scroll());
+        self.history_selection = self
+            .history_selection
+            .saturating_add(1)
+            .min(self.history_items.len().saturating_sub(1));
+    }
+
+    /// The largest scroll offset that still shows the last history row.
+    fn history_max_scroll(&self) -> u16 {
+        self.history_items
+            .len()
+            .saturating_sub(self.visible_rows() as usize) as u16
+    }
+
+    /// The largest scroll offset that still shows the last replay row.
+    fn replay_bottom(&self) -> u16 {
+        self.replay_lines
+            .len()
+            .saturating_sub(self.visible_rows() as usize) as u16
+    }
+
+    /// Sets the directory the history overlay reads past transcripts from. The
+    /// run loop resolves this from the overrides so the history overlay and the
+    /// durable worker log the same directory.
+    pub fn set_log_dir(&mut self, dir: PathBuf) {
+        self.log_dir = Some(dir);
     }
 
     fn handle_help_key(&mut self, key: KeyEvent) -> bool {
@@ -1315,7 +1618,7 @@ fn bargraph(fraction: f64, width: u16) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{App, KeyAction, LineKind, Style};
+    use super::{App, KeyAction, LineKind, MENU_ITEMS, Overlay, Style};
     use crate::session::Event;
     use agent_runtime::ReasoningEffort;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
@@ -2134,5 +2437,184 @@ mod tests {
             }
         }
         String::from_utf8(out).expect("base64 payload is utf-8")
+    }
+
+    #[test]
+    fn ctrl_q_quits_even_when_a_turn_is_running() {
+        // Ctrl-Q is the reliable exit: it quits whether or not a turn runs,
+        // unlike Ctrl+C which needs a second press once idle.
+        let mut running = app();
+        running.running = true;
+        running.status = "thinking".to_owned();
+        assert_eq!(running.on_key(ctrl(KeyCode::Char('q'))), KeyAction::Quit);
+        assert!(running.should_quit);
+    }
+
+    #[test]
+    fn ctrl_q_quits_when_idle() {
+        let mut app = app();
+        assert_eq!(app.on_key(ctrl(KeyCode::Char('q'))), KeyAction::Quit);
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn esc_when_idle_opens_the_action_menu() {
+        let mut app = app();
+        assert_eq!(app.on_key(ch(KeyCode::Esc)), KeyAction::Idle);
+        assert_eq!(app.overlay, Overlay::Menu);
+        assert_eq!(app.menu_selection, 0);
+    }
+
+    #[test]
+    fn esc_when_help_is_open_closes_help_and_skips_the_menu() {
+        // Help keeps priority: Esc closes it and returns to the prompt, rather
+        // than dropping straight into the menu.
+        let mut app = app();
+        app.show_help = true;
+        assert_eq!(app.on_key(ch(KeyCode::Esc)), KeyAction::Idle);
+        assert!(!app.show_help);
+        assert_eq!(app.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn menu_esc_and_r_return_to_the_prompt() {
+        let mut app = app();
+        app.open_menu();
+        assert_eq!(app.on_key(ch(KeyCode::Esc)), KeyAction::Idle);
+        assert_eq!(app.overlay, Overlay::None);
+        app.open_menu();
+        assert_eq!(app.on_key(ch(KeyCode::Char('r'))), KeyAction::Idle);
+        assert_eq!(app.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn menu_navigation_clamps_at_both_ends() {
+        let mut app = app();
+        app.open_menu();
+        for _ in 0..8 {
+            app.on_key(ch(KeyCode::Down));
+        }
+        assert_eq!(app.menu_selection, MENU_ITEMS.len() - 1);
+        for _ in 0..8 {
+            app.on_key(ch(KeyCode::Up));
+        }
+        assert_eq!(app.menu_selection, 0);
+    }
+
+    #[test]
+    fn menu_n_hotkey_starts_a_new_session() {
+        let mut app = app();
+        app.note(Style::default(), "earlier output that should vanish");
+        assert!(!app.lines.is_empty());
+        app.open_menu();
+        app.on_key(ch(KeyCode::Char('n')));
+        assert!(
+            !app.lines
+                .iter()
+                .any(|l| l.line.to_string().contains("earlier output")),
+            "old transcript is cleared"
+        );
+        assert_eq!(app.status, "idle");
+    }
+
+    #[test]
+    fn menu_enter_on_quit_selection_quits() {
+        let mut app = app();
+        app.open_menu();
+        // Move to the Quit action (index 2) and activate with Enter.
+        for _ in 0..2 {
+            app.on_key(ch(KeyCode::Down));
+        }
+        assert_eq!(app.menu_selection, 2);
+        app.on_key(ch(KeyCode::Enter));
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn menu_history_hotkey_opens_the_history_overlay() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("session-1.log"),
+            "== session refac finished: 2 turns, 20 tokens, 1s, ok ==\n",
+        )
+        .unwrap();
+        let mut app = app();
+        app.set_log_dir(dir.path().to_path_buf());
+        app.open_menu();
+        app.on_key(ch(KeyCode::Char('h')));
+        assert_eq!(app.overlay, Overlay::History);
+        assert_eq!(app.history_items.len(), 1);
+    }
+
+    #[test]
+    fn history_esc_returns_to_the_menu() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("session-1.log"),
+            "== session s finished: cancelled/failed ==\n",
+        )
+        .unwrap();
+        let mut app = app();
+        app.set_log_dir(dir.path().to_path_buf());
+        app.open_history();
+        assert_eq!(app.overlay, Overlay::History);
+        assert_eq!(app.on_key(ch(KeyCode::Esc)), KeyAction::Idle);
+        assert_eq!(app.overlay, Overlay::Menu);
+    }
+
+    #[test]
+    fn history_enter_replays_the_selected_transcript() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("session-1.log"),
+            "== session demo started 0s ago ==\nyou: refactor the parser\n\u{2192} tool: shell\n\u{2713} tool shell finished\n",
+        )
+        .unwrap();
+        let mut app = app();
+        app.set_log_dir(dir.path().to_path_buf());
+        app.open_history();
+        app.on_key(ch(KeyCode::Enter));
+        assert_eq!(app.overlay, Overlay::Replay);
+        assert_eq!(app.replay_title, "demo");
+        assert!(
+            app.replay_lines
+                .iter()
+                .any(|l| l.contains("refactor the parser")),
+            "replay shows the transcript content:\n{:?}",
+            app.replay_lines
+        );
+    }
+
+    #[test]
+    fn replay_esc_returns_to_the_history_list() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("session-1.log"),
+            "== session demo started 0s ago ==\nhello there\n",
+        )
+        .unwrap();
+        let mut app = app();
+        app.set_log_dir(dir.path().to_path_buf());
+        app.open_history();
+        app.on_key(ch(KeyCode::Enter));
+        assert_eq!(app.overlay, Overlay::Replay);
+        assert_eq!(app.on_key(ch(KeyCode::Esc)), KeyAction::Idle);
+        assert_eq!(app.overlay, Overlay::History);
+    }
+
+    #[test]
+    fn open_history_notes_when_no_sessions_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.set_log_dir(dir.path().to_path_buf());
+        app.open_history();
+        assert_eq!(app.overlay, Overlay::History);
+        assert!(app.history_items.is_empty());
+        assert!(
+            app.lines
+                .iter()
+                .any(|line| line.line.to_string().contains("no past sessions found")),
+            "a helpful note appears when history is empty"
+        );
     }
 }

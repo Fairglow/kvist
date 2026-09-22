@@ -7,7 +7,7 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
 };
 
-use super::app::App;
+use super::app::{App, MENU_HOTKEYS, MENU_ITEMS, Overlay};
 
 /// Rows reserved for the multiline prompt editor around the transcript.
 const INPUT_ROWS: u16 = 4;
@@ -30,10 +30,13 @@ pub fn render(f: &mut ratatui::Frame, app: &App) {
 
     render_header(f, app, header_area);
     render_stats(f, app, stats_area);
-    if app.show_help {
-        render_help(f, app, transcript_area);
-    } else {
-        render_transcript(f, app, transcript_area);
+    match (app.show_help, app.overlay) {
+        // The help overlay keeps its own dedicated rendering and scroll state.
+        (true, _) => render_help(f, app, transcript_area),
+        (false, Overlay::History) => render_history(f, app, transcript_area),
+        (false, Overlay::Replay) => render_replay(f, app, transcript_area),
+        (false, Overlay::Menu) => render_menu(f, app, transcript_area),
+        (false, Overlay::None) => render_transcript(f, app, transcript_area),
     }
     render_input(f, app, input_area);
 }
@@ -85,9 +88,10 @@ fn render_transcript(f: &mut ratatui::Frame, app: &App, area: Rect) {
         .block(block)
         .scroll((app.scroll, 0));
     f.render_widget(paragraph, area);
-    // The help overlay shares the transcript box, so it must not draw the
-    // scrollbar on the right edge (it would overwrite the last column of text).
-    if app.show_scrollbar && !app.show_help {
+    // The help and other overlays share the transcript box, so they must not
+    // draw the scrollbar on the right edge (it would overwrite the last column
+    // of text). Overlays manage their own visible window instead.
+    if app.show_scrollbar && !app.show_help && matches!(app.overlay, Overlay::None) {
         // The box's left and right borders consume 2 columns; the remaining
         // width is the inner content area the scrollbar represents.
         let viewport = area.height.saturating_sub(2).max(1) as usize;
@@ -187,6 +191,118 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         .block(block)
         .alignment(Alignment::Left)
         .scroll((scroll, 0));
+    f.render_widget(paragraph, area);
+}
+
+/// The action overlay menu, reached with Esc. Items are navigated with the
+/// arrow keys or `j`/`k`, activated with Enter, or via their single-letter
+/// hotkeys; Esc or `r` returns to the prompt.
+fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(
+            " agent-runner menu ",
+            Style::default().fg(Color::Cyan).bold(),
+        )),
+        Line::from(""),
+        Line::from("  up/down or j/k select · enter act · esc / r return"),
+        Line::from(""),
+    ];
+    for (index, item) in MENU_ITEMS.iter().enumerate() {
+        let selected = index == app.menu_selection;
+        let style = if selected {
+            Style::default().fg(Color::Yellow).bold()
+        } else {
+            Style::default().fg(Color::White)
+        };
+        let marker = if selected { "> " } else { "  " };
+        let hotkey = MENU_HOTKEYS[index];
+        lines.push(Line::from(Span::styled(
+            format!("  {marker}{item} ({hotkey})"),
+            style,
+        )));
+    }
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        " menu",
+        Style::default().fg(Color::Cyan).bold(),
+    ));
+    let paragraph = Paragraph::new(Text::from(lines))
+        .block(block)
+        .alignment(Alignment::Left);
+    f.render_widget(paragraph, area);
+}
+
+/// The session-history overlay: a scrollable list of past transcripts. Enter
+/// replays the highlighted session; Esc returns to the action menu.
+fn render_history(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(
+            " session history ",
+            Style::default().fg(Color::Cyan).bold(),
+        )),
+        Line::from(""),
+        Line::from("  up/down or j/k select · enter replay · esc back"),
+        Line::from(""),
+    ];
+    if app.history_items.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  no past sessions found",
+            Style::default().fg(Color::Yellow),
+        )));
+    } else {
+        for (index, item) in app.history_items.iter().enumerate() {
+            let selected = index == app.history_selection;
+            let style = if selected {
+                Style::default().fg(Color::Yellow).bold()
+            } else {
+                Style::default().fg(Color::White)
+            };
+            let marker = if selected { "> " } else { "  " };
+            lines.push(Line::from(Span::styled(
+                format!("  {marker}{}  {}", item.id, item.describe()),
+                style,
+            )));
+        }
+    }
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        " sessions",
+        Style::default().fg(Color::Cyan).bold(),
+    ));
+    let inner_height = area.height.saturating_sub(2).max(1);
+    let max_scroll = lines.len().saturating_sub(inner_height as usize) as u16;
+    let paragraph = Paragraph::new(Text::from(lines))
+        .block(block)
+        .alignment(Alignment::Left)
+        .scroll((app.history_scroll.min(max_scroll), 0));
+    f.render_widget(paragraph, area);
+}
+
+/// A read-only replay of one past session's transcript. Esc returns to the
+/// session-history list; navigation scrolls the transcript.
+fn render_replay(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let mut lines: Vec<Line> = Vec::new();
+    lines.push(Line::from(Span::styled(
+        format!(" replay {} ", app.replay_title),
+        Style::default().fg(Color::Cyan).bold(),
+    )));
+    lines.push(Line::from(""));
+    lines.push(Line::from("  esc back to history"));
+    lines.push(Line::from(""));
+    for line in &app.replay_lines {
+        lines.push(Line::from(Span::styled(
+            line.clone(),
+            Style::default().fg(Color::White),
+        )));
+    }
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        " replay",
+        Style::default().fg(Color::Cyan).bold(),
+    ));
+    let inner_height = area.height.saturating_sub(2).max(1);
+    let max_scroll = lines.len().saturating_sub(inner_height as usize) as u16;
+    let paragraph = Paragraph::new(Text::from(lines))
+        .block(block)
+        .alignment(Alignment::Left)
+        .scroll((app.replay_scroll.min(max_scroll), 0));
     f.render_widget(paragraph, area);
 }
 

@@ -100,6 +100,14 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         .clone()
         .unwrap_or_else(|| config.working_directory.clone());
 
+    // Resolve the session-transcript directory once so both the worker and the
+    // history overlay read and write the same location.
+    let log_dir = overrides.log_dir.clone().unwrap_or_else(|| {
+        working_directory
+            .clone()
+            .join(crate::session_log::DEFAULT_LOG_DIR)
+    });
+
     // Advertise only tool-chains that genuinely reach the sandbox, gated on the
     // per-language profile settings. Detection is advisory logging; the gate is
     // the sole authority for what is advertised. An explicit/forced profile or a
@@ -176,6 +184,9 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         width,
         height,
     );
+    // Point the history overlay at the same directory the worker logs to, so
+    // "Session history" lists the transcripts this run contributes to.
+    app.set_log_dir(log_dir);
     // Prefill and auto-start a caller-supplied prompt (for example one produced
     // by `kvist prompt`). The startup dispatch in `run_ui` sends the staged
     // text to the worker before the interactive loop begins.
