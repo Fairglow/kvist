@@ -323,6 +323,14 @@ fn run_ui<M: std::io::Write>(
     loop {
         terminal.draw(|frame| render::render(frame, app))?;
 
+        // Emit any staged OSC 52 clipboard escape before drawing, so the write
+        // goes through this loop's stdout handle and the buffer is flushed each
+        // iteration. Copying is a terminal-side convenience, so a failure here is
+        // reported but never aborts the run.
+        if let Err(error) = crate::tui::app::emit_pending_osc_52(app) {
+            eprintln!("copy: {error}");
+        }
+
         // Drain loop events without blocking.
         if let Some(current) = worker.as_ref() {
             app.pump(&current.rx)?;

@@ -3,7 +3,9 @@
 use ratatui::layout::{Alignment, Constraint, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+};
 
 use super::app::App;
 
@@ -83,6 +85,30 @@ fn render_transcript(f: &mut ratatui::Frame, app: &App, area: Rect) {
         .block(block)
         .scroll((app.scroll, 0));
     f.render_widget(paragraph, area);
+    // The help overlay shares the transcript box, so it must not draw the
+    // scrollbar on the right edge (it would overwrite the last column of text).
+    if app.show_scrollbar && !app.show_help {
+        // The box's left and right borders consume 2 columns; the remaining
+        // width is the inner content area the scrollbar represents.
+        let viewport = area.height.saturating_sub(2).max(1) as usize;
+        let content_length = app.lines.len().max(viewport);
+        let offset = (app.scroll as usize).min(app.lines.len().saturating_sub(viewport));
+        let mut state = ScrollbarState::new(content_length)
+            .position(offset)
+            .viewport_content_length(viewport);
+        // Ride the right border column (width 1) so the scrollbar never overlaps
+        // the wrapped content, which fills columns 1..=area.right()-2.
+        let bar_area = Rect::new(area.right() - 1, area.top(), 1, area.height);
+        f.render_stateful_widget(
+            Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(Some("▲"))
+                .end_symbol(Some("▼"))
+                .track_symbol(Some("│"))
+                .style(ratatui::style::Style::default().fg(Color::DarkGray)),
+            bar_area,
+            &mut state,
+        );
+    }
 }
 
 fn render_input(f: &mut ratatui::Frame, app: &App, area: Rect) {

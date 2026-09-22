@@ -1,5 +1,6 @@
 //! Terminal UI application state: transcript rows, selectors, input, and keys.
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
@@ -147,6 +148,18 @@ pub struct App {
     pub collapse_reasoning: bool,
     /// Reasoning lines removed by a collapse, restored on reveal, in order.
     hidden_reasoning: Vec<Vec<ScreenLine>>,
+    /// Whether the transcript shows a right-edge scrollbar. Toggled with
+    /// Ctrl+S. The scrollbar is purely on-screen: it never affects the transcript
+    /// content or what copy emits.
+    pub show_scrollbar: bool,
+    /// The OSC 52 escape that copies the cleaned transcript to the terminal, if
+    /// a copy is pending but the event loop has not emitted it yet. Kept here so
+    /// a double copy cannot resend a stale sequence.
+    pending_osc_52: Option<String>,
+    /// The last escape `copy_to_clipboard` produced, used to skip re-staging an
+    /// identical copy (so a repeat Ctrl+Insert with no new content does not spam
+    /// the terminal with another OSC 52 sequence).
+    last_copied_escape: Option<String>,
 }
 
 impl App {
@@ -169,7 +182,7 @@ impl App {
             ratatui::widgets::Block::default()
                 .borders(ratatui::widgets::Borders::ALL)
                 .title(Span::styled(
-                    " prompt · Enter/Ctrl+Enter send · Shift+Enter · Tab model · Shift+Tab effort · Ctrl+H help ",
+                    " prompt · Enter/Ctrl+Enter send · Shift+Enter · Tab model · Shift+Tab effort · Ctrl+Insert copy · Ctrl+S scroll · Ctrl+H help ",
                     Style::default().fg(Color::DarkGray),
                 )),
         );
@@ -198,6 +211,9 @@ impl App {
             last_growth: None,
             collapse_reasoning: false,
             hidden_reasoning: Vec::new(),
+            show_scrollbar: false,
+            pending_osc_52: None,
+            last_copied_escape: None,
         };
         app.note(
             Style::default().fg(Color::Cyan),
@@ -504,6 +520,10 @@ impl App {
                 self.show_help = true;
                 KeyAction::Idle
             }
+            (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
+                self.show_scrollbar = !self.show_scrollbar;
+                KeyAction::Idle
+            }
             (KeyCode::PageUp, _) => {
                 self.following = false;
                 self.scroll_back(self.visible_rows());
@@ -537,6 +557,14 @@ impl App {
                     KeyAction::Idle
                 }
             }
+            // Ctrl+Insert copies the transcript to the clipboard via the OSC 52
+            // escape (see copy_to_clipboard). Ctrl+C is handled above: a running
+            // turn cancels, an idle Ctrl+C quits.
+            (KeyCode::Char('c'), KeyModifiers::SHIFT)
+            | (KeyCode::Insert, KeyModifiers::CONTROL) => {
+                self.copy_to_clipboard();
+                KeyAction::Idle
+            }
             // Everything else goes to the multiline editor, which handles Enter
             // as a newline, characters, Backspace, and cursor motions.
             _ => {
@@ -544,6 +572,74 @@ impl App {
                 KeyAction::Idle
             }
         }
+    }
+
+    /// Builds the OSC 52 clipboard escape that copies the transcript to the
+    /// terminal's primary selection.
+    ///
+    /// The transcript lines are pre-wrapped at the *inner* width (width minus the
+    /// two border columns), so they never contain the box's `│` characters — the
+    /// frame is drawn solely by the terminal widget and never reaches the buffer.
+    /// Copy therefore emits the stored lines verbatim, then strips trailing
+    /// whitespace from each line so nothing but real content lands on the
+    /// clipboard. The content is base64-encoded and wrapped in the OSC 52 escape
+    /// (ST via the ANSI bell); a terminal that speaks OSC 52 (Alacritty, Kitty,
+    /// iTerm2, WezTerm, GNOME Terminal) then places it on the clipboard.
+    fn clipboard_escape(&self) -> Option<String> {
+        // Strip trailing whitespace per line, drop fully-empty trailing lines so
+        // pasted content reads cleanly, and join without a trailing newline so a
+        // pasted block has no dangling line break.
+        let mut cleaned: Vec<String> = Vec::new();
+        for line in &self.lines {
+            let text = line.line.to_string();
+            let trimmed = text.trim_end().to_owned();
+            // Keep internal blank lines (blank paragraphs) but remember whether
+            // the very last lines were empty so we can trim the tail.
+            cleaned.push(trimmed);
+        }
+        while cleaned.last().is_some_and(|line| line.is_empty()) {
+            cleaned.pop();
+        }
+        if cleaned.is_empty() {
+            return None;
+        }
+        let content = cleaned.join("\n");
+        let encoded = base64_encode(content.as_bytes());
+        let mut escape = String::with_capacity(encoded.len() + 8);
+        escape.push('\u{1b}');
+        escape.push_str("]52;c;");
+        escape.push_str(&encoded);
+        escape.push('\u{7}');
+        Some(escape)
+    }
+
+    /// Stages a copy of the transcript to the clipboard escape. The escape is
+    /// emitted to stdout by the event loop via [`App::emit_pending_osc_52`] so the
+    /// write stays out of the key handler's synchronous path.
+    fn copy_to_clipboard(&mut self) {
+        let escape = self.clipboard_escape();
+        if escape.as_deref() == self.last_copied_escape.as_deref() {
+            return;
+        }
+        self.last_copied_escape = escape.clone();
+        self.pending_osc_52 = escape;
+    }
+
+    /// The OSC 52 escape awaiting emission, if any. Called by the event loop so
+    /// the write goes through the loop's stdout handle and the escape is cleared
+    /// after being sent.
+    pub fn take_pending_osc_52(&mut self) -> Option<String> {
+        self.pending_osc_52.take()
+    }
+
+    /// Emits any staged OSC 52 clipboard escape to the terminal's stdout,
+    /// clearing the pending copy once it has been sent.
+    pub fn emit_pending_osc_52(&mut self) -> Result<()> {
+        if let Some(escape) = self.take_pending_osc_52() {
+            self.pending_osc_52 = None;
+            std::io::stdout().write_all(escape.as_bytes())?;
+        }
+        Ok(())
     }
 
     fn submit(&mut self) {
@@ -939,6 +1035,42 @@ impl App {
     }
 }
 
+/// Writes the OSC 52 clipboard escape to stdout. Called by the event loop after
+/// [`App::emit_pending_osc_52`] reports pending content, so the write happens on
+/// the loop's stdout handle rather than from the synchronous key handler.
+///
+/// Returns `Ok(())` when nothing was staged, so the loop can call it unconditionally.
+pub fn emit_pending_osc_52(app: &mut App) -> Result<()> {
+    app.emit_pending_osc_52()
+}
+
+/// Minimal base64 encoder for the OSC 52 clipboard escape. Keeps `agent-runner`
+/// free of an external clipboard/base64 dependency while remaining correct for
+/// the small, UTF-8-encoded transcripts it copies.
+fn base64_encode(input: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    for chunk in input.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
+        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (b0 << 16) | (b1 << 8) | b2;
+        out.push(TABLE[(n >> 18 & 0x3f) as usize] as char);
+        out.push(TABLE[(n >> 12 & 0x3f) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(TABLE[(n >> 6 & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if chunk.len() > 2 {
+            out.push(TABLE[(n & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+    }
+    out
+}
+
 fn wrap(text: &str, width: usize) -> Vec<String> {
     let width = width.max(10);
     let mut lines = Vec::new();
@@ -998,7 +1130,7 @@ fn split_long(word: &str, width: usize) -> Vec<String> {
 /// removes that prefix before flushing the next block.
 ///
 /// A paragraph block ends at the next blank line (`\n\n`); a fenced code block
-/// ends at a matching closing fence. Blank lines between the opening fence and
+/// ends at a matching closer fence. Blank lines between the opening fence and
 /// its closer are part of the code, never a paragraph boundary.
 fn next_block_end(pending: &str) -> Option<usize> {
     let stripped = pending.trim_start_matches('\n');
@@ -1150,7 +1282,7 @@ fn bargraph(fraction: f64, width: u16) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{App, KeyAction, LineKind};
+    use super::{App, KeyAction, LineKind, Style};
     use crate::session::Event;
     use agent_runtime::ReasoningEffort;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
@@ -1789,6 +1921,62 @@ mod tests {
         assert!(app.following);
     }
 
+    #[test]
+    fn ctrl_s_toggles_scrollbar() {
+        let mut app = app();
+        assert!(!app.show_scrollbar);
+        app.on_key(ctrl(KeyCode::Char('s')));
+        assert!(app.show_scrollbar);
+        app.on_key(ctrl(KeyCode::Char('s')));
+        assert!(!app.show_scrollbar);
+    }
+
+    #[test]
+    fn copy_strips_frame_and_trailing_whitespace_from_transcript() {
+        let mut app = clean_app();
+        // `push_wrapped` appends one pre-wrapped row per line, so each argument
+        // line becomes a distinct transcript row without depending on markdown
+        // (where a single `\n` is a soft break, i.e. a space).
+        app.push_wrapped(Style::default(), "alpha");
+        app.push_wrapped(Style::default(), "beta");
+        // A final row that ends with genuine trailing spaces, to prove copy
+        // trims the padding that sits between the content and the box border.
+        app.push_wrapped(Style::default(), "trailing spaces   ");
+        app.copy_to_clipboard();
+        let escape = app
+            .take_pending_osc_52()
+            .expect("a clipboard escape is staged");
+        // The escape is OSC 52: `\x1b]52;c;<base64>\x07`.
+        assert!(escape.starts_with("\u{1b}]52;c;"));
+        assert!(escape.ends_with('\u{7}'));
+        assert!(
+            !escape.contains('\u{2502}'),
+            "no box frame char: {escape:?}"
+        );
+        assert!(
+            !escape.ends_with('\n'),
+            "no trailing newline in escape: {escape:?}"
+        );
+        // The base64 payload starts at byte 7 (after the ESC byte and `]52;c;`)
+        // and runs to the final byte before the ST bell.
+        let payload = &escape.as_bytes()[7..escape.len() - 1];
+        let decoded = base64_decode(std::str::from_utf8(payload).unwrap());
+        assert_eq!(
+            decoded, "alpha\nbeta\ntrailing spaces",
+            "trailing whitespace is stripped and no trailing line break is kept"
+        );
+        // A second copy with nothing new staged must not resend a stale escape.
+        app.copy_to_clipboard();
+        assert!(app.take_pending_osc_52().is_none());
+    }
+
+    #[test]
+    fn copy_with_empty_transcript_stages_nothing() {
+        let mut app = clean_app();
+        app.copy_to_clipboard();
+        assert!(app.take_pending_osc_52().is_none());
+    }
+
     fn rendered_text(app: &App) -> Vec<String> {
         app.lines.iter().map(|line| line.line.to_string()).collect()
     }
@@ -1869,5 +2057,49 @@ mod tests {
             "a separator row: {lines:?}"
         );
         assert!(lines[2].contains("1") && lines[2].contains("2"));
+    }
+
+    /// Groups are decoded four characters at a time into bytes. A full group of
+    /// four chars yields three bytes; a trailing group of three (`XXX=`) yields
+    /// two, and of two (`XX==`) yields one. Sextets are zero-padded to four so
+    /// the 24-bit layout is fixed and the real bytes occupy the top bits in
+    /// order; the trailing padding sextets decode to zeros that the match discards.
+    fn base64_decode(input: &str) -> String {
+        const TABLE: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let vals: Vec<u32> = input
+            .bytes()
+            .filter(|&b| b != b'=' && b != b'\n' && b != b'\r')
+            .map(|b| {
+                TABLE
+                    .find(b as char)
+                    .map(|i| i as u32)
+                    .expect("non-base64 character in escape")
+            })
+            .collect();
+        let mut out: Vec<u8> = Vec::new();
+        for group in vals.chunks(4) {
+            // Zero-pad to four sextets so the 24-bit layout is fixed. The padding
+            // sextets decode to zero bytes that the match discards, so a 2-byte tail
+            // yields 1 output byte and a 3-byte tail yields 2.
+            let mut sextets = [0u32; 4];
+            for (slot, value) in sextets.iter_mut().zip(group.iter()) {
+                *slot = *value;
+            }
+            let n: u32 = (sextets[0] << 18) | (sextets[1] << 12) | (sextets[2] << 6) | sextets[3];
+            match group.len() {
+                4 => {
+                    out.push((n >> 16) as u8);
+                    out.push((n >> 8) as u8);
+                    out.push(n as u8);
+                }
+                3 => {
+                    out.push((n >> 16) as u8);
+                    out.push((n >> 8) as u8);
+                }
+                2 => out.push((n >> 16) as u8),
+                _ => {}
+            }
+        }
+        String::from_utf8(out).expect("base64 payload is utf-8")
     }
 }
