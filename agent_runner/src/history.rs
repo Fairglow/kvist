@@ -52,12 +52,16 @@ impl SessionEntry {
     }
 }
 
+/// Parsed finish-metadata from a transcript's `== session … finished: … ==`
+/// marker: the session id, turn count, token count, and final outcome.
+type FinishMeta = (String, Option<usize>, Option<u64>, Option<bool>);
+
 /// Parses the terminal `== session … finished: … ==` marker line into its parts.
 ///
 /// The transcript writes the marker as
 /// `== session {id} finished: {n} turns, {t} tokens, {s}s, {status} ==`, so the
 /// id sits before ` finished: ` and the metrics follow it.
-fn parse_finish(line: &str) -> Option<(String, Option<usize>, Option<u64>, Option<bool>)> {
+fn parse_finish(line: &str) -> Option<FinishMeta> {
     let inner = line.strip_suffix(" ==")?.strip_prefix("== session ")?;
     let (id, rest) = inner.split_once(" finished: ")?;
     if id.is_empty() {
@@ -148,20 +152,29 @@ pub fn list_sessions(log_dir: &Path) -> Vec<SessionEntry> {
 ///
 /// Every line is examined uniformly, so a single-line transcript or a finish
 /// marker on the first line is not lost to a separate initial read.
-fn parse_transcript_meta(
-    path: &Path,
-) -> Option<(String, Option<usize>, Option<u64>, Option<bool>)> {
+fn parse_transcript_meta(path: &Path) -> Option<FinishMeta> {
     let file = File::open(path).ok()?;
-    let reader = BufReader::new(file);
-    let mut finish: Option<(String, Option<usize>, Option<u64>, Option<bool>)> = None;
+    let mut reader = BufReader::new(file);
+    let mut finish: Option<FinishMeta> = None;
     let mut first_id: Option<String> = None;
-    for line in reader.lines().flatten() {
+    // Read lines until EOF or an unreadable (invalid-UTF8) line; either way the
+    // scan ends gracefully instead of aborting the whole file.
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line) {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {}
+        }
+        // `read_line` retains the trailing newline; `BufRead::lines` does not, so
+        // drop it here to keep the parsers' `strip_suffix` matching intact.
+        line.truncate(line.trim_end_matches('\n').len());
         // The start marker carries the id too; keep it as a fallback when the
         // run never wrote a finish line (an interrupted session).
-        if first_id.is_none() {
-            if let Some(id) = extract_id(&line) {
-                first_id = Some(id);
-            }
+        if first_id.is_none()
+            && let Some(id) = extract_id(&line)
+        {
+            first_id = Some(id);
         }
         if let Some(parsed) = parse_finish(&line) {
             finish = Some(parsed);
