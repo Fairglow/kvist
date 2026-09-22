@@ -19,6 +19,7 @@ pub mod config;
 pub mod context;
 pub mod error;
 pub mod executor;
+pub mod history;
 pub mod retry;
 pub mod sandbox;
 pub mod session;
