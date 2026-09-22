@@ -26,9 +26,10 @@ use crate::config::{Config, Model};
 use crate::context::ContextManager;
 use crate::error::{Error, Result};
 use crate::executor::SandboxExecutor;
+use crate::host::HostExecutor;
 use crate::retry::RetryPolicy;
 use crate::run::{self, start};
-use crate::session::{AgentSession, MAX_TURNS, Recorder};
+use crate::session::{AgentSession, MAX_TURNS, Recorder, ToolExecutor};
 use crate::session_log::SessionLog;
 use crate::tools::ToolRegistry;
 
@@ -51,11 +52,37 @@ pub struct Overrides {
     pub no_logs: bool,
     /// The resolved configuration path, shown in the help overlay.
     pub config_path: Option<PathBuf>,
-    /// When true, each prompt may drive an autonomous multi-turn loop rather
-    /// than a single model turn. A single turn is the safe default.
-    pub multi_turn: bool,
+    /// When true, the agent runs its commands on the host (no sandbox). Off by
+    /// default: the agent is confined to the sandbox, multi-turn, and needs no
+    /// acknowledgement.
+    pub allow_host_execution: bool,
+    /// The maximum autonomous turns a prompt drives when `allow_host_execution`
+    /// is set. `None` means the safe default (one turn).
+    pub host_turns: Option<u32>,
     /// A prefilled prompt that is auto-started when the session begins.
     pub prompt: Option<String>,
+}
+
+/// Resolves the autonomous turn cap for a session and validates it.
+///
+/// Sandboxed execution is the safe default and is multi-turn (`MAX_TURNS`). Host
+/// execution runs with real privileges, so it is single-turn by default and only
+/// `--host-turns` lifts the cap — and only within `1..=MAX_TURNS`, because an
+/// out-of-range cap would otherwise be a silent no-op. Returns the resolved cap,
+/// or [`Error::HostTurns`] when a host cap was requested outside that range.
+fn resolve_max_turns(allow_host_execution: bool, host_turns: Option<u32>) -> Result<u32> {
+    if allow_host_execution {
+        match host_turns {
+            Some(turns) if (1..=MAX_TURNS).contains(&turns) => Ok(turns),
+            Some(turns) => Err(Error::HostTurns {
+                requested: turns,
+                max: MAX_TURNS,
+            }),
+            None => Ok(1),
+        }
+    } else {
+        Ok(MAX_TURNS)
+    }
 }
 
 /// Runs the interactive UI to completion and returns the process exit code.
@@ -147,11 +174,29 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
     };
     let tool_defs = registry.tool_definitions();
 
-    let executor = Arc::new(SandboxExecutor::new(
-        registry,
-        config.sandbox.clone(),
-        working_directory.clone(),
-    ));
+    // Resolve the autonomous turn cap for this session, validating the host cap.
+    let max_turns = match resolve_max_turns(overrides.allow_host_execution, overrides.host_turns) {
+        Ok(turns) => turns,
+        Err(error) => {
+            eprintln!("{}", error.describe());
+            return ExitCode::from(error.exit_code());
+        }
+    };
+
+    let executor: Arc<dyn ToolExecutor> = if overrides.allow_host_execution {
+        eprintln!(
+            "warning: --allow-host-execution runs the agent on the host with real \
+             privileges; a single prompt is single-turn by default (raise --host-turns \
+             to allow more)"
+        );
+        Arc::new(HostExecutor::new(registry, working_directory.clone()))
+    } else {
+        Arc::new(SandboxExecutor::new(
+            registry,
+            config.sandbox.clone(),
+            working_directory.clone(),
+        ))
+    };
 
     let builder = SessionBuilder {
         config: config.clone(),
@@ -163,7 +208,7 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         log_dir: overrides.log_dir.clone(),
         no_logs: overrides.no_logs,
         working_directory,
-        max_turns: if overrides.multi_turn { MAX_TURNS } else { 1 },
+        max_turns,
     };
 
     let initial = match builder.start(&model, effort) {
@@ -209,7 +254,7 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
 /// restarts, which the UI announces).
 struct SessionBuilder {
     config: Config,
-    executor: Arc<SandboxExecutor>,
+    executor: Arc<dyn ToolExecutor>,
     tool_defs: Vec<agent_runtime::ToolDefinition>,
     context_limit: usize,
     log_dir: Option<PathBuf>,
@@ -444,4 +489,62 @@ fn run_ui<M: std::io::Write>(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sandboxed_work_is_multi_turn_by_default() {
+        assert_eq!(
+            resolve_max_turns(false, None).expect("default cap"),
+            MAX_TURNS,
+            "a sandboxed prompt runs multi-turn without any flag"
+        );
+    }
+
+    #[test]
+    fn sandboxed_ignores_any_host_turn_cap() {
+        assert_eq!(
+            resolve_max_turns(false, Some(1)).expect("cap"),
+            MAX_TURNS,
+            "the host cap is only relevant in the elevated (host) case"
+        );
+    }
+
+    #[test]
+    fn host_execution_is_single_turn_by_default() {
+        assert_eq!(
+            resolve_max_turns(true, None).expect("default cap"),
+            1,
+            "host work is single-turn by default to bound privilege overuse"
+        );
+    }
+
+    #[test]
+    fn host_turns_lifts_the_cap_when_in_range() {
+        assert_eq!(
+            resolve_max_turns(true, Some(10)).expect("cap"),
+            10,
+            "an in-range host cap is honored"
+        );
+        assert_eq!(
+            resolve_max_turns(true, Some(MAX_TURNS)).expect("cap"),
+            MAX_TURNS,
+            "the maximum in-range value is honored"
+        );
+    }
+
+    #[test]
+    fn host_turns_outside_the_range_is_rejected() {
+        assert!(
+            resolve_max_turns(true, Some(0)).is_err(),
+            "zero is below range"
+        );
+        assert!(
+            resolve_max_turns(true, Some(MAX_TURNS + 1)).is_err(),
+            "above range is rejected"
+        );
+    }
 }

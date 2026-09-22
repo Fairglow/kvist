@@ -43,29 +43,29 @@ sandboxes, and governance tools.
 
 ## CLI contract
 
-| Command                                                               | Contract                                                                                             |
-| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `kvist init [PROJECT_DIR]`                                            | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.           |
-| `kvist convert <PROJECT_DIR>`                                         | Generate no-clobber draft onboarding artifacts for an existing Rust project.                         |
-| `kvist doctor [PROJECT_DIR]`                                          | Read-only inspection of the root artifact state and recovery guidance.                               |
-| `kvist status [PROJECT_DIR] [--format text\|json] [--only-documents]` | Read-only versioned inspection, optionally limited to document state.                                |
-| `kvist tree [PROJECT_DIR]`                                            | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory.         |
-| `kvist component new <COMPONENT_DIR>`                                 | Create no-clobber `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` templates.                       |
-| `kvist component validate <COMPONENT_DIR>`                            | Validate all three component intent documents without rewriting them.                                |
-| `kvist component accept <COMPONENT_DIR>`                              | Structurally validate and record local intent and immediate-parent contract revisions.               |
-| `kvist task next <COMPONENT_DIR>`                                     | Select the first ready task without changing durable state.                                          |
-| `kvist task transition <COMPONENT_DIR> ...`                           | Persist one legal task-state transition with append-only attempt evidence.                           |
-| `kvist task run <COMPONENT_DIR> [TASK_ID]`                            | Run the configured external agent for one ready task; see the execution boundary below.              |
-| `kvist task log <COMPONENT_DIR> <TASK_ID>`                            | Print the most recent bounded, redacted agent log for a task.                                        |
-| `kvist task approve-policy [PROJECT_DIR]`                             | Record approval of the complete effective execution policy.                                          |
-| `kvist prompt [PROMPT] --allow-host-execution`                        | Run a prompt with optional role/model/reasoning selection; text output is provider content only.     |
-| `kvist agent profile add [--force]` (or `setup`)                      | Collect, qualify, and register a new model profile without assigning roles.                          |
-| `kvist agent profile list` (or `list`)                                | List all configured and standalone model profiles with their active role assignments.                |
-| `kvist agent profile remove <MODEL_NAME> [--all]` (or `remove`)       | Remove configured model profile(s) or clear all agent configuration.                                 |
-| `kvist agent role [list]`                                             | Inspect current role assignments (developer, architect, security-reviewer).                          |
-| `kvist agent role set <ROLE> <MODEL>`                                 | Bind a configured or standalone profile to a role.                                                   |
-| `kvist agent role clear <ROLE> [--all]`                               | Clear role assignment(s).                                                                            |
-| `kvist agent check [--global]`                                        | Live-verify configured model profiles behind an explicit acknowledgement; remove or ignore failures. |
+| Command                                                               | Contract                                                                                                                                    |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kvist init [PROJECT_DIR]`                                            | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.                                                  |
+| `kvist convert <PROJECT_DIR>`                                         | Generate no-clobber draft onboarding artifacts for an existing Rust project.                                                                |
+| `kvist doctor [PROJECT_DIR]`                                          | Read-only inspection of the root artifact state and recovery guidance.                                                                      |
+| `kvist status [PROJECT_DIR] [--format text\|json] [--only-documents]` | Read-only versioned inspection, optionally limited to document state.                                                                       |
+| `kvist tree [PROJECT_DIR]`                                            | Render the component hierarchy rooted at `PROJECT_DIR`, defaulting to the current directory.                                                |
+| `kvist component new <COMPONENT_DIR>`                                 | Create no-clobber `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` templates.                                                              |
+| `kvist component validate <COMPONENT_DIR>`                            | Validate all three component intent documents without rewriting them.                                                                       |
+| `kvist component accept <COMPONENT_DIR>`                              | Structurally validate and record local intent and immediate-parent contract revisions.                                                      |
+| `kvist task next <COMPONENT_DIR>`                                     | Select the first ready task without changing durable state.                                                                                 |
+| `kvist task transition <COMPONENT_DIR> ...`                           | Persist one legal task-state transition with append-only attempt evidence.                                                                  |
+| `kvist task run <COMPONENT_DIR> [TASK_ID]`                            | Run the configured external agent for one ready task; see the execution boundary below.                                                     |
+| `kvist task log <COMPONENT_DIR> <TASK_ID>`                            | Print the most recent bounded, redacted agent log for a task.                                                                               |
+| `kvist task approve-policy [PROJECT_DIR]`                             | Record approval of the complete effective execution policy.                                                                                 |
+| `kvist prompt [PROMPT] [--allow-host-execution]`                      | Run a prompt in the interactive agent-runner shell (sandboxed and multi-turn by default); non-interactive use runs a one-shot host command. |
+| `kvist agent profile add [--force]` (or `setup`)                      | Collect, qualify, and register a new model profile without assigning roles.                                                                 |
+| `kvist agent profile list` (or `list`)                                | List all configured and standalone model profiles with their active role assignments.                                                       |
+| `kvist agent profile remove <MODEL_NAME> [--all]` (or `remove`)       | Remove configured model profile(s) or clear all agent configuration.                                                                        |
+| `kvist agent role [list]`                                             | Inspect current role assignments (developer, architect, security-reviewer).                                                                 |
+| `kvist agent role set <ROLE> <MODEL>`                                 | Bind a configured or standalone profile to a role.                                                                                          |
+| `kvist agent role clear <ROLE> [--all]`                               | Clear role assignment(s).                                                                                                                   |
+| `kvist agent check [--global]`                                        | Live-verify configured model profiles behind an explicit acknowledgement; remove or ignore failures.                                        |
 
 Delivery is organized into phases. The completed, current, and planned phase
 scope, context, and acceptance criteria are maintained in
@@ -149,15 +149,26 @@ printf '%s\n' "Review this component contract" |
   kvist prompt --allow-host-execution
 ```
 
+At an interactive terminal Kvist opens the standalone `agent-runner` shell and
+prefills the model, thinking effort, and prompt; the agent does real work under
+Kvist's supervision. Work is sandboxed (Bubblewrap-protected) and multi-turn by
+default; `--allow-host-execution` opts out of the sandbox so the agent runs with
+the invoking user's host privileges, and is then single-turn unless
+`--multi-turn` allows more turns. With no interactive terminal, only the
+one-shot host path below applies, which is why the acknowledgement is mandatory
+there. `--multi-turn` has no effect outside host execution, since sandboxed work
+is already multi-turn.
+
 Use `--file -` to select standard input explicitly. Use `--editor` to author a
 multiline prompt with `$VISUAL`, `$EDITOR`, or `vi`. If
 no source is supplied, redirected standard input is read automatically; at an
 interactive terminal Kvist offers to open the editor. These input modes are
 mutually exclusive, limited to 1 MiB, and must produce nonblank UTF-8 text.
-The acknowledgement is mandatory because this custom prompt path runs the
-configured provider with the invoking user's host permissions. Idle and loop
-retries append a warning that an earlier attempt may already have changed
-files or external systems; the warning does not roll those effects back.
+When the one-shot host path applies (no interactive terminal), the
+acknowledgement is mandatory because that path runs the configured provider
+with the invoking user's host permissions. Idle and loop retries append a
+warning that an earlier attempt may already have changed files or external
+systems; the warning does not roll those effects back.
 
 Prompt acquisition, command rendering, and host-process supervision are
 provided by the independently usable `agent-runtime` workspace package:

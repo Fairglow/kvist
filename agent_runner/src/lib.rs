@@ -10,6 +10,7 @@
 #![forbid(unsafe_code)]
 
 mod cli;
+mod host;
 mod kvist_import;
 mod logging;
 mod markdown;
@@ -35,6 +36,7 @@ pub use context::{
 };
 pub use error::{Error, Result};
 pub use executor::SandboxExecutor;
+pub use host::HostExecutor;
 pub use kvist_import::{KVIST_CONFIG_FILE, import_models, resolve_kvist_config_path};
 pub use markdown::{MarkdownStyles, RenderedLine, render_document};
 pub use retry::{

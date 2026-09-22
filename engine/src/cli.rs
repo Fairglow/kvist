@@ -95,11 +95,15 @@ pub enum Command {
         /// Maximum number of automatic restarts allowed.
         #[arg(long, default_value_t = 3)]
         max_restarts: u32,
-        /// Acknowledge that this command runs the provider with your host permissions.
+        /// Run the agent on the host, bypassing the Bubblewrap sandbox. Interactive
+        /// work is sandboxed (protected) by default; with this flag agent-runner
+        /// runs with host privileges and is single-turn unless --multi-turn allows
+        /// more turns. Never the default.
         #[arg(long)]
         allow_host_execution: bool,
-        /// Allow the interactive shell to drive an autonomous, multi-turn loop.
-        /// Off by default: a prompt takes exactly one model turn.
+        /// Allow the agent to work across multiple model turns. Meaningful only with
+        /// --allow-host-execution (host execution is single-turn by default);
+        /// sandboxed interactive work is multi-turn by default.
         #[arg(long)]
         multi_turn: bool,
     },
@@ -596,18 +600,19 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             } => {
                 let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
 
-                // Interactive, sandboxed custom prompt work runs in the standalone
+                // Interactive custom prompt work runs in the standalone
                 // agent-runner shell. Kvist authors the prompt and preselects the
-                // model/effort; agent-runner owns the interactive transcript and
-                // the Bubblewrap scope, and its stdio is inherited so the shell is
-                // the view. Delegation returns Ok(false) only when there is no
-                // interactive terminal, in which case the one-shot host path below
-                // still applies.
+                // model/effort; agent-runner owns the interactive transcript and the
+                // execution scope, and its stdio is inherited so the shell is the
+                // view. By default the sandbox confines and multiplies the work; the
+                // one-shot host path below only applies when there is no interactive
+                // terminal or host execution was not acknowledged.
                 if delegate_interactive_prompt(
                     &resolved_prompt,
                     &role,
                     model.as_deref(),
                     reasoning_effort.map(Into::into),
+                    allow_host_execution,
                     multi_turn,
                 )? {
                     return Ok(CommandOutput::none());
@@ -1190,14 +1195,17 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             } => {
                 let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
 
-                // `kvist shell` is itself interactive, so sandbox prompt work runs
-                // in the standalone agent-runner shell. Only the one-shot host path
-                // remains behind an explicit host-execution acknowledgement.
+                // `kvist shell` is itself interactive, so prompt work runs in the
+                // standalone agent-runner shell. By default the sandbox confines and
+                // multiplies the work; the one-shot host path below only applies when
+                // there is no interactive terminal or host execution was not
+                // acknowledged.
                 if delegate_interactive_prompt(
                     &resolved_prompt,
                     &role,
                     model.as_deref(),
                     reasoning_effort.map(Into::into),
+                    allow_host_execution,
                     multi_turn,
                 )? {
                     return Ok(CommandOutput::none());
@@ -1789,6 +1797,12 @@ fn resolve_role_config<'a>(
     Ok(profile)
 }
 
+/// The autonomous turn cap the engine grants when a user opts into multi-turn
+/// host execution via `kvist prompt --allow-host-execution --multi-turn`. It
+/// mirrors the sandbox's own default cap: sandboxed interactive work is
+/// multi-turn by default, while host work is single-turn unless this opts in.
+const HOST_AUTONOMOUS_CAP: u32 = 50;
+
 /// Launch the standalone `agent-runner` shell for an interactive, sandboxed
 /// custom prompt. Kvist supplies the authored prompt and the preselected model
 /// and thinking effort, and inherits the child's stdio so the terminal UI is the
@@ -1802,6 +1816,7 @@ fn delegate_interactive_prompt(
     role_name: &str,
     model: Option<&str>,
     effort: Option<agent_runtime::ReasoningEffort>,
+    allow_host_execution: bool,
     multi_turn: bool,
 ) -> Result<bool> {
     if !std::io::stdin().is_terminal() {
@@ -1836,8 +1851,16 @@ fn delegate_interactive_prompt(
     if let Some(effort) = effort {
         command.arg("--effort").arg(effort.as_str());
     }
-    if multi_turn {
-        command.arg("--multi-turn");
+    // Bypassing the Bubblewrap sandbox runs the agent with host privileges, so it
+    // is single-turn by default; --multi-turn lifts that cap only in the
+    // elevated (host) case, where sandboxed multi-turn is already the default.
+    if allow_host_execution {
+        command.arg("--allow-host-execution");
+        if multi_turn {
+            command
+                .arg("--host-turns")
+                .arg(HOST_AUTONOMOUS_CAP.to_string());
+        }
     }
     // The prompt is positional; agent-runner prefills and auto-starts it.
     command.arg(prompt);

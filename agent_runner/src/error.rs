@@ -74,6 +74,13 @@ pub enum Error {
         /// The profile whose interpreter could not be found in the sandbox.
         profile: String,
     },
+    /// The `--host-turns` cap was outside the allowed range for host execution.
+    HostTurns {
+        /// The requested maximum number of turns.
+        requested: u32,
+        /// The permitted maximum number of turns.
+        max: u32,
+    },
     /// A tool argument was malformed or could not be rendered.
     ToolRender {
         /// The tool that could not be rendered.
@@ -123,6 +130,7 @@ impl Error {
             Error::InvalidEffort { .. } => 2,
             Error::ToolPolicy { .. } => 3,
             Error::ToolchainUnavailable { .. } => 2,
+            Error::HostTurns { .. } => 2,
             _ => 1,
         }
     }
@@ -172,6 +180,9 @@ impl Error {
                 "tool profile `{profile}` is required, but the tool-chain is not available \
                  inside the sandbox (only the read-only /usr layout is mounted); install it \
                  system-wide or set it to `auto` or `off` in `[tool_profiles]"
+            ),
+            Error::HostTurns { requested, max } => format!(
+                "--host-turns {requested} is out of range for host execution; expected 1..={max}"
             ),
             Error::ToolRender { tool, reason } => {
                 format!("could not render tool `{tool}`: {reason}")

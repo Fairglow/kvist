@@ -648,8 +648,12 @@ pub fn execute(
     })
 }
 
-fn drain_pipe<R>(pipe: R, limit: Arc<AtomicBool>, done: Arc<AtomicBool>, tx: mpsc::Sender<Vec<u8>>)
-where
+pub(crate) fn drain_pipe<R>(
+    pipe: R,
+    limit: Arc<AtomicBool>,
+    done: Arc<AtomicBool>,
+    tx: mpsc::Sender<Vec<u8>>,
+) where
     R: Read,
 {
     let mut reader = BufReader::new(pipe);
@@ -671,7 +675,7 @@ where
     done.store(true, Ordering::SeqCst);
 }
 
-fn flush_blocking(rx: &mpsc::Receiver<Vec<u8>>, buffer: &mut Vec<u8>) {
+pub(crate) fn flush_blocking(rx: &mpsc::Receiver<Vec<u8>>, buffer: &mut Vec<u8>) {
     while let Ok(chunk) = rx.recv() {
         buffer.extend_from_slice(&chunk);
     }
@@ -701,7 +705,7 @@ fn sandbox_unavailable(sandbox: &SandboxPaths, stream: &str) -> Error {
     }
 }
 
-fn kill_group(child: &mut std::process::Child) -> Result<()> {
+pub(crate) fn kill_group(child: &mut std::process::Child) -> Result<()> {
     use nix::sys::signal;
     use nix::unistd::Pid;
     let pid = child.id();

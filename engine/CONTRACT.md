@@ -67,8 +67,11 @@ and changes no durable state. `vcs commit-accepted` retries or performs the
 isolated index commit for an already accepted set.
 
 Commands are non-interactive unless their contract explicitly obtains terminal
-input; `shell`, the agent setup/configuration flows, and `task run` without
-TASK_ID (which confirms the suggested task) are the interactive exceptions.
+input; `prompt` (with a terminal), `shell`, the agent setup/configuration flows,
+and `task run` without TASK_ID (which confirms the suggested task) are the
+interactive exceptions. `prompt` obtains a terminal to open the standalone
+`agent-runner` shell; with no interactive terminal it falls back to the one-shot
+host path, which still requires `--allow-host-execution`.
 Success is written to standard output. Domain failures are actionable, written
 to standard error, and return a nonzero status. Parser help returns success and
 parser input errors use the parser's nonzero status.

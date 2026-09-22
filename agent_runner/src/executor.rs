@@ -46,7 +46,7 @@ impl SandboxExecutor {
     }
 }
 
-impl ToolExecutor for Arc<SandboxExecutor> {
+impl<T: ToolExecutor + ?Sized> ToolExecutor for Arc<T> {
     fn execute(
         &self,
         intent: &ToolIntent,

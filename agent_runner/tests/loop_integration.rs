@@ -850,8 +850,9 @@ fn a_transient_failure_is_retried_until_success() {
 fn a_single_turn_cap_limits_one_prompt_to_one_model_turn() {
     // The transport keeps proposing tools, so only the cap stops the loop. With
     // a per-prompt cap of one turn the loop performs a single model turn and one
-    // tool, even though more work was queued: multi-turn autonomy is an explicit
-    // opt-in, so a default prompt must not run past one turn.
+    // tool, even though more work was queued. A cap of one is the safe default
+    // for host execution (where a prompt runs with real privileges); sandboxed
+    // work is multi-turn by default, bounded by MAX_TURNS.
     let transport = ScriptedTransport::new(vec![
         tool_turn("plan first", "shell", json!({ "command": "echo hi" })),
         tool_turn("plan again", "shell", json!({ "command": "echo hi" })),

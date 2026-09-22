@@ -283,7 +283,7 @@ impl AgentSession {
 /// Executes a tool intent and returns its sandbox outcome. Injected into the
 /// loop so the loop itself needs no process or filesystem access. The executor
 /// owns the working directory and the sandbox configuration.
-pub trait ToolExecutor: Send {
+pub trait ToolExecutor: Send + Sync {
     /// Renders and executes one tool intent inside the sandbox.
     fn execute(&self, intent: &ToolIntent, cancellation: &CancellationToken)
     -> Result<ToolOutcome>;

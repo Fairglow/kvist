@@ -446,6 +446,13 @@ Options:
   --context-limit <TOKENS>    Model context window in tokens (default 8192)
   --no-logs                   Skip the durable session journal and transcript
   --list-models               Print the configured models and exit
+      --allow-host-execution  Bypass the Bubblewrap sandbox and run the agent's
+                              commands directly on the host. Never the default;
+                              without it the agent is confined to the sandbox and
+                              runs multi-turn.
+      --host-turns <N>        Maximum autonomous turns a single prompt may
+                              drive, only when --allow-host-execution is set
+                              (default 1, range 1..=50).
   -h, --help                  Print help
   -V, --version               Print version
 ```
@@ -455,6 +462,14 @@ Options:
 - A positional `PROMPT` starts the session and submits the first prompt; the
   session can continue with further input in the UI.
 - `--list-models` is non-interactive and exits zero.
+- The sandbox is the default execution scope and is multi-turn (`50` turns). The
+  `--allow-host-execution` flag opts out of the sandbox: the agent runs with host
+  privileges, so it is single-turn by default to prevent a single prompt from
+  driving an unbounded autonomous loop under those privileges. `--host-turns`
+  raises that cap (restricted to `1..=50`) and is only meaningful with
+  `--allow-host-execution`; a cap outside the range is rejected before the UI
+  starts. Setting `--host-turns` without `--allow-host-execution` has no effect,
+  since sandboxed work is already multi-turn.
 - `--config`, `--model`, `--effort`, `--cwd`, `--profile` override configuration
   and are validated before the UI starts. A `--profile` name is one of
   `generic`, `python`, `rust`, `javascript`, `go`, `c`; selecting an unavailable

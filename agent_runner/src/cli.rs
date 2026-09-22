@@ -69,12 +69,22 @@ pub struct Cli {
     /// An initial prompt to submit (optional).
     pub prompt: Option<String>,
 
-    /// Allow a single prompt to drive an autonomous, multi-turn loop. Off by
-    /// default: a prompt takes exactly one model turn, and its tools run once
-    /// before control returns. Enable this explicitly to permit the agent to
-    /// keep working across turns.
+    /// Bypass the Bubblewrap sandbox and run the agent's commands directly on
+    /// the host. Never the default: without it the agent is confined to the
+    /// sandbox, multi-turn, and needs no acknowledgement. With it, the agent
+    /// runs with host privileges and is single-turn by default because a single
+    /// prompt must not be able to drive an unbounded autonomous loop under those
+    /// privileges; raise the cap with `--host-turns` only when that risk is
+    /// accepted. This flag is only meaningful when host execution is requested.
     #[arg(long)]
-    pub multi_turn: bool,
+    pub allow_host_execution: bool,
+
+    /// Maximum autonomous turns a single prompt may drive, only when
+    /// `--allow-host-execution` is set. Off by default (one turn), because the
+    /// elevated privileges are the overuse concern. Valid when host execution is
+    /// enabled.
+    #[arg(long, value_name = "N")]
+    pub host_turns: Option<u32>,
 }
 
 /// The per-app configuration directory name under the XDG config directories.
@@ -212,17 +222,43 @@ mod tests {
     }
 
     #[test]
-    fn prompt_defaults_to_a_single_model_turn() {
+    fn prompt_defaults_to_sandboxed_multi_turn() {
+        // The sandbox is the safe default: a prompt runs multi-turn with no host
+        // privileges and no explicit acknowledgement.
         let cli = Cli::try_parse_from(["agent-runner", "explain this"]).expect("valid prompt");
-        assert!(!cli.multi_turn, "a prompt defaults to a single model turn");
+        assert!(
+            !cli.allow_host_execution,
+            "host privileges require an explicit flag"
+        );
+        assert!(
+            cli.host_turns.is_none(),
+            "host turn cap is unset by default"
+        );
         assert_eq!(cli.prompt.as_deref(), Some("explain this"));
     }
 
     #[test]
-    fn multi_turn_is_enabled_only_when_explicit() {
-        let cli = Cli::try_parse_from(["agent-runner", "--multi-turn", "refactor this"])
+    fn allow_host_execution_requires_explicit_flag() {
+        let cli = Cli::try_parse_from(["agent-runner", "--allow-host-execution", "refactor this"])
             .expect("valid prompt");
-        assert!(cli.multi_turn, "autonomy requires an explicit flag");
+        assert!(
+            cli.allow_host_execution,
+            "host privileges require an explicit flag"
+        );
+        assert_eq!(cli.prompt.as_deref(), Some("refactor this"));
+    }
+
+    #[test]
+    fn host_turns_parses_only_with_allow_host_execution() {
+        let cli = Cli::parse_from([
+            "agent-runner",
+            "--allow-host-execution",
+            "--host-turns",
+            "5",
+            "refactor this",
+        ]);
+        assert!(cli.allow_host_execution);
+        assert_eq!(cli.host_turns, Some(5));
         assert_eq!(cli.prompt.as_deref(), Some("refactor this"));
     }
 
@@ -254,6 +290,8 @@ mod tests {
         assert!(!cli.list_models);
         assert!(!cli.import_kvist);
         assert!(cli.kvist_config.is_none());
+        assert!(!cli.allow_host_execution);
+        assert!(cli.host_turns.is_none());
     }
 
     #[test]
