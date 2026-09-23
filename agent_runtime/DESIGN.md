@@ -1,4 +1,4 @@
-<!-- kvist-design-version: 2 -->
+<!-- kvist-design-version: 1 -->
 
 # Agent Runtime Design
 

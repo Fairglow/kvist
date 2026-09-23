@@ -1,4 +1,4 @@
-<!-- agent-runner-design-version: 4 -->
+<!-- kvist-design-version: 1 -->
 
 # Agent Runner — Design
 
@@ -7,7 +7,7 @@ It covers module layout, the agent loop, tool rendering, tool-chain advertisemen
 and gating, sandbox request construction, the terminal UI, cancellation, and the
 edge cases that the tests cover.
 
-## Module layout
+## Design overview
 
 ```
 src/
@@ -38,7 +38,16 @@ and loop policy;
 `Executor` trait, which the worker implements over the sandbox. Tests inject a
 fake transport and a recording executor.
 
-## The agent loop
+## Internal structure
+
+`config`/`toolchain`/`tools`/`sandbox` build trusted structures from untrusted
+inputs; `session` owns the model-agnostic conversation and loop policy; `run`
+owns process and thread plumbing; and `tui` owns only presentation. Nothing in
+`session` performs blocking subprocess I/O directly — it hands argv to an
+`Executor` trait that the worker implements over the sandbox, which keeps the
+conversation model unit-testable in isolation.
+
+## Interactions and state
 
 The loop is the classic stream-and-execute cycle, kept transport-agnostic:
 
@@ -69,7 +78,7 @@ starts the loop on a detached thread and pushes `Event`s over a bounded channel;
 the UI reads events each frame and renders them, showing a status spinner while
 a turn is in flight.
 
-## Rolling context management
+## Algorithms and decisions
 
 Long-running sessions grow one turn per step, so `ContextManager` keeps the
 model's live context bounded. It estimates request size with the ~4-chars-per-token
@@ -96,7 +105,7 @@ The loop calls `maybe_compact` after each turn; when a compaction happens it
 emits `Event::Note` describing how many turns were rolled up. The UI surfaces
 context utilization and a compaction progress bar via `Event::Progress`.
 
-## Tool rendering
+### Tool rendering
 
 The registry exposes four tools, in stable order: `shell`, `read_file`,
 `write_file`, `list_dir`. Each is rendered to an argv whose `[0]` is an absolute
@@ -136,7 +145,7 @@ merely when it fails a bare `starts_with`), and the sandbox grants read-write
 authority only at the write root, so any other write fails inside the sandbox
 regardless.
 
-## Tool-chain advertisement and gating
+### Tool-chain advertisement and gating
 
 The `shell` tool advertises the tool-chains available inside the authoring
 sandbox through the `toolkit()` strings of the enabled `ToolProfile`s. Advertisement
@@ -168,7 +177,23 @@ advertised — availability does. A setting of `on` for a profile the sandbox ca
 run is treated as an explicit, user-intended request and fails closed, so the model
 never receives a tool list that promises a compiler it cannot invoke.
 
-## Sandbox request construction
+## Failure and recovery
+
+- A turn that hits a recoverable, temporal transport error (dropped connection,
+  provider timeout, or transient server error) is retried: the worker waits a
+  capped exponential `backoff_delay` and replays the turn with a fresh request and
+  a larger per-turn deadline, reported to the user via `Event::Note`; a retry that
+  exhausts `max_attempts` is surfaced as `Event::Failed`. Cancellation is never
+  retried.
+- A shared `CancellationToken` (from `agent_runtime`) is checked between turns and
+  threaded through the sandbox executor, which terminates the process group on
+  interrupt; `agent_runtime::install_handler` routes Ctrl+C/SIGTERM to a
+  cooperative flag so the whole process stays safe.
+- A missing or unverified sandbox runner or backend fails closed with an actionable
+  diagnostic and never triggers host execution; oversized or non-UTF-8 output is
+  truncated and reported rather than buffered unbounded.
+
+## Security and resource design
 
 `sandbox::build_request` assembles a version-one `SandboxRequest` in the
 `Authoring` phase, reusing the shared `kvist_sandbox_runner::protocol` types so
@@ -232,7 +257,7 @@ toward the hard limit (`compaction_progress > 0`), and suppressed when the
 context is flat, was just rolled back by a compaction, or grows too slowly to
 trust. No speculative or misleading number is ever shown.
 
-## Edge cases covered by tests
+## Verification strategy
 
 - Empty prompt is ignored, not submitted.
 - A model turn with zero tool intents ends the loop and returns the answer.

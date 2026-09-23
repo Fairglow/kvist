@@ -1,12 +1,14 @@
-<!-- agent-runner-contract-version: 4 -->
+<!-- kvist-contract-version: 1 -->
 
 # Agent Runner — Contract
+
+## Boundary and ownership
 
 This document defines what `agent-runner` exposes to consumers: the library
 public API, the configuration schema, the command-line interface, and the exact
 sandbox request it produces. Private algorithm choices live in `DESIGN.md`.
 
-## Library public API
+## Provided interfaces
 
 All public items live in the `agent_runner` crate and are re-exported from
 `lib.rs`. Consumers (the `agent-runner` binary, and Kvist as a future caller)
@@ -374,7 +376,25 @@ rolling summary while the most recent turns stay in full.
 - `ContextManager::should_compact`, `utilization`, and `compaction_progress`
   drive the live stats and the compaction progress bar shown in the UI.
 
-## Configuration schema (TOML)
+## Required interfaces
+
+- **Model transport.** The session and loop are transport-agnostic: they consume a
+  `ModelTransport` from `agent_runtime` for streaming turns and never spawn or
+  talk to a model directly.
+- **Executor.** Rendering only produces an argv; execution is handed to an
+  `Executor` trait, so the session, loop, and loop policy are unit-testable with a
+  recording executor and never perform blocking subprocess I/O themselves.
+- **Sandbox runner.** Tool execution is delegated to the externally installed
+  `kvist-sandbox-runner` subprocess (`--kvist-sandbox-request-v1`); `agent-runner`
+  writes a version-one `SandboxRequest` to its stdin and supervises bounded,
+  timed, cancellable output.
+- **Events and recording.** The loop emits typed `Event`s over a bounded channel to
+  the UI and writes durable session records (`session_start`, `turn_start`,
+  `turn_finish`, `tool_result`, `session_finish`) to a pluggable `Recorder`.
+- **Cancellation.** A shared `CancellationToken` from `agent_runtime` is checked
+  between turns and terminates the sandbox process group on interrupt.
+
+## Data and schemas
 
 ```toml
 schema_version = 1
@@ -477,7 +497,41 @@ Options:
   tool the sandbox cannot run. `--log-dir`, `--context-limit`, and `--no-logs`
   configure the durable session record and the compaction window.
 
-## Sandbox request contract
+## Behavioral guarantees
+
+- The loop is multi-turn: it repeats `next_request`, streams text, reasoning, and
+  tool-intent events, executes each tool intent (bounded and cancellable) inside
+  the sandbox, folds results back, and stops on `FinishReason::Stop` or zero
+  pending tool intents, delivering the final assistant text as the session answer.
+- A turn that hits a recoverable, temporal transport error is retried with capped
+  exponential backoff and a per-turn deadline that grows with the attempt number
+  and caps at the deadline times `max_attempts`; an exhausted budget is reported
+  as `Event::Failed`, never hidden, and cancellation is never retried.
+- The model context stays bounded across long sessions: `ContextManager` compacts
+  the oldest completed turns into a rolling summary (trimmed to `MAX_SUMMARY_CHARS`)
+  while always keeping the single most recent turn in full, so the live context
+  remains under the hard limit without losing the durable audit trail.
+- The executor emits exactly one `SandboxRequest` per tool call and reports any
+  deviation as an `Err` before spawning the runner.
+
+## Errors and failure semantics
+
+- `agent_runner::Error` (thiserror) and `agent_runner::Result<T>` carry an
+  `exit_code() -> u8` and a `describe() -> String` that produce actionable,
+  non-secret messages; formatting failures degrade gracefully and errors never
+  unwrap their underlying source when printing.
+- A tool rejected by policy or that fails before producing real output is recorded
+  as a zeroed `ToolOutcome::rejected()`, keeping the durable record faithful
+  without fabricating sandbox results.
+- A missing or unverified sandbox runner or backend fails closed with an
+  actionable diagnostic and never falls back to unconstrained host execution; a
+  write whose target escapes the working directory is rejected before the request
+  is built, on a slash boundary so `/workspace-evil` is rejected when the write
+  root is `/workspace`.
+- Non-UTF-8 subprocess output is captured byte-accurately and truncated via
+  `output_text`/`error_text` helpers, so malformed output never panics.
+
+## Security and authority
 
 The executor emits exactly one `SandboxRequest` per tool call, shaped as in
 `src/sandbox.rs`, matching `sandbox_runner/schema/kvist-sandbox-probe-v1.schema.json`
@@ -496,3 +550,17 @@ and the runner's closed version-one protocol. Guarantees:
   toolchain block identity.
 
 Any deviation is reported as an `Err` before spawning the runner.
+
+## Compatibility and verification
+
+- The sandbox request matches the shared version-one `kvist_sandbox_runner::protocol`
+  wire shape and the closed version-one `kvist-sandbox-probe-v1.schema.json`, so the
+  wire format stays identical to the runner's own statement of the contract.
+- `schema_version` is `1`; unknown top-level fields, unknown profile keys, and
+  unrecognized settings fail at load. `deadline_secs` is bounded to `1..=600` and
+  `cadence_timeout_secs` to `0..=600` (`0` disables the inter-token cadence watchdog).
+- Tool definitions, grants, and identities use stable, deterministic ordering, and
+  every identity is a `sha256:` digest that binds the request to the policy,
+  toolchain, command, and mount plan it ran under.
+- The session, loop, rendering, and CLI are transport- and environment-independent
+  and unit-tested with an injected transport and a recording executor.

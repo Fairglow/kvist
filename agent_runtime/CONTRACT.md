@@ -1,4 +1,4 @@
-<!-- kvist-contract-version: 2 -->
+<!-- kvist-contract-version: 1 -->
 
 # Agent Runtime Contract
 

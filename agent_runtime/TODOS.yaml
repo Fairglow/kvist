@@ -1,8 +1,8 @@
 schema_version: 1
 component:
   requirements_revision: "sha256:b79d7e4e17a002cba6c8bbf4bffd9231c7d294375bb9a452b1a038c8a40d2780"
-  contract_revision: "sha256:d299678c719c844b10e8735ab711a39419e85a01800630784b206847e98ec5d4"
-  design_revision: "sha256:fe89197f432a8103756b3646c8273d52d438dab464337656b4e9ec1d06338230"
+  contract_revision: "sha256:66a80725990f8f19a074ef3088bf512041bba4fd90d43aca57dae0d04b908532"
+  design_revision: "sha256:b629358ac60133fe3b5ed12150e4f6f6bfbd47a78d1a3db5ddbe7c44c0321943"
   parent_contract: null
   revalidation:
     state: current

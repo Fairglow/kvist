@@ -1,8 +1,8 @@
-<!-- agent-runner-requirements-version: 3 -->
+<!-- kvist-requirements-version: 1 -->
 
 # Agent Runner — Requirements
 
-## Purpose
+## Purpose and scope
 
 `agent-runner` is a first-class, interactive agent shell that lets a person talk
 to an AI coding agent while the agent performs real work on their machine,
@@ -18,7 +18,21 @@ the independently installed Bubblewrap sandbox, so the agent never asks the
 person for per-action permission: the available tools, the working directory,
 and the authority boundaries are declared once, up front, in configuration.
 
-## Outcomes
+## Stakeholders and concerns
+
+- **The person at the terminal.** Wants a transparent, safe session: a live
+  transcript of the agent's reasoning and tool calls, visible model and effort
+  choices, clear and actionable errors, and clean cancellation. Their machine
+  stays protected because tools, the working directory, and authority are
+  declared once, up front, in configuration.
+- **The AI coding agent.** Operates only within the tools, working directory, and
+  authority boundaries that configuration declares, and never asks the person for
+  per-action permission.
+- **Kvist and future callers.** May launch `agent-runner` as a bounded subprocess
+  and rely on the documented CLI, configuration schema, sandbox request contract,
+  and deterministic, non-interactive diagnostics.
+
+## Functional requirements
 
 Successful use produces:
 
@@ -78,7 +92,7 @@ Successful use produces:
 - Multi-model concurrent sessions, remote model brokering, and any daemon.
 - Non-Linux targets and any cloud or credential requirement for core commands.
 
-## Constraints
+## Quality requirements and constraints
 
 - The tool MUST NOT ask the person for permission for individual tool actions.
   Authority is established once in configuration.
@@ -121,7 +135,7 @@ Successful use produces:
   MUST fail startup with an actionable diagnostic rather than advertise a tool
   the sandbox cannot run.
 
-## Acceptance criteria
+## Acceptance and traceability
 
 - Given a configuration that declares one model and a working directory,
   `agent-runner` opens the UI, rejects non-interactive input with an actionable
