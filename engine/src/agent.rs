@@ -262,6 +262,61 @@ fn provider_from_command(command: &str) -> LocalModelProvider {
     }
 }
 
+/// Recovers the provider-facing model identifier embedded in a command template.
+///
+/// The structured transport path builds its own request, so unlike the rendered
+/// command it starts with no model identifier. For a llama-server/ollama command
+/// the identifier is embedded in the request body the command would send (for
+/// example the `model` of a curl `--json` payload), so this reads it out. The
+/// command may be shell-quoted (with `\"`), so quote and backslash runs around
+/// the key and value are tolerated and the value is unescaped. Returns `None`
+/// when no identifier is present, letting the caller fall back to the selector.
+fn extract_provider_model(command: &str) -> Option<String> {
+    let bytes = command.as_bytes();
+    let mut i = 0;
+    while i + 5 <= bytes.len() {
+        if &bytes[i..i + 5] != b"model" {
+            i += 1;
+            continue;
+        }
+        // Reject a `model` that is the tail of a longer token (for example the
+        // `model` inside `my_model`) so it is not mistaken for a key. Any other
+        // preceding byte (a `{`, quote, whitespace, comma, …) is accepted.
+        let before_ok = i == 0
+            || !matches!(
+                bytes[i - 1],
+                b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-'
+            );
+        // Skip any optional escaped quote / whitespace after the key to the colon.
+        let mut j = i + 5;
+        while j < bytes.len() && matches!(bytes[j], b'"' | b'\\' | b' ' | b'\t') {
+            j += 1;
+        }
+        let colon = bytes.get(j) == Some(&b':');
+        if !before_ok || !colon {
+            i += 1;
+            continue;
+        }
+        // Skip the colon and any leading escaped quote / whitespace, then read
+        // the value up to the next quote.
+        j += 1;
+        while j < bytes.len() && matches!(bytes[j], b'"' | b'\\' | b' ' | b'\t') {
+            j += 1;
+        }
+        let start = j;
+        while j < bytes.len() && bytes[j] != b'"' {
+            j += 1;
+        }
+        if j < bytes.len() {
+            // Drop the value's quote/backslash escaping (model identifiers carry
+            // no quotes or backslashes of their own).
+            return Some(command[start..j].replace(['\\', '"'], ""));
+        }
+        i += 1;
+    }
+    None
+}
+
 /// Brief connect attempts made while proving the gateway is accepting traffic.
 /// A down gateway fails on the first attempt; these ride out a gateway that is
 /// still starting its listeners. Every attempt and pause draws from the turn's
@@ -581,8 +636,14 @@ fn execute_host_turn(
         messages.push(ModelMessage::System(system.clone()));
     }
     messages.push(ModelMessage::User(request.prompt.to_owned()));
+    // llama-server/ollama gateways route on the provider-facing model identifier,
+    // which the command embeds; the selector alone is not a model the gateway
+    // recognizes (it returns 400). Fall back to the selector when the command
+    // carries no such identifier.
+    let provider_model =
+        extract_provider_model(&choice.command).unwrap_or_else(|| choice.model.clone());
     let model_request = ModelRequest {
-        model: choice.model.clone(),
+        model: provider_model,
         messages,
         tools: authoring::authoring_tool_definitions(),
         tool_choice: ToolChoice::Auto,
@@ -1353,6 +1414,39 @@ mod tests {
             provider_from_command("http://127.0.0.1:9931"),
             LocalModelProvider::LlamaServer
         );
+    }
+
+    #[test]
+    fn extract_provider_model_recovers_name_from_shell_quoted_command() {
+        // The profile command is a TOML literal string, so the runtime command
+        // carries backslash-escaped quotes around the embedded JSON body.
+        let command = r##"curl --disable --silent --show-error --fail-with-body --request POST --json "{\"model\":\"Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL\",\"messages\":[]}" -- "http://127.0.0.1:9931/v1/chat/completions""##;
+        assert_eq!(
+            extract_provider_model(command),
+            Some("Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL".to_owned())
+        );
+    }
+
+    #[test]
+    fn extract_provider_model_recovers_name_from_clean_json_command() {
+        // A JSON body without surrounding shell quotes, plus one that injects
+        // the identifier via a --data flag.
+        let command = r##"curl --json "{\"model\":\"qwen-9b\",\"messages\":[]}" "http://127.0.0.1:8080/v1/chat/completions""##;
+        assert_eq!(extract_provider_model(command), Some("qwen-9b".to_owned()));
+        // A provider template that injects the identifier directly into the body.
+        let command = "curl \"http://127.0.0.1:8080/v1/chat/completions\" --data {\"model\":\"gemini\",\"messages\":[]}";
+        assert_eq!(extract_provider_model(command), Some("gemini".to_owned()));
+    }
+
+    #[test]
+    fn extract_provider_model_returns_none_when_no_identifier() {
+        // No model key at all.
+        let command = "curl \"http://127.0.0.1:8080/v1/chat/completions\"";
+        assert_eq!(extract_provider_model(command), None);
+        // `model` inside another token is not a key.
+        let command =
+            r##"curl --json "{\"model_id\":\"x\",\"messages\":[]}" "http://127.0.0.1:8080""##;
+        assert_eq!(extract_provider_model(command), None);
     }
 
     #[test]
