@@ -4250,7 +4250,41 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
         )?;
 
         // 7. Transition task status depending on outcome
-        if run_result.success {
+        if run_result.surfaced_decision {
+            // An impactful, uncovered decision pauses the run for the human.
+            // It is a controlled pause, not a failure: the task awaits a
+            // decision and a subsequent re-review of the updated intent rather
+            // than completing or being blocked.
+            let evidence_dir = context
+                .component_dir
+                .join(".kvist")
+                .join("authoring")
+                .join("proposals");
+            let decision_reason = format!(
+                "one or more impactful, uncovered decisions surfaced and require a human decision before implementation continues. Proposal evidence is at {}.",
+                evidence_dir.display()
+            );
+            tracing::info!(
+                task_id = %task_id,
+                evidence_dir = %evidence_dir.display(),
+                "surfaced a decision worthy of intervention; transitioning task to awaiting-decision"
+            );
+            let transition_at =
+                Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
+            let _ = transition_locked(
+                &context,
+                &lock,
+                task_id,
+                TaskStatus::AwaitingDecision,
+                Some(&decision_reason),
+                &transition_at,
+            )?;
+            Ok(format!(
+                "task `{task_id}` paused and transitioned to awaiting-decision. A decision is required before implementation continues. Proposal evidence is at {}.\nLogs written to: {}\nNext Step: review the proposal, decide, then re-review and accept the updated intent; the run resumes from the awaiting-decision state.",
+                evidence_dir.display(),
+                run_result.log_path.display()
+            ))
+        } else if run_result.success {
             if task.kind == TaskKind::Implementation {
                 tracing::info!(
                     task_id = %task_id,

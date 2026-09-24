@@ -28,6 +28,15 @@
 //!   and `replace` must occur in it exactly once; that one occurrence is replaced
 //!   with `content` (empty content deletes it). The identity of the resulting bytes
 //!   is bound into the [`CheckedIntent`] so the applier can prove the result.
+//! - `propose_decision`: `summary` + `why` + optional `patch`. Surfaces an
+//!   impactful, uncovered decision for the user. It never writes a protected
+//!   document; the engine records a redacted proposal under the component state
+//!   directory and ends the run in the awaiting-decision state.
+//! - `request_dependency`: `name` + `origin`. Requests a new dependency. A request
+//!   within policy (an exact, pinned revision) is recorded and accepted so the
+//!   agent continues; a request outside policy (private, link-local, loopback,
+//!   unverified, or unpinned origin) is surfaced as a decision and ends the run in
+//!   the awaiting-decision state.
 
 pub mod apply;
 
@@ -46,7 +55,12 @@ use sha2::{Digest, Sha256};
 /// This is the authoritative enumeration of allowed agent authoring actions. It is
 /// *not* supplied by agents: every model proposes arbitrary tool calls, and only
 /// these names are ever authorized.
-pub const ALLOWED_TOOLS: &[&str] = &["write_file", "edit_file"];
+pub const ALLOWED_TOOLS: &[&str] = &[
+    "write_file",
+    "edit_file",
+    "propose_decision",
+    "request_dependency",
+];
 
 /// Documents that must never be writable inside an authoring ancestor. These are
 /// mounted read-only context; the broker refuses to authorize effects targeting them,
@@ -73,6 +87,17 @@ pub const MAX_CONTENT_BYTES: usize = 1 << 20;
 
 /// Maximum total authored-content bytes across a single plan.
 pub const MAX_PLAN_CONTENT_BYTES: usize = 8 << 20;
+
+/// Maximum bytes of a surfaced-decision summary or `why` justification. Bounds the
+/// evidence recorded for a decision so a hostile model cannot bloat it.
+pub const MAX_DECISION_BYTES: usize = 8 << 10;
+
+/// Maximum bytes of a surfaced-decision patch or dependency origin. Bounds the
+/// recorded proposal so a hostile model cannot bloat it.
+pub const MAX_PATCH_BYTES: usize = 64 << 10;
+
+/// Maximum length of a dependency crate identity. Bounds the recorded identity.
+pub const MAX_DEPENDENCY_NAME_BYTES: usize = 64;
 
 /// The class of an authorized authoring effect.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -121,11 +146,65 @@ pub struct DroppedIntent {
     pub reason: String,
 }
 
-/// The brokered result of authorizing every intent from one model turn.
+/// A decision the agent surfaced for human intervention.
+///
+/// Recorded, never applied: it is persisted under the component state directory as
+/// durable, inspectable evidence and ends the run in the awaiting-decision state.
+/// It never contains bytes written to a protected intent document.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProposedDecision {
+    /// Turn-local call identity, echoed from the model intent.
+    pub call_id: String,
+    /// Bounded, non-secret summary of the uncovered, impactful decision.
+    pub summary: String,
+    /// Why the issue is decision-worthy rather than a trivial, review-only matter.
+    pub why: String,
+    /// Optional proposed change, as a redacted patch or draft; never a protected
+    /// document write.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub patch: Option<String>,
+}
+
+/// A dependency the agent requested mid-task that is within the dependency
+/// policy. Out-of-policy requests are surfaced as [`ProposedDecision`]s instead,
+/// so a recorded request is by definition accepted for acquisition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DependencyRequest {
+    /// Turn-local call identity, echoed from the model intent.
+    pub call_id: String,
+    /// Crate or spec identity requested.
+    pub name: String,
+    /// Exact, declared origin (a pinned revision or a public VCS origin).
+    pub origin: String,
+    /// Non-secret policy justification recorded as evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// The class of a brokered turn outcome. A single funnel routes every intent to
+/// exactly one of these; the broker is total and infallible, so no untrusted
+/// intent can panic, wedge, or silently vanish.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BrokerOutcome {
+    /// An authorized write effect.
+    Effect(CheckedIntent),
+    /// A decision worthy of human intervention.
+    Decision(ProposedDecision),
+    /// A dependency request evaluated against policy.
+    Request(DependencyRequest),
+    /// A refused intent, with a non-secret reason.
+    Drop(String),
+}
+
+/// The brokered result of authoring every intent from one model turn.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthoringPlan {
     /// Authorized, capability-bound effects, in proposal order.
     pub effects: Vec<CheckedIntent>,
+    /// Surfaced decisions, in proposal order, for durable evidence.
+    pub decisions: Vec<ProposedDecision>,
+    /// Accepted dependency requests, in proposal order, for acquisition.
+    pub dependency_requests: Vec<DependencyRequest>,
     /// Refused intents, in proposal order, for the audit trail.
     pub dropped: Vec<DroppedIntent>,
 }
@@ -139,6 +218,21 @@ impl AuthoringPlan {
     /// Number of refused intents.
     pub fn dropped_count(&self) -> usize {
         self.dropped.len()
+    }
+
+    /// True when any decision worthy of human intervention was surfaced.
+    pub fn has_decision(&self) -> bool {
+        !self.decisions.is_empty()
+    }
+
+    /// Number of surfaced decisions.
+    pub fn decision_count(&self) -> usize {
+        self.decisions.len()
+    }
+
+    /// Number of accepted dependency requests.
+    pub fn dependency_request_count(&self) -> usize {
+        self.dependency_requests.len()
     }
 
     /// Total authored content bytes across all authorized effects.
@@ -241,8 +335,10 @@ pub fn authorize_intents(
     let mut plan = AuthoringPlan::default();
     for intent in intents {
         match classify_intent(component_root, intent, policy) {
-            Ok(checked) => plan.effects.push(checked),
-            Err(reason) => plan.dropped.push(DroppedIntent {
+            BrokerOutcome::Effect(checked) => plan.effects.push(checked),
+            BrokerOutcome::Decision(decision) => plan.decisions.push(decision),
+            BrokerOutcome::Request(request) => plan.dependency_requests.push(request),
+            BrokerOutcome::Drop(reason) => plan.dropped.push(DroppedIntent {
                 call_id: intent.id.clone(),
                 tool: intent.name.clone(),
                 reason,
@@ -255,42 +351,281 @@ pub fn authorize_intents(
     plan
 }
 
-/// Reduce a single untrusted intent to a checked effect, or a drop reason.
+/// Bounds a non-secret, user-facing string into bounded, redactable evidence.
+fn bounded_text(value: &str, max: usize, label: &str) -> Result<String, String> {
+    if value.is_empty() {
+        return Err(format!("argument `{label}` must be non-empty"));
+    }
+    if value.len() > max {
+        return Err(format!("argument `{label}` exceeds the {max}-byte bound"));
+    }
+    Ok(value.to_owned())
+}
+
+/// Reduce a single untrusted intent to a brokered outcome or a drop reason.
 ///
 /// Deny-by-default: the tool name must be in [`ALLOWED_TOOLS`]; arguments must be a
-/// JSON object; the destination must normalize under a writable root without
-/// escaping; content must be within bound. Any failure is a drop reason, never a
-/// panic, so a hostile or buggy model cannot wedge the broker.
+/// JSON object. Write tools additionally require a normalized destination and
+/// bounded content; the decision tool requires bounded summary and `why`; the
+/// dependency tool validates its identity and origin against the dependency
+/// policy. Any failure is a drop reason, never a panic, so a hostile or buggy
+/// model cannot wedge the broker.
 fn classify_intent(
     component_root: &Path,
     intent: &ToolIntent,
     policy: &BrokerPolicy,
-) -> Result<CheckedIntent, String> {
+) -> BrokerOutcome {
     if intent.name.trim().is_empty() {
-        return Err("tool name is empty".to_owned());
+        return BrokerOutcome::Drop("tool name is empty".to_owned());
     }
     if !ALLOWED_TOOLS.contains(&intent.name.as_str()) {
-        return Err(format!(
+        return BrokerOutcome::Drop(format!(
             "tool `{}` is not in the authorized authoring set {:?}",
             intent.name, ALLOWED_TOOLS
         ));
     }
     let Some(obj) = intent.arguments.as_object() else {
-        return Err(format!(
+        return BrokerOutcome::Drop(format!(
             "tool `{}` arguments must be a JSON object",
             intent.name
         ));
     };
     match intent.name.as_str() {
-        "write_file" => authorize_write(component_root, intent, obj, policy),
-        "edit_file" => authorize_edit(component_root, intent, obj, policy),
+        "write_file" => match authorize_write(component_root, intent, obj, policy) {
+            Ok(effect) => BrokerOutcome::Effect(effect),
+            Err(reason) => BrokerOutcome::Drop(reason),
+        },
+        "edit_file" => match authorize_edit(component_root, intent, obj, policy) {
+            Ok(effect) => BrokerOutcome::Effect(effect),
+            Err(reason) => BrokerOutcome::Drop(reason),
+        },
+        "propose_decision" => match classify_propose(intent, obj) {
+            Ok(decision) => BrokerOutcome::Decision(decision),
+            Err(reason) => BrokerOutcome::Drop(reason),
+        },
+        "request_dependency" => classify_dependency(intent, obj),
         // The allowlist check above makes this arm unreachable; it is kept as a
         // fail-closed default rather than a panic.
-        _ => Err(format!(
+        _ => BrokerOutcome::Drop(format!(
             "tool `{}` is not in the authorized authoring set {:?}",
             intent.name, ALLOWED_TOOLS
         )),
     }
+}
+
+/// Authorizes a `propose_decision` intent into a surfaced decision. A malformed
+/// proposal is dropped (the model misused the tool); a well-formed one is recorded
+/// as durable evidence and will end the run in the awaiting-decision state.
+fn classify_propose(
+    intent: &ToolIntent,
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> Result<ProposedDecision, String> {
+    let summary = bounded_text(
+        obj.get("summary")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default(),
+        MAX_DECISION_BYTES,
+        "summary",
+    )?;
+    let why = bounded_text(
+        obj.get("why")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default(),
+        MAX_DECISION_BYTES,
+        "why",
+    )?;
+    let patch = match obj.get("patch").and_then(serde_json::Value::as_str) {
+        None | Some("") => None,
+        Some(value) => Some(bounded_text(value, MAX_PATCH_BYTES, "patch")?),
+    };
+    Ok(ProposedDecision {
+        call_id: intent.id.clone(),
+        summary,
+        why,
+        patch,
+    })
+}
+
+/// The set of host substrings that mark an origin private, link-local, loopback,
+/// or otherwise unverified-remote and therefore outside the dependency policy.
+const UNVERIFIED_ORIGIN_PREFIXES: [&str; 8] = [
+    "127.",
+    "10.",
+    "192.168.",
+    "169.254.",
+    "172.16.",
+    "172.17.",
+    "localhost",
+    "file://",
+];
+
+/// Rejects an origin that is private, link-local, loopback, a local path, or a
+/// VCS/registry scheme pointing at a non-public host. Public crates.io and public
+/// VCS hosts are not rejected here; the caller additionally requires an exact,
+/// pinned revision.
+fn is_unverified_origin(origin: &str) -> bool {
+    UNVERIFIED_ORIGIN_PREFIXES
+        .iter()
+        .any(|prefix| origin.starts_with(prefix))
+    || origin.starts_with("./")
+    || origin.starts_with("/")
+    // Any scheme other than a public http(s) or git-over-http(s)/ssh VCS origin
+    // (path, ftp, custom, git+http) is treated as unverified here.
+    || origin.contains("://")
+        && !origin.starts_with("https://")
+        && !origin.starts_with("git+https://")
+        && !origin.starts_with("git+ssh://")
+        && !origin.starts_with("ssh://")
+}
+
+/// Whether a crate identity looks like a plausible registry name (letters,
+/// digits, `-`, `_`, `.`), used to reject malformed dependency names.
+fn looks_like_crate_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= MAX_DEPENDENCY_NAME_BYTES
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+/// Whether the leading character of an unpinned-precedence operator marks the
+/// origin as a range/comparator/wildcard rather than an exact revision.
+fn has_version_precedence_operator(origin: &str) -> bool {
+    matches!(
+        origin.bytes().next(),
+        Some(b'^' | b'~' | b'>' | b'<' | b'=')
+    )
+}
+
+/// Whether an origin is an exact, three-part semver revision with an optional
+/// pre-release/build suffix. Wildcards (`1.x`, `*`), ranges, comparators, and
+/// partials (`1`, `1.2`) are rejected.
+fn is_exact_semver(value: &str) -> bool {
+    if value
+        .bytes()
+        .any(|byte| matches!(byte, b'*' | b'>' | b'<' | b'=' | b'^' | b'~'))
+    {
+        return false;
+    }
+    let mut numbers = value.split('.');
+    let core = matches!(
+        (numbers.next(), numbers.next(), numbers.next()),
+        (
+            Some(major),
+            Some(minor),
+            Some(patch)
+        ) if !major.is_empty()
+            && !minor.is_empty()
+            && !patch.is_empty()
+            && numbers.next().is_none()
+            && major.bytes().all(|byte| byte.is_ascii_digit())
+            && minor.bytes().all(|byte| byte.is_ascii_digit())
+            && patch.bytes().all(|byte| byte.is_ascii_digit())
+    );
+    if !core {
+        return false;
+    }
+    // The pre-release/build suffix, if present after `-` or `+`, may contain
+    // dotted alphanumeric identifiers; an empty identifier is rejected.
+    for tail in value.split(['-', '+']).skip(1) {
+        if tail.is_empty()
+            || !tail
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.'))
+        {
+            return false;
+        }
+    }
+    true
+}
+
+/// Whether a VCS `?rev=`/`?tag=` fragment pins the origin to a specific, non-empty
+/// reference (a long commit-ish or a tag), rather than an empty or wildcard ref.
+fn vcs_ref_is_pinned(value: &str) -> bool {
+    let value = value.split('&').next().unwrap_or("").trim();
+    !value.is_empty()
+        && value.len() >= 7
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.'))
+}
+
+/// Whether an origin is an exact, pinned revision rather than a wildcard, range,
+/// comparator, branch, or unpinned partial. Crates.io revisions are `x.y.z` with
+/// an optional pre-release/build suffix; public VCS origins require an explicit
+/// `?rev=` or `?tag=` fragment.
+fn looks_pinned(origin: &str) -> bool {
+    if has_version_precedence_operator(origin) {
+        return false;
+    }
+    if is_exact_semver(origin) {
+        return true;
+    }
+    let Some((scheme, rest)) = origin.split_once("://") else {
+        return false;
+    };
+    if !matches!(scheme, "https" | "git+https" | "git+ssh" | "ssh") {
+        return false;
+    }
+    match rest.split_once("?rev=") {
+        Some((_, rev)) => vcs_ref_is_pinned(rev),
+        None => match rest.split_once("?tag=") {
+            Some((_, tag)) => vcs_ref_is_pinned(tag),
+            None => false,
+        },
+    }
+}
+
+/// Evaluates a dependency request against policy. Returns the recorded request
+/// when the origin is an exact, pinned, non-private revision, with a policy
+/// justification; returns a surfaced decision otherwise.
+fn classify_dependency(
+    intent: &ToolIntent,
+    obj: &serde_json::Map<String, serde_json::Value>,
+) -> BrokerOutcome {
+    let name = match obj.get("name").and_then(serde_json::Value::as_str) {
+        None | Some("") => {
+            return BrokerOutcome::Drop("argument `name` must be non-empty".to_owned());
+        }
+        Some(name) if !looks_like_crate_name(name) => {
+            return BrokerOutcome::Drop(format!(
+                "dependency `{name}` is not a plausible crate identity"
+            ));
+        }
+        Some(name) => name.to_owned(),
+    };
+    let origin = match obj.get("origin").and_then(serde_json::Value::as_str) {
+        None | Some("") => {
+            return BrokerOutcome::Drop("argument `origin` must be non-empty".to_owned());
+        }
+        Some(origin) => origin,
+    };
+    if is_unverified_origin(origin) {
+        return BrokerOutcome::Decision(ProposedDecision {
+            call_id: intent.id.clone(),
+            summary: format!(
+                "dependency `{name}` origin `{origin}` is private, link-local, loopback, a local path, or an unverified remote"
+            ),
+            why: "a dependency from an untrusted origin can inject unreviewed code".to_owned(),
+            patch: None,
+        });
+    }
+    if !looks_pinned(origin) {
+        return BrokerOutcome::Decision(ProposedDecision {
+            call_id: intent.id.clone(),
+            summary: format!(
+                "dependency `{name}` origin `{origin}` is not an exact, pinned revision"
+            ),
+            why: "an unpinned or wildcard origin can resolve to an unreviewed revision".to_owned(),
+            patch: None,
+        });
+    }
+    BrokerOutcome::Request(DependencyRequest {
+        call_id: intent.id.clone(),
+        name,
+        origin: origin.to_owned(),
+        reason: Some("exact, pinned, non-private origin".to_owned()),
+    })
 }
 
 /// Model-facing descriptors for the closed authoring tool set. The schemas mirror
@@ -341,6 +676,59 @@ pub fn authoring_tool_definitions() -> Vec<ToolDefinition> {
                     }
                 },
                 "required": ["destination", "replace", "content"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "propose_decision".to_owned(),
+            description: "Surface an impactful decision that is not already covered by \
+             the component's REQUIREMENTS, CONTRACT, DESIGN, or TODOS. This ends the \
+             task run and pauses it for a human; use it only for decisions that \
+             substantially alter the implementation, never for trivial issues. Do \
+             NOT use it to write REQUIREMENTS.md, CONTRACT.md, DESIGN.md, TODOS.yaml, \
+             or IMPL.md; Kvist maintains those separately."
+                .to_owned(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Non-secret summary of the uncovered, impactful decision"
+                    },
+                    "why": {
+                        "type": "string",
+                        "description": "Why the issue is decision-worthy rather than a trivial, review-only matter"
+                    },
+                    "patch": {
+                        "type": "string",
+                        "description": "Optional proposed change as a redacted draft; never bytes for a protected document"
+                    }
+                },
+                "required": ["summary", "why"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "request_dependency".to_owned(),
+            description: "Request a new or changed dependency mid-task. An exact, pinned \
+             revision from a public source is accepted automatically and you continue; \
+             a private, link-local, loopback, unverified, or unpinned origin is \
+             surfaced as a decision and pauses the run. Provide an exact version such \
+             as 1.2.3, or a public URL with an explicit ?rev= or ?tag=."
+                .to_owned(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Crate or spec identity requested"
+                    },
+                    "origin": {
+                        "type": "string",
+                        "description": "Exact, pinned origin: a registry revision (1.2.3) or a public VCS URL with ?rev= or ?tag="
+                    }
+                },
+                "required": ["name", "origin"],
                 "additionalProperties": false
             }),
         },
@@ -990,9 +1378,16 @@ mod tests {
     fn tool_definitions_cover_exactly_the_allowed_set() {
         let tools = authoring_tool_definitions();
         let names: Vec<&str> = tools.iter().map(|tool| tool.name.as_str()).collect();
-        assert_eq!(names, vec!["write_file", "edit_file"]);
+        assert_eq!(names, ALLOWED_TOOLS);
+        // The advertised tool set is the authority: every advertised tool is
+        // authorized and every authorized tool is advertised, so a tool the
+        // broker would refuse can never be offered to the model.
         for tool in &tools {
+            assert!(ALLOWED_TOOLS.contains(&tool.name.as_str()));
             assert!(tool.parameters.is_object());
+        }
+        for allowed in ALLOWED_TOOLS {
+            assert!(names.contains(allowed));
         }
     }
 
@@ -1056,5 +1451,202 @@ mod tests {
         let tools: Vec<&str> = plan.dropped.iter().map(|d| d.tool.as_str()).collect();
         assert!(tools.contains(&"mount"));
         assert!(tools.contains(&"write_file"));
+    }
+
+    fn propose_intent(summary: &str, why: &str) -> ToolIntent {
+        intent(
+            "propose_decision",
+            serde_json::json!({ "summary": summary, "why": why }),
+        )
+    }
+
+    fn dependency_intent(name: &str, origin: &str) -> ToolIntent {
+        intent(
+            "request_dependency",
+            serde_json::json!({ "name": name, "origin": origin }),
+        )
+    }
+
+    #[test]
+    fn valid_propose_becomes_a_surfaced_decision() {
+        let plan = authorize_intents(
+            tempdir().unwrap().path(),
+            &[propose_intent(
+                "use a different crate",
+                "the recorded fit is worse",
+            )],
+            &policy(),
+        );
+        assert!(plan.has_decision());
+        assert_eq!(plan.decision_count(), 1);
+        assert!(plan.effects.is_empty());
+        assert_eq!(plan.dropped_count(), 0);
+        assert_eq!(plan.decisions[0].summary, "use a different crate");
+        assert_eq!(plan.decisions[0].why, "the recorded fit is worse");
+    }
+
+    fn propose_intent_raw(args: serde_json::Value) -> ToolIntent {
+        intent("propose_decision", args)
+    }
+
+    #[test]
+    fn propose_with_a_patch_records_the_patch_only() {
+        let plan = authorize_intents(
+            tempdir().unwrap().path(),
+            &[propose_intent_raw(serde_json::json!({
+                "summary": "refactor",
+                "why": "style",
+                "patch": "s/old/new",
+            }))],
+            &policy(),
+        );
+        assert_eq!(plan.decision_count(), 1);
+        assert_eq!(plan.decisions[0].patch.as_deref(), Some("s/old/new"));
+    }
+
+    #[test]
+    fn propose_without_a_patch_leaves_patch_none() {
+        let plan = authorize_intents(
+            tempdir().unwrap().path(),
+            &[propose_intent("refactor", "style")],
+            &policy(),
+        );
+        assert_eq!(plan.decision_count(), 1);
+        assert!(plan.decisions[0].patch.is_none());
+    }
+
+    #[test]
+    fn propose_missing_summary_is_dropped() {
+        let plan = authorize_intents(
+            tempdir().unwrap().path(),
+            &[intent(
+                "propose_decision",
+                serde_json::json!({ "why": "style" }),
+            )],
+            &policy(),
+        );
+        assert!(plan.decisions.is_empty());
+        assert_eq!(plan.dropped_count(), 1);
+    }
+
+    #[test]
+    fn propose_missing_why_is_dropped() {
+        let plan = authorize_intents(
+            tempdir().unwrap().path(),
+            &[intent(
+                "propose_decision",
+                serde_json::json!({ "summary": "x" }),
+            )],
+            &policy(),
+        );
+        assert_eq!(plan.dropped_count(), 1);
+    }
+
+    #[test]
+    fn propose_summary_over_the_bound_is_dropped() {
+        let huge = "a".repeat(MAX_DECISION_BYTES + 1);
+        let plan = authorize_intents(
+            tempdir().unwrap().path(),
+            &[propose_intent(&huge, "ok")],
+            &policy(),
+        );
+        assert_eq!(plan.dropped_count(), 1);
+    }
+
+    #[test]
+    fn exact_registry_revision_dependency_is_accepted() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        let plan = authorize_intents(
+            dir.path(),
+            &[dependency_intent("serde", "1.0.200")],
+            &policy(),
+        );
+        assert_eq!(plan.dependency_request_count(), 1);
+        assert!(plan.decisions.is_empty());
+        assert_eq!(plan.dependency_requests[0].name, "serde");
+        assert_eq!(plan.dependency_requests[0].origin, "1.0.200");
+    }
+
+    #[test]
+    fn wildcard_dependency_is_surfaced_as_a_decision() {
+        let plan = authorize_intents(
+            tempdir().unwrap().path(),
+            &[dependency_intent("serde", "*")],
+            &policy(),
+        );
+        assert!(plan.has_decision());
+        assert_eq!(plan.decision_count(), 1);
+        assert_eq!(plan.dependency_request_count(), 0);
+    }
+
+    #[test]
+    fn loopback_dependency_origin_is_surfaced_as_a_decision() {
+        let plan = authorize_intents(
+            tempdir().unwrap().path(),
+            &[dependency_intent(
+                "local-crate",
+                "git+https://127.0.0.1:8443/some/crate.git",
+            )],
+            &policy(),
+        );
+        assert_eq!(plan.decision_count(), 1);
+        assert_eq!(plan.dependency_request_count(), 0);
+    }
+
+    #[test]
+    fn dependency_missing_name_is_dropped() {
+        let plan = authorize_intents(
+            tempdir().unwrap().path(),
+            &[intent(
+                "request_dependency",
+                serde_json::json!({ "origin": "1.0.0" }),
+            )],
+            &policy(),
+        );
+        assert_eq!(plan.dropped_count(), 1);
+    }
+
+    #[test]
+    fn dependency_missing_origin_is_dropped() {
+        let plan = authorize_intents(
+            tempdir().unwrap().path(),
+            &[intent(
+                "request_dependency",
+                serde_json::json!({ "name": "serde" }),
+            )],
+            &policy(),
+        );
+        assert_eq!(plan.dropped_count(), 1);
+    }
+
+    #[test]
+    fn decision_and_dependency_and_write_partition_into_their_outcomes() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        let intents = vec![
+            write_intent("src/a.rs", "a"),
+            propose_intent("change approach", "not covered"),
+            dependency_intent("tokio", "1.38.0"),
+            dependency_intent("bad", "*"),
+            intent("mount", serde_json::json!({})),
+        ];
+        let plan = authorize_intents(dir.path(), &intents, &policy());
+        assert_eq!(plan.effects.len(), 1);
+        assert_eq!(plan.dependency_request_count(), 1);
+        assert_eq!(plan.decision_count(), 2);
+        assert_eq!(plan.dropped_count(), 1);
+    }
+
+    #[test]
+    fn all_closed_tools_are_advertised_in_the_tool_definitions() {
+        let names: Vec<String> = authoring_tool_definitions()
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect();
+        assert!(names.contains(&"write_file".to_owned()));
+        assert!(names.contains(&"edit_file".to_owned()));
+        assert!(names.contains(&"propose_decision".to_owned()));
+        assert!(names.contains(&"request_dependency".to_owned()));
     }
 }

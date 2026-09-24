@@ -130,6 +130,44 @@ fn serve_local_ollama(content: &str) -> String {
     format!("http://{addr}/api/chat")
 }
 
+/// Serves Ollama-style responses that return a single tool call alongside the
+/// assistant text, from a numeric loopback endpoint. `tool_calls` is the raw
+/// JSON array fragment embedded in the response message.
+#[cfg(target_os = "linux")]
+fn serve_local_ollama_tool_call(content: &str, tool_calls: &str) -> String {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+    let listener = Arc::new(TcpListener::bind("127.0.0.1:0").expect("bind fake provider"));
+    let addr = listener.local_addr().expect("fake provider address");
+    let body = format!(
+        "{{\"model\":\"test-model\",\"created_at\":\"2026-08-30T00:00:00Z\",\"message\":{{\"role\":\"assistant\",\"content\":\"{content}\",\"tool_calls\":{tool_calls}}},\"done\":true,\"done_reason\":\"tool_call\",\"prompt_eval_count\":10,\"eval_count\":4}}"
+    );
+    // A real model gateway serves many sequential connections: a brokered host
+    // turn liveness-probes the port first, then performs the turn, so the fake
+    // provider must serve more than one connection.
+    for _ in 0..4 {
+        let listener = Arc::clone(&listener);
+        let body = body.clone();
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let mut buffer = [0u8; 4096];
+            let _ = stream.read(&mut buffer);
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(body.as_bytes());
+            let _ = stream.flush();
+        });
+    }
+    format!("http://{addr}/api/chat")
+}
+
 #[test]
 #[cfg(target_os = "linux")]
 fn execute_agent_runs_the_model_turn_on_the_host_and_captures_the_response() {
@@ -206,6 +244,116 @@ fn execute_agent_runs_the_model_turn_on_the_host_and_captures_the_response() {
     assert!(
         log_contents.contains("brokered host turn ok"),
         "log contents were: {log_contents}"
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn execute_agent_surfaces_a_proposed_decision_and_pauses() {
+    kvist::init_test_logging();
+    let target_dir = TempDir::new().expect("workspace");
+
+    // The provider returns a single propose_decision tool call; the loop must
+    // pause the run in an awaiting-decision outcome rather than completing.
+    let tool_calls = serde_json::json!([
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+                "name": "propose_decision",
+                "arguments": { "summary": "use a different crate", "why": "recorded fit is worse" }
+            }
+        }
+    ]);
+    let endpoint = serve_local_ollama_tool_call("", &tool_calls.to_string());
+    let prompt = "Choose the best serialization approach";
+    let command = format!(
+        "curl --silent --request POST --json '{{\"model\":\"test-model\"}}' -- \"{endpoint}\""
+    );
+
+    let profile = AgentProfile {
+        role: Role::Developer,
+        profile: "default".to_owned(),
+        command_template: command.clone(),
+        models: vec![Model {
+            name: "default".to_owned(),
+            command,
+            system_prompt: None,
+        }],
+        default_model: "default".to_owned(),
+        model: None,
+        thinking_effort: None,
+        token_limit: None,
+        timeout_seconds: 5,
+        max_output_bytes: 1_024,
+        redaction_values: vec![],
+    };
+
+    let context_paths: Vec<PathBuf> = vec![];
+    let task_id = "test-task";
+    let sandbox = SandboxConfig {
+        runner: "/usr/bin/true".to_owned(),
+        backend: "/usr/bin/true".to_owned(),
+        environment_allowlist: vec![],
+        acquisition: kvist::config::AcquisitionConfig::default(),
+    };
+
+    let result = execute_agent(
+        &profile,
+        &sandbox,
+        // A surfaced decision returns before any authoring sandbox dispatch,
+        // so no runner or probe is required.
+        None,
+        None,
+        kvist::agent::AgentExecutionRequest {
+            project_root: target_dir.path(),
+            vcs_selection: VcsSelection::Git,
+            prompt,
+            context_paths: &context_paths,
+            read_only_mounts: &[],
+            target_dir: target_dir.path(),
+            task_id,
+            stream_output: false,
+            role: Role::Developer,
+            policy_identity: "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        },
+    )
+    .expect("agent execution success");
+
+    // A surfaced decision is a controlled pause, not a success and not a
+    // transport failure.
+    assert!(!result.success);
+    assert!(result.surfaced_decision);
+    assert!(!result.timed_out);
+    assert!(!result.output_limit_exceeded);
+
+    // The proposal is persisted as durable evidence under the component state
+    // directory, and is never applied as a file effect.
+    let proposals = target_dir
+        .path()
+        .join(".kvist")
+        .join("authoring")
+        .join("proposals");
+    assert!(
+        proposals.exists(),
+        "proposals directory should exist: {proposals:?}"
+    );
+    let entries: Vec<_> = std::fs::read_dir(&proposals)
+        .expect("read proposals")
+        .map(|entry| entry.expect("entry").path())
+        .collect();
+    assert_eq!(entries.len(), 1, "exactly one proposal should be recorded");
+    let evidence = fs::read_to_string(&entries[0]).expect("read proposal evidence");
+    assert!(
+        evidence.contains("use a different crate"),
+        "evidence was: {evidence}"
+    );
+
+    // The run log summarizes the surfaced decision for inspection.
+    let log_contents = fs::read_to_string(&result.log_path).expect("read log contents");
+    assert!(
+        log_contents.contains("surfaced decisions and dependency requests"),
+        "log should summarize the decision: {log_contents}"
     );
 }
 

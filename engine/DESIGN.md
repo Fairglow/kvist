@@ -338,6 +338,76 @@ distinct from failure (`blocked`). Once the decision is accepted, `TODOS.yaml`
 gains the tasks needed to implement it, `IMPL.md` becomes stale, and the component
 stays awaiting-decision until an updated advisory review is performed and accepted.
 
+### Implemented proposal and dependency-request tools (phase 4)
+
+Phase 3 drove the bounded multi-turn loop but only brokered the two write
+tools (`write_file`, `edit_file`) and terminated a run on a usable answer, a
+dropped intent, or an unapplied effect. This subsection documents the
+implemented tier that closes the remaining target-tier gap: the two read-only-of-
+intent tools the multi-turn contract names, `propose_decision` and
+`request_dependency`, wired to the `AwaitingDecision` state, plus the prompt
+that advertises them. The authoritative enumeration of allowed agent actions
+remains the closed [`ALLOWED_TOOLS`](crate::authoring::ALLOWED_TOOLS) set in the
+broker; a change to that set is a change to that code and its tests, never to an
+untrusted agent.
+
+The broker ([`engine/src/authoring`](src/authoring/mod.rs)) routes each untrusted
+intent through the single funnel [`classify_intent`](src/authoring/mod.rs) to one
+of four outcomes: an authorized write effect ([`CheckedIntent`]), a surfaced
+decision ([`ProposedDecision`]), an accepted dependency request
+([`DependencyRequest`]), or a dropped intent ([`DroppedIntent`]). The
+[`AuthoringPlan`](src/authoring/mod.rs) now carries `decisions` and
+`dependency_requests` alongside `effects` and `dropped`.
+
+`propose_decision` takes `summary`, `why`, and an optional `patch`. It never
+writes a protected intent document; instead the engine records a bounded,
+redacted proposal as durable, inspectable evidence under
+`<component>/.kvist/authoring/proposals/<id>.json`. When a turn contains a
+surfaced decision the loop stops before applying that turn's write effects, sets
+`AgentRunResult.surfaced_decision`, and the run harness
+([`run_task`](src/task_commands.rs)) transitions the task to `AwaitingDecision`
+with a reason rather than running verification or jumping to `Completed`. Only
+decisions that substantially alter the implementation and are not already covered
+by the component intent are surfaced; trivial issues do not block and are left
+for the post-hoc advisory comparison of `IMPL.md`. Whether an issue is trivial
+or decision-worthy is the tested decision boundary; trivial issues never pause
+the run.
+
+`request_dependency` takes `name` and `origin` and evaluates the origin against
+the dependency policy in [`evaluate_dependency_request`](src/authoring/mod.rs).
+An in-policy request (an exact, pinned registry revision, or a public VCS origin
+with an exact pinned revision; never a private, link-local, loopback, or
+unverified production address, and never a wildcard or unpinned range) is
+recorded and accepted so the agent continues without interruption; the existing
+build/verification step acquires the exact revision. An out-of-policy request is
+surfaced as a decision and stops the run in `AwaitingDecision`. A dedicated
+in-run acquisition phase (fetching before the next turn) is a documented
+follow-up, so a request within policy is recorded and surfaced for acquisition
+rather than fetched inline in this tier.
+
+The model is advertised exactly these tools, with schemas and the scope and
+protected-document notice, by [`authoring_tool_definitions`](src/authoring/mod.rs)
+and the authoring-scope directive in the task prompt. Trivial-issueness, the
+decision-worthy-of-intervention test, and the dependency-origin policy are unit
+tested in the broker and the run harness; the end-to-end pause-then-await is
+exercised by an integration test that drives the loop with a mock gateway that
+proposes a decision.
+
+#### Whole-component write scope (phase 4b, deferred)
+
+The target writable scope is the whole current component directory minus the
+excluded paths (the five protected documents, `.kvist`, `.git`, and any
+sub-component directory), with `write_file` retaining full overwrite semantics.
+This tier keeps the existing `src`/`tests` scope because the write scope is
+enforced by two coupled layers — the broker's `WRITABLE_ROOTS` and the sandbox's
+`AUTHORING_WRITABLE_ROOTS` plus its read-write grant mount plan in
+[`append_authoring_grants`](src/sandbox.rs) — and the approved-write-scope
+digest in [`approved_write_scope`](src/task_commands.rs). Widening the broker
+alone would authorize effects the sandbox would then refuse to apply, so the
+widening is a separate phase that changes both layers and the grant enumeration
+together, then re-tests the dogfood boundary suite. See
+[`REQUIREMENTS.md`](REQUIREMENTS.md) for the recorded follow-up.
+
 ### Planned review evidence and acceptance state
 
 The initial review subject is a digest-bound bundle containing exact local

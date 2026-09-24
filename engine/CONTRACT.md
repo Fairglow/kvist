@@ -363,12 +363,20 @@ produces no persisted effect. `write_file` and `edit_file` are reduced to the
 writable component scope and applied by the engine itself inside the effect
 sandbox against a read-only staged-intent mount; the host never writes component
 state for an effect, and only the final brokered effect of a run is persisted.
-`request_dependency` is routed to the dependency phase for evaluation rather than
-executed inline. `propose_decision` records an impactful question for the user
-and ends the run by placing the component in an awaiting-decision state; it never
-blocks on a trivial matter. A run succeeds only when the agent reports completion,
-no decision worthy of intervention remains surfaced, and every authorized effect
-applied. Once such a decision is accepted, `TODOS.yaml` MUST gain the tasks needed
+`request_dependency` is evaluated by the broker's dependency-origin policy rather
+than executed inline: a request whose origin is an exact, pinned registry
+revision or a public VCS origin with an exact pinned revision (never a private,
+link-local, loopback, or unverified production address, and never a wildcard or
+unpinned range) is recorded and accepted so the agent continues without
+interruption and acquires the revision through the build/verification step; a
+request outside that policy is surfaced as a decision. `propose_decision`
+records an impactful, uncovered decision for the user as a redacted proposal under
+the component state directory and ends the run by placing the component in an
+awaiting-decision state; the run harness transitions the task to that state and
+never runs verification or jumps to completed. A decision never writes a protected
+intent document, and it never blocks on a trivial matter. A run succeeds only when
+the agent reports completion, no decision worthy of intervention remains surfaced,
+and every authorized effect applied. Once such a decision is accepted, `TODOS.yaml` MUST gain the tasks needed
 to implement it and `IMPL.md` MUST become stale; the component then remains in the
 awaiting-decision state until an updated advisory review is performed and accepted,
 after which `IMPL.md` is rederived from the code.

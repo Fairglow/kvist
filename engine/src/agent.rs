@@ -18,7 +18,10 @@ use std::{
 
 use crate::{
     KvistError, Result,
-    authoring::{self, AuthoringPlan, BrokerPolicy, CheckedIntent, DroppedIntent},
+    authoring::{
+        self, AuthoringPlan, BrokerPolicy, CheckedIntent, DependencyRequest, DroppedIntent,
+        ProposedDecision,
+    },
     config::{AgentProfile, SandboxConfig, VcsSelection},
     sandbox,
     task_queue::Timestamp,
@@ -47,6 +50,9 @@ pub struct AgentRunResult {
     pub stderr: String,
     pub timed_out: bool,
     pub output_limit_exceeded: bool,
+    /// True when the run paused for an impactful, uncovered decision the human
+    /// must resolve; it is neither a success nor a failure.
+    pub surfaced_decision: bool,
 }
 
 /// Inputs for one sandboxed agent task.
@@ -94,6 +100,11 @@ struct RunTurn {
     effects: Vec<EffectRecord>,
     /// Brokered intents the model proposed that were not authorized.
     drops: Vec<DroppedIntent>,
+    /// Decisions surfaced for the human this turn; non-empty means the run must
+    /// pause in awaiting-decision and apply no effects from this turn.
+    surfaced_decisions: Vec<ProposedDecision>,
+    /// In-policy dependency requests recorded for acquisition this turn.
+    accepted_requests: Vec<DependencyRequest>,
 }
 
 /// A resolved model identity plus the command template and system prompt for one selection.
@@ -1089,6 +1100,58 @@ pub fn execute_agent(
         // 2. Broker: reduce untrusted intents to capability-bound effects.
         let plan = authoring::authorize_turn(request.target_dir, &turn, &BrokerPolicy::default());
 
+        // 2a. An impactful, uncovered decision pauses the run for the human
+        //     before any effect applies: record each surfaced decision as durable
+        //     evidence and stop the run without applying this turn's effects. A
+        //     decision takes precedence over a dropped intent so a decision-worthy
+        //     issue is never masked by a turn failure; the turn still records the
+        //     dropped intents for the evidence trail.
+        if !plan.decisions.is_empty() {
+            let mut recorded = Vec::with_capacity(plan.decisions.len());
+            for decision in &plan.decisions {
+                let path = record_decision_evidence(request.target_dir, decision, &redactions)?;
+                tracing::info!(
+                    task_id = %request.task_id,
+                    path = %path.display(),
+                    decision = %decision.call_id,
+                    "surfaced a decision worthy of intervention; pausing run for the human"
+                );
+                recorded.push(decision.clone());
+            }
+            run_turns.push(RunTurn {
+                turn,
+                effects: Vec::new(),
+                drops: plan.dropped.clone(),
+                surfaced_decisions: recorded,
+                accepted_requests: plan.dependency_requests.clone(),
+            });
+            return record_turn_outcome(
+                profile,
+                &request,
+                &session_id,
+                &log_path,
+                &mut log_file,
+                &redactions,
+                &run_turns,
+                None,
+            );
+        }
+
+        // 2b. In-policy dependency requests are recorded as durable evidence for
+        //     the later acquisition step; they do not stop the run, so the agent
+        //     continues without interruption.
+        let mut accepted_requests = Vec::with_capacity(plan.dependency_requests.len());
+        for dep_request in &plan.dependency_requests {
+            let path = record_dependency_evidence(request.target_dir, dep_request, &redactions)?;
+            tracing::info!(
+                task_id = %request.task_id,
+                path = %path.display(),
+                dependency = %dep_request.name,
+                "accepted an in-policy dependency request for acquisition"
+            );
+            accepted_requests.push(dep_request.clone());
+        }
+
         // 3. A dropped intent fails the turn before any effect runs: partial
         //    application would misrepresent what the model requested. The model
         //    is told what was refused so it can pursue an authorized path.
@@ -1099,6 +1162,8 @@ pub fn execute_agent(
                 turn,
                 effects: Vec::new(),
                 drops: plan.dropped,
+                surfaced_decisions: Vec::new(),
+                accepted_requests: accepted_requests.clone(),
             });
             return record_turn_outcome(
                 profile,
@@ -1124,6 +1189,8 @@ pub fn execute_agent(
                 turn,
                 effects: Vec::new(),
                 drops: Vec::new(),
+                surfaced_decisions: Vec::new(),
+                accepted_requests: accepted_requests.clone(),
             });
             break;
         }
@@ -1141,6 +1208,8 @@ pub fn execute_agent(
                 turn,
                 effects: Vec::new(),
                 drops: Vec::new(),
+                surfaced_decisions: Vec::new(),
+                accepted_requests: accepted_requests.clone(),
             });
             return record_turn_outcome(
                 profile,
@@ -1197,6 +1266,8 @@ pub fn execute_agent(
                 turn,
                 effects,
                 drops: Vec::new(),
+                surfaced_decisions: Vec::new(),
+                accepted_requests: accepted_requests.clone(),
             });
             return record_turn_outcome(
                 profile,
@@ -1219,6 +1290,8 @@ pub fn execute_agent(
             turn,
             effects,
             drops: Vec::new(),
+            surfaced_decisions: Vec::new(),
+            accepted_requests: accepted_requests.clone(),
         });
     }
 
@@ -1296,16 +1369,30 @@ fn record_turn_outcome(
         .iter()
         .flat_map(|run_turn| run_turn.drops.iter().cloned())
         .collect();
+    let all_decisions: Vec<ProposedDecision> = run_turns
+        .iter()
+        .flat_map(|run_turn| run_turn.surfaced_decisions.iter().cloned())
+        .collect();
+    let all_accepted_requests: Vec<DependencyRequest> = run_turns
+        .iter()
+        .flat_map(|run_turn| run_turn.accepted_requests.iter().cloned())
+        .collect();
     let last_turn = run_turns.last().map(|run_turn| run_turn.turn.clone());
 
     let turn_ok = last_turn
         .as_ref()
         .is_some_and(|turn| !turn.text.trim().is_empty() || !turn.tool_intents.is_empty());
+    // A surfaced decision pauses the run for the human; it is neither a success
+    // nor a failure, so force success off and report it separately.
+    // A surfaced decision pauses the run for the human; it is neither a success
+    // nor a failure, so force success off and report it separately.
+    let surfaced_decision = !all_decisions.is_empty();
     let success = last_turn.is_some()
         && turn_ok
         && failure.is_none()
         && all_dropped.is_empty()
-        && all_effects.iter().all(|record| record.applied);
+        && all_effects.iter().all(|record| record.applied)
+        && !surfaced_decision;
 
     let stdout = redact_bounded(
         last_turn
@@ -1371,6 +1458,28 @@ fn record_turn_outcome(
             log.push_str(&format!(
                 "dropped call {} (tool `{}`): {}\n",
                 dropped.call_id, dropped.tool, dropped.reason
+            ));
+        }
+    }
+    if !all_decisions.is_empty() || !all_accepted_requests.is_empty() {
+        log.push_str("\n--- surfaced decisions and dependency requests ---\n");
+        for decision in &all_decisions {
+            log.push_str(&format!(
+                "decision {id} ({summary}): {why}\n",
+                id = decision.call_id,
+                summary = decision.summary,
+                why = decision.why,
+            ));
+            if let Some(patch) = &decision.patch {
+                log.push_str(&format!("  patch:\n{}\n", patch));
+            }
+        }
+        for request in &all_accepted_requests {
+            log.push_str(&format!(
+                "dependency {} -> {} ({})\n",
+                request.name,
+                request.origin,
+                request.reason.as_deref().unwrap_or("accepted")
             ));
         }
     }
@@ -1481,6 +1590,7 @@ fn record_turn_outcome(
         stderr,
         timed_out,
         output_limit_exceeded,
+        surfaced_decision,
     })
 }
 
@@ -1515,6 +1625,101 @@ fn ensure_real_directory(path: &Path, operation: &'static str) -> Result<()> {
             source,
         }),
     }
+}
+
+/// The component-state subdirectory that holds brokered, non-effect evidence:
+/// surfaced decisions and accepted dependency requests. It lives under `.kvist`
+/// so it is Kvist-managed state, never writable by the model through a tool.
+const AUTHORING_EVIDENCE_DIR: &str = "authoring";
+
+/// Ensures the named authoring-evidence subdirectory exists without following a
+/// link, creating the `.kvist/authoring` parent chain first. Reuses the same
+/// real-directory guard as the log directory so a link at any level is refused.
+fn ensure_authoring_evidence_dir(target_dir: &Path, leaf: &str) -> Result<PathBuf> {
+    let kvist_dir = target_dir.join(".kvist");
+    ensure_real_directory(&kvist_dir, "create agent state directory")?;
+    let authoring_dir = kvist_dir.join(AUTHORING_EVIDENCE_DIR);
+    ensure_real_directory(&authoring_dir, "create authoring evidence directory")?;
+    let leaf_dir = authoring_dir.join(leaf);
+    ensure_real_directory(&leaf_dir, "create authoring evidence directory")?;
+    Ok(leaf_dir)
+}
+
+/// Records a surfaced decision as durable, redacted evidence under the component
+/// state directory. It never writes a protected intent document; it only persists
+/// a bounded JSON proposal the human can review. Failures to persist are surfaced
+/// as a run failure so an unreadable state directory cannot silently lose a
+/// decision.
+fn record_decision_evidence(
+    target_dir: &Path,
+    decision: &ProposedDecision,
+    redactions: &[String],
+) -> Result<PathBuf> {
+    let proposals_dir = ensure_authoring_evidence_dir(target_dir, "proposals")?;
+    let redacted = ProposedDecision {
+        call_id: redact(&decision.call_id, redactions),
+        summary: redact(&decision.summary, redactions),
+        why: redact(&decision.why, redactions),
+        patch: decision
+            .patch
+            .as_ref()
+            .map(|patch| redact(patch, redactions)),
+    };
+    let payload = serde_json::to_string_pretty(&redacted).map_err(|source| {
+        KvistError::AuthoringEffectFailed {
+            call_id: decision.call_id.clone(),
+            reason: format!("cannot serialize the surfaced proposal: {source}"),
+        }
+    })?;
+    let path = proposals_dir.join(format!("{}.json", decision.call_id));
+    write_atomic(&path, payload)?;
+    Ok(path)
+}
+
+/// Records an accepted, in-policy dependency request as durable, redacted
+/// evidence under the component state directory so the later acquisition step has
+/// an exact, inspectable record of what the agent requested and why it was
+/// allowed.
+fn record_dependency_evidence(
+    target_dir: &Path,
+    request: &DependencyRequest,
+    redactions: &[String],
+) -> Result<PathBuf> {
+    let authoring_dir = ensure_authoring_evidence_dir(target_dir, "dependencies")?;
+    let redacted = DependencyRequest {
+        call_id: redact(&request.call_id, redactions),
+        name: redact(&request.name, redactions),
+        origin: redact(&request.origin, redactions),
+        reason: request
+            .reason
+            .as_ref()
+            .map(|reason| redact(reason, redactions)),
+    };
+    let payload = serde_json::to_string_pretty(&redacted).map_err(|source| {
+        KvistError::AuthoringEffectFailed {
+            call_id: request.call_id.clone(),
+            reason: format!("cannot serialize the accepted dependency request: {source}"),
+        }
+    })?;
+    let path = authoring_dir.join(format!("{}.json", request.call_id));
+    write_atomic(&path, payload)?;
+    Ok(path)
+}
+
+/// Writes bytes to `path` atomically via a temp file in the same directory and a
+/// rename, so a reader never observes a half-written proposal.
+fn write_atomic(path: &Path, payload: String) -> Result<()> {
+    let tmp = path.with_extension("tmp");
+    fs::write(&tmp, payload.as_bytes()).map_err(|source| KvistError::Io {
+        operation: "write authoring evidence",
+        path: tmp.clone(),
+        source,
+    })?;
+    fs::rename(&tmp, path).map_err(|source| KvistError::Io {
+        operation: "commit authoring evidence",
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 fn redaction_values(profile: &AgentProfile, sandbox_config: &SandboxConfig) -> Vec<String> {

@@ -200,9 +200,14 @@ policy, it MUST NOT be applied automatically. It is instead surfaced to the huma
 as a blocking decision and placed the component in an awaiting-decision state
 until the human approves it, rejects it, or narrows the policy.
 
-Current implementation status: acquisition remains a distinct, engine-planned but
-not-yet-live phase; agent-driven requests that auto-fetch within policy are target
-behavior.
+Current implementation status (phase 4): the broker accepts the
+`request_dependency` tool, evaluates each origin against the dependency policy,
+records an in-policy request as durable evidence so the agent continues without
+interruption, and surfaces an out-of-policy request as a decision that places the
+component in an awaiting-decision state. The distinct acquisition phase that
+auto-fetches an in-policy revision and promotes an immutable generation remains a
+documented follow-up, so an in-policy request is recorded for acquisition rather
+than fetched inline.
 
 ### REQ-SUPERVISED-EXECUTION
 
@@ -449,10 +454,15 @@ and the component becomes valid again. Accepting a proposal MUST NOT skip the
 review gate, and `IMPL.md` revision is a staleness cause so changing it marks the
 component stale.
 
-Current implementation status: there is no awaiting-decision task state and no
-agent-driven decision surfacing today; both are target behavior. The existing
-`propose intent`/`derive draft` path provides the no-clobber draft mechanism this
-extends.
+Current implementation status (phase 4): the `AwaitingDecision` task state exists
+and the broker accepts the `propose_decision` tool; a surfaced decision ends the
+run and the run harness transitions the task to awaiting-decision (never running
+verification or jumping to completed), recording the proposal as a redacted patch
+under the component state directory. Accepting a proposal still must propagate the
+decision to `TODOS.yaml`, invalidate `IMPL.md`, and require an updated advisory
+review before the component becomes valid again; the harness pauses the task and
+defers that finalization to the human. The existing `propose intent`/`derive
+draft` path provides the no-clobber draft mechanism this extends.
 
 ### REQ-CONTRACT-VERIFICATION
 
@@ -482,10 +492,13 @@ explicitly draft rather than inferred truth.
   invocation.
 - Advisory document review, observed-intent proposal, and contract-clause
   traceability are target requirements, not claims about the current CLI.
-- Multi-turn agent execution, whole-component-minus-exclusions writing scope,
-  bounded whole-project reading, agent-driven dependency requests, and
-  decision-driven awaiting-decision states are target requirements, not claims
-  about the current CLI.
+- Multi-turn agent execution, bounded whole-project reading, decision-driven
+  awaiting-decision states, and the `propose_decision`/`request_dependency`
+  tools (request, policy evaluation, and run-harness pause) are implemented and
+  claimed by the current CLI. Whole-component-minus-exclusions writing scope
+  (write at the component root for `Cargo.toml`/`deny.toml`) and agent-driven
+  dependency requests that auto-fetch an in-policy revision remain target
+  requirements, not claims about the current CLI.
 - Configuration is limited to 64 KiB. Component Markdown and YAML artifacts
   read by the engine are limited to 1 MiB.
 - Traversal depth, directory count, component count, entries per directory,

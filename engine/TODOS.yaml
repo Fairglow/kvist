@@ -2387,3 +2387,101 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "phase-4-write-tests"
+    title: "Define failing tests for proposal and dependency-request tools"
+    description: "Write failing broker unit tests for the decide/dependency classification and dependency-origin policy and write failing loop tests for the decision-pause path, plus a dogfood integration test that drives the multi-turn loop with a mock gateway that proposes a decision."
+    context: "Phase 3 drives a bounded multi-turn loop but only brokers two write tools; an impactful uncovered decision or an out-of-policy dependency request cannot yet pause the run for the human."
+    purpose: "Establish executable evidence for the propose_decision and request_dependency tools, the awaiting-decision run-harness transition, and the dependency-origin policy before their implementation, so a hostile or buggy model cannot wedge the broker nor escape the scope."
+    expected_outcome: "Tests cover propose_decision classification and redacted-patch evidence, request_dependency in/out-of-policy routing, the closed ALLOWED_TOOLS enumeration, the decision-pause ordering over write effects, surfaced_decision on the run result, and the awaiting-decision task transition in the harness."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-SURFACING"
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-REQUEST"
+      - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
+      - "CONTRACT.md#Behavioral-guarantees"
+    timestamps:
+      created_at: "2026-09-24T09:00:00Z"
+      updated_at: "2026-09-24T09:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "phase-4-implement-code"
+    title: "Implement proposal and dependency-request tools and awaiting-decision wiring"
+    description: "Add propose_decision and request_dependency to the closed broker allowlist with classification to four outcomes, the dependency-origin policy, and tool definitions; extend AuthoringPlan with decisions and dependency_requests; extend the multi-turn loop to record a redacted proposal under the component state directory, stop before applying that turn's effects, and set AgentRunResult.surfaced_decision; transition the task to awaiting-decision in the run harness; advertise the tools and scope in the prompt."
+    context: "The broker, loop, and run harness are in place; the two read-only-of-intent tools and the run-harness pause are not yet wired."
+    purpose: "Close the implemented target-tier gap so an uncovered, impactful decision or an out-of-policy dependency request pauses the run for the human without blocking on trivial issues, while normal work proceeds unattended across turns."
+    expected_outcome: "The broker classifies every intent to exactly one of read, write, dependency request, or decision; a decision ends the run in awaiting-decision; an in-policy dependency request is recorded and the agent continues; an out-of-policy request is surfaced; the tool set is advertised in the prompt; and all phase-4 tests pass."
+    kind: implement-code
+    status: pending
+    depends_on:
+      - "phase-4-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-SURFACING"
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-REQUEST"
+      - "CONTRACT.md#Security-and-authority"
+    timestamps:
+      created_at: "2026-09-24T09:00:00Z"
+      updated_at: "2026-09-24T09:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "phase-4-write-tests-2"
+    title: "Add integration tests for the awaiting-decision run path"
+    description: "Extend the dogfood boundary suite with a mock gateway mode that proposes a decision and assert the run pauses in awaiting-decision and records the proposal, and assert an in-policy dependency request continues while an out-of-policy request pauses."
+    context: "Unit tests cover the broker and loop in isolation; the end-to-end run-harness transition needs a driven loop."
+    purpose: "Establish executable evidence for the run-harness awaiting-decision transition and the dependency-policy surface decision through the full loop."
+    expected_outcome: "The dogfood suite exercises propose_decision, in-policy request_dependency, and out-of-policy request_dependency end to end."
+    kind: test
+    status: pending
+    depends_on:
+      - "phase-4-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
+      - "CONTRACT.md#Behavioral-guarantees"
+    timestamps:
+      created_at: "2026-09-24T09:00:00Z"
+      updated_at: "2026-09-24T09:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "phase-4-security-audit"
+    title: "Audit proposal and dependency-request tools"
+    description: "Source-blind security review of the broker classification funnel, the dependency-origin policy, the proposal evidence path under .kvist, the decision-pause ordering, and the closed ALLOWED_TOOLS enumeration for bypass, injection, or scope-escape findings."
+    context: "A new closed tool set and a policy evaluator change which untrusted intents are authorized and how the run pauses."
+    purpose: "Preserve independent confirmation that the broker is still the total, fail-closed source of truth and no untrusted intent can write a protected document or escape the scope."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "phase-4-write-tests-2"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-24T09:00:00Z"
+      updated_at: "2026-09-24T09:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "phase-4-compliance-review"
+    title: "Review proposal and dependency-request compliance"
+    description: "Compare source-derived proposal and dependency-request behavior and the awaiting-decision transition with the decision-surfacing and dependency-requirements contract, retaining discrepancies for human arbitration."
+    context: "New tools and a run-harness state change need independent confirmation they match the declared requirements."
+    purpose: "Preserve independent evidence that the implemented tools match their declared requirements and contract."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "phase-4-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-DECISION-SURFACING"
+      - "REQUIREMENTS.md#REQ-DEPENDENCY-REQUEST"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-24T09:00:00Z"
+      updated_at: "2026-09-24T09:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
