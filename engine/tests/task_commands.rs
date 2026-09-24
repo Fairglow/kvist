@@ -158,6 +158,27 @@ impl MockGateway {
         Self::serve(move |_| body.clone(), delay)
     }
 
+    /// Spawns a gateway that answers the first request with a `write_file` tool
+    /// call (exercising the brokered effect path) and every later request with a
+    /// final-answer text body, so a multi-turn loop runs one effect and then
+    /// completes instead of repeating the same effect to the turn bound.
+    fn spawn_write_then_fallthrough(delay: std::time::Duration) -> Self {
+        use std::sync::{Arc, Mutex};
+        let turns = Arc::new(Mutex::new(0u32));
+        Self::serve(
+            move |_request| {
+                let mut count = turns.lock().expect("mock gateway counter");
+                *count += 1;
+                if *count == 1 {
+                    GATEWAY_WRITE_FILE_BODY.to_owned()
+                } else {
+                    gateway_text_body("Implementation complete.")
+                }
+            },
+            delay,
+        )
+    }
+
     /// Spawns a gateway that echoes the request's user-message content back as a
     /// text response, so a test can observe the rendered prompt the engine sent.
     fn spawn_echo_prompt(delay: std::time::Duration) -> Self {
@@ -825,9 +846,10 @@ fn task_run_executes_successfully_and_transitions_completed() {
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
 
     // The brokered turn runs on the host against a loopback gateway; the mock
-    // answers with a write_file tool call so the full effect loop (staging and
-    // in-sandbox applier) runs.
-    let gateway = MockGateway::spawn(GATEWAY_WRITE_FILE_BODY, std::time::Duration::ZERO);
+    // answers the first turn with a write_file tool call so the full effect loop
+    // (staging and in-sandbox applier) runs, and later turns with a final answer
+    // so the multi-turn loop completes.
+    let gateway = MockGateway::spawn_write_then_fallthrough(std::time::Duration::ZERO);
     let config_toml = format!(
         r#"schema_version = 1
 component_root = "src"
@@ -951,9 +973,10 @@ fn child_task_run_mounts_the_nearest_parent_contract_read_only() {
     fs::write(child_dir.join("TODOS.yaml"), child_queue).expect("write child queue");
 
     // The brokered turn runs on the host against a loopback gateway; the mock
-    // answers with a write_file tool call so the child's effect loop runs and its
-    // authoring request mounts the nearest parent contract.
-    let gateway = MockGateway::spawn(GATEWAY_WRITE_FILE_BODY, std::time::Duration::ZERO);
+    // answers the first turn with a write_file tool call so the child's effect
+    // loop runs and its authoring request mounts the nearest parent contract,
+    // and later turns with a final answer so the multi-turn loop completes.
+    let gateway = MockGateway::spawn_write_then_fallthrough(std::time::Duration::ZERO);
     let config_toml = format!(
         r#"schema_version = 1
 component_root = "src"

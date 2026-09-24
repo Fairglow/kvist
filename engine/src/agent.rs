@@ -18,7 +18,7 @@ use std::{
 
 use crate::{
     KvistError, Result,
-    authoring::{self, AuthoringPlan, BrokerPolicy, CheckedIntent},
+    authoring::{self, AuthoringPlan, BrokerPolicy, CheckedIntent, DroppedIntent},
     config::{AgentProfile, SandboxConfig, VcsSelection},
     sandbox,
     task_queue::Timestamp,
@@ -74,6 +74,26 @@ pub fn split_command(
     target_dir: &Path,
 ) -> Result<(String, Vec<String>)> {
     agent_runtime::render_command(template, prompt, context_paths, target_dir).map_err(Into::into)
+}
+
+/// The maximum number of model turns one `task run` may perform before it stops.
+///
+/// The shared wall-clock budget is the primary limiter; this is a hard safety
+/// net so a model that keeps proposing effects can never loop forever.
+const MAX_AGENT_TURNS: usize = 64;
+
+/// The brokered and applied outcomes of one model turn within a run.
+///
+/// A run is a sequence of these; [`record_turn_outcome`](record_turn_outcome)
+/// folds them into the durable log and trajectory so intermediate turns are
+/// inspectable rather than lost.
+struct RunTurn {
+    /// The untrusted model turn.
+    turn: ModelTurn,
+    /// Authorized effects applied for this turn.
+    effects: Vec<EffectRecord>,
+    /// Brokered intents the model proposed that were not authorized.
+    drops: Vec<DroppedIntent>,
 }
 
 /// A resolved model identity plus the command template and system prompt for one selection.
@@ -598,12 +618,18 @@ fn complete_turn<T: ModelTransport>(
 /// before any transport work: no agent command ever runs on the host outside
 /// the effect sandbox. The returned turn is untrusted; its tool intents are
 /// brokered by [`crate::authoring`] before anything is applied.
+///
+/// The full conversation history is supplied by the caller so each turn feeds
+/// its assistant message and tool results back to the model; the cancellation
+/// token spans the whole run rather than a single turn.
 fn execute_host_turn(
     choice: &ModelChoice,
     profile: &AgentProfile,
     request: &AgentExecutionRequest<'_>,
     budget: &TurnBudget,
     redactions: &[String],
+    messages: &[ModelMessage],
+    cancellation: &CancellationToken,
 ) -> Result<ModelTurn> {
     if choice.is_none {
         return Err(KvistError::InvalidModelSelection {
@@ -626,16 +652,6 @@ fn execute_host_turn(
     // shifts a model slot.
     probe_gateway_reachable(&endpoint, budget)?;
 
-    let cancellation = CancellationToken::new();
-    let mut messages = Vec::new();
-    if let Some(system) = choice
-        .system_prompt
-        .as_ref()
-        .filter(|text| !text.trim().is_empty())
-    {
-        messages.push(ModelMessage::System(system.clone()));
-    }
-    messages.push(ModelMessage::User(request.prompt.to_owned()));
     // llama-server/ollama gateways route on the provider-facing model identifier,
     // which the command embeds; the selector alone is not a model the gateway
     // recognizes (it returns 400). Fall back to the selector when the command
@@ -644,7 +660,7 @@ fn execute_host_turn(
         extract_provider_model(&choice.command).unwrap_or_else(|| choice.model.clone());
     let model_request = ModelRequest {
         model: provider_model,
-        messages,
+        messages: messages.to_vec(),
         tools: authoring::authoring_tool_definitions(),
         tool_choice: ToolChoice::Auto,
         reasoning_effort: profile.thinking_effort,
@@ -662,7 +678,7 @@ fn execute_host_turn(
             .map_err(KvistError::AgentRuntime)
         },
         &model_request,
-        &cancellation,
+        cancellation,
         budget,
         request.stream_output,
         redactions,
@@ -678,6 +694,7 @@ struct EffectSandbox<'a> {
 }
 
 /// Bounded outcome of one authorized effect dispatch, for evidence.
+#[derive(Clone)]
 struct EffectRecord {
     /// Turn-local call identity echoed from the model intent.
     call_id: String,
@@ -901,6 +918,35 @@ impl TurnFailure {
 /// fail the turn (fail-closed); only a turn with no dropped intents and every
 /// effect applied succeeds. A model command that does not target a loopback
 /// gateway is refused: it is never executed on the host.
+/// Builds the failure reason for a turn whose proposed intents were not
+/// authorized and were therefore not applied.
+fn drop_reason(dropped: &[DroppedIntent]) -> String {
+    let mut reason = format!(
+        "{} proposed intent(s) were not authorized and were not applied:\n",
+        dropped.len()
+    );
+    for intent in dropped {
+        reason.push_str(&format!(
+            "- call {} (tool `{}`): {}\n",
+            intent.call_id, intent.tool, intent.reason
+        ));
+    }
+    reason.trim_end().to_owned()
+}
+
+/// Builds the failure reason for a turn whose authorized effects did not all
+/// apply; partial application would misrepresent what the model requested.
+fn apply_reason(effects: &[EffectRecord]) -> String {
+    let mut reason = String::new();
+    for record in effects.iter().filter(|record| !record.applied) {
+        reason.push_str(&format!(
+            "- effect call {} (tool `{}` -> {}): {}\n",
+            record.call_id, record.tool, record.destination, record.detail
+        ));
+    }
+    reason.trim_end().to_owned()
+}
+
 pub fn execute_agent(
     profile: &AgentProfile,
     sandbox_config: &SandboxConfig,
@@ -923,7 +969,7 @@ pub fn execute_agent(
     let session_id = format!(
         "{}_{}",
         request.task_id,
-        timestamp.to_string().replace(':', "-")
+        timestamp.to_string().replace(":", "-")
     );
     let log_path = logs_dir.join(format!("{session_id}.log"));
 
@@ -946,54 +992,38 @@ pub fn execute_agent(
 
     let redactions = redaction_values(profile, sandbox_config);
     let budget = TurnBudget::new(Duration::from_secs(profile.timeout_seconds));
-    let empty_plan = AuthoringPlan::default();
 
-    // 1. The model turn runs on the host: numeric loopback gateway only,
-    //    liveness-probed, transient availability failures retried in budget.
-    //    Streamed deltas are redacted with the same values as the durable log.
-    let turn = match execute_host_turn(&choice, profile, &request, &budget, &redactions) {
-        Ok(turn) => turn,
-        Err(source) => {
+    // One cancellation token spans the whole run so Ctrl+C aborts every turn,
+    // not just the one in flight.
+    let cancellation = CancellationToken::new();
+
+    // Rolling conversation: the system prompt plus task prompt seed the model;
+    // each turn appends its own assistant message and any tool results, so the
+    // model sees the full history as it iterates toward a final answer.
+    let mut messages: Vec<ModelMessage> = Vec::new();
+    if let Some(system) = choice
+        .system_prompt
+        .as_ref()
+        .filter(|text| !text.trim().is_empty())
+    {
+        messages.push(ModelMessage::System(system.clone()));
+    }
+    messages.push(ModelMessage::User(request.prompt.to_owned()));
+
+    let mut run_turns: Vec<RunTurn> = Vec::new();
+
+    loop {
+        if run_turns.len() >= MAX_AGENT_TURNS {
+            let reason = format!(
+                "agent did not complete within the {}-turn bound",
+                MAX_AGENT_TURNS
+            );
             tracing::warn!(
                 task_id = %request.task_id,
-                %source,
-                "agent model turn failed"
+                %reason,
+                max_turns = MAX_AGENT_TURNS,
+                "agent exceeded the multi-turn bound"
             );
-            let failure = TurnFailure::from_kvist_error(&source);
-            let result = record_turn_outcome(
-                profile,
-                &request,
-                &session_id,
-                &log_path,
-                &mut log_file,
-                &redactions,
-                None,
-                Some(&failure),
-                &empty_plan,
-                &[],
-            )?;
-            if failure.cancelled {
-                return Err(KvistError::AgentRuntime(agent_runtime::Error::Cancelled));
-            }
-            return Ok(result);
-        }
-    };
-
-    // 2. Broker: reduce untrusted intents to capability-bound effects.
-    let plan = authoring::authorize_turn(request.target_dir, &turn, &BrokerPolicy::default());
-
-    // 3. Apply every authorized effect in the effect sandbox.
-    let effects = if plan.is_empty() {
-        Vec::new()
-    } else {
-        let (Some(expected_runner), Some(probe)) = (expected_runner, probe) else {
-            // No approved runner or capability-confirmed probe: effects cannot
-            // be applied safely. Fail closed rather than skip them.
-            let reason = format!(
-                "{} authorized effect(s) cannot be applied: no approved sandbox runner or capability-confirmed probe is available for the authoring phase",
-                plan.effects.len()
-            );
-            tracing::warn!(task_id = %request.task_id, %reason);
             let failure = TurnFailure {
                 reason,
                 timed_out: false,
@@ -1007,58 +1037,190 @@ pub fn execute_agent(
                 &log_path,
                 &mut log_file,
                 &redactions,
-                Some(&turn),
+                &run_turns,
                 Some(&failure),
-                &plan,
-                &[],
+            );
+        }
+
+        // 1. The model turn runs on the host: numeric loopback gateway only,
+        //    liveness-probed, transient availability failures retried in the
+        //    shared budget. Streamed deltas are redacted with the same values
+        //    as the durable log.
+        let turn = match execute_host_turn(
+            &choice,
+            profile,
+            &request,
+            &budget,
+            &redactions,
+            &messages,
+            &cancellation,
+        ) {
+            Ok(turn) => turn,
+            Err(source) => {
+                tracing::warn!(
+                    task_id = %request.task_id,
+                    %source,
+                    "agent model turn failed"
+                );
+                let failure = TurnFailure::from_kvist_error(&source);
+                let result = record_turn_outcome(
+                    profile,
+                    &request,
+                    &session_id,
+                    &log_path,
+                    &mut log_file,
+                    &redactions,
+                    &run_turns,
+                    Some(&failure),
+                )?;
+                if failure.cancelled {
+                    return Err(KvistError::AgentRuntime(agent_runtime::Error::Cancelled));
+                }
+                return Ok(result);
+            }
+        };
+
+        // Feed the assistant message back so the model observes its own output.
+        messages.push(ModelMessage::Assistant {
+            text: turn.text.clone(),
+            tool_intents: turn.tool_intents.clone(),
+        });
+
+        // 2. Broker: reduce untrusted intents to capability-bound effects.
+        let plan = authoring::authorize_turn(request.target_dir, &turn, &BrokerPolicy::default());
+
+        // 3. A dropped intent fails the turn before any effect runs: partial
+        //    application would misrepresent what the model requested. The model
+        //    is told what was refused so it can pursue an authorized path.
+        if !plan.dropped.is_empty() {
+            let reason = drop_reason(&plan.dropped);
+            tracing::warn!(task_id = %request.task_id, %reason);
+            run_turns.push(RunTurn {
+                turn,
+                effects: Vec::new(),
+                drops: plan.dropped,
+            });
+            return record_turn_outcome(
+                profile,
+                &request,
+                &session_id,
+                &log_path,
+                &mut log_file,
+                &redactions,
+                &run_turns,
+                Some(&TurnFailure {
+                    reason,
+                    timed_out: false,
+                    output_limit_exceeded: false,
+                    cancelled: false,
+                }),
+            );
+        }
+
+        // No intents at all: the model produced a final answer rather than
+        // another action. Complete the run.
+        if plan.effects.is_empty() {
+            run_turns.push(RunTurn {
+                turn,
+                effects: Vec::new(),
+                drops: Vec::new(),
+            });
+            break;
+        }
+
+        // Authorized effects, but no approved sandbox runner or
+        // capability-confirmed probe: they cannot be applied safely. Fail
+        // closed rather than skip them.
+        let (Some(expected_runner), Some(probe)) = (expected_runner, probe) else {
+            let reason = format!(
+                "{} authorized effect(s) cannot be applied: no approved sandbox runner or capability-confirmed probe is available for the authoring phase",
+                plan.effects.len()
+            );
+            tracing::warn!(task_id = %request.task_id, %reason);
+            run_turns.push(RunTurn {
+                turn,
+                effects: Vec::new(),
+                drops: Vec::new(),
+            });
+            return record_turn_outcome(
+                profile,
+                &request,
+                &session_id,
+                &log_path,
+                &mut log_file,
+                &redactions,
+                &run_turns,
+                Some(&TurnFailure {
+                    reason,
+                    timed_out: false,
+                    output_limit_exceeded: false,
+                    cancelled: false,
+                }),
             );
         };
+
         let sandbox_context = EffectSandbox {
             config: sandbox_config,
             expected_runner,
             probe,
         };
-        apply_authoring_effects(
+        let effects = apply_authoring_effects(
             profile,
             &sandbox_context,
             &request,
             &plan,
             &turn,
             &session_id,
-        )?
-    };
+        )?;
 
-    // 4. A dropped intent or an unapplied effect fails the turn: partial
-    //    application would misrepresent what the model requested.
-    let failure = if plan.dropped.is_empty() && effects.iter().all(|record| record.applied) {
-        None
-    } else {
-        let mut reason = String::new();
-        if !plan.dropped.is_empty() {
-            reason.push_str(&format!(
-                "{} proposed intent(s) were not authorized and were not applied:\n",
-                plan.dropped.len()
-            ));
-            for dropped in &plan.dropped {
-                reason.push_str(&format!(
-                    "- call {} (tool `{}`): {}\n",
-                    dropped.call_id, dropped.tool, dropped.reason
-                ));
-            }
+        // Feed each effect's outcome back to the model as a tool result so it
+        // can react to a failed or skipped write on a later turn.
+        for record in &effects {
+            let content = if record.applied {
+                "applied".to_owned()
+            } else {
+                format!("did not apply: {}", record.detail)
+            };
+            messages.push(ModelMessage::ToolResult {
+                call_id: record.call_id.clone(),
+                name: record.tool.clone(),
+                content,
+            });
         }
-        for record in effects.iter().filter(|record| !record.applied) {
-            reason.push_str(&format!(
-                "- effect call {} (tool `{}` -> {}): {}\n",
-                record.call_id, record.tool, record.destination, record.detail
-            ));
+
+        // An unapplied effect fails the turn: partial application would
+        // misrepresent what the model requested.
+        if effects.iter().any(|record| !record.applied) {
+            let reason = apply_reason(&effects);
+            tracing::warn!(task_id = %request.task_id, %reason);
+            run_turns.push(RunTurn {
+                turn,
+                effects,
+                drops: Vec::new(),
+            });
+            return record_turn_outcome(
+                profile,
+                &request,
+                &session_id,
+                &log_path,
+                &mut log_file,
+                &redactions,
+                &run_turns,
+                Some(&TurnFailure {
+                    reason,
+                    timed_out: false,
+                    output_limit_exceeded: false,
+                    cancelled: false,
+                }),
+            );
         }
-        Some(TurnFailure {
-            reason: reason.trim_end().to_owned(),
-            timed_out: false,
-            output_limit_exceeded: false,
-            cancelled: false,
-        })
-    };
+
+        run_turns.push(RunTurn {
+            turn,
+            effects,
+            drops: Vec::new(),
+        });
+    }
 
     let result = record_turn_outcome(
         profile,
@@ -1067,10 +1229,8 @@ pub fn execute_agent(
         &log_path,
         &mut log_file,
         &redactions,
-        Some(&turn),
-        failure.as_ref(),
-        &plan,
-        &effects,
+        &run_turns,
+        None,
     )?;
 
     if result.success {
@@ -1078,6 +1238,7 @@ pub fn execute_agent(
             task_id = %request.task_id,
             tokens_input = ?result.tokens_input,
             tokens_output = ?result.tokens_output,
+            total_turns = run_turns.len(),
             log_path = %result.log_path.display(),
             "agent execution completed successfully"
         );
@@ -1110,7 +1271,9 @@ pub fn execute_agent(
 /// Called exactly once per run, on the success and failure paths alike, so
 /// evidence can never diverge between them: stdout carries the model's text,
 /// stderr carries the failure diagnostic (empty on a clean run), and the log
-/// records both plus the broker's decision and every effect's outcome.
+/// records both plus the broker's decision and every effect's outcome across
+/// every turn. The run succeeds only when the final turn is a usable answer,
+/// no proposed intent was dropped, and every authorized effect applied.
 #[allow(clippy::too_many_arguments)]
 fn record_turn_outcome(
     profile: &AgentProfile,
@@ -1119,21 +1282,36 @@ fn record_turn_outcome(
     log_path: &Path,
     log_file: &mut fs::File,
     redactions: &[String],
-    turn: Option<&ModelTurn>,
+    run_turns: &[RunTurn],
     failure: Option<&TurnFailure>,
-    plan: &AuthoringPlan,
-    effects: &[EffectRecord],
 ) -> Result<AgentRunResult> {
-    let turn_ok =
-        turn.is_some_and(|turn| !turn.text.trim().is_empty() || !turn.tool_intents.is_empty());
-    let success = turn.is_some()
+    // The final turn is the run's answer; the earlier turns are the steps that
+    // led to it. Aggregate effects and dropped intents across the whole run so
+    // the evidence is complete regardless of which turn produced them.
+    let all_effects: Vec<EffectRecord> = run_turns
+        .iter()
+        .flat_map(|run_turn| run_turn.effects.iter().cloned())
+        .collect();
+    let all_dropped: Vec<DroppedIntent> = run_turns
+        .iter()
+        .flat_map(|run_turn| run_turn.drops.iter().cloned())
+        .collect();
+    let last_turn = run_turns.last().map(|run_turn| run_turn.turn.clone());
+
+    let turn_ok = last_turn
+        .as_ref()
+        .is_some_and(|turn| !turn.text.trim().is_empty() || !turn.tool_intents.is_empty());
+    let success = last_turn.is_some()
         && turn_ok
         && failure.is_none()
-        && plan.dropped.is_empty()
-        && effects.iter().all(|record| record.applied);
+        && all_dropped.is_empty()
+        && all_effects.iter().all(|record| record.applied);
 
     let stdout = redact_bounded(
-        turn.map(|turn| turn.text.as_str()).unwrap_or_default(),
+        last_turn
+            .as_ref()
+            .map(|turn| turn.text.as_str())
+            .unwrap_or_default(),
         redactions,
         profile.max_output_bytes,
     );
@@ -1145,12 +1323,19 @@ fn record_turn_outcome(
         profile.max_output_bytes,
     );
     let timed_out = failure.is_some_and(|failure| failure.timed_out)
-        || effects.iter().any(|record| record.timed_out);
+        || all_effects.iter().any(|record| record.timed_out);
     let output_limit_exceeded = failure.is_some_and(|failure| failure.output_limit_exceeded)
-        || effects.iter().any(|record| record.output_limit_exceeded);
+        || all_effects
+            .iter()
+            .any(|record| record.output_limit_exceeded);
 
     let mut log = String::new();
-    if let Some(turn) = turn {
+    for (index, run_turn) in run_turns.iter().enumerate() {
+        if index > 0 {
+            log.push_str("\n\n");
+        }
+        let turn = &run_turn.turn;
+        log.push_str(&format!("turn {}:\n", index + 1));
         if let Some(reasoning) = turn
             .reasoning
             .as_deref()
@@ -1167,9 +1352,9 @@ fn record_turn_outcome(
             }
         }
     }
-    if !effects.is_empty() || !plan.dropped.is_empty() {
+    if !all_effects.is_empty() || !all_dropped.is_empty() {
         log.push_str("\n--- authoring broker ---\n");
-        for record in effects {
+        for record in &all_effects {
             if record.applied {
                 log.push_str(&format!(
                     "applied {} -> {}\n",
@@ -1182,7 +1367,7 @@ fn record_turn_outcome(
                 ));
             }
         }
-        for dropped in &plan.dropped {
+        for dropped in &all_dropped {
             log.push_str(&format!(
                 "dropped call {} (tool `{}`): {}\n",
                 dropped.call_id, dropped.tool, dropped.reason
@@ -1205,16 +1390,13 @@ fn record_turn_outcome(
             source,
         })?;
 
-    let tokens_input = turn
-        .and_then(|turn| turn.usage)
-        .map(|usage| usage.input_tokens as usize);
-    let tokens_output = turn
-        .and_then(|turn| turn.usage)
-        .map(|usage| usage.output_tokens as usize);
+    let usage = last_turn.and_then(|turn| turn.usage);
+    let tokens_input = usage.map(|usage| usage.input_tokens as usize);
+    let tokens_output = usage.map(|usage| usage.output_tokens as usize);
 
     // Record the structured session trajectory journal: one dispatch/result
-    // pair per applied-or-failed effect, so `state_mutated` reflects effects
-    // that actually ran rather than the overall turn outcome.
+    // pair per applied-or-failed effect across every turn, so `state_mutated`
+    // reflects effects that actually ran rather than the overall turn outcome.
     let runs_dir = request.target_dir.join(".kvist").join("runs");
     let trajectory_path = runs_dir.join(format!("{session_id}.trajectory.jsonl"));
     let recorder = agent_runtime::TrajectoryRecorder::new(&trajectory_path);
@@ -1227,58 +1409,66 @@ fn record_turn_outcome(
         task_id: request.task_id.to_string(),
         timestamp: now_ts,
     });
-    let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::TurnStart {
-        turn: 1,
-        timestamp: now_ts,
-    });
-    let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::PromptEval {
-        turn: 1,
-        cached_tokens: None,
-        new_tokens: tokens_input.map(|tokens| tokens as u64),
-        eval_duration_ms: None,
-    });
-    for record in effects {
-        let args = serde_json::json!({ "destination": record.destination });
-        let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::ToolDispatch {
-            turn: 1,
-            call_id: record.call_id.clone(),
-            tool: record.tool.clone(),
-            args: args.clone(),
-            action_hash: agent_runtime::compute_action_hash(&record.tool, &args),
+
+    let mut total_tokens: u64 = 0;
+    for (index, run_turn) in run_turns.iter().enumerate() {
+        let turn = &run_turn.turn;
+        let turn_number = index + 1;
+        let usage = turn.usage;
+        let new_tokens = usage.map(|usage| usage.input_tokens);
+        let output_tokens = usage.map(|usage| usage.output_tokens);
+        total_tokens += new_tokens.unwrap_or(0) + output_tokens.unwrap_or(0);
+
+        let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::TurnStart {
+            turn: turn_number,
+            timestamp: now_ts,
         });
-        let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::ToolResult {
-            turn: 1,
-            call_id: record.call_id.clone(),
-            tool: record.tool.clone(),
-            stdout: if record.applied {
-                "applied".to_owned()
-            } else {
-                String::new()
-            },
-            stderr: redact_bounded(&record.detail, redactions, profile.max_output_bytes),
-            exit_code: if record.applied { 0 } else { 1 },
-            bytes: record.detail.len(),
-            state_mutated: record.applied,
+        let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::PromptEval {
+            turn: turn_number,
+            cached_tokens: None,
+            new_tokens,
+            eval_duration_ms: None,
+        });
+        for record in &run_turn.effects {
+            let args = serde_json::json!({ "destination": record.destination });
+            let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::ToolDispatch {
+                turn: turn_number,
+                call_id: record.call_id.clone(),
+                tool: record.tool.clone(),
+                args: args.clone(),
+                action_hash: agent_runtime::compute_action_hash(&record.tool, &args),
+            });
+            let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::ToolResult {
+                turn: turn_number,
+                call_id: record.call_id.clone(),
+                tool: record.tool.clone(),
+                stdout: if record.applied {
+                    "applied".to_owned()
+                } else {
+                    String::new()
+                },
+                stderr: redact_bounded(&record.detail, redactions, profile.max_output_bytes),
+                exit_code: if record.applied { 0 } else { 1 },
+                bytes: record.detail.len(),
+                state_mutated: record.applied,
+            });
+        }
+        let finish_reason = serde_json::to_value(&turn.finish_reason)
+            .ok()
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "stop".to_owned());
+        let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::TurnFinish {
+            turn: turn_number,
+            output_tokens,
+            finish_reason,
         });
     }
-    let finish_reason = turn
-        .map(|turn| {
-            serde_json::to_value(&turn.finish_reason)
-                .ok()
-                .and_then(|value| value.as_str().map(str::to_owned))
-                .unwrap_or_else(|| "stop".to_owned())
-        })
-        .unwrap_or_else(|| "error".to_owned());
-    let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::TurnFinish {
-        turn: 1,
-        output_tokens: tokens_output.map(|tokens| tokens as u64),
-        finish_reason,
-    });
+
     let _ = recorder.record_event(&agent_runtime::TrajectoryEvent::SessionFinish {
         session_id: session_id.to_owned(),
         task_id: request.task_id.to_string(),
-        total_turns: 1,
-        total_tokens: (tokens_input.unwrap_or(0) + tokens_output.unwrap_or(0)) as u64,
+        total_turns: run_turns.len(),
+        total_tokens,
         success,
     });
 
@@ -1900,8 +2090,16 @@ mod tests {
             is_none: false,
         };
         let budget = TurnBudget::new(Duration::from_secs(60));
-        let error = execute_host_turn(&choice, &profile, &request, &budget, &[])
-            .expect_err("a non-loopback command must be refused");
+        let error = execute_host_turn(
+            &choice,
+            &profile,
+            &request,
+            &budget,
+            &[],
+            &[],
+            &agent_runtime::CancellationToken::new(),
+        )
+        .expect_err("a non-loopback command must be refused");
         assert!(
             matches!(error, KvistError::AgentCommandNotModelGateway { .. }),
             "unexpected error: {error:?}"
@@ -1920,8 +2118,16 @@ mod tests {
             is_none: true,
         };
         let budget = TurnBudget::new(Duration::from_secs(60));
-        let error = execute_host_turn(&choice, &profile, &request, &budget, &[])
-            .expect_err("the no-op model must be refused");
+        let error = execute_host_turn(
+            &choice,
+            &profile,
+            &request,
+            &budget,
+            &[],
+            &[],
+            &agent_runtime::CancellationToken::new(),
+        )
+        .expect_err("the no-op model must be refused");
         assert!(
             matches!(error, KvistError::InvalidModelSelection { .. }),
             "unexpected error: {error:?}"

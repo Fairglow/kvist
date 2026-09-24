@@ -86,6 +86,12 @@ impl LocalModel {
             // under the subsequent turn and fail the whole run. After the stop
             // flag is set, the next connection is the drop sentinel and ends
             // the loop.
+            //
+            // The agent runs a multi-turn loop, so the mock must eventually
+            // stop proposing effects or the run would spin to the turn bound.
+            // It proposes the fixture effect on the first turn, then returns a
+            // final answer with no tool calls so the broker completes the run.
+            let mut serve_turn: u32 = 0;
             for stream in listener.incoming() {
                 if stop_loop.load(std::sync::atomic::Ordering::Acquire) {
                     break;
@@ -127,11 +133,18 @@ impl LocalModel {
                     }
                 }
 
-                // A single `write_file` tool call for the fixture's test root.
-                // The broker authorizes it and the effect loop dispatches the
-                // in-sandbox applier for it, so every supervised run in this
-                // suite exercises the full effect path end to end.
-                let body = b"{\"model\":\"kvist-test-mock\",\"choices\":[{\"finish_reason\":\"tool_calls\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"destination\\\":\\\"tests/generated.rs\\\",\\\"content\\\":\\\"#[test]\\\\nfn generated() {}\\\\n\\\"}\"}}]}}]}";
+                // The first turn proposes a single `write_file` tool call for the
+                // fixture's test root: the broker authorizes it and the effect
+                // loop dispatches the in-sandbox applier for it, so every
+                // supervised run in this suite exercises the full effect path.
+                // Every later turn returns a final answer with no tool calls so
+                // the multi-turn loop completes.
+                serve_turn += 1;
+                let body: &[u8] = if serve_turn == 1 {
+                    &b"{\"model\":\"kvist-test-mock\",\"choices\":[{\"finish_reason\":\"tool_calls\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\\\"destination\\\":\\\"tests/generated.rs\\\",\\\"content\\\":\\\"#[test]\\\\nfn generated() {}\\\\n\\\"}\"}}]}}]}"[..]
+                } else {
+                    &b"{\"model\":\"kvist-test-mock\",\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Implementation complete.\"}}]}"[..]
+                };
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                     body.len()
