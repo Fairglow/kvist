@@ -909,7 +909,16 @@ mod tests {
         let c = completer();
         let res = complete(&c, "task transition . write-tests ");
         let got = values(&res);
-        assert_eq!(got, vec!["pending", "in-progress", "blocked", "completed"]);
+        assert_eq!(
+            got,
+            vec![
+                "pending",
+                "in-progress",
+                "blocked",
+                "awaiting-decision",
+                "completed"
+            ]
+        );
     }
 
     #[test]

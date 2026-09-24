@@ -330,13 +330,13 @@ fn validate_transition(
                 "only an in-progress task may be completed",
             ));
         }
-        TaskStatus::Blocked => match reason {
+        TaskStatus::Blocked | TaskStatus::AwaitingDecision => match reason {
             Some(reason) if !reason.trim().is_empty() => {}
             _ => {
                 return Err(transition_error(
                     task,
                     target,
-                    "`--reason` must be nonblank when status is blocked",
+                    "`--reason` must be nonblank when status is blocked or awaiting-decision",
                 ));
             }
         },
@@ -1555,6 +1555,7 @@ fn status_name(status: TaskStatus) -> &'static str {
         TaskStatus::Pending => "pending",
         TaskStatus::InProgress => "in-progress",
         TaskStatus::Blocked => "blocked",
+        TaskStatus::AwaitingDecision => "awaiting-decision",
         TaskStatus::Completed => "completed",
     }
 }
@@ -3724,7 +3725,7 @@ fn can_fence_pre_spawn(task: &Task, tasks: &[Task]) -> bool {
     match task.status {
         TaskStatus::Pending => task_is_ready(task, tasks),
         TaskStatus::InProgress => task.recovery_state.is_none(),
-        TaskStatus::Blocked | TaskStatus::Completed => false,
+        TaskStatus::Blocked | TaskStatus::AwaitingDecision | TaskStatus::Completed => false,
     }
 }
 

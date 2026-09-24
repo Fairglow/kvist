@@ -850,6 +850,7 @@ fn status_label(status: TaskStatus) -> &'static str {
         TaskStatus::Pending => "pending",
         TaskStatus::InProgress => "in-progress",
         TaskStatus::Blocked => "blocked",
+        TaskStatus::AwaitingDecision => "awaiting-decision",
         TaskStatus::Completed => "completed",
     }
 }
@@ -870,9 +871,10 @@ fn parse_task_status(value: &str) -> std::result::Result<TaskStatus, String> {
         "pending" => Ok(TaskStatus::Pending),
         "in-progress" => Ok(TaskStatus::InProgress),
         "blocked" => Ok(TaskStatus::Blocked),
+        "awaiting-decision" => Ok(TaskStatus::AwaitingDecision),
         "completed" => Ok(TaskStatus::Completed),
         other => Err(format!(
-            "unknown status `{other}`; expected pending, in-progress, blocked, or completed"
+            "unknown status `{other}`; expected pending, in-progress, blocked, awaiting-decision, or completed"
         )),
     }
 }
@@ -981,6 +983,7 @@ fn status_style(theme: Theme, status: TaskStatus) -> String {
         TaskStatus::Pending => theme.dim(status_label(status)),
         TaskStatus::InProgress => theme.cyan(status_label(status)),
         TaskStatus::Blocked => theme.red(status_label(status)),
+        TaskStatus::AwaitingDecision => theme.yellow(status_label(status)),
         TaskStatus::Completed => theme.green(status_label(status)),
     }
 }

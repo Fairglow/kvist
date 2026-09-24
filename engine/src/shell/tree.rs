@@ -546,6 +546,7 @@ mod tests {
                 "pending".to_owned(),
                 "in-progress".to_owned(),
                 "blocked".to_owned(),
+                "awaiting-decision".to_owned(),
                 "completed".to_owned()
             ]
         );

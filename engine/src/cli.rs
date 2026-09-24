@@ -495,6 +495,7 @@ pub enum TaskStatusArgument {
     Pending,
     InProgress,
     Blocked,
+    AwaitingDecision,
     Completed,
 }
 
@@ -504,6 +505,7 @@ impl From<TaskStatusArgument> for TaskStatus {
             TaskStatusArgument::Pending => Self::Pending,
             TaskStatusArgument::InProgress => Self::InProgress,
             TaskStatusArgument::Blocked => Self::Blocked,
+            TaskStatusArgument::AwaitingDecision => Self::AwaitingDecision,
             TaskStatusArgument::Completed => Self::Completed,
         }
     }
@@ -1636,6 +1638,7 @@ fn task_status_name(status: crate::task_queue::TaskStatus) -> &'static str {
         crate::task_queue::TaskStatus::Pending => "pending",
         crate::task_queue::TaskStatus::InProgress => "in-progress",
         crate::task_queue::TaskStatus::Blocked => "blocked",
+        crate::task_queue::TaskStatus::AwaitingDecision => "awaiting-decision",
         crate::task_queue::TaskStatus::Completed => "completed",
     }
 }

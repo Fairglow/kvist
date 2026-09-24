@@ -199,6 +199,10 @@ pub enum TaskStatus {
     InProgress,
     /// The task cannot progress until its recorded blocker is resolved.
     Blocked,
+    /// The task is paused pending a human decision and a subsequent
+    /// re-review and acceptance of the updated intent; it is a controlled
+    /// pause, not a failure.
+    AwaitingDecision,
     /// The task achieved its expected outcome and retains its evidence.
     Completed,
 }
@@ -211,9 +215,10 @@ impl TaskStatus {
             (Self::Pending, Self::InProgress | Self::Blocked)
                 | (
                     Self::InProgress,
-                    Self::Pending | Self::Blocked | Self::Completed
+                    Self::Pending | Self::Blocked | Self::Completed | Self::AwaitingDecision
                 )
                 | (Self::Blocked, Self::Pending | Self::InProgress)
+                | (Self::AwaitingDecision, Self::Pending | Self::InProgress)
         )
     }
 }
@@ -830,17 +835,20 @@ fn validate_task(task: &Task) -> std::result::Result<(), TaskQueueError> {
         (_, None) => {}
     }
     match (task.status, task.blocked_reason.as_deref()) {
-        (TaskStatus::Blocked, Some(reason)) if !reason.trim().is_empty() => {}
-        (TaskStatus::Blocked, _) => {
+        (TaskStatus::Blocked | TaskStatus::AwaitingDecision, Some(reason))
+            if !reason.trim().is_empty() => {}
+        (TaskStatus::Blocked | TaskStatus::AwaitingDecision, _) => {
             return Err(TaskQueueError::invalid(format!(
-                "blocked task `{}` requires a nonblank blocked_reason",
+                "{} task `{}` requires a nonblank blocked_reason",
+                task_status_name(task.status),
                 task.id
             )));
         }
         (_, None) => {}
         (_, Some(_)) => {
             return Err(TaskQueueError::invalid(format!(
-                "non-blocked task `{}` requires blocked_reason: null",
+                "{} task `{}` requires blocked_reason: null",
+                task_status_name(task.status),
                 task.id
             )));
         }
@@ -1060,6 +1068,7 @@ fn task_status_name(status: TaskStatus) -> &'static str {
         TaskStatus::Pending => "pending",
         TaskStatus::InProgress => "in-progress",
         TaskStatus::Blocked => "blocked",
+        TaskStatus::AwaitingDecision => "awaiting-decision",
         TaskStatus::Completed => "completed",
     }
 }
@@ -1163,5 +1172,69 @@ mod tests {
         // A dependency missing from the queue is never satisfied.
         let tasks = vec![task("a", TaskStatus::Pending, &["missing"])];
         assert_eq!(next_ready_task_id(&tasks), None);
+    }
+
+    fn task_with_status(id: &str, status: TaskStatus, reason: Option<&str>) -> Task {
+        let mut task = task(id, status, &[]);
+        let instant = Timestamp("2020-01-01T00:00:00Z".to_owned());
+        task.timestamps.created_at = instant.clone();
+        task.timestamps.updated_at = instant;
+        task.blocked_reason = reason.map(|reason| reason.to_owned());
+        // validate_text requires every detail field to be nonblank and trimmed;
+        // the base task() helper leaves them empty, so populate them here.
+        task.description = "detail".to_owned();
+        task.context = "detail".to_owned();
+        task.purpose = "detail".to_owned();
+        task.expected_outcome = "detail".to_owned();
+        task
+    }
+
+    #[test]
+    fn awaiting_decision_allows_pause_and_resume_transitions() {
+        // A running task may pause for a decision, and resume or reset after it.
+        let mut status = TaskStatus::InProgress;
+        assert!(status.can_transition_to(TaskStatus::AwaitingDecision));
+        status = TaskStatus::AwaitingDecision;
+        assert!(status.can_transition_to(TaskStatus::InProgress));
+        assert!(status.can_transition_to(TaskStatus::Pending));
+        // No decision state may jump straight to completion.
+        assert!(!status.can_transition_to(TaskStatus::Completed));
+        // The pause is only reachable from active work, not a clean pending.
+        assert!(!TaskStatus::Pending.can_transition_to(TaskStatus::AwaitingDecision));
+    }
+
+    #[test]
+    fn awaiting_decision_task_is_never_ready() {
+        // A paused task is not the next ready task; the pending sibling is.
+        let tasks = vec![
+            task_with_status("a", TaskStatus::AwaitingDecision, Some("reason")),
+            task("b", TaskStatus::Pending, &[]),
+        ];
+        assert_eq!(next_ready_task_id(&tasks), Some("b".to_owned()));
+    }
+
+    #[test]
+    fn awaiting_decision_requires_a_nonblank_reason() {
+        // Without a reason the pause is not actionable and is invalid.
+        assert!(validate_task(&task_with_status("a", TaskStatus::AwaitingDecision, None)).is_err());
+        // With a reason it is a valid controlled pause.
+        assert!(
+            validate_task(&task_with_status(
+                "a",
+                TaskStatus::AwaitingDecision,
+                Some("awaiting decision on X")
+            ))
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn awaiting_decision_rejects_stale_completion_and_recovery_fields() {
+        // A non-completed task may not carry a completed_at.
+        let mut task = task_with_status("a", TaskStatus::AwaitingDecision, Some("reason"));
+        task.timestamps.completed_at = Some(Timestamp("2020-01-01T00:00:00Z".to_owned()));
+        assert!(validate_task(&task).is_err());
+        task.timestamps.completed_at = None;
+        assert!(validate_task(&task).is_ok());
     }
 }

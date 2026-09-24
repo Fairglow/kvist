@@ -139,6 +139,7 @@ impl DynamicState {
             task_queue::TaskStatus::Pending => "pending",
             task_queue::TaskStatus::InProgress => "in-progress",
             task_queue::TaskStatus::Blocked => "blocked",
+            task_queue::TaskStatus::AwaitingDecision => "awaiting-decision",
             task_queue::TaskStatus::Completed => "completed",
         };
         if task.title.is_empty() {
