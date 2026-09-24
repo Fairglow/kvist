@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use crate::{
     KvistError, Result, component_documents, config, convert, discovery, import, init,
     project_state, prompt_input, reverse_discovery, status, task_commands, task_queue::TaskStatus,
-    tree, wizard,
+    tree, vendor_command, wizard,
 };
 
 /// Kvist's top-level command-line interface.
@@ -40,6 +40,18 @@ pub enum Command {
         /// Existing Rust project directory.
         #[arg(value_name = "PROJECT_DIR")]
         project_dir: PathBuf,
+    },
+    /// Populate and enforce offline vendored dependencies so Rust builds and
+    /// tests run with the sandbox network denied (ADR-0011).
+    Vendor {
+        /// Project directory containing `Cargo.lock`; defaults to the current
+        /// directory.
+        #[arg(value_name = "PROJECT_DIR", default_value = ".")]
+        project_dir: PathBuf,
+        /// Use this directory as the vendored registry instead of the default
+        /// `<project>/.kvist/vendored`.
+        #[arg(long, value_name = "PATH")]
+        vendored_dir: Option<PathBuf>,
     },
     /// Import Kvist artifacts from a Git repository.
     Import {
@@ -560,6 +572,27 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 json_string_escape(&mut message_json, &outcome.to_string());
                 CommandOutput::message(format!(
                     r#"{{"status":"success","command":"convert","project_dir":{project_dir_json},"message":{message_json}}}"#
+                ))
+            }),
+            Command::Vendor {
+                project_dir,
+                vendored_dir,
+            } => vendor_command::vendor_project(
+                &project_dir,
+                vendor_command::VendorOptions {
+                    vendored_dir,
+                    populate: true,
+                },
+            )
+            .map(|report| {
+                let mut project_dir_json = String::new();
+                let mut vendored_dir_json = String::new();
+                let mut message_json = String::new();
+                json_string_escape(&mut project_dir_json, &project_dir.to_string_lossy());
+                json_string_escape(&mut vendored_dir_json, &report.vendored_dir);
+                json_string_escape(&mut message_json, &report.to_string());
+                CommandOutput::message(format!(
+                    r#"{{"status":"success","command":"vendor","project_dir":{project_dir_json},"vendored_dir":{vendored_dir_json},"message":{message_json}}}"#
                 ))
             }),
             Command::Import {
@@ -1173,6 +1206,17 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
         match command {
             Command::Convert { project_dir } => convert::convert(&project_dir)
                 .map(|outcome| CommandOutput::message(outcome.to_string())),
+            Command::Vendor {
+                project_dir,
+                vendored_dir,
+            } => vendor_command::vendor_project(
+                &project_dir,
+                vendor_command::VendorOptions {
+                    vendored_dir,
+                    populate: true,
+                },
+            )
+            .map(|report| CommandOutput::message(report.to_string())),
             Command::Import {
                 repo_url,
                 branch,

@@ -791,6 +791,7 @@ mod tests {
             "vcs",
             "agent",
             "completions",
+            "vendor",
             "cd",
             "tasks",
             "run",
@@ -804,7 +805,7 @@ mod tests {
         ] {
             assert!(got.contains(&name), "missing {name} in {got:?}");
         }
-        assert_eq!(got.len(), 15 + 10);
+        assert_eq!(got.len(), 16 + 10);
     }
 
     #[test]

@@ -65,5 +65,10 @@ into the sandbox is not an accepted remote-agent design.
 Dependency changes require an explicit acquisition step and may need human
 approval for a new source. Initial implementation is more complex than
 unrestricted egress, but normal crates.io dependency additions remain possible
-without giving the authoring agent general network authority. Remote agents
+without giving the authoring agent general network authority.
+
+The offline verification material is supplied either by the on-the-fly
+acquisition cache or by a vendored registry that is recorded and enforced as a
+versioned artifact (ADR 0011), so sandbox builds and tests resolve everything
+with the network denied. Remote agents
 remain a later brokered capability rather than an exception to sandbox policy.

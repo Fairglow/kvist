@@ -1,4 +1,5 @@
 <!-- kvist-vision-version: 1 -->
+
 # Project Vision
 
 ## Purpose
@@ -28,6 +29,9 @@ Successful use produces:
   acceptance, with visible acknowledgement or deliberate exception;
 - task queues traceable to stable requirement and contract identifiers;
 - bounded agent execution with explicit authority;
+- builds and tests that run offline and deterministically from a vendored,
+  version-controlled dependency registry (vendor dependencies on the host, build
+  the sandbox with the network denied);
 - implementation records derived independently from source;
 - uncertain no-clobber intent proposals and comparisons derived from observed
   records without claiming to recover stakeholder intent;

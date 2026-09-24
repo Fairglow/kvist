@@ -391,10 +391,11 @@ mod tests {
             "vcs",
             "agent",
             "completions",
+            "vendor",
         ] {
             assert!(root.find_subcommand(name).is_some(), "missing {name}");
         }
-        assert_eq!(root.subcommands.len(), 15 + 10);
+        assert_eq!(root.subcommands.len(), 16 + 10);
     }
 
     #[test]

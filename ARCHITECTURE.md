@@ -39,7 +39,9 @@ trusted core.
   execution requires an independently installed approved enforcement boundary.
 - Network authority MUST be capability-specific. Dependency acquisition MAY
   reach explicitly approved sources through a bounded acquisition phase;
-  authoring and verification remain network-denied.
+  authoring and verification remain network-denied. Dependency acquisition MAY
+  provision a versioned, enforced vendored registry on the host so sandbox
+  builds and tests resolve everything offline ([ADR 0011](docs/decisions/0011-vendored-offline-builds.md)).
 - Linux is the only executable target until other backends have independent
   native tests.
 
@@ -132,8 +134,10 @@ artifact promotion, and canonical evidence. The installed sandbox runner is
 the only layer allowed to cause approved filesystem and process effects.
 Dependency acquisition is a separate bounded capability that can reach only
 configured package sources and writes only attempt-local caches and workspace
-dependency state. Remote model credentials and transport remain outside the
-effect sandbox.
+dependency state. It MAY provision a versioned, enforced vendored registry on
+the host that sandbox builds and tests resolve offline (ADR 0011), keeping every
+network toolchain operation outside the effect sandbox. Remote model credentials
+and transport remain outside the effect sandbox.
 
 **Compatibility:** every machine-consumed artifact declares an independent
 format version. Unknown or invalid semantics fail explicitly. The unreleased
@@ -189,11 +193,16 @@ model is recorded in
 [`0001-separate-component-intent.md`](docs/decisions/0001-separate-component-intent.md).
 The nonbinding review gate and its separation from compliance are recorded in
 [`0002-advisory-document-review.md`](docs/decisions/0002-advisory-document-review.md).
+Offline vendored builds are recorded in
+[`0011-vendored-offline-builds.md`](docs/decisions/0011-vendored-offline-builds.md):
+the host provisions a versioned vendored registry and manifest, and sandbox
+verification is intended to re-enforce that manifest and build Rust code fully
+offline from the vendored registry.
 
 The immediate prerequisite risks are repository-layout migration, explicit
 attempt recovery, the production Bubblewrap runner, typed sandbox grants,
-mediated dependency acquisition, supervised finalization, and exact
-accepted-change Git commits. Unattended execution remains disabled until
+mediated dependency acquisition, offline vendored builds, supervised
+finalization, and exact accepted-change Git commits. Unattended execution remains disabled until
 private workspaces and conflict-checked promotion are complete and
 independently reviewed. Jujutsu commit automation, advisory-review and
 project-level acceptance automation, remote model brokering, observed-intent

@@ -540,6 +540,44 @@ pub enum KvistError {
         /// Human-readable, non-secret reason the effect was not applied.
         reason: String,
     },
+    /// Vendored dependency material is not provisioned or cannot be used to
+    /// build offline (ADR-0011). Covers a missing vendored directory, a cargo
+    /// toolchain that is absent when provisioning is required, or a broken
+    /// vendoring configuration.
+    #[error("offline vendoring is not available for `{path}`: {reason}")]
+    VendoringUnavailable {
+        /// Project directory the vendoring operation targets.
+        path: String,
+        /// Human-readable, non-secret reason vendoring cannot proceed.
+        reason: String,
+    },
+    /// A locked project cannot build offline because one or more registry
+    /// dependencies are not present in the vendored directory (ADR-0011).
+    #[error(
+        "project `{path}` cannot build offline; {count} dependency(ies) are missing from the vendored registry: {missing}"
+    )]
+    VendoringIncomplete {
+        /// Project directory that is missing vendored material.
+        path: String,
+        /// Count of registry dependencies not found in the vendored layout.
+        count: usize,
+        /// Human-readable list of the missing `name-version` dependencies.
+        missing: String,
+    },
+    /// The recorded vendoring manifest no longer matches the current lockfile
+    /// (ADR-0011). The lockfile changed since vendoring, so a fresh vendoring
+    /// pass is required before an offline build is trusted.
+    #[error(
+        "offline vendoring is stale for `{path}`: lockfile digest `{current}` no longer matches the vendored digest `{expected}`"
+    )]
+    VendoringStale {
+        /// Project directory whose lockfile drifted from the vendored material.
+        path: String,
+        /// Current lockfile digest.
+        current: String,
+        /// Digest recorded by the vendoring manifest.
+        expected: String,
+    },
 }
 
 /// Result type used by Kvist's domain and command layers.

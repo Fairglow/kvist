@@ -26,9 +26,11 @@ constraint set injected into component work.
 - Keep authoring, dependency acquisition, verification, and promotion as
   distinct authority phases. Authoring receives only approved writable paths.
   Dependency acquisition may reach exact configured package sources and may
-  write only attempt-local dependency and workspace state. Verification runs
-  without network access. Agents must not write queues, intent, implementation
-  records, approval state, or canonical evidence.
+  write only attempt-local dependency and workspace state, and MAY provision a
+  versioned, enforced vendored registry on the host. Verification runs without
+  network access and builds offline from that vendored registry. Agents must not
+  write queues, intent, implementation records, approval state, or canonical
+  evidence.
 - Keep model networking and credentials outside the effect sandbox. Initial
   task execution may use local agents; future remote agents require a
   host-owned transport and typed tool broker rather than a mounted user home or
