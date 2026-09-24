@@ -17,6 +17,7 @@ kvist.toml
 
 # Ignore agent-runner runtime data (session journals + transcripts)
 .agent-runner/
+agent_runner/.kvist-attempts/
 
 # Ignore Gemini CLI deps
 /node_modules
