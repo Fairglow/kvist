@@ -281,13 +281,17 @@ is the content digest of the exact resolved `argv[0]` executable, exposed as a
 narrow read-only toolchain grant for that executable (a full immutable
 toolchain-set approval is later work); and resource limits use bounded defaults
 and options that never exceed fixed safe maxima, failing closed on overflow
-rather than saturating. An authoring request grants read-write access only to the
-component's explicit implementation and test roots and mounts each component
-intent and record document (`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`,
-`TODOS.yaml`, `IMPL.md`) as read-only context at a disjoint destination; the
-component root, `.kvist`, `.git`, and child or peer implementation are never
-exposed under a writable ancestor. When no safe authoring root exists, `task
-run` fails closed rather than granting the component root. It emits none of the
+rather than saturating. An authoring request grants read-write access to the whole current component
+directory minus the excluded paths — the five Kvist intent and record documents
+(`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, `IMPL.md`), the
+component's `.kvist` state and evidence, its `.git`, and any sub-component
+directory — and mounts each excluded document as read-only context at a disjoint
+destination. No writable ancestor may expose an excluded document, the
+component's `.kvist` or `.git`, or a sub-component directory. The agent may read
+the whole current project and approved dependency source within bounded per-file,
+per-turn, and directory-depth limits. When an exclusion cannot be correctly
+identified, or when no writable path remains, `task run` fails closed rather than
+granting the component root. It emits none of the
 retired `program`, `arguments`, `mounts`, or `context_files` fields. The
 independently installed runner strictly parses and validates this request and
 rejects the retired shape, but Bubblewrap enforcement is not yet integrated, so
@@ -334,27 +338,43 @@ the selected runtime and provider determine which available host authority
 they exercise. The acknowledgement does not extend to subsequent provider
 runs.
 
-When `task run` executes an external agent, the engine performs the model turn
-on the host, outside the effect sandbox. The selected model command must target
-a numeric loopback model gateway; any other command is refused before any
-transport work with `AgentCommandNotModelGateway`, so no agent command ever runs
-on the host outside the effect sandbox. The engine liveness-probes the gateway
-with a bounded TCP connect to the resolved endpoint before issuing the model
-turn. The probe issues no HTTP request, so it never loads, selects, or shifts a
-model slot; a gateway that does not accept a connection fails fast with
-`LocalModelGatewayUnreachable` and an actionable "ensure the model server is
-running and listening on `{endpoint}`" hint.
+This section describes the target multi-turn agent tier. The current tier
+performs a single, write-only authoring turn; the target tier runs a multi-turn
+loop that persists the agent's intermediate reasoning in a per-run trajectory
+and persists only the final brokered effect, preserving Kvist's durable,
+inspectable state rather than in-chat context. When `task run` executes an
+external agent, the engine performs each model turn on the host, outside the
+effect sandbox. The selected model command must target a numeric loopback model
+gateway; any other command is refused before any transport work with
+`AgentCommandNotModelGateway`, so no agent command ever runs on the host outside
+the effect sandbox. The engine liveness-probes the gateway with a bounded TCP
+connect to the resolved endpoint before issuing the model turn. The probe issues
+no HTTP request, so it never loads, selects, or shifts a model slot; a gateway
+that does not accept a connection fails fast with `LocalModelGatewayUnreachable`
+and an actionable "ensure the model server is running and listening on
+`{endpoint}" hint.
 
-The turn advertises the closed authoring tool set (`write_file`, `edit_file`).
-The broker reduces the turn's untrusted tool intents to capability-bound effects
-under a deny-by-default policy; a dropped intent fails the turn. Every
-authorized effect is applied by the engine itself inside the effect sandbox
-against a read-only staged-intent mount; the host never writes component state
-for an effect. A turn succeeds only when it produced a usable result, no intent
-was dropped, and every authorized effect applied.
+The loop advertises the closed authoring tool set (`read_file`, `write_file`,
+`edit_file`, `request_dependency`, and `propose_decision`). The broker reduces
+each turn's untrusted tool intents to capability-bound effects under a
+deny-by-default policy; a dropped intent fails that turn without ending the run.
+`read_file` is honored within the read scope and logged to the trajectory but
+produces no persisted effect. `write_file` and `edit_file` are reduced to the
+writable component scope and applied by the engine itself inside the effect
+sandbox against a read-only staged-intent mount; the host never writes component
+state for an effect, and only the final brokered effect of a run is persisted.
+`request_dependency` is routed to the dependency phase for evaluation rather than
+executed inline. `propose_decision` records an impactful question for the user
+and ends the run by placing the component in an awaiting-decision state; it never
+blocks on a trivial matter. A run succeeds only when the agent reports completion,
+no decision worthy of intervention remains surfaced, and every authorized effect
+applied. Once such a decision is accepted, `TODOS.yaml` MUST gain the tasks needed
+to implement it and `IMPL.md` MUST become stale; the component then remains in the
+awaiting-decision state until an updated advisory review is performed and accepted,
+after which `IMPL.md` is rederived from the code.
 
 The model phase runs under one shared wall-clock budget equal to the configured
-profile timeout, covering the liveness probe, every turn attempt, and every
+profile timeout, covering the liveness probe, every model and brokered turn, every read and effect, and every
 retry backoff; the per-attempt transport deadline is the remaining budget. When
 the gateway accepts but a turn still hits a transient availability failure — a
 socket connection refused, timed out, interrupted, or reset error, a

@@ -122,6 +122,37 @@ ambient home state, or child and peer implementations. Verification MAY
 receive read-only provider source and workspace metadata required by the build
 without adding those paths to authoring context or write authority.
 
+Read access is a separate, bounded, logged capability and is not governed by the
+write restrictions above; the exact bounds and exclusions are defined by
+`REQ-AGENT-READ-SCOPE`.
+
+### REQ-AGENT-READ-SCOPE
+
+An authoring agent MAY read the whole current project and the source code of
+approved dependencies, so it can navigate, understand, and correctly modify the
+component it is working on. Reads do not change state; they MUST be bounded by
+per-file size, total bytes per turn, and directory recursion depth, and MUST be
+recorded in the durable trajectory so the run remains inspectable. Reads MUST
+never surface user-owned secrets outside the project: approval material, the
+user-owned authentication secret, and ambient home state remain outside the read
+scope.
+
+### REQ-COMPONENT-WRITING-SCOPE
+
+An authoring agent MAY write any part of its own component directory, including
+component-root files such as `Cargo.toml`, `deny.toml`, and build scripts, but
+MUST NEVER write Kvist-controlled intent and record documents
+(`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, `IMPL.md`), the
+component's `.kvist` state and evidence, its `.git`, or any sub-component
+directory. A sub-component is any directory that is itself a component by the
+discovery rules; it is identified and excluded from the writable scope.
+
+`write_file` MAY fully overwrite an existing file, because every authored file is
+version controlled and its commit is gated on full human review, so any change
+can be reverted. `edit_file` remains available for targeted, identity-bound
+replacements. The broker's writable scope is the component directory minus the
+exclusions above; everything outside it is refused.
+
 ### REQ-DEPENDENCY-ACQUISITION
 
 Dependency acquisition MUST be a distinct approved phase. Cargo MUST be able to
@@ -153,6 +184,26 @@ These are primitives only: OS mount, process, DNS/address-pinning, redirect,
 and network enforcement, live `task run` wiring, and final project-cache
 generation selection remain deferred. An otherwise valid request fails closed.
 
+### REQ-DEPENDENCY-REQUEST
+
+An agent MAY request a new or changed dependency mid-task, because the required
+dependency is often only known while implementing. A request carries the crate
+identity and an exact, approved source. When the request matches the configured
+supported package sources and all bounds, the engine MUST fetch it in the distinct
+dependency-acquisition phase, bind the lockfile before/after identities, promote
+an immutable generation, and allow the agent to continue using it, all without
+human intervention. The request and its outcome MUST be recorded durably as
+evidence.
+
+When a request needs a source, registry, or git revision outside the approved
+policy, it MUST NOT be applied automatically. It is instead surfaced to the human
+as a blocking decision and placed the component in an awaiting-decision state
+until the human approves it, rejects it, or narrows the policy.
+
+Current implementation status: acquisition remains a distinct, engine-planned but
+not-yet-live phase; agent-driven requests that auto-fetch within policy are target
+behavior.
+
 ### REQ-SUPERVISED-EXECUTION
 
 The initial production-runner tier MUST be supervised. It MUST require an
@@ -162,10 +213,36 @@ success or verification success alone MUST NOT complete the task. Timeout,
 output breach, runner failure, and ambiguous interruption MUST fence or block
 the attempt with bounded evidence.
 
-Unattended execution MUST remain unavailable until private bounded workspaces,
-deterministic change sets, conflict-checked promotion, crash-recoverable
-multi-file journaling, and cleanup have independent security and compliance
-evidence.
+Unattended _work_ — a task run proceeding across many turns without per-turn
+human intervention — is the intended operating mode and does not require the
+private bounded workspaces above; only final completion and VCS commit remain
+human-gated. A mid-run decision that warrants human input does not complete the
+task: it places the component in an awaiting-decision state for further
+implementation until resolved, as defined by `REQ-DECISION-SURFACING`.
+
+### REQ-MULTI-TURN-EXECUTION
+
+A supervised task run MAY execute the agent across multiple model turns on the
+host until the agent reports completion, a decision requires human input, a fatal
+failure occurs, or the shared wall-clock budget is exhausted. The user's intent
+is at the task level or higher: scheduling MUST NOT depend on the number of
+intermediate turns, and normal work MUST proceed without per-turn human
+intervention.
+
+The shared wall-clock budget MUST equal the configured profile timeout and MUST
+cover the liveness probe, every turn attempt, every retry backoff, every read,
+and every brokered effect. The per-attempt transport deadline remains the
+remaining budget. Only transient gateway availability failures are retried a
+bounded number of times; response-level failures and surfaced decisions end the
+loop deterministically.
+
+Each turn returns untrusted intents that the engine classifies into exactly one
+of: read (bounded, state-changing, logged), write (brokered and applied in the
+effect sandbox), dependency acquisition request (evaluated against policy), or
+decision proposal (surfaced to the human). Read and write results are fed back
+into the model's continuing context; only decisions and fatal failures stop the
+loop. Completion is the agent's explicit completion signal together with a clean
+verification result; a single turn's success is not completion.
 
 ### REQ-ACCEPTED-VCS-COMMIT
 
@@ -340,6 +417,43 @@ verdict vocabulary and MUST NOT count as compliance evidence.
 The existing `reverse-discover` source-based onboarding pipeline remains
 distinct. Any contract it generates is a non-normative draft.
 
+### REQ-DECISION-SURFACING
+
+An agent MUST distinguish issues worthy of human intervention from those that are
+not. A decision is worthy of intervention only when it substantially alters the
+implementation, is not already covered by the component's `REQUIREMENTS.md`,
+`CONTRACT.md`, `DESIGN.md`, or `TODOS.yaml`, and reasonably should be covered
+there. Such a decision MUST stop the run and place the component in an
+awaiting-decision state for further implementation until the human decides and
+accepts or rejects the agent's proposal.
+
+Issues that are not worthy of intervention — approach, style, minor refactors, or
+decisions already covered by the existing intent — MUST NOT block the run. They
+are recorded and left for the post-hoc advisory comparison of the independently
+generated `IMPL.md` with the existing intent.
+
+The agent MUST understand the purpose and policy of the Kvist-controlled intent
+documents so it can judge coverage correctly. A proposal for a worthy decision
+MUST be a no-clobber draft describing the decision and the proposed change, and
+MUST be subject to human review and the normal advisory-review-or-exception
+acceptance gate. An awaiting-decision component MUST NOT accept new
+implementation work until the decision is resolved.
+
+Accepting a proposal MUST propagate the decision to the durable intent before
+work resumes. `TODOS.yaml` MUST gain every task required to implement the
+accepted change, and `IMPL.md` MUST become stale because the implementation no
+longer matches the intent. The component stays in the awaiting-decision state
+until the intent is updated, an updated advisory review is performed, and the
+human accepts the updated intent; only then is `IMPL.md` rederived from the code
+and the component becomes valid again. Accepting a proposal MUST NOT skip the
+review gate, and `IMPL.md` revision is a staleness cause so changing it marks the
+component stale.
+
+Current implementation status: there is no awaiting-decision task state and no
+agent-driven decision surfacing today; both are target behavior. The existing
+`propose intent`/`derive draft` path provides the no-clobber draft mechanism this
+extends.
+
 ### REQ-CONTRACT-VERIFICATION
 
 Kvist MUST plan stable contract-clause locators, initially using existing
@@ -368,6 +482,10 @@ explicitly draft rather than inferred truth.
   invocation.
 - Advisory document review, observed-intent proposal, and contract-clause
   traceability are target requirements, not claims about the current CLI.
+- Multi-turn agent execution, whole-component-minus-exclusions writing scope,
+  bounded whole-project reading, agent-driven dependency requests, and
+  decision-driven awaiting-decision states are target requirements, not claims
+  about the current CLI.
 - Configuration is limited to 64 KiB. Component Markdown and YAML artifacts
   read by the engine are limited to 1 MiB.
 - Traversal depth, directory count, component count, entries per directory,

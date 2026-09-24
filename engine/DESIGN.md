@@ -275,6 +275,69 @@ the current CLI contract:
 
 These capabilities are design intent, not claims of current implementation.
 
+### Planned multi-turn agent execution
+
+The current tier drives a single, write-only authoring turn: the model turn runs
+on the host, the broker reduces its intents to capability-bound effects, and a
+dropped intent or an unapplied effect fails the turn. The target tier replaces
+that single turn with a bounded multi-turn loop. This subsection is design intent
+for that loop; it does not describe current implementation, and the current
+behavior is documented in the dogfooding execution boundary above.
+
+The loop runs a closed authoring tool set: `read_file`, `write_file`,
+`edit_file`, `request_dependency`, and `propose_decision`. Each host turn is
+classified by the broker, which routes each untrusted intent to a capability-bound
+effect under a deny-by-default policy; a dropped intent fails the turn but not
+the run. The state machine advances turn by turn through a running state and
+terminates in one of complete, awaiting-decision, or fatal. A run reaches
+complete only
+when the agent reports completion, no decision worthy of intervention remains
+surfaced, and every authorized effect applied by the engine. A decision worthy of
+intervention terminates the run in awaiting-decision rather than continuing, and
+a fatal
+transport or gateway failure terminates it in fatal.
+
+Reads execute within a bounded read scope: the whole current project plus
+approved dependency source, constrained by per-file, per-turn, and directory-depth
+limits. Reads are logged to the per-run trajectory with the run's redaction
+values applied, so intermediate investigation is inspectable without being
+persisted as an effect. Only brokered write effects are applied by the engine
+inside the effect sandbox against a read-only staged-intent mount; the host never
+writes component state, and only the final brokered effect of a run is persisted,
+preserving durable, inspectable state over in-chat reasoning.
+
+The write scope is the whole current component directory minus the excluded paths
+— the five Kvist intent and record documents, the component's `.kvist` state and
+evidence, its `.git`, and any sub-component directory — with each excluded
+document mounted read-only as context. Sub-components are detected by the same
+adjacency rule used for component status, so a child never inherits a writable
+view of a sibling or of its parent. When an exclusion cannot be correctly
+identified, or when no writable path remains, the run fails closed rather than
+granting the component root.
+
+`request_dependency` is routed to the dependency phase for evaluation rather than
+executed inline. While the agent is in the acquisition phase, a request within
+policy is fetched automatically so the agent continues without interruption; a
+request outside policy is surfaced to the user as a decision worthy of
+intervention and stops the run in awaiting-decision. Policy covers the
+configured supported
+registry and exact revision origins and rejects private, link-local, loopback, and
+unverified production addresses.
+
+`propose_decision` records an impactful question for the user and ends the run by
+placing the component in an awaiting-decision state, where it remains for further
+implementation until the decision is resolved. Only decisions that substantially
+alter the implementation and are not already covered by the component's
+REQUIREMENTS, CONTRACT, DESIGN, or TODOS are worthy of intervention; trivial
+issues do not block and are left for the post-hoc advisory comparison of IMPL.md
+with the existing intent. Human finalization gates completion and commit, but the
+run itself proceeds unattended between turns; the awaiting-decision state is the
+sole in-run blocking mechanism for impactful, uncovered decisions. The running
+task holds this status while the component is paused; it is a task-level state
+distinct from failure (`blocked`). Once the decision is accepted, `TODOS.yaml`
+gains the tasks needed to implement it, `IMPL.md` becomes stale, and the component
+stays awaiting-decision until an updated advisory review is performed and accepted.
+
 ### Planned review evidence and acceptance state
 
 The initial review subject is a digest-bound bundle containing exact local
