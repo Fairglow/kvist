@@ -3471,6 +3471,7 @@ fn load_and_interpolate_template(
     component_dir: &Path,
     lang: &str,
     task: &crate::task_queue::Task,
+    write_scope: &[AttemptWriteScope],
 ) -> Result<String> {
     let _ = ensure_default_templates(component_dir);
 
@@ -3499,7 +3500,7 @@ fn load_and_interpolate_template(
     };
 
     let kind_str = format!("{:?}", task.kind);
-    let prompt = template_content
+    let mut prompt = template_content
         .replace("{id}", &task.id)
         .replace("{title}", &task.title)
         .replace("{kind}", &kind_str)
@@ -3508,7 +3509,41 @@ fn load_and_interpolate_template(
         .replace("{purpose}", &task.purpose)
         .replace("{expected_outcome}", &task.expected_outcome);
 
+    prompt.push_str(&authoring_scope_directive(write_scope));
     Ok(prompt)
+}
+
+/// A prompt directive naming the component-relative directories the model may
+/// write to, derived from the same approved write scope the broker enforces.
+///
+/// The task prompt advertises code best practices but not the authoring
+/// boundary, so a model that has never seen the scope proposes writes at the
+/// component root (which the broker then drops). Telling the model the exact
+/// boundary up front keeps its first proposal inside it. The roots are the
+/// final path component of each approved scope entry (component-relative), so
+/// the directive always matches the enforcement.
+fn authoring_scope_directive(write_scope: &[AttemptWriteScope]) -> String {
+    let mut roots: Vec<String> = write_scope
+        .iter()
+        .filter_map(|entry| {
+            Path::new(&entry.path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+        .collect();
+    roots.sort_unstable();
+    if roots.is_empty() {
+        return String::new();
+    }
+    let list: Vec<String> = roots.iter().map(|root| format!("`{root}/`")).collect();
+    format!(
+        "\nAuthoring Scope:\n\
+         - You may only create or modify files under {} within this component, using \
+         component-relative destinations (for example `src/main.rs`).\n\
+         - Do not write at the component root or anywhere outside those directories; \
+         the sandbox rejects any other destination.\n",
+        list.join(", ")
+    )
 }
 
 enum TaskRunApproval {
@@ -4162,7 +4197,8 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
 
         // 5. Build prompt
         let lang = detect_language(&context.component_dir);
-        let prompt = load_and_interpolate_template(&context.component_dir, lang, task)?;
+        let prompt =
+            load_and_interpolate_template(&context.component_dir, lang, task, &write_scope)?;
 
         tracing::info!(
             task_id = %task_id,
