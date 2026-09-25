@@ -736,10 +736,10 @@ fn dispatch_effect(
     staged_path: &Path,
 ) -> Result<crate::sandbox::ExecutionResult> {
     let mut mounts: Vec<crate::sandbox::ReadOnlyMount> = request.read_only_mounts.to_vec();
-    mounts.push(crate::sandbox::ReadOnlyMount {
-        source: staged_path.to_path_buf(),
-        destination: STAGED_INTENT_MOUNT_PATH.to_owned(),
-    });
+    mounts.push(crate::sandbox::ReadOnlyMount::file(
+        staged_path.to_path_buf(),
+        STAGED_INTENT_MOUNT_PATH.to_owned(),
+    ));
     let execution_request = crate::sandbox::ExecutionRequest {
         project_root: request.project_root,
         vcs_selection: request.vcs_selection,

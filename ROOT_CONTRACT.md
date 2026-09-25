@@ -26,8 +26,10 @@ constraint set injected into component work.
 - Keep authoring, dependency acquisition, verification, and promotion as
   distinct authority phases. Authoring receives only approved writable paths.
   Dependency acquisition may reach exact configured package sources and may
-  write only attempt-local dependency and workspace state, and MAY provision a
-  versioned, enforced vendored registry on the host. Verification runs without
+  write only attempt-local dependency and workspace state, and MAY provision
+  versioned, enforced vendored registries on the host (a language-aware model:
+  Rust enforced exactly through Cargo.lock; Python/uv, Node/npm, and Conan
+  enforced through their respective lock files). Verification runs without
   network access and builds offline from that vendored registry. Agents must not
   write queues, intent, implementation records, approval state, or canonical
   evidence.

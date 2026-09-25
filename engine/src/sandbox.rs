@@ -278,11 +278,47 @@ pub struct ExecutionRequest<'a> {
     pub policy_identity: &'a str,
 }
 
-/// One host file exposed to the sandbox at a fixed read-only path.
+/// One host path (file or directory) exposed to the sandbox at a fixed
+/// read-only path.
+///
+/// The identity is the content address bound to the approved mount plan. For a
+/// single file it is derived from the file bytes; for a directory it is an
+/// explicit identity supplied by the caller (for example the lock-file digest
+/// of a vendored registry), so large directory trees are never hashed file by
+/// file. `None` means the caller wants the identity derived from the source
+/// bytes, as for a single file.
 #[derive(Clone)]
 pub struct ReadOnlyMount {
     pub source: PathBuf,
     pub destination: String,
+    /// Explicit mount identity. `None` derives the identity from the source.
+    pub identity: Option<String>,
+}
+
+impl ReadOnlyMount {
+    /// One read-only mount whose identity is derived from the source bytes.
+    pub fn file(source: impl Into<PathBuf>, destination: impl Into<String>) -> Self {
+        Self {
+            source: source.into(),
+            destination: destination.into(),
+            identity: None,
+        }
+    }
+
+    /// One read-only mount carrying an explicit identity (used for directory
+    /// sources, whose content is catalogued by an external identity rather than
+    /// hashed file by file).
+    pub fn directory(
+        source: impl Into<PathBuf>,
+        destination: impl Into<String>,
+        identity: impl Into<String>,
+    ) -> Self {
+        Self {
+            source: source.into(),
+            destination: destination.into(),
+            identity: Some(identity.into()),
+        }
+    }
 }
 
 /// The identity of the enforcement backend confirmed by the version-one probe.
@@ -989,14 +1025,23 @@ pub fn execute_with_timeout(
             &mount.source,
             "canonicalize read-only context mount for sandbox manifest",
         )?;
-        let bytes = fs::read(&mount.source).map_err(|source_error| {
-            sandbox_error(
-                config,
-                "read approved context mount for sandbox identity",
-                source_error,
-            )
-        })?;
-        let identity = digest_label(&bytes);
+        // Directory sources carry an explicit identity (for example the
+        // lock-file digest of a vendored registry); single files derive theirs
+        // from their own bytes. Large directory trees are never hashed file by
+        // file.
+        let identity = match &mount.identity {
+            Some(identity) => identity.clone(),
+            None => {
+                let bytes = fs::read(&mount.source).map_err(|source_error| {
+                    sandbox_error(
+                        config,
+                        "read approved context mount for sandbox identity",
+                        source_error,
+                    )
+                })?;
+                digest_label(&bytes)
+            }
+        };
         grants.push(SandboxGrant {
             source,
             destination: mount.destination.clone(),

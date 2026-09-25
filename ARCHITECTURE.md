@@ -42,6 +42,9 @@ trusted core.
   authoring and verification remain network-denied. Dependency acquisition MAY
   provision a versioned, enforced vendored registry on the host so sandbox
   builds and tests resolve everything offline ([ADR 0011](docs/decisions/0011-vendored-offline-builds.md)).
+  Vendoring is language-aware (Rust, Python/`uv`, Node/`npm`, `Conan`) and
+  enforced through a single Kvist-owned entry point; a directory vendored mount
+  is identified by its lock-file digest rather than by hashing every file.
 - Linux is the only executable target until other backends have independent
   native tests.
 
@@ -195,9 +198,12 @@ The nonbinding review gate and its separation from compliance are recorded in
 [`0002-advisory-document-review.md`](docs/decisions/0002-advisory-document-review.md).
 Offline vendored builds are recorded in
 [`0011-vendored-offline-builds.md`](docs/decisions/0011-vendored-offline-builds.md):
-the host provisions a versioned vendored registry and manifest, and sandbox
-verification is intended to re-enforce that manifest and build Rust code fully
-offline from the vendored registry.
+the host provisions a versioned vendored registry and manifest for each supported
+language (Rust enforced exactly through `Cargo.lock`; Python, Node, and
+`Conan` enforced through their respective lock files), and the engine re-enforces
+that manifest via `enforce_vendoring` before an offline build is allowed. Routing
+Rust verification through the Cargo topology and mounting the read-only vendored
+registry and cargo configuration is the planned, security-sensitive integration.
 
 The immediate prerequisite risks are repository-layout migration, explicit
 attempt recovery, the production Bubblewrap runner, typed sandbox grants,

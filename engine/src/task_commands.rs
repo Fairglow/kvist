@@ -4181,19 +4181,19 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
             PathBuf::from("/workspace/component/IMPL.md"),
             PathBuf::from("/workspace/context/ROOT_CONTRACT.md"),
         ];
-        let mut read_only_mounts = vec![crate::sandbox::ReadOnlyMount {
-            source: project_dir.join("ROOT_CONTRACT.md"),
-            destination: "/workspace/context/ROOT_CONTRACT.md".to_owned(),
-        }];
+        let mut read_only_mounts = vec![crate::sandbox::ReadOnlyMount::file(
+            project_dir.join("ROOT_CONTRACT.md"),
+            "/workspace/context/ROOT_CONTRACT.md".to_owned(),
+        )];
         if queue.component.parent_contract.is_some() {
             let component_root = project_dir.join(&config.component_root);
             let (parent_component_dir, _) =
                 discovery::find_parent_component_dir(&component_root, &context.component_path)?;
             context_files.push(PathBuf::from("/workspace/context/PARENT_CONTRACT.md"));
-            read_only_mounts.push(crate::sandbox::ReadOnlyMount {
-                source: parent_component_dir.join(ComponentArtifact::Contract.filename()),
-                destination: "/workspace/context/PARENT_CONTRACT.md".to_owned(),
-            });
+            read_only_mounts.push(crate::sandbox::ReadOnlyMount::file(
+                parent_component_dir.join(ComponentArtifact::Contract.filename()),
+                "/workspace/context/PARENT_CONTRACT.md".to_owned(),
+            ));
         }
 
         // 5. Build prompt
