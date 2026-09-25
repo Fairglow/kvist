@@ -280,6 +280,20 @@ fn cargo_verification_request() -> Value {
                 "access": "read-only",
                 "purpose": "verification",
                 "identity": digest(b"verification-workspace")
+            },
+            {
+                "source": "/host/vendored/registry",
+                "destination": "/workspace/vendored",
+                "access": "read-only",
+                "purpose": "registry",
+                "identity": digest(b"vendored-registry")
+            },
+            {
+                "source": "/host/vendored/cargo-config",
+                "destination": "/workspace/.cargo",
+                "access": "read-only",
+                "purpose": "cargo-config",
+                "identity": digest(b"cargo-config")
             }
         ],
         "toolchain": {
@@ -483,6 +497,39 @@ fn accepts_the_cargo_verification_shape() {
     let request = cargo_verification_request();
     validation::parse_and_validate(&encode(&request))
         .expect("cargo verification request must parse and validate");
+}
+
+#[test]
+fn rejects_cargo_verification_without_vendored_mounts() {
+    let mut request = cargo_verification_request();
+    request["grants"]
+        .as_array_mut()
+        .expect("grants")
+        .truncate(4);
+    let error = validation::parse_and_validate(&encode(&request))
+        .expect_err("missing vendored mounts rejected");
+    assert!(
+        error.to_string().contains("Registry") || error.to_string().contains("CargoConfig"),
+        "diagnostic should name a missing vendored mount: {error}"
+    );
+}
+
+#[test]
+fn rejects_cargo_verification_vendored_mount_at_wrong_destination() {
+    let mut request = cargo_verification_request();
+    request["grants"][5]["destination"] = json!("/workspace/vendor");
+    let error = validation::parse_and_validate(&encode(&request))
+        .expect_err("wrong vendored destination rejected");
+    assert!(error.to_string().contains("/workspace/.cargo"));
+}
+
+#[test]
+fn rejects_cargo_verification_vendored_mount_not_read_only() {
+    let mut request = cargo_verification_request();
+    request["grants"][5]["access"] = json!("read-write");
+    let error = validation::parse_and_validate(&encode(&request))
+        .expect_err("writable vendored mount rejected");
+    assert!(error.to_string().contains("read-only"));
 }
 
 #[test]

@@ -5769,6 +5769,34 @@ pub fn verify_task(
             reason: "task execution requires a project-local [sandbox] configuration".to_owned(),
         })?;
     let normalized_component = normalize_component_path(component_path)?;
+    let context = validate_context(component_path)?;
+
+    // Vendored Rust verification runs `cargo test --locked` offline through the
+    // closed cargo topology; every other language keeps the generic sandbox path
+    // with its approved test command.
+    if is_rust_verification(project_dir) {
+        return finalize_verification(
+            &context,
+            task_id,
+            "cargo test --locked",
+            &crate::sandbox::run_offline_cargo_verification(
+                sandbox_config,
+                project_dir,
+                config.vcs,
+                probe,
+                policy_identity,
+                &context.component_dir,
+                crate::sandbox::ExecutionOptions {
+                    timeout: Some(std::time::Duration::from_secs(policy.timeout_seconds)),
+                    output_limit: Some(policy.max_output_bytes),
+                    live_stdout: None,
+                },
+            )?,
+            policy,
+            config,
+        );
+    }
+
     let command_str = find_test_command(&normalized_component, policy).ok_or_else(|| {
         KvistError::MissingTestCommand {
             component: component_path.to_string_lossy().into_owned(),
@@ -5782,17 +5810,11 @@ pub fn verify_task(
             source: io::Error::other("empty test command string"),
         });
     };
-    let context = validate_context(component_path)?;
     let args = arguments
         .iter()
         .map(|value| (*value).to_owned())
         .collect::<Vec<_>>();
-    let crate::sandbox::ExecutionResult {
-        output,
-        timed_out,
-        output_limit_exceeded,
-        cancelled,
-    } = crate::sandbox::execute_with_timeout(
+    let result = crate::sandbox::execute_with_timeout(
         sandbox_config,
         crate::sandbox::ExecutionRequest {
             project_root: project_dir,
@@ -5816,8 +5838,43 @@ pub fn verify_task(
         },
         &approved_runner,
     )?;
+    finalize_verification(&context, task_id, &command_str, &result, policy, config)
+}
+
+/// Whether a verification targets a vendored Rust project.
+///
+/// `detect_language_strategy` prefers Rust, so a mixed Rust workspace such as
+/// Kvist itself selects the cargo offline topology when a `Cargo.lock` is present.
+fn is_rust_verification(project_dir: &Path) -> bool {
+    matches!(
+        crate::language_vendoring::detect_language_strategy(project_dir),
+        Ok(strategy) if strategy.id() == "rust"
+    )
+}
+
+/// Build the recorded verification result from a completed sandbox execution:
+/// redact evidence, append the verification record, and return the public
+/// result. Shared by the generic and offline cargo verification paths.
+fn finalize_verification(
+    context: &TaskContext,
+    task_id: &str,
+    command: &str,
+    result: &crate::sandbox::ExecutionResult,
+    policy: &crate::config::TestPolicy,
+    config: &crate::config::ProjectConfig,
+) -> Result<VerificationResult> {
+    let crate::sandbox::ExecutionResult {
+        output,
+        timed_out,
+        output_limit_exceeded,
+        cancelled,
+    } = result;
     let redactions = evidence_redactions(config);
-    let command = redact_bounded(command_str, &redactions, MAX_VERIFICATION_EVIDENCE_BYTES);
+    let command = redact_bounded(
+        command.to_owned(),
+        &redactions,
+        MAX_VERIFICATION_EVIDENCE_BYTES,
+    );
     let stdout = redact_bounded(
         String::from_utf8_lossy(&output.stdout).into_owned(),
         &redactions,
@@ -5828,7 +5885,7 @@ pub fn verify_task(
         &redactions,
         policy.max_output_bytes.min(MAX_VERIFICATION_EVIDENCE_BYTES),
     );
-    let success = !timed_out && !output_limit_exceeded && !cancelled && output.status.success();
+    let success = !*timed_out && !*output_limit_exceeded && !*cancelled && output.status.success();
     let exit_code = output.status.code();
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let attempt_path = attempt_path(&context.component_dir, task_id)?;
@@ -5841,7 +5898,7 @@ pub fn verify_task(
             command: &command,
             success,
             exit_code,
-            timed_out,
+            timed_out: *timed_out,
             stdout: &stdout,
             stderr: &stderr,
         },
@@ -5850,7 +5907,7 @@ pub fn verify_task(
         success,
         command,
         exit_code,
-        timed_out,
+        timed_out: *timed_out,
         stdout,
         stderr,
     })
@@ -5865,7 +5922,7 @@ mod tests {
     use super::{
         MAX_ATTEMPT_JOURNAL_BYTES, MAX_SCOPE_DEPTH, MAX_SCOPE_ENTRIES, MAX_SCOPE_FILE_BYTES,
         TaskLock, Timestamp, append_encoded_attempt, digest, digest_path_tree,
-        read_attempt_journal,
+        is_rust_verification, read_attempt_journal,
     };
 
     #[test]
@@ -5907,6 +5964,22 @@ mod tests {
         assert!(
             digest_path_tree(&directory.path().join("deep")).is_err(),
             "scope traversal must stop at its configured depth"
+        );
+    }
+
+    #[test]
+    fn is_rust_verification_selects_cargo_only_for_a_lock_file() {
+        let rust = tempfile::tempdir().expect("rust project");
+        fs::write(rust.path().join("Cargo.lock"), b"version = 3\n").expect("write Cargo.lock");
+        assert!(
+            is_rust_verification(rust.path()),
+            "a Cargo.lock selects the cargo offline topology"
+        );
+
+        let empty = tempfile::tempdir().expect("empty project");
+        assert!(
+            !is_rust_verification(empty.path()),
+            "a project without Cargo.lock keeps the generic sandbox path"
         );
     }
 

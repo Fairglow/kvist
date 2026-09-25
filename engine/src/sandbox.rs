@@ -413,6 +413,11 @@ struct SandboxResources {
     max_files: u64,
     max_file_bytes: u64,
     max_scratch_bytes: u64,
+    /// Bound for a read-only approved Cargo home during Cargo phases. The
+    /// generic (system-toolchain) path leaves it unset, preserving that wire
+    /// shape; the offline Cargo verification path requires a nonzero bound.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_cache_bytes: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -441,17 +446,43 @@ struct SandboxGrant {
     identity: String,
 }
 
+/// The approved toolchain for an execution, serialized to match
+/// `kvist_sandbox_runner::protocol::Toolchain` (`system` or `cargo`).
 #[derive(Debug, Serialize)]
-struct SandboxToolchain {
-    kind: &'static str,
-    identity: String,
-    root: String,
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+enum SandboxToolchain {
+    /// A generic system toolchain rooted at an approval-bound immutable root.
+    System { identity: String, root: String },
+    /// A usable Cargo toolchain: the immutable root (cargo, rustc, rustlib,
+    /// linker) plus the exact cargo executable path that must live beneath it.
+    Cargo {
+        identity: String,
+        root: String,
+        cargo: String,
+    },
 }
 
+/// A read-only approved Cargo-home endpoint used by offline Cargo verification.
 #[derive(Debug, Serialize)]
-struct SandboxCache {
+#[serde(deny_unknown_fields)]
+struct SandboxCacheEndpoint {
     destination: String,
     identity: String,
+}
+
+/// The read-only approved Cargo home for an offline build. Shape mirrors
+/// `kvist_sandbox_runner::protocol::Cache`: the exact registry and git children
+/// of `cargo_home`, plus the approved read-only endpoint. The writable,
+/// lockfile, and promotion acquisition fields are omitted, since verification
+/// only mounts an approved, immutable Cargo home.
+#[derive(Debug, Serialize)]
+#[serde(deny_unknown_fields)]
+struct SandboxCache {
+    cargo_home: String,
+    registry: String,
+    git: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    approved: Option<SandboxCacheEndpoint>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1077,6 +1108,9 @@ pub fn execute_with_timeout(
         max_files: DEFAULT_MAX_FILES,
         max_file_bytes: DEFAULT_MAX_FILE_BYTES,
         max_scratch_bytes: DEFAULT_MAX_SCRATCH_BYTES,
+        // The generic system-toolchain path never mounts a Cargo home, so no
+        // cache bound is declared; this preserves the established wire shape.
+        max_cache_bytes: None,
     };
 
     let network = SandboxNetwork {
@@ -1125,8 +1159,7 @@ pub fn execute_with_timeout(
             mount_plan: mount_plan_identity,
         },
         grants: &grants,
-        toolchain: SandboxToolchain {
-            kind: "system",
+        toolchain: SandboxToolchain::System {
             identity: toolchain_identity,
             root: resolved_program.canonical_path.clone(),
         },
@@ -1161,6 +1194,610 @@ pub fn execute_with_timeout(
         options.output_limit,
         options.live_stdout,
     )
+}
+
+/// Sandbox destination of the writable scratch for an offline Cargo
+/// verification. Kept distinct from the verification workspace so the shared
+/// runner never observes overlapping read-only and writable destinations.
+pub const CARGO_SCRATCH_DEST: &str = "/workspace/scratch";
+/// Sandbox working directory mounted read-only as the offline verification
+/// workspace. Distinct from `CARGO_SCRATCH_DEST` and the component mount.
+const CARGO_WORKING_DIRECTORY: &str = "/workspace/component";
+/// The exact argument list an offline Cargo verification runs, appended after
+/// the resolved `cargo` path: `cargo test --locked`.
+const CARGO_VERIFY_ARGS: [&str; 2] = ["test", "--locked"];
+/// The read-only bound applied to a vendored, approved Cargo home during
+/// offline verification. Well under the shared runner's 64 GiB maximum.
+const DEFAULT_MAX_CARGO_CACHE_BYTES: u64 = 32 * 1024 * 1024 * 1024;
+/// Sandbox destination of the immutable Rust toolchain, mounted read-only.
+const CARGO_TOOLCHAIN_DEST: &str = "/workspace/toolchain";
+/// Sandbox destination of the approved, read-only Cargo-home cache. The shared
+/// runner's closed Cargo verification topology requires an approved Cargo home;
+/// the vendored registry (mounted at `VENDOR_SANDBOX_MOUNT`) is what `cargo`
+/// actually resolves dependencies from, so the approved home need only be a
+/// real, immutable directory the runner's topology can reference.
+const CARGO_CARGO_HOME_DEST: &str = "/workspace/cargo-home";
+
+/// Inputs for an offline, network-denied `cargo test --locked` verification
+/// against a vendored Rust project.
+///
+/// Every host path must be a real, non-symlink directory: `toolchain_root`
+/// contains cargo/rustc/rustlib/linker, `cargo_path` is the exact cargo
+/// executable beneath it, `cargo_home` is the approved read-only Cargo home,
+/// `vendored_registry` is the `cargo vendor` registry directory, `cargo_config`
+/// holds the offline `.cargo/config.toml`, and `scratch_host_dir` is a writable
+/// directory that becomes the target/HOME scratch inside the sandbox.
+pub struct OfflineCargoVerification<'a> {
+    pub project_root: &'a Path,
+    pub vcs_selection: VcsSelection,
+    pub toolchain_root: &'a Path,
+    pub cargo_path: &'a Path,
+    pub cargo_home: &'a Path,
+    pub vendored_registry: &'a Path,
+    pub cargo_config: &'a Path,
+    pub scratch_host_dir: &'a Path,
+    pub component_dir: &'a Path,
+    /// Lock-file digest identifying every read-only vendored mount. This is the
+    /// authoritative catalogue of the locked content, so it is both the manifest
+    /// identity and the identity of every vendored-directory mount.
+    pub lockfile_digest: String,
+    pub policy_identity: &'a str,
+    pub backend: &'a BackendIdentity,
+    pub config: &'a SandboxConfig,
+    pub expected_runner: &'a RunnerIdentity,
+}
+
+/// Build the closed version-one offline-Cargo verification request bytes.
+///
+/// Emits exactly the four-grant Cargo topology the shared runner enforces: a
+/// read-only toolchain root, a read-only approved vendored Cargo home, a writable
+/// scratch, and a read-only verification workspace, with network denied and the
+/// exact Cargo environment allowlist. The `identities_*` arguments are the
+/// approval-bound digests; the command and mount-plan identities are derived
+/// deterministically so identical inputs serialize identically. This is a pure
+/// function over on-disk paths so it can be validated against the shared runner's
+/// validator without a live execution.
+#[allow(clippy::too_many_arguments)]
+fn build_offline_cargo_verification_request(
+    config: &SandboxConfig,
+    runner_identity: &str,
+    backend: &BackendIdentity,
+    policy_identity: &str,
+    toolchain_identity: &str,
+    lockfile_digest: &str,
+    toolchain_root: &Path,
+    cargo_path: &Path,
+    cargo_home: &Path,
+    vendored_registry: &Path,
+    cargo_config: &Path,
+    scratch_host_dir: &Path,
+    component_dir: &Path,
+) -> Result<Vec<u8>> {
+    // The closed Cargo topology is six mutually non-overlapping grants. Their
+    // sources are canonicalized once; destinations are the fixed sandbox paths.
+    let toolchain_root = canonical_source_str(
+        config,
+        toolchain_root,
+        "canonicalize cargo toolchain root for offline verification",
+    )?;
+    let cargo_home = canonical_source_str(
+        config,
+        cargo_home,
+        "canonicalize approved cargo home for offline verification",
+    )?;
+    let vendored_registry = canonical_source_str(
+        config,
+        vendored_registry,
+        "canonicalize vendored registry for offline verification",
+    )?;
+    let cargo_config = canonical_source_str(
+        config,
+        cargo_config,
+        "canonicalize cargo config for offline verification",
+    )?;
+    let scratch_host_dir = canonical_source_str(
+        config,
+        scratch_host_dir,
+        "canonicalize scratch directory for offline verification",
+    )?;
+    let component_dir = canonical_source_str(
+        config,
+        component_dir,
+        "canonicalize verification workspace for offline verification",
+    )?;
+    let cargo_path = canonical_source_str(
+        config,
+        cargo_path,
+        "canonicalize cargo executable for offline verification",
+    )?;
+
+    // The cargo executable lives beneath the toolchain root; its sandbox path is
+    // the toolchain destination plus cargo's path relative to that root, so the
+    // single toolchain grant covers the whole immutable toolchain.
+    // `str::strip_prefix` is a lexical prefix match that keeps a leading slash
+    // when cargo sits directly under the root, so use the component-aware `Path`
+    // variant to obtain a clean relative remainder.
+    let rel = Path::new(&cargo_path)
+        .strip_prefix(&toolchain_root)
+        .map(|relative| relative.to_string_lossy().into_owned())
+        .map_err(|source| KvistError::SandboxUnavailable {
+            runner: config.runner.clone(),
+            reason: format!("cargo executable is not beneath the toolchain root: {source}"),
+        })?;
+    let cargo_sandbox_path = format!("{CARGO_TOOLCHAIN_DEST}/{rel}");
+
+    // The approved Cargo-home endpoint identity binds the dependency-cache
+    // grant; the toolchain and scratch/workspace identities bind their grants.
+    // Each is a build-time, path-derived content claim over immutable,
+    // approval-bound material (a directory is not hashed byte by byte).
+    let cache_identity = digest_label(format!("kvist-cargo-home:{cargo_home}").as_bytes());
+    let scratch_identity = digest_label(
+        serde_json::to_string(&scratch_host_dir)
+            .map_err(|error| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!("cannot canonicalize scratch identity: {error}"),
+            })?
+            .as_bytes(),
+    );
+    let verification_identity = digest_label(
+        serde_json::to_string(&component_dir)
+            .map_err(|error| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!("cannot canonicalize workspace identity: {error}"),
+            })?
+            .as_bytes(),
+    );
+
+    // `PATH` is the immutable toolchain's `bin` directory so `cargo` resolves
+    // `rustc`, `rustdoc`, and the linker without a host search path; the runner
+    // validates it as a single canonical absolute directory.
+    let cargo_parent = Path::new(&cargo_sandbox_path)
+        .parent()
+        .map(|parent| parent.to_string_lossy().into_owned())
+        .unwrap_or_else(|| CARGO_TOOLCHAIN_DEST.to_owned());
+
+    let mut environment: BTreeMap<String, String> = BTreeMap::new();
+    environment.insert("HOME".to_owned(), format!("{CARGO_SCRATCH_DEST}/home"));
+    environment.insert("PATH".to_owned(), cargo_parent);
+    environment.insert("CARGO_HOME".to_owned(), CARGO_CARGO_HOME_DEST.to_owned());
+    environment.insert(
+        "CARGO_TARGET_DIR".to_owned(),
+        format!("{CARGO_SCRATCH_DEST}/target"),
+    );
+    environment.insert("CARGO_NET_OFFLINE".to_owned(), "true".to_owned());
+
+    let argv: Vec<String> = vec![
+        cargo_sandbox_path.clone(),
+        CARGO_VERIFY_ARGS[0].to_owned(),
+        CARGO_VERIFY_ARGS[1].to_owned(),
+    ];
+
+    let grants: Vec<SandboxGrant> = vec![
+        SandboxGrant {
+            source: toolchain_root.clone(),
+            destination: CARGO_TOOLCHAIN_DEST.to_owned(),
+            access: "read-only",
+            purpose: "toolchain",
+            identity: toolchain_identity.to_owned(),
+        },
+        SandboxGrant {
+            source: cargo_home.clone(),
+            destination: CARGO_CARGO_HOME_DEST.to_owned(),
+            access: "read-only",
+            purpose: "dependency-cache",
+            identity: cache_identity.clone(),
+        },
+        SandboxGrant {
+            source: scratch_host_dir.clone(),
+            destination: CARGO_SCRATCH_DEST.to_owned(),
+            access: "read-write",
+            purpose: "scratch",
+            identity: scratch_identity.clone(),
+        },
+        SandboxGrant {
+            source: component_dir.clone(),
+            destination: CARGO_WORKING_DIRECTORY.to_owned(),
+            access: "read-only",
+            purpose: "verification",
+            identity: verification_identity,
+        },
+        // The read-only vendored registry is what `cargo` actually resolves
+        // dependencies from offline; the cargo config directs the resolver at it.
+        // Each is pinned to its fixed destination and identified by the lock-file
+        // digest, the authoritative catalogue of the locked content.
+        SandboxGrant {
+            source: vendored_registry.clone(),
+            destination: crate::vendoring::VENDOR_SANDBOX_MOUNT.to_owned(),
+            access: "read-only",
+            purpose: "registry",
+            identity: lockfile_digest.to_owned(),
+        },
+        SandboxGrant {
+            source: cargo_config.clone(),
+            destination: crate::vendoring::SANDBOX_CARGO_CONFIG_MOUNT.to_owned(),
+            access: "read-only",
+            purpose: "cargo-config",
+            identity: lockfile_digest.to_owned(),
+        },
+    ];
+
+    let resources = SandboxResources {
+        wall_time_ms: DEFAULT_WALL_TIME_MS,
+        max_output_bytes: DEFAULT_MAX_OUTPUT_BYTES,
+        max_processes: DEFAULT_MAX_PROCESSES,
+        max_files: DEFAULT_MAX_FILES,
+        max_file_bytes: DEFAULT_MAX_FILE_BYTES,
+        max_scratch_bytes: DEFAULT_MAX_SCRATCH_BYTES,
+        max_cache_bytes: Some(DEFAULT_MAX_CARGO_CACHE_BYTES),
+    };
+
+    let command_identity = digest_label(
+        serde_json::to_string(&argv)
+            .map_err(|error| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!("cannot canonicalize command identity: {error}"),
+            })?
+            .as_bytes(),
+    );
+    let mount_plan_identity = digest_label(
+        serde_json::to_string(&grants)
+            .map_err(|error| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!("cannot canonicalize mount plan identity: {error}"),
+            })?
+            .as_bytes(),
+    );
+
+    let sandbox_request = SandboxRequest {
+        protocol: REQUEST_PROTOCOL,
+        protocol_version: PROTOCOL_VERSION,
+        phase: ExecutionPhase::Verification.wire(),
+        argv: &argv,
+        working_directory: CARGO_WORKING_DIRECTORY,
+        environment: &environment,
+        network: SandboxNetwork {
+            mode: "deny",
+            allowed_sources: Vec::new(),
+        },
+        resources,
+        identities: SandboxIdentities {
+            runner: runner_identity.to_owned(),
+            backend: SandboxBackend {
+                kind: backend.kind.clone(),
+                path: backend.path.clone(),
+                digest: backend.digest.clone(),
+            },
+            policy: policy_identity.to_owned(),
+            toolchain: toolchain_identity.to_owned(),
+            command: command_identity,
+            mount_plan: mount_plan_identity,
+        },
+        grants: &grants,
+        toolchain: SandboxToolchain::Cargo {
+            identity: toolchain_identity.to_owned(),
+            // The toolchain root is the sandbox destination of the immutable
+            // toolchain grant; `cargo` lives strictly beneath it in the same
+            // sandbox namespace, so the runner binds the exact binary it runs.
+            root: CARGO_TOOLCHAIN_DEST.to_owned(),
+            // `cargo` is the sandbox destination of the executable, which must
+            // equal `argv[0]` so the runner binds the exact binary it runs.
+            cargo: cargo_sandbox_path.clone(),
+        },
+        cache: Some(SandboxCache {
+            // The approved Cargo home is the read-only dependency-cache endpoint
+            // mounted in the sandbox; the resolver's `CARGO_HOME` points at it.
+            cargo_home: CARGO_CARGO_HOME_DEST.to_owned(),
+            registry: format!("{CARGO_CARGO_HOME_DEST}/registry"),
+            git: format!("{CARGO_CARGO_HOME_DEST}/git"),
+            approved: Some(SandboxCacheEndpoint {
+                destination: CARGO_CARGO_HOME_DEST.to_owned(),
+                identity: cache_identity,
+            }),
+        }),
+        scratch: Some(SandboxScratch {
+            destination: CARGO_SCRATCH_DEST,
+            identity: scratch_identity.clone(),
+        }),
+    };
+
+    serde_json::to_vec(&sandbox_request).map_err(|error| KvistError::SandboxUnavailable {
+        runner: config.runner.clone(),
+        reason: format!("cannot encode offline Cargo verification request: {error}"),
+    })
+}
+
+/// Run an offline, network-denied `cargo test --locked` verification against an
+/// approved, vendored Cargo home through the closed four-grant Cargo topology.
+///
+/// Unlike the generic system-toolchain path, this resolves the immutable Cargo
+/// toolchain, mounts the read-only approved Cargo home plus a writable scratch
+/// and verification workspace, and pins the exact `cargo test --locked` command.
+/// A sandbox infrastructure failure fails closed and never builds on the host.
+pub fn execute_offline_cargo_verification(
+    config: &SandboxConfig,
+    request: &OfflineCargoVerification<'_>,
+    options: ExecutionOptions,
+) -> Result<ExecutionResult> {
+    let environment: BTreeMap<String, String> = BTreeMap::new();
+    let program = request.cargo_path.to_string_lossy().into_owned();
+    let verify_args: Vec<String> = CARGO_VERIFY_ARGS
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect();
+    validate_request_inputs(config, &program, &verify_args, &environment)?;
+
+    // Rehash and revalidate the approval-bound enforcement backend immediately
+    // before execution, as in the generic path.
+    let current_backend = backend_identity(config, request.project_root, request.vcs_selection)?;
+    if &current_backend != request.backend {
+        return Err(KvistError::SandboxUnavailable {
+            runner: config.runner.clone(),
+            reason: "the enforcement backend identity changed after the availability probe"
+                .to_owned(),
+        });
+    }
+    let launch = checked_runner_launch(
+        config,
+        request.project_root,
+        request.vcs_selection,
+        request.expected_runner,
+    )?;
+
+    // Resolve the exact cargo executable so argv[0] and the toolchain block
+    // agree, and derive the toolchain identity from its bytes like the system
+    // path derives its identity from argv[0].
+    let resolved = resolve_program(config, &program, &environment)?;
+    let cargo_bytes = fs::read(&resolved.canonical_path).map_err(|source| KvistError::Io {
+        operation: "read cargo executable for offline verification toolchain identity",
+        path: PathBuf::from(&resolved.canonical_path),
+        source,
+    })?;
+    let toolchain_identity = digest_label(&cargo_bytes);
+
+    let encoded = build_offline_cargo_verification_request(
+        config,
+        &request.expected_runner.digest,
+        request.backend,
+        request.policy_identity,
+        &toolchain_identity,
+        &request.lockfile_digest,
+        request.toolchain_root,
+        Path::new(&resolved.canonical_path),
+        request.cargo_home,
+        request.vendored_registry,
+        request.cargo_config,
+        request.scratch_host_dir,
+        request.component_dir,
+    )?;
+
+    tracing::info!(
+        component = %request.component_dir.display(),
+        cargo_home = %request.cargo_home.display(),
+        "executing offline vendored cargo verification"
+    );
+
+    run_launched_bounded(
+        &launch,
+        config,
+        EXECUTE_ARGUMENT,
+        Some(&encoded),
+        options.timeout,
+        options.output_limit,
+        options.live_stdout,
+    )
+}
+
+/// The immutable Rust toolchain resolved for offline cargo verification.
+#[derive(Debug)]
+pub struct ResolvedCargoToolchain {
+    /// The toolchain root containing cargo, rustc, rustlib, and the linker.
+    pub root: PathBuf,
+    /// The exact cargo executable beneath `root`.
+    pub cargo: PathBuf,
+}
+
+/// Derive and validate an immutable toolchain layout from a resolved `cargo`
+/// path, returning the toolchain root and the cargo executable beneath it.
+///
+/// The path is expected to be `<root>/bin/cargo`; `root` is that path's parent's
+/// parent, and it must be a complete toolchain (it contains `rustlib`). cargo is
+/// required to live strictly beneath `root`, so the single read-only toolchain
+/// grant covers the whole immutable toolchain set. This is a pure validation over
+/// a resolved path so it can be unit-tested without invoking `rustup`.
+fn cargo_toolchain_from_path(cargo_str: &str, runner: &str) -> Result<ResolvedCargoToolchain> {
+    let cargo = PathBuf::from(cargo_str);
+    let bin_dir = cargo
+        .parent()
+        .ok_or_else(|| KvistError::SandboxUnavailable {
+            runner: runner.to_owned(),
+            reason: format!("resolved cargo path `{cargo_str}` has no parent directory"),
+        })?;
+    let root = bin_dir
+        .parent()
+        .ok_or_else(|| KvistError::SandboxUnavailable {
+            runner: runner.to_owned(),
+            reason: format!("resolved cargo path `{cargo_str}` is not inside a toolchain root"),
+        })?;
+    let cargo = cargo
+        .canonicalize()
+        .map_err(|source| KvistError::SandboxUnavailable {
+            runner: runner.to_owned(),
+            reason: format!("cannot canonicalize resolved cargo path `{cargo_str}`: {source}"),
+        })?;
+    let root = root
+        .canonicalize()
+        .map_err(|source| KvistError::SandboxUnavailable {
+            runner: runner.to_owned(),
+            reason: format!(
+                "cannot canonicalize Rust toolchain root `{}`: {source}",
+                root.display()
+            ),
+        })?;
+    if !root.join("rustlib").is_dir() {
+        return Err(KvistError::SandboxUnavailable {
+            runner: runner.to_owned(),
+            reason: format!(
+                "Rust toolchain root `{}` is not a complete toolchain (missing rustlib)",
+                root.display()
+            ),
+        });
+    }
+    if !cargo.starts_with(&root) {
+        return Err(KvistError::SandboxUnavailable {
+            runner: runner.to_owned(),
+            reason: format!(
+                "resolved cargo `{}` is not beneath the toolchain root `{}`",
+                cargo.display(),
+                root.display()
+            ),
+        });
+    }
+    Ok(ResolvedCargoToolchain { root, cargo })
+}
+
+/// Locate the immutable Rust toolchain (cargo, rustc, rustlib, linker) so an
+/// offline `cargo` build can mount the whole toolchain read-only.
+///
+/// `rustup` is the canonical source of a complete toolchain set; resolution fails
+/// closed with a non-secret, actionable message when `rustup` or the toolchain is
+/// absent. This never falls back to building on the host.
+pub fn resolve_cargo_toolchain(runner: &str) -> Result<ResolvedCargoToolchain> {
+    let output = std::process::Command::new("rustup")
+        .args(["which", "--cargo"])
+        .output()
+        .map_err(|source| KvistError::SandboxUnavailable {
+            runner: runner.to_owned(),
+            reason: format!("cannot invoke rustup to locate the Rust toolchain: {source}"),
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(KvistError::SandboxUnavailable {
+            runner: runner.to_owned(),
+            reason: format!("`rustup which --cargo` failed: {}", stderr.trim()),
+        });
+    }
+    let cargo_str = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if cargo_str.is_empty() {
+        return Err(KvistError::SandboxUnavailable {
+            runner: runner.to_owned(),
+            reason: "`rustup which --cargo` returned no toolchain path".to_owned(),
+        });
+    }
+    cargo_toolchain_from_path(&cargo_str, runner)
+}
+
+/// Provision a fresh, empty, read-only approved Cargo home for offline
+/// verification.
+///
+/// Crate sources resolve from the vendored registry through the sandbox cargo
+/// configuration, so the approved home need only be a real, immutable directory
+/// the closed topology references. It holds only the standard, empty registry and
+/// git layout cargo expects, and is regenerated on every run under the
+/// Kvist-owned `.kvist/` directory.
+fn provision_cargo_home(project_root: &Path) -> Result<PathBuf> {
+    let cargo_home = project_root.join(".kvist").join("cargo-home");
+    for child in ["registry/cache", "git/db"] {
+        std::fs::create_dir_all(cargo_home.join(child)).map_err(|source| KvistError::Io {
+            operation: "provision read-only cargo home for offline cargo verification",
+            path: cargo_home.join(child),
+            source,
+        })?;
+    }
+    Ok(cargo_home)
+}
+
+/// Run offline, network-denied `cargo test --locked` verification for a vendored
+/// Rust project through the closed Cargo topology.
+///
+/// Enforces vendoring readiness (failing closed when the project is not vendored,
+/// the lockfile drifted, or material is missing), resolves the immutable
+/// toolchain, provisions a fresh read-only approved Cargo home and a writable,
+/// disjoint target/HOME scratch, and delegates to
+/// [`execute_offline_cargo_verification`]. A sandbox infrastructure failure fails
+/// closed and never builds on the host.
+pub fn run_offline_cargo_verification(
+    config: &SandboxConfig,
+    project_root: &Path,
+    vcs_selection: VcsSelection,
+    probe: &SandboxProbe,
+    policy_identity: &str,
+    component_dir: &Path,
+    options: ExecutionOptions,
+) -> Result<ExecutionResult> {
+    // Enforce vendoring readiness against the manifest and lock file. This fails
+    // closed with a clear message when the project is not vendored, the lockfile
+    // has drifted since vendoring, or a registry or Git dependency is absent.
+    let enforcement = crate::language_vendoring::enforce_vendoring(project_root)?;
+    if enforcement.language != "rust" {
+        return Err(KvistError::SandboxUnavailable {
+            runner: config.runner.clone(),
+            reason: "verification routed to offline cargo verification but the project is not Rust"
+                .to_owned(),
+        });
+    }
+
+    // The read-only vendored registry and sandbox cargo configuration are the
+    // mounts an offline build needs; their host sources come from the enforced
+    // manifest. Each is pinned to its fixed sandbox destination.
+    let mut vendored_registry = None;
+    let mut cargo_config = None;
+    for mount in &enforcement.mounts {
+        match mount.destination.as_str() {
+            crate::vendoring::VENDOR_SANDBOX_MOUNT => {
+                vendored_registry = Some(mount.source.clone())
+            }
+            crate::vendoring::SANDBOX_CARGO_CONFIG_MOUNT => {
+                cargo_config = Some(mount.source.clone())
+            }
+            _ => {}
+        }
+    }
+    let vendored_registry = vendored_registry.ok_or_else(|| KvistError::SandboxUnavailable {
+        runner: config.runner.clone(),
+        reason: "the enforced Rust vendoring manifest declares no vendored-registry mount"
+            .to_owned(),
+    })?;
+    let cargo_config = cargo_config.ok_or_else(|| KvistError::SandboxUnavailable {
+        runner: config.runner.clone(),
+        reason: "the enforced Rust vendoring manifest declares no sandbox cargo-config mount"
+            .to_owned(),
+    })?;
+
+    let toolchain = resolve_cargo_toolchain(&config.runner)?;
+    let cargo_home = provision_cargo_home(project_root)?;
+    let scratch = tempfile::tempdir().map_err(|source| KvistError::Io {
+        operation: "create writable scratch for offline cargo verification",
+        path: PathBuf::from("."),
+        source,
+    })?;
+
+    tracing::info!(
+        component = %component_dir.display(),
+        vendored = %vendored_registry.display(),
+        "executing offline vendored cargo verification"
+    );
+
+    let request = OfflineCargoVerification {
+        project_root,
+        vcs_selection,
+        toolchain_root: &toolchain.root,
+        cargo_path: &toolchain.cargo,
+        cargo_home: &cargo_home,
+        vendored_registry: &vendored_registry,
+        cargo_config: &cargo_config,
+        scratch_host_dir: scratch.path(),
+        component_dir,
+        lockfile_digest: enforcement.lockfile_digest,
+        policy_identity,
+        backend: &probe.backend,
+        config,
+        expected_runner: &RunnerIdentity {
+            canonical_path: probe.runner_path.clone(),
+            digest: probe.runner_digest.clone(),
+        },
+    };
+
+    execute_offline_cargo_verification(config, &request, options)
 }
 
 /// Spawns the verified runner launch with one protocol argument, optionally
@@ -1980,6 +2617,7 @@ mod tests {
             max_files: DEFAULT_MAX_FILES,
             max_file_bytes: DEFAULT_MAX_FILE_BYTES,
             max_scratch_bytes: DEFAULT_MAX_SCRATCH_BYTES,
+            max_cache_bytes: None,
         };
         let toolchain_identity = digest_label(b"kvist-system-toolchain:/usr");
         let backend = sample_backend();
@@ -2005,8 +2643,7 @@ mod tests {
                 mount_plan: digest_label(b"mount"),
             },
             grants: &grants,
-            toolchain: SandboxToolchain {
-                kind: "system",
+            toolchain: SandboxToolchain::System {
                 identity: toolchain_identity,
                 root: "/usr".to_owned(),
             },
@@ -2194,6 +2831,208 @@ mod tests {
         assert!(
             started.elapsed() < Duration::from_secs(1),
             "output overflow must terminate descendants even after parent exit"
+        );
+    }
+
+    /// A valid offline Cargo verification request must satisfy the shared runner's
+    /// validator, which enforces the closed four-grant Cargo topology (`cargo
+    /// test --locked`, denied network, the exact Cargo environment allowlist).
+    /// This is a producer-side contract test: it proves the builder emits a
+    /// well-formed request without requiring a live runner.
+    #[test]
+    fn offline_cargo_request_satisfies_the_shared_runner_validator() {
+        use kvist_sandbox_runner::protocol::{Access, Purpose, Toolchain};
+        use kvist_sandbox_runner::validation;
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("tmp root");
+        let project = root.path().join("project");
+        fs::create_dir_all(&project).expect("project dir");
+
+        // Immutable toolchain root holding an exact cargo executable beneath it.
+        let toolchain = tempfile::tempdir().expect("toolchain");
+        let bin = toolchain.path().join("bin");
+        fs::create_dir_all(&bin).expect("toolchain bin");
+        let cargo = bin.join("cargo");
+        fs::write(&cargo, "#!/bin/sh\n").expect("cargo file");
+        fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755))
+            .expect("cargo executable");
+        fs::write(bin.join("rustc"), "").expect("rustc file");
+
+        // Vendored, approved Cargo home with its registry and git children.
+        let cargo_home = tempfile::tempdir().expect("cargo home");
+        fs::create_dir_all(cargo_home.path().join("registry/cache/c")).expect("registry subdir");
+        fs::create_dir_all(cargo_home.path().join("git/db")).expect("git subdir");
+
+        // Writable scratch directory and the verification workspace (the project).
+        let scratch = tempfile::tempdir().expect("scratch");
+
+        // Read-only vendored registry and its offline resolver configuration.
+        let vendored_registry = tempfile::tempdir().expect("vendored registry");
+        let cargo_config = tempfile::tempdir().expect("cargo config");
+        let lockfile_digest = digest_label(b"kvist-cargo-lockfile");
+
+        let config = SandboxConfig {
+            runner: "/usr/bin/bwrap".to_owned(),
+            backend: "/usr/bin/true".to_owned(),
+            environment_allowlist: Vec::new(),
+            acquisition: crate::config::AcquisitionConfig::default(),
+        };
+        let backend = sample_backend();
+        let runner_digest = format!("sha256:{}", "c".repeat(64));
+        let toolchain_identity = digest_label(b"kvist-cargo-toolchain");
+
+        let encoded = build_offline_cargo_verification_request(
+            &config,
+            &runner_digest,
+            &backend,
+            &digest_label(b"policy"),
+            &toolchain_identity,
+            &lockfile_digest,
+            toolchain.path(),
+            &cargo,
+            cargo_home.path(),
+            vendored_registry.path(),
+            cargo_config.path(),
+            scratch.path(),
+            &project,
+        )
+        .expect("build offline cargo verification request");
+        let request = validation::parse_and_validate(&encoded)
+            .expect("offline cargo request must satisfy the closed Cargo topology validator");
+
+        // The closed topology is exactly the four base grants plus the two
+        // read-only vendored extensions: toolchain, dependency-cache, scratch,
+        // verification, registry, and cargo-config.
+        assert_eq!(
+            request.grants.len(),
+            6,
+            "closed Cargo topology is six grants"
+        );
+        let purposes: Vec<_> = request.grants.iter().map(|grant| grant.purpose).collect();
+        assert!(purposes.contains(&Purpose::Registry));
+        assert!(purposes.contains(&Purpose::CargoConfig));
+
+        // The vendored registry mount is pinned, read-only, at its fixed
+        // destination, and identified by the lock-file digest.
+        let registry = request
+            .grants
+            .iter()
+            .find(|grant| grant.purpose == Purpose::Registry)
+            .expect("registry grant");
+        assert_eq!(registry.destination, crate::vendoring::VENDOR_SANDBOX_MOUNT);
+        assert_eq!(registry.access, Access::ReadOnly);
+        assert_eq!(registry.identity, lockfile_digest);
+
+        let cargo_config_mount = request
+            .grants
+            .iter()
+            .find(|grant| grant.purpose == Purpose::CargoConfig)
+            .expect("cargo-config grant");
+        assert_eq!(
+            cargo_config_mount.destination,
+            crate::vendoring::SANDBOX_CARGO_CONFIG_MOUNT
+        );
+        assert_eq!(cargo_config_mount.access, Access::ReadOnly);
+        assert_eq!(cargo_config_mount.identity, lockfile_digest);
+
+        // The Cargo toolchain `cargo` must equal argv[0] (the sandbox path of the
+        // executable), so the runner binds the exact binary it runs.
+        let Toolchain::Cargo { cargo, .. } = &request.toolchain else {
+            panic!("offline verification uses a Cargo toolchain");
+        };
+        assert_eq!(*cargo, request.argv[0]);
+        assert!(
+            request.argv[0].starts_with(&format!("{CARGO_TOOLCHAIN_DEST}/")),
+            "cargo must be the sandbox path under the toolchain root"
+        );
+    }
+
+    #[test]
+    fn cargo_toolchain_from_path_accepts_a_complete_toolchain_layout() {
+        let root = tempfile::tempdir().expect("toolchain root");
+        fs::create_dir_all(root.path().join("rustlib")).expect("rustlib");
+        fs::create_dir_all(root.path().join("bin")).expect("bin");
+        fs::write(root.path().join("bin").join("cargo"), b"cargo").expect("cargo");
+
+        let cargo = root.path().join("bin").join("cargo");
+        let resolved = cargo_toolchain_from_path(&cargo.to_string_lossy(), "/runner")
+            .expect("complete toolchain validates");
+
+        // The root is the canonical toolchain directory, and cargo is a real file
+        // strictly beneath it, so the single read-only toolchain grant covers it.
+        assert_eq!(
+            resolved.root,
+            root.path().canonicalize().expect("canonical root")
+        );
+        assert!(resolved.cargo.is_file());
+        assert!(resolved.cargo.starts_with(&resolved.root));
+    }
+
+    #[test]
+    fn cargo_toolchain_from_path_rejects_a_toolchain_missing_rustlib() {
+        let root = tempfile::tempdir().expect("toolchain root");
+        fs::create_dir_all(root.path().join("bin")).expect("bin");
+        fs::write(root.path().join("bin").join("cargo"), b"cargo").expect("cargo");
+
+        let cargo = root.path().join("bin").join("cargo");
+        let error = cargo_toolchain_from_path(&cargo.to_string_lossy(), "/runner")
+            .expect_err("a toolchain without rustlib is not complete");
+        assert!(
+            error.to_string().contains("rustlib"),
+            "diagnostic should name the missing rustlib marker: {error}"
+        );
+    }
+
+    #[test]
+    fn cargo_toolchain_from_path_rejects_a_path_outside_a_toolchain_root() {
+        let error = cargo_toolchain_from_path("cargo", "/runner")
+            .expect_err("a bare program name is not inside a toolchain root");
+        assert!(
+            error.to_string().contains("toolchain root"),
+            "diagnostic should name the missing toolchain root: {error}"
+        );
+    }
+
+    #[test]
+    fn provision_cargo_home_creates_a_real_empty_home() {
+        let project = tempfile::tempdir().expect("project root");
+        let cargo_home = provision_cargo_home(project.path()).expect("provision cargo home");
+        assert!(cargo_home.is_dir());
+        assert!(cargo_home.join("registry/cache").is_dir());
+        assert!(cargo_home.join("git/db").is_dir());
+    }
+
+    #[test]
+    fn run_offline_cargo_verification_fails_closed_without_vendoring() {
+        let project = tempfile::tempdir().expect("project root");
+        let config = SandboxConfig {
+            runner: "/usr/bin/bwrap".to_owned(),
+            backend: "/usr/bin/true".to_owned(),
+            environment_allowlist: Vec::new(),
+            acquisition: crate::config::AcquisitionConfig::default(),
+        };
+        let probe = SandboxProbe {
+            runner_path: "/runner".to_owned(),
+            runner_digest: String::new(),
+            backend: sample_backend(),
+        };
+        let result = run_offline_cargo_verification(
+            &config,
+            project.path(),
+            VcsSelection::Git,
+            &probe,
+            "policy",
+            project.path(),
+            ExecutionOptions {
+                timeout: None,
+                output_limit: None,
+                live_stdout: None,
+            },
+        );
+        assert!(
+            matches!(result, Err(KvistError::VendoringUnavailable { .. })),
+            "verification must fail closed when the project is not vendored"
         );
     }
 }

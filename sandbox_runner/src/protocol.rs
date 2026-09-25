@@ -86,6 +86,12 @@ pub enum Purpose {
     DependencyCache,
     /// Isolated writable workspace containing the acquisition lockfile.
     Lockfile,
+    /// Read-only vendored dependency material (for example a `cargo vendor`
+    /// registry) that a locked build resolves dependencies from offline.
+    Registry,
+    /// Read-only language offline configuration that directs the resolver at
+    /// the vendored material (for example a `.cargo/config.toml`).
+    CargoConfig,
 }
 
 /// Network authority requested by the phase.

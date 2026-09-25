@@ -807,6 +807,8 @@ fn grant_plan_identity(grants: &[GrantWire]) -> Vec<u8> {
             Purpose::Verification => b'4',
             Purpose::DependencyCache => b'5',
             Purpose::Lockfile => b'6',
+            Purpose::Registry => b'7',
+            Purpose::CargoConfig => b'8',
         });
         bytes.push(b'\0');
     }

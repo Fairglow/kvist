@@ -133,6 +133,8 @@ fn verification_request(fixture: &std::path::Path, argv: &[&str]) -> Value {
     let approved_identity = sha256_bytes(b"approved-cargo-home");
     let scratch_identity = sha256_bytes(b"verification-scratch");
     let workspace_identity = sha256_bytes(b"verification-workspace");
+    let vendored_identity = sha256_bytes(b"vendored-registry");
+    let cargo_config_identity = sha256_bytes(b"cargo-config");
 
     request["working_directory"] = json!("/workspace/component");
     request["environment"] = json!({
@@ -172,6 +174,20 @@ fn verification_request(fixture: &std::path::Path, argv: &[&str]) -> Value {
             "access": "read-only",
             "purpose": "verification",
             "identity": workspace_identity
+        },
+        {
+            "source": fixture.join("vendored").canonicalize().expect("vendored registry"),
+            "destination": "/workspace/vendored",
+            "access": "read-only",
+            "purpose": "registry",
+            "identity": vendored_identity
+        },
+        {
+            "source": fixture.join("cargo-config").canonicalize().expect("cargo config"),
+            "destination": "/workspace/.cargo",
+            "access": "read-only",
+            "purpose": "cargo-config",
+            "identity": cargo_config_identity
         }
     ]);
     request["toolchain"] = json!({
@@ -203,6 +219,8 @@ fn cargo_fixture() -> tempfile::TempDir {
     fs::create_dir(root.join("cargo-home")).expect("create Cargo home");
     fs::create_dir(root.join("lockfile")).expect("create lockfile workspace");
     fs::create_dir(root.join("project-cache")).expect("create project cache");
+    fs::create_dir(root.join("vendored")).expect("create vendored registry");
+    fs::create_dir(root.join("cargo-config")).expect("create cargo config");
     fs::create_dir_all(root.join("component")).expect("create verification workspace");
     fs::write(root.join("lockfile/Cargo.lock"), "# lockfile\n").expect("write lockfile");
     write_fake_cargo(

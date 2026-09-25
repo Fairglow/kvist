@@ -29,20 +29,32 @@ Implemented:
   exactly (through the existing `VendorManifest` machinery), while Python
   (`pip`/`uv`), JavaScript/Node (`npm`), and C/`Conan` enforce lock-file match
   plus vendored-content presence. `detect_language_strategy` prefers Rust so a
-  mixed Rust+JS project verifies against its `Cargo.lock`. Implemented and
+  Rust+JS project verifies against its `Cargo.lock`. Implemented and
   tested (unit tests plus an integration test that enforces against a real
   vendored project). See "Multi-language vendoring".
-
-Planned (security-sensitive, requires the bwrap runner environment to validate):
-
 - **Route Rust verification through the Cargo topology and add the vendored
-  mounts.** The sandbox enforces an offline `cargo` build through a closed
-  four-grant topology (Toolchain, DependencyCache, Scratch, Verification) and
-  `build_verification_plan` constructs that topology, but it is not yet wired
-  into production verification, and that closed topology does not yet carry the
-  read-only vendored-registry and cargo-config mounts. Extending the closed
-  topology to admit those mounts changes an enforcement invariant and is the
-  planned integration; it is documented here, not shipped unvalidated.
+  mounts.** The closed verification topology (Toolchain, DependencyCache, Scratch,
+  Verification) now carries two read-only extensions: a vendored-registry mount
+  at `/workspace/vendored` and a cargo-config mount at `/workspace/.cargo`, each
+  identified by the lock-file digest so the mount plan is a build-time claim over
+  the locked catalogue. The engine routes Rust verification through
+  `sandbox::run_offline_cargo_verification`, which enforces vendoring readiness,
+  resolves the immutable toolchain, provisions a read-only approved Cargo home and
+  a disjoint scratch, and builds the six-grant request validated by the runner;
+  `verify_task` selects this path when `detect_language_strategy` reports Rust and
+  falls back to the approved test command otherwise. The new `Purpose::Registry`
+  and `Purpose::CargoConfig` grant purposes pin the mounts to their fixed,
+  non-overlapping, read-only destinations. Implemented and unit-tested; its live
+  execution is pending the bwrap runner environment (see below).
+
+Pending live validation (security-sensitive, requires the bwrap runner environment):
+
+- **Validate the extended Cargo topology under the real bwrap runner.** The routing
+  and the two vendored mounts are implemented and covered by unit and planning
+  tests, but the closed-topology change has not yet been executed against the bwrap
+  runner environment, so the end-to-end offline `cargo test --locked` build inside
+  the sandbox remains to be validated. Extending the closed topology admits new
+  read-only authority and is documented here rather than certified.
 
 ## Lock-file digest as the directory-mount identity
 

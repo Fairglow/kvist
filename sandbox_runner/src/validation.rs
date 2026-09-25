@@ -64,6 +64,14 @@ fn invalid(detail: impl Into<String>) -> ProtocolError {
     }
 }
 
+/// Fixed, non-overlapping sandbox destinations for the read-only vendored
+/// dependency material and its offline resolver configuration. They are pinned
+/// here so a Cargo verification cannot smuggle unbounded read-only authority at
+/// an arbitrary destination: the vendored registry is only ever mounted at
+/// `/workspace/vendored` and the offline configuration only at `/workspace/.cargo`.
+const VENDORED_REGISTRY_MOUNT: &str = "/workspace/vendored";
+const VENDORED_CARGO_CONFIG_MOUNT: &str = "/workspace/.cargo";
+
 /// Parses the bounded, closed wire request without trusting its producer.
 pub fn parse_request(bytes: &[u8]) -> Result<SandboxRequest, ProtocolError> {
     if bytes.len() > MAX_REQUEST_BYTES {
@@ -415,6 +423,8 @@ fn validate_phase_purpose(
                 | Purpose::Toolchain
                 | Purpose::DependencyCache
                 | Purpose::Scratch
+                | Purpose::Registry
+                | Purpose::CargoConfig
         ),
         Phase::DependencyAcquisition => matches!(
             purpose,
@@ -927,6 +937,11 @@ fn validate_cargo_verification(request: &SandboxRequest) -> Result<(), ProtocolE
             "Cargo verification working_directory requires a matching read-only verification grant",
         ));
     }
+    // The vendored registry and its offline resolver configuration are
+    // read-only extensions of the closed topology, each pinned to its fixed,
+    // non-overlapping destination.
+    require_vendored_mount(request, Purpose::Registry, VENDORED_REGISTRY_MOUNT)?;
+    require_vendored_mount(request, Purpose::CargoConfig, VENDORED_CARGO_CONFIG_MOUNT)?;
     ensure_exact_cargo_purposes(
         request,
         &[
@@ -934,6 +949,8 @@ fn validate_cargo_verification(request: &SandboxRequest) -> Result<(), ProtocolE
             Purpose::DependencyCache,
             Purpose::Scratch,
             Purpose::Verification,
+            Purpose::Registry,
+            Purpose::CargoConfig,
         ],
     )
 }
@@ -946,6 +963,38 @@ fn cargo_toolchain(request: &SandboxRequest) -> Result<(&str, &str), ProtocolErr
         return Err(invalid("Cargo phases require Toolchain::Cargo"));
     };
     Ok((identity, cargo))
+}
+
+/// Returns the single read-only vendored-material grant for `purpose`, pinning
+/// it to its fixed, non-overlapping sandbox destination. Requiring both a
+/// distinct destination and read-only access keeps the vendored mounts a
+/// constrained, non-writable extension of the closed Cargo topology.
+fn require_vendored_mount(
+    request: &SandboxRequest,
+    purpose: Purpose,
+    destination: &str,
+) -> Result<(), ProtocolError> {
+    let grant = request
+        .grants
+        .iter()
+        .find(|grant| grant.purpose == purpose)
+        .ok_or_else(|| {
+            invalid(format!(
+                "Cargo verification requires a {purpose:?} mount at {destination}"
+            ))
+        })?;
+    if grant.destination != destination {
+        return Err(invalid(format!(
+            "Cargo verification {purpose:?} mount must be at {destination}, not {}",
+            grant.destination
+        )));
+    }
+    if grant.access != Access::ReadOnly {
+        return Err(invalid(format!(
+            "Cargo verification {purpose:?} mount at {destination} must be read-only"
+        )));
+    }
+    Ok(())
 }
 
 /// Confirms there is exactly one read-only toolchain grant whose destination is
