@@ -74,10 +74,15 @@ pub fn vendor_project(project_dir: &Path, options: VendorOptions) -> Result<Vend
     }
     report.enforce()?;
 
-    // Host configuration lets an offline build run on the host directly, and the
-    // sandbox configuration is what verification mounts at `/workspace/.cargo`.
-    let cargo_config_path = ensure_host_cargo_config(&project_dir, &vendored_dir)?;
-    let sandbox_cargo_dir = ensure_sandbox_cargo_config(&project_dir, &vendored_dir)?;
+    // The sandbox cargo configuration is what verification mounts at
+    // `/workspace/.cargo`; it is the authoritative offline resolver config.
+    // Kvist deliberately does NOT write source-replacement keys into the project's
+    // own `.cargo/config.toml`: that file is carried into the sandbox through the
+    // component mount, and cargo prefers the project-local config over parent
+    // directories, so a host-path config there would shadow the mounted
+    // `/workspace/.cargo` config and break the offline build. Host builds resolve
+    // from the network as usual; only the sandbox build is required to be offline.
+    let sandbox_cargo_dir = ensure_sandbox_cargo_config(&project_dir)?;
 
     let manifest = VendorManifest {
         schema_version: crate::vendoring::VENDOR_SCHEMA_VERSION,
@@ -92,7 +97,6 @@ pub fn vendor_project(project_dir: &Path, options: VendorOptions) -> Result<Vend
             })?,
         ),
         vendored_dir: vendored_dir.to_string_lossy().into_owned(),
-        cargo_config_path: cargo_config_path.to_string_lossy().into_owned(),
         sandbox_cargo_dir: sandbox_cargo_dir.to_string_lossy().into_owned(),
         sandbox_vendored_mount: crate::vendoring::VENDOR_SANDBOX_MOUNT.to_owned(),
         verified: true,
@@ -144,49 +148,15 @@ fn populate_with_cargo_vendor(project_dir: &Path, vendored_dir: &Path) -> Result
     })
 }
 
-/// Ensure the project's `.cargo/config.toml` maps the crates.io source at the
-/// vendored registry, merging with any existing configuration rather than
-/// clobbering it. Returns the configuration path.
-fn ensure_host_cargo_config(project_dir: &Path, vendored_dir: &Path) -> Result<PathBuf> {
-    let cargo_dir = project_dir.join(".cargo");
-    std::fs::create_dir_all(&cargo_dir).map_err(|source| KvistError::Io {
-        operation: "create .cargo directory for vendoring config",
-        path: cargo_dir.clone(),
-        source,
-    })?;
-    let config_path = cargo_dir.join("config.toml");
-
-    use toml_edit::{DocumentMut, value};
-    let mut document = if config_path.is_file() {
-        let text = std::fs::read_to_string(&config_path).map_err(|source| KvistError::Io {
-            operation: "read existing .cargo/config.toml for vendoring",
-            path: config_path.clone(),
-            source,
-        })?;
-        text.parse::<DocumentMut>()
-            .map_err(|source| KvistError::VendoringUnavailable {
-                path: project_dir.to_string_lossy().into_owned(),
-                reason: format!(
-                    "existing `{}` is not valid TOML and cannot be merged safely: {source}",
-                    config_path.display()
-                ),
-            })?
-    } else {
-        DocumentMut::new()
-    };
-
-    document["source"]["crates-io"]["replace-with"] = value("vendored-sources");
-    document["source"]["vendored-sources"]["directory"] =
-        value(vendored_dir.to_string_lossy().into_owned());
-
-    crate::file_io::replace_file_atomically(&config_path, &document.to_string())?;
-    Ok(config_path)
-}
-
 /// Write the sandbox cargo configuration (referencing the fixed sandbox mount at
 /// `/workspace/vendored`) into a directory that verification mounts read-only at
 /// `/workspace/.cargo`. Returns that directory.
-fn ensure_sandbox_cargo_config(project_dir: &Path, vendored_dir: &Path) -> Result<PathBuf> {
+///
+/// This is the authoritative offline resolver config for sandbox verification. It
+/// is mounted at `/workspace/.cargo`, a parent of the sandbox working directory,
+/// and only takes effect because the project-local `.cargo/config.toml` carries no
+/// source-replacement keys of its own (see `vendor_project`).
+fn ensure_sandbox_cargo_config(project_dir: &Path) -> Result<PathBuf> {
     let sandbox_cargo_dir = project_dir
         .join(".kvist")
         .join(crate::vendoring::SANDBOX_CARGO_CONFIG_DIRNAME);
@@ -204,7 +174,6 @@ fn ensure_sandbox_cargo_config(project_dir: &Path, vendored_dir: &Path) -> Resul
         path: config_path.clone(),
         source,
     })?;
-    let _ = vendored_dir;
     Ok(sandbox_cargo_dir)
 }
 

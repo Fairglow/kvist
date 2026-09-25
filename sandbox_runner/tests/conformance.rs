@@ -294,6 +294,13 @@ fn cargo_verification_request() -> Value {
                 "access": "read-only",
                 "purpose": "cargo-config",
                 "identity": digest(b"cargo-config")
+            },
+            {
+                "source": "/host/runtime/bin",
+                "destination": "/workspace/bin",
+                "access": "read-only",
+                "purpose": "runtime",
+                "identity": digest(b"runtime-bin")
             }
         ],
         "toolchain": {

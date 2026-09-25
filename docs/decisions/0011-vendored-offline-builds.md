@@ -34,27 +34,45 @@ Implemented:
   vendored project). See "Multi-language vendoring".
 - **Route Rust verification through the Cargo topology and add the vendored
   mounts.** The closed verification topology (Toolchain, DependencyCache, Scratch,
-  Verification) now carries two read-only extensions: a vendored-registry mount
-  at `/workspace/vendored` and a cargo-config mount at `/workspace/.cargo`, each
+  Verification) carries three read-only extensions: a vendored-registry mount at
+  `/workspace/vendored`, a cargo-config mount at `/workspace/.cargo`, and a
+  runtime-bin mount at `/workspace/bin`. The two vendored mounts are each
   identified by the lock-file digest so the mount plan is a build-time claim over
   the locked catalogue. The engine routes Rust verification through
   `sandbox::run_offline_cargo_verification`, which enforces vendoring readiness,
-  resolves the immutable toolchain, provisions a read-only approved Cargo home and
-  a disjoint scratch, and builds the six-grant request validated by the runner;
+  resolves the immutable toolchain, provisions a read-only approved Cargo home,
+  a read-only runtime bin (symlinks exposing `rustc`, `rustdoc`, and the system
+  linker/archiver `cc`/`ar`/`as` so a locked build can compile and link), and a
+  disjoint scratch, and builds the seven-grant request validated by the runner;
   `verify_task` selects this path when `detect_language_strategy` reports Rust and
-  falls back to the approved test command otherwise. The new `Purpose::Registry`
-  and `Purpose::CargoConfig` grant purposes pin the mounts to their fixed,
-  non-overlapping, read-only destinations. Implemented and unit-tested; its live
-  execution is pending the bwrap runner environment (see below).
+  falls back to the approved test command otherwise. The `Purpose::Registry`,
+  `Purpose::CargoConfig`, and `Purpose::Runtime` grant purposes pin the mounts to
+  their fixed, non-overlapping, read-only destinations. Implemented, unit-tested,
+  and validated live against the bwrap runner by the end-to-end test
+  `offline_cargo_verification_e2e` (a network-denied `cargo test --locked` that
+  compiles, links, and runs inside bubblewrap).
+- **Sandbox cargo configuration is authoritative; the project-local config is
+  left untouched.** Cargo resolves configuration from the project-local
+  `.cargo/config.toml` first, and that file is carried into the sandbox through
+  the component mount. A host-path source config written there would shadow the
+  mounted `/workspace/.cargo` config and break the offline build. `kvist vendor`
+  therefore writes only the sandbox cargo configuration (at
+  `.kvist/sandbox-cargo/config.toml`, mounted at `/workspace/.cargo`) and never
+  writes source-replacement keys into the project's own `.cargo/config.toml`.
+  Host builds resolve from the network as usual; only the sandbox build is
+  required to be offline.
 
-Pending live validation (security-sensitive, requires the bwrap runner environment):
+Validated live (security-sensitive, requires the bwrap runner environment):
 
-- **Validate the extended Cargo topology under the real bwrap runner.** The routing
-  and the two vendored mounts are implemented and covered by unit and planning
-  tests, but the closed-topology change has not yet been executed against the bwrap
-  runner environment, so the end-to-end offline `cargo test --locked` build inside
-  the sandbox remains to be validated. Extending the closed topology admits new
-  read-only authority and is documented here rather than certified.
+- **The extended Cargo topology runs under the real bwrap runner.** The routing,
+  the vendored mounts, and the runtime-bin mount are exercised end to end by
+  `engine/tests/offline_cargo_verification_e2e.rs`, which vendors a small project
+  and runs a network-denied `cargo test --locked` inside bubblewrap that compiles,
+  links, and executes. The test self-skips when the live sandbox cannot run
+  (no built runner, no bubblewrap backend, no cargo/rustup, no git worktree, or no
+  network for the initial vendoring pass) so it never fails in an environment that
+  lacks the bwrap runner. Extending the closed topology admits new read-only
+  authority and is documented here rather than certified.
 
 ## Lock-file digest as the directory-mount identity
 
@@ -131,7 +149,7 @@ make the sandbox build from it offline.
   never invoked again.
 - **Record a versioned manifest.** `kvist vendor` writes `.kvist/vendoring-v1.json`
   under the project, recording the lockfile digest, the vendored directory, the
-  host and sandbox `.cargo/config.toml` paths, and the fixed sandbox mount
+  sandbox `.cargo/config.toml` directory, and the fixed sandbox mount
   destinations. The manifest is version-controlled durable state, and it is the
   single authoritative record of what offline material is trusted, tied to the
   version-controlled `Cargo.lock` catalogue (see below).
@@ -139,12 +157,13 @@ make the sandbox build from it offline.
   before it records the manifest, failing closed when a registry or Git
   dependency is absent. The manifest enforcement primitive re-reads the manifest,
   rejects a stale lockfile (digest no longer matches), and rejects missing
-  dependencies. Sandbox verification is intended to mount the vendored registry
-  read-only at `/workspace/vendored` together with a sandbox cargo configuration
-  at `/workspace/.cargo`. The cargo configuration maps the crates-io source at the
-  vendored registry. The two mounts are distinct directories because the sandbox
-  runner forbids overlapping the component mount. That verification wiring is the
-  planned integration (see Status).
+  dependencies. Sandbox verification mounts the vendored registry read-only at
+  `/workspace/vendored` together with a sandbox cargo configuration at
+  `/workspace/.cargo` and a runtime-bin directory at `/workspace/bin`. The cargo
+  configuration maps the crates-io source at the vendored registry. The three
+  mounts are distinct directories because the sandbox runner forbids overlapping
+  the component mount. That verification wiring is implemented and validated
+  (see Status).
 - **Build offline in the sandbox.** `cargo build`/`cargo test --locked`
   execute inside the effect sandbox with network denied, resolving everything
   from the vendored registry with the toolchain mounted read-only. No

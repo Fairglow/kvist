@@ -65,12 +65,15 @@ fn invalid(detail: impl Into<String>) -> ProtocolError {
 }
 
 /// Fixed, non-overlapping sandbox destinations for the read-only vendored
-/// dependency material and its offline resolver configuration. They are pinned
-/// here so a Cargo verification cannot smuggle unbounded read-only authority at
-/// an arbitrary destination: the vendored registry is only ever mounted at
-/// `/workspace/vendored` and the offline configuration only at `/workspace/.cargo`.
+/// dependency material, its offline resolver configuration, and the runtime bin
+/// directory. They are pinned here so a Cargo verification cannot smuggle
+/// unbounded read-only authority at an arbitrary destination: the vendored
+/// registry is only ever mounted at `/workspace/vendored`, the offline
+/// configuration only at `/workspace/.cargo`, and the runtime bin only at
+/// `/workspace/bin`.
 const VENDORED_REGISTRY_MOUNT: &str = "/workspace/vendored";
 const VENDORED_CARGO_CONFIG_MOUNT: &str = "/workspace/.cargo";
+const RUNTIME_BIN_MOUNT: &str = "/workspace/bin";
 
 /// Parses the bounded, closed wire request without trusting its producer.
 pub fn parse_request(bytes: &[u8]) -> Result<SandboxRequest, ProtocolError> {
@@ -425,6 +428,7 @@ fn validate_phase_purpose(
                 | Purpose::Scratch
                 | Purpose::Registry
                 | Purpose::CargoConfig
+                | Purpose::Runtime
         ),
         Phase::DependencyAcquisition => matches!(
             purpose,
@@ -942,6 +946,9 @@ fn validate_cargo_verification(request: &SandboxRequest) -> Result<(), ProtocolE
     // non-overlapping destination.
     require_vendored_mount(request, Purpose::Registry, VENDORED_REGISTRY_MOUNT)?;
     require_vendored_mount(request, Purpose::CargoConfig, VENDORED_CARGO_CONFIG_MOUNT)?;
+    // The runtime bin is what `PATH` resolves `rustc`, `rustdoc`, and the system
+    // linker from; it is a read-only extension pinned to its fixed destination.
+    require_vendored_mount(request, Purpose::Runtime, RUNTIME_BIN_MOUNT)?;
     ensure_exact_cargo_purposes(
         request,
         &[
@@ -951,6 +958,7 @@ fn validate_cargo_verification(request: &SandboxRequest) -> Result<(), ProtocolE
             Purpose::Verification,
             Purpose::Registry,
             Purpose::CargoConfig,
+            Purpose::Runtime,
         ],
     )
 }

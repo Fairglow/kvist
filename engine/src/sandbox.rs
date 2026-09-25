@@ -13,6 +13,7 @@ use std::{
     fs::{self, File},
     io::{self, Read, Write},
     os::fd::AsFd,
+    os::unix::fs::symlink,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Duration, Instant},
@@ -1217,6 +1218,10 @@ const CARGO_TOOLCHAIN_DEST: &str = "/workspace/toolchain";
 /// actually resolves dependencies from, so the approved home need only be a
 /// real, immutable directory the runner's topology can reference.
 const CARGO_CARGO_HOME_DEST: &str = "/workspace/cargo-home";
+/// Sandbox destination of the provisioned, read-only runtime bin directory that
+/// exposes the toolchain binaries and the system linker, and that `PATH` points
+/// at so a locked build can compile and link offline.
+const CARGO_RUNTIME_BIN_DEST: &str = "/workspace/bin";
 
 /// Inputs for an offline, network-denied `cargo test --locked` verification
 /// against a vendored Rust project.
@@ -1235,6 +1240,9 @@ pub struct OfflineCargoVerification<'a> {
     pub cargo_home: &'a Path,
     pub vendored_registry: &'a Path,
     pub cargo_config: &'a Path,
+    /// Read-only provisioned runtime bin directory (toolchain shims + system
+    /// linker) mounted at `CARGO_RUNTIME_BIN_DEST` and pointed at by `PATH`.
+    pub runtime_bin: &'a Path,
     pub scratch_host_dir: &'a Path,
     pub component_dir: &'a Path,
     /// Lock-file digest identifying every read-only vendored mount. This is the
@@ -1270,15 +1278,21 @@ fn build_offline_cargo_verification_request(
     cargo_home: &Path,
     vendored_registry: &Path,
     cargo_config: &Path,
+    runtime_bin: &Path,
     scratch_host_dir: &Path,
     component_dir: &Path,
 ) -> Result<Vec<u8>> {
-    // The closed Cargo topology is six mutually non-overlapping grants. Their
+    // The closed Cargo topology is seven mutually non-overlapping grants. Their
     // sources are canonicalized once; destinations are the fixed sandbox paths.
     let toolchain_root = canonical_source_str(
         config,
         toolchain_root,
         "canonicalize cargo toolchain root for offline verification",
+    )?;
+    let runtime_bin = canonical_source_str(
+        config,
+        runtime_bin,
+        "canonicalize runtime bin for offline verification",
     )?;
     let cargo_home = canonical_source_str(
         config,
@@ -1348,17 +1362,14 @@ fn build_offline_cargo_verification_request(
             .as_bytes(),
     );
 
-    // `PATH` is the immutable toolchain's `bin` directory so `cargo` resolves
-    // `rustc`, `rustdoc`, and the linker without a host search path; the runner
-    // validates it as a single canonical absolute directory.
-    let cargo_parent = Path::new(&cargo_sandbox_path)
-        .parent()
-        .map(|parent| parent.to_string_lossy().into_owned())
-        .unwrap_or_else(|| CARGO_TOOLCHAIN_DEST.to_owned());
-
+    // `PATH` is the provisioned runtime bin directory, a single canonical
+    // absolute directory the runner validates. It exposes the toolchain
+    // binaries the build invokes by name (`rustc`, `rustdoc`) plus the system
+    // linker and archiver (`cc`, `ar`, `as`), so a locked build can compile and
+    // link without any host search path.
     let mut environment: BTreeMap<String, String> = BTreeMap::new();
     environment.insert("HOME".to_owned(), format!("{CARGO_SCRATCH_DEST}/home"));
-    environment.insert("PATH".to_owned(), cargo_parent);
+    environment.insert("PATH".to_owned(), CARGO_RUNTIME_BIN_DEST.to_owned());
     environment.insert("CARGO_HOME".to_owned(), CARGO_CARGO_HOME_DEST.to_owned());
     environment.insert(
         "CARGO_TARGET_DIR".to_owned(),
@@ -1418,6 +1429,16 @@ fn build_offline_cargo_verification_request(
             access: "read-only",
             purpose: "cargo-config",
             identity: lockfile_digest.to_owned(),
+        },
+        // The runtime bin is a read-only, Kvist-provisioned directory of
+        // symlinks exposing the toolchain binaries and the system linker. Its
+        // identity is a path-derived content claim over the immutable material.
+        SandboxGrant {
+            source: runtime_bin.clone(),
+            destination: CARGO_RUNTIME_BIN_DEST.to_owned(),
+            access: "read-only",
+            purpose: "runtime",
+            identity: digest_label(format!("kvist-runtime-bin:{runtime_bin}").as_bytes()),
         },
     ];
 
@@ -1566,6 +1587,7 @@ pub fn execute_offline_cargo_verification(
         request.cargo_home,
         request.vendored_registry,
         request.cargo_config,
+        request.runtime_bin,
         request.scratch_host_dir,
         request.component_dir,
     )?;
@@ -1600,10 +1622,11 @@ pub struct ResolvedCargoToolchain {
 /// path, returning the toolchain root and the cargo executable beneath it.
 ///
 /// The path is expected to be `<root>/bin/cargo`; `root` is that path's parent's
-/// parent, and it must be a complete toolchain (it contains `rustlib`). cargo is
-/// required to live strictly beneath `root`, so the single read-only toolchain
-/// grant covers the whole immutable toolchain set. This is a pure validation over
-/// a resolved path so it can be unit-tested without invoking `rustup`.
+/// parent, and it must be a complete toolchain (it contains a `rustlib` runtime
+/// directory). cargo is required to live strictly beneath `root`, so the single
+/// read-only toolchain grant covers the whole immutable toolchain set. This is a
+/// pure validation over a resolved path so it can be unit-tested without invoking
+/// `rustup`.
 fn cargo_toolchain_from_path(cargo_str: &str, runner: &str) -> Result<ResolvedCargoToolchain> {
     let cargo = PathBuf::from(cargo_str);
     let bin_dir = cargo
@@ -1633,12 +1656,19 @@ fn cargo_toolchain_from_path(cargo_str: &str, runner: &str) -> Result<ResolvedCa
                 root.display()
             ),
         })?;
-    if !root.join("rustlib").is_dir() {
+    // Modern rustup places the toolchain runtime at `<root>/lib/rustlib`;
+    // older toolchains keep it at `<root>/rustlib`. Accept either layout so the
+    // completeness check matches what is on disk without over-fitting to one
+    // rustup version.
+    let has_rustlib = root.join("rustlib").is_dir() || root.join("lib").join("rustlib").is_dir();
+    if !has_rustlib {
         return Err(KvistError::SandboxUnavailable {
             runner: runner.to_owned(),
             reason: format!(
-                "Rust toolchain root `{}` is not a complete toolchain (missing rustlib)",
-                root.display()
+                "Rust toolchain root `{}` is not a complete toolchain (no rustlib runtime under `{}` or `{}`)",
+                root.display(),
+                root.join("lib").join("rustlib").display(),
+                root.join("rustlib").display(),
             ),
         });
     }
@@ -1663,7 +1693,7 @@ fn cargo_toolchain_from_path(cargo_str: &str, runner: &str) -> Result<ResolvedCa
 /// absent. This never falls back to building on the host.
 pub fn resolve_cargo_toolchain(runner: &str) -> Result<ResolvedCargoToolchain> {
     let output = std::process::Command::new("rustup")
-        .args(["which", "--cargo"])
+        .args(["which", "cargo"])
         .output()
         .map_err(|source| KvistError::SandboxUnavailable {
             runner: runner.to_owned(),
@@ -1673,14 +1703,14 @@ pub fn resolve_cargo_toolchain(runner: &str) -> Result<ResolvedCargoToolchain> {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(KvistError::SandboxUnavailable {
             runner: runner.to_owned(),
-            reason: format!("`rustup which --cargo` failed: {}", stderr.trim()),
+            reason: format!("`rustup which cargo` failed: {}", stderr.trim()),
         });
     }
     let cargo_str = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     if cargo_str.is_empty() {
         return Err(KvistError::SandboxUnavailable {
             runner: runner.to_owned(),
-            reason: "`rustup which --cargo` returned no toolchain path".to_owned(),
+            reason: "`rustup which cargo` returned no toolchain path".to_owned(),
         });
     }
     cargo_toolchain_from_path(&cargo_str, runner)
@@ -1704,6 +1734,87 @@ fn provision_cargo_home(project_root: &Path) -> Result<PathBuf> {
         })?;
     }
     Ok(cargo_home)
+}
+
+/// Provision the read-only runtime bin directory for offline cargo verification.
+///
+/// A locked build invokes `rustc` and `rustdoc` by name (resolved via `PATH`),
+/// and `rustc` in turn invokes the system linker `cc` (plus `ar`/`as` for
+/// archives and assembly). Because the closed topology pins `PATH` to a single
+/// directory, this creates a small Kvist-owned directory of symlinks exposing
+/// exactly those executables: the toolchain binaries at their fixed sandbox
+/// toolchain destination, and the system binutils at their host path (which the
+/// runner binds read-only into the sandbox). It is regenerated on every run
+/// under the Kvist-owned `.kvist/` directory.
+fn provision_toolchain_bin(project_root: &Path, runner: &str) -> Result<PathBuf> {
+    let bin_dir = project_root.join(".kvist").join("toolchain-bin");
+    // Recreate from scratch so a stale set of symlinks from a previous run (or a
+    // different toolchain) never leaks into the grant.
+    match std::fs::remove_dir_all(&bin_dir) {
+        Ok(()) => {}
+        Err(source) if source.kind() == io::ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "reset provisioned runtime bin for offline cargo verification",
+                path: bin_dir.clone(),
+                source,
+            });
+        }
+    }
+    std::fs::create_dir_all(&bin_dir).map_err(|source| KvistError::Io {
+        operation: "create provisioned runtime bin for offline cargo verification",
+        path: bin_dir.clone(),
+        source,
+    })?;
+
+    // Toolchain binaries resolve at their fixed sandbox toolchain destination.
+    for name in ["rustc", "rustdoc"] {
+        let target = format!("{CARGO_TOOLCHAIN_DEST}/bin/{name}");
+        link_runtime_entry(&bin_dir, name, &target, runner)?;
+    }
+
+    // System binutils resolve at their host path, which the runner binds
+    // read-only into the sandbox (`/usr`, `/bin`, ...).
+    for name in ["cc", "ar", "as"] {
+        let host_path = locate_system_binary(name, runner)?;
+        link_runtime_entry(&bin_dir, name, &host_path.to_string_lossy(), runner)?;
+    }
+
+    Ok(bin_dir)
+}
+
+/// Create a symlink `bin_dir/name` -> `target`, failing closed with a bounded,
+/// actionable error.
+fn link_runtime_entry(bin_dir: &Path, name: &str, target: &str, runner: &str) -> Result<()> {
+    let link_path = bin_dir.join(name);
+    symlink(target, &link_path).map_err(|source| KvistError::SandboxUnavailable {
+        runner: runner.to_owned(),
+        reason: format!("cannot link runtime bin entry `{name}` to `{target}`: {source}"),
+    })?;
+    Ok(())
+}
+
+/// Locate a system binary (`cc`, `ar`, `as`) in the standard host locations the
+/// runner binds read-only into the sandbox. Fails closed with a non-secret,
+/// actionable message when none is present.
+fn locate_system_binary(name: &str, runner: &str) -> Result<PathBuf> {
+    for candidate in [
+        format!("/usr/bin/{name}"),
+        format!("/bin/{name}"),
+        format!("/usr/local/bin/{name}"),
+    ] {
+        let path = Path::new(&candidate);
+        if path.is_file() || path.is_symlink() {
+            return Ok(path.to_path_buf());
+        }
+    }
+    Err(KvistError::SandboxUnavailable {
+        runner: runner.to_owned(),
+        reason: format!(
+            "system binary `{name}` was not found in /usr/bin, /bin, or /usr/local/bin; \
+             a C compiler and binutils are required to link sandbox builds"
+        ),
+    })
 }
 
 /// Run offline, network-denied `cargo test --locked` verification for a vendored
@@ -1765,6 +1876,7 @@ pub fn run_offline_cargo_verification(
 
     let toolchain = resolve_cargo_toolchain(&config.runner)?;
     let cargo_home = provision_cargo_home(project_root)?;
+    let runtime_bin = provision_toolchain_bin(project_root, &config.runner)?;
     let scratch = tempfile::tempdir().map_err(|source| KvistError::Io {
         operation: "create writable scratch for offline cargo verification",
         path: PathBuf::from("."),
@@ -1777,6 +1889,20 @@ pub fn run_offline_cargo_verification(
         "executing offline vendored cargo verification"
     );
 
+    // The expected runner identity is derived from the configured trusted
+    // runner (its canonical path plus content digest), exactly as the generic
+    // verification path does via `approved_runner`. The capability probe
+    // reports the runner's `current_exe()`, which is the immutable copy the
+    // runner is executed from and therefore cannot equal the approved canonical
+    // path; the recomputed identity is the same content the probe confirmed.
+    let approved_runner = runner_identity(config, project_root, vcs_selection)
+        .map_err(|source| KvistError::SandboxUnavailable {
+            runner: config.runner.clone(),
+            reason: format!(
+                "cannot re-identify the trusted sandbox runner for offline cargo verification: {source}"
+            ),
+        })?;
+
     let request = OfflineCargoVerification {
         project_root,
         vcs_selection,
@@ -1785,16 +1911,14 @@ pub fn run_offline_cargo_verification(
         cargo_home: &cargo_home,
         vendored_registry: &vendored_registry,
         cargo_config: &cargo_config,
+        runtime_bin: &runtime_bin,
         scratch_host_dir: scratch.path(),
         component_dir,
         lockfile_digest: enforcement.lockfile_digest,
         policy_identity,
         backend: &probe.backend,
         config,
-        expected_runner: &RunnerIdentity {
-            canonical_path: probe.runner_path.clone(),
-            digest: probe.runner_digest.clone(),
-        },
+        expected_runner: &approved_runner,
     };
 
     execute_offline_cargo_verification(config, &request, options)
@@ -2867,9 +2991,11 @@ mod tests {
         // Writable scratch directory and the verification workspace (the project).
         let scratch = tempfile::tempdir().expect("scratch");
 
-        // Read-only vendored registry and its offline resolver configuration.
+        // Read-only vendored registry, its offline resolver configuration, and
+        // the provisioned runtime bin directory.
         let vendored_registry = tempfile::tempdir().expect("vendored registry");
         let cargo_config = tempfile::tempdir().expect("cargo config");
+        let runtime_bin = tempfile::tempdir().expect("runtime bin");
         let lockfile_digest = digest_label(b"kvist-cargo-lockfile");
 
         let config = SandboxConfig {
@@ -2894,6 +3020,7 @@ mod tests {
             cargo_home.path(),
             vendored_registry.path(),
             cargo_config.path(),
+            runtime_bin.path(),
             scratch.path(),
             &project,
         )
@@ -2901,17 +3028,18 @@ mod tests {
         let request = validation::parse_and_validate(&encoded)
             .expect("offline cargo request must satisfy the closed Cargo topology validator");
 
-        // The closed topology is exactly the four base grants plus the two
-        // read-only vendored extensions: toolchain, dependency-cache, scratch,
-        // verification, registry, and cargo-config.
+        // The closed topology is exactly the four base grants plus the three
+        // read-only extensions: toolchain, dependency-cache, scratch,
+        // verification, registry, cargo-config, and runtime bin.
         assert_eq!(
             request.grants.len(),
-            6,
-            "closed Cargo topology is six grants"
+            7,
+            "closed Cargo topology is seven grants"
         );
         let purposes: Vec<_> = request.grants.iter().map(|grant| grant.purpose).collect();
         assert!(purposes.contains(&Purpose::Registry));
         assert!(purposes.contains(&Purpose::CargoConfig));
+        assert!(purposes.contains(&Purpose::Runtime));
 
         // The vendored registry mount is pinned, read-only, at its fixed
         // destination, and identified by the lock-file digest.
@@ -2935,6 +3063,21 @@ mod tests {
         );
         assert_eq!(cargo_config_mount.access, Access::ReadOnly);
         assert_eq!(cargo_config_mount.identity, lockfile_digest);
+
+        // The runtime bin is read-only, pinned to its fixed destination, and
+        // `PATH` points at it so the build resolves `rustc` and the linker.
+        let runtime_mount = request
+            .grants
+            .iter()
+            .find(|grant| grant.purpose == Purpose::Runtime)
+            .expect("runtime grant");
+        assert_eq!(runtime_mount.destination, CARGO_RUNTIME_BIN_DEST);
+        assert_eq!(runtime_mount.access, Access::ReadOnly);
+        let path_env = request
+            .environment
+            .get("PATH")
+            .expect("PATH is set for the offline build");
+        assert_eq!(path_env, CARGO_RUNTIME_BIN_DEST);
 
         // The Cargo toolchain `cargo` must equal argv[0] (the sandbox path of the
         // executable), so the runner binds the exact binary it runs.

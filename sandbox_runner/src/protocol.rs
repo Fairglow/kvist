@@ -92,6 +92,11 @@ pub enum Purpose {
     /// Read-only language offline configuration that directs the resolver at
     /// the vendored material (for example a `.cargo/config.toml`).
     CargoConfig,
+    /// Read-only runtime bin directory exposing the toolchain binaries the
+    /// build invokes by name (`rustc`, `rustdoc`) plus the system linker and
+    /// archiver (`cc`, `ar`, `as`) so a locked build can compile and link
+    /// without a host `PATH`.
+    Runtime,
 }
 
 /// Network authority requested by the phase.

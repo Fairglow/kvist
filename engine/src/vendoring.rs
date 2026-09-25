@@ -262,8 +262,6 @@ pub struct VendorManifest {
     pub lockfile_digest: String,
     /// Absolute host path of the vendored registry.
     pub vendored_dir: String,
-    /// Absolute host path of the host `.cargo/config.toml` for offline host builds.
-    pub cargo_config_path: String,
     /// Absolute host path of the directory mounted at `/workspace/.cargo`.
     pub sandbox_cargo_dir: String,
     /// Sandbox destination of the vendored registry (informational).
@@ -355,8 +353,12 @@ impl VendorManifest {
 /// Render a cargo configuration that maps the crates.io source to a vendored
 /// directory at `directory`, so a locked build resolves everything offline.
 ///
-/// `directory` is whatever path cargo will see: the host vendored directory for
-/// host builds, and the fixed sandbox mount path for sandbox verification.
+/// `directory` is the fixed sandbox mount path (`VENDOR_SANDBOX_MOUNT`). This
+/// configuration is the authoritative offline resolver config for sandbox
+/// verification: it is mounted at `/workspace/.cargo`, a parent of the sandbox
+/// working directory. Kvist deliberately does not write source-replacement keys
+/// into the project's own `.cargo/config.toml`, because that file is carried
+/// into the sandbox through the component mount and would shadow this one.
 pub fn offline_cargo_config(directory: &str) -> String {
     format!(
         "# Managed by `kvist vendor` (ADR-0011). Do not edit by hand.\n\
@@ -482,11 +484,6 @@ checksum = \"41ed3c71d68f1f04ad7790f37911905f10320b73714c9c6f7e6f6b92\"\n\n\
             lockfile_path: CARGO_LOCK_FILENAME.to_owned(),
             lockfile_digest: digest.clone(),
             vendored_dir: vendored.to_string_lossy().into_owned(),
-            cargo_config_path: project
-                .join(".cargo")
-                .join("config.toml")
-                .to_string_lossy()
-                .into_owned(),
             sandbox_cargo_dir: project
                 .join(".kvist")
                 .join(SANDBOX_CARGO_CONFIG_DIRNAME)
