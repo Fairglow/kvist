@@ -1,4 +1,5 @@
 <!-- kvist-implementation-record-version: 1 -->
+
 # Component Implementation Record
 
 > Historical evidence notice: this record predates the one-way move from the
@@ -13,7 +14,7 @@ This record was derived from the Rust implementation files directly under
 No intent, architecture, existing implementation-record, review, guide, or
 version-control evidence was used.
 
-The root package is `kvist` version `0.1.0`, uses Rust edition 2024, declares a
+The root package is `kvist` version `0.2.0`, uses Rust edition 2024, declares a
 minimum Rust version of 1.94, forbids unsafe code in the library, and fails
 compilation on non-Linux targets. It builds a library and a CLI binary. The
 workspace also names the opaque `agent-runtime` package as a path dependency.
@@ -27,7 +28,7 @@ workspace also names the opaque `agent-runtime` package as a path dependency.
 - Failures are printed to stderr. Parser-controlled help and parser errors use
   Clap's exit status and rendering; all other root-defined errors return status
   1. Structured component-validation failures in JSON mode are written as the
-  complete JSON error object without an added `error:` prefix.
+     complete JSON error object without an added `error:` prefix.
 - `--json` is a global flag. Most commands wrap successful results in JSON;
   `status` emits its own versioned JSON representation and `prompt` emits a
   JSON object containing captured provider output. Plain mode emits

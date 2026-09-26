@@ -38,7 +38,7 @@ No requirements, contracts, designs, prior implementation records, docs, README,
 
 ## Workspace and feature shape
 
-- `src/agent_runtime` is a workspace member and a local path dependency of the root `kvist` package as `agent-runtime = { version = "=0.1.0", path = "src/agent_runtime" }`.
+- `src/agent_runtime` is a workspace member and a local path dependency of the root `kvist` package as `agent-runtime = { version = "=0.2.0", path = "src/agent_runtime" }`.
 - The crate builds a library named `agent_runtime` and a binary named `agent-run`.
 - The crate is Linux-only at compile time:
   - `src/lib.rs` and `src/main.rs` both emit `compile_error!` when `target_os != "linux"`.
@@ -158,7 +158,7 @@ Observed behavior:
   - `Prompt:`
   - prompt text
   - `Response:`
-  to stderr before provider output.
+    to stderr before provider output.
 
 ### `models`
 
@@ -217,7 +217,7 @@ Observed behavior:
 - `--json` emits exactly one object:
 
 ```json
-{"content":"..."}
+{ "content": "..." }
 ```
 
 - In `run --json`, stdout from the successful supervised command is decoded with `String::from_utf8_lossy`; invalid UTF-8 becomes replacement characters.
@@ -584,7 +584,7 @@ Observed output schema subset and bounds:
   - `number`
   - `string`
   - `integer`
-  or a nonempty array of those strings
+    or a nonempty array of those strings
 - `required` must contain unique property names already present in `properties`
 - `additionalProperties` may be boolean or schema
 - `enum`, `anyOf`, and `allOf` must be nonempty arrays
@@ -638,8 +638,8 @@ Observed provider-specific request mapping:
 }
 ```
 
-  - optional `tools`
-  - `tool_choice` as `"none" | "auto" | "required"`
+- optional `tools`
+- `tool_choice` as `"none" | "auto" | "required"`
 
 Observed message encoding:
 

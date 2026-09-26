@@ -4,7 +4,7 @@
 **Project Name:** KVIST (`kvist`)  
 **Target Engine Implementation:** Rust  
 **License:** GNU Affero General Public License v3.0 or later, with separate commercial terms available
-**Version:** 0.1.0
+**Version:** 0.2.0
 
 **Status:** This is the authoritative detailed product direction, not a claim
 that every described workflow is automated. [`VISION.md`](VISION.md) owns the
@@ -367,16 +367,16 @@ declare what it preserves or loses.
 
 ## 7. Risks and Deferred Work
 
-| Risk | Architectural response |
-| --- | --- |
-| Upstream ripple | Only the nearest ancestor component `CONTRACT.md` propagates implicitly; general provider-contract materialization remains deferred. |
-| Context growth | Local intent, queue, root constraints, and explicitly authorized contracts bound the work context. |
-| Hallucinated compliance | Clean-slate observation and separate source-blind comparison prevent implementer self-certification. |
+| Risk                              | Architectural response                                                                                                                                                                                                                 |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Upstream ripple                   | Only the nearest ancestor component `CONTRACT.md` propagates implicitly; general provider-contract materialization remains deferred.                                                                                                   |
+| Context growth                    | Local intent, queue, root constraints, and explicitly authorized contracts bound the work context.                                                                                                                                     |
+| Hallucinated compliance           | Clean-slate observation and separate source-blind comparison prevent implementer self-certification.                                                                                                                                   |
 | Review becomes an approval oracle | Findings remain advisory; a review-required acceptance checks only exact-digest review opportunity and acknowledgement or explicit exception, while a visible project opt-out disables the gate. Receipts are not compliance evidence. |
-| Artifact ambiguity | Requirements, contract, design, task state, and observed behavior have distinct authority. |
-| Unsafe execution | External commands are shell-free and effectful task execution requires an independently installed approved enforcement boundary. |
-| Nominal portability | Linux is the only executable target until another backend has independent native evidence. |
-| Interchange overclaim | Native schema references and retained identifiers support future adapters without claiming currently deferred conformance or interoperability. |
+| Artifact ambiguity                | Requirements, contract, design, task state, and observed behavior have distinct authority.                                                                                                                                             |
+| Unsafe execution                  | External commands are shell-free and effectful task execution requires an independently installed approved enforcement boundary.                                                                                                       |
+| Nominal portability               | Linux is the only executable target until another backend has independent native evidence.                                                                                                                                             |
+| Interchange overclaim             | Native schema references and retained identifiers support future adapters without claiming currently deferred conformance or interoperability.                                                                                         |
 
 Advisory review evidence and project-level acceptance, IMPL-derived intent
 proposals and comparison, contract-clause traceability, visual editor, LSP,
@@ -394,4 +394,5 @@ strategy; `VISION.md`, `ARCHITECTURE.md`, component intent documents,
 `TODOS.yaml`, and `IMPL.md` retain their distinct authorities.
 
 ---
-*KVIST — Structured design for autonomous agents.*
+
+_KVIST — Structured design for autonomous agents._
