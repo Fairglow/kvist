@@ -8,9 +8,10 @@
 //! cargo test --locked actually executes inside bubblewrap.
 //!
 //! It self-skips when the live sandbox cannot run here (no built
-//! runner, no bubblewrap backend, no cargo or rustup, no git
-//! worktree, or no network for the initial vendoring pass), so it
-//! never fails in an environment that lacks the bwrap runner.
+//! runner outside the git worktree, no bubblewrap backend, no cargo
+//! or rustup, no git worktree, or no network for the initial
+//! vendoring pass), so it never fails in an environment that lacks
+//! the bwrap runner.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -52,17 +53,33 @@ fn candidate_target_roots() -> Vec<PathBuf> {
 }
 
 /// Locate the built sandbox runner, preferring an explicit override.
+///
+/// The validator requires the runner to be installed outside the
+/// selected VCS worktree, so a candidate inside it (such as the
+/// default in-worktree cargo target directory) is unusable and is
+/// treated as absent: the test self-skips instead of failing.
 fn locate_runner() -> Option<PathBuf> {
+    let worktree = match git_worktree_root().as_deref() {
+        Some(root) => root.canonicalize().ok(),
+        None => None,
+    };
+    let outside_worktree = |candidate: &Path| match &worktree {
+        Some(root) => candidate
+            .canonicalize()
+            .ok()
+            .is_some_and(|canonical| !canonical.starts_with(root)),
+        None => true,
+    };
     if let Ok(path) = std::env::var("KVIST_SANDBOX_RUNNER") {
         let candidate = Path::new(&path);
-        if candidate.is_file() {
+        if candidate.is_file() && outside_worktree(candidate) {
             return Some(candidate.to_path_buf());
         }
     }
     for root in candidate_target_roots() {
         for profile in ["debug", "release"] {
             let candidate = root.join(profile).join("kvist-sandbox-runner");
-            if candidate.is_file() {
+            if candidate.is_file() && outside_worktree(&candidate) {
                 return Some(candidate);
             }
         }

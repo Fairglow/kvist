@@ -25,6 +25,10 @@ jobs:
   quality:
     name: Quality (Linux, stable)
     runs-on: ubuntu-latest
+    # The sandbox runner must be installed outside the VCS worktree for the
+    # offline cargo verification e2e test to execute it, so build there.
+    env:
+      CARGO_TARGET_DIR: /home/runner/kvist-target
 
     steps:
       - name: Checkout repository
@@ -76,6 +80,10 @@ jobs:
   msrv:
     name: MSRV (Rust 1.95.0)
     runs-on: ubuntu-latest
+    # Build outside the worktree so the sandbox runner the offline cargo
+    # verification e2e test executes stays outside the VCS worktree.
+    env:
+      CARGO_TARGET_DIR: /home/runner/kvist-target
 
     steps:
       - name: Checkout repository
