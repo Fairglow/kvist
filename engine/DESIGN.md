@@ -408,6 +408,116 @@ widening is a separate phase that changes both layers and the grant enumeration
 together, then re-tests the dogfood boundary suite. See
 [`REQUIREMENTS.md`](REQUIREMENTS.md) for the recorded follow-up.
 
+### Pinned Rust toolchains and host provisioning (ADR-0012)
+
+The offline Cargo verification topology needs an immutable toolchain. The
+toolchain is a pinned, host-provisioned artifact with durable state, managed
+exactly like the vendored registry:
+
+- **Pin source.** `rust-toolchain.toml` (TOML: `[toolchain] channel = "..."`,
+  the rustup-native file) takes priority over the plain `rust-toolchain` file
+  (a bare channel name) at the project root. Both are read with the same
+  bounds as other project artifacts (bounded size, regular non-link files).
+  Channel syntax is validated to rustup-supported forms: exact versions
+  (`1.95.0`, `1.95`), `stable`, `beta`, `nightly`, and dated variants
+  (`nightly-2026-01-01`, `stable-2026-01-01`, `beta-2026-01-01`). Anything
+  else fails closed with an actionable message naming the offending pin.
+- **Channel-explicit resolution.** `rustup which cargo --toolchain <channel>`
+  resolves the exact cargo path for the pinned channel, independent of the
+  process working directory and ambient rustup overrides; the resolved path
+  then passes the existing toolchain-layout validation (`cargo_toolchain_from_
+path`: `<root>/bin/cargo`, a complete rustlib layout, cargo beneath the
+  root). Without a pin, the rustup default is resolved as today and recorded
+  as `default` in the manifest.
+- **Provisioning step (host, outside the sandbox).** `kvist toolchain ensure
+[PROJECT_DIR]` resolves the effective channel, runs `rustup toolchain
+install <channel>` when the channel is not present in `rustup toolchain
+list` (the supported upgrade/downgrade path; bounded output capture, host
+  network), re-resolves and validates the layout, and records the manifest.
+  This step is the only supported toolchain change path. Builds and
+  verification never invoke `rustup toolchain install`.
+- **Manifest.** `.kvist/rust-toolchain.json` (schema version 1) records:
+  schema version, the pinned channel (`"default"` when no pin file exists),
+  the canonical toolchain root, the canonical cargo path, the cargo
+  executable's SHA-256 content digest (the identity the sandbox request
+  derives), and a provisioning timestamp. The manifest lives under the
+  Kvist-owned, gitignored `.kvist/` directory: the durable, version-controlled
+  catalogue is the pin file itself.
+- **Enforcement on use.** `run_offline_cargo_verification` resolves the
+  toolchain from the pin (channel-explicit). When the manifest exists, the
+  resolved toolchain root and cargo digest MUST match the recorded values; a
+  mismatch fails closed with an actionable message ("toolchain drifted; run
+  `kvist toolchain ensure`"). When the manifest is absent, resolution proceeds
+  without a recorded baseline (today's behavior), so the feature is additive.
+  A pinned channel that is not installed fails closed with an actionable
+  message naming `kvist toolchain ensure`.
+
+**Authoring-phase toolchain gap.** The authoring phase cannot receive the
+offline Cargo topology under the current shared runner contract: the runner's
+phase-purpose validation permits only `Context`, `Authoring`, `Toolchain`,
+and `Scratch` purposes in authoring, rejects `Toolchain::Cargo` outside Cargo
+phases, and rejects a declared Cargo cache in authoring. The vendored
+registry, sandbox cargo config, and runtime bin therefore cannot be mounted
+for authoring. Two paths exist: (a) extend the runner contract (protocol
+change plus conformance updates in `sandbox_runner` and the `agent_runner`
+serialization) to permit the read-only Cargo purposes in authoring, or (b)
+carry the vendored registry, cargo config, and runtime bin under the already
+permitted `Context` purpose with a `Toolchain::System` toolchain block rooted
+at the toolchain destination and a writable `Scratch` serving as
+`CARGO_HOME`/`CARGO_TARGET_DIR` — no protocol change, but the request builder
+must be engine-side and the resulting topology is a documented variant of the
+verification topology. Path (b) is the first candidate because it reuses the
+existing closed purposes and the pinned-toolchain manifest.
+
+### Language support, per-language provisioning, and evidence
+
+`detect_language_strategy` selects the owning language by lock file (Rust
+first, then Python, JavaScript, C/Conan). `verify_task` routes Rust to the
+closed offline Cargo topology; every other language runs the generic
+approved-test-command path in the network-denied sandbox against host system
+toolchains (the runner mounts `/usr`, `/lib`, `/lib64`, `/bin`, and `/sbin`
+read-only; writable space is the `/tmp` and `/run` tmpfs; no `$HOME`).
+
+The non-Rust vendoring strategies are implemented at the enforcement layer
+(detection, lock-file digest identity, vendored-content presence, mount
+planning with per-language offline configs: `pip.conf` at `/workspace/.pip`,
+`.npmrc` at `/workspace/.npm`, `OFFLINE.md` at `/workspace/.conan`). The
+remaining wiring, in intended order:
+
+1. **Go (easy).** No Kvist machinery: `go mod vendor` on the host commits
+   `vendor/` inside the component, and `go test -mod=vendor ./...` runs
+   fully offline against the system `go`. The test-policy environment
+   allowlist must include `GOCACHE` and `TMPDIR` pointing at `/tmp`.
+   Evidence: a Go e2e test in the shape of
+   `offline_cargo_verification_e2e` (provision on the host, run the real
+   test offline in the sandbox, self-skip without the live sandbox).
+2. **JavaScript (easy).** Provision `package-lock.json` entries into
+   `.kvist/vendored-js` on the host (`npm pack` per locked entry, or an
+   offline npm cache seed), then wire the existing `JavaScriptStrategy`
+   mounts through the generic path's `read_only_mounts` parameter with the
+   test policy running `npm ci --offline` (or against a committed
+   `node_modules`) and the project test command.
+3. **Python (important).** Provision locked wheels into
+   `.kvist/vendored-python` on the host (`pip download`/`uv` fetch against
+   the lock file), wire the existing `PythonStrategy` mounts, and run an
+   offline `pip install --no-index --find-links` plus the project test
+   command inside the sandbox. Limitations to document: interpreter version
+   must match the host system `python3` (no per-project interpreter
+   provisioning yet), C-extension packages must be manylinux wheels, and
+   build backends with their own network needs require vendored build
+   dependencies.
+4. **C/C++ (important).** System `gcc`/`cc` plus system packages works today
+   via the generic path; Conan support reuses the existing `CConanStrategy`
+   (lock file plus presence, `--offline` install against the vendored
+   package directory).
+
+Before any non-Rust language is claimed as vendored-supported, its strategy
+MUST verify per-package presence against the lock file (the current
+directory-non-empty check is a placeholder) and an end-to-end integration
+test MUST pass. `kvist vendor` dispatches per strategy once each language's
+provisioning is implemented; until then it is Rust-only and fails with an
+actionable message for other languages.
+
 ### Planned review evidence and acceptance state
 
 The initial review subject is a digest-bound bundle containing exact local

@@ -1627,7 +1627,10 @@ pub struct ResolvedCargoToolchain {
 /// read-only toolchain grant covers the whole immutable toolchain set. This is a
 /// pure validation over a resolved path so it can be unit-tested without invoking
 /// `rustup`.
-fn cargo_toolchain_from_path(cargo_str: &str, runner: &str) -> Result<ResolvedCargoToolchain> {
+pub(crate) fn cargo_toolchain_from_path(
+    cargo_str: &str,
+    runner: &str,
+) -> Result<ResolvedCargoToolchain> {
     let cargo = PathBuf::from(cargo_str);
     let bin_dir = cargo
         .parent()
@@ -1874,7 +1877,7 @@ pub fn run_offline_cargo_verification(
             .to_owned(),
     })?;
 
-    let toolchain = resolve_cargo_toolchain(&config.runner)?;
+    let toolchain = crate::toolchain::resolve_pinned_toolchain(project_root, &config.runner)?;
     let cargo_home = provision_cargo_home(project_root)?;
     let runtime_bin = provision_toolchain_bin(project_root, &config.runner)?;
     let scratch = tempfile::tempdir().map_err(|source| KvistError::Io {

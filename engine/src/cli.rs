@@ -7,7 +7,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use crate::{
     KvistError, Result, component_documents, config, convert, discovery, import, init,
     project_state, prompt_input, reverse_discovery, status, task_commands, task_queue::TaskStatus,
-    tree, vendor_command, wizard,
+    toolchain, tree, vendor_command, wizard,
 };
 
 /// Kvist's top-level command-line interface.
@@ -52,6 +52,12 @@ pub enum Command {
         /// `<project>/.kvist/vendored`.
         #[arg(long, value_name = "PATH")]
         vendored_dir: Option<PathBuf>,
+    },
+    /// Host-authorized Rust toolchain provisioning (ADR-0012).
+    Toolchain {
+        /// Toolchain operation to execute.
+        #[command(subcommand)]
+        command: ToolchainCommand,
     },
     /// Import Kvist artifacts from a Git repository.
     Import {
@@ -240,6 +246,19 @@ pub enum ComponentCommand {
         /// Explicit commit message when --commit is used.
         #[arg(long)]
         message: Option<String>,
+    },
+}
+
+/// Toolchain provisioning operations.
+#[derive(Debug, Subcommand)]
+pub enum ToolchainCommand {
+    /// Resolve and provision the project's pinned Rust toolchain on the host,
+    /// outside the sandbox, and record the durable toolchain manifest.
+    Ensure {
+        /// Project directory containing `rust-toolchain.toml` when pinned;
+        /// defaults to the current directory.
+        #[arg(value_name = "PROJECT_DIR", default_value = ".")]
+        project_dir: PathBuf,
     },
 }
 
@@ -593,6 +612,19 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 json_string_escape(&mut message_json, &report.to_string());
                 CommandOutput::message(format!(
                     r#"{{"status":"success","command":"vendor","project_dir":{project_dir_json},"vendored_dir":{vendored_dir_json},"message":{message_json}}}"#
+                ))
+            }),
+            Command::Toolchain {
+                command: ToolchainCommand::Ensure { project_dir },
+            } => toolchain::ensure_toolchain(&project_dir, "toolchain ensure").map(|manifest| {
+                let mut project_dir_json = String::new();
+                let mut channel_json = String::new();
+                let mut toolchain_root_json = String::new();
+                json_string_escape(&mut project_dir_json, &project_dir.to_string_lossy());
+                json_string_escape(&mut channel_json, &manifest.channel);
+                json_string_escape(&mut toolchain_root_json, &manifest.toolchain_root);
+                CommandOutput::message(format!(
+                    r#"{{"status":"success","command":"toolchain ensure","project_dir":{project_dir_json},"channel":{channel_json},"toolchain_root":{toolchain_root_json}}}"#
                 ))
             }),
             Command::Import {
@@ -1217,6 +1249,14 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 },
             )
             .map(|report| CommandOutput::message(report.to_string())),
+            Command::Toolchain {
+                command: ToolchainCommand::Ensure { project_dir },
+            } => toolchain::ensure_toolchain(&project_dir, "toolchain ensure").map(|manifest| {
+                CommandOutput::message(format!(
+                    "Toolchain ensured: channel `{}`, root `{}`",
+                    manifest.channel, manifest.toolchain_root
+                ))
+            }),
             Command::Import {
                 repo_url,
                 branch,

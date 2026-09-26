@@ -246,6 +246,160 @@ fn offline_cargo_verification_builds_tested_project_denied_network() {
     );
 }
 
+/// The active rustup toolchain channel with the target-triple suffix removed,
+/// so the pinned e2e case can pin the toolchain that is already installed.
+/// `None` when the channel cannot be derived (skip, never fail).
+fn active_rustup_channel() -> Option<String> {
+    let output = Command::new("rustup")
+        .args(["show", "active-toolchain"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let token = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()?
+        .split_whitespace()
+        .next()?
+        .to_owned();
+    let channel = token
+        .strip_suffix("-x86_64-unknown-linux-gnu")
+        .or_else(|| token.strip_suffix("-aarch64-unknown-linux-gnu"))?
+        .to_owned();
+    kvist::toolchain::validate_channel(&channel, "e2e active toolchain").ok()?;
+    Some(channel)
+}
+
+/// End-to-end: a project pinned via `rust-toolchain.toml` is provisioned by
+/// `kvist toolchain ensure` (ADR-0012), and the offline verification resolves
+/// that exact pinned toolchain channel-explicitly and builds against it.
+#[test]
+fn offline_cargo_verification_uses_pinned_toolchain() {
+    let Some(runner) = locate_runner() else {
+        eprintln!("skip: no built sandbox runner; build it first");
+        return;
+    };
+    let Some(bwrap) = locate_backend() else {
+        eprintln!("skip: no bubblewrap backend on PATH");
+        return;
+    };
+    if !Command::new("cargo").arg("--version").output().is_ok() {
+        eprintln!("skip: cargo not on PATH");
+        return;
+    }
+    if !Command::new("rustup").arg("--version").output().is_ok() {
+        eprintln!("skip: rustup not on PATH");
+        return;
+    }
+    let Some(worktree) = git_worktree_root() else {
+        eprintln!("skip: not inside a git worktree");
+        return;
+    };
+    let Some(channel) = active_rustup_channel() else {
+        eprintln!("skip: active rustup toolchain channel not derivable");
+        return;
+    };
+
+    // A throwaway Rust project pinned to the active toolchain, vendored and
+    // built inside the worktree so the runner and backend stay outside it.
+    let project = tempfile::tempdir_in(&worktree).expect("temp project directory");
+    write_mini_cargo_project(project.path());
+    write_file(
+        project.path().join("rust-toolchain.toml"),
+        format!("[toolchain]\nchannel = \"{channel}\"\n").as_bytes(),
+    );
+
+    // The host-authorized provisioning step records the durable manifest.
+    let manifest = kvist::toolchain::ensure_toolchain(project.path(), "e2e pinned")
+        .expect("toolchain ensure records the pinned manifest");
+    assert_eq!(manifest.channel, channel);
+
+    let locked = Command::new("cargo")
+        .arg("generate-lockfile")
+        .current_dir(project.path())
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    if !locked {
+        eprintln!("skip: cargo generate-lockfile failed (offline host?)");
+        return;
+    }
+    let report = match vendor_project(
+        project.path(),
+        VendorOptions {
+            populate: true,
+            vendored_dir: None,
+        },
+    ) {
+        Ok(report) => report,
+        Err(source) => {
+            eprintln!("skip: vendoring unavailable: {source}");
+            return;
+        }
+    };
+    assert!(
+        report.ready(),
+        "vendoring must report the project ready for offline builds"
+    );
+
+    let config = SandboxConfig {
+        runner: runner.to_string_lossy().into_owned(),
+        backend: bwrap.to_string_lossy().into_owned(),
+        environment_allowlist: vec![
+            "PATH".to_owned(),
+            "RUST_BACKTRACE".to_owned(),
+            "CARGO_HOME".to_owned(),
+            "RUSTC".to_owned(),
+            "TERM".to_owned(),
+        ],
+        acquisition: AcquisitionConfig::default(),
+    };
+
+    let approved_runner = runner_identity(&config, project.path(), VcsSelection::Git)
+        .expect("identify the trusted sandbox runner");
+    let approved_backend = backend_identity(&config, project.path(), VcsSelection::Git)
+        .expect("identify the approved bubblewrap backend");
+    let probe: SandboxProbe = ensure_available(
+        &config,
+        project.path(),
+        VcsSelection::Git,
+        &approved_runner,
+        &approved_backend,
+    )
+    .expect("the bwrap capability probe confirms production isolation");
+
+    let result = run_offline_cargo_verification(
+        &config,
+        project.path(),
+        VcsSelection::Git,
+        &probe,
+        POLICY_IDENTITY,
+        project.path(),
+        ExecutionOptions {
+            timeout: Some(Duration::from_secs(180)),
+            output_limit: Some(1 << 20),
+            live_stdout: None,
+        },
+    )
+    .expect("offline cargo verification executes against the pinned toolchain");
+
+    let stdout = String::from_utf8_lossy(&result.output.stdout);
+    let stderr = String::from_utf8_lossy(&result.output.stderr);
+    assert!(
+        !result.timed_out && !result.output_limit_exceeded && !result.cancelled,
+        "verification must not time out, overflow, or be cancelled"
+    );
+    if !result.output.status.success() {
+        eprintln!("offline cargo test failed; stdout={stdout}; stderr={stderr}");
+        panic!("offline cargo verification failed inside bwrap");
+    }
+    assert!(
+        stdout.contains("test result:") || stderr.contains("test result:"),
+        "cargo must have run at least one test"
+    );
+}
+
 /// Write bytes to a path, failing the test on io error.
 fn write_file(path: PathBuf, contents: &[u8]) {
     std::fs::write(path, contents).expect("write file");

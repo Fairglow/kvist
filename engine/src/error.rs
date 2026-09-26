@@ -578,6 +578,16 @@ pub enum KvistError {
         /// Digest recorded by the vendoring manifest.
         expected: String,
     },
+    /// The pinned Rust toolchain cannot be resolved, provisioned, or verified
+    /// (ADR-0012). Covers a malformed pin, an absent pinned toolchain, and a
+    /// recorded manifest that no longer matches the on-disk toolchain.
+    #[error("Rust toolchain is not available for `{path}`: {reason}")]
+    ToolchainUnavailable {
+        /// Project directory the toolchain operation targets.
+        path: String,
+        /// Human-readable, non-secret reason the toolchain cannot proceed.
+        reason: String,
+    },
 }
 
 /// Result type used by Kvist's domain and command layers.

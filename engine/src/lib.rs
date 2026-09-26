@@ -34,6 +34,7 @@ pub mod shell;
 pub mod status;
 pub mod task_commands;
 pub mod task_queue;
+pub mod toolchain;
 pub mod tree;
 pub mod vcs;
 pub mod vcs_commit;

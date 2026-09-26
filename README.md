@@ -494,6 +494,100 @@ Discovery refuses link-like non-artifact descendants rather than following or
 silently traversing them. These direct checks reduce accidental traversal only;
 they do not remove the TOCTOU limitation above.
 
+## Language and toolchain support
+
+Every sandbox phase (authoring and verification) is network-denied. The runner
+mounts the host system layout read-only (`/usr`, `/lib`, `/lib64`, `/bin`,
+`/sbin`) plus the component (read-write `src`/`tests` for authoring, read-only
+for verification), with writable `/tmp` and `/run` tmpfs. Any toolchain
+installed as a host system package is therefore visible inside the sandbox;
+anything installed under the user's home (`rustup` homes, `~/.m2`, `~/.npm`,
+`~/.cargo`) is not.
+
+### Current state
+
+| Language                  | Authoring (agent)                                                                | Verification (`kvist task verify`)                                                                                                                       | Vendoring                                                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **Rust**                  | Writes only; no usable toolchain in the authoring sandbox (known gap, see below) | **First-class**: closed offline Cargo topology, `cargo test --locked`, enforced, validated end-to-end in CI (stable + MSRV)                              | Exact and automated: `kvist vendor` + per-dependency fail-closed manifest                                      |
+| **C/C++**                 | System `gcc`/`cc` available                                                      | Works for projects whose dependencies are host system packages (`make`, `cmake`)                                                                         | Conan strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification |
+| **Go**                    | System `go` available                                                            | Works fully offline with `go mod vendor` (`vendor/` travels inside the component mount); add `GOCACHE`/`TMPDIR` to the test-policy environment allowlist | Native (`vendor/` directory); no Kvist machinery required                                                      |
+| **Python**                | Advertised and available (`/usr/bin/python3`)                                    | Generic test-command path; stdlib-only in practice (system packages only)                                                                                | Strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification       |
+| **JavaScript/TypeScript** | System `node` available                                                          | Generic test-command path; dependencies only via system packages or committed `node_modules`                                                             | Strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification       |
+| **JVM / Ruby**            | System `java`/`ruby` available                                                   | Zero-dependency projects only; `~/.m2`/Gradle home/Gem state are not visible                                                                             | Not supported                                                                                                  |
+| **Shell / scripts**       | Available                                                                        | Available                                                                                                                                                | n/a                                                                                                            |
+
+"Generic test-command path" means the approved per-component command from the
+`[test_policy]` configuration runs in the network-denied sandbox against host
+system toolchains, with no vendored mounts. Vendoring strategies for Python,
+JavaScript, and C/Conan are implemented at the enforcement layer (detection,
+lock-file digest identity, presence check, mount planning) but are not yet
+wired into `kvist vendor` provisioning or the verification mount plan; that
+wiring is tracked in `engine/TODOS.yaml`.
+
+### Intended support order and evidence
+
+1. **Rust** (complete for verification; authoring toolchain is the active gap
+   below).
+2. **Go and JavaScript first** (the easy languages): their offline stories fit
+   the existing model with little new machinery (Go `vendor/`; Node with a
+   vendored package cache or committed `node_modules`).
+3. **Python and C/C++ next** (the important languages): wire the existing
+   vendoring strategies into `kvist vendor` and the verification path, with
+   per-package verification added before they are claimed as supported.
+
+Support is never claimed without executable evidence: every supported language
+requires an end-to-end integration test that vendors (or otherwise provisions)
+a small real project on the host and runs its real build/test offline inside
+the Bubblewrap sandbox, asserting a successful run. The existing Rust e2e is
+`engine/tests/offline_cargo_verification_e2e.rs`; per-language e2e tests
+follow the same shape and self-skip on hosts without the live sandbox.
+
+Declared limitations for currently supported languages:
+
+- **Rust**: verification builds from the vendored registry with the pinned
+  host toolchain; dependency build scripts never run in the sandbox. The
+  authoring sandbox has no working Rust toolchain, so agents cannot compile
+  while authoring (verification only).
+- **Go**: requires the `vendor/` directory to be present in the component
+  (`go mod vendor` on the host); `GOCACHE` must point at the writable `/tmp`
+  via the test-policy environment allowlist.
+- **C/C++**: third-party dependencies must be host system packages; Conan
+  support is planned, not current.
+- **Python/JavaScript**: third-party dependencies are not resolvable in the
+  sandbox until the vendored mounts are wired; stdlib/system packages only.
+
+### Rust toolchain handling
+
+The offline Cargo topology mounts an immutable toolchain read-only. The
+selected toolchain is pinned in the project's `rust-toolchain.toml`
+(or `rust-toolchain`) when present, and falls back to the rustup default
+otherwise. `kvist toolchain ensure [PROJECT_DIR]` is the host-side step
+(ADR-0012): it runs outside the sandbox, installs the pinned toolchain via
+`rustup` when absent (this is how upgrades and downgrades are performed),
+validates the toolchain layout, and records a durable manifest under
+`.kvist/` that verification re-checks, failing closed on drift. Builds never
+install or modify toolchains: toolchain changes are a visible, host-authorized
+step, never an in-build side effect.
+
+Known gap: the authoring phase cannot yet receive the Rust toolchain, because
+the shared runner contract permits the Cargo toolchain and the vendored
+registry/config/runtime purposes only in verification phases. Extending that
+contract (protocol change) is tracked in `engine/TODOS.yaml` and documented in
+`engine/DESIGN.md`.
+
+### Explicitly unsupported
+
+- **Container-based builds** (Docker/Podman): the daemon, overlay
+  filesystem, and nested-namespace model conflict with the single
+  enforcement boundary. Not supported by design.
+- **Toolchains with no offline/locked mode**: the model requires an exact
+  locked catalogue plus a reproducible offline build; dynamic build-time
+  resolution without a lockfile or vendored mode does not fit.
+- **Toolchains that require ambient home/global mutable state** with no
+  supported offline cache: the sandbox exposes no `$HOME` by design.
+- **GPU/accelerator toolchains** (e.g. CUDA SDKs): no device passthrough in
+  the minimal `/dev`.
+
 ## Root artifact templates
 
 `kvist init` creates the following deterministic, UTF-8 templates.

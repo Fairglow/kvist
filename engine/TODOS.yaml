@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:4e2da3a51e978d84cc9938e563debb096ea4e12deafe44c4830b82f86d357943"
-  contract_revision: "sha256:01f3305a1bc53429dd5e5476a0743bac35039c3af61d85b629f3fa4aa20241a2"
-  design_revision: "sha256:9060ac0dade3b1f4efe376f0b81a33a5dc12936b9732b8768db1df20029e2573"
+  requirements_revision: "sha256:86d37970cf28a6605158daa930ff49b5991bfeff579146b45354e976257d6fb2"
+  contract_revision: "sha256:53c67bd6fb0ba36bfb21b6671675b3a26e0f90dc369d59998f0eaf6b95f5bef7"
+  design_revision: "sha256:d660cc1394882318a6b81f1eb29241059bc823f8ad2bbb479453eed3540f2e78"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-18T13:29:07Z"
+    checked_at: "2026-09-26T08:00:00Z"
     stale_since: null
     causes: []
 tasks:
@@ -2482,6 +2482,163 @@ tasks:
     timestamps:
       created_at: "2026-09-24T09:00:00Z"
       updated_at: "2026-09-24T09:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "rust-toolchain-write-tests"
+    title: "Define pinned Rust toolchain tests"
+    description: "Write unit tests for toolchain pin parsing (rust-toolchain.toml and rust-toolchain priority, valid channel forms, and fail-closed on malformed/oversized/link-like pins), channel-explicit resolution parsing, the .kvist/rust-toolchain.json manifest record/re-check (digest match, channel drift, stale root), and the host provisioning wrapper's absent-channel install path and layout validation."
+    context: "Offline verification currently resolves the ambient rustup default with no pin, provisioning step, or recorded state, so toolchain drift is invisible and non-reproducible."
+    purpose: "Establish executable evidence for the pinned, host-provisioned toolchain contract before any production code, per ADR-0012."
+    expected_outcome: "Pin parsing, channel resolution, manifest enforcement, and provisioning behavior are covered by tests that initially fail for the unimplemented module."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-26T08:00:00Z"
+      updated_at: "2026-09-26T08:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "rust-toolchain-implement-code"
+    title: "Implement pinned Rust toolchain provisioning and enforcement"
+    description: "Add a toolchain module that reads and validates the project pin, resolves the channel explicitly via rustup (working-directory independent), runs rustup toolchain install for an absent pinned channel, validates the toolchain layout, records .kvist/rust-toolchain.json, and re-checks it. Wire run_offline_cargo_verification to resolve from the pin and fail closed on absence or drift, and expose the kvist toolchain ensure command."
+    context: "The toolchain is the compiler a locked build trusts; it must be a pinned, host-provisioned, recorded artifact, not an ambient default."
+    purpose: "Make the offline Cargo toolchain selectable, upgradeable, and reproducible as a visible host-authorized step outside the sandbox."
+    expected_outcome: "kvist toolchain ensure provisions and records the pinned toolchain; verification consumes it and fails closed on absence or drift."
+    kind: implement
+    status: pending
+    depends_on:
+      - "rust-toolchain-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
+      - "CONTRACT.md#Provided-interfaces"
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "DESIGN.md#Pinned-Rust-toolchains-and-host-provisioning-ADR-0012"
+    timestamps:
+      created_at: "2026-09-26T08:00:00Z"
+      updated_at: "2026-09-26T08:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "rust-toolchain-security-audit"
+    title: "Audit pinned toolchain provisioning and enforcement"
+    description: "Source-blind security review of pin parsing, channel-explicit resolution, the host rustup install path, manifest digest binding, and fail-closed enforcement for injection, path traversal, link-following, ambient-override bypass, and sandbox-escape findings."
+    context: "A host step that installs toolchains and a manifest that a build trusts changes which compiler a locked build can use."
+    purpose: "Preserve independent confirmation that toolchain selection cannot be tampered with, bypassed, or used to reach the network inside the sandbox."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "rust-toolchain-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-26T08:00:00Z"
+      updated_at: "2026-09-26T08:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "rust-toolchain-compliance-review"
+    title: "Review pinned Rust toolchain compliance"
+    description: "Compare source-derived toolchain pinning, provisioning, recording, and enforcement behavior with the REQ-RUST-TOOLCHAIN requirements and the contract, retaining discrepancies for human arbitration."
+    context: "New host provisioning and a recorded manifest need independent confirmation they match the declared requirements and contract."
+    purpose: "Preserve independent evidence that the implemented toolchain handling matches its declared requirements and contract."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "rust-toolchain-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-26T08:00:00Z"
+      updated_at: "2026-09-26T08:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "language-e2e-write-tests"
+    title: "Define per-language offline e2e tests"
+    description: "Write self-skipping end-to-end tests that provision a small real project on the host and run its real build/test offline inside the Bubblewrap sandbox for Go (vendor/ + go test -mod=vendor) and JavaScript (vendored npm cache or committed node_modules + the project test command), in the shape of offline_cargo_verification_e2e, plus provisioning tests for each language's strategy."
+    context: "Support is never claimed without executable evidence, and the non-Rust vendoring strategies are not yet wired into provisioning or the verification mount plan."
+    purpose: "Establish executable evidence that Go and JavaScript build and test offline in the sandbox before they are claimed as supported."
+    expected_outcome: "Go and JavaScript e2e tests provision on the host, run the real build/test offline in the sandbox, and self-skip on hosts without the live sandbox."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-26T08:00:00Z"
+      updated_at: "2026-09-26T08:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "language-e2e-implement-code"
+    title: "Wire Go and JavaScript offline verification"
+    description: "Make kvist vendor dispatch per strategy, provision Go vendor/ and JavaScript vendored package material on the host, and pass the non-Rust strategy mounts through the verification path's read-only mount plan with the approved per-language test command and environment allowlist (including GOCACHE/TMPDIR for Go)."
+    context: "The easy languages (Go, JavaScript) fit the existing offline model with little new machinery and are the intended first supported languages after Rust."
+    purpose: "Deliver supported, evidenced offline Go and JavaScript verification through the existing sandbox topology."
+    expected_outcome: "Go and JavaScript projects verify offline in the sandbox with per-package vendored presence enforced and e2e evidence passing."
+    kind: implement
+    status: pending
+    depends_on:
+      - "language-e2e-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "DESIGN.md#Language-support-per-language-provisioning-and-evidence"
+    timestamps:
+      created_at: "2026-09-26T08:00:00Z"
+      updated_at: "2026-09-26T08:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "language-e2e-security-audit"
+    title: "Audit per-language offline verification"
+    description: "Source-blind security review of per-language provisioning, vendored mount wiring, test-command/environment allowlisting, and offline enforcement for injection, path traversal, link-following, and network-escape findings."
+    context: "New provisioning paths and mount wiring for non-Rust languages change what material a build resolves from offline."
+    purpose: "Preserve independent confirmation that per-language offline builds resolve only approved, pinned material with network denied."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "language-e2e-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-26T08:00:00Z"
+      updated_at: "2026-09-26T08:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "language-e2e-compliance-review"
+    title: "Review per-language offline verification compliance"
+    description: "Compare source-derived per-language provisioning and offline verification behavior with the REQ-LANGUAGE-SUPPORT requirements and the contract, retaining discrepancies for human arbitration."
+    context: "New supported languages and their evidence need independent confirmation they match the declared requirements and contract."
+    purpose: "Preserve independent evidence that implemented language support matches its declared requirements and contract."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "language-e2e-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-26T08:00:00Z"
+      updated_at: "2026-09-26T08:00:00Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

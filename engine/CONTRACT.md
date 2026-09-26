@@ -47,6 +47,8 @@ The `kvist` executable provides:
 - `task recover COMPONENT_DIR TASK_ID ATTEMPT_ID --disposition execution-did-not-start`
 - `task finalize COMPONENT_DIR TASK_ID ATTEMPT_ID DISPOSITION [--commit]
 [--reason TEXT]` with DISPOSITION `accept` or `block`
+- `vendor [PROJECT_DIR] [--vendored-dir PATH]`
+- `toolchain ensure [PROJECT_DIR]`
 - `prompt` with one explicit prompt source or redirected input, optional
   `--role`, `--model`, and `--reasoning-effort`
 - `agent setup [--force]`
@@ -65,6 +67,25 @@ accepts; a refusal changes no state). When no task is ready, or when standard
 input is not an interactive terminal, it fails with an actionable diagnostic
 and changes no durable state. `vcs commit-accepted` retries or performs the
 isolated index commit for an already accepted set.
+
+`vendor` is a host-authorized provisioning step (ADR-0011): it populates and
+enforces the project's offline vendored dependency registry from the exact
+locked versions, writes the versioned vendoring manifest under `.kvist/`, and
+fails closed when the lockfile drifted or locked material is missing. For a
+Rust project it provisions the exact `cargo vendor` registry; provisioning for
+the non-Rust strategies (Python, JavaScript, C/Conan) is a tracked follow-up,
+and invoking `vendor` on a non-Rust project fails with an actionable message
+naming the language and the required provisioning command.
+
+`toolchain ensure` is a host-authorized provisioning step (ADR-0012): it
+resolves the project's pinned Rust toolchain (`rust-toolchain.toml` or
+`rust-toolchain` at the project root, else the rustup default), installs the
+pinned channel via `rustup` when absent (the supported upgrade/downgrade
+path), validates the toolchain layout, and records the versioned toolchain
+manifest under `.kvist/`. It is the only supported toolchain change path and
+never runs inside a sandbox. Builds and verification never install, upgrade,
+or modify a toolchain; they consume the provisioned one and fail closed when
+it is absent or has drifted from the recorded manifest.
 
 Commands are non-interactive unless their contract explicitly obtains terminal
 input; `prompt` (with a terminal), `shell`, the agent setup/configuration flows,
@@ -222,7 +243,12 @@ All current formats are version 1 and independently versioned:
 - `IMPL.md`: version marker and required heading;
 - status JSON: `format_version: 1`;
 - attempt logs: bounded JSON Lines evidence;
-- sandbox request: `protocol_version: 1`.
+- sandbox request: `protocol_version: 1`;
+- vendoring manifest (`.kvist/vendoring-v1.json`): `schema_version: 1` with
+  the lock-file digest, vendored directory, and sandbox mount destinations;
+- toolchain manifest (`.kvist/rust-toolchain.json`): `schema_version: 1` with
+  the pinned channel, toolchain root, cargo path, cargo content digest, and
+  provisioning timestamp.
 
 No external schema file is currently normative. JSON Schema export for
 machine-consumed formats is permitted later; the contract must then state the
@@ -309,6 +335,35 @@ scratch. Strict `[sandbox.acquisition]` configuration is approval-bound. The
 runner validates these values but live `task run` acquisition wiring, OS mount,
 process, DNS/address-pinning, redirect, and network enforcement, and final
 project-cache generation selection remain later work.
+
+Language support is declared per language with executable evidence. Rust is
+first-class for verification: `kvist task verify` routes Rust projects
+(`Cargo.lock` present) to the closed offline Cargo topology and runs exactly
+`cargo test --locked` network-denied against the vendored registry. Every other
+language uses the generic approved-test-command path: the per-component
+`[test_policy]` command runs in the network-denied sandbox against host system
+toolchains (the runner mounts `/usr`, `/lib`, `/lib64`, `/bin`, and `/sbin`
+read-only), with no vendored mounts and no `$HOME`. Go additionally builds
+fully offline from a committed `vendor/` directory; Python, JavaScript, and
+C/C++ resolve third-party dependencies only from host system packages until
+their vendoring strategies are wired into provisioning and the verification
+mount plan. JVM and Ruby support zero-dependency projects only. Container-based
+builds, toolchains without an offline/locked mode, toolchains requiring ambient
+home/global mutable state, and GPU/accelerator toolchains are explicitly
+unsupported. Each supported language is backed by an end-to-end integration
+test that provisions a small real project on the host and runs its real
+build/test offline inside the sandbox.
+
+The Rust toolchain used by offline verification is pinned by the project's
+`rust-toolchain.toml` or `rust-toolchain` when present (else the rustup
+default), provisioned by `kvist toolchain ensure` on the host, and recorded in
+the `.kvist/` toolchain manifest. Verification resolves the toolchain
+channel-explicitly, independent of the process working directory, and fails
+closed with an actionable message when the pinned toolchain is absent or the
+manifest no longer matches the on-disk toolchain. The authoring phase currently
+receives no usable Rust toolchain (the shared runner contract permits the Cargo
+toolchain and the vendored-registry/config/runtime purposes only in
+verification phases); this is a documented, tracked limitation.
 
 The target supervised tier requires one explicit task and produces a pending
 human disposition after agent and verification results are recorded. A

@@ -209,6 +209,66 @@ auto-fetches an in-policy revision and promotes an immutable generation remains 
 documented follow-up, so an in-policy request is recorded for acquisition rather
 than fetched inline.
 
+### REQ-RUST-TOOLCHAIN
+
+The Rust toolchain used by offline Cargo verification MUST be a pinned,
+host-provisioned artifact with durable, versioned state. When a project root
+contains `rust-toolchain.toml` (preferred) or `rust-toolchain`, its channel
+MUST be the authoritative toolchain selection; otherwise the rustup default
+MUST be used and recorded as such. Channel parsing MUST fail closed on
+malformed, oversized, or link-like pin files, and channel syntax MUST be
+validated to the rustup-supported forms (exact versions, `stable`, `beta`,
+`nightly`, and dated variants).
+
+Toolchain provisioning MUST be a distinct host-authorized step performed
+outside the sandbox (ADR-0012): it resolves the pinned channel, installs it
+via `rustup` when absent (the supported upgrade and downgrade path), validates
+the resolved toolchain layout, and records a versioned manifest under
+`.kvist/` carrying the channel, toolchain root, exact cargo path, and cargo
+content digest. Builds and verification MUST NEVER install, upgrade, or modify
+a toolchain; they MUST only consume an already-provisioned one. Verification
+MUST resolve the toolchain channel-explicitly (independent of the process
+working directory and ambient rustup overrides) and MUST fail closed with an
+actionable message when the pinned toolchain is absent or the recorded manifest
+no longer matches the on-disk toolchain.
+
+Current implementation status: not implemented. The verification path resolves
+the ambient rustup default without a pin, a provisioning step, or a recorded
+manifest, and the authoring phase receives no usable Rust toolchain (see
+`REQ-LANGUAGE-SUPPORT`).
+
+### REQ-LANGUAGE-SUPPORT
+
+Language support in the build flow MUST be declared, evidenced, and bounded
+per language. A language is supported for a phase only when an end-to-end
+integration test vendors (or otherwise provisions) a small real project on the
+host and runs its real build/test offline inside the Bubblewrap sandbox,
+asserting a successful run; tests MUST self-skip on hosts without the live
+sandbox. Supported languages and their limitations MUST be documented in the
+root README and this component's contract.
+
+The current support state is: Rust first-class for verification (exact
+vendored registry, pinned toolchain pending `REQ-RUST-TOOLCHAIN`); C/C++, Go,
+Python, and JavaScript through the generic approved-test-command path against
+host system toolchains (network denied, no vendored mounts); JVM and Ruby for
+zero-dependency projects only. The intended order is the easy languages first
+(Go, JavaScript), then the important ones (Python, C/C++), with the existing
+non-Rust vendoring strategies (lock-file match plus presence) wired into
+`kvist vendor` provisioning and the verification mount plan before any of them
+is claimed as vendored-supported; per-package verification MUST land before
+that claim. Container-based builds, toolchains without an offline/locked mode,
+toolchains requiring ambient home/global mutable state, and GPU/accelerator
+toolchains MUST be documented as explicitly unsupported.
+
+Current implementation status: the generic test-command path and the Rust
+closed topology are implemented and evidenced (Rust by
+`offline_cargo_verification_e2e`). The non-Rust vendoring strategies exist at
+the enforcement layer only; `kvist vendor` is Rust-only and verification passes
+no vendored mounts for non-Rust languages. The authoring phase exposes no
+usable Rust toolchain (the shared runner contract permits the Cargo toolchain
+and the vendored-registry/config/runtime purposes only in verification
+phases); extending that contract is a tracked follow-up.
+
 ### REQ-SUPERVISED-EXECUTION
 
 The initial production-runner tier MUST be supervised. It MUST require an
