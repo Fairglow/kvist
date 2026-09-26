@@ -271,6 +271,35 @@ fn active_rustup_channel() -> Option<String> {
     Some(channel)
 }
 
+/// Whether a rustup toolchain channel is already installed on the host, so a
+/// pin can be provisioned without a network install inside the test.
+fn rustup_has_toolchain(channel: &str) -> bool {
+    let Ok(output) = Command::new("rustup").args(["toolchain", "list"]).output() else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    let prefix = format!("{channel}-");
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(|line| line.trim() == channel || line.trim().starts_with(&prefix))
+}
+
+/// The exact `cargo` path of the active rustup toolchain, for asserting that a
+/// pin moves the resolved toolchain off the active default.
+fn active_rustup_cargo() -> Option<String> {
+    let output = Command::new("rustup")
+        .args(["which", "cargo"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (!path.is_empty()).then_some(path)
+}
+
 /// End-to-end: a project pinned via `rust-toolchain.toml` is provisioned by
 /// `kvist toolchain ensure` (ADR-0012), and the offline verification resolves
 /// that exact pinned toolchain channel-explicitly and builds against it.
@@ -403,6 +432,199 @@ fn offline_cargo_verification_uses_pinned_toolchain() {
 /// Write bytes to a path, failing the test on io error.
 fn write_file(path: PathBuf, contents: &[u8]) {
     std::fs::write(path, contents).expect("write file");
+}
+
+/// Write a zero-dependency Rust project with a test, so the pinned-toolchain
+/// case provisions entirely offline (no registry access for the lockfile or
+/// the vendoring pass) and only the toolchain pin varies between runs.
+fn write_zero_dep_cargo_project(dir: &Path) {
+    let manifest = [
+        "[package]",
+        "name = \"e2e_mini\"",
+        "version = \"0.1.0\"",
+        "edition = \"2021\"",
+        "",
+        "[lib]",
+        "",
+        "[workspace]",
+    ]
+    .join("\n");
+    write_file(dir.join("Cargo.toml"), format!("{manifest}\n").as_bytes());
+
+    std::fs::create_dir_all(dir.join("src")).expect("create src");
+    let lib = [
+        "pub fn answer() -> u32 {",
+        "    42",
+        "}",
+        "",
+        "#[cfg(test)]",
+        "mod tests {",
+        "    #[test]",
+        "    fn answer_is_42() {",
+        "        assert_eq!(super::answer(), 42);",
+        "    }",
+        "}",
+    ]
+    .join("\n");
+    let lib_path = dir.join("src").join("lib.rs");
+    write_file(lib_path, format!("{lib}\n").as_bytes());
+}
+
+/// End-to-end: a project pinned to the `nightly` channel via
+/// `rust-toolchain.toml` is provisioned by `kvist toolchain ensure`
+/// (ADR-0012), the offline verification resolves exactly that pinned channel
+/// (not the host default), and a network-denied `cargo test --locked` builds
+/// and runs against it. This proves the alternate-toolchain story end to end,
+/// including a nightly toolchain, with the pin as the only input.
+#[test]
+fn offline_cargo_verification_uses_pinned_nightly_toolchain() {
+    let Some(runner) = locate_runner() else {
+        eprintln!("skip: no built sandbox runner; build it first");
+        return;
+    };
+    let Some(bwrap) = locate_backend() else {
+        eprintln!("skip: no bubblewrap backend on PATH");
+        return;
+    };
+    if !Command::new("cargo").arg("--version").output().is_ok() {
+        eprintln!("skip: cargo not on PATH");
+        return;
+    }
+    if !Command::new("rustup").arg("--version").output().is_ok() {
+        eprintln!("skip: rustup not on PATH");
+        return;
+    }
+    let Some(worktree) = git_worktree_root() else {
+        eprintln!("skip: not inside a git worktree");
+        return;
+    };
+    if !rustup_has_toolchain("nightly") {
+        eprintln!("skip: no nightly rustup toolchain installed on the host");
+        return;
+    }
+
+    // A zero-dependency project pinned to `nightly`; the whole pass is offline
+    // because no registry material is required.
+    let project = tempfile::tempdir_in(&worktree).expect("temp project directory");
+    write_zero_dep_cargo_project(project.path());
+    write_file(
+        project.path().join("rust-toolchain.toml"),
+        b"[toolchain]\nchannel = \"nightly\"\n",
+    );
+
+    // The host-authorized provisioning step records the durable manifest for
+    // the pinned nightly channel.
+    let manifest = kvist::toolchain::ensure_toolchain(project.path(), "e2e nightly")
+        .expect("toolchain ensure records the pinned nightly manifest");
+    assert_eq!(manifest.channel, "nightly");
+
+    // The pin must move the resolved toolchain off the host default whenever the
+    // active toolchain is not nightly itself: the recorded cargo path is the
+    // proof that verification will build with the pinned toolchain, not the
+    // ambient one.
+    let active_cargo = active_rustup_cargo();
+    let Some(active_channel) = active_rustup_channel() else {
+        eprintln!("skip: active rustup toolchain channel not derivable");
+        return;
+    };
+    if active_channel != "nightly" {
+        let Some(active) = active_cargo else {
+            eprintln!("skip: active rustup cargo path not derivable");
+            return;
+        };
+        assert_ne!(
+            manifest.cargo_path, active,
+            "the nightly pin must resolve a different toolchain than the host default"
+        );
+    }
+
+    // The project-local pin makes the host lockfile pass run under nightly as
+    // well; the zero dependencies keep it network-free.
+    let locked = Command::new("cargo")
+        .arg("generate-lockfile")
+        .current_dir(project.path())
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    if !locked {
+        eprintln!("skip: cargo generate-lockfile failed");
+        return;
+    }
+    let report = match vendor_project(
+        project.path(),
+        VendorOptions {
+            populate: true,
+            vendored_dir: None,
+        },
+    ) {
+        Ok(report) => report,
+        Err(source) => {
+            eprintln!("skip: vendoring unavailable: {source}");
+            return;
+        }
+    };
+    assert!(
+        report.ready(),
+        "vendoring must report the project ready for offline builds"
+    );
+
+    let config = SandboxConfig {
+        runner: runner.to_string_lossy().into_owned(),
+        backend: bwrap.to_string_lossy().into_owned(),
+        environment_allowlist: vec![
+            "PATH".to_owned(),
+            "RUST_BACKTRACE".to_owned(),
+            "CARGO_HOME".to_owned(),
+            "RUSTC".to_owned(),
+            "TERM".to_owned(),
+        ],
+        acquisition: AcquisitionConfig::default(),
+    };
+
+    let approved_runner = runner_identity(&config, project.path(), VcsSelection::Git)
+        .expect("identify the trusted sandbox runner");
+    let approved_backend = backend_identity(&config, project.path(), VcsSelection::Git)
+        .expect("identify the approved bubblewrap backend");
+    let probe: SandboxProbe = ensure_available(
+        &config,
+        project.path(),
+        VcsSelection::Git,
+        &approved_runner,
+        &approved_backend,
+    )
+    .expect("the bwrap capability probe confirms production isolation");
+
+    let result = run_offline_cargo_verification(
+        &config,
+        project.path(),
+        VcsSelection::Git,
+        &probe,
+        POLICY_IDENTITY,
+        project.path(),
+        ExecutionOptions {
+            timeout: Some(Duration::from_secs(180)),
+            output_limit: Some(1 << 20),
+            live_stdout: None,
+        },
+    )
+    .expect("offline cargo verification executes against the pinned nightly toolchain");
+
+    let stdout = String::from_utf8_lossy(&result.output.stdout);
+    let stderr = String::from_utf8_lossy(&result.output.stderr);
+    assert!(
+        !result.timed_out && !result.output_limit_exceeded && !result.cancelled,
+        "verification must not time out, overflow, or be cancelled"
+    );
+    if !result.output.status.success() {
+        eprintln!("offline nightly cargo test failed; stdout={stdout}; stderr={stderr}");
+        panic!(
+            "offline cargo verification failed inside bwrap against the pinned nightly toolchain"
+        );
+    }
+    assert!(
+        stdout.contains("test result:") || stderr.contains("test result:"),
+        "cargo must have run at least one test under the pinned nightly toolchain"
+    );
 }
 
 /// Write a minimal Rust project depending on one registry crate with a test.

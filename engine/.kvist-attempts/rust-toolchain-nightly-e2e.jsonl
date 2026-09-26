@@ -1,0 +1,4 @@
+{"phase":"prepared","task_id":"rust-toolchain-nightly-e2e","from_status":"pending","to_status":"in-progress","timestamp":"2026-09-26T17:00:00Z","reason":null}
+{"phase":"committed","task_id":"rust-toolchain-nightly-e2e","from_status":"pending","to_status":"in-progress","timestamp":"2026-09-26T17:00:00Z","reason":null}
+{"phase":"prepared","task_id":"rust-toolchain-nightly-e2e","from_status":"in-progress","to_status":"completed","timestamp":"2026-09-26T17:00:00Z","reason":null}
+{"phase":"committed","task_id":"rust-toolchain-nightly-e2e","from_status":"in-progress","to_status":"completed","timestamp":"2026-09-26T17:00:00Z","reason":null}

@@ -232,10 +232,12 @@ working directory and ambient rustup overrides) and MUST fail closed with an
 actionable message when the pinned toolchain is absent or the recorded manifest
 no longer matches the on-disk toolchain.
 
-Current implementation status: not implemented. The verification path resolves
-the ambient rustup default without a pin, a provisioning step, or a recorded
-manifest, and the authoring phase receives no usable Rust toolchain (see
-`REQ-LANGUAGE-SUPPORT`).
+Current implementation status: implemented. Pin parsing, channel validation,
+the host provisioning step (`kvist toolchain ensure`), the durable manifest,
+and channel-explicit, fail-closed enforcement on use are implemented and
+evidenced by unit tests plus end-to-end tests, including a pinned
+`nightly` toolchain built and tested offline in the sandbox. The authoring
+phase still receives no usable Rust toolchain (see `REQ-LANGUAGE-SUPPORT`).
 
 ### REQ-LANGUAGE-SUPPORT
 

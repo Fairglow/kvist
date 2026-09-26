@@ -60,6 +60,14 @@ pub fn vendor_project(project_dir: &Path, options: VendorOptions) -> Result<Vend
             .join(".kvist")
             .join(crate::vendoring::DEFAULT_VENDORED_DIRNAME),
     };
+    // A dependency-free lockfile needs no registry material, but the offline
+    // topology still mounts the vendored registry directory; it must exist on
+    // disk even when empty.
+    std::fs::create_dir_all(&vendored_dir).map_err(|source| KvistError::Io {
+        operation: "create vendored registry directory",
+        path: vendored_dir.clone(),
+        source,
+    })?;
 
     // Populate or reconcile the vendored registry on the host using the locked
     // lockfile. `cargo vendor` reconciles an existing registry, so it is only
