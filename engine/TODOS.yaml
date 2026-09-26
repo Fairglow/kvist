@@ -2397,10 +2397,10 @@ tasks:
     status: pending
     depends_on: []
     requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
       - "REQUIREMENTS.md#REQ-DECISION-SURFACING"
       - "REQUIREMENTS.md#REQ-DEPENDENCY-REQUEST"
       - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
-      - "CONTRACT.md#Behavioral-guarantees"
     timestamps:
       created_at: "2026-09-24T09:00:00Z"
       updated_at: "2026-09-24T09:00:00Z"
@@ -2413,14 +2413,14 @@ tasks:
     context: "The broker, loop, and run harness are in place; the two read-only-of-intent tools and the run-harness pause are not yet wired."
     purpose: "Close the implemented target-tier gap so an uncovered, impactful decision or an out-of-policy dependency request pauses the run for the human without blocking on trivial issues, while normal work proceeds unattended across turns."
     expected_outcome: "The broker classifies every intent to exactly one of read, write, dependency request, or decision; a decision ends the run in awaiting-decision; an in-policy dependency request is recorded and the agent continues; an out-of-policy request is surfaced; the tool set is advertised in the prompt; and all phase-4 tests pass."
-    kind: implement-code
+    kind: implementation
     status: pending
     depends_on:
       - "phase-4-write-tests"
     requirements:
+      - "CONTRACT.md#Security-and-authority"
       - "REQUIREMENTS.md#REQ-DECISION-SURFACING"
       - "REQUIREMENTS.md#REQ-DEPENDENCY-REQUEST"
-      - "CONTRACT.md#Security-and-authority"
     timestamps:
       created_at: "2026-09-24T09:00:00Z"
       updated_at: "2026-09-24T09:00:00Z"
@@ -2438,8 +2438,8 @@ tasks:
     depends_on:
       - "phase-4-implement-code"
     requirements:
-      - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
       - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-MULTI-TURN-EXECUTION"
     timestamps:
       created_at: "2026-09-24T09:00:00Z"
       updated_at: "2026-09-24T09:00:00Z"
@@ -2492,16 +2492,16 @@ tasks:
     purpose: "Establish executable evidence for the pinned, host-provisioned toolchain contract before any production code, per ADR-0012."
     expected_outcome: "Pin parsing, channel resolution, manifest enforcement, and provisioning behavior are covered by tests that initially fail for the unimplemented module."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
-      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
       - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-09-26T08:00:00Z"
-      updated_at: "2026-09-26T08:00:00Z"
-      completed_at: null
+      updated_at: "2026-09-26T12:58:44Z"
+      completed_at: "2026-09-26T12:58:44Z"
     blocked_reason: null
     recovery_state: null
   - id: "rust-toolchain-implement-code"
@@ -2510,19 +2510,19 @@ tasks:
     context: "The toolchain is the compiler a locked build trusts; it must be a pinned, host-provisioned, recorded artifact, not an ambient default."
     purpose: "Make the offline Cargo toolchain selectable, upgradeable, and reproducible as a visible host-authorized step outside the sandbox."
     expected_outcome: "kvist toolchain ensure provisions and records the pinned toolchain; verification consumes it and fails closed on absence or drift."
-    kind: implement
-    status: pending
+    kind: implementation
+    status: completed
     depends_on:
       - "rust-toolchain-write-tests"
     requirements:
-      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
-      - "CONTRACT.md#Provided-interfaces"
       - "CONTRACT.md#Behavioral-guarantees"
+      - "CONTRACT.md#Provided-interfaces"
       - "DESIGN.md#Pinned-Rust-toolchains-and-host-provisioning-ADR-0012"
+      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
     timestamps:
       created_at: "2026-09-26T08:00:00Z"
-      updated_at: "2026-09-26T08:00:00Z"
-      completed_at: null
+      updated_at: "2026-09-26T12:58:45Z"
+      completed_at: "2026-09-26T12:58:45Z"
     blocked_reason: null
     recovery_state: null
   - id: "rust-toolchain-security-audit"
@@ -2555,8 +2555,8 @@ tasks:
     depends_on:
       - "rust-toolchain-security-audit"
     requirements:
-      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
       - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-RUST-TOOLCHAIN"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-26T08:00:00Z"
@@ -2574,8 +2574,8 @@ tasks:
     status: pending
     depends_on: []
     requirements:
-      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
       - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
       - "ROOT_CONTRACT.md#Non-negotiable-architecture"
     timestamps:
       created_at: "2026-09-26T08:00:00Z"
@@ -2589,14 +2589,14 @@ tasks:
     context: "The easy languages (Go, JavaScript) fit the existing offline model with little new machinery and are the intended first supported languages after Rust."
     purpose: "Deliver supported, evidenced offline Go and JavaScript verification through the existing sandbox topology."
     expected_outcome: "Go and JavaScript projects verify offline in the sandbox with per-package vendored presence enforced and e2e evidence passing."
-    kind: implement
+    kind: implementation
     status: pending
     depends_on:
       - "language-e2e-write-tests"
     requirements:
-      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
       - "CONTRACT.md#Behavioral-guarantees"
       - "DESIGN.md#Language-support-per-language-provisioning-and-evidence"
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
     timestamps:
       created_at: "2026-09-26T08:00:00Z"
       updated_at: "2026-09-26T08:00:00Z"
@@ -2633,8 +2633,8 @@ tasks:
     depends_on:
       - "language-e2e-security-audit"
     requirements:
-      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
       - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-26T08:00:00Z"
