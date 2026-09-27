@@ -38,6 +38,8 @@ pub const JS_PACKAGE_CACHE_DIRNAME: &str = "vendored-js";
 pub const PYTHON_WHEELS_DIRNAME: &str = "vendored-python";
 /// Project-local Conan home directory name for C/C++ projects (`.kvist/`).
 pub const CONAN_HOME_DIRNAME: &str = "vendored-conan";
+/// Project-local vcpkg root directory name for C/C++ projects (`.kvist/`).
+pub const VCPKG_ROOT_DIRNAME: &str = "vendored-vcpkg";
 
 /// SHA-256 of the lock file, prefixed. The lock file is the authoritative
 /// catalogue of the locked content, so this is both the manifest identity and
@@ -164,21 +166,25 @@ pub fn detect_language_strategy(project_dir: &Path) -> Result<Box<dyn LanguageSt
     Err(KvistError::VendoringUnavailable {
         path: path.clone(),
         reason: "no supported lock file (Cargo.lock, go.sum, requirements.lock.txt, \
-                 uv.lock, package-lock.json, yarn.lock, pnpm-lock.yaml, or a \
-                 conanfile/vcpkg.json) found; run the language's acquisition command \
-                 so vendoring matches the exact locked versions"
+                 uv.lock, package-lock.json, yarn.lock, pnpm-lock.yaml, a conanfile, \
+                 or vcpkg.json) found; run the language's acquisition command so \
+                 vendoring matches the exact locked versions"
             .to_owned(),
     })
 }
 
 /// One supported language strategy, in detection priority order.
-pub fn language_strategies() -> [Box<dyn LanguageStrategy>; 5] {
+pub fn language_strategies() -> [Box<dyn LanguageStrategy>; 6] {
     [
         Box::new(RustStrategy),
         Box::new(GoStrategy),
         Box::new(PythonStrategy),
         Box::new(JavaScriptStrategy),
+        // Conan is listed before vcpkg so a project with both a conanfile and a
+        // vcpkg.json keeps the established Conan detection; a vcpkg.json-only
+        // project falls through to the vcpkg strategy.
         Box::new(CConanStrategy),
+        Box::new(CvcpkgStrategy),
     ]
 }
 
@@ -772,6 +778,124 @@ impl LanguageStrategy for CConanStrategy {
     }
 }
 
+/// A locked C/C++ project (`vcpkg`). The vendored material is a project-local
+/// vcpkg root (`VCPKG_ROOT=.kvist/vendored-vcpkg`) holding the exact locked
+/// ports plus the vcpkg tool, and the generated CMake toolchain files the
+/// project build system consumes. The vcpkg root is mounted read-only at its
+/// own canonical host path in the sandbox so the absolute cache paths embedded
+/// in the generated toolchain file resolve unchanged.
+struct CvcpkgStrategy;
+
+impl LanguageStrategy for CvcpkgStrategy {
+    fn id(&self) -> &'static str {
+        "c-vcpkg"
+    }
+    fn lockfile_names(&self) -> &'static [&'static str] {
+        &["vcpkg-lock.json"]
+    }
+    /// A vcpkg project is marked by its `vcpkg.json` manifest even before the
+    /// generated `vcpkg-lock.json` exists: `kvist vendor` writes the lock file
+    /// during provisioning (`vcpkg install --lockfile-out`), so lock-file-only
+    /// detection would make a fresh C/C++ vcpkg project unprovisionable.
+    fn detects(&self, project_dir: &Path) -> bool {
+        project_dir.join("vcpkg.json").is_file() || self.lockfile_path(project_dir).is_some()
+    }
+    fn vendored_dirname(&self) -> &'static str {
+        VCPKG_ROOT_DIRNAME
+    }
+    fn vendored_mount_dest(&self) -> &'static str {
+        "/workspace/vendored-vcpkg"
+    }
+    fn sandbox_config_dest(&self) -> &'static str {
+        "/workspace/.vcpkg"
+    }
+
+    fn enforce(&self, project_dir: &Path) -> Result<VendoringReport> {
+        let (lockfile, digest) = lockfile_digest_for(self, project_dir)?;
+        let vendored = self.vendored_dir(project_dir);
+        // A provisioned vcpkg root holds the installed ports under `installed/`
+        // (layout shared by the vcpkg release and ported binaries).
+        if !directory_non_empty(&vendored.join("installed")) {
+            return Ok(VendoringReport {
+                language: "c-vcpkg".to_owned(),
+                project_root: project_dir.to_string_lossy().into_owned(),
+                lockfile_path: lockfile.to_string_lossy().into_owned(),
+                lockfile_digest: digest,
+                vendored_dir: vendored.to_string_lossy().into_owned(),
+                present_dependencies: 0,
+                missing_dependencies: vec![
+                    "c: vcpkg root not provisioned; run `kvist vendor` on the host \
+                     (VCPKG_ROOT=.kvist/vendored-vcpkg vcpkg install --locked --triplet x64-linux)"
+                        .to_owned(),
+                ],
+            });
+        }
+        Ok(VendoringReport {
+            language: "c-vcpkg".to_owned(),
+            project_root: project_dir.to_string_lossy().into_owned(),
+            lockfile_path: lockfile.to_string_lossy().into_owned(),
+            lockfile_digest: digest,
+            vendored_dir: vendored.to_string_lossy().into_owned(),
+            present_dependencies: count_lock_entries(&lockfile),
+            missing_dependencies: Vec::new(),
+        })
+    }
+
+    fn mounts(&self, project_dir: &Path, lockfile_digest: &str) -> Result<Vec<VendoredMount>> {
+        let vendored = self.vendored_dir(project_dir);
+        let config_dir = project_dir.join(".kvist").join("sandbox-vcpkg");
+        fs::create_dir_all(&config_dir).map_err(|source| KvistError::Io {
+            operation: "create vcpkg sandbox config dir",
+            path: config_dir.clone(),
+            source,
+        })?;
+        let config_path = config_dir.join("OFFLINE.md");
+        let contents = format!(
+            "# Managed by `kvist vendor` (ADR-0011/ADR-0013). Do not edit by hand.\n\n\
+             Offline provisioning for this locked project:\n\n\
+             - Host: `VCPKG_ROOT={} vcpkg install --locked --triplet x64-linux`\n\
+             - Sandbox: the vcpkg root is mounted read-only at its host path; the generated CMake toolchain file (`<VCPKG_ROOT>/scripts/buildsystems/vcpkg.cmake`) and the installed ports resolve unchanged inside the component mount.\n",
+            vendored.display()
+        );
+        fs::write(&config_path, contents).map_err(|source| KvistError::Io {
+            operation: "write vcpkg sandbox OFFLINE.md",
+            path: config_path.clone(),
+            source,
+        })?;
+        // The vcpkg root is mounted at its own absolute host path (source ==
+        // destination): the generated toolchain file and the embedded install
+        // paths resolve unchanged in the sandbox.
+        let canonical = vendored.canonicalize().map_err(|source| KvistError::Io {
+            operation: "canonicalize vcpkg root for offline verification mount",
+            path: vendored.clone(),
+            source,
+        })?;
+        let destination = canonical
+            .to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| KvistError::Io {
+                operation: "canonicalize vcpkg root for offline verification mount",
+                path: canonical.clone(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "vcpkg root path is not valid UTF-8",
+                ),
+            })?;
+        Ok(vec![
+            VendoredMount {
+                source: canonical,
+                destination,
+                identity: lockfile_digest.to_owned(),
+            },
+            VendoredMount {
+                source: config_dir,
+                destination: self.sandbox_config_dest().to_owned(),
+                identity: lockfile_digest.to_owned(),
+            },
+        ])
+    }
+}
+
 /// Count rough locked-package entries in a text lock file (one per non-empty,
 /// non-comment, non-section line). Approximate but bounded, and only for reporting.
 fn count_lock_entries(lockfile: &Path) -> usize {
@@ -870,6 +994,105 @@ mod tests {
                 .expect("conanfile.py")
                 .id(),
             "c"
+        );
+    }
+
+    #[test]
+    fn detects_vcpkg_manifest_and_lock_file() {
+        // A vcpkg.json manifest selects the vcpkg C/C++ strategy even before the
+        // generated vcpkg-lock.json exists, so kvist vendor can generate it.
+        assert_eq!(
+            detect_language_strategy(project_with(&[("vcpkg.json", "{}")]).path())
+                .expect("vcpkg.json")
+                .id(),
+            "c-vcpkg"
+        );
+        assert_eq!(
+            detect_language_strategy(project_with(&[("vcpkg-lock.json", "{}")]).path())
+                .expect("vcpkg-lock.json")
+                .id(),
+            "c-vcpkg"
+        );
+        // Conan is listed first: a project with both a conanfile and a vcpkg.json
+        // keeps the established Conan detection.
+        assert_eq!(
+            detect_language_strategy(
+                project_with(&[
+                    ("conanfile.txt", "[requires]\nzlib/1.3.1\n"),
+                    ("vcpkg.json", "{}"),
+                ])
+                .path()
+            )
+            .expect("conan + vcpkg")
+            .id(),
+            "c"
+        );
+    }
+
+    #[test]
+    fn vcpkg_mounts_document_offline_provisioning_as_a_single_line() {
+        // The offline OFFLINE.md must describe vcpkg provisioning as one clean
+        // line: the generated toolchain path stays inline and no space is
+        // dropped between words (guards against a stray newline in the format
+        // string splitting the description across lines).
+        let tmp = project_with(&[
+            (
+                "vcpkg.json",
+                "{\"name\":\"e2eminivcpkg\",\"dependencies\":[\"zlib\"]}\n",
+            ),
+            ("vcpkg-lock.json", "{}\n"),
+        ]);
+        let project = tmp.path();
+        let strategy = detect_language_strategy(project).expect("vcpkg strategy");
+        // A provisioned vcpkg root holds the installed ports under installed/.
+        let vcpkg_root = project.join(".kvist").join("vendored-vcpkg");
+        fs::create_dir_all(vcpkg_root.join("installed")).expect("installed dir");
+        fs::write(vcpkg_root.join("installed").join(".seed"), "x").expect("seed installed");
+
+        let report = strategy.enforce(project).expect("report ready");
+        assert_eq!(report.language, "c-vcpkg");
+        assert!(report.ready());
+
+        let mounts = strategy
+            .mounts(project, &report.lockfile_digest)
+            .expect("mounts");
+        // The vendored vcpkg root (mounted at its canonical host path) plus the
+        // sandbox OFFLINE.md config dir, each bound to the lock-file digest.
+        assert_eq!(mounts.len(), 2);
+        for mount in &mounts {
+            assert_eq!(mount.identity, report.lockfile_digest);
+            assert!(mount.destination.starts_with('/'));
+        }
+        // The vcpkg root is mounted at its own canonical host path (source ==
+        // destination) so the toolchain file's absolute paths resolve unchanged
+        // inside the sandbox.
+        let canonical_root = vcpkg_root.canonicalize().expect("canonical vcpkg root");
+        let root_mount = mounts
+            .iter()
+            .find(|mount| mount.source == canonical_root)
+            .expect("the vendored vcpkg root is mounted");
+        assert_eq!(root_mount.source.to_string_lossy(), root_mount.destination);
+
+        // The offline catalogue is a single, well-formed line: exactly one
+        // "- Sandbox:" line, with the toolchain path inline and no dropped space.
+        let config_mount = mounts
+            .iter()
+            .find(|mount| mount.destination == "/workspace/.vcpkg")
+            .expect("the sandbox config dir is mounted");
+        let offline = config_mount.source.join("OFFLINE.md");
+        let text = fs::read_to_string(&offline).expect("OFFLINE.md");
+        let sandbox_lines: Vec<&str> = text
+            .lines()
+            .filter(|line| line.starts_with("- Sandbox:"))
+            .collect();
+        assert_eq!(
+            sandbox_lines.len(),
+            1,
+            "the Sandbox description must be a single line"
+        );
+        assert_eq!(
+            sandbox_lines[0].trim_start(),
+            "- Sandbox: the vcpkg root is mounted read-only at its host path; the generated CMake toolchain file (`<VCPKG_ROOT>/scripts/buildsystems/vcpkg.cmake`) and the installed ports resolve unchanged inside the component mount."
         );
     }
 

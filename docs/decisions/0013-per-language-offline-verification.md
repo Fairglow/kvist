@@ -19,9 +19,10 @@ Implemented:
   `yarn install --frozen-lockfile` into a yarn cache for `yarn.lock`, or
   `pnpm install` vendoring the content-addressable pnpm store for
   `pnpm-lock.yaml`, located via `pnpm store path`); Python downloads the locked
-  wheels and provisions a virtualenv (offline install into it); C/C++ fills a
-  project-local Conan home and generates the build files under
-  `.kvist/conan-build`.
+  wheels and provisions a virtualenv (offline install into it);
+  C/C++ fills a project-local package manager root depending on the detected
+  manager: a Conan home (`.kvist/vendored-conan`, generating the build files
+  under `.kvist/conan-build`) or a vcpkg root (`.kvist/vendored-vcpkg`).
 - **The shared offline language topology**
   (`engine::language_verification::run_offline_language_verification`):
   vendoring is enforced before any sandbox work, the language's vendored
@@ -40,7 +41,8 @@ Implemented:
 unittest -v` with `VIRTUAL_ENV` at the
   mounted provisioned venv (bytecode and user-site writes disabled). C/C++:
   the approved project test command (the build system is project-defined) with
-  `CONAN_HOME` at the Conan home's canonical host path.
+  `CONAN_HOME` at the Conan home's canonical host path, or `VCPKG_ROOT` at the
+  vendored vcpkg root's canonical host path.
 - **Go end-to-end evidence.** `engine/tests/language_offline_e2e.rs` vendors a
   real small Go module on the host (`kvist vendor` dispatch) and runs
   `go test -mod=vendor ./...` network-denied inside the Bubblewrap sandbox;
@@ -55,10 +57,11 @@ unittest -v` with `VIRTUAL_ENV` at the
 
 Validated live (security-sensitive, requires the bwrap runner environment):
 
-- **Go, JavaScript (npm/yarn and pnpm), Python (pip and uv), and C/C++ (Conan)
-  verify offline under the real bwrap runner.** Each language has a passing
-  end-to-end test in `engine/tests/language_offline_e2e.rs`; the tests
-  self-skip on hosts without the live sandbox or the language toolchain.
+- **Go, JavaScript (npm/yarn and pnpm), Python (pip and uv), and C/C++ (Conan
+  and vcpkg) verify offline under the real bwrap runner.** Each language/package
+  manager has a passing end-to-end test in
+  `engine/tests/language_offline_e2e.rs`; the tests self-skip on hosts without
+  the live sandbox or the language toolchain.
 
 ## Context
 
@@ -98,6 +101,11 @@ generic sandbox path plus:
     mounted **at its own canonical host path** (source equals destination), so
     the absolute cache paths embedded in the generated toolchain file resolve
     unchanged in the sandbox.
+  - **C/C++ (vcpkg)** — the project-local vcpkg root (`.kvist/vendored-vcpkg`,
+    the vcpkg tool plus the installed ports) mounted **at its own canonical
+    host path** (source equals destination), so the absolute install paths
+    embedded in the generated CMake toolchain file resolve unchanged in the
+    sandbox.
 - **One writable scratch** at the fixed destination the closed Cargo topology
   uses, granted read-write with an endpoint identity derived from the host
   source path. Toolchain caches, build output, and `HOME` live under it.
@@ -111,7 +119,8 @@ generic sandbox path plus:
   - Python — `python3 -m unittest -v` with the mounted venv's site-packages on
     `PYTHONPATH`.
   - C/C++ — the approved `[test_policy]` command (for example `make test`)
-    driving the project build system against the mounted Conan home.
+    driving the project build system against the mounted Conan home or vendored
+    vcpkg root, depending on the detected package manager.
 
 The topology is fail-closed: vendoring is enforced before any sandbox work
 (missing, incomplete, or stale material is a `VendoringUnavailable`/
@@ -125,12 +134,12 @@ the evidence uniform.
 
 ## Where actions are performed
 
-| Action                                                                              | Performs it                                         | Network                | Boundary     |
-| ----------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------- | ------------ |
-| `go mod vendor`, `npm ci`, `pip download`, `uv venv`/`pip install`, `conan install` | Host, authorized provisioning step (`kvist vendor`) | Approved sources only  | Provisioning |
-| Vendoring enforcement (lock-file digest, presence, mounts)                          | `kvist` engine (host)                               | None                   | Authority    |
-| Canonical offline test command (or approved C/C++ test command)                     | Effect sandbox                                      | None (denied)          | Isolation    |
-| System toolchain (`go`, `node`, `python3`, `gcc`/`make`)                            | Effect sandbox                                      | None (read-only mount) | Isolation    |
+| Action                                                                                               | Performs it                                         | Network                | Boundary     |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------- | ------------ |
+| `go mod vendor`, `npm ci`, `pip download`, `uv venv`/`pip install`, `conan install`, `vcpkg install` | Host, authorized provisioning step (`kvist vendor`) | Approved sources only  | Provisioning |
+| Vendoring enforcement (lock-file digest, presence, mounts)                                           | `kvist` engine (host)                               | None                   | Authority    |
+| Canonical offline test command (or approved C/C++ test command)                                      | Effect sandbox                                      | None (denied)          | Isolation    |
+| System toolchain (`go`, `node`, `python3`, `gcc`/`make`)                                             | Effect sandbox                                      | None (read-only mount) | Isolation    |
 
 ## Rationale
 
@@ -180,4 +189,7 @@ the evidence uniform.
   `requirements.lock.txt` (pip) or `uv.lock` (uv): a `uv.lock` project is
   provisioned by exporting its exact resolved graph with `uv export --locked`
   to a pip-format file before the locked wheels are vendored and installed
-  offline; C/C++ requires an approved test command.
+  offline; C/C++ requires an approved test command, and the vcpkg path vendors
+  the whole vcpkg root (the tool plus the installed ports), which must already
+  be a provisioned vcpkg installation because vcpkg performs no offline tool
+  bootstrap.

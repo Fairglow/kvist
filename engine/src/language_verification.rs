@@ -206,57 +206,81 @@ fn offline_profile(
                 environment,
             })
         }
-        "c" => {
-            // The C/C++ build system is project-defined; the approved test
-            // command drives compile and test against the Conan home mounted
-            // at its host path (the generated toolchain file references it).
-            let (program, arguments) = match test_command {
-                Some(command) if !command.is_empty() => {
-                    let Some((program, arguments)) = command.split_first() else {
-                        unreachable!("split_first of a non-empty slice");
-                    };
-                    (program.to_owned(), arguments.to_vec())
-                }
-                _ => {
-                    return Err(KvistError::SandboxUnavailable {
-                        runner: "<language-verification>".to_owned(),
-                        reason: "C/C++ verification requires an approved test command from the \
-                                 project [test_policy] (for example `make test`)"
-                            .to_owned(),
-                    });
-                }
-            };
-            // The canonical path matches the Conan home mount destination, so
-            // the absolute cache paths embedded in the generated toolchain
-            // file resolve inside the sandbox even under symlinked prefixes.
-            let conan_home = project_root
-                .join(".kvist")
-                .join(crate::language_vendoring::CONAN_HOME_DIRNAME);
-            let canonical =
-                conan_home
-                    .canonicalize()
-                    .map_err(|source| KvistError::SandboxUnavailable {
-                        runner: "<language-verification>".to_owned(),
-                        reason: format!(
-                            "cannot canonicalize the Conan home at `{}`: {source}",
-                            conan_home.display()
-                        ),
-                    })?;
-            environment.insert(
-                "CONAN_HOME".to_owned(),
-                canonical.to_string_lossy().into_owned(),
-            );
-            Ok(LanguageProfile {
-                program,
-                arguments,
-                environment,
-            })
-        }
+        // The C/C++ build system is project-defined; the approved test command
+        // drives compile and test against the package manager's vendored root
+        // mounted at its canonical host path (the generated toolchain file's
+        // absolute cache paths then resolve inside the sandbox even under
+        // symlinked prefixes). Conan and vcpkg share this shape.
+        "c" => c_package_manager_profile(
+            &mut environment,
+            project_root,
+            test_command,
+            "CONAN_HOME",
+            crate::language_vendoring::CONAN_HOME_DIRNAME,
+        ),
+        "c-vcpkg" => c_package_manager_profile(
+            &mut environment,
+            project_root,
+            test_command,
+            "VCPKG_ROOT",
+            crate::language_vendoring::VCPKG_ROOT_DIRNAME,
+        ),
         other => Err(KvistError::SandboxUnavailable {
             runner: "<language-verification>".to_owned(),
             reason: format!("no offline verification profile for language `{other}`"),
         }),
     }
+}
+
+/// Build an approved-test-command profile for a C/C++ package manager whose
+/// vendored root is mounted read-only at its canonical host path: resolve the
+/// first program of the approved command, and set the package-manager root
+/// environment variable (`CONAN_HOME`, `VCPKG_ROOT`) to the canonicalized
+/// vendored root so the generated toolchain file's absolute cache paths resolve
+/// inside the sandbox even under symlinked prefixes. Fails closed when no
+/// approved test command is supplied (the build system is project-defined).
+fn c_package_manager_profile(
+    environment: &mut BTreeMap<String, String>,
+    project_root: &Path,
+    test_command: Option<&[String]>,
+    root_env_var: &str,
+    vendored_dirname: &str,
+) -> Result<LanguageProfile> {
+    let (program, arguments) = match test_command {
+        Some(command) if !command.is_empty() => {
+            let Some((program, arguments)) = command.split_first() else {
+                unreachable!("split_first of a non-empty slice");
+            };
+            (program.to_owned(), arguments.to_vec())
+        }
+        _ => {
+            return Err(KvistError::SandboxUnavailable {
+                runner: "<language-verification>".to_owned(),
+                reason: "C/C++ verification requires an approved test command from the \
+                         project [test_policy] (for example `make test`)"
+                    .to_owned(),
+            });
+        }
+    };
+    let vendored = project_root.join(".kvist").join(vendored_dirname);
+    let canonical = vendored
+        .canonicalize()
+        .map_err(|source| KvistError::SandboxUnavailable {
+            runner: "<language-verification>".to_owned(),
+            reason: format!(
+                "cannot canonicalize the vendored {vendored_dirname} at `{}`: {source}",
+                vendored.display()
+            ),
+        })?;
+    environment.insert(
+        root_env_var.to_owned(),
+        canonical.to_string_lossy().into_owned(),
+    );
+    Ok(LanguageProfile {
+        program,
+        arguments,
+        environment: std::mem::take(environment),
+    })
 }
 
 /// The sandbox path of the provisioned venv's site-packages directory.
@@ -462,6 +486,38 @@ mod tests {
             with_command
                 .environment
                 .get("CONAN_HOME")
+                .map(String::as_str),
+            Some(expected.to_str().unwrap())
+        );
+    }
+
+    #[test]
+    fn c_vcpkg_profile_requires_an_approved_test_command() {
+        let root = tempfile::tempdir().expect("temp root");
+        let project = project(root.path(), "c-vcpkg");
+        let missing = offline_profile("c-vcpkg", &project, None);
+        assert!(
+            missing.is_err(),
+            "vcpkg without a test command fails closed"
+        );
+        // A provisioned vcpkg root is present when the profile is built in
+        // production (enforcement runs first); the profile canonicalizes it so
+        // VCPKG_ROOT matches the mount destination.
+        let vcpkg_root = project.join(".kvist").join("vendored-vcpkg");
+        std::fs::create_dir_all(&vcpkg_root).expect("vcpkg root dir");
+        let with_command = offline_profile(
+            "c-vcpkg",
+            &project,
+            Some(&["make".to_owned(), "test".to_owned()]),
+        )
+        .expect("vcpkg profile with command");
+        assert_eq!(with_command.program, "make");
+        assert_eq!(with_command.arguments, vec!["test".to_owned()]);
+        let expected = vcpkg_root.canonicalize().expect("canonical vcpkg root");
+        assert_eq!(
+            with_command
+                .environment
+                .get("VCPKG_ROOT")
                 .map(String::as_str),
             Some(expected.to_str().unwrap())
         );

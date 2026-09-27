@@ -732,3 +732,99 @@ fn javascript_pnpm_offline_verification_builds_and_tests_denied_network() {
         "pnpm offline verification must build and test the vendored project"
     );
 }
+
+/// End-to-end: a small C project with one vcpkg-locked zlib dependency is
+/// provisioned on the host (`vcpkg install` via `kvist vendor` into the
+/// project-local vcpkg root under `.kvist/vendored-vcpkg`), and the approved
+/// test command (`make test`) compiles and runs its real test offline inside
+/// the bubblewrap sandbox with the network denied, resolving zlib from the
+/// vendored vcpkg root mounted at its host path.
+#[test]
+fn c_vcpkg_offline_verification_builds_and_tests_denied_network() {
+    let Some((runner, bwrap)) = live_sandbox_ready() else {
+        eprintln!("skip: live sandbox prerequisites not met");
+        return;
+    };
+    for tool in ["vcpkg", "cmake", "make", "g++"] {
+        if !Command::new(tool)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            eprintln!("skip: {tool} not on PATH");
+            return;
+        }
+    }
+
+    // One vcpkg-locked zlib dependency. The vcpkg CMake toolchain is reached by
+    // relative path from the component mount; the vendored vcpkg root is also
+    // mounted read-only at its canonical host path so the install tree's
+    // absolute cache paths resolve unchanged inside the sandbox.
+    let worktree = git_worktree_root().expect("worktree checked by live_sandbox_ready");
+    let project = tempfile::tempdir_in(&worktree).expect("temp project directory");
+    let root = project.path();
+    write_file(
+        root.join("vcpkg.json"),
+        "{\"name\":\"e2eminivcpkg\",\"version\":\"0.1.0\",\"dependencies\":[\"zlib\"]}\n",
+    );
+    write_file(
+        root.join("CMakeLists.txt"),
+        "cmake_minimum_required(VERSION 3.15)\nproject(e2eminivcpkg C)\nfind_package(ZLIB REQUIRED)\nadd_executable(test_zlib test_zlib.c)\ntarget_link_libraries(test_zlib PRIVATE ZLIB::ZLIB)\n",
+    );
+    write_file(
+        root.join("test_zlib.c"),
+        "#include <zlib.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\nint main(void) {\n    const char *msg = \"kvist offline vcpkg check\";\n    unsigned long bound = compressBound((unsigned long)strlen(msg));\n    unsigned char *dst = malloc(bound);\n    unsigned char *back = malloc(strlen(msg));\n    uLongf dst_len = bound;\n    uLongf back_len = strlen(msg);\n    int rc = compress2(dst, &dst_len, (const unsigned char *)msg, (uInt)strlen(msg), Z_DEFAULT_COMPRESSION);\n    if (rc != Z_OK || uncompress(back, &back_len, dst, dst_len) != Z_OK || back_len != strlen(msg) || memcmp(back, msg, back_len) != 0) {\n        fprintf(stderr, \"zlib roundtrip failed\\n\");\n        return 1;\n    }\n    printf(\"zlib roundtrip ok %s\\n\", ZLIB_VERSION);\n    return 0;\n}\n",
+    );
+    write_file(
+        root.join("Makefile"),
+        "BUILD := /workspace/scratch/build\n\ntest:\n\t/usr/bin/cmake -S . -B $(BUILD) -DCMAKE_TOOLCHAIN_FILE=.kvist/vendored-vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release\n\t/usr/bin/cmake --build $(BUILD)\n\t$(BUILD)/test_zlib\n",
+    );
+
+    if !provision(root) {
+        return;
+    }
+    // The vendored vcpkg root must hold the installed ports (for the offline
+    // mount and to resolve zlib) and ship the CMake toolchain the build
+    // consumes. Mirror the Conan provision check.
+    let vcpkg_root = root.join(".kvist").join("vendored-vcpkg");
+    let installed = vcpkg_root.join("installed");
+    let toolchain = vcpkg_root
+        .join("scripts")
+        .join("buildsystems")
+        .join("vcpkg.cmake");
+    if !installed.is_dir()
+        || std::fs::read_dir(&installed)
+            .expect("installed dir")
+            .next()
+            .is_none()
+        || !toolchain.is_file()
+    {
+        eprintln!("skip: vcpkg did not provision the root (installed ports or toolchain missing)");
+        return;
+    }
+
+    let config = sandbox_config(&runner, &bwrap);
+    let approved_runner =
+        runner_identity(&config, root, VcsSelection::Git).expect("identify the runner");
+    let approved_backend =
+        backend_identity(&config, root, VcsSelection::Git).expect("identify the backend");
+    let probe: SandboxProbe = ensure_available(
+        &config,
+        root,
+        VcsSelection::Git,
+        &approved_runner,
+        &approved_backend,
+    )
+    .expect("the bwrap capability probe confirms production isolation");
+
+    assert!(
+        verify_offline(
+            &config,
+            root,
+            &probe,
+            Some(vec!["make".to_owned(), "test".to_owned()]),
+            &["zlib roundtrip ok"],
+        ),
+        "c vcpkg offline verification must build and test the vendored project"
+    );
+}

@@ -2740,6 +2740,45 @@ tasks:
       completed_at: "2026-09-27T13:30:00Z"
     blocked_reason: null
     recovery_state: null
+  - id: "c-vcpkg-write-tests"
+    title: "Define the C/C++ (vcpkg) offline e2e test"
+    description: "Write a self-skipping end-to-end test that provisions a small real C/C++ project with one vcpkg-locked zlib dependency on the host (vcpkg.json plus kvist vendor dispatch: vcpkg install --locked --triplet x64-linux into the project-local vcpkg root under .kvist/vendored-vcpkg) and runs its approved build/test command (make) offline inside the Bubblewrap sandbox, in the shape of offline_cargo_verification_e2e."
+    context: "Support is never claimed without executable evidence, and the C/C++ (vcpkg) vendoring strategy is not yet evidenced end to end."
+    purpose: "Establish executable evidence that a C/C++ project with a locked vcpkg dependency builds and tests offline in the sandbox before it is claimed as supported."
+    expected_outcome: "c_vcpkg_offline_verification_builds_and_tests_denied_network provisions on the host, runs the real build/test offline in the sandbox, and self-skips on hosts without vcpkg or the live sandbox."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-27T14:00:00Z"
+      updated_at: "2026-09-27T14:00:00Z"
+      completed_at: "2026-09-27T14:00:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "c-vcpkg-implement-code"
+    title: "Wire C/C++ (vcpkg) offline verification"
+    description: "Evidence the implemented C/C++ (vcpkg) strategy end to end: kvist vendor runs vcpkg install --locked --triplet x64-linux with VCPKG_ROOT=.kvist/vendored-vcpkg into the project-local vcpkg root (vendoring the tool plus installed ports), and the shared offline language topology runs the approved test command (make) with VCPKG_ROOT at the vendored vcpkg root's canonical host path; add the end-to-end test."
+    context: "C/C++ is vendored-supported via Conan; vcpkg is the second C/C++ package manager on the shared offline language topology (ADR-0013)."
+    purpose: "Deliver supported, evidenced offline C/C++ verification through vcpkg via the shared sandbox topology."
+    expected_outcome: "C/C++ projects with a locked vcpkg dependency verify offline in the sandbox with vendored presence enforced and e2e evidence passing (self-skip without vcpkg)."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "c-vcpkg-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "DESIGN.md#Language-support-per-language-provisioning-and-evidence-ADR-0013"
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+    timestamps:
+      created_at: "2026-09-27T14:00:00Z"
+      updated_at: "2026-09-27T14:00:00Z"
+      completed_at: "2026-09-27T14:00:00Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "language-e2e-security-audit"
     title: "Audit per-language offline verification"
     description: "Source-blind security review of per-language provisioning, vendored mount wiring, test-command/environment allowlisting, and offline enforcement for injection, path traversal, link-following, and network-escape findings."

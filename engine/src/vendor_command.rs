@@ -131,6 +131,13 @@ pub fn vendor_project(project_dir: &Path, options: VendorOptions) -> Result<Vend
                 "c",
             )?))
         }
+        "c-vcpkg" => {
+            populate_vcpkg(&project_dir)?;
+            Ok(VendorReport::Language(enforce_language_report(
+                &project_dir,
+                "c-vcpkg",
+            )?))
+        }
         other => Err(KvistError::VendoringUnavailable {
             path: project_dir.to_string_lossy().into_owned(),
             reason: format!("no provisioning pass for language `{other}`"),
@@ -599,6 +606,73 @@ fn populate_conan(project_dir: &Path) -> Result<()> {
     )
 }
 
+/// C/C++ (vcpkg) provisioning: fill a project-local vcpkg root with the exact
+/// locked ports and generate the CMake toolchain files the project build system
+/// consumes. The vcpkg root under `.kvist/` (`VCPKG_ROOT`) keeps the install
+/// tree Kvist-owned and inspectable. Vendoring the root (the vcpkg tool plus the
+/// installed ports) is what makes offline verification possible; the root must
+/// already be a provisioned vcpkg installation, because vcpkg performs no
+/// offline tool bootstrap.
+fn populate_vcpkg(project_dir: &Path) -> Result<()> {
+    let vcpkg_root = project_dir
+        .join(".kvist")
+        .join(crate::language_vendoring::VCPKG_ROOT_DIRNAME);
+    let env = [(
+        "VCPKG_ROOT",
+        vcpkg_root.to_str().ok_or_else(invalid_utf8_path_error)?,
+    )];
+
+    // The vcpkg triple is project-defined: the manifest may pin it via
+    // `x-triplet`; otherwise the Linux default `x64-linux` is used so the
+    // offline build is reproducible and pinned.
+    let triple = vcpkg_triple(project_dir)?;
+
+    let mut args: Vec<&str> = vec!["install", "."];
+    if project_dir.join("vcpkg-lock.json").is_file() {
+        args.push("--locked");
+    } else {
+        args.push("--lockfile-out=vcpkg-lock.json");
+    }
+    args.push("--triplet");
+    args.push(triple.as_str());
+    run_host_tool(
+        "vcpkg",
+        &args,
+        project_dir,
+        "install locked vcpkg ports",
+        &env,
+    )
+}
+
+/// Read the pinned vcpkg triple from the manifest, falling back to the Linux
+/// default so the offline build is reproducible.
+fn vcpkg_triple(project_dir: &Path) -> Result<String> {
+    let manifest = project_dir.join("vcpkg.json");
+    let text =
+        std::fs::read_to_string(&manifest).map_err(|source| KvistError::VendoringUnavailable {
+            path: project_dir.to_string_lossy().into_owned(),
+            reason: format!(
+                "cannot read the vcpkg manifest `{}`: {source}",
+                manifest.display()
+            ),
+        })?;
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|source| KvistError::VendoringUnavailable {
+            path: project_dir.to_string_lossy().into_owned(),
+            reason: format!(
+                "the vcpkg manifest `{}` is not valid JSON: {source}",
+                manifest.display()
+            ),
+        })?;
+    let triple = value
+        .get("x-triplet")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| "x64-linux".to_owned());
+    Ok(triple)
+}
+
 /// Probe a host tool without treating a failure as an error (for optional
 /// accelerators such as `uv`).
 fn run_host_tool_quiet(program: &str, args: &[&str], project_dir: &Path) -> bool {
@@ -644,8 +718,7 @@ fn pnpm_store_path(project_dir: &Path) -> Result<PathBuf> {
     let store = text
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .next_back()
+        .rfind(|line| !line.is_empty())
         .ok_or_else(|| KvistError::VendoringUnavailable {
             path: project_dir.to_string_lossy().into_owned(),
             reason: "pnpm did not report a store path; check the pnpm installation".to_owned(),

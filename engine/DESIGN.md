@@ -472,7 +472,7 @@ existing closed purposes and the pinned-toolchain manifest.
 ### Language support, per-language provisioning, and evidence (ADR-0013)
 
 `detect_language_strategy` selects the owning language by lock file (Rust
-first, then Go, Python, JavaScript, C/Conan). `verify_task` routes Rust to the
+first, then Go, Python, JavaScript, C/Conan, C/vcpkg). `verify_task` routes Rust to the
 closed offline Cargo topology; every other **vendored** language is routed to
 the shared offline language topology
 (`language_verification::run_offline_language_verification`); non-vendored
@@ -540,12 +540,23 @@ denied_network`, `language_offline_e2e.rs::python_uv_lock_offline_verification_b
    The `CMakeToolchain`/`CMakeDeps` generators are not Conan 2 defaults and
    must be requested explicitly, so the generated toolchain file and
    `find_package` material are what the project build system consumes.
+5. **C/C++ (vcpkg).** `kvist vendor` runs `vcpkg install [--locked/--lockfile-out] --triplet <triple>`
+   with `VCPKG_ROOT=.kvist/vendored-vcpkg`; the profile runs the approved project
+   test command with `VCPKG_ROOT` at the vendored vcpkg root's canonical host
+   path (the root is mounted read-only at that same path, so the absolute
+   install paths embedded in the generated CMake toolchain file resolve
+   unchanged). The triple is read from `vcpkg.json` (`x-triplet`) and defaults
+   to `x64-linux`. Vendoring the whole vcpkg root (the tool plus the installed
+   ports) is what makes offline verification possible; the root must already be
+   a provisioned vcpkg installation. E2E evidence:
+   `language_offline_e2e.rs::c_vcpkg_offline_verification_builds_and_tests_denied_network`.
 
 Before any non-Rust language is claimed as vendored-supported, an end-to-end
 integration test MUST pass (provision a small real project on the host, run
 its real build/test offline in the sandbox, self-skip without the live
 sandbox). Go, JavaScript, and Python are claimed with that evidence; C/C++ is
-tracked in `TODOS.yaml`. JavaScript is evidenced for npm/yarn and for pnpm.
+tracked in `TODOS.yaml`. JavaScript is evidenced for npm/yarn and for pnpm; C/C++
+is evidenced for Conan and for vcpkg.
 
 ### Planned review evidence and acceptance state
 
