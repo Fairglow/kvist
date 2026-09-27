@@ -158,6 +158,22 @@ fn offline_profile(
             // directory; `GOPROXY=off` plus `GOTOOLCHAIN=local` make any
             // accidental fetch or toolchain download fail immediately instead
             // of reaching for the network.
+            //
+            // Debian/Ubuntu ship a "trimmed" Go binary whose standard library is
+            // not bundled, so the verifier must set `GOROOT` explicitly; the
+            // interpreter always lives at `$GOROOT/bin/go`, so the vendored root
+            // is its grandparent. The host `/usr` is bound read-only inside the
+            // sandbox, so the standard library at that root stays reachable with
+            // the network denied.
+            let program = locate_host_binary("go")?;
+            let goroot = Path::new(&program)
+                .parent()
+                .and_then(|parent| parent.parent())
+                .ok_or_else(|| KvistError::SandboxUnavailable {
+                    runner: "<language-verification>".to_owned(),
+                    reason: format!("cannot derive GOROOT from the go binary path `{}`", program),
+                })?;
+            environment.insert("GOROOT".to_owned(), goroot.to_string_lossy().into_owned());
             environment.insert("GOPROXY".to_owned(), "off".to_owned());
             environment.insert("GOTOOLCHAIN".to_owned(), "local".to_owned());
             environment.insert("GOFLAGS".to_owned(), "-mod=vendor".to_owned());
@@ -169,7 +185,7 @@ fn offline_profile(
                 format!("{SCRATCH_DEST}/gopath/pkg/mod"),
             );
             Ok(LanguageProfile {
-                program: locate_host_binary("go")?,
+                program,
                 arguments: vec![
                     "test".to_owned(),
                     "-mod=vendor".to_owned(),
