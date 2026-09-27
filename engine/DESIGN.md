@@ -530,6 +530,9 @@ denied_network`.
    test command with `CONAN_HOME` at the Conan home's canonical host path
    (the home is mounted read-only at that same path, so the absolute cache
    paths embedded in the generated toolchain file resolve unchanged).
+   The `CMakeToolchain`/`CMakeDeps` generators are not Conan 2 defaults and
+   must be requested explicitly, so the generated toolchain file and
+   `find_package` material are what the project build system consumes.
 
 Before any non-Rust language is claimed as vendored-supported, an end-to-end
 integration test MUST pass (provision a small real project on the host, run

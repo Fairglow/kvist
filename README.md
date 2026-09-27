@@ -506,15 +506,15 @@ anything installed under the user's home (`rustup` homes, `~/.m2`, `~/.npm`,
 
 ### Current state
 
-| Language                  | Authoring (agent)                                                                | Verification (`kvist task verify`)                                                                                                                                                                | Vendoring                                                                                                      |
-| ------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| **Rust**                  | Writes only; no usable toolchain in the authoring sandbox (known gap, see below) | **First-class**: closed offline Cargo topology, `cargo test --locked`, enforced, validated end-to-end in CI (stable + MSRV)                                                                       | Exact and automated: `kvist vendor` + per-dependency fail-closed manifest                                      |
-| **C/C++**                 | System `gcc`/`cc` available                                                      | Works for projects whose dependencies are host system packages (`make`, `cmake`)                                                                                                                  | Conan strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification |
-| **Go**                    | System `go` available                                                            | **First-class** for vendored projects: shared offline language topology, `go test -mod=vendor ./...` network-denied, validated end-to-end (`language_offline_e2e`)                                | Automated: `kvist vendor` runs `go mod vendor`; the committed `vendor/` travels inside the component mount     |
-| **Python**                | System `python3` available                                                       | **First-class** for vendored projects: shared offline language topology, `python3 -m unittest` network-denied against the mounted provisioned venv, validated end-to-end (`language_offline_e2e`) | Automated: `kvist vendor` downloads the locked wheels and provisions an offline virtualenv                     |
-| **JavaScript/TypeScript** | System `node` available                                                          | **First-class** for vendored projects: shared offline language topology, `node --test` network-denied, validated end-to-end (`language_offline_e2e`)                                              | Automated: `kvist vendor` runs `npm ci` (or `yarn install --frozen-lockfile`) into the vendored package cache  |
-| **JVM / Ruby**            | System `java`/`ruby` available                                                   | Zero-dependency projects only; `~/.m2`/Gradle home/Gem state are not visible                                                                                                                      | Not supported                                                                                                  |
-| **Shell / scripts**       | Available                                                                        | Available                                                                                                                                                                                         | n/a                                                                                                            |
+| Language                  | Authoring (agent)                                                                | Verification (`kvist task verify`)                                                                                                                                                                | Vendoring                                                                                                                       |
+| ------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Rust**                  | Writes only; no usable toolchain in the authoring sandbox (known gap, see below) | **First-class**: closed offline Cargo topology, `cargo test --locked`, enforced, validated end-to-end in CI (stable + MSRV)                                                                       | Exact and automated: `kvist vendor` + per-dependency fail-closed manifest                                                       |
+| **C/C++**                 | System `gcc`/`cc` available                                                      | **First-class** for vendored projects: shared offline language topology, `make` network-denied against the mounted Conan home, validated end-to-end (`language_offline_e2e`)                      | Automated: `kvist vendor` runs `conan install` (explicit CMakeToolchain/CMakeDeps generators) into the project-local Conan home |
+| **Go**                    | System `go` available                                                            | **First-class** for vendored projects: shared offline language topology, `go test -mod=vendor ./...` network-denied, validated end-to-end (`language_offline_e2e`)                                | Automated: `kvist vendor` runs `go mod vendor`; the committed `vendor/` travels inside the component mount                      |
+| **Python**                | System `python3` available                                                       | **First-class** for vendored projects: shared offline language topology, `python3 -m unittest` network-denied against the mounted provisioned venv, validated end-to-end (`language_offline_e2e`) | Automated: `kvist vendor` downloads the locked wheels and provisions an offline virtualenv                                      |
+| **JavaScript/TypeScript** | System `node` available                                                          | **First-class** for vendored projects: shared offline language topology, `node --test` network-denied, validated end-to-end (`language_offline_e2e`)                                              | Automated: `kvist vendor` runs `npm ci` (or `yarn install --frozen-lockfile`) into the vendored package cache                   |
+| **JVM / Ruby**            | System `java`/`ruby` available                                                   | Zero-dependency projects only; `~/.m2`/Gradle home/Gem state are not visible                                                                                                                      | Not supported                                                                                                                   |
+| **Shell / scripts**       | Available                                                                        | Available                                                                                                                                                                                         | n/a                                                                                                                             |
 
 "Generic test-command path" means the approved per-component command from the
 `[test_policy]` configuration runs in the network-denied sandbox against host
@@ -534,9 +534,9 @@ Python, C/Conan); per-language end-to-end evidence is tracked in
 2. **Go and JavaScript** (complete with end-to-end evidence; the easy
    languages): their offline stories fit the shared language topology with
    little new machinery (Go `vendor/`; Node with a vendored package cache).
-3. **C/C++** (the important language): provisioning and profile are
-   implemented; it is claimed as vendored-supported when its end-to-end
-   evidence passes. **Python** is complete with end-to-end evidence.
+3. **C/C++** (the important language): provisioning, profile, and
+   end-to-end evidence are complete; it is claimed as vendored-supported.
+   **Python** is also complete with end-to-end evidence.
 
 Support is never claimed without executable evidence: every supported language
 requires an end-to-end integration test that vendors (or otherwise provisions)
@@ -554,10 +554,14 @@ Declared limitations for currently supported languages:
 - **Go**: requires the `vendor/` directory to be present in the component
   (`go mod vendor` on the host); `GOCACHE` must point at the writable `/tmp`
   via the test-policy environment allowlist.
-- **C/C++**: third-party dependencies must be host system packages; Conan
-  support is planned, not current.
-- **Python/JavaScript**: third-party dependencies are not resolvable in the
-  sandbox until the vendored mounts are wired; stdlib/system packages only.
+- **C/C++**: requires the Conan home (`.kvist/vendored-conan`) to be
+  provisioned by `kvist vendor`; the project build system consumes the
+  generated `conan_toolchain.cmake`, so the approved test command must point
+  at it (for example `make`). C/C++ dependencies that are not resolvable via
+  Conan must be host system packages (see the host-packages limitation).
+- **Host system packages (all languages)**: dependencies that are not
+  resolvable through the vendored mounts remain non-offline; stdlib/system
+  packages only.
 
 ### Rust toolchain handling
 

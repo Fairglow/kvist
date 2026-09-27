@@ -164,9 +164,9 @@ pub fn detect_language_strategy(project_dir: &Path) -> Result<Box<dyn LanguageSt
     Err(KvistError::VendoringUnavailable {
         path: path.clone(),
         reason: "no supported lock file (Cargo.lock, go.sum, requirements.lock.txt, \
-                 uv.lock, package-lock.json, yarn.lock, or conanfile.lock) found; \
-                 run the language's acquisition command so vendoring matches the \
-                 exact locked versions"
+                 uv.lock, package-lock.json, yarn.lock, or a conanfile) found; \
+                 run the language's acquisition command so vendoring matches the exact \
+                 locked versions"
             .to_owned(),
     })
 }
@@ -631,6 +631,15 @@ impl LanguageStrategy for CConanStrategy {
     fn lockfile_names(&self) -> &'static [&'static str] {
         &["conanfile.lock"]
     }
+    /// A Conan project is marked by its conanfile even before the lock file
+    /// exists: `kvist vendor` generates `conanfile.lock` during provisioning
+    /// (`conan install --lockfile-out`), so lock-file-only detection would
+    /// make a fresh C/C++ project unprovisionable.
+    fn detects(&self, project_dir: &Path) -> bool {
+        project_dir.join("conanfile.txt").is_file()
+            || project_dir.join("conanfile.py").is_file()
+            || self.lockfile_path(project_dir).is_some()
+    }
     fn vendored_dirname(&self) -> &'static str {
         CONAN_HOME_DIRNAME
     }
@@ -644,8 +653,10 @@ impl LanguageStrategy for CConanStrategy {
     fn enforce(&self, project_dir: &Path) -> Result<VendoringReport> {
         let (lockfile, digest) = lockfile_digest_for(self, project_dir)?;
         let vendored = self.vendored_dir(project_dir);
-        // A provisioned Conan home holds its package cache under `.conan2`.
-        if !directory_non_empty(&vendored.join(".conan2")) {
+        // A provisioned Conan home holds its package cache at the home root
+        // under `p/` (both the Conan 1.x and 2.x layouts keep it there; the
+        // `~/.conan2` default is a home directory name, not a subdirectory).
+        if !directory_non_empty(&vendored.join("p")) {
             return Ok(VendoringReport {
                 language: "c".to_owned(),
                 project_root: project_dir.to_string_lossy().into_owned(),
@@ -808,6 +819,22 @@ mod tests {
         assert_eq!(
             detect_language_strategy(project_with(&[("conanfile.lock", "")]).path())
                 .expect("conan")
+                .id(),
+            "c"
+        );
+        // A conanfile alone marks a C/C++ project before any lock file exists,
+        // so kvist vendor can generate the lock file during provisioning.
+        assert_eq!(
+            detect_language_strategy(
+                project_with(&[("conanfile.txt", "[requires]\nzlib/1.3.1\n")]).path()
+            )
+            .expect("conanfile.txt")
+            .id(),
+            "c"
+        );
+        assert_eq!(
+            detect_language_strategy(project_with(&[("conanfile.py", "")]).path())
+                .expect("conanfile.py")
                 .id(),
             "c"
         );

@@ -509,11 +509,7 @@ fn populate_conan(project_dir: &Path) -> Result<()> {
     )];
 
     // Ensure a default profile exists in the project-local home.
-    let has_profile = conan_home
-        .join(".conan2")
-        .join("profiles")
-        .join("default")
-        .is_file();
+    let has_profile = conan_home.join("profiles").join("default").is_file();
     if !has_profile {
         run_host_tool(
             "conan",
@@ -533,6 +529,13 @@ fn populate_conan(project_dir: &Path) -> Result<()> {
         args.push("--lockfile-out=conanfile.lock");
     }
     args.push("--build=missing");
+    // The CMake generators are not Conan 2 defaults, so the toolchain file
+    // and find_package material the project build system consumes must be
+    // requested explicitly.
+    args.push("-g");
+    args.push("CMakeToolchain");
+    args.push("-g");
+    args.push("CMakeDeps");
     args.push("-of");
     args.push(output_folder);
     run_host_tool(

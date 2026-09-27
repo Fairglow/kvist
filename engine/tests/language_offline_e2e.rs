@@ -164,10 +164,13 @@ fn provision(project: &Path) -> bool {
 
 /// Run offline language verification and assert a successful test run whose
 /// output contains at least one of the expected evidence markers.
+/// `test_command` is `None` for the canonical-command languages and the
+/// approved command for C/C++ (the project-defined build system).
 fn verify_offline(
     config: &SandboxConfig,
     project: &Path,
     probe: &SandboxProbe,
+    test_command: Option<Vec<String>>,
     expected_markers: &[&str],
 ) -> bool {
     let result = match run_offline_language_verification(
@@ -177,7 +180,7 @@ fn verify_offline(
         probe,
         POLICY_IDENTITY,
         project,
-        None,
+        test_command,
         ExecutionOptions {
             timeout: Some(Duration::from_secs(240)),
             output_limit: Some(1 << 20),
@@ -287,7 +290,7 @@ fn go_offline_verification_builds_and_tests_denied_network() {
     .expect("the bwrap capability probe confirms production isolation");
 
     assert!(
-        verify_offline(&config, root, &probe, &["ok  ", "PASS"]),
+        verify_offline(&config, root, &probe, None, &["ok  ", "PASS"]),
         "go offline verification must build and test the vendored project"
     );
 }
@@ -362,7 +365,7 @@ fn javascript_offline_verification_builds_and_tests_denied_network() {
     .expect("the bwrap capability probe confirms production isolation");
 
     assert!(
-        verify_offline(&config, root, &probe, &["pass 1", "tests 1"]),
+        verify_offline(&config, root, &probe, None, &["pass 1", "tests 1"]),
         "javascript offline verification must build and test the vendored project"
     );
 }
@@ -431,7 +434,90 @@ fn python_offline_verification_builds_and_tests_denied_network() {
     .expect("the bwrap capability probe confirms production isolation");
 
     assert!(
-        verify_offline(&config, root, &probe, &["OK", "Ran 1 test"]),
+        verify_offline(&config, root, &probe, None, &["OK", "Ran 1 test"]),
         "python offline verification must build and test the vendored project"
+    );
+}
+
+/// End-to-end: a small C project with one Conan-locked zlib dependency is
+/// provisioned on the host (`conan install` via `kvist vendor` into the
+/// project-local Conan home plus generated CMake files), and the approved test
+/// command (`make test`) compiles and runs its real test offline inside the
+/// bubblewrap sandbox with the network denied, resolving zlib from the Conan
+/// home mounted at its host path.
+#[test]
+fn c_offline_verification_builds_and_tests_denied_network() {
+    let Some((runner, bwrap)) = live_sandbox_ready() else {
+        eprintln!("skip: live sandbox prerequisites not met");
+        return;
+    };
+    for tool in ["conan", "cmake", "make"] {
+        if !Command::new(tool)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            eprintln!("skip: {tool} not on PATH");
+            return;
+        }
+    }
+
+    // One Conan-locked zlib dependency; the approved test command drives the
+    // CMake build system, which consumes the generated toolchain file
+    // (it references the Conan home by absolute host path) and writes all
+    // build output under the sandbox scratch.
+    let worktree = git_worktree_root().expect("worktree checked by live_sandbox_ready");
+    let project = tempfile::tempdir_in(&worktree).expect("temp project directory");
+    let root = project.path();
+    write_file(root.join("conanfile.txt"), "[requires]\nzlib/1.3.1\n");
+    write_file(
+        root.join("CMakeLists.txt"),
+        "cmake_minimum_required(VERSION 3.15)\nproject(e2eminicc C)\nfind_package(ZLIB REQUIRED)\nadd_executable(test_zlib test_zlib.c)\ntarget_link_libraries(test_zlib PRIVATE ZLIB::ZLIB)\n",
+    );
+    write_file(
+        root.join("test_zlib.c"),
+        "#include <zlib.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n\nint main(void) {\n    const char *msg = \"kvist offline conan check\";\n    unsigned long bound = compressBound((unsigned long)strlen(msg));\n    unsigned char *dst = malloc(bound);\n    unsigned char *back = malloc(strlen(msg));\n    uLongf dst_len = bound;\n    uLongf back_len = strlen(msg);\n    int rc = compress2(dst, &dst_len, (const unsigned char *)msg, (uInt)strlen(msg), Z_DEFAULT_COMPRESSION);\n    if (rc != Z_OK || uncompress(back, &back_len, dst, dst_len) != Z_OK || back_len != strlen(msg) || memcmp(back, msg, back_len) != 0) {\n        fprintf(stderr, \"zlib roundtrip failed\\n\");\n        return 1;\n    }\n    printf(\"zlib roundtrip ok %s\\n\", ZLIB_VERSION);\n    return 0;\n}\n",
+    );
+    write_file(
+        root.join("Makefile"),
+        "BUILD := /workspace/scratch/build\n\ntest:\n\t/usr/bin/cmake -S . -B $(BUILD) -DCMAKE_TOOLCHAIN_FILE=.kvist/conan-build/conan_toolchain.cmake -DCMAKE_BUILD_TYPE=Release\n\t/usr/bin/cmake --build $(BUILD)\n\t$(BUILD)/test_zlib\n",
+    );
+
+    if !provision(root) {
+        return;
+    }
+    if !root
+        .join(".kvist")
+        .join("conan-build")
+        .join("conan_toolchain.cmake")
+        .is_file()
+    {
+        eprintln!("skip: conan did not generate the CMake toolchain file");
+        return;
+    }
+
+    let config = sandbox_config(&runner, &bwrap);
+    let approved_runner =
+        runner_identity(&config, root, VcsSelection::Git).expect("identify the runner");
+    let approved_backend =
+        backend_identity(&config, root, VcsSelection::Git).expect("identify the backend");
+    let probe: SandboxProbe = ensure_available(
+        &config,
+        root,
+        VcsSelection::Git,
+        &approved_runner,
+        &approved_backend,
+    )
+    .expect("the bwrap capability probe confirms production isolation");
+
+    assert!(
+        verify_offline(
+            &config,
+            root,
+            &probe,
+            Some(vec!["make".to_owned(), "test".to_owned()]),
+            &["zlib roundtrip ok"],
+        ),
+        "c offline verification must build and test the vendored project"
     );
 }
