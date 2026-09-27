@@ -164,9 +164,9 @@ pub fn detect_language_strategy(project_dir: &Path) -> Result<Box<dyn LanguageSt
     Err(KvistError::VendoringUnavailable {
         path: path.clone(),
         reason: "no supported lock file (Cargo.lock, go.sum, requirements.lock.txt, \
-                 uv.lock, package-lock.json, yarn.lock, or a conanfile) found; \
-                 run the language's acquisition command so vendoring matches the exact \
-                 locked versions"
+                 uv.lock, package-lock.json, yarn.lock, pnpm-lock.yaml, or a \
+                 conanfile/vcpkg.json) found; run the language's acquisition command \
+                 so vendoring matches the exact locked versions"
             .to_owned(),
     })
 }
@@ -530,8 +530,22 @@ fn venv_interpreter(project_dir: &Path) -> Option<PathBuf> {
     venv.is_file().then_some(venv)
 }
 
-/// A locked JavaScript/Node project (`npm`). Present-and-matching catalogue with
-/// a vendored tarball directory and an `.npmrc` that resolves offline.
+/// Which JavaScript/Node package manager owns this project, by lock file.
+/// pnpm is preferred over the lock-file priority order because a `pnpm-lock.yaml`
+/// requires the pnpm store, which is a distinct catalogue shape from the
+/// npm/yarn tarball cache.
+fn javascript_package_manager(project_dir: &Path) -> &'static str {
+    if project_dir.join("pnpm-lock.yaml").is_file() {
+        "pnpm"
+    } else if project_dir.join("yarn.lock").is_file() {
+        "yarn"
+    } else {
+        "npm"
+    }
+}
+
+/// A locked JavaScript/Node project (`npm`/`yarn`/`pnpm`). Present-and-matching
+/// catalogue (tarball cache or pnpm store) and an offline `.npmrc`.
 struct JavaScriptStrategy;
 
 impl LanguageStrategy for JavaScriptStrategy {
@@ -539,7 +553,7 @@ impl LanguageStrategy for JavaScriptStrategy {
         "javascript"
     }
     fn lockfile_names(&self) -> &'static [&'static str] {
-        &["package-lock.json", "yarn.lock"]
+        &["package-lock.json", "yarn.lock", "pnpm-lock.yaml"]
     }
     fn vendored_dirname(&self) -> &'static str {
         JS_PACKAGE_CACHE_DIRNAME
@@ -554,6 +568,14 @@ impl LanguageStrategy for JavaScriptStrategy {
     fn enforce(&self, project_dir: &Path) -> Result<VendoringReport> {
         let (lockfile, digest) = lockfile_digest_for(self, project_dir)?;
         let vendored = self.vendored_dir(project_dir);
+        // The vendored catalogue shape differs per manager (npm/yarn tarball
+        // cache, pnpm content-addressable store) but its readiness contract is
+        // the same: non-empty and lock-file digest identified.
+        let catalogue = match javascript_package_manager(project_dir) {
+            "pnpm" => "pnpm store",
+            "yarn" => "yarn cache",
+            _ => "npm cache",
+        };
         if !directory_non_empty(&vendored) {
             return Ok(VendoringReport {
                 language: "javascript".to_owned(),
@@ -562,11 +584,9 @@ impl LanguageStrategy for JavaScriptStrategy {
                 lockfile_digest: digest,
                 vendored_dir: vendored.to_string_lossy().into_owned(),
                 present_dependencies: 0,
-                missing_dependencies: vec![
-                    "javascript: vendored tarballs not provisioned; run `npm pack` \
-                      for each locked entry on the host"
-                        .to_owned(),
-                ],
+                missing_dependencies: vec![format!(
+                    "javascript: {catalogue} not provisioned; run `kvist vendor` on the host"
+                )],
             });
         }
         Ok(VendoringReport {
@@ -589,13 +609,26 @@ impl LanguageStrategy for JavaScriptStrategy {
             source,
         })?;
         let config_path = config_dir.join(".npmrc");
-        let contents = format!(
-            "# Managed by `kvist vendor` (ADR-0011). Do not edit by hand.\n\
-             offline=true\n\
-             prefer-offline=true\n\
-             cache={}\n",
-            self.vendored_mount_dest()
-        );
+        // npm/yarn consume `cache=` for the offline tarball cache; pnpm uses a
+        // content-addressable store referenced by `store-path`. The file is
+        // bound to the lock-file digest identity and documents the offline
+        // catalogue; the canonical `node --test` consumes the committed
+        // node_modules, not this config.
+        let contents = match javascript_package_manager(project_dir) {
+            "pnpm" => format!(
+                "# Managed by `kvist vendor` (ADR-0011). Do not edit by hand.\n\
+                 offline=true\n\
+                 store-path={}\n",
+                self.vendored_mount_dest()
+            ),
+            _ => format!(
+                "# Managed by `kvist vendor` (ADR-0011). Do not edit by hand.\n\
+                 offline=true\n\
+                 prefer-offline=true\n\
+                 cache={}\n",
+                self.vendored_mount_dest()
+            ),
+        };
         fs::write(&config_path, contents).map_err(|source| KvistError::Io {
             operation: "write javascript sandbox .npmrc",
             path: config_path.clone(),
@@ -837,6 +870,20 @@ mod tests {
                 .expect("conanfile.py")
                 .id(),
             "c"
+        );
+    }
+
+    #[test]
+    fn detects_pnpm_lock_file_and_reports_pnpm_package_manager() {
+        // A pnpm-lock.yaml selects the JavaScript strategy, and the offline
+        // catalogue is the pnpm store (a distinct shape from the npm/yarn cache).
+        assert_eq!(
+            detect_language_strategy(
+                project_with(&[("pnpm-lock.yaml", "\"lockfileVersion\":\"6\"\n")]).path()
+            )
+            .expect("pnpm")
+            .id(),
+            "javascript"
         );
     }
 

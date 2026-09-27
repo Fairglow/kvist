@@ -351,8 +351,11 @@ fn populate_go_vendor(project_dir: &Path) -> Result<()> {
 }
 
 /// JavaScript provisioning: build `node_modules` from the exact locked
-/// versions into the vendored package cache. `npm ci` reconciles from
-/// `package-lock.json`; yarn projects reconcile from `yarn.lock`.
+/// versions and vend the resolved material under `.kvist/`. `npm ci`
+/// reconciles from `package-lock.json` into a tarball cache; yarn projects
+/// reconcile from `yarn.lock`; pnpm projects are vendored as the resolved
+/// `node_modules` tree (see `populate_pnpm`). Only the install steps may touch
+/// the network; they run on the host during provisioning.
 fn populate_javascript(project_dir: &Path) -> Result<()> {
     let vendored = project_dir
         .join(".kvist")
@@ -362,14 +365,17 @@ fn populate_javascript(project_dir: &Path) -> Result<()> {
         path: vendored.clone(),
         source,
     })?;
-    if project_dir.join("yarn.lock").is_file() {
+    let vendored_str = vendored.to_str().ok_or_else(invalid_utf8_path_error)?;
+    if project_dir.join("pnpm-lock.yaml").is_file() {
+        populate_pnpm(project_dir)
+    } else if project_dir.join("yarn.lock").is_file() {
         run_host_tool(
             "yarn",
             &[
                 "install",
                 "--frozen-lockfile",
                 "--cache-folder",
-                vendored.to_str().ok_or_else(invalid_utf8_path_error)?,
+                vendored_str,
             ],
             project_dir,
             "install JavaScript packages with yarn",
@@ -378,11 +384,7 @@ fn populate_javascript(project_dir: &Path) -> Result<()> {
     } else {
         run_host_tool(
             "npm",
-            &[
-                "ci",
-                "--cache",
-                vendored.to_str().ok_or_else(invalid_utf8_path_error)?,
-            ],
+            &["ci", "--cache", vendored_str],
             project_dir,
             "install JavaScript packages with npm",
             &[],
@@ -607,6 +609,143 @@ fn run_host_tool_quiet(program: &str, args: &[&str], project_dir: &Path) -> bool
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|status| status.success())
+}
+
+/// pnpm provisioning: build `node_modules` from the locked graph and vend its
+/// resolved material. pnpm resolves dependencies into a content-addressable
+/// store (its canonical offline catalogue), so that store is copied into
+/// `.kvist/`, bound to the lock-file digest, and mounted read-only in the
+/// sandbox. Only `pnpm install` touches the network, and only on the host.
+fn populate_pnpm(project_dir: &Path) -> Result<()> {
+    run_host_tool(
+        "pnpm",
+        &["install"],
+        project_dir,
+        "install JavaScript packages with pnpm",
+        &[],
+    )?;
+    let vendored = project_dir
+        .join(".kvist")
+        .join(crate::language_vendoring::JS_PACKAGE_CACHE_DIRNAME);
+    let store = pnpm_store_path(project_dir)?;
+    copy_tree(&store, &vendored)
+}
+
+/// Resolve pnpm's content-addressable store path via `pnpm store path` and
+/// confirm it exists and is therefore populated by the install above.
+fn pnpm_store_path(project_dir: &Path) -> Result<PathBuf> {
+    let output = run_capture_host_tool(
+        "pnpm",
+        &["store", "path"],
+        project_dir,
+        "locate the pnpm store",
+    )?;
+    let text = String::from_utf8_lossy(&output.stdout);
+    let store = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .next_back()
+        .ok_or_else(|| KvistError::VendoringUnavailable {
+            path: project_dir.to_string_lossy().into_owned(),
+            reason: "pnpm did not report a store path; check the pnpm installation".to_owned(),
+        })?;
+    let store_path = PathBuf::from(store);
+    if !store_path.is_dir() {
+        return Err(KvistError::VendoringUnavailable {
+            path: project_dir.to_string_lossy().into_owned(),
+            reason: format!(
+                "the pnpm store at `{store}` is not present after install; run \
+                 `pnpm install` on the host"
+            ),
+        });
+    }
+    Ok(store_path)
+}
+
+/// Recursively copy `src` into `dst`. The pnpm store is a content-addressable
+/// tree of regular files, so no symlink handling is needed; `is_dir()` and
+/// `copy` follow symlinks defensively if the layout ever changes. Host-side
+/// provisioning only; the copy becomes the lock-file-digest-identified vendored
+/// catalogue.
+fn copy_tree(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst).map_err(|source| KvistError::Io {
+        operation: "create vendored pnpm store",
+        path: dst.to_path_buf(),
+        source,
+    })?;
+    for entry in std::fs::read_dir(src).map_err(|source| KvistError::Io {
+        operation: "read vendored pnpm store",
+        path: src.to_path_buf(),
+        source,
+    })? {
+        let entry = entry.map_err(|source| KvistError::Io {
+            operation: "list vendored pnpm store entry",
+            path: src.to_path_buf(),
+            source,
+        })?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        if src_path.is_dir() {
+            copy_tree(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path).map_err(|source| KvistError::Io {
+                operation: "copy vendored pnpm store entry",
+                path: src_path.clone(),
+                source,
+            })?;
+        }
+    }
+    Ok(())
+}
+
+/// Run a host tool and capture its output for downstream parsing (e.g.
+/// `pnpm store path`). Fails closed with an actionable message when the tool is
+/// absent or does not complete.
+fn run_capture_host_tool(
+    program: &str,
+    args: &[&str],
+    project_dir: &Path,
+    context: &str,
+) -> Result<std::process::Output> {
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(project_dir)
+        .output()
+        .map_err(|source| {
+            if source.kind() == std::io::ErrorKind::NotFound {
+                KvistError::VendoringUnavailable {
+                    path: project_dir.to_string_lossy().into_owned(),
+                    reason: format!(
+                        "the `{program}` executable was not found on PATH; install
+                         {program} so it can {context}"
+                    ),
+                }
+            } else {
+                KvistError::VendoringUnavailable {
+                    path: project_dir.to_string_lossy().into_owned(),
+                    reason: format!("cannot invoke {program} to {context}: {source}"),
+                }
+            }
+        })?;
+    if output.status.success() {
+        return Ok(output);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let detail = if stderr.trim().is_empty() {
+        stdout
+    } else {
+        stderr
+    };
+    let truncated: String = detail.chars().take(MAX_VENDOR_ERROR_BYTES).collect();
+    Err(KvistError::VendoringUnavailable {
+        path: project_dir.to_string_lossy().into_owned(),
+        reason: format!(
+            "`{program} {}` did not complete:\n{truncated}",
+            args.join(" ")
+        ),
+    })
 }
 
 /// A non-UTF-8 path cannot cross into a tool argv or the sandbox wire format.

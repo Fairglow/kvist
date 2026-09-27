@@ -503,11 +503,16 @@ detected strategy):
    subdirectories are pre-created because Go requires them to exist). E2E
    evidence: `language_offline_e2e.rs::go_offline_verification_builds_and_
 tests_denied_network`.
-2. **JavaScript.** `kvist vendor` runs `npm ci` (or
-   `yarn install --frozen-lockfile`) into `.kvist/vendored-js`; the profile
-   runs `node --test` with the vendored cache and generated `.npmrc` mounted.
-   E2E evidence:
+2. **JavaScript.** `kvist vendor` reconciles the locked graph for the detected
+   package manager into `.kvist/vendored-js`: `npm ci` into a tarball cache
+   (`package-lock.json`), `yarn install --frozen-lockfile` into a yarn cache
+   (`yarn.lock`), or `pnpm install` vendoring the content-addressable pnpm
+   store (`pnpm-lock.yaml`, located with `pnpm store path` and copied into
+   `.kvist/`). The profile runs `node --test` with the vendored catalogue and
+   the generated offline `.npmrc` mounted. E2E evidence:
    `language_offline_e2e.rs::javascript_offline_verification_builds_and_
+tests_denied_network`,
+   `language_offline_e2e.rs::javascript_pnpm_offline_verification_builds_and_
 tests_denied_network`.
 3. **Python.** `kvist vendor` downloads the locked wheels into
    `.kvist/vendored-python`, provisions `.kvist/venv` (uv preferred, stdlib
@@ -540,7 +545,7 @@ Before any non-Rust language is claimed as vendored-supported, an end-to-end
 integration test MUST pass (provision a small real project on the host, run
 its real build/test offline in the sandbox, self-skip without the live
 sandbox). Go, JavaScript, and Python are claimed with that evidence; C/C++ is
-tracked in `TODOS.yaml`.
+tracked in `TODOS.yaml`. JavaScript is evidenced for npm/yarn and for pnpm.
 
 ### Planned review evidence and acceptance state
 

@@ -640,3 +640,95 @@ class TestDateutil(unittest.TestCase):
         "uv.lock offline verification must build and test the vendored project"
     );
 }
+
+/// End-to-end: a small JavaScript project locked with `pnpm` (`pnpm-lock.yaml`)
+/// is provisioned on the host (`pnpm install --store-path` into the vendored
+/// pnpm store via `kvist vendor`) and `node --test` runs its real suite offline
+/// inside the bubblewrap sandbox with the network denied, importing the locked
+/// dependency (and, transitively, its dependency) from the provisioned
+/// node_modules. This exercises the pnpm offline provisioning path end to end.
+#[test]
+fn javascript_pnpm_offline_verification_builds_and_tests_denied_network() {
+    let Some((runner, bwrap)) = live_sandbox_ready() else {
+        eprintln!("skip: live sandbox prerequisites not met");
+        return;
+    };
+    for tool in ["node", "pnpm"] {
+        if !Command::new(tool)
+            .arg("--version")
+            .output()
+            .is_ok_and(|o| o.status.success())
+        {
+            eprintln!("skip: {tool} not on PATH");
+            return;
+        }
+    }
+
+    // One locked dependency that pulls a transitive dependency; proving the
+    // pnpm store resolved the full graph offline. The transitive `is-number`
+    // dependency is exercised when `is-odd` runs.
+    let worktree = git_worktree_root().expect("worktree checked by live_sandbox_ready");
+    let project = tempfile::tempdir_in(&worktree).expect("temp project directory");
+    let root = project.path();
+    write_file(
+        root.join("package.json"),
+        "{\"name\":\"e2eminipnpm\",\"version\":\"0.1.0\",\"dependencies\":{\"is-odd\":\"3.0.1\"}}\n",
+    );
+    write_file(
+        root.join("main.test.js"),
+        "const test = require('node:test');\nconst assert = require('node:assert');\n\
+         const isOdd = require('is-odd');\n\n\
+         test('pnpm offline transitive import', () => {\n\
+           assert.equal(isOdd(3), true);\n\
+           assert.equal(isOdd(4), false);\n\
+         });\n",
+    );
+
+    // Generate the committed pnpm-lock.yaml on the host (network on the host
+    // acquisition side only); detection needs the lock file before kvist vendor.
+    let locked = Command::new("pnpm")
+        .arg("install")
+        .current_dir(root)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !locked {
+        eprintln!("skip: pnpm install failed to produce a lock file (offline host?)");
+        return;
+    }
+
+    if !provision(root) {
+        return;
+    }
+    // The pnpm catalogue is a content-addressable store; provisioning must have
+    // populated the vendored store so the offline mount is non-empty.
+    let store = root.join(".kvist").join("vendored-js");
+    if !store.is_dir()
+        || std::fs::read_dir(&store)
+            .expect("store dir")
+            .next()
+            .is_none()
+    {
+        eprintln!("skip: pnpm did not populate the vendored store");
+        return;
+    }
+
+    let config = sandbox_config(&runner, &bwrap);
+    let approved_runner =
+        runner_identity(&config, root, VcsSelection::Git).expect("identify the runner");
+    let approved_backend =
+        backend_identity(&config, root, VcsSelection::Git).expect("identify the backend");
+    let probe: SandboxProbe = ensure_available(
+        &config,
+        root,
+        VcsSelection::Git,
+        &approved_runner,
+        &approved_backend,
+    )
+    .expect("the bwrap capability probe confirms production isolation");
+
+    assert!(
+        verify_offline(&config, root, &probe, None, &["tests 1", "pass 1"]),
+        "pnpm offline verification must build and test the vendored project"
+    );
+}

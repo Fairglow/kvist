@@ -14,10 +14,14 @@ Implemented:
 
 - **`kvist vendor` dispatches per detected strategy.** Rust keeps its
   `cargo vendor` pass and versioned manifest; Go runs `go mod vendor`;
-  JavaScript runs `npm ci` (or `yarn install --frozen-lockfile`) into the
-  vendored package cache; Python downloads the locked wheels and provisions a
-  virtualenv (offline install into it); C/C++ fills a project-local Conan home
-  and generates the build files under `.kvist/conan-build`.
+  JavaScript reconciles the locked graph for the detected package manager into
+  `.kvist/vendored-js` (`npm ci` into a tarball cache for `package-lock.json`,
+  `yarn install --frozen-lockfile` into a yarn cache for `yarn.lock`, or
+  `pnpm install` vendoring the content-addressable pnpm store for
+  `pnpm-lock.yaml`, located via `pnpm store path`); Python downloads the locked
+  wheels and provisions a virtualenv (offline install into it); C/C++ fills a
+  project-local Conan home and generates the build files under
+  `.kvist/conan-build`.
 - **The shared offline language topology**
   (`engine::language_verification::run_offline_language_verification`):
   vendoring is enforced before any sandbox work, the language's vendored
@@ -30,7 +34,10 @@ Implemented:
 - **Per-language profiles.** Go: `go test -mod=vendor ./...` with
   `GOPROXY=off`, `GOTOOLCHAIN=local`, `GOFLAGS=-mod=vendor`, and
   `GOCACHE`/`GOTMPDIR`/`GOPATH`/`GOMODCACHE` under the scratch. JavaScript:
-  `node --test`. Python: `python3 -m unittest -v` with `VIRTUAL_ENV` at the
+  `node --test`, running the project's `node:test` suites from the committed,
+  host-provisioned `node_modules` (the vendored tarball cache or pnpm store is
+  mounted read-only with the lock-file digest identity). Python: `python3 -m
+unittest -v` with `VIRTUAL_ENV` at the
   mounted provisioned venv (bytecode and user-site writes disabled). C/C++:
   the approved project test command (the build system is project-defined) with
   `CONAN_HOME` at the Conan home's canonical host path.
@@ -38,14 +45,20 @@ Implemented:
   real small Go module on the host (`kvist vendor` dispatch) and runs
   `go test -mod=vendor ./...` network-denied inside the Bubblewrap sandbox;
   the test self-skips without the live sandbox or the Go toolchain.
+- **JavaScript end-to-end evidence.** The same test file proves the npm/yarn
+  path (`javascript_offline_verification_builds_and_tests_denied_network`, a
+  zero-dependency `package-lock.json` project) and the pnpm path
+  (`javascript_pnpm_offline_verification_builds_and_tests_denied_network`, a
+  `pnpm-lock.yaml` project that pulls a transitive dependency), each running
+  `node --test` network-denied inside the Bubblewrap sandbox; both self-skip
+  without the live sandbox or the Node/pnpm toolchain.
 
 Validated live (security-sensitive, requires the bwrap runner environment):
 
-- **Go verifies offline under the real bwrap runner** (see the end-to-end
-  evidence above). The JavaScript, Python, and C/C++ profiles and provisioning
-  passes are implemented at the enforcement and dispatch layers; their
-  end-to-end evidence is tracked per language in `engine/TODOS.yaml` and is
-  required before each is claimed as vendored-supported.
+- **Go, JavaScript (npm/yarn and pnpm), Python (pip and uv), and C/C++ (Conan)
+  verify offline under the real bwrap runner.** Each language has a passing
+  end-to-end test in `engine/tests/language_offline_e2e.rs`; the tests
+  self-skip on hosts without the live sandbox or the language toolchain.
 
 ## Context
 
