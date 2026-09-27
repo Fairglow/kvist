@@ -450,7 +450,20 @@ mod tests {
             .join("site-packages");
         std::fs::create_dir_all(&site).expect("venv site-packages");
         let profile = offline_profile("python", &project, None).expect("python profile");
-        assert!(profile.program.ends_with("python3.14") || profile.program.ends_with("python3"));
+        // The host `python3` is normally a symlink to `python3.<version>`; the
+        // resolved interpreter version differs between hosts (3.14 locally,
+        // 3.12 on the CI runner), so match the basename prefix rather than a
+        // specific patch version.
+        let program = profile
+            .program
+            .rsplit('/')
+            .next()
+            .expect("program basename");
+        assert!(
+            program.starts_with("python3"),
+            "python profile must resolve to a python3 interpreter, got `{}`",
+            profile.program
+        );
         assert_eq!(
             profile.arguments,
             vec!["-m".to_owned(), "unittest".to_owned(), "-v".to_owned()]
