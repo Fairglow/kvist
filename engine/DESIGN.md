@@ -516,12 +516,14 @@ tests_denied_network`.
    venv's site-packages (CPython discovers a venv from the `pyvenv.cfg` beside
    its executable, not from `VIRTUAL_ENV`, so the host interpreter is pointed
    at the venv explicitly; `VIRTUAL_ENV` is set for the tools that read it) and
-   bytecode/user-site writes disabled. `requirements.lock.txt` is
-   the supported lock form; `uv.lock`-only projects fail closed (documented
-   follow-up). C-extension packages must be manylinux wheels, and the
+   bytecode/user-site writes disabled. Both `requirements.lock.txt` (pip) and
+   `uv.lock` (uv) are supported lock forms; a `uv.lock` project is provisioned
+   by exporting its exact resolved graph with `uv export --locked` to a
+   pip-format file before the locked wheels are vendored and installed
+   offline. C-extension packages must be manylinux wheels, and the
    interpreter version must match the host system `python3`. E2E evidence:
    `language_offline_e2e.rs::python_offline_verification_builds_and_tests_
-denied_network`.
+denied_network`, `language_offline_e2e.rs::python_uv_lock_offline_verification_builds_and_tests_denied_network`.
 4. **C/C++ (Conan).** `kvist vendor` runs `conan profile detect` (when no
    profile exists) and
    `conan install . [--lockfile=…|--lockfile-out=…] --build=missing -of

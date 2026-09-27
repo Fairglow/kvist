@@ -391,20 +391,22 @@ fn populate_javascript(project_dir: &Path) -> Result<()> {
 }
 
 /// Python provisioning: download the locked wheels, build the provisioned
-/// virtualenv, and install the locked material into it offline. `requirements`
-/// lock files are the supported form; `uv.lock` projects are detected but not
-/// yet provisionable (documented limitation).
+/// virtualenv, and install the locked material into it offline. Both
+/// `requirements.lock.txt` (pip) and `uv.lock` (uv) are supported lock forms.
 fn populate_python(project_dir: &Path) -> Result<()> {
-    let lockfile = project_dir.join("requirements.lock.txt");
-    if !lockfile.is_file() {
-        return Err(KvistError::VendoringUnavailable {
-            path: project_dir.to_string_lossy().into_owned(),
-            reason: "python provisioning requires `requirements.lock.txt` (a pinned \
-                     requirements lock file); `uv.lock` provisioning is a documented \
-                     follow-up"
-                .to_owned(),
-        });
-    }
+    // `requirements.lock.txt` is preferred; a `uv.lock` project is provisioned
+    // by first exporting its exact resolved graph to a pip-format file so the
+    // locked catalogue can be vendored and installed identically to pip.
+    let pip_lock = project_dir.join("requirements.lock.txt");
+    let uv_lock = project_dir.join("uv.lock");
+    let use_uv = uv_lock.is_file() && !pip_lock.is_file();
+    let requirements: PathBuf = if use_uv {
+        project_dir.join(".kvist").join("uv-requirements.txt")
+    } else {
+        pip_lock.clone()
+    };
+    let requirements_str = requirements.to_str().ok_or_else(invalid_utf8_path_error)?;
+
     let wheels = project_dir
         .join(".kvist")
         .join(crate::language_vendoring::PYTHON_WHEELS_DIRNAME);
@@ -414,13 +416,19 @@ fn populate_python(project_dir: &Path) -> Result<()> {
         source,
     })?;
 
+    if use_uv {
+        // `uv export --locked` prints the pip-format graph to stdout; progress
+        // goes to stderr, so only stdout is persisted as the vendored catalogue.
+        export_uv_lock(project_dir, &requirements)?;
+    }
+
     // Download the locked wheels (the only network step).
     run_host_tool(
         "pip",
         &[
             "download",
             "-r",
-            "requirements.lock.txt",
+            requirements_str,
             "-d",
             wheels.to_str().ok_or_else(invalid_utf8_path_error)?,
         ],
@@ -471,7 +479,7 @@ fn populate_python(project_dir: &Path) -> Result<()> {
             "--find-links",
             find_links,
             "-r",
-            "requirements.lock.txt",
+            requirements_str,
         ],
         project_dir,
     );
@@ -486,7 +494,7 @@ fn populate_python(project_dir: &Path) -> Result<()> {
                 "--find-links",
                 find_links,
                 "-r",
-                "requirements.lock.txt",
+                requirements_str,
             ],
             project_dir,
             "install the locked Python wheels into the virtualenv",
@@ -494,6 +502,48 @@ fn populate_python(project_dir: &Path) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+/// Derive a pip-format requirements file from a `uv.lock` so its exact resolved
+/// graph (including transitive dependencies) can be vendored with `pip download`
+/// and installed offline into the venv, exactly like a `requirements.lock.txt`.
+///
+/// `uv export --locked` prints the pip-format catalogue to stdout; progress
+/// messages go to stderr and are discarded. Fails closed with an actionable
+/// message when uv is absent or the export does not complete.
+fn export_uv_lock(project_dir: &Path, exported: &Path) -> Result<()> {
+    let output = Command::new("uv")
+        .args(["export", "--locked"])
+        .current_dir(project_dir)
+        .output()
+        .map_err(|source| {
+            if source.kind() == std::io::ErrorKind::NotFound {
+                KvistError::VendoringUnavailable {
+                    path: project_dir.to_string_lossy().into_owned(),
+                    reason: "uv executable was not found on PATH; install uv so `uv.lock`
+                             projects can be vendored"
+                        .to_owned(),
+                }
+            } else {
+                KvistError::VendoringUnavailable {
+                    path: project_dir.to_string_lossy().into_owned(),
+                    reason: "cannot invoke uv to export the locked Python graph".to_owned(),
+                }
+            }
+        })?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let truncated: String = stderr.chars().take(MAX_VENDOR_ERROR_BYTES).collect();
+        return Err(KvistError::VendoringUnavailable {
+            path: project_dir.to_string_lossy().into_owned(),
+            reason: format!("`uv export --locked` did not complete:\n{truncated}"),
+        });
+    }
+    std::fs::write(exported, &output.stdout).map_err(|source| KvistError::Io {
+        operation: "write uv-exported requirements",
+        path: exported.to_path_buf(),
+        source,
+    })
 }
 
 /// C/C++ (Conan) provisioning: fill a project-local Conan home with the exact

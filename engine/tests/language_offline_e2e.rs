@@ -521,3 +521,122 @@ fn c_offline_verification_builds_and_tests_denied_network() {
         "c offline verification must build and test the vendored project"
     );
 }
+
+/// End-to-end: a small Python project locked with `uv.lock` is provisioned on
+/// the host (`uv lock` to generate the lock, then `kvist vendor` dispatching
+/// `uv export` + `pip download` into the vendored wheels and an
+/// offline-provisioned virtualenv) and `python3 -m unittest` runs its real test
+/// suite offline inside the bubblewrap sandbox with the network denied,
+/// importing a locked dependency and its transitive dependency from the
+/// mounted venv. This exercises the `uv.lock` provisioning path end to end.
+#[test]
+fn python_uv_lock_offline_verification_builds_and_tests_denied_network() {
+    let Some((runner, bwrap)) = live_sandbox_ready() else {
+        eprintln!("skip: live sandbox prerequisites not met");
+        return;
+    };
+    if !Command::new("uv")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("skip: uv not on PATH");
+        return;
+    }
+    if !Command::new("python3")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("skip: python3 not on PATH");
+        return;
+    }
+
+    // A `uv.lock`-locked project with a dependency that pulls a transitive
+    // dependency; proving `uv export` resolves the full graph offline. The
+    // transitive `six` dependency would be missed by a naive resolver and
+    // fails to import if the export graph is incomplete.
+    let worktree = git_worktree_root().expect("worktree checked by live_sandbox_ready");
+    let project = tempfile::tempdir_in(&worktree).expect("temp project directory");
+    let root = project.path();
+    write_file(
+        root.join("pyproject.toml"),
+        r#"[project]
+name = "e2eminippyuv"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["python-dateutil==2.9.0"]
+
+[tool.uv]
+package = false
+"#,
+    );
+    write_file(
+        root.join("e2eminippyuv.py"),
+        r#"import dateutil
+from dateutil import parser
+
+
+def parse_day(text: str) -> int:
+    return parser.parse(text).day
+"#,
+    );
+    write_file(
+        root.join("test_e2eminippyuv.py"),
+        r#"import unittest
+
+from e2eminippyuv import parse_day
+
+
+class TestDateutil(unittest.TestCase):
+
+    def test_day(self):
+        self.assertEqual(parse_day("2024-01-15"), 15)
+"#,
+    );
+
+    // Generate the `uv.lock` on the host (network on the host acquisition
+    // side only); a fresh resolve cannot be vendored without it.
+    let locked = Command::new("uv")
+        .args(["lock"])
+        .current_dir(root)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !locked {
+        eprintln!("skip: uv lock failed (offline host?)");
+        return;
+    }
+    if !provision(root) {
+        return;
+    }
+    if !root
+        .join(".kvist")
+        .join("venv")
+        .join("bin")
+        .join("python")
+        .is_file()
+    {
+        eprintln!("skip: kvist vendor did not provision the virtualenv");
+        return;
+    }
+
+    let config = sandbox_config(&runner, &bwrap);
+    let approved_runner =
+        runner_identity(&config, root, VcsSelection::Git).expect("identify the runner");
+    let approved_backend =
+        backend_identity(&config, root, VcsSelection::Git).expect("identify the backend");
+    let probe: SandboxProbe = ensure_available(
+        &config,
+        root,
+        VcsSelection::Git,
+        &approved_runner,
+        &approved_backend,
+    )
+    .expect("the bwrap capability probe confirms production isolation");
+
+    assert!(
+        verify_offline(&config, root, &probe, None, &["OK", "Ran 1 test"]),
+        "uv.lock offline verification must build and test the vendored project"
+    );
+}

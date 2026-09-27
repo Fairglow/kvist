@@ -155,13 +155,16 @@ the evidence uniform.
 ## Consequences
 
 - A supported language is claimed only with its self-skipping end-to-end test
-  passing where the toolchain and live sandbox exist (Go now; JavaScript,
-  Python, and C/C++ tracked per language).
+  passing where the toolchain and live sandbox exist (Go, JavaScript, Python,
+  and C/C++ each with an end-to-end test, including a uv.lock-locked Python
+  project).
 - `kvist vendor` is no longer Rust-only: it provisions the detected language's
   vendored material, and every subsequent verification re-enforces it.
 - The writable scratch at the Cargo destination is now shared by the closed
   Cargo topology and the language topology; the two never run concurrently for
   one request, and the destination is disjoint from the component mount.
-- Provisioning limitations are documented per language (for example
-  `uv.lock`-only Python projects fail closed until `uv.lock` provisioning is
-  implemented; C/C++ requires an approved test command).
+- Provisioning limitations are documented per language. Python vendors either
+  `requirements.lock.txt` (pip) or `uv.lock` (uv): a `uv.lock` project is
+  provisioned by exporting its exact resolved graph with `uv export --locked`
+  to a pip-format file before the locked wheels are vendored and installed
+  offline; C/C++ requires an approved test command.

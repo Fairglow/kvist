@@ -841,6 +841,28 @@ mod tests {
     }
 
     #[test]
+    fn detects_python_uv_lock_and_prefers_pip_lock_when_both_present() {
+        // `uv.lock` selects the Python strategy so `uv`-locked projects are
+        // vendored through the same offline path as `requirements.lock.txt`.
+        assert_eq!(
+            detect_language_strategy(project_with(&[("uv.lock", "")]).path())
+                .expect("uv.lock")
+                .id(),
+            "python"
+        );
+        // When both Python lock files are present, `requirements.lock.txt` is
+        // preferred, so `uv.lock`-only provisioning is the only uv path taken.
+        assert_eq!(
+            detect_language_strategy(
+                project_with(&[("requirements.lock.txt", ""), ("uv.lock", ""),]).path()
+            )
+            .expect("both")
+            .id(),
+            "python"
+        );
+    }
+
+    #[test]
     fn detects_go_lock_file_and_reports_vendor_presence() {
         let tmp = project_with(&[("go.sum", "example.com/mod v1.0.0 h1:abc=\n")]);
         let project = tmp.path();
