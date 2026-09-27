@@ -77,7 +77,10 @@ generic sandbox path plus:
     generated offline `.npmrc`.
   - **Python** — the vendored wheels (`.kvist/vendored-python`), the generated
     offline `pip.conf`, and the provisioned virtualenv (`.kvist/venv`) mounted
-    at a fixed destination and made the interpreter's site via `VIRTUAL_ENV`.
+    at a fixed destination and made the interpreter's site via `PYTHONPATH`
+    (CPython discovers a venv from the `pyvenv.cfg` beside its executable,
+    not from `VIRTUAL_ENV`, so the host interpreter is pointed at the venv
+    explicitly).
   - **C/C++ (Conan)** — the project-local Conan home (`.kvist/vendored-conan`)
     mounted **at its own canonical host path** (source equals destination), so
     the absolute cache paths embedded in the generated toolchain file resolve
@@ -92,7 +95,8 @@ generic sandbox path plus:
     immediately.
   - JavaScript — `node --test`, running the project's `node:test` suites from
     the provisioned `node_modules`.
-  - Python — `python3 -m unittest -v` against the mounted venv.
+  - Python — `python3 -m unittest -v` with the mounted venv's site-packages on
+    `PYTHONPATH`.
   - C/C++ — the approved `[test_policy]` command (for example `make test`)
     driving the project build system against the mounted Conan home.
 
@@ -108,12 +112,12 @@ the evidence uniform.
 
 ## Where actions are performed
 
-| Action                                        | Performs it                    | Network                                              | Boundary    |
-| --------------------------------------------- | ------------------------------ | ---------------------------------------------------- | ----------- |
-| `go mod vendor`, `npm ci`, `pip download`, `uv venv`/`pip install`, `conan install` | Host, authorized provisioning step (`kvist vendor`) | Approved sources only | Provisioning |
-| Vendoring enforcement (lock-file digest, presence, mounts) | `kvist` engine (host) | None | Authority |
-| Canonical offline test command (or approved C/C++ test command) | Effect sandbox | None (denied) | Isolation |
-| System toolchain (`go`, `node`, `python3`, `gcc`/`make`) | Effect sandbox | None (read-only mount) | Isolation |
+| Action                                                                              | Performs it                                         | Network                | Boundary     |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------- | ------------ |
+| `go mod vendor`, `npm ci`, `pip download`, `uv venv`/`pip install`, `conan install` | Host, authorized provisioning step (`kvist vendor`) | Approved sources only  | Provisioning |
+| Vendoring enforcement (lock-file digest, presence, mounts)                          | `kvist` engine (host)                               | None                   | Authority    |
+| Canonical offline test command (or approved C/C++ test command)                     | Effect sandbox                                      | None (denied)          | Isolation    |
+| System toolchain (`go`, `node`, `python3`, `gcc`/`make`)                            | Effect sandbox                                      | None (read-only mount) | Isolation    |
 
 ## Rationale
 

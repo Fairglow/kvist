@@ -189,12 +189,15 @@ fn offline_profile(
             })
         }
         "python" => {
-            // The provisioned virtualenv (mounted at `PYTHON_VENV_DEST`) makes
-            // the locked wheels importable; the host interpreter is the real
-            // executable, and `VIRTUAL_ENV` is the documented mechanism that
-            // redirects it to the venv's site-packages. Bytecode writes and
-            // the user site are disabled so the read-only venv stays clean.
+            // The provisioned virtualenv (mounted at `PYTHON_VENV_DEST`) is the
+            // offline runtime: CPython discovers a virtualenv from the
+            // `pyvenv.cfg` beside its own executable, not from `VIRTUAL_ENV`,
+            // so the host interpreter is pointed at the venv's site-packages
+            // explicitly through `PYTHONPATH` (with `VIRTUAL_ENV` set for the
+            // tools that do read it). Bytecode writes and the user site are
+            // disabled so the read-only venv stays clean.
             environment.insert("VIRTUAL_ENV".to_owned(), PYTHON_VENV_DEST.to_owned());
+            environment.insert("PYTHONPATH".to_owned(), venv_site_packages(project_root)?);
             environment.insert("PYTHONDONTWRITEBYTECODE".to_owned(), "1".to_owned());
             environment.insert("PYTHONNOUSERSITE".to_owned(), "1".to_owned());
             Ok(LanguageProfile {
@@ -254,6 +257,56 @@ fn offline_profile(
             reason: format!("no offline verification profile for language `{other}`"),
         }),
     }
+}
+
+/// The sandbox path of the provisioned venv's site-packages directory.
+///
+/// The venv layout is deterministic (`lib/python<major.minor>/site-packages`) and
+/// `kvist vendor` creates the venv from the host interpreter, so the version
+/// directory is discovered from the on-disk venv and mapped to the fixed
+/// sandbox destination the venv is mounted at.
+fn venv_site_packages(project_root: &Path) -> Result<String> {
+    let lib = project_root
+        .join(".kvist")
+        .join(crate::language_vendoring::PYTHON_VENV_DIRNAME)
+        .join("lib");
+    let entries = std::fs::read_dir(&lib).map_err(|source| KvistError::SandboxUnavailable {
+        runner: "<language-verification>".to_owned(),
+        reason: format!(
+            "cannot read the provisioned venv lib directory `{}`: {source}",
+            lib.display()
+        ),
+    })?;
+    let mut version_dirs: Vec<String> = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|source| KvistError::SandboxUnavailable {
+            runner: "<language-verification>".to_owned(),
+            reason: format!(
+                "cannot read the provisioned venv lib directory `{}`: {source}",
+                lib.display()
+            ),
+        })?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("python") && entry.path().is_dir() {
+            version_dirs.push(name);
+        }
+    }
+    if version_dirs.len() != 1 {
+        return Err(KvistError::SandboxUnavailable {
+            runner: "<language-verification>".to_owned(),
+            reason: format!(
+                "the provisioned venv lib directory `{}` must contain exactly one \
+                 python version directory, found {version_dirs:?}",
+                lib.display()
+            ),
+        });
+    }
+    Ok(format!(
+        "{PYTHON_VENV_DEST}/lib/{}/site-packages",
+        version_dirs
+            .pop()
+            .expect("version_dirs has exactly one entry when the count is checked above")
+    ))
 }
 
 /// Locate a host binary by name through the host `PATH`, returning its
@@ -363,6 +416,15 @@ mod tests {
     fn python_profile_points_at_the_provisioned_venv() {
         let root = tempfile::tempdir().expect("temp root");
         let project = project(root.path(), "py");
+        // The profile discovers the venv's version directory on disk; the
+        // sandbox path is the fixed mount destination plus the layout.
+        let site = project
+            .join(".kvist")
+            .join("venv")
+            .join("lib")
+            .join("python3.14")
+            .join("site-packages");
+        std::fs::create_dir_all(&site).expect("venv site-packages");
         let profile = offline_profile("python", &project, None).expect("python profile");
         assert!(profile.program.ends_with("python3.14") || profile.program.ends_with("python3"));
         assert_eq!(
@@ -372,6 +434,10 @@ mod tests {
         assert_eq!(
             profile.environment.get("VIRTUAL_ENV").map(String::as_str),
             Some(PYTHON_VENV_DEST)
+        );
+        assert_eq!(
+            profile.environment.get("PYTHONPATH").map(String::as_str),
+            Some("/workspace/venv/lib/python3.14/site-packages")
         );
     }
 

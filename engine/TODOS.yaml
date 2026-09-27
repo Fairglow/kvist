@@ -1,8 +1,8 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:78c2be101685d4db669461fb4869573f6791060d64ffcdd812b16c7a2e9c7c47"
-  contract_revision: "sha256:41d1e87bfedd63d6bbb58b8f3f1cb003483fb624cf64eaf74f3a6d2b036d2dd7"
-  design_revision: "sha256:0d40112f237dbaf5b0325a84dc03f5022c3ec8e8eef4f0655e840c760676026b"
+  requirements_revision: "sha256:975c15fac6876e52ecb9e675cab460112bfa5b931e06dfa7b41bcfec9c6bdc6e"
+  contract_revision: "sha256:a4dd7850e0b4dbc43ded73d3dc63a430f43137d1b2bbccaec20738f9dac695ed"
+  design_revision: "sha256:6912691f5cc2c147af4d9e4579488680081e580dac6ed2b26e35d3ed3e8e6e4f"
   parent_contract: null
   revalidation:
     state: current
@@ -2660,6 +2660,45 @@ tasks:
       created_at: "2026-09-26T08:00:00Z"
       updated_at: "2026-09-27T10:41:42Z"
       completed_at: "2026-09-27T10:41:42Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "python-e2e-write-tests"
+    title: "Define the Python offline e2e test"
+    description: "Write a self-skipping end-to-end test that provisions a small real Python project with one pinned pure wheel on the host (requirements.lock.txt plus kvist vendor dispatch: pip download into the vendored wheels and an offline-provisioned virtualenv) and runs its real unittest suite offline inside the Bubblewrap sandbox, in the shape of offline_cargo_verification_e2e."
+    context: "Support is never claimed without executable evidence, and the Python vendoring strategy is not yet evidenced end to end."
+    purpose: "Establish executable evidence that a Python project with a locked third-party dependency builds and tests offline in the sandbox before it is claimed as supported."
+    expected_outcome: "python_offline_verification_builds_and_tests_denied_network provisions on the host, runs the real build/test offline in the sandbox, and self-skips on hosts without the live sandbox."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-27T11:06:41Z"
+      updated_at: "2026-09-27T11:06:41Z"
+      completed_at: "2026-09-27T11:06:41Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "python-e2e-implement-code"
+    title: "Wire Python offline verification"
+    description: "Evidence the implemented Python strategy end to end: kvist vendor dispatches pip download plus virtualenv provisioning (uv preferred, stdlib venv fallback) with the offline install, and the shared offline language topology runs python3 -m unittest -v with the mounted venv's site-packages on PYTHONPATH (CPython discovers a venv from the pyvenv.cfg beside its executable, not from VIRTUAL_ENV); add the end-to-end test and the queue completion that claims the language as vendored-supported."
+    context: "Go and JavaScript are vendored-supported with e2e evidence; Python is the next important language on the shared offline language topology (ADR-0013)."
+    purpose: "Deliver supported, evidenced offline Python verification through the shared sandbox topology."
+    expected_outcome: "Python projects with locked wheels verify offline in the sandbox with vendored presence enforced and e2e evidence passing."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "python-e2e-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "DESIGN.md#Language-support-per-language-provisioning-and-evidence-ADR-0013"
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+    timestamps:
+      created_at: "2026-09-27T11:06:41Z"
+      updated_at: "2026-09-27T11:06:41Z"
+      completed_at: "2026-09-27T11:06:41Z"
     blocked_reason: null
     recovery_state: null
   - id: "language-e2e-security-audit"

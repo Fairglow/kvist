@@ -192,6 +192,9 @@ fn verify_offline(
     };
     let stdout = String::from_utf8_lossy(&result.output.stdout);
     let stderr = String::from_utf8_lossy(&result.output.stderr);
+    // Language test runners emit their evidence on different streams (go test
+    // and node --test on stdout, python unittest on stderr).
+    let combined = format!("{stdout}\n{stderr}");
     if result.timed_out || result.output_limit_exceeded || result.cancelled {
         eprintln!("offline verification did not complete cleanly");
         return false;
@@ -202,10 +205,10 @@ fn verify_offline(
     }
     if !expected_markers
         .iter()
-        .any(|marker| stdout.contains(marker))
+        .any(|marker| combined.contains(marker))
     {
         eprintln!(
-            "offline test output carries no expected markers ({:?}); stdout={stdout}",
+            "offline test output carries no expected markers ({:?}); output={combined}",
             expected_markers
         );
         return false;
@@ -361,5 +364,74 @@ fn javascript_offline_verification_builds_and_tests_denied_network() {
     assert!(
         verify_offline(&config, root, &probe, &["pass 1", "tests 1"]),
         "javascript offline verification must build and test the vendored project"
+    );
+}
+
+/// End-to-end: a small Python project with one pinned pure-wheel dependency is
+/// provisioned on the host (`pip download` plus a provisioned virtualenv via
+/// `kvist vendor`) and `python3 -m unittest` runs its real test suite offline
+/// inside the bubblewrap sandbox with the network denied, importing the
+/// locked material from the mounted venv.
+#[test]
+fn python_offline_verification_builds_and_tests_denied_network() {
+    let Some((runner, bwrap)) = live_sandbox_ready() else {
+        eprintln!("skip: live sandbox prerequisites not met");
+        return;
+    };
+    if !Command::new("python3")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("skip: python3 not on PATH");
+        return;
+    }
+
+    // One pinned pure wheel (no C extension, so no manylinux constraint) plus
+    // a unittest suite that imports it; the venv is the offline runtime.
+    let worktree = git_worktree_root().expect("worktree checked by live_sandbox_ready");
+    let project = tempfile::tempdir_in(&worktree).expect("temp project directory");
+    let root = project.path();
+    write_file(root.join("requirements.lock.txt"), "tomli==2.2.1\n");
+    write_file(
+        root.join("e2eminipy.py"),
+        "import tomli\n\n\ndef parse(text: str) -> dict:\n    return tomli.loads(text)\n",
+    );
+    write_file(
+        root.join("test_e2eminipy.py"),
+        "import unittest\n\nfrom e2eminipy import parse\n\n\nclass TestTomli(unittest.TestCase):\n\n    def test_parses(self):\n        self.assertEqual(parse(\"a = 1\"), {\"a\": 1})\n",
+    );
+
+    if !provision(root) {
+        return;
+    }
+    if !root
+        .join(".kvist")
+        .join("venv")
+        .join("bin")
+        .join("python")
+        .is_file()
+    {
+        eprintln!("skip: kvist vendor did not provision the virtualenv");
+        return;
+    }
+
+    let config = sandbox_config(&runner, &bwrap);
+    let approved_runner =
+        runner_identity(&config, root, VcsSelection::Git).expect("identify the runner");
+    let approved_backend =
+        backend_identity(&config, root, VcsSelection::Git).expect("identify the backend");
+    let probe: SandboxProbe = ensure_available(
+        &config,
+        root,
+        VcsSelection::Git,
+        &approved_runner,
+        &approved_backend,
+    )
+    .expect("the bwrap capability probe confirms production isolation");
+
+    assert!(
+        verify_offline(&config, root, &probe, &["OK", "Ran 1 test"]),
+        "python offline verification must build and test the vendored project"
     );
 }

@@ -512,14 +512,20 @@ tests_denied_network`.
 3. **Python.** `kvist vendor` downloads the locked wheels into
    `.kvist/vendored-python`, provisions `.kvist/venv` (uv preferred, stdlib
    `venv` fallback), and installs the locked material into it offline; the
-   profile runs `python3 -m unittest -v` with `VIRTUAL_ENV` at the mounted
-   venv and bytecode/user-site writes disabled. `requirements.lock.txt` is
+   profile runs `python3 -m unittest -v` with `PYTHONPATH` at the mounted
+   venv's site-packages (CPython discovers a venv from the `pyvenv.cfg` beside
+   its executable, not from `VIRTUAL_ENV`, so the host interpreter is pointed
+   at the venv explicitly; `VIRTUAL_ENV` is set for the tools that read it) and
+   bytecode/user-site writes disabled. `requirements.lock.txt` is
    the supported lock form; `uv.lock`-only projects fail closed (documented
    follow-up). C-extension packages must be manylinux wheels, and the
-   interpreter version must match the host system `python3`.
+   interpreter version must match the host system `python3`. E2E evidence:
+   `language_offline_e2e.rs::python_offline_verification_builds_and_tests_
+denied_network`.
 4. **C/C++ (Conan).** `kvist vendor` runs `conan profile detect` (when no
-   profile exists) and `conan install . [--lockfile=…|--lockfile-out=…] 
---build=missing -of .kvist/conan-build` with
+   profile exists) and
+   `conan install . [--lockfile=…|--lockfile-out=…] --build=missing -of
+.kvist/conan-build` with
    `CONAN_HOME=.kvist/vendored-conan`; the profile runs the approved project
    test command with `CONAN_HOME` at the Conan home's canonical host path
    (the home is mounted read-only at that same path, so the absolute cache
@@ -528,8 +534,8 @@ tests_denied_network`.
 Before any non-Rust language is claimed as vendored-supported, an end-to-end
 integration test MUST pass (provision a small real project on the host, run
 its real build/test offline in the sandbox, self-skip without the live
-sandbox). Go and JavaScript are claimed with that evidence; Python and C/C++ are
-tracked per language in `TODOS.yaml`.
+sandbox). Go, JavaScript, and Python are claimed with that evidence; C/C++ is
+tracked in `TODOS.yaml`.
 
 ### Planned review evidence and acceptance state
 
