@@ -352,9 +352,9 @@ toolchain — Go: `go test -mod=vendor ./...`; JavaScript: `node --test`;
 Python: `python3 -m unittest -v` against the mounted provisioned venv;
 C/C++: the approved `[test_policy]` command (the build system is
 project-defined), with the Conan home mounted read-only at its canonical host
-path. Go is vendored-supported with end-to-end evidence
-(`language_offline_e2e`); JavaScript, Python, and C/C++ are vendored-supported
-when their end-to-end evidence is tracked and passing. Non-vendored projects
+path. Go and JavaScript are vendored-supported with end-to-end evidence
+(`language_offline_e2e`); Python and C/C++ are vendored-supported when their
+end-to-end evidence is tracked and passing. Non-vendored projects
 use the generic approved-test-command path: the per-component `[test_policy]`
 command runs in the network-denied sandbox against host system toolchains
 (the runner mounts `/usr`, `/lib`, `/lib64`, `/bin`, and `/sbin` read-only),

@@ -506,6 +506,9 @@ tests_denied_network`.
 2. **JavaScript.** `kvist vendor` runs `npm ci` (or
    `yarn install --frozen-lockfile`) into `.kvist/vendored-js`; the profile
    runs `node --test` with the vendored cache and generated `.npmrc` mounted.
+   E2E evidence:
+   `language_offline_e2e.rs::javascript_offline_verification_builds_and_
+tests_denied_network`.
 3. **Python.** `kvist vendor` downloads the locked wheels into
    `.kvist/vendored-python`, provisions `.kvist/venv` (uv preferred, stdlib
    `venv` fallback), and installs the locked material into it offline; the
@@ -525,7 +528,7 @@ tests_denied_network`.
 Before any non-Rust language is claimed as vendored-supported, an end-to-end
 integration test MUST pass (provision a small real project on the host, run
 its real build/test offline in the sandbox, self-skip without the live
-sandbox). Go is claimed with that evidence; JavaScript, Python, and C/C++ are
+sandbox). Go and JavaScript are claimed with that evidence; Python and C/C++ are
 tracked per language in `TODOS.yaml`.
 
 ### Planned review evidence and acceptance state

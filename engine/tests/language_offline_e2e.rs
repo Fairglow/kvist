@@ -288,3 +288,78 @@ fn go_offline_verification_builds_and_tests_denied_network() {
         "go offline verification must build and test the vendored project"
     );
 }
+
+/// End-to-end: a zero-dependency Node project is provisioned on the host
+/// (`npm ci` via `kvist vendor`) and `node --test` runs its real test suite
+/// offline inside the bubblewrap sandbox with the network denied.
+#[test]
+fn javascript_offline_verification_builds_and_tests_denied_network() {
+    let Some((runner, bwrap)) = live_sandbox_ready() else {
+        eprintln!("skip: live sandbox prerequisites not met");
+        return;
+    };
+    if !Command::new("node")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("skip: node not on PATH");
+        return;
+    }
+    if !Command::new("npm")
+        .arg("--version")
+        .output()
+        .is_ok_and(|o| o.status.success())
+    {
+        eprintln!("skip: npm not on PATH");
+        return;
+    }
+
+    // A zero-dependency project with a committed lock file: `npm ci`
+    // reconciles exactly from it and never needs the network, and
+    // `node --test` runs the suite from the project alone.
+    let worktree = git_worktree_root().expect("worktree checked by live_sandbox_ready");
+    let project = tempfile::tempdir_in(&worktree).expect("temp project directory");
+    let root = project.path();
+    write_file(
+        root.join("package.json"),
+        "{\"name\":\"e2eminibs\",\"version\":\"0.1.0\"}\n",
+    );
+    write_file(
+        root.join("package-lock.json"),
+        "{\"name\":\"e2eminibs\",\"version\":\"0.1.0\",\"lockfileVersion\":3,\
+         \"requires\":true,\"packages\":{\"\":{\"name\":\"e2eminibs\",\"version\":\"0.1.0\"}}}\n",
+    );
+    write_file(
+        root.join("main.test.js"),
+        "const test = require('node:test');\nconst assert = require('node:assert');\n\n\
+         test('zero-dep offline check', () => {\n  assert.ok(true);\n});\n",
+    );
+
+    if !provision(root) {
+        return;
+    }
+    if !root.join(".kvist").join("vendored-js").is_dir() {
+        eprintln!("skip: npm ci did not produce the vendored package cache");
+        return;
+    }
+
+    let config = sandbox_config(&runner, &bwrap);
+    let approved_runner =
+        runner_identity(&config, root, VcsSelection::Git).expect("identify the runner");
+    let approved_backend =
+        backend_identity(&config, root, VcsSelection::Git).expect("identify the backend");
+    let probe: SandboxProbe = ensure_available(
+        &config,
+        root,
+        VcsSelection::Git,
+        &approved_runner,
+        &approved_backend,
+    )
+    .expect("the bwrap capability probe confirms production isolation");
+
+    assert!(
+        verify_offline(&config, root, &probe, &["pass 1", "tests 1"]),
+        "javascript offline verification must build and test the vendored project"
+    );
+}

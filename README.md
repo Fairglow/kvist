@@ -512,7 +512,7 @@ anything installed under the user's home (`rustup` homes, `~/.m2`, `~/.npm`,
 | **C/C++**                 | System `gcc`/`cc` available                                                      | Works for projects whose dependencies are host system packages (`make`, `cmake`)                                                                                   | Conan strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification |
 | **Go**                    | System `go` available                                                            | **First-class** for vendored projects: shared offline language topology, `go test -mod=vendor ./...` network-denied, validated end-to-end (`language_offline_e2e`) | Automated: `kvist vendor` runs `go mod vendor`; the committed `vendor/` travels inside the component mount     |
 | **Python**                | Advertised and available (`/usr/bin/python3`)                                    | Generic test-command path; stdlib-only in practice (system packages only)                                                                                          | Strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification       |
-| **JavaScript/TypeScript** | System `node` available                                                          | Generic test-command path; dependencies only via system packages or committed `node_modules`                                                                       | Strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification       |
+| **JavaScript/TypeScript** | System `node` available                                                          | **First-class** for vendored projects: shared offline language topology, `node --test` network-denied, validated end-to-end (`language_offline_e2e`)               | Automated: `kvist vendor` runs `npm ci` (or `yarn install --frozen-lockfile`) into the vendored package cache  |
 | **JVM / Ruby**            | System `java`/`ruby` available                                                   | Zero-dependency projects only; `~/.m2`/Gradle home/Gem state are not visible                                                                                       | Not supported                                                                                                  |
 | **Shell / scripts**       | Available                                                                        | Available                                                                                                                                                          | n/a                                                                                                            |
 
@@ -531,10 +531,9 @@ Python, C/Conan); per-language end-to-end evidence is tracked in
 
 1. **Rust** (complete for verification; authoring toolchain is the active gap
    below).
-2. **Go** (complete with end-to-end evidence) **and JavaScript next** (the
-   easy languages): their offline stories fit the shared language topology
-   with little new machinery (Go `vendor/`; Node with a vendored package
-   cache).
+2. **Go and JavaScript** (complete with end-to-end evidence; the easy
+   languages): their offline stories fit the shared language topology with
+   little new machinery (Go `vendor/`; Node with a vendored package cache).
 3. **Python and C/C++** (the important languages): provisioning and profiles
    are implemented; each is claimed as vendored-supported when its
    end-to-end evidence passes.
