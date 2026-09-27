@@ -32,6 +32,12 @@ use crate::vendoring as rust_vendoring;
 
 /// Identity prefix, matching the digest shape used everywhere else in Kvist.
 pub const DIGEST_PREFIX: &str = "sha256:";
+/// Vendored package-cache directory name for JavaScript projects (`.kvist/`).
+pub const JS_PACKAGE_CACHE_DIRNAME: &str = "vendored-js";
+/// Vendored wheels directory name for Python projects (`.kvist/`).
+pub const PYTHON_WHEELS_DIRNAME: &str = "vendored-python";
+/// Project-local Conan home directory name for C/C++ projects (`.kvist/`).
+pub const CONAN_HOME_DIRNAME: &str = "vendored-conan";
 
 /// SHA-256 of the lock file, prefixed. The lock file is the authoritative
 /// catalogue of the locked content, so this is both the manifest identity and
@@ -83,6 +89,32 @@ impl VendoringReport {
     }
 }
 
+impl std::fmt::Display for VendoringReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.ready() {
+            write!(
+                f,
+                "{} vendored and ready for offline builds ({} locked entr{} present) at {}",
+                self.language,
+                self.present_dependencies,
+                if self.present_dependencies == 1 {
+                    "y"
+                } else {
+                    "ies"
+                },
+                self.vendored_dir
+            )
+        } else {
+            write!(
+                f,
+                "{} not ready for offline builds: {}",
+                self.language,
+                self.missing_human_readable()
+            )
+        }
+    }
+}
+
 /// A language's offline-vendoring model.
 pub trait LanguageStrategy {
     /// Stable language identifier.
@@ -95,6 +127,12 @@ pub trait LanguageStrategy {
     fn vendored_mount_dest(&self) -> &'static str;
     /// Fixed sandbox destination of the offline-config directory.
     fn sandbox_config_dest(&self) -> &'static str;
+    /// The on-disk vendored-content directory. Defaults to the Kvist-owned
+    /// `.kvist/<vendored_dirname>`; Go overrides it because its vendored
+    /// material is the committed `vendor/` directory inside the project.
+    fn vendored_dir(&self, project_dir: &Path) -> PathBuf {
+        project_dir.join(".kvist").join(self.vendored_dirname())
+    }
     /// The lock file that selects this strategy (first name present).
     fn lockfile_path(&self, project_dir: &Path) -> Option<PathBuf> {
         self.lockfile_names()
@@ -125,18 +163,19 @@ pub fn detect_language_strategy(project_dir: &Path) -> Result<Box<dyn LanguageSt
     let path = project_dir.to_string_lossy().into_owned();
     Err(KvistError::VendoringUnavailable {
         path: path.clone(),
-        reason: "no supported lock file (Cargo.lock, requirements.lock.txt, \
-                 uv.lock, package-lock.json, or conanfile.lock) found; run the \
-                 language's acquisition command so vendoring matches the exact \
-                 locked versions"
+        reason: "no supported lock file (Cargo.lock, go.sum, requirements.lock.txt, \
+                 uv.lock, package-lock.json, yarn.lock, or conanfile.lock) found; \
+                 run the language's acquisition command so vendoring matches the \
+                 exact locked versions"
             .to_owned(),
     })
 }
 
 /// One supported language strategy, in detection priority order.
-pub fn language_strategies() -> [Box<dyn LanguageStrategy>; 4] {
+pub fn language_strategies() -> [Box<dyn LanguageStrategy>; 5] {
     [
         Box::new(RustStrategy),
+        Box::new(GoStrategy),
         Box::new(PythonStrategy),
         Box::new(JavaScriptStrategy),
         Box::new(CConanStrategy),
@@ -172,14 +211,9 @@ pub fn enforce_vendoring(project_dir: &Path) -> Result<VendoringEnforcement> {
     Ok(VendoringEnforcement {
         language: report.language,
         lockfile_digest: report.lockfile_digest,
-        vendored_dir: vendored_directory(project_dir, strategy.as_ref()),
+        vendored_dir: strategy.vendored_dir(project_dir),
         mounts,
     })
-}
-
-/// The vendored-content directory for a strategy under a project.
-pub fn vendored_directory(project_dir: &Path, strategy: &dyn LanguageStrategy) -> PathBuf {
-    project_dir.join(".kvist").join(strategy.vendored_dirname())
 }
 
 /// Whether a directory exists and holds at least one entry.
@@ -240,7 +274,7 @@ impl LanguageStrategy for RustStrategy {
     }
 
     fn enforce(&self, project_dir: &Path) -> Result<VendoringReport> {
-        let vendored = vendored_directory(project_dir, self);
+        let vendored = self.vendored_dir(project_dir);
         let report = rust_vendoring::enforce_offline_readiness(project_dir, &vendored).map_err(
             |source| KvistError::VendoringUnavailable {
                 path: project_dir.to_string_lossy().into_owned(),
@@ -313,9 +347,79 @@ impl LanguageStrategy for RustStrategy {
     }
 }
 
+/// A locked Go project (`go mod`). The vendored material is the committed
+/// `vendor/` directory beside `go.sum`: `go test -mod=vendor` builds entirely
+/// from it, so no separate vendored mount is needed (it travels with the
+/// component mount) and no offline resolver config exists for Go.
+struct GoStrategy;
+
+impl LanguageStrategy for GoStrategy {
+    fn id(&self) -> &'static str {
+        "go"
+    }
+    fn lockfile_names(&self) -> &'static [&'static str] {
+        &["go.sum"]
+    }
+    fn vendored_dirname(&self) -> &'static str {
+        "vendor"
+    }
+    fn vendored_mount_dest(&self) -> &'static str {
+        ""
+    }
+    fn sandbox_config_dest(&self) -> &'static str {
+        ""
+    }
+    /// Go's vendored material is the committed `vendor/` directory inside the
+    /// project, not a Kvist-owned `.kvist/` directory.
+    fn vendored_dir(&self, project_dir: &Path) -> PathBuf {
+        project_dir.join(self.vendored_dirname())
+    }
+
+    fn enforce(&self, project_dir: &Path) -> Result<VendoringReport> {
+        let (lockfile, digest) = lockfile_digest_for(self, project_dir)?;
+        let vendored = self.vendored_dir(project_dir);
+        let modules_txt = vendored.join("modules.txt");
+        if !modules_txt.is_file() || !directory_non_empty(&vendored) {
+            return Ok(VendoringReport {
+                language: "go".to_owned(),
+                project_root: project_dir.to_string_lossy().into_owned(),
+                lockfile_path: lockfile.to_string_lossy().into_owned(),
+                lockfile_digest: digest,
+                vendored_dir: vendored.to_string_lossy().into_owned(),
+                present_dependencies: 0,
+                missing_dependencies: vec![
+                    "go: vendor/ not provisioned; run `go mod vendor` on the host so \
+                     `go test -mod=vendor` can build offline"
+                        .to_owned(),
+                ],
+            });
+        }
+        Ok(VendoringReport {
+            language: "go".to_owned(),
+            project_root: project_dir.to_string_lossy().into_owned(),
+            lockfile_path: lockfile.to_string_lossy().into_owned(),
+            lockfile_digest: digest,
+            vendored_dir: vendored.to_string_lossy().into_owned(),
+            present_dependencies: count_lock_entries(&modules_txt),
+            missing_dependencies: Vec::new(),
+        })
+    }
+
+    /// No extra mounts: the committed `vendor/` directory is part of the
+    /// component mount, and Go needs no offline resolver configuration.
+    fn mounts(&self, _project_dir: &Path, _lockfile_digest: &str) -> Result<Vec<VendoredMount>> {
+        Ok(Vec::new())
+    }
+}
+
 /// A locked Python project (`pip`/`uv`). Present-and-matching catalogue with a
-/// vendored wheels/sdists directory and a `pip.conf` that resolves offline.
+/// vendored wheels/sdists directory, a `pip.conf` that resolves offline, and a
+/// provisioned virtualenv that makes the locked material importable in the
+/// sandbox (the venv is the offline runtime; the wheels catalogue it).
 struct PythonStrategy;
+
+/// Kvist-owned virtualenv directory name under a project's `.kvist/`.
+pub const PYTHON_VENV_DIRNAME: &str = "venv";
 
 impl LanguageStrategy for PythonStrategy {
     fn id(&self) -> &'static str {
@@ -325,7 +429,7 @@ impl LanguageStrategy for PythonStrategy {
         &["requirements.lock.txt", "uv.lock"]
     }
     fn vendored_dirname(&self) -> &'static str {
-        "vendored-python"
+        PYTHON_WHEELS_DIRNAME
     }
     fn vendored_mount_dest(&self) -> &'static str {
         "/workspace/vendored-python"
@@ -336,8 +440,21 @@ impl LanguageStrategy for PythonStrategy {
 
     fn enforce(&self, project_dir: &Path) -> Result<VendoringReport> {
         let (lockfile, digest) = lockfile_digest_for(self, project_dir)?;
-        let vendored = vendored_directory(project_dir, self);
-        if !directory_non_empty(&vendored) {
+        let vendored = self.vendored_dir(project_dir);
+        let wheels_ready = directory_non_empty(&vendored);
+        let venv_ready = venv_interpreter(project_dir).is_some();
+        if !wheels_ready || !venv_ready {
+            let mut missing_dependencies = Vec::new();
+            if !wheels_ready {
+                missing_dependencies.push(
+                    "python: vendored wheels/sdists not provisioned; run `kvist vendor` on the host".to_owned(),
+                );
+            }
+            if !venv_ready {
+                missing_dependencies.push(
+                    "python: virtualenv not provisioned; run `kvist vendor` on the host".to_owned(),
+                );
+            }
             return Ok(VendoringReport {
                 language: "python".to_owned(),
                 project_root: project_dir.to_string_lossy().into_owned(),
@@ -345,11 +462,7 @@ impl LanguageStrategy for PythonStrategy {
                 lockfile_digest: digest,
                 vendored_dir: vendored.to_string_lossy().into_owned(),
                 present_dependencies: 0,
-                missing_dependencies: vec![
-                    "python: vendored wheels/sdists not provisioned; run \
-                      `pip download --no-binary :all: -r <lock> -d <dir>` on the host"
-                        .to_owned(),
-                ],
+                missing_dependencies,
             });
         }
         Ok(VendoringReport {
@@ -364,7 +477,7 @@ impl LanguageStrategy for PythonStrategy {
     }
 
     fn mounts(&self, project_dir: &Path, lockfile_digest: &str) -> Result<Vec<VendoredMount>> {
-        let vendored = vendored_directory(project_dir, self);
+        let vendored = self.vendored_dir(project_dir);
         let config_dir = project_dir.join(".kvist").join("sandbox-pip");
         fs::create_dir_all(&config_dir).map_err(|source| KvistError::Io {
             operation: "create python sandbox config dir",
@@ -384,6 +497,7 @@ impl LanguageStrategy for PythonStrategy {
             path: config_path.clone(),
             source,
         })?;
+        let venv = project_dir.join(".kvist").join(PYTHON_VENV_DIRNAME);
         Ok(vec![
             VendoredMount {
                 source: vendored,
@@ -395,8 +509,25 @@ impl LanguageStrategy for PythonStrategy {
                 destination: self.sandbox_config_dest().to_owned(),
                 identity: lockfile_digest.to_owned(),
             },
+            // The provisioned virtualenv is the offline runtime: it is mounted
+            // read-only and made the interpreter's site via `VIRTUAL_ENV`.
+            VendoredMount {
+                source: venv,
+                destination: "/workspace/venv".to_owned(),
+                identity: lockfile_digest.to_owned(),
+            },
         ])
     }
+}
+
+/// The provisioned venv interpreter, when the venv exists and is complete.
+fn venv_interpreter(project_dir: &Path) -> Option<PathBuf> {
+    let venv = project_dir
+        .join(".kvist")
+        .join(PYTHON_VENV_DIRNAME)
+        .join("bin")
+        .join("python");
+    venv.is_file().then_some(venv)
 }
 
 /// A locked JavaScript/Node project (`npm`). Present-and-matching catalogue with
@@ -408,10 +539,10 @@ impl LanguageStrategy for JavaScriptStrategy {
         "javascript"
     }
     fn lockfile_names(&self) -> &'static [&'static str] {
-        &["package-lock.json"]
+        &["package-lock.json", "yarn.lock"]
     }
     fn vendored_dirname(&self) -> &'static str {
-        "vendored-js"
+        JS_PACKAGE_CACHE_DIRNAME
     }
     fn vendored_mount_dest(&self) -> &'static str {
         "/workspace/vendored-node"
@@ -422,7 +553,7 @@ impl LanguageStrategy for JavaScriptStrategy {
 
     fn enforce(&self, project_dir: &Path) -> Result<VendoringReport> {
         let (lockfile, digest) = lockfile_digest_for(self, project_dir)?;
-        let vendored = vendored_directory(project_dir, self);
+        let vendored = self.vendored_dir(project_dir);
         if !directory_non_empty(&vendored) {
             return Ok(VendoringReport {
                 language: "javascript".to_owned(),
@@ -450,7 +581,7 @@ impl LanguageStrategy for JavaScriptStrategy {
     }
 
     fn mounts(&self, project_dir: &Path, lockfile_digest: &str) -> Result<Vec<VendoredMount>> {
-        let vendored = vendored_directory(project_dir, self);
+        let vendored = self.vendored_dir(project_dir);
         let config_dir = project_dir.join(".kvist").join("sandbox-npm");
         fs::create_dir_all(&config_dir).map_err(|source| KvistError::Io {
             operation: "create javascript sandbox config dir",
@@ -485,8 +616,12 @@ impl LanguageStrategy for JavaScriptStrategy {
     }
 }
 
-/// A locked C/C++ project (`Conan`). Present-and-matching catalogue with a
-/// vendored package directory; offline provisioning is documented on disk.
+/// A locked C/C++ project (`Conan`). The vendored material is a project-local
+/// Conan home (`CONAN_HOME=.kvist/vendored-conan`) holding the exact locked
+/// binaries, plus the generated build files under `.kvist/conan-build` that
+/// the project build system consumes. The Conan home is mounted read-only at
+/// its own host path in the sandbox so the absolute cache paths embedded in
+/// the generated toolchain file resolve unchanged.
 struct CConanStrategy;
 
 impl LanguageStrategy for CConanStrategy {
@@ -497,7 +632,7 @@ impl LanguageStrategy for CConanStrategy {
         &["conanfile.lock"]
     }
     fn vendored_dirname(&self) -> &'static str {
-        "vendored-conan"
+        CONAN_HOME_DIRNAME
     }
     fn vendored_mount_dest(&self) -> &'static str {
         "/workspace/vendored-conan"
@@ -508,8 +643,9 @@ impl LanguageStrategy for CConanStrategy {
 
     fn enforce(&self, project_dir: &Path) -> Result<VendoringReport> {
         let (lockfile, digest) = lockfile_digest_for(self, project_dir)?;
-        let vendored = vendored_directory(project_dir, self);
-        if !directory_non_empty(&vendored) {
+        let vendored = self.vendored_dir(project_dir);
+        // A provisioned Conan home holds its package cache under `.conan2`.
+        if !directory_non_empty(&vendored.join(".conan2")) {
             return Ok(VendoringReport {
                 language: "c".to_owned(),
                 project_root: project_dir.to_string_lossy().into_owned(),
@@ -518,8 +654,8 @@ impl LanguageStrategy for CConanStrategy {
                 vendored_dir: vendored.to_string_lossy().into_owned(),
                 present_dependencies: 0,
                 missing_dependencies: vec![
-                    "c: vendored conan packages not provisioned; run \
-                      `conan download -r <remote> \"*\" --keep-copy -d <dir>` on the host"
+                    "c: conan home not provisioned; run `kvist vendor` on the host \
+                     (CONAN_HOME=.kvist/vendored-conan conan install --build=missing)"
                         .to_owned(),
                 ],
             });
@@ -536,7 +672,7 @@ impl LanguageStrategy for CConanStrategy {
     }
 
     fn mounts(&self, project_dir: &Path, lockfile_digest: &str) -> Result<Vec<VendoredMount>> {
-        let vendored = vendored_directory(project_dir, self);
+        let vendored = self.vendored_dir(project_dir);
         let config_dir = project_dir.join(".kvist").join("sandbox-conan");
         fs::create_dir_all(&config_dir).map_err(|source| KvistError::Io {
             operation: "create conan sandbox config dir",
@@ -545,21 +681,42 @@ impl LanguageStrategy for CConanStrategy {
         })?;
         let config_path = config_dir.join("OFFLINE.md");
         let contents = format!(
-            "# Managed by `kvist vendor` (ADR-0011). Do not edit by hand.\n\n\
+            "# Managed by `kvist vendor` (ADR-0011/ADR-0013). Do not edit by hand.\n\n\
              Offline provisioning for this locked project:\n\n\
-             - `conan download -r <remote> \"*\" --keep-copy -d {}` on the host\n\
-             - `conan install --lockfile conanfile.lock --lockfile-out --offline`\n",
-            self.vendored_mount_dest()
+             - Host: `CONAN_HOME={} conan install --lockfile=conanfile.lock \\\n--build=missing -of .kvist/conan-build`\n\
+             - Sandbox: the Conan home is mounted read-only at its host path;\
+ the generated build files under `.kvist/conan-build` are inside the\
+ component mount.\n",
+            vendored.display()
         );
         fs::write(&config_path, contents).map_err(|source| KvistError::Io {
             operation: "write conan sandbox OFFLINE.md",
             path: config_path.clone(),
             source,
         })?;
+        // The Conan home is mounted at its own absolute host path (source ==
+        // destination): the generated conan toolchain file embeds absolute
+        // cache paths, so the sandbox sees them unchanged.
+        let canonical = vendored.canonicalize().map_err(|source| KvistError::Io {
+            operation: "canonicalize conan home for offline verification mount",
+            path: vendored.clone(),
+            source,
+        })?;
+        let destination = canonical
+            .to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| KvistError::Io {
+                operation: "canonicalize conan home for offline verification mount",
+                path: canonical.clone(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "conan home path is not valid UTF-8",
+                ),
+            })?;
         Ok(vec![
             VendoredMount {
-                source: vendored,
-                destination: self.vendored_mount_dest().to_owned(),
+                source: canonical,
+                destination,
                 identity: lockfile_digest.to_owned(),
             },
             VendoredMount {
@@ -602,6 +759,17 @@ mod tests {
         dir
     }
 
+    fn seed_venv(project: &Path) -> PathBuf {
+        let venv_python = project
+            .join(".kvist")
+            .join("venv")
+            .join("bin")
+            .join("python");
+        fs::create_dir_all(venv_python.parent().expect("venv bin")).expect("venv bin dir");
+        fs::write(&venv_python, "#!/usr/bin/python3\n").expect("venv python");
+        venv_python
+    }
+
     #[test]
     fn detects_rust_first_when_mixed_lock_files_present() {
         let tmp = project_with(&[
@@ -632,10 +800,49 @@ mod tests {
             "javascript"
         );
         assert_eq!(
+            detect_language_strategy(project_with(&[("yarn.lock", "# yarn lockfile\n")]).path())
+                .expect("yarn")
+                .id(),
+            "javascript"
+        );
+        assert_eq!(
             detect_language_strategy(project_with(&[("conanfile.lock", "")]).path())
                 .expect("conan")
                 .id(),
             "c"
+        );
+    }
+
+    #[test]
+    fn detects_go_lock_file_and_reports_vendor_presence() {
+        let tmp = project_with(&[("go.sum", "example.com/mod v1.0.0 h1:abc=\n")]);
+        let project = tmp.path();
+        let strategy = detect_language_strategy(project).expect("go");
+        assert_eq!(strategy.id(), "go");
+
+        // Without the committed vendor/ directory the project is not ready.
+        let report = strategy.enforce(project).expect("report");
+        assert_eq!(report.language, "go");
+        assert!(!report.ready());
+
+        // `go mod vendor` output makes it ready; the committed vendor/ needs
+        // no extra sandbox mounts.
+        let vendor = project.join("vendor");
+        fs::create_dir_all(&vendor).expect("vendor dir");
+        fs::write(
+            vendor.join("modules.txt"),
+            "# example.com/mod v1.0.0\n## explicit; go 1.21\nexample.com/mod\n\
+             # example.com/other v2.0.0\n## explicit; go 1.21\nexample.com/other\n",
+        )
+        .expect("modules.txt");
+        let report = strategy.enforce(project).expect("report");
+        assert!(report.ready());
+        assert_eq!(report.present_dependencies, 2);
+        assert!(
+            strategy
+                .mounts(project, &report.lockfile_digest)
+                .expect("mounts")
+                .is_empty()
         );
     }
 
@@ -678,6 +885,13 @@ mod tests {
 
         seed_vendored(project, "vendored-python");
         let report = strategy.enforce(project).expect("report");
+        assert!(
+            !report.ready(),
+            "wheels alone are not enough; the venv is required"
+        );
+
+        seed_venv(project);
+        let report = strategy.enforce(project).expect("report");
         assert!(report.ready());
         assert!(report.lockfile_digest.starts_with(DIGEST_PREFIX));
         assert_eq!(report.present_dependencies, 2);
@@ -688,10 +902,18 @@ mod tests {
         let tmp = project_with(&[("requirements.lock.txt", "click==8.1.7\n")]);
         let project = tmp.path();
         seed_vendored(project, "vendored-python");
+        seed_venv(project);
         let enforcement = enforce_vendoring(project).expect("enforce");
         assert_eq!(enforcement.language, "python");
         assert!(enforcement.lockfile_digest.starts_with(DIGEST_PREFIX));
-        assert_eq!(enforcement.mounts.len(), 2);
+        // Wheels, the pip config, and the provisioned virtualenv.
+        assert_eq!(enforcement.mounts.len(), 3);
+        assert!(
+            enforcement
+                .mounts
+                .iter()
+                .any(|mount| mount.destination == "/workspace/venv")
+        );
         for mount in &enforcement.mounts {
             assert_eq!(mount.identity, enforcement.lockfile_digest);
             assert!(mount.destination.starts_with('/'));

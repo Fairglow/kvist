@@ -1,8 +1,8 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:3a6fa8b5703e89e2e9dbc91a209f694972d43e7a3687e19103708df1e027b242"
-  contract_revision: "sha256:53c67bd6fb0ba36bfb21b6671675b3a26e0f90dc369d59998f0eaf6b95f5bef7"
-  design_revision: "sha256:d660cc1394882318a6b81f1eb29241059bc823f8ad2bbb479453eed3540f2e78"
+  requirements_revision: "sha256:fa376fa9d4e5309b9fc05f2ec1778d55364ab65006ebfca38381d25e4d4808a1"
+  contract_revision: "sha256:c8643c7a143e90175691fe14dc9807157cddbd2ef07ee7654acb7ca3b3394c04"
+  design_revision: "sha256:3d75f7e6ae07e6978d7c3dcb4da3114581b6460771c38aa7aec8e28410cf2f08"
   parent_contract: null
   revalidation:
     state: current
@@ -2584,10 +2584,49 @@ tasks:
       completed_at: "2026-09-26T17:00:00Z"
     blocked_reason: null
     recovery_state: null
+  - id: "go-e2e-write-tests"
+    title: "Define the Go offline e2e test"
+    description: "Write a self-skipping end-to-end test in engine/tests/language_offline_e2e.rs that provisions a small real Go module on the host (go mod tidy plus kvist vendor dispatch) and runs its real go test -mod=vendor ./... offline inside the Bubblewrap sandbox with the network denied, in the shape of offline_cargo_verification_e2e."
+    context: "Support is never claimed without executable evidence, and Go is the first language wired into the shared offline language topology."
+    purpose: "Establish executable evidence that a Go module builds and tests offline in the sandbox before Go is claimed as vendored-supported."
+    expected_outcome: "go_offline_verification_builds_and_tests_denied_network passes where the live sandbox and Go toolchain exist and self-skips elsewhere."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+      - "ROOT_CONTRACT.md#Non-negotiable-architecture"
+    timestamps:
+      created_at: "2026-09-27T10:15:00Z"
+      updated_at: "2026-09-27T10:15:00Z"
+      completed_at: "2026-09-27T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "go-e2e-implement-code"
+    title: "Wire Go offline verification"
+    description: "Make kvist vendor dispatch the Go strategy (go mod vendor committing vendor/), add the Go language strategy (go.sum lockfile, vendor/ presence via modules.txt, no extra mounts), add the shared offline language verification topology (vendored mounts plus writable scratch, network denied, canonical go test -mod=vendor ./... with GOPROXY=off/GOTOOLCHAIN=local), and route vendored non-Rust projects to it from verify_task."
+    context: "Go's committed vendor/ directory travels inside the component mount and needs no resolver configuration, so it fits the shared offline language topology (ADR-0013) with little new machinery."
+    purpose: "Deliver vendored, evidenced offline Go verification through the shared sandbox topology."
+    expected_outcome: "Go projects vendor through kvist vendor and verify offline in the sandbox with e2e evidence passing; non-vendored projects keep the generic approved-test-command path."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "go-e2e-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "DESIGN.md#Language-support-per-language-provisioning-and-evidence-ADR-0013"
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+    timestamps:
+      created_at: "2026-09-27T10:15:00Z"
+      updated_at: "2026-09-27T10:15:00Z"
+      completed_at: "2026-09-27T10:15:00Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "language-e2e-write-tests"
-    title: "Define per-language offline e2e tests"
-    description: "Write self-skipping end-to-end tests that provision a small real project on the host and run its real build/test offline inside the Bubblewrap sandbox for Go (vendor/ + go test -mod=vendor) and JavaScript (vendored npm cache or committed node_modules + the project test command), in the shape of offline_cargo_verification_e2e, plus provisioning tests for each language's strategy."
-    context: "Support is never claimed without executable evidence, and the non-Rust vendoring strategies are not yet wired into provisioning or the verification mount plan."
+    title: "Define the JavaScript offline e2e test"
+    description: "Write a self-skipping end-to-end test that provisions a small real JavaScript project on the host (package-lock.json plus kvist vendor dispatch into the vendored npm cache) and runs its real build/test offline inside the Bubblewrap sandbox, in the shape of offline_cargo_verification_e2e."
+    context: "Support is never claimed without executable evidence, and the JavaScript vendoring strategy is not yet evidenced end to end."
     purpose: "Establish executable evidence that Go and JavaScript build and test offline in the sandbox before they are claimed as supported."
     expected_outcome: "Go and JavaScript e2e tests provision on the host, run the real build/test offline in the sandbox, and self-skip on hosts without the live sandbox."
     kind: test
@@ -2604,18 +2643,18 @@ tasks:
     blocked_reason: null
     recovery_state: null
   - id: "language-e2e-implement-code"
-    title: "Wire Go and JavaScript offline verification"
-    description: "Make kvist vendor dispatch per strategy, provision Go vendor/ and JavaScript vendored package material on the host, and pass the non-Rust strategy mounts through the verification path's read-only mount plan with the approved per-language test command and environment allowlist (including GOCACHE/TMPDIR for Go)."
-    context: "The easy languages (Go, JavaScript) fit the existing offline model with little new machinery and are the intended first supported languages after Rust."
-    purpose: "Deliver supported, evidenced offline Go and JavaScript verification through the existing sandbox topology."
-    expected_outcome: "Go and JavaScript projects verify offline in the sandbox with per-package vendored presence enforced and e2e evidence passing."
+    title: "Wire JavaScript offline verification"
+    description: "Evidence the implemented JavaScript strategy end to end: kvist vendor already dispatches npm ci/yarn install into the vendored package cache, and the shared offline language topology runs node --test with the vendored cache mounted; add the JavaScript end-to-end test and the per-language queue tasks that claim the language as vendored-supported."
+    context: "Go is vendored-supported with e2e evidence; JavaScript is the next easy language on the shared offline language topology (ADR-0013)."
+    purpose: "Deliver supported, evidenced offline JavaScript verification through the shared sandbox topology."
+    expected_outcome: "JavaScript projects verify offline in the sandbox with vendored presence enforced and e2e evidence passing."
     kind: implementation
     status: pending
     depends_on:
       - "language-e2e-write-tests"
     requirements:
       - "CONTRACT.md#Behavioral-guarantees"
-      - "DESIGN.md#Language-support-per-language-provisioning-and-evidence"
+      - "DESIGN.md#Language-support-per-language-provisioning-and-evidence-ADR-0013"
       - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
     timestamps:
       created_at: "2026-09-26T08:00:00Z"

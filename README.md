@@ -506,34 +506,38 @@ anything installed under the user's home (`rustup` homes, `~/.m2`, `~/.npm`,
 
 ### Current state
 
-| Language                  | Authoring (agent)                                                                | Verification (`kvist task verify`)                                                                                                                       | Vendoring                                                                                                      |
-| ------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| **Rust**                  | Writes only; no usable toolchain in the authoring sandbox (known gap, see below) | **First-class**: closed offline Cargo topology, `cargo test --locked`, enforced, validated end-to-end in CI (stable + MSRV)                              | Exact and automated: `kvist vendor` + per-dependency fail-closed manifest                                      |
-| **C/C++**                 | System `gcc`/`cc` available                                                      | Works for projects whose dependencies are host system packages (`make`, `cmake`)                                                                         | Conan strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification |
-| **Go**                    | System `go` available                                                            | Works fully offline with `go mod vendor` (`vendor/` travels inside the component mount); add `GOCACHE`/`TMPDIR` to the test-policy environment allowlist | Native (`vendor/` directory); no Kvist machinery required                                                      |
-| **Python**                | Advertised and available (`/usr/bin/python3`)                                    | Generic test-command path; stdlib-only in practice (system packages only)                                                                                | Strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification       |
-| **JavaScript/TypeScript** | System `node` available                                                          | Generic test-command path; dependencies only via system packages or committed `node_modules`                                                             | Strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification       |
-| **JVM / Ruby**            | System `java`/`ruby` available                                                   | Zero-dependency projects only; `~/.m2`/Gradle home/Gem state are not visible                                                                             | Not supported                                                                                                  |
-| **Shell / scripts**       | Available                                                                        | Available                                                                                                                                                | n/a                                                                                                            |
+| Language                  | Authoring (agent)                                                                | Verification (`kvist task verify`)                                                                                                                                 | Vendoring                                                                                                      |
+| ------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| **Rust**                  | Writes only; no usable toolchain in the authoring sandbox (known gap, see below) | **First-class**: closed offline Cargo topology, `cargo test --locked`, enforced, validated end-to-end in CI (stable + MSRV)                                        | Exact and automated: `kvist vendor` + per-dependency fail-closed manifest                                      |
+| **C/C++**                 | System `gcc`/`cc` available                                                      | Works for projects whose dependencies are host system packages (`make`, `cmake`)                                                                                   | Conan strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification |
+| **Go**                    | System `go` available                                                            | **First-class** for vendored projects: shared offline language topology, `go test -mod=vendor ./...` network-denied, validated end-to-end (`language_offline_e2e`) | Automated: `kvist vendor` runs `go mod vendor`; the committed `vendor/` travels inside the component mount     |
+| **Python**                | Advertised and available (`/usr/bin/python3`)                                    | Generic test-command path; stdlib-only in practice (system packages only)                                                                                          | Strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification       |
+| **JavaScript/TypeScript** | System `node` available                                                          | Generic test-command path; dependencies only via system packages or committed `node_modules`                                                                       | Strategy exists (lock-file match + presence); provisioning is manual and not yet wired into verification       |
+| **JVM / Ruby**            | System `java`/`ruby` available                                                   | Zero-dependency projects only; `~/.m2`/Gradle home/Gem state are not visible                                                                                       | Not supported                                                                                                  |
+| **Shell / scripts**       | Available                                                                        | Available                                                                                                                                                          | n/a                                                                                                            |
 
 "Generic test-command path" means the approved per-component command from the
 `[test_policy]` configuration runs in the network-denied sandbox against host
-system toolchains, with no vendored mounts. Vendoring strategies for Python,
-JavaScript, and C/Conan are implemented at the enforcement layer (detection,
-lock-file digest identity, presence check, mount planning) but are not yet
-wired into `kvist vendor` provisioning or the verification mount plan; that
-wiring is tracked in `engine/TODOS.yaml`.
+system toolchains, with no vendored mounts. **Vendored** non-Rust projects
+instead verify through the shared offline language topology (ADR-0013):
+vendoring is enforced, the language's vendored material is mounted read-only,
+one writable scratch is granted, the network is denied, and the language's
+canonical offline test command runs (C/C++ uses the approved `[test_policy]`
+command). `kvist vendor` dispatches per detected strategy (Go, JavaScript,
+Python, C/Conan); per-language end-to-end evidence is tracked in
+`engine/TODOS.yaml` and gates the vendored-supported claim.
 
 ### Intended support order and evidence
 
 1. **Rust** (complete for verification; authoring toolchain is the active gap
    below).
-2. **Go and JavaScript first** (the easy languages): their offline stories fit
-   the existing model with little new machinery (Go `vendor/`; Node with a
-   vendored package cache or committed `node_modules`).
-3. **Python and C/C++ next** (the important languages): wire the existing
-   vendoring strategies into `kvist vendor` and the verification path, with
-   per-package verification added before they are claimed as supported.
+2. **Go** (complete with end-to-end evidence) **and JavaScript next** (the
+   easy languages): their offline stories fit the shared language topology
+   with little new machinery (Go `vendor/`; Node with a vendored package
+   cache).
+3. **Python and C/C++** (the important languages): provisioning and profiles
+   are implemented; each is claimed as vendored-supported when its
+   end-to-end evidence passes.
 
 Support is never claimed without executable evidence: every supported language
 requires an end-to-end integration test that vendors (or otherwise provisions)

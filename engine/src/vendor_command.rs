@@ -1,24 +1,75 @@
-//! `kvist vendor`: provision and enforce offline vendored dependencies (ADR-0011).
+//! `kvist vendor`: provision and enforce offline vendored dependencies
+//! (ADR-0011, ADR-0013).
 //!
-//! This is the operator-facing entry point that makes Rust builds and tests run
-//! with the sandbox network denied. It populates or reconciles a vendored
-//! registry with the host cargo, records a versioned manifest under the
-//! project, and writes the host and sandbox cargo configurations so an offline
-//! build can resolve everything from vendored material. The recorded manifest is
-//! re-enforced by verification before an offline build is allowed.
+//! This is the operator-facing entry point that makes builds and tests run with
+//! the sandbox network denied. It detects the project's language strategy and
+//! dispatches the host-authorized provisioning pass for it:
 //!
-//! Kvist controls vendoring: the vendored registry is produced from the exact
+//! - **Rust** — populates or reconciles a vendored registry with the host cargo,
+//!   records a versioned manifest under the project, and writes the sandbox
+//!   cargo configuration. The recorded manifest is re-enforced by verification
+//!   before an offline build is allowed.
+//! - **Go** — `go mod vendor` commits the exact module material into the
+//!   project's `vendor/` directory.
+//! - **JavaScript** — `npm ci` (or `yarn install --frozen-lockfile`) builds
+//!   `node_modules` from the exact locked versions into a vendored package
+//!   cache.
+//! - **Python** — downloads the locked wheels and builds a provisioned
+//!   virtualenv that makes them importable offline.
+//! - **C/C++ (Conan)** — fills a project-local Conan home with the exact locked
+//!   binaries and generates the build files the project build system consumes.
+//!
+//! Kvist controls vendoring: the vendored material is produced from the exact
 //! locked versions, and every subsequent verification re-checks that the lockfile
-//! still matches and that every registry dependency is present before it allows
-//! an offline build.
+//! still matches and that the material is present before it allows an offline
+//! build. Provisioning is the only step that may contact the network; it runs on
+//! the host, outside the effect sandbox.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::error::{KvistError, Result};
 use crate::vendoring::{
-    VendorManifest, VendoringReport, enforce_offline_readiness, now_unix_secs, offline_cargo_config,
+    VendorManifest, enforce_offline_readiness, now_unix_secs, offline_cargo_config,
 };
+
+/// The readiness outcome of a `kvist vendor` pass, per language.
+///
+/// Rust reports the exact registry/Git/path dependency counts from its manifest
+/// machinery; the other languages report the lock-file catalogue plus
+/// vendored-content presence. Both carry the same core identity facts.
+#[derive(Debug, Clone)]
+pub enum VendorReport {
+    Rust(crate::vendoring::VendoringReport),
+    Language(crate::language_vendoring::VendoringReport),
+}
+
+impl VendorReport {
+    /// The vendored-content directory the pass provisioned or verified.
+    pub fn vendored_dir(&self) -> &str {
+        match self {
+            Self::Rust(report) => &report.vendored_dir,
+            Self::Language(report) => &report.vendored_dir,
+        }
+    }
+
+    /// Whether the pass left the project ready for offline builds.
+    pub fn ready(&self) -> bool {
+        match self {
+            Self::Rust(report) => report.ready(),
+            Self::Language(report) => report.ready(),
+        }
+    }
+}
+
+impl std::fmt::Display for VendorReport {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Rust(report) => write!(f, "{report}"),
+            Self::Language(report) => write!(f, "{report}"),
+        }
+    }
+}
 
 /// Maximum bytes of a failed `cargo vendor` stderr message retained in an error.
 const MAX_VENDOR_ERROR_BYTES: usize = 4096;
@@ -39,11 +90,92 @@ pub struct VendorOptions {
 
 /// Ensure a locked project can build offline and record what was produced.
 ///
-/// The pass populates the vendored registry when required, enforces readiness,
-/// writes the host and sandbox cargo configurations, and persists the manifest.
-/// It returns a readiness report describing the resulting offline build state.
-pub fn vendor_project(project_dir: &Path, options: VendorOptions) -> Result<VendoringReport> {
+/// Detects the project's language strategy, performs the host-authorized
+/// provisioning pass for it, and returns the readiness report the strategy
+/// enforces. Rust additionally writes the sandbox cargo configuration and the
+/// versioned manifest; the other languages are enforced statelessly from their
+/// lock file plus the provisioned material on disk.
+pub fn vendor_project(project_dir: &Path, options: VendorOptions) -> Result<VendorReport> {
     let project_dir = canonical_or(project_dir)?;
+    let strategy = crate::language_vendoring::detect_language_strategy(&project_dir)?;
+    match strategy.id() {
+        "rust" => Ok(VendorReport::Rust(vendor_rust_project(
+            &project_dir,
+            options,
+        )?)),
+        "go" => {
+            populate_go_vendor(&project_dir)?;
+            Ok(VendorReport::Language(enforce_language_report(
+                &project_dir,
+                "go",
+            )?))
+        }
+        "javascript" => {
+            populate_javascript(&project_dir)?;
+            Ok(VendorReport::Language(enforce_language_report(
+                &project_dir,
+                "javascript",
+            )?))
+        }
+        "python" => {
+            populate_python(&project_dir)?;
+            Ok(VendorReport::Language(enforce_language_report(
+                &project_dir,
+                "python",
+            )?))
+        }
+        "c" => {
+            populate_conan(&project_dir)?;
+            Ok(VendorReport::Language(enforce_language_report(
+                &project_dir,
+                "c",
+            )?))
+        }
+        other => Err(KvistError::VendoringUnavailable {
+            path: project_dir.to_string_lossy().into_owned(),
+            reason: format!("no provisioning pass for language `{other}`"),
+        }),
+    }
+}
+
+/// Enforce a non-Rust strategy's vendoring readiness and return its report.
+fn enforce_language_report(
+    project_dir: &Path,
+    language: &str,
+) -> Result<crate::language_vendoring::VendoringReport> {
+    let strategy = crate::language_vendoring::detect_language_strategy(project_dir)?;
+    if strategy.id() != language {
+        return Err(KvistError::VendoringUnavailable {
+            path: project_dir.to_string_lossy().into_owned(),
+            reason: format!(
+                "project language changed during vendoring (expected {language}, detected {})",
+                strategy.id()
+            ),
+        });
+    }
+    let report = strategy.enforce(project_dir)?;
+    if !report.ready() {
+        return Err(KvistError::VendoringIncomplete {
+            path: report.project_root.clone(),
+            count: report.missing_dependencies.len(),
+            missing: report.missing_human_readable(),
+        });
+    }
+    tracing::info!(
+        project = %report.project_root,
+        language,
+        present = report.present_dependencies,
+        "vendored dependencies for offline builds"
+    );
+    Ok(report)
+}
+
+/// The Rust provisioning pass: populate or reconcile the vendored registry,
+/// write the sandbox cargo configuration, and persist the versioned manifest.
+fn vendor_rust_project(
+    project_dir: &Path,
+    options: VendorOptions,
+) -> Result<crate::vendoring::VendoringReport> {
     let lockfile_path = project_dir.join(crate::vendoring::CARGO_LOCK_FILENAME);
     if !lockfile_path.is_file() {
         return Err(KvistError::VendoringUnavailable {
@@ -75,10 +207,10 @@ pub fn vendor_project(project_dir: &Path, options: VendorOptions) -> Result<Vend
     // satisfy the lock; a complete registry is reused and cargo is never invoked.
     // This is the only step that may touch the network: it resolves crate sources
     // into an attempt-local, content-addressed-on-disk registry.
-    let mut report = enforce_offline_readiness(&project_dir, &vendored_dir)?;
+    let mut report = enforce_offline_readiness(project_dir, &vendored_dir)?;
     if options.populate && !report.ready() {
-        populate_with_cargo_vendor(&project_dir, &vendored_dir)?;
-        report = enforce_offline_readiness(&project_dir, &vendored_dir)?;
+        populate_with_cargo_vendor(project_dir, &vendored_dir)?;
+        report = enforce_offline_readiness(project_dir, &vendored_dir)?;
     }
     report.enforce()?;
 
@@ -90,7 +222,7 @@ pub fn vendor_project(project_dir: &Path, options: VendorOptions) -> Result<Vend
     // directories, so a host-path config there would shadow the mounted
     // `/workspace/.cargo` config and break the offline build. Host builds resolve
     // from the network as usual; only the sandbox build is required to be offline.
-    let sandbox_cargo_dir = ensure_sandbox_cargo_config(&project_dir)?;
+    let sandbox_cargo_dir = ensure_sandbox_cargo_config(project_dir)?;
 
     let manifest = VendorManifest {
         schema_version: crate::vendoring::VENDOR_SCHEMA_VERSION,
@@ -109,7 +241,7 @@ pub fn vendor_project(project_dir: &Path, options: VendorOptions) -> Result<Vend
         sandbox_vendored_mount: crate::vendoring::VENDOR_SANDBOX_MOUNT.to_owned(),
         verified: true,
     };
-    manifest.save(&project_dir)?;
+    manifest.save(project_dir)?;
 
     tracing::info!(
         project = %project_dir.to_string_lossy(),
@@ -154,6 +286,283 @@ fn populate_with_cargo_vendor(project_dir: &Path, vendored_dir: &Path) -> Result
         path: project_dir.to_string_lossy().into_owned(),
         reason: format!("`cargo vendor` did not complete:\n{truncated}"),
     })
+}
+
+/// Run a host provisioning tool at the project directory with extra
+/// environment variables, failing closed with a bounded, actionable error.
+fn run_host_tool(
+    program: &str,
+    args: &[&str],
+    project_dir: &Path,
+    context: &str,
+    env: &[(&str, &str)],
+) -> Result<()> {
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .current_dir(project_dir)
+        .envs(env.iter().copied());
+    let output = command.output().map_err(|source| {
+        if source.kind() == std::io::ErrorKind::NotFound {
+            KvistError::VendoringUnavailable {
+                path: project_dir.to_string_lossy().into_owned(),
+                reason: format!(
+                    "the `{program}` executable was not found on PATH; install the \
+                     toolchain before vendoring dependencies"
+                ),
+            }
+        } else {
+            KvistError::VendoringUnavailable {
+                path: project_dir.to_string_lossy().into_owned(),
+                reason: format!("cannot invoke {program} to {context}: {source}"),
+            }
+        }
+    })?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let detail = if stderr.trim().is_empty() {
+        stdout
+    } else {
+        stderr
+    };
+    let truncated: String = detail.chars().take(MAX_VENDOR_ERROR_BYTES).collect();
+    Err(KvistError::VendoringUnavailable {
+        path: project_dir.to_string_lossy().into_owned(),
+        reason: format!(
+            "`{program} {}` did not complete:\n{truncated}",
+            args.join(" ")
+        ),
+    })
+}
+
+/// Go provisioning: `go mod vendor` commits the exact locked module material
+/// into the project's `vendor/` directory (the only step that may fetch).
+fn populate_go_vendor(project_dir: &Path) -> Result<()> {
+    run_host_tool(
+        "go",
+        &["mod", "vendor"],
+        project_dir,
+        "vendor Go modules",
+        &[],
+    )
+}
+
+/// JavaScript provisioning: build `node_modules` from the exact locked
+/// versions into the vendored package cache. `npm ci` reconciles from
+/// `package-lock.json`; yarn projects reconcile from `yarn.lock`.
+fn populate_javascript(project_dir: &Path) -> Result<()> {
+    let vendored = project_dir
+        .join(".kvist")
+        .join(crate::language_vendoring::JS_PACKAGE_CACHE_DIRNAME);
+    std::fs::create_dir_all(&vendored).map_err(|source| KvistError::Io {
+        operation: "create vendored javascript package cache",
+        path: vendored.clone(),
+        source,
+    })?;
+    if project_dir.join("yarn.lock").is_file() {
+        run_host_tool(
+            "yarn",
+            &[
+                "install",
+                "--frozen-lockfile",
+                "--cache-folder",
+                vendored.to_str().ok_or_else(invalid_utf8_path_error)?,
+            ],
+            project_dir,
+            "install JavaScript packages with yarn",
+            &[],
+        )
+    } else {
+        run_host_tool(
+            "npm",
+            &[
+                "ci",
+                "--cache",
+                vendored.to_str().ok_or_else(invalid_utf8_path_error)?,
+            ],
+            project_dir,
+            "install JavaScript packages with npm",
+            &[],
+        )
+    }
+}
+
+/// Python provisioning: download the locked wheels, build the provisioned
+/// virtualenv, and install the locked material into it offline. `requirements`
+/// lock files are the supported form; `uv.lock` projects are detected but not
+/// yet provisionable (documented limitation).
+fn populate_python(project_dir: &Path) -> Result<()> {
+    let lockfile = project_dir.join("requirements.lock.txt");
+    if !lockfile.is_file() {
+        return Err(KvistError::VendoringUnavailable {
+            path: project_dir.to_string_lossy().into_owned(),
+            reason: "python provisioning requires `requirements.lock.txt` (a pinned \
+                     requirements lock file); `uv.lock` provisioning is a documented \
+                     follow-up"
+                .to_owned(),
+        });
+    }
+    let wheels = project_dir
+        .join(".kvist")
+        .join(crate::language_vendoring::PYTHON_WHEELS_DIRNAME);
+    std::fs::create_dir_all(&wheels).map_err(|source| KvistError::Io {
+        operation: "create vendored python wheels directory",
+        path: wheels.clone(),
+        source,
+    })?;
+
+    // Download the locked wheels (the only network step).
+    run_host_tool(
+        "pip",
+        &[
+            "download",
+            "-r",
+            "requirements.lock.txt",
+            "-d",
+            wheels.to_str().ok_or_else(invalid_utf8_path_error)?,
+        ],
+        project_dir,
+        "download locked Python wheels",
+        &[],
+    )?;
+
+    // Build the virtualenv (uv preferred for speed, stdlib venv fallback).
+    let venv = project_dir.join(".kvist").join("venv");
+    let venv_python = venv.join("bin").join("python");
+    if !venv_python.exists() {
+        let uv = run_host_tool_quiet("uv", &["--version"], project_dir);
+        if uv {
+            run_host_tool(
+                "uv",
+                &["venv", venv.to_str().ok_or_else(invalid_utf8_path_error)?],
+                project_dir,
+                "create the provisioned Python virtualenv",
+                &[],
+            )?;
+        } else {
+            run_host_tool(
+                "python3",
+                &[
+                    "-m",
+                    "venv",
+                    venv.to_str().ok_or_else(invalid_utf8_path_error)?,
+                ],
+                project_dir,
+                "create the provisioned Python virtualenv",
+                &[],
+            )?;
+        }
+    }
+
+    // Install the locked material into the venv fully offline.
+    let find_links = wheels.to_str().ok_or_else(invalid_utf8_path_error)?;
+    let venv_python_str = venv_python.to_str().ok_or_else(invalid_utf8_path_error)?;
+    let installed = run_host_tool_quiet(
+        "uv",
+        &[
+            "pip",
+            "install",
+            "--python",
+            venv_python_str,
+            "--no-index",
+            "--find-links",
+            find_links,
+            "-r",
+            "requirements.lock.txt",
+        ],
+        project_dir,
+    );
+    if !installed {
+        run_host_tool(
+            venv_python_str,
+            &[
+                "-m",
+                "pip",
+                "install",
+                "--no-index",
+                "--find-links",
+                find_links,
+                "-r",
+                "requirements.lock.txt",
+            ],
+            project_dir,
+            "install the locked Python wheels into the virtualenv",
+            &[],
+        )?;
+    }
+    Ok(())
+}
+
+/// C/C++ (Conan) provisioning: fill a project-local Conan home with the exact
+/// locked binaries and generate the build files under `.kvist/conan-build`.
+/// The Conan home under `.kvist/` keeps the cache Kvist-owned and inspectable.
+fn populate_conan(project_dir: &Path) -> Result<()> {
+    let conan_home = project_dir
+        .join(".kvist")
+        .join(crate::language_vendoring::CONAN_HOME_DIRNAME);
+    let env = [(
+        "CONAN_HOME",
+        conan_home.to_str().ok_or_else(invalid_utf8_path_error)?,
+    )];
+
+    // Ensure a default profile exists in the project-local home.
+    let has_profile = conan_home
+        .join(".conan2")
+        .join("profiles")
+        .join("default")
+        .is_file();
+    if !has_profile {
+        run_host_tool(
+            "conan",
+            &["profile", "detect"],
+            project_dir,
+            "detect the Conan default profile",
+            &env,
+        )?;
+    }
+
+    let output_path = project_dir.join(".kvist").join("conan-build");
+    let output_folder = output_path.to_str().ok_or_else(invalid_utf8_path_error)?;
+    let mut args: Vec<&str> = vec!["install", "."];
+    if project_dir.join("conanfile.lock").is_file() {
+        args.push("--lockfile=conanfile.lock");
+    } else {
+        args.push("--lockfile-out=conanfile.lock");
+    }
+    args.push("--build=missing");
+    args.push("-of");
+    args.push(output_folder);
+    run_host_tool(
+        "conan",
+        &args,
+        project_dir,
+        "install locked Conan packages",
+        &env,
+    )
+}
+
+/// Probe a host tool without treating a failure as an error (for optional
+/// accelerators such as `uv`).
+fn run_host_tool_quiet(program: &str, args: &[&str], project_dir: &Path) -> bool {
+    Command::new(program)
+        .args(args)
+        .current_dir(project_dir)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+/// A non-UTF-8 path cannot cross into a tool argv or the sandbox wire format.
+fn invalid_utf8_path_error() -> KvistError {
+    KvistError::VendoringUnavailable {
+        path: "<vendoring>".to_owned(),
+        reason: "a vendoring path is not valid UTF-8 and cannot be used by the host tool"
+            .to_owned(),
+    }
 }
 
 /// Write the sandbox cargo configuration (referencing the fixed sandbox mount at

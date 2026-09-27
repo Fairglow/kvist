@@ -264,12 +264,20 @@ toolchains MUST be documented as explicitly unsupported.
 
 Current implementation status: the generic test-command path and the Rust
 closed topology are implemented and evidenced (Rust by
-`offline_cargo_verification_e2e`). The non-Rust vendoring strategies exist at
-the enforcement layer only; `kvist vendor` is Rust-only and verification passes
-no vendored mounts for non-Rust languages. The authoring phase exposes no
-usable Rust toolchain (the shared runner contract permits the Cargo toolchain
-and the vendored-registry/config/runtime purposes only in verification
-phases); extending that contract is a tracked follow-up.
+`offline_cargo_verification_e2e`). `kvist vendor` dispatches per detected
+language strategy, and every vendored non-Rust project verifies through the
+shared offline language topology (ADR-0013): vendoring enforced, vendored
+material mounted read-only with the lock-file digest identity, one writable
+scratch at the fixed Cargo scratch destination, network denied, and the
+language's canonical offline test command (or, for C/C++ only, the approved
+`[test_policy]` command). Go is vendored-supported and evidenced end to end by
+`language_offline_e2e::go_offline_verification_builds_and_tests_denied_network`;
+JavaScript, Python, and C/C++ provisioning and profiles are implemented, and
+each is vendored-supported when its end-to-end evidence is tracked and
+passing. `uv.lock`-only Python projects fail closed (documented follow-up). The
+authoring phase exposes no usable Rust toolchain (the shared runner contract
+permits the Cargo toolchain and the vendored-registry/config/runtime purposes
+only in verification phases); extending that contract is a tracked follow-up.
 
 ### REQ-SUPERVISED-EXECUTION
 

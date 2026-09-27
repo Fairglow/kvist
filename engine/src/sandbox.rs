@@ -271,6 +271,9 @@ pub struct ExecutionRequest<'a> {
     pub arguments: &'a [String],
     pub environment: BTreeMap<String, String>,
     pub read_only_mounts: &'a [ReadOnlyMount],
+    /// A host directory exposed as the writable scratch at
+    /// `CARGO_SCRATCH_DEST`. `None` keeps the established no-scratch shape.
+    pub scratch_host_dir: Option<&'a Path>,
     /// The enforcement backend identity confirmed by the availability probe.
     pub backend: &'a BackendIdentity,
     /// The authenticated execution-approval digest bound as the request policy
@@ -1082,6 +1085,39 @@ pub fn execute_with_timeout(
             identity,
         });
     }
+    // An optional writable scratch for builds that need a cache, build output,
+    // or scratch HOME (the per-language offline verification topologies). The
+    // endpoint identity binds the endpoint to the single read-write scratch
+    // grant, exactly as the closed Cargo topology does.
+    let scratch = match request.scratch_host_dir {
+        Some(host_dir) => {
+            let source = canonical_source_str(
+                config,
+                host_dir,
+                "canonicalize writable scratch for sandbox manifest",
+            )?;
+            let identity = digest_label(
+                serde_json::to_string(&source)
+                    .map_err(|error| KvistError::SandboxUnavailable {
+                        runner: config.runner.clone(),
+                        reason: format!("cannot canonicalize scratch identity: {error}"),
+                    })?
+                    .as_bytes(),
+            );
+            grants.push(SandboxGrant {
+                source,
+                destination: CARGO_SCRATCH_DEST.to_owned(),
+                access: "read-write",
+                purpose: "scratch",
+                identity: identity.clone(),
+            });
+            Some(SandboxScratch {
+                destination: CARGO_SCRATCH_DEST,
+                identity,
+            })
+        }
+        None => None,
+    };
     // The toolchain identity is derived from the exact resolved argv[0] bytes,
     // and the conservative toolchain grant exposes exactly that executable at
     // its canonical path. This is a narrow, internally consistent toolchain
@@ -1165,7 +1201,7 @@ pub fn execute_with_timeout(
             root: resolved_program.canonical_path.clone(),
         },
         cache: None,
-        scratch: None,
+        scratch,
     };
     tracing::info!(
         program = %request.program,

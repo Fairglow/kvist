@@ -608,7 +608,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 let mut vendored_dir_json = String::new();
                 let mut message_json = String::new();
                 json_string_escape(&mut project_dir_json, &project_dir.to_string_lossy());
-                json_string_escape(&mut vendored_dir_json, &report.vendored_dir);
+                json_string_escape(&mut vendored_dir_json, report.vendored_dir());
                 json_string_escape(&mut message_json, &report.to_string());
                 CommandOutput::message(format!(
                     r#"{{"status":"success","command":"vendor","project_dir":{project_dir_json},"vendored_dir":{vendored_dir_json},"message":{message_json}}}"#

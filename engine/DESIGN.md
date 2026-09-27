@@ -469,54 +469,64 @@ must be engine-side and the resulting topology is a documented variant of the
 verification topology. Path (b) is the first candidate because it reuses the
 existing closed purposes and the pinned-toolchain manifest.
 
-### Language support, per-language provisioning, and evidence
+### Language support, per-language provisioning, and evidence (ADR-0013)
 
 `detect_language_strategy` selects the owning language by lock file (Rust
-first, then Python, JavaScript, C/Conan). `verify_task` routes Rust to the
-closed offline Cargo topology; every other language runs the generic
-approved-test-command path in the network-denied sandbox against host system
-toolchains (the runner mounts `/usr`, `/lib`, `/lib64`, `/bin`, and `/sbin`
-read-only; writable space is the `/tmp` and `/run` tmpfs; no `$HOME`).
+first, then Go, Python, JavaScript, C/Conan). `verify_task` routes Rust to the
+closed offline Cargo topology; every other **vendored** language is routed to
+the shared offline language topology
+(`language_verification::run_offline_language_verification`); non-vendored
+projects keep the generic approved-test-command path in the network-denied
+sandbox against host system toolchains.
 
-The non-Rust vendoring strategies are implemented at the enforcement layer
-(detection, lock-file digest identity, vendored-content presence, mount
-planning with per-language offline configs: `pip.conf` at `/workspace/.pip`,
-`.npmrc` at `/workspace/.npm`, `OFFLINE.md` at `/workspace/.conan`). The
-remaining wiring, in intended order:
+**The shared offline language topology.** Vendoring is enforced first (missing,
+incomplete, or stale material fails closed — never a fallback to a host
+build), then the language's vendored material is mounted read-only with the
+lock-file digest identity, one disjoint writable scratch at the Cargo
+topology's fixed destination (`/workspace/scratch`) absorbs caches, build
+output, and `HOME`, the network is denied, and the language's canonical
+offline test command runs against the host system toolchain (the sandbox
+`PATH` is the fixed `/usr/bin:/bin`; the language binary is located and
+canonicalized on the host so the toolchain grant binds a regular,
+non-symlink executable). An approved test command drives only the C/C++
+profile (the build system is project-defined); the canonical-command
+languages reject one and fail closed.
 
-1. **Go (easy).** No Kvist machinery: `go mod vendor` on the host commits
-   `vendor/` inside the component, and `go test -mod=vendor ./...` runs
-   fully offline against the system `go`. The test-policy environment
-   allowlist must include `GOCACHE` and `TMPDIR` pointing at `/tmp`.
-   Evidence: a Go e2e test in the shape of
-   `offline_cargo_verification_e2e` (provision on the host, run the real
-   test offline in the sandbox, self-skip without the live sandbox).
-2. **JavaScript (easy).** Provision `package-lock.json` entries into
-   `.kvist/vendored-js` on the host (`npm pack` per locked entry, or an
-   offline npm cache seed), then wire the existing `JavaScriptStrategy`
-   mounts through the generic path's `read_only_mounts` parameter with the
-   test policy running `npm ci --offline` (or against a committed
-   `node_modules`) and the project test command.
-3. **Python (important).** Provision locked wheels into
-   `.kvist/vendored-python` on the host (`pip download`/`uv` fetch against
-   the lock file), wire the existing `PythonStrategy` mounts, and run an
-   offline `pip install --no-index --find-links` plus the project test
-   command inside the sandbox. Limitations to document: interpreter version
-   must match the host system `python3` (no per-project interpreter
-   provisioning yet), C-extension packages must be manylinux wheels, and
-   build backends with their own network needs require vendored build
-   dependencies.
-4. **C/C++ (important).** System `gcc`/`cc` plus system packages works today
-   via the generic path; Conan support reuses the existing `CConanStrategy`
-   (lock file plus presence, `--offline` install against the vendored
-   package directory).
+**Per-language profiles and provisioning** (`kvist vendor` dispatches per
+detected strategy):
 
-Before any non-Rust language is claimed as vendored-supported, its strategy
-MUST verify per-package presence against the lock file (the current
-directory-non-empty check is a placeholder) and an end-to-end integration
-test MUST pass. `kvist vendor` dispatches per strategy once each language's
-provisioning is implemented; until then it is Rust-only and fails with an
-actionable message for other languages.
+1. **Go.** `kvist vendor` runs `go mod vendor`; the committed `vendor/`
+   directory travels inside the component mount, so no extra mounts. The
+   profile runs `go test -mod=vendor ./...` with `GOPROXY=off`,
+   `GOTOOLCHAIN=local`, `GOFLAGS=-mod=vendor`, and `GOCACHE`/`GOTMPDIR`/
+   `GOPATH`/`GOMODCACHE` under the scratch (the standard scratch
+   subdirectories are pre-created because Go requires them to exist). E2E
+   evidence: `language_offline_e2e.rs::go_offline_verification_builds_and_
+tests_denied_network`.
+2. **JavaScript.** `kvist vendor` runs `npm ci` (or
+   `yarn install --frozen-lockfile`) into `.kvist/vendored-js`; the profile
+   runs `node --test` with the vendored cache and generated `.npmrc` mounted.
+3. **Python.** `kvist vendor` downloads the locked wheels into
+   `.kvist/vendored-python`, provisions `.kvist/venv` (uv preferred, stdlib
+   `venv` fallback), and installs the locked material into it offline; the
+   profile runs `python3 -m unittest -v` with `VIRTUAL_ENV` at the mounted
+   venv and bytecode/user-site writes disabled. `requirements.lock.txt` is
+   the supported lock form; `uv.lock`-only projects fail closed (documented
+   follow-up). C-extension packages must be manylinux wheels, and the
+   interpreter version must match the host system `python3`.
+4. **C/C++ (Conan).** `kvist vendor` runs `conan profile detect` (when no
+   profile exists) and `conan install . [--lockfile=…|--lockfile-out=…] 
+--build=missing -of .kvist/conan-build` with
+   `CONAN_HOME=.kvist/vendored-conan`; the profile runs the approved project
+   test command with `CONAN_HOME` at the Conan home's canonical host path
+   (the home is mounted read-only at that same path, so the absolute cache
+   paths embedded in the generated toolchain file resolve unchanged).
+
+Before any non-Rust language is claimed as vendored-supported, an end-to-end
+integration test MUST pass (provision a small real project on the host, run
+its real build/test offline in the sandbox, self-skip without the live
+sandbox). Go is claimed with that evidence; JavaScript, Python, and C/C++ are
+tracked per language in `TODOS.yaml`.
 
 ### Planned review evidence and acceptance state
 

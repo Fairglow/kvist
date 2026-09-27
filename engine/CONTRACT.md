@@ -68,14 +68,17 @@ input is not an interactive terminal, it fails with an actionable diagnostic
 and changes no durable state. `vcs commit-accepted` retries or performs the
 isolated index commit for an already accepted set.
 
-`vendor` is a host-authorized provisioning step (ADR-0011): it populates and
-enforces the project's offline vendored dependency registry from the exact
-locked versions, writes the versioned vendoring manifest under `.kvist/`, and
-fails closed when the lockfile drifted or locked material is missing. For a
-Rust project it provisions the exact `cargo vendor` registry; provisioning for
-the non-Rust strategies (Python, JavaScript, C/Conan) is a tracked follow-up,
-and invoking `vendor` on a non-Rust project fails with an actionable message
-naming the language and the required provisioning command.
+`vendor` is a host-authorized provisioning step (ADR-0011, ADR-0013): it
+detects the project's language strategy and performs that language's
+host-authorized provisioning pass from the exact locked versions, then enforces
+readiness, failing closed when the lockfile drifted or locked material is
+missing. For a Rust project it provisions the exact `cargo vendor` registry and
+writes the versioned vendoring manifest under `.kvist/`. For the other
+supported languages it provisions their vendored material under `.kvist/`
+(Go's committed `vendor/` directory via `go mod vendor`; the JavaScript package
+cache via `npm ci`/`yarn install --frozen-lockfile`; the Python locked wheels
+and provisioned virtualenv; the C/C++ project-local Conan home and generated
+build files via `conan install --build=missing`).
 
 `toolchain ensure` is a host-authorized provisioning step (ADR-0012): it
 resolves the project's pinned Rust toolchain (`rust-toolchain.toml` or
@@ -339,20 +342,28 @@ project-cache generation selection remain later work.
 Language support is declared per language with executable evidence. Rust is
 first-class for verification: `kvist task verify` routes Rust projects
 (`Cargo.lock` present) to the closed offline Cargo topology and runs exactly
-`cargo test --locked` network-denied against the vendored registry. Every other
-language uses the generic approved-test-command path: the per-component
-`[test_policy]` command runs in the network-denied sandbox against host system
-toolchains (the runner mounts `/usr`, `/lib`, `/lib64`, `/bin`, and `/sbin`
-read-only), with no vendored mounts and no `$HOME`. Go additionally builds
-fully offline from a committed `vendor/` directory; Python, JavaScript, and
-C/C++ resolve third-party dependencies only from host system packages until
-their vendoring strategies are wired into provisioning and the verification
-mount plan. JVM and Ruby support zero-dependency projects only. Container-based
-builds, toolchains without an offline/locked mode, toolchains requiring ambient
-home/global mutable state, and GPU/accelerator toolchains are explicitly
-unsupported. Each supported language is backed by an end-to-end integration
-test that provisions a small real project on the host and runs its real
-build/test offline inside the sandbox.
+`cargo test --locked` network-denied against the vendored registry. Every
+other **vendored** project is routed to the shared offline language topology
+(ADR-0013): vendoring is enforced, the language's vendored material is mounted
+read-only with the lock-file digest identity, one disjoint writable scratch is
+granted at the fixed Cargo scratch destination, the network is denied, and the
+language's canonical offline test command runs against the host system
+toolchain — Go: `go test -mod=vendor ./...`; JavaScript: `node --test`;
+Python: `python3 -m unittest -v` against the mounted provisioned venv;
+C/C++: the approved `[test_policy]` command (the build system is
+project-defined), with the Conan home mounted read-only at its canonical host
+path. Go is vendored-supported with end-to-end evidence
+(`language_offline_e2e`); JavaScript, Python, and C/C++ are vendored-supported
+when their end-to-end evidence is tracked and passing. Non-vendored projects
+use the generic approved-test-command path: the per-component `[test_policy]`
+command runs in the network-denied sandbox against host system toolchains
+(the runner mounts `/usr`, `/lib`, `/lib64`, `/bin`, and `/sbin` read-only),
+with no vendored mounts and no `$HOME`. JVM and Ruby support zero-dependency
+projects only. Container-based builds, toolchains without an offline/locked
+mode, toolchains requiring ambient home/global mutable state, and GPU/
+accelerator toolchains are explicitly unsupported. Each supported language is
+backed by an end-to-end integration test that provisions a small real project
+on the host and runs its real build/test offline inside the sandbox.
 
 The Rust toolchain used by offline verification is pinned by the project's
 `rust-toolchain.toml` or `rust-toolchain` when present (else the rustup

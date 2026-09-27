@@ -745,6 +745,7 @@ fn dispatch_effect(
         vcs_selection: request.vcs_selection,
         component_dir: request.target_dir,
         phase: crate::sandbox::ExecutionPhase::Authoring,
+        scratch_host_dir: None,
         program,
         arguments,
         environment: crate::sandbox::allowed_environment(sandbox.config, None),

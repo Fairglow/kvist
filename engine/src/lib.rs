@@ -25,6 +25,7 @@ pub mod import;
 pub mod init;
 pub(crate) mod interruptible_stdin;
 pub mod language_vendoring;
+pub mod language_verification;
 pub mod logging;
 pub mod project_state;
 pub mod prompt_input;

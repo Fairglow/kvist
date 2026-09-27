@@ -5772,8 +5772,10 @@ pub fn verify_task(
     let context = validate_context(component_path)?;
 
     // Vendored Rust verification runs `cargo test --locked` offline through the
-    // closed cargo topology; every other language keeps the generic sandbox path
-    // with its approved test command.
+    // closed cargo topology; every other vendored language uses its offline
+    // language topology (vendored mounts plus writable scratch, network
+    // denied); non-vendored projects keep the generic sandbox path with their
+    // approved test command.
     if is_rust_verification(project_dir) {
         return finalize_verification(
             &context,
@@ -5795,6 +5797,18 @@ pub fn verify_task(
             policy,
             config,
         );
+    }
+    if let Some(result) = vendored_language_verification(
+        &context,
+        task_id,
+        project_dir,
+        sandbox_config,
+        config,
+        probe,
+        policy_identity,
+        policy,
+    )? {
+        return Ok(result);
     }
 
     let command_str = find_test_command(&normalized_component, policy).ok_or_else(|| {
@@ -5828,6 +5842,7 @@ pub fn verify_task(
                 Some(&policy.environment_allowlist),
             ),
             read_only_mounts: &[],
+            scratch_host_dir: None,
             backend: &probe.backend,
             policy_identity,
         },
@@ -5839,6 +5854,84 @@ pub fn verify_task(
         &approved_runner,
     )?;
     finalize_verification(&context, task_id, &command_str, &result, policy, config)
+}
+
+/// Run offline verification for a vendored non-Rust project, returning the
+/// finalized result. `Ok(None)` means the project is not a vendored non-Rust
+/// project and the caller should use the generic approved-test-command path.
+#[allow(clippy::too_many_arguments)]
+fn vendored_language_verification(
+    context: &TaskContext,
+    task_id: &str,
+    project_dir: &Path,
+    sandbox_config: &crate::config::SandboxConfig,
+    config: &crate::config::ProjectConfig,
+    probe: &crate::sandbox::SandboxProbe,
+    policy_identity: &str,
+    policy: &crate::config::TestPolicy,
+) -> Result<Option<VerificationResult>> {
+    let strategy = match crate::language_vendoring::detect_language_strategy(project_dir) {
+        Ok(strategy) if strategy.id() != "rust" => strategy,
+        _ => return Ok(None),
+    };
+    // A vendoring failure means the project is not provisioned for offline
+    // builds: fall back to the generic approved-test-command path (host system
+    // toolchains, no vendored mounts), which is the documented support state
+    // for non-vendored projects.
+    let vendored = crate::language_vendoring::enforce_vendoring(project_dir).is_ok();
+    if !vendored {
+        return Ok(None);
+    }
+    // C/C++ build systems are project-defined, so the approved test command
+    // drives them; the other languages use their canonical offline commands.
+    let language = strategy.id();
+    let test_command = if language == "c" {
+        let command_str = find_test_command(&context.component_dir, policy).ok_or_else(|| {
+            KvistError::MissingTestCommand {
+                component: context.component_dir.to_string_lossy().into_owned(),
+            }
+        })?;
+        Some(command_str.split_whitespace().map(str::to_owned).collect())
+    } else {
+        None
+    };
+    let command_str = match language {
+        "go" => "go test -mod=vendor ./...".to_owned(),
+        "javascript" => "node --test".to_owned(),
+        "python" => "python -m unittest -v".to_owned(),
+        "c" => "approved test command".to_owned(),
+        other => {
+            return Err(KvistError::SandboxUnavailable {
+                runner: config
+                    .sandbox
+                    .as_ref()
+                    .map_or_else(|| "<unconfigured>".to_owned(), |value| value.runner.clone()),
+                reason: format!("no offline verification profile for language `{other}`"),
+            });
+        }
+    };
+    let result = crate::language_verification::run_offline_language_verification(
+        sandbox_config,
+        project_dir,
+        config.vcs,
+        probe,
+        policy_identity,
+        &context.component_dir,
+        test_command,
+        crate::sandbox::ExecutionOptions {
+            timeout: Some(std::time::Duration::from_secs(policy.timeout_seconds)),
+            output_limit: Some(policy.max_output_bytes),
+            live_stdout: None,
+        },
+    )?;
+    Ok(Some(finalize_verification(
+        context,
+        task_id,
+        &command_str,
+        &result,
+        policy,
+        config,
+    )?))
 }
 
 /// Whether a verification targets a vendored Rust project.
