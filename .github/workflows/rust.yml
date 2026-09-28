@@ -47,6 +47,18 @@ jobs:
         with:
           components: rustfmt, clippy
 
+      - name: Install system Go toolchain
+        run: |
+          # The offline language e2e tests verify against a go toolchain whose
+          # GOROOT lives under a sandboxed system prefix (/usr, /lib, /lib64,
+          # /bin, /sbin); the runner's toolcache go that leads PATH does not,
+          # so install the official tarball at /usr/local/go and expose it as
+          # /usr/bin/go. The version must be >= the go directive in the e2e
+          # fixture (go 1.24), or the sandboxed build fails with an actionable
+          # go.mod requirement error.
+          curl -fsSL https://go.dev/dl/go1.24.13.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+          sudo ln -sf /usr/local/go/bin/go /usr/bin/go
+
       - name: Cache cargo registry and build target
         uses: Swatinem/rust-cache@v2
 
@@ -99,6 +111,18 @@ jobs:
 
       - name: Install Rust 1.95.0
         uses: dtolnay/rust-toolchain@1.95.0
+
+      - name: Install system Go toolchain
+        run: |
+          # The offline language e2e tests verify against a go toolchain whose
+          # GOROOT lives under a sandboxed system prefix (/usr, /lib, /lib64,
+          # /bin, /sbin); the runner's toolcache go that leads PATH does not,
+          # so install the official tarball at /usr/local/go and expose it as
+          # /usr/bin/go. The version must be >= the go directive in the e2e
+          # fixture (go 1.24), or the sandboxed build fails with an actionable
+          # go.mod requirement error.
+          curl -fsSL https://go.dev/dl/go1.24.13.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+          sudo ln -sf /usr/local/go/bin/go /usr/bin/go
 
       - name: Cache cargo registry and build target
         uses: Swatinem/rust-cache@v2

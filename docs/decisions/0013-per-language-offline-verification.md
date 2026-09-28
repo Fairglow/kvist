@@ -46,7 +46,10 @@ unittest -v` with `VIRTUAL_ENV` at the
 - **Go end-to-end evidence.** `engine/tests/language_offline_e2e.rs` vendors a
   real small Go module on the host (`kvist vendor` dispatch) and runs
   `go test -mod=vendor ./...` network-denied inside the Bubblewrap sandbox;
-  the test self-skips without the live sandbox or the Go toolchain.
+  the test self-skips without the live sandbox or the Go toolchain. CI
+  installs the official Go tarball at `/usr/local/go` (exposed as
+  `/usr/bin/go`) so verification has a toolchain under a sandboxed system
+  prefix; the runner's toolcache go alone is not reachable in the sandbox.
 - **JavaScript end-to-end evidence.** The same test file proves the npm/yarn
   path (`javascript_offline_verification_builds_and_tests_denied_network`, a
   zero-dependency `package-lock.json` project) and the pnpm path
