@@ -486,11 +486,18 @@ lock-file digest identity, one disjoint writable scratch at the Cargo
 topology's fixed destination (`/workspace/scratch`) absorbs caches, build
 output, and `HOME`, the network is denied, and the language's canonical
 offline test command runs against the host system toolchain (the sandbox
-`PATH` is the fixed `/usr/bin:/bin`; the language binary is located and
-canonicalized on the host so the toolchain grant binds a regular,
-non-symlink executable). An approved test command drives only the C/C++
-profile (the build system is project-defined); the canonical-command
-languages reject one and fail closed.
+`PATH` is the fixed `/usr/bin:/bin`; the language binary is located on the
+host and canonicalized so the toolchain grant binds a regular, non-symlink
+executable, preferring a PATH candidate under a bound system prefix —
+`/usr`, `/lib`, `/lib64`, `/bin`, `/sbin` — because only those remain
+reachable inside the sandbox while toolchain managers frequently put
+installs such as `/opt/hostedtoolcache/...` ahead of the system toolchain
+on `PATH`). For Go, `GOROOT` is the grandparent of `bin/go` and must sit
+under a bound prefix as well; a go whose `GOROOT` the sandbox cannot reach
+fails closed with an actionable message (the in-sandbox symptom would
+otherwise be `package <std> is not in std`). An approved test command
+drives only the C/C++ profile (the build system is project-defined); the
+canonical-command languages reject one and fail closed.
 
 **Per-language profiles and provisioning** (`kvist vendor` dispatches per
 detected strategy):

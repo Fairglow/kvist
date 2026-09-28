@@ -30,6 +30,11 @@ const PYTHON_VENV_DEST: &str = "/workspace/venv";
 /// The deterministic sandbox `PATH`: the host system toolchains the runner
 /// already binds read-only. No host search path is leaked into the sandbox.
 const SANDBOX_PATH: &str = "/usr/bin:/bin";
+/// The host system prefixes the sandbox runner binds read-only (the runner's
+/// system layout: `/usr`, `/lib`, `/lib64`, `/bin`, `/sbin`). A host binary is
+/// only usable inside the sandbox — and for Go, so is its standard library
+/// under `GOROOT` — when it lives under one of them.
+const BOUND_SYSTEM_PREFIXES: &[&str] = &["/usr", "/lib", "/lib64", "/bin", "/sbin"];
 /// Sandbox destination of the writable scratch, shared with the Cargo topology.
 const SCRATCH_DEST: &str = crate::sandbox::CARGO_SCRATCH_DEST;
 
@@ -159,12 +164,17 @@ fn offline_profile(
             // accidental fetch or toolchain download fail immediately instead
             // of reaching for the network.
             //
-            // Debian/Ubuntu ship a "trimmed" Go binary whose standard library is
-            // not bundled, so the verifier must set `GOROOT` explicitly; the
-            // interpreter always lives at `$GOROOT/bin/go`, so the vendored root
-            // is its grandparent. The host `/usr` is bound read-only inside the
-            // sandbox, so the standard library at that root stays reachable with
-            // the network denied.
+            // The profile runs against the host toolchain, so the binary and
+            // its standard library must both be reachable inside the sandbox,
+            // where only the bound system prefixes are visible. `GOROOT` is
+            // always the grandparent of `bin/go`; toolchain managers frequently
+            // put an install ahead of the system one on `PATH` (e.g.
+            // `/opt/hostedtoolcache/go/...` on CI runners), and a GOROOT
+            // outside the bound prefixes leaves the sandbox with a go binary
+            // it cannot compile with (`package bytes is not in std`).
+            // `locate_host_binary` prefers a candidate under a bound prefix;
+            // the guard below fails closed with an actionable message when no
+            // such install exists.
             let program = locate_host_binary("go")?;
             let goroot = Path::new(&program)
                 .parent()
@@ -173,6 +183,18 @@ fn offline_profile(
                     runner: "<language-verification>".to_owned(),
                     reason: format!("cannot derive GOROOT from the go binary path `{}`", program),
                 })?;
+            if !under_bound_system_prefix(goroot) {
+                return Err(KvistError::SandboxUnavailable {
+                    runner: "<language-verification>".to_owned(),
+                    reason: format!(
+                        "the go toolchain at `{program}` keeps its standard library at \
+                         GOROOT `{}`, which the sandbox cannot reach (it binds only {}); \
+                         install a go toolchain under one of those prefixes",
+                        goroot.display(),
+                        BOUND_SYSTEM_PREFIXES.join(", ")
+                    ),
+                });
+            }
             environment.insert("GOROOT".to_owned(), goroot.to_string_lossy().into_owned());
             environment.insert("GOPROXY".to_owned(), "off".to_owned());
             environment.insert("GOTOOLCHAIN".to_owned(), "local".to_owned());
@@ -349,11 +371,42 @@ fn venv_site_packages(project_root: &Path) -> Result<String> {
     ))
 }
 
+/// True when `path` is one of the bound system prefixes or inside one of
+/// them (component-wise, so `/usr2` is not inside `/usr`).
+fn under_bound_system_prefix(path: &Path) -> bool {
+    BOUND_SYSTEM_PREFIXES
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+}
+
+/// Choose the toolchain candidate to run in the sandbox: the first PATH
+/// candidate under a bound system prefix (reachable inside the sandbox),
+/// falling back to the first candidate overall when none is reachable. The
+/// fallback keeps the previous behavior on hosts whose only toolchain install
+/// sits outside the bound prefixes; language profiles that need more of the
+/// toolchain than the granted executable (Go's `GOROOT`) fail closed on their
+/// own.
+fn select_toolchain_candidate(candidates: &[PathBuf]) -> Option<&Path> {
+    let first = candidates.first()?;
+    Some(
+        candidates
+            .iter()
+            .find(|candidate| under_bound_system_prefix(candidate))
+            .unwrap_or(first)
+            .as_path(),
+    )
+}
+
 /// Locate a host binary by name through the host `PATH`, returning its
 /// canonical (symlink-resolved) path so the sandbox toolchain grant binds a
-/// regular, non-symlink executable. Fails closed with an actionable message.
+/// regular, non-symlink executable. Prefers a candidate under a bound system
+/// prefix, because only those remain reachable inside the sandbox; PATH
+/// frequently lists toolchain-manager installs (e.g.
+/// `/opt/hostedtoolcache/...`) ahead of the system toolchain. Fails closed
+/// with an actionable message.
 fn locate_host_binary(name: &str) -> Result<String> {
     let path_value = std::env::var("PATH").unwrap_or_else(|_| SANDBOX_PATH.to_owned());
+    let mut candidates: Vec<PathBuf> = Vec::new();
     for directory in path_value.split(':') {
         if directory.is_empty() {
             continue;
@@ -383,25 +436,31 @@ fn locate_host_binary(name: &str) -> Result<String> {
                 }
             })?;
             if canonical_metadata.file_type().is_file() {
-                return canonical.to_str().map(str::to_owned).ok_or_else(|| {
-                    KvistError::SandboxUnavailable {
-                        runner: "<language-verification>".to_owned(),
-                        reason: format!(
-                            "host binary `{name}` resolved to non-UTF-8 path `{}`",
-                            canonical.display()
-                        ),
-                    }
-                });
+                candidates.push(canonical);
             }
         }
     }
-    Err(KvistError::SandboxUnavailable {
-        runner: "<language-verification>".to_owned(),
-        reason: format!(
-            "host binary `{name}` was not found on the host PATH; install the \
-             {name} toolchain before verifying this project"
-        ),
-    })
+    match select_toolchain_candidate(&candidates) {
+        Some(canonical) => {
+            canonical
+                .to_str()
+                .map(str::to_owned)
+                .ok_or_else(|| KvistError::SandboxUnavailable {
+                    runner: "<language-verification>".to_owned(),
+                    reason: format!(
+                        "host binary `{name}` resolved to non-UTF-8 path `{}`",
+                        canonical.display()
+                    ),
+                })
+        }
+        None => Err(KvistError::SandboxUnavailable {
+            runner: "<language-verification>".to_owned(),
+            reason: format!(
+                "host binary `{name}` was not found on the host PATH; install the \
+                 {name} toolchain before verifying this project"
+            ),
+        }),
+    }
 }
 
 #[cfg(test)]
@@ -441,6 +500,42 @@ mod tests {
         );
         assert!(profile.environment.contains_key("GOCACHE"));
         assert!(profile.environment.contains_key("GOTMPDIR"));
+    }
+
+    #[test]
+    fn toolchain_candidate_prefers_a_bound_system_prefix() {
+        let outside = PathBuf::from("/opt/hostedtoolcache/go/1.24.13/x64/bin/go");
+        let inside = PathBuf::from("/usr/local/go/bin/go");
+        // A sandbox-reachable candidate beats an earlier unreachable one.
+        assert_eq!(
+            select_toolchain_candidate(&[outside.clone(), inside.clone()]).map(PathBuf::from),
+            Some(inside.clone())
+        );
+        // A single reachable candidate is kept.
+        assert_eq!(
+            select_toolchain_candidate(std::slice::from_ref(&inside)).map(PathBuf::from),
+            Some(inside.clone())
+        );
+        // A single unreachable candidate is kept as the documented fallback.
+        assert_eq!(
+            select_toolchain_candidate(std::slice::from_ref(&outside)).map(PathBuf::from),
+            Some(outside)
+        );
+        // No candidate at all is not a selection.
+        assert!(select_toolchain_candidate(&[]).is_none());
+    }
+
+    #[test]
+    fn under_bound_prefix_is_component_wise() {
+        assert!(under_bound_system_prefix(Path::new(
+            "/usr/lib/go-1.22/bin/go"
+        )));
+        assert!(under_bound_system_prefix(Path::new("/usr")));
+        assert!(!under_bound_system_prefix(Path::new("/usr2/go/bin/go")));
+        assert!(!under_bound_system_prefix(Path::new("/usrx")));
+        assert!(!under_bound_system_prefix(Path::new(
+            "/opt/hostedtoolcache/go/bin/go"
+        )));
     }
 
     #[test]
