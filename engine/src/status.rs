@@ -107,10 +107,16 @@ fn render_text(
                 escape_text(&component.path.to_string_lossy())
             ));
         } else if component.state == ComponentState::Blocked {
+            let component_dir = component_directory(inspection, &component.path);
+            let (blocked, decisions) =
+                guidance_entries_for(&component_dir, &component.path.to_string_lossy());
             output.push_str(&format!(
-                "\n  Next Step: Component tasks are blocked or need manual intervention. Resolve the blocked tasks or manual gates in {}/TODOS.yaml.",
-                escape_text(&component.path.to_string_lossy())
+                "\n  Next Step: {} blocked task(s) need resolution; 'kvist help task-states' explains states and transitions.",
+                blocked.len()
             ));
+            if let Some(details) = render_text_entries(&blocked, &decisions) {
+                output.push_str(&details);
+            }
         } else if component.state == ComponentState::Invalid {
             output.push_str(&format!(
                 "\n  Next Step: The component contains invalid or malformed artifacts. Run 'kvist component validate {}' and check the reported Markdown or YAML document.",
@@ -121,9 +127,149 @@ fn render_text(
                 "\n  Next Step: The component is missing required adjacent Kvist artifacts. Run 'kvist component new {}' to create its intent-document templates.",
                 escape_text(&component.path.to_string_lossy())
             ));
+        } else if component.state == ComponentState::UnsupportedVersion {
+            output.push_str(
+                "\n  Next Step: An artifact uses an unsupported schema version; upgrade the kvist binary ('kvist help concepts' explains the artifact set).",
+            );
         }
     }
     output
+}
+
+/// A blocked or awaiting-decision task rendered for status guidance.
+struct GuidanceEntry {
+    id: String,
+    reason: String,
+    next: String,
+}
+
+/// Resolves a component-root-relative component path against the project.
+fn component_directory(inspection: &ProjectInspection, component_path: &Path) -> PathBuf {
+    match &inspection.component_root {
+        Some(root) => {
+            if root == Path::new(".") {
+                inspection.project_dir.join(component_path)
+            } else {
+                inspection.project_dir.join(root).join(component_path)
+            }
+        }
+        None => inspection.project_dir.join(component_path),
+    }
+}
+
+/// Reads and parses a component's queue best-effort; a missing or malformed
+/// queue yields no entries rather than an error (status stays read-only).
+fn guidance_entries_for(
+    component_dir: &Path,
+    component_path: &str,
+) -> (Vec<GuidanceEntry>, Vec<GuidanceEntry>) {
+    let Ok(content) = fs::read_to_string(component_dir.join("TODOS.yaml")) else {
+        return (Vec::new(), Vec::new());
+    };
+    let Ok(queue) = crate::task_queue::parse(&content) else {
+        return (Vec::new(), Vec::new());
+    };
+    guidance_entries(&queue, component_path)
+}
+
+/// Collects the guidance entries for a parsed queue: each blocked task with
+/// the exact command that re-runs it (dependency chain completed) or reopens
+/// it (chain incomplete), then each awaiting-decision task with a pointer to
+/// the task-states help topic, because resuming one is a human decision.
+fn guidance_entries(
+    queue: &crate::task_queue::TaskQueue,
+    component_path: &str,
+) -> (Vec<GuidanceEntry>, Vec<GuidanceEntry>) {
+    let mut blocked = Vec::new();
+    for task in queue
+        .tasks
+        .iter()
+        .filter(|t| t.status == crate::task_queue::TaskStatus::Blocked)
+    {
+        let next = if crate::task_queue::dependencies_completed(task, &queue.tasks) {
+            format!("kvist task run {component_path} {}", task.id)
+        } else {
+            let n = crate::task_queue::incomplete_dependency_count(task, &queue.tasks);
+            let unit = if n == 1 { "task" } else { "tasks" };
+            format!(
+                "kvist task transition {component_path} {} pending ({} dependency {unit} incomplete)",
+                task.id, n
+            )
+        };
+        blocked.push(GuidanceEntry {
+            id: task.id.clone(),
+            reason: truncate_reason(task.blocked_reason.as_deref().unwrap_or(""), 96),
+            next,
+        });
+    }
+    let mut decisions = Vec::new();
+    for task in queue
+        .tasks
+        .iter()
+        .filter(|t| t.status == crate::task_queue::TaskStatus::AwaitingDecision)
+    {
+        decisions.push(GuidanceEntry {
+            id: task.id.clone(),
+            reason: truncate_reason(task.blocked_reason.as_deref().unwrap_or(""), 96),
+            next: "human decision needed; 'kvist help task-states' explains resuming".to_owned(),
+        });
+    }
+    (blocked, decisions)
+}
+
+/// Renders the text-report entries for blocked and decision tasks.
+fn render_text_entries(blocked: &[GuidanceEntry], decisions: &[GuidanceEntry]) -> Option<String> {
+    if blocked.is_empty() && decisions.is_empty() {
+        return None;
+    }
+    let mut text = String::new();
+    for entry in blocked {
+        text.push_str(&format!(
+            "\n  blocked: {}\n    reason: {}\n    next: {}",
+            entry.id, entry.reason, entry.next
+        ));
+    }
+    for entry in decisions {
+        text.push_str(&format!(
+            "\n  decision: {}\n    reason: {}\n    next: {}",
+            entry.id, entry.reason, entry.next
+        ));
+    }
+    Some(text)
+}
+
+/// Renders the overview entries for blocked and decision tasks under the box.
+fn render_overview_entries(
+    blocked: &[GuidanceEntry],
+    decisions: &[GuidanceEntry],
+) -> Option<String> {
+    if blocked.is_empty() && decisions.is_empty() {
+        return None;
+    }
+    let mut text = String::new();
+    for entry in blocked {
+        text.push_str(&format!("│    Blocked:   {}\n", entry.id));
+        text.push_str(&format!("│               reason: {}\n", entry.reason));
+        text.push_str(&format!("│               next:   {}\n", entry.next));
+    }
+    for entry in decisions {
+        text.push_str(&format!("│    Decisions: {}\n", entry.id));
+        text.push_str(&format!("│               reason: {}\n", entry.reason));
+        text.push_str(&format!("│               next:   {}\n", entry.next));
+    }
+    Some(text)
+}
+
+/// Truncates a recorded reason to its first line, bounded to `max` characters
+/// at a word boundary, marked with an ellipsis when cut.
+fn truncate_reason(value: &str, max: usize) -> String {
+    let first_line = value.lines().next().unwrap_or("").trim();
+    if first_line.chars().count() <= max {
+        return first_line.to_owned();
+    }
+    let cut: String = first_line.chars().take(max).collect();
+    let end = cut.rfind(char::is_whitespace).unwrap_or(cut.len());
+    format!("{}…", cut[..end].trim_end())
 }
 
 fn render_json(
@@ -290,6 +436,7 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
     let mut total_in_progress = 0;
     let mut total_pending = 0;
     let mut total_blocked = 0;
+    let mut total_awaiting = 0;
 
     struct CompSummary {
         path: String,
@@ -299,6 +446,7 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
         next_task: Option<(String, String)>,
         stale_details: Option<String>,
         guidance: Option<String>,
+        blocked_details: Option<String>,
     }
 
     let mut comp_summaries = Vec::new();
@@ -344,71 +492,83 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
             None => inspection.project_dir.join(&component.path),
         };
 
-        let (tasks_summary, next_task) =
-            if let Ok(content) = fs::read_to_string(component_dir.join("TODOS.yaml")) {
-                if let Ok(queue) = crate::task_queue::parse(&content) {
-                    let comp_total = queue.tasks.len();
-                    let comp_completed = queue
-                        .tasks
-                        .iter()
-                        .filter(|t| t.status == crate::task_queue::TaskStatus::Completed)
-                        .count();
-                    let comp_in_progress = queue
-                        .tasks
-                        .iter()
-                        .filter(|t| t.status == crate::task_queue::TaskStatus::InProgress)
-                        .count();
-                    let comp_pending = queue
-                        .tasks
-                        .iter()
-                        .filter(|t| t.status == crate::task_queue::TaskStatus::Pending)
-                        .count();
-                    let comp_blocked = queue
-                        .tasks
-                        .iter()
-                        .filter(|t| t.status == crate::task_queue::TaskStatus::Blocked)
-                        .count();
+        let (tasks_summary, next_task, blocked_entries, decision_entries) = if let Ok(content) =
+            fs::read_to_string(component_dir.join("TODOS.yaml"))
+        {
+            if let Ok(queue) = crate::task_queue::parse(&content) {
+                let comp_total = queue.tasks.len();
+                let comp_completed = queue
+                    .tasks
+                    .iter()
+                    .filter(|t| t.status == crate::task_queue::TaskStatus::Completed)
+                    .count();
+                let comp_in_progress = queue
+                    .tasks
+                    .iter()
+                    .filter(|t| t.status == crate::task_queue::TaskStatus::InProgress)
+                    .count();
+                let comp_pending = queue
+                    .tasks
+                    .iter()
+                    .filter(|t| t.status == crate::task_queue::TaskStatus::Pending)
+                    .count();
+                let comp_blocked = queue
+                    .tasks
+                    .iter()
+                    .filter(|t| t.status == crate::task_queue::TaskStatus::Blocked)
+                    .count();
+                let comp_awaiting = queue
+                    .tasks
+                    .iter()
+                    .filter(|t| t.status == crate::task_queue::TaskStatus::AwaitingDecision)
+                    .count();
 
-                    total_tasks += comp_total;
-                    total_completed += comp_completed;
-                    total_in_progress += comp_in_progress;
-                    total_pending += comp_pending;
-                    total_blocked += comp_blocked;
+                total_tasks += comp_total;
+                total_completed += comp_completed;
+                total_in_progress += comp_in_progress;
+                total_pending += comp_pending;
+                total_blocked += comp_blocked;
+                total_awaiting += comp_awaiting;
 
-                    let pct = (comp_completed * 100)
-                        .checked_div(comp_total)
-                        .unwrap_or(100);
-                    let mut detail_parts = Vec::new();
-                    if comp_in_progress > 0 {
-                        detail_parts.push(format!("{comp_in_progress} in-progress"));
-                    }
-                    if comp_pending > 0 {
-                        detail_parts.push(format!("{comp_pending} pending"));
-                    }
-                    if comp_blocked > 0 {
-                        detail_parts.push(format!("{comp_blocked} blocked"));
-                    }
-
-                    let summary = if detail_parts.is_empty() {
-                        format!("{comp_completed}/{comp_total} completed ({pct}%)")
-                    } else {
-                        format!(
-                            "{comp_completed}/{comp_total} completed ({pct}%) [{}]",
-                            detail_parts.join(", ")
-                        )
-                    };
-
-                    let next = crate::task_queue::next_ready_task_id(&queue.tasks)
-                        .and_then(|id| queue.tasks.iter().find(|t| t.id == id))
-                        .map(|t| (t.id.clone(), t.title.clone()));
-
-                    (Some(summary), next)
-                } else {
-                    (None, None)
+                let pct = (comp_completed * 100)
+                    .checked_div(comp_total)
+                    .unwrap_or(100);
+                let mut detail_parts = Vec::new();
+                if comp_in_progress > 0 {
+                    detail_parts.push(format!("{comp_in_progress} in-progress"));
                 }
+                if comp_pending > 0 {
+                    detail_parts.push(format!("{comp_pending} pending"));
+                }
+                if comp_blocked > 0 {
+                    detail_parts.push(format!("{comp_blocked} blocked"));
+                }
+                if comp_awaiting > 0 {
+                    detail_parts.push(format!("{comp_awaiting} awaiting-decision"));
+                }
+
+                let summary = if detail_parts.is_empty() {
+                    format!("{comp_completed}/{comp_total} completed ({pct}%)")
+                } else {
+                    format!(
+                        "{comp_completed}/{comp_total} completed ({pct}%) [{}]",
+                        detail_parts.join(", ")
+                    )
+                };
+
+                let next = crate::task_queue::next_ready_task_id(&queue.tasks)
+                    .and_then(|id| queue.tasks.iter().find(|t| t.id == id))
+                    .map(|t| (t.id.clone(), t.title.clone()));
+
+                let (blocked_entries, decision_entries) = guidance_entries(&queue, &comp_path_str);
+
+                (Some(summary), next, blocked_entries, decision_entries)
             } else {
-                (None, None)
-            };
+                (None, None, Vec::new(), Vec::new())
+            }
+        } else {
+            (None, None, Vec::new(), Vec::new())
+        };
 
         // For stale components, show exactly what changed (expected vs
         // observed revision per document) plus a concrete diff command, so
@@ -448,9 +608,10 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
             ComponentState::Stale => Some(format!(
                 "Review the changed documents above, then run 'kvist component accept {comp_path_str}'"
             )),
-            ComponentState::Blocked => Some(format!(
-                "Resolve blocked tasks in {comp_path_str}/TODOS.yaml."
-            )),
+            ComponentState::Blocked => Some(
+                "Resolve the blocked tasks below; 'kvist help task-states' explains each state and its resolution."
+                    .to_owned(),
+            ),
             ComponentState::Invalid => Some(format!(
                 "Run 'kvist component validate {comp_path_str}' to inspect invalid artifacts."
             )),
@@ -463,6 +624,8 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
             ComponentState::Current => None,
         };
 
+        let blocked_details = render_overview_entries(&blocked_entries, &decision_entries);
+
         comp_summaries.push(CompSummary {
             path: comp_path_str,
             state: state_name,
@@ -471,6 +634,7 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
             next_task,
             stale_details,
             guidance,
+            blocked_details,
         });
     }
 
@@ -486,6 +650,9 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
     }
     if total_blocked > 0 {
         overall_details.push(format!("{total_blocked} blocked"));
+    }
+    if total_awaiting > 0 {
+        overall_details.push(format!("{total_awaiting} awaiting-decision"));
     }
     let details_suffix = if overall_details.is_empty() {
         String::new()
@@ -520,6 +687,9 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
         }
         if let Some(hint) = comp.guidance {
             output.push_str(&format!("│    Action:    {}\n", hint));
+        }
+        if let Some(details) = comp.blocked_details {
+            output.push_str(&details);
         }
     }
 

@@ -518,3 +518,172 @@ fn status_overview_lists_changed_documents_with_revisions_and_diff_hint() {
     assert!(stdout.contains("git diff HEAD -- src/DESIGN.md"));
     assert!(stdout.contains("kvist component accept ."));
 }
+
+/// A blocked component lists each blocked task with its reason and the exact
+/// next command, plus any awaiting-decision tasks, in both text and overview.
+#[test]
+fn status_blocked_details_list_reasons_and_exact_next_commands() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+
+    fs::write(
+        project.path().join("src/TODOS.yaml"),
+        valid_queue(
+            GENERATED_REQUIREMENTS_REVISION,
+            None,
+            r#"
+  - id: dep-task
+    title: Dependency task
+    description: A pending dependency for a blocked task.
+    context: Fixture for blocked guidance.
+    purpose: Keep one dependency incomplete.
+    expected_outcome: A blocked task with an incomplete dependency chain.
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - REQUIREMENTS.md#Project-status-inspection
+    timestamps:
+      created_at: 2026-08-16T12:19:23Z
+      updated_at: 2026-08-16T12:19:23Z
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: blocked-ready
+    title: Blocked ready task
+    description: A blocked task whose dependency chain is completed.
+    context: Fixture for blocked guidance.
+    purpose: Verify the run next-command.
+    expected_outcome: The report offers task run for this task.
+    kind: test
+    status: blocked
+    depends_on: []
+    requirements:
+      - REQUIREMENTS.md#Project-status-inspection
+    timestamps:
+      created_at: 2026-08-16T12:19:23Z
+      updated_at: 2026-08-16T12:19:23Z
+      completed_at: null
+    blocked_reason: missing test-command policy for component `x`. Please define a command for it in `kvist.toml` under `[test_policy]` and approve it
+    recovery_state: null
+  - id: blocked-waiting
+    title: Blocked waiting task
+    description: A blocked task whose dependency chain is not completed.
+    context: Fixture for blocked guidance.
+    purpose: Verify the transition next-command.
+    expected_outcome: The report offers task transition pending for this task.
+    kind: test
+    status: blocked
+    depends_on:
+      - dep-task
+    requirements:
+      - REQUIREMENTS.md#Project-status-inspection
+    timestamps:
+      created_at: 2026-08-16T12:19:23Z
+      updated_at: 2026-08-16T12:19:23Z
+      completed_at: null
+    blocked_reason: Waiting on dep-task.
+    recovery_state: null
+  - id: paused
+    title: Paused task
+    description: An awaiting-decision task.
+    context: Fixture for blocked guidance.
+    purpose: Verify decision visibility.
+    expected_outcome: The report lists the decision with a help pointer.
+    kind: test
+    status: awaiting-decision
+    depends_on: []
+    requirements:
+      - REQUIREMENTS.md#Project-status-inspection
+    timestamps:
+      created_at: 2026-08-16T12:19:23Z
+      updated_at: 2026-08-16T12:19:23Z
+      completed_at: null
+    blocked_reason: Awaiting decision on product direction.
+    recovery_state: null
+"#,
+        ),
+    )
+    .expect("write fixture queue");
+
+    let text = run_kvist(&[
+        "status",
+        "--format",
+        "text",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(text.status.success());
+    let stdout = String::from_utf8(text.stdout).expect("UTF-8 text output");
+    assert!(stdout.contains("component: . state: blocked"));
+    assert!(stdout.contains(
+        "Next Step: 2 blocked task(s) need resolution; 'kvist help task-states' explains states and transitions."
+    ));
+    assert!(stdout.contains("blocked: blocked-ready"));
+    assert!(stdout.contains(
+        "reason: missing test-command policy for component `x`. Please define a command for it in `kvist.toml`\u{2026}"
+    ));
+    assert!(stdout.contains("next: kvist task run . blocked-ready"));
+    assert!(stdout.contains("blocked: blocked-waiting"));
+    assert!(stdout.contains("reason: Waiting on dep-task."));
+    assert!(stdout.contains(
+        "next: kvist task transition . blocked-waiting pending (1 dependency task incomplete)"
+    ));
+    assert!(stdout.contains("decision: paused"));
+    assert!(stdout.contains("reason: Awaiting decision on product direction."));
+    assert!(
+        stdout.contains("next: human decision needed; 'kvist help task-states' explains resuming")
+    );
+
+    let overview = run_kvist(&[
+        "status",
+        "--format",
+        "overview",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(overview.status.success());
+    let stdout = String::from_utf8(overview.stdout).expect("UTF-8 overview output");
+    assert!(stdout.contains("1 awaiting-decision"));
+    assert!(stdout.contains(
+        "Action:    Resolve the blocked tasks below; 'kvist help task-states' explains each state and its resolution."
+    ));
+    assert!(stdout.contains("Blocked:   blocked-ready"));
+    assert!(stdout.contains(
+        "reason: missing test-command policy for component `x`. Please define a command for it in `kvist.toml`\u{2026}"
+    ));
+    assert!(stdout.contains("next:   kvist task run . blocked-ready"));
+    assert!(stdout.contains("Blocked:   blocked-waiting"));
+    assert!(stdout.contains(
+        "next:   kvist task transition . blocked-waiting pending (1 dependency task incomplete)"
+    ));
+    assert!(stdout.contains("Decisions: paused"));
+    assert!(
+        stdout
+            .contains("next:   human decision needed; 'kvist help task-states' explains resuming")
+    );
+}
+
+/// The stable text report names a next step for unsupported-version components.
+#[test]
+fn status_text_reports_next_step_for_unsupported_version() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+
+    copy_valid_component_artifacts(&project, "unsupported");
+    fs::write(
+        project.path().join("src/unsupported/TODOS.yaml"),
+        "schema_version: 99\ntasks: []\n",
+    )
+    .expect("write unsupported queue");
+
+    let text = run_kvist(&[
+        "status",
+        "--format",
+        "text",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(text.status.success());
+    let stdout = String::from_utf8(text.stdout).expect("UTF-8 text output");
+    assert!(stdout.contains("component: unsupported state: unsupported-version"));
+    assert!(stdout.contains("Next Step: "));
+    assert!(stdout.contains("'kvist help concepts'"));
+}

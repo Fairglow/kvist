@@ -413,6 +413,53 @@ pub fn next_ready_task_id(tasks: &[Task]) -> Option<String> {
         .map(|task| task.id.clone())
 }
 
+/// Returns whether every direct and transitive dependency of `task` exists and
+/// is `completed`. A blocked task with a fully completed chain is ready to be
+/// re-run (blocked → in-progress is legal), so this drives the "next command"
+/// guidance rendered by status.
+pub fn dependencies_completed(task: &Task, tasks: &[Task]) -> bool {
+    let mut stack: Vec<&str> = task.depends_on.iter().map(|d| d.as_str()).collect();
+    let mut visited = std::collections::BTreeSet::new();
+    while let Some(dep) = stack.pop() {
+        if !visited.insert(dep) {
+            continue;
+        }
+        match tasks.iter().find(|other| other.id == dep) {
+            Some(other) => {
+                if other.status != TaskStatus::Completed {
+                    return false;
+                }
+                stack.extend(other.depends_on.iter().map(|d| d.as_str()));
+            }
+            None => return false,
+        }
+    }
+    true
+}
+
+/// Counts the direct and transitive dependencies of `task` that are not
+/// completed (missing dependencies count as incomplete).
+pub fn incomplete_dependency_count(task: &Task, tasks: &[Task]) -> usize {
+    let mut stack: Vec<&str> = task.depends_on.iter().map(|d| d.as_str()).collect();
+    let mut visited = std::collections::BTreeSet::new();
+    let mut incomplete = 0usize;
+    while let Some(dep) = stack.pop() {
+        if !visited.insert(dep) {
+            continue;
+        }
+        match tasks.iter().find(|other| other.id == dep) {
+            Some(other) => {
+                if other.status != TaskStatus::Completed {
+                    incomplete += 1;
+                }
+                stack.extend(other.depends_on.iter().map(|d| d.as_str()));
+            }
+            None => incomplete += 1,
+        }
+    }
+    incomplete
+}
+
 fn append_component(output: &mut String, component: &ComponentState, indentation: usize) {
     line(
         output,
@@ -1172,6 +1219,43 @@ mod tests {
         // A dependency missing from the queue is never satisfied.
         let tasks = vec![task("a", TaskStatus::Pending, &["missing"])];
         assert_eq!(next_ready_task_id(&tasks), None);
+    }
+
+    #[test]
+    fn dependencies_completed_covers_direct_and_transitive_chains() {
+        // No dependencies is trivially completed.
+        assert!(dependencies_completed(
+            &task("a", TaskStatus::Blocked, &[]),
+            &[]
+        ));
+        // A completed direct dependency suffices.
+        let tasks = vec![
+            task("a", TaskStatus::Blocked, &["b"]),
+            task("b", TaskStatus::Completed, &[]),
+        ];
+        assert!(dependencies_completed(&tasks[0], &tasks));
+        // A pending direct dependency fails.
+        let tasks = vec![
+            task("a", TaskStatus::Blocked, &["b"]),
+            task("b", TaskStatus::Pending, &[]),
+        ];
+        assert!(!dependencies_completed(&tasks[0], &tasks));
+        // A missing dependency fails.
+        let tasks = vec![task("a", TaskStatus::Blocked, &["missing"])];
+        assert!(!dependencies_completed(&tasks[0], &tasks));
+        // Transitive completion follows the whole chain.
+        let tasks = vec![
+            task("a", TaskStatus::Blocked, &["b"]),
+            task("b", TaskStatus::Completed, &["c"]),
+            task("c", TaskStatus::Completed, &[]),
+        ];
+        assert!(dependencies_completed(&tasks[0], &tasks));
+        let tasks = vec![
+            task("a", TaskStatus::Blocked, &["b"]),
+            task("b", TaskStatus::Completed, &["c"]),
+            task("c", TaskStatus::Pending, &[]),
+        ];
+        assert!(!dependencies_completed(&tasks[0], &tasks));
     }
 
     fn task_with_status(id: &str, status: TaskStatus, reason: Option<&str>) -> Task {
