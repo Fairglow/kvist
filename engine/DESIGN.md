@@ -18,7 +18,7 @@ evidence.
 
 | Area              | Modules                                                                                                            | Responsibility                                                                                                                      |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
-| CLI boundary      | `cli`, `main`, `error`                                                                                             | Typed grammar, dispatch, JSON/text output, domain errors                                                                            |
+| CLI boundary      | `cli`, `main`, `error`, `help`                                                                                     | Typed grammar, dispatch, JSON/text output, domain errors, guided help tour and concept topics                                       |
 | Durable artifacts | `artifacts`, `component_documents`, `file_io`, `filesystem`                                                        | Templates, Markdown validation, bounded safe reads, atomic writes                                                                   |
 | Project model     | `config`, `discovery`, `project_state`, `tree`, `status`, `vcs`                                                    | Configuration, recursive layout, state classification, deterministic reports                                                        |
 | Workflow          | `task_queue`, `task_commands`, `sandbox`                                                                           | Queue schema, lifecycle, locks, policy approval, runner protocol, evidence                                                          |
@@ -703,6 +703,39 @@ current component), and the walker treats a complete `--` token as the end
 of flag parsing, so Tab after `--` completes positionals only. Editor launch
 retries the transient Linux `ETXTBSY` ("text file busy") a bounded number of
 times before reporting it.
+
+### Guided help and actionable status guidance
+
+`help.rs` is a pure, I/O-free module: `HelpTopic` is a closed
+`ValueEnum` set (`concepts`, `lifecycle`, `task-states`), and
+`render(Option<HelpTopic>)` is a pure string function. `kvist help [TOPIC]`
+(clap variant `Help`) and the shell's `help [TOPIC]` builtin both dispatch to
+the same renderer, so the content cannot drift between the two surfaces. Tab
+completion is closed-set: the clap-derived completion tree supplies the topic
+values for `kvist help`, and the shell builtin `help` node carries the same
+closed `TOPIC` positional. Every topic ends with a pointer to the deeper
+documentation (`GUIDE.md`, `docs/command-set.md`, or a component's
+`CONTRACT.md`), and each actionable line names a real command.
+
+Status guidance in `status.rs` reuses the `TODOS.yaml` parse it already
+performs for task progress. For a blocked component it lists each blocked
+task with its `blocked_reason` first line truncated to a bounded 96
+characters (reasons are redacted when recorded, so no new secret path is
+introduced) and derives the exact next command from
+`task_queue::dependencies_completed(task, tasks)`: when the dependency chain
+is completed the command is `kvist task run <COMPONENT_DIR> <TASK_ID>`
+(blocked → in-progress is legal); otherwise it is `kvist task transition
+<COMPONENT_DIR> <TASK_ID> pending` with the count of incomplete dependencies.
+Awaiting-decision tasks are listed with a pointer to `kvist help
+task-states` because resuming them is a human decision. The details render as
+separate indented lines under the overview Action line and as `blocked:` /
+`decision:` entries in the stable text report; the JSON report is unchanged.
+
+`task transition` failures (`transition_error`) enumerate the legal target
+statuses from `TaskStatus::can_transition_to` — the closed five-state set in
+deterministic declaration order — followed by a pointer to
+`kvist help task-states`, so an illegal move is always paired with the legal
+moves.
 
 ## Failure and recovery
 

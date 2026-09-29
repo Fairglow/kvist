@@ -531,6 +531,32 @@ review before the component becomes valid again; the harness pauses the task and
 defers that finalization to the human. The existing `propose intent`/`derive
 draft` path provides the no-clobber draft mechanism this extends.
 
+### REQ-HELP-GUIDANCE
+
+Kvist MUST answer "what is this state, and what do I do next?" from the
+command line and the interactive shell without external documentation. Status
+output for every non-current component state MUST name the concrete cause —
+for blocked components, each blocked task with its recorded `blocked_reason`
+(truncated to a bounded first line) and each awaiting-decision task — and an
+actionable next command, or, where the next step is a human decision, an
+explicit pointer to the help topic that explains the state and its resolution.
+Hints MUST be short, dense, and name real commands.
+
+The engine MUST provide `kvist help` rendering a short tour of the core
+concepts (project, component, intent documents, tasks) and the component
+lifecycle, plus named topics: the core concepts, the lifecycle with the exact
+commands, and the durable task states with the legal transitions and the
+command that achieves each. Topics MUST be selectable by name on the command
+line with tab completion, and the shell's `help` builtin MUST accept the same
+topics with completion. Every topic MUST end with a pointer to the deeper
+documentation (`GUIDE.md`, `docs/command-set.md`, or a component's
+`CONTRACT.md`).
+
+An invalid task transition MUST report the legal transitions from the current
+state together with a pointer to the task-states help topic. The `task run`
+help MUST document the multi-task task specifications (exact task ID, item
+prefix, `all`).
+
 ### REQ-CONTRACT-VERIFICATION
 
 Kvist MUST plan stable contract-clause locators, initially using existing

@@ -43,7 +43,10 @@ The `kvist` executable provides (the authoritative design is
 - `component commit ACCEPTANCE_ID`
 - `task next [COMPONENT_DIR]`
 - `task transition [COMPONENT_DIR] TASK_ID STATUS [--reason TEXT]`
-- `task run [COMPONENT_DIR] [TASK_ID] [--stream]`
+- `task run [COMPONENT_DIR] [TASK_ID] [--stream]`, where TASK_ID is an exact
+  task ID, an item prefix selecting every task of that item, or `all` (every
+  uncompleted task of the component, run sequentially, stopping at the first
+  failure)
 - `task log [COMPONENT_DIR] TASK_ID`
 - `task replay SESSION_JSONL [--max-turns N]`
 - `task approve-policy [PROJECT_DIR]`
@@ -62,6 +65,9 @@ The `kvist` executable provides (the authoritative design is
 [--global]`, and `agent role clear [ROLE] [--all] [--global]`
 - `agent check [--global]`
 - `completions SHELL`
+- `help [TOPIC]` with TOPIC one of `concepts`, `lifecycle`, `task-states`
+  (tab-completable); no topic renders the guided tour listing the available
+  topics
 
 **Context resolution.** Project-level commands resolve the project root by
 walking upward from the current working directory to the nearest directory
@@ -84,10 +90,19 @@ reported when `component accept --commit` records the acceptance but cannot
 create the Git commit).
 
 **Guidance.** Project-state domain failures end with a `hint:` line naming the
-concrete unblocking command. `status` (overview) renders, per component, state,
-document validity, task progress, the next ready task, an Action line for every
-non-current state, and — for stale components — each changed document with its
-expected and observed revision plus a `git diff HEAD -- <path>` review hint.
+concrete unblocking command. `status` (overview and text) renders, per
+component, state, document validity, task progress, the next ready task, an
+Action line for every non-current state, and — for stale components — each
+changed document with its expected and observed revision plus a `git diff
+HEAD -- <path>` review hint. For blocked components, the status output lists
+each blocked task with its truncated `blocked_reason` first line and the exact
+next command (`task run <COMPONENT_DIR> <TASK_ID>` when the task's dependency
+chain is completed, else `task transition <COMPONENT_DIR> <TASK_ID> pending`
+with the incomplete-dependency count); awaiting-decision tasks are listed with
+a pointer to the task-states help topic. Every Action line names a concrete
+next command or the `kvist help <TOPIC>` that explains a required human
+decision. Invalid `task transition` failures report the legal transitions from
+the current state plus a pointer to `kvist help task-states`.
 Gating success messages chain to the next lifecycle stage (`component accept`
 points at `task next`; `task run` points at `task log`; `task approve-policy`
 points at `task run`). Agent configuration commands operate on the project
@@ -193,14 +208,16 @@ set.
 `shell [PROJECT_DIR]` starts the interactive workspace shell and requires an
 interactive standard input; it fails with an actionable diagnostic otherwise
 and is not supported under global `--json`. Lines are parsed against the same
-command surface as the CLI. Static completion is derived from that surface and
-dynamic completion covers component paths, task IDs, attempt IDs, model
-profile names, and the active VCS branch; dynamic sets are refreshed after
+command surface as the CLI. Static completion is derived from that surface (including the help topics as
+closed value sets for `help [TOPIC]`) and dynamic completion covers component
+paths, task IDs, attempt IDs, model profile names, and the active VCS branch; dynamic sets are refreshed after
 every executed command and each source degrades independently without aborting
 the session. The shell builtins are `cd [COMPONENT_DIR]`,
 `tasks [COMPONENT_DIR] [--status STATUS]`, `run [COMPONENT_DIR] [TASK_ID]`,
-`help`, `last [COUNT]`, `history [COUNT]`, `journal`, `locks [clean]`, and
-`exit`/`quit`. `cd` remembers a default component for the builtins and for
+`help [TOPIC]`, `last [COUNT]`, `history [COUNT]`, `journal`, `locks
+[clean]`, and `exit`/`quit`. `help` with no topic lists the builtins and the
+available help topics; with a topic it renders that topic, exactly as
+`kvist help [TOPIC]` does. `cd` remembers a default component for the builtins and for
 completion ordering; when `tasks` or `run` names a component different from the
 current focus, the shell prints a hint to switch and leaves the focus
 unchanged. `run` without a task ID suggests the first ready task of the
