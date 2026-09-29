@@ -2743,6 +2743,7 @@ fn valid_digest(value: &str) -> bool {
 /// # Returns
 ///
 /// A status message summarizing the finalization and commit operation.
+#[allow(clippy::too_many_arguments)]
 pub fn finalize(
     project_dir: &Path,
     component_dir: &Path,
@@ -3982,13 +3983,13 @@ pub fn run_task(
         });
     }
 
-    let (approved_runner, policy_identity, secret) = match task_run_approval(&project_dir, &config)?
+    let (approved_runner, policy_identity, secret) = match task_run_approval(project_dir, &config)?
     {
         TaskRunApproval::Ready {
             runner,
             policy_identity,
         } => {
-            let (_, secret) = load_authenticated_execution_approval(&project_dir, &config)?;
+            let (_, secret) = load_authenticated_execution_approval(project_dir, &config)?;
             (runner, policy_identity, secret)
         }
         TaskRunApproval::DescriptorUnavailable {
@@ -3999,7 +4000,7 @@ pub fn run_task(
             fence_pre_spawn_failure(
                 component_path,
                 task_id,
-                &project_dir,
+                project_dir,
                 &config,
                 &approval,
                 &secret,
@@ -4017,10 +4018,10 @@ pub fn run_task(
             reason: "task execution requires a project-local [sandbox] configuration".to_owned(),
         })?;
     let approved_backend =
-        crate::sandbox::backend_identity(sandbox_config, &project_dir, config.vcs)?;
+        crate::sandbox::backend_identity(sandbox_config, project_dir, config.vcs)?;
     let sandbox_probe = crate::sandbox::ensure_available(
         sandbox_config,
-        &project_dir,
+        project_dir,
         config.vcs,
         &approved_runner,
         &approved_backend,
@@ -4092,7 +4093,7 @@ pub fn run_task(
         // 4. Sliced context files gathering
         let agent_attempt_path = attempt_path(&context.component_dir, task_id)?;
         let attempt_id = next_attempt_id(&agent_attempt_path)?;
-        let write_scope = approved_write_scope(&project_dir, &context, &config)?;
+        let write_scope = approved_write_scope(project_dir, &context, &config)?;
         let pre_queue_digest = current_queue_digest(&context.component_dir)?;
 
         // Build the PreparedAttempt struct with all required fields.
@@ -4167,7 +4168,7 @@ pub fn run_task(
             Some(&approved_runner),
             Some(&sandbox_probe),
             crate::agent::AgentExecutionRequest {
-                project_root: &project_dir,
+                project_root: project_dir,
                 vcs_selection: config.vcs,
                 prompt: &prompt,
                 context_paths: &context_files,
@@ -4242,7 +4243,7 @@ pub fn run_task(
                 match verify_task(
                     component_path,
                     task_id,
-                    &project_dir,
+                    project_dir,
                     &config,
                     &sandbox_probe,
                     &policy_identity,
@@ -4255,7 +4256,7 @@ pub fn run_task(
                                 for entry in entries.flatten() {
                                     let path = entry.path();
                                     if path.is_file()
-                                        && let Ok(rel) = path.strip_prefix(&project_dir)
+                                        && let Ok(rel) = path.strip_prefix(project_dir)
                                         && let Ok(bytes) = fs::read(&path)
                                     {
                                         let post_digest = format!(
