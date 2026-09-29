@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:1230963380e3f030fecd13fc16222cc49aca2aa0467431bf706729e5af9e2ba8"
-  contract_revision: "sha256:a4dd7850e0b4dbc43ded73d3dc63a430f43137d1b2bbccaec20738f9dac695ed"
-  design_revision: "sha256:d690dda6b6bd303c18ce0a204e899da48aed8df6c2eea8cd82812ab5412fb698"
+  requirements_revision: "sha256:1eafde6ee469d3b1845c65f0452c2809c7eb12882708454a10a6dba84aedf568"
+  contract_revision: "sha256:68e4278bdd813bf810be755294ab3430d3061de44c219e31666986f08aa5d538"
+  design_revision: "sha256:2a7c4c3bb961ed91afab76fbcdb33cca664a2842746d37a9a47dee6643bc76fd"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-26T08:00:00Z"
+    checked_at: "2026-09-29T18:19:45Z"
     stale_since: null
     causes: []
 tasks:

@@ -98,7 +98,7 @@ tasks:
     purpose: "Replace the placeholder-era security receipts with genuine independent findings before the runner is trusted as the enforcement boundary."
     expected_outcome: "A genuine independent audit records or remediates every high-confidence finding, and its disposition is retained for human arbitration against the placeholder-era receipts."
     kind: security-audit
-    status: pending
+    status: blocked
     depends_on:
       - "sandbox-runner-implement-code"
     requirements:
@@ -107,9 +107,9 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-15T13:15:00Z"
-      updated_at: "2026-09-15T21:31:22Z"
+      updated_at: "2026-09-28T22:32:35Z"
       completed_at: null
-    blocked_reason: null
+    blocked_reason: "agent execution exceeded the combined output limit while contacting the local model gateway. Bounded redacted logs are written to: /opt/proj/kvist/./sandbox_runner/.kvist/logs/sandbox-runner-reverification-security-audit_2026-09-28T22-32-13Z.log"
     recovery_state: null
   - id: "sandbox-runner-reverification-compliance-review"
     title: "Re-run sandbox runner compliance review"
