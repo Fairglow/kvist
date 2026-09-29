@@ -199,10 +199,18 @@ pub fn inject_shell_builtins(root: &mut CommandNode) {
         },
         CommandNode {
             name: "help".to_owned(),
-            help: Some("List shell builtins and top workflow commands".to_owned()),
+            help: Some("List builtins, or one help topic".to_owned()),
             subcommands: Vec::new(),
             flags: Vec::new(),
-            positionals: Vec::new(),
+            positionals: vec![PositionalSpec {
+                value_name: Some("TOPIC".to_owned()),
+                possible_values: vec![
+                    "concepts".to_owned(),
+                    "lifecycle".to_owned(),
+                    "task-states".to_owned(),
+                ],
+                help: Some("Help topic; omitted lists builtins and topics".to_owned()),
+            }],
         },
         CommandNode {
             name: "last".to_owned(),

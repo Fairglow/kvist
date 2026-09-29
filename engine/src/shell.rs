@@ -186,11 +186,30 @@ impl Shell {
             "history" => {
                 self.handle_history(&arguments, line, history);
             }
-            "help" => {
-                display_output(&render_help(self.theme));
-                self.journal.append(journal_entry(line, "shown"));
-                self.note(false);
-            }
+            "help" => match arguments.len() {
+                0 => {
+                    display_output(&render_help(self.theme));
+                    self.journal.append(journal_entry(line, "shown"));
+                    self.note(false);
+                }
+                1 => {
+                    let (text, failed) = crate::help::render_named(&arguments[0]);
+                    if failed {
+                        report_error(self.theme, &text);
+                        self.journal.append(journal_entry(line, "usage hint"));
+                        self.note(true);
+                    } else {
+                        display_output(&text);
+                        self.journal.append(journal_entry(line, "shown"));
+                        self.note(false);
+                    }
+                }
+                _ => {
+                    report_error(self.theme, "usage: help [concepts|lifecycle|task-states]");
+                    self.journal.append(journal_entry(line, "usage hint"));
+                    self.note(true);
+                }
+            },
             "cd" => {
                 self.handle_cd(&arguments, line);
             }
@@ -1108,7 +1127,12 @@ fn render_help(theme: Theme) -> String {
     text.push_str(
         "  status                       human-friendly project overview and next steps\n",
     );
-    text.push_str("  help                           this list\n");
+    text.push_str(
+        "  help [TOPIC]               this list; topics: concepts, lifecycle, task-states\n",
+    );
+    text.push_str(
+        "                               (same content as `kvist help [TOPIC]`: states, transitions, lifecycle)\n",
+    );
     text.push_str("  exit | quit                    leave the shell\n");
     text.push_str(
         "\nKey bindings: Tab complete · arrows navigate · Ctrl+C cancel command · Ctrl+D exit\n",
@@ -1993,6 +2017,18 @@ mod tests {
         ] {
             assert!(text.contains(name), "help missing {name}");
         }
+    }
+
+    #[test]
+    fn render_help_advertises_the_help_topics() {
+        let text = render_help(Theme::plain());
+        for topic in ["concepts", "lifecycle", "task-states"] {
+            assert!(text.contains(topic), "help missing topic {topic}");
+        }
+        assert!(
+            text.contains("kvist help"),
+            "help should point at the CLI help command"
+        );
     }
 
     #[test]

@@ -22,6 +22,7 @@ pub mod discovery;
 mod error;
 pub(crate) mod file_io;
 mod filesystem;
+pub mod help;
 pub mod import;
 pub mod init;
 pub(crate) mod interruptible_stdin;

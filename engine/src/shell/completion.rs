@@ -1302,4 +1302,23 @@ mod tests {
         // The first `task run` positional is a component: `-- .` offers it.
         assert_eq!(values(&complete(&c, "task run -- .")), vec!["."]);
     }
+
+    // ---- Help topics -------------------------------------------------------
+
+    #[test]
+    fn help_builtin_offers_the_closed_topic_set() {
+        let c = completer();
+        assert_eq!(
+            values(&complete(&c, "help ")),
+            vec!["concepts", "lifecycle", "task-states"]
+        );
+    }
+
+    #[test]
+    fn help_topic_prefix_filters() {
+        let c = completer();
+        assert_eq!(values(&complete(&c, "help t")), vec!["task-states"]);
+        assert_eq!(values(&complete(&c, "help l")), vec!["lifecycle"]);
+        assert!(complete(&c, "help n").is_empty());
+    }
 }

@@ -8,9 +8,9 @@ use std::{
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::{
-    KvistError, Result, component_documents, config, context, convert, discovery, import, init,
-    project_state, prompt_input, reverse_discovery, status, task_commands, task_queue::TaskStatus,
-    toolchain, tree, vendor_command, wizard,
+    KvistError, Result, component_documents, config, context, convert, discovery, help::HelpTopic,
+    import, init, project_state, prompt_input, reverse_discovery, status, task_commands,
+    task_queue::TaskStatus, toolchain, tree, vendor_command, wizard,
 };
 
 /// Kvist's top-level command-line interface.
@@ -18,6 +18,7 @@ use crate::{
 #[command(
     name = "kvist",
     version,
+    disable_help_subcommand = true,
     about = "Spec-driven architecture workflow for human-directed AI development",
     long_about = "\
 Kvist manages filesystem-native requirements, contracts, designs, task queues, \
@@ -33,7 +34,9 @@ Typical flow:\n\
 \nCommands work from the directory you are standing in: the project root is \
 found by walking upward to the nearest kvist.toml, and component commands act \
 on the component containing the current directory unless you name one \
-explicitly. Run `kvist <command> --help` for details."
+explicitly. Run `kvist <command> --help` for details, and `kvist help` for \
+the core concepts, the lifecycle, and the task states with their legal \
+transitions."
 )]
 pub struct Cli {
     /// Output structured JSON instead of plain text.
@@ -207,9 +210,16 @@ pub enum Command {
     },
     /// Generate shell completion scripts on stdout.
     Completions {
-        /// Target shell for completion.
+        /// Target shell for completion generation.
         #[arg(value_name = "SHELL", value_enum)]
         shell: SupportedShell,
+    },
+    /// Guided help: the 30-second tour, or one of the concepts, lifecycle, or
+    /// task-states topics.
+    Help {
+        /// Help topic; omitted renders the guided tour.
+        #[arg(value_name = "TOPIC", value_enum)]
+        topic: Option<HelpTopic>,
     },
     /// Apply one staged authoring effect inside the effect sandbox.
     ///
@@ -1206,6 +1216,9 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     "{{\"status\":\"success\",\"command\":\"completions\",\"shell\":\"{shell:?}\",\"script\":{escaped_script}}}"
                 )))
             }
+            Command::Help { topic } => {
+                Ok(CommandOutput::message(crate::help::render(topic)))
+            }
             // Dispatched above before presentation handling; retained so the
             // match stays total and the JSON branch never sees it.
             Command::AuthoringApply {
@@ -1653,6 +1666,7 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 let script = String::from_utf8(buffer).expect("valid UTF-8 completion script");
                 Ok(CommandOutput::message(script))
             }
+            Command::Help { topic } => Ok(CommandOutput::message(crate::help::render(topic))),
             // Dispatched above before presentation handling; retained so the
             // match stays total and the plain branch never sees it.
             Command::AuthoringApply {
