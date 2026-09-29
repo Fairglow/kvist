@@ -16,6 +16,7 @@ pub mod authoring;
 pub mod cli;
 pub mod component_documents;
 pub mod config;
+pub mod context;
 pub mod convert;
 pub mod discovery;
 mod error;

@@ -270,6 +270,76 @@ pub fn inject_shell_builtins(root: &mut CommandNode) {
             }
         }
     }
+
+    // Task subcommands that parse their trailing positionals as one `args`
+    // vector would expose a single opaque ARG slot in the derived tree. Re-expose
+    // the documented slot shapes so completion and help stay precise.
+    reexpose_task_slots(root);
+}
+
+/// One documented positional slot of a task subcommand.
+fn task_slot(value_name: &str, help: &str, possible_values: Vec<String>) -> PositionalSpec {
+    PositionalSpec {
+        value_name: Some(value_name.to_owned()),
+        possible_values,
+        help: Some(help.to_owned()),
+    }
+}
+
+/// Re-exposes the documented positional slot shapes for task subcommands
+/// whose trailing positionals are parsed as a single vector.
+fn reexpose_task_slots(root: &mut CommandNode) {
+    let component_help =
+        "Component directory; defaults to the component containing the current directory."
+            .to_owned();
+    let task_help = "Queue-local task ID.".to_owned();
+    let attempt_help = "Stable identity of the fenced attempt.".to_owned();
+
+    let Some(task) = root.find_subcommand_mut("task") else {
+        return;
+    };
+    if let Some(transition) = task.find_subcommand_mut("transition") {
+        transition.positionals = vec![
+            task_slot("COMPONENT_DIR", &component_help, Vec::new()),
+            task_slot("TASK_ID", &task_help, Vec::new()),
+            task_slot(
+                "STATUS",
+                "Requested durable status",
+                vec![
+                    "pending".to_owned(),
+                    "in-progress".to_owned(),
+                    "blocked".to_owned(),
+                    "awaiting-decision".to_owned(),
+                    "completed".to_owned(),
+                ],
+            ),
+        ];
+    }
+    if let Some(log) = task.find_subcommand_mut("log") {
+        log.positionals = vec![
+            task_slot("COMPONENT_DIR", &component_help, Vec::new()),
+            task_slot("TASK_ID", &task_help, Vec::new()),
+        ];
+    }
+    if let Some(recover) = task.find_subcommand_mut("recover") {
+        recover.positionals = vec![
+            task_slot("COMPONENT_DIR", &component_help, Vec::new()),
+            task_slot("TASK_ID", &task_help, Vec::new()),
+            task_slot("ATTEMPT_ID", &attempt_help, Vec::new()),
+        ];
+    }
+    if let Some(finalize) = task.find_subcommand_mut("finalize") {
+        finalize.positionals = vec![
+            task_slot("COMPONENT_DIR", &component_help, Vec::new()),
+            task_slot("TASK_ID", &task_help, Vec::new()),
+            task_slot("ATTEMPT_ID", &attempt_help, Vec::new()),
+            task_slot(
+                "DISPOSITION",
+                "Explicit human disposition",
+                vec!["accept".to_owned(), "block".to_owned()],
+            ),
+        ];
+    }
 }
 
 fn propagate_globals(node: &mut CommandNode, globals: &[FlagSpec]) {
@@ -385,10 +455,8 @@ mod tests {
             "reverse-discover",
             "prompt",
             "status",
-            "overview",
             "task",
             "component",
-            "vcs",
             "agent",
             "completions",
             "vendor",
@@ -396,7 +464,7 @@ mod tests {
         ] {
             assert!(root.find_subcommand(name).is_some(), "missing {name}");
         }
-        assert_eq!(root.subcommands.len(), 17 + 10);
+        assert_eq!(root.subcommands.len(), 15 + 10);
     }
 
     #[test]
@@ -495,29 +563,30 @@ mod tests {
     fn component_node_exposes_its_subcommands() {
         let root = root();
         let component = node(&root, "component");
-        for name in ["new", "validate", "accept"] {
+        for name in ["new", "validate", "accept", "commit"] {
             assert!(
                 component.find_subcommand(name).is_some(),
                 "missing component {name}"
             );
         }
-        assert_eq!(component.subcommands.len(), 3);
+        assert_eq!(component.subcommands.len(), 4);
     }
 
     #[test]
-    fn vcs_and_agent_nodes_expose_their_subcommands() {
+    fn agent_node_exposes_its_subcommands() {
         let root = root();
-        assert!(
-            node(&root, "vcs")
-                .find_subcommand("commit-accepted")
-                .is_some()
-        );
         let agent = node(&root, "agent");
-        assert!(agent.find_subcommand("profile").is_some());
-        assert!(agent.find_subcommand("role").is_some());
-        assert!(agent.find_subcommand("setup").is_some());
-        assert!(agent.find_subcommand("list").is_some());
-        assert!(agent.find_subcommand("remove").is_some());
+        for name in ["setup", "list", "remove", "check", "role"] {
+            assert!(
+                agent.find_subcommand(name).is_some(),
+                "missing agent {name}"
+            );
+        }
+        assert_eq!(agent.subcommands.len(), 5);
+        assert!(
+            agent.find_subcommand("profile").is_none(),
+            "agent profile was merged into agent setup/list/remove"
+        );
     }
 
     #[test]

@@ -732,14 +732,14 @@ fn required_signing_failure_keeps_acceptance_pending_for_exact_retry() {
     assert_success(&keygen, "generate signing key for retry");
     let retry = run_kvist(
         project.path(),
-        &["--json", "vcs", "commit-accepted", acceptance_id],
+        &["--json", "component", "commit", acceptance_id],
     );
     assert!(
         retry.status.success(),
         "exact pending acceptance retry failed: {}",
         output_text(&retry)
     );
-    let retry_result = parse_json_stdout(&retry, "vcs commit-accepted");
+    let retry_result = parse_json_stdout(&retry, "component commit");
     assert_eq!(
         retry_result.get("acceptance_id").and_then(Value::as_str),
         Some(acceptance_id)
@@ -823,7 +823,7 @@ fn pending_commit_refuses_concurrent_head_movement() {
     );
     let concurrent_head = head(project.path());
 
-    let retry = run_kvist(project.path(), &["vcs", "commit-accepted", acceptance_id]);
+    let retry = run_kvist(project.path(), &["component", "commit", acceptance_id]);
 
     assert!(!retry.status.success());
     assert!(
@@ -912,12 +912,12 @@ fn jujutsu_commit_automation_is_explicitly_unsupported() {
 }
 
 #[test]
-fn vcs_commit_accepted_cli_is_scoped_to_one_acceptance_id() {
+fn component_commit_cli_is_scoped_to_one_acceptance_id() {
     let project = create_target_project("pending");
-    let help = run_kvist(project.path(), &["vcs", "commit-accepted", "--help"]);
+    let help = run_kvist(project.path(), &["component", "commit", "--help"]);
     assert!(
         help.status.success(),
-        "planned VCS recovery command missing: {}",
+        "planned component commit recovery command missing: {}",
         output_text(&help)
     );
     let text = output_text(&help);
@@ -926,7 +926,7 @@ fn vcs_commit_accepted_cli_is_scoped_to_one_acceptance_id() {
     assert!(!text.contains("--push"));
     assert!(!text.contains("--amend"));
 
-    let missing = run_kvist(project.path(), &["vcs", "commit-accepted", ACCEPTANCE_ID]);
+    let missing = run_kvist(project.path(), &["component", "commit", ACCEPTANCE_ID]);
     assert!(!missing.status.success());
     assert!(
         output_text(&missing).contains(ACCEPTANCE_ID)

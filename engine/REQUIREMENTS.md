@@ -233,7 +233,7 @@ actionable message when the pinned toolchain is absent or the recorded manifest
 no longer matches the on-disk toolchain.
 
 Current implementation status: implemented. Pin parsing, channel validation,
-the host provisioning step (`kvist toolchain ensure`), the durable manifest,
+the host provisioning step (`kvist toolchain`), the durable manifest,
 and channel-explicit, fail-closed enforcement on use are implemented and
 evidenced by unit tests plus end-to-end tests, including a pinned
 `nightly` toolchain built and tested offline in the sandbox. The authoring

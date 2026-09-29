@@ -5,7 +5,7 @@ use std::{
 
 use thiserror::Error;
 
-use crate::config::Role;
+use crate::{config::Role, context::PROJECT_MARKER};
 
 /// Errors that Kvist can report independently of its presentation layer.
 #[derive(Debug, Error)]
@@ -215,6 +215,39 @@ pub enum KvistError {
         /// Missing configuration path.
         path: PathBuf,
     },
+    /// No Kvist project marker was found at or above the current directory.
+    #[error(
+        "not inside a Kvist project: no {PROJECT_MARKER} found at or above `{searched_from}`\n\n\
+         hint: run `kvist init <DIR>` to create a project, or pass an explicit PROJECT_DIR"
+    )]
+    NotInProject {
+        /// Directory where the upward search started.
+        searched_from: PathBuf,
+    },
+    /// The current directory is not at or below the resolved project root.
+    #[error(
+        "current directory `{cwd}` is not inside the Kvist project `{project_dir}`\n\n\
+         hint: cd into a component (see `kvist tree`), or pass an explicit COMPONENT_DIR"
+    )]
+    ComponentNotInsideProject {
+        /// The current working directory.
+        cwd: PathBuf,
+        /// The resolved project root.
+        project_dir: PathBuf,
+    },
+    /// The current directory is not inside any discovered component.
+    #[error(
+        "current directory `{cwd}` is not inside any Kvist component of project `{project_dir}`\n\n\
+         hint: cd into a component ({known}), or pass an explicit COMPONENT_DIR"
+    )]
+    ComponentNotResolvable {
+        /// The current working directory.
+        cwd: PathBuf,
+        /// The resolved project root.
+        project_dir: PathBuf,
+        /// Discovered component paths, comma-joined for the hint.
+        known: String,
+    },
     /// The project-local configuration is not a regular file.
     #[error("Kvist project configuration `{path}` must be a regular file")]
     ProjectConfigurationNotFile {
@@ -382,7 +415,8 @@ pub enum KvistError {
     },
     /// A task command can only run from a complete current project.
     #[error(
-        "cannot run task command because project `{project_dir}` is not current (state: {state})"
+        "cannot run task command because project `{project_dir}` is not current (state: {state})\n\n\
+         hint: run `kvist doctor {project_dir}` to see what needs attention"
     )]
     TaskProjectNotCurrent {
         /// Current project root.
@@ -391,12 +425,14 @@ pub enum KvistError {
         state: String,
     },
     /// The requested directory is not a discovered current component.
-    #[error("cannot run task command because component `{component}` is {state}")]
+    #[error("component `{component}` is {state}\n\nhint: {hint}")]
     TaskComponentNotCurrent {
         /// Component-root-relative component path.
         component: PathBuf,
         /// Inspected component state or absence.
         state: String,
+        /// Concrete next step for this state.
+        hint: String,
     },
     /// Task mutation and selection require every durable artifact to be tracked.
     #[error(
@@ -426,7 +462,10 @@ pub enum KvistError {
         task_id: String,
     },
     /// A requested task is not in the selected component queue.
-    #[error("task `{task_id}` does not exist in component `{component}`")]
+    #[error(
+        "task `{task_id}` does not exist in component `{component}`\n\n\
+         hint: run `kvist task next {component}` to see the ready task, or `kvist status` for the full queue"
+    )]
     TaskNotFound {
         /// Component-root-relative component path.
         component: PathBuf,
@@ -450,7 +489,8 @@ pub enum KvistError {
     TaskRunSuggestionNotInteractive,
     /// No task in the selected component queue is ready to run.
     #[error(
-        "no ready tasks in the queue for component `{component}`; inspect `kvist overview` or pass an explicit TASK_ID"
+        "no ready tasks in the queue for component `{component}`\n\n\
+         hint: run `kvist status` to see why tasks are blocked, `kvist task next {component}` to re-check readiness, or pass an explicit TASK_ID"
     )]
     NoReadyTasks {
         /// Component-root-relative component path.

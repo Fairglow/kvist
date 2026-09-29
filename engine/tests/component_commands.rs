@@ -7,6 +7,7 @@ use kvist::component_documents::{
     COMPONENT_CONTRACT_TEMPLATE, COMPONENT_DESIGN_TEMPLATE, COMPONENT_REQUIREMENTS_TEMPLATE,
     DocumentKind, validate_file,
 };
+use kvist::init::initialize;
 use tempfile::TempDir;
 
 fn run_component(arguments: &[&str]) -> Output {
@@ -66,24 +67,27 @@ fn component_new_refuses_the_complete_set_when_any_document_exists() {
 
 #[test]
 fn component_validate_reports_the_document_with_line_aware_errors() {
-    let component = TempDir::new().expect("create temporary component");
+    let project = TempDir::new().expect("create temporary project");
+    initialize(project.path()).expect("initialize project");
+    let component = project.path().join("src").join("fixture");
+    fs::create_dir_all(&component).expect("create component directory");
     fs::write(
-        component.path().join("REQUIREMENTS.md"),
+        component.join("REQUIREMENTS.md"),
         COMPONENT_REQUIREMENTS_TEMPLATE,
     )
     .expect("write requirements");
-    fs::write(
-        component.path().join("CONTRACT.md"),
-        COMPONENT_CONTRACT_TEMPLATE,
-    )
-    .expect("write contract");
-    fs::write(component.path().join("DESIGN.md"), "# invalid\n").expect("write design");
+    fs::write(component.join("CONTRACT.md"), COMPONENT_CONTRACT_TEMPLATE).expect("write contract");
+    fs::write(component.join("DESIGN.md"), "# invalid\n").expect("write design");
 
-    let output = run_component(&[
-        "component",
-        "validate",
-        component.path().to_str().expect("UTF-8 component path"),
-    ]);
+    let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args([
+            "component",
+            "validate",
+            component.to_str().expect("UTF-8 component path"),
+        ])
+        .current_dir(project.path())
+        .output()
+        .expect("run kvist component");
 
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());

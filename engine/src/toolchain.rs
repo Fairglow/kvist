@@ -263,7 +263,7 @@ pub fn rustup_which_cargo_for_channel(context: &str, channel: &str) -> Result<Pa
             context,
             format!(
                 "`rustup which cargo --toolchain {channel}` failed: {}; \
-                 run `kvist toolchain ensure` to install the pinned toolchain",
+                 run `kvist toolchain` to install the pinned toolchain",
                 bounded_stderr(&output)
             ),
         ));
@@ -350,7 +350,7 @@ pub fn load_manifest(project_root: &Path) -> Result<Option<ToolchainManifest>> {
             &project_root.to_string_lossy(),
             format!(
                 "toolchain manifest schema version {} is unsupported (expected {TOOLCHAIN_SCHEMA_VERSION}); \
-                 re-run `kvist toolchain ensure`",
+                 re-run `kvist toolchain`",
                 manifest.schema_version
             ),
         ));
@@ -465,7 +465,7 @@ pub fn resolve_pinned_toolchain(
                 &project_root.to_string_lossy(),
                 format!(
                     "toolchain channel `{expected_channel}` no longer matches the recorded manifest channel `{}`; \
-                     re-run `kvist toolchain ensure`",
+                     re-run `kvist toolchain`",
                     manifest.channel
                 ),
             ));
@@ -474,7 +474,7 @@ pub fn resolve_pinned_toolchain(
             return Err(toolchain_error(
                 &project_root.to_string_lossy(),
                 "the on-disk Rust toolchain no longer matches the recorded toolchain manifest; \
-                 re-run `kvist toolchain ensure`"
+                 re-run `kvist toolchain`"
                     .to_owned(),
             ));
         }

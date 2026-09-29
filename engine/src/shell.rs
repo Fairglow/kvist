@@ -582,7 +582,7 @@ impl Shell {
         let spinner = self.stream_manager.start_spinner("authoring prompt");
         self.stream_manager.print_prompt_stage(line);
         self.stream_manager.print_working_stage();
-        let result = cli::execute(command, false);
+        let result = cli::execute(Some(command), false);
         spinner.stop();
         // A free prompt run records no trajectory, so there is nothing to correlate.
         self.stream_manager
@@ -631,8 +631,15 @@ impl Shell {
                 return;
             }
         };
+        let Some(mut cmd) = parsed.command else {
+            println!("tip: run `help` for the command list, or `status` for where you stand");
+            self.journal
+                .append(journal_entry(journal_line, "empty command"));
+            self.note(false);
+            return;
+        };
 
-        if matches!(parsed.command, cli::Command::Shell(_)) {
+        if matches!(cmd, cli::Command::Shell { .. }) {
             println!("You are already in an active Kvist shell.");
             self.journal
                 .append(journal_entry(journal_line, "already in shell"));
@@ -640,8 +647,13 @@ impl Shell {
             return;
         }
 
+        // The shell's `cd` focus stands in for an omitted COMPONENT_DIR so
+        // that `cd engine` followed by `task next` targets `engine`, exactly
+        // as `cd engine && kvist task next` does in the regular CLI.
+        inject_command_focus(&mut cmd, self.current_component().as_deref());
+
         // Destructive operations require an explicit in-shell confirmation.
-        if let Some(gate) = destructive_gate(&parsed.command)
+        if let Some(gate) = destructive_gate(&cmd)
             && !confirm(&format!("confirm {gate}? [y/N] "))
         {
             println!("Operation cancelled.");
@@ -651,17 +663,16 @@ impl Shell {
             return;
         }
 
-        let streaming = is_streaming_command(&parsed.command);
-        let interactive = is_interactive_command(&parsed.command);
+        let streaming = is_streaming_command(&cmd);
+        let interactive = is_interactive_command(&cmd);
         // Capture the run's task before moving the command, for feedback
         // correlation with the run's own trajectory.
-        let run_task_id = match &parsed.command {
+        let run_task_id = match &cmd {
             cli::Command::Task {
                 command: cli::TaskCommand::Run { task_id, .. },
             } => task_id.clone(),
             _ => None,
         };
-        let mut cmd = parsed.command;
         if streaming {
             if let cli::Command::Task {
                 command: cli::TaskCommand::Run { ref mut stream, .. },
@@ -682,7 +693,7 @@ impl Shell {
         } else {
             Some(self.stream_manager.start_spinner(&program))
         };
-        let result = cli::execute(cmd, false);
+        let result = cli::execute(Some(cmd), false);
         if let Some(spinner) = spinner {
             spinner.stop();
         }
@@ -1094,21 +1105,62 @@ fn render_help(theme: Theme) -> String {
     text.push_str("  journal                        the append-only session journal\n");
     text.push_str("  locks [clean]                  inspect live/stale task locks; clean removes stale ones\n");
     text.push_str("  prompt TASK                    author a prompt in your editor for a task\n");
-    text.push_str("  status | overview              human-friendly project overview\n");
+    text.push_str(
+        "  status                       human-friendly project overview and next steps\n",
+    );
     text.push_str("  help                           this list\n");
     text.push_str("  exit | quit                    leave the shell\n");
     text.push_str(
         "\nKey bindings: Tab complete · arrows navigate · Ctrl+C cancel command · Ctrl+D exit\n",
     );
-    text.push_str("\nTop workflow commands (the full CLI surface also parses):\n");
-    text.push_str("  task next .            show the next ready task\n");
-    text.push_str("  task run . [TASK]      run a task; omit TASK to confirm the next ready one\n");
-    text.push_str("  task log . TASK        inspect an execution log\n");
-    text.push_str("  task transition . TASK STATUS  record a status transition\n");
-    text.push_str("  component validate DIR validate component intent documents\n");
-    text.push_str("  agent profile list     configured model profiles\n");
-    text.push_str("  tree                   the component tree\n");
+    text.push_str("\nWorkflow commands (after `cd COMPONENT`, omit the component argument):\n");
+    text.push_str("  task next                show the next ready task\n");
+    text.push_str(
+        "  task run [TASK]          run a task; omit TASK to confirm the next ready one\n",
+    );
+    text.push_str("  task log TASK            inspect an execution log\n");
+    text.push_str("  task transition TASK STATUS  record a status transition\n");
+    text.push_str("  component validate       validate component intent documents\n");
+    text.push_str(
+        "  component accept         accept changed intent documents (records the baseline)\n",
+    );
+    text.push_str("  component commit ID      (re)create a pending acceptance commit\n");
+    text.push_str("  agent list               configured model profiles and role assignments\n");
+    text.push_str("  tree                     the component tree\n");
+    text.push_str(
+        "\nAny full CLI command also works here, e.g. `status --format json` or `task finalize TASK ATTEMPT accept`.\n",
+    );
     text
+}
+
+/// Fills omitted optional COMPONENT_DIR arguments from the shell's `cd`
+/// focus, so component commands work without repeating the component after
+/// a `cd`. An explicitly typed component argument always wins.
+fn inject_command_focus(command: &mut cli::Command, focus: Option<&str>) {
+    let Some(focus) = focus.filter(|focus| !focus.is_empty()) else {
+        return;
+    };
+    let component_arg = match command {
+        cli::Command::Task {
+            command:
+                cli::TaskCommand::Next { component_dir, .. }
+                | cli::TaskCommand::Transition { component_dir, .. }
+                | cli::TaskCommand::Run { component_dir, .. }
+                | cli::TaskCommand::Log { component_dir, .. }
+                | cli::TaskCommand::Unlock { component_dir, .. }
+                | cli::TaskCommand::Recover { component_dir, .. }
+                | cli::TaskCommand::Finalize { component_dir, .. },
+        }
+        | cli::Command::Component {
+            command:
+                cli::ComponentCommand::Validate { component_dir, .. }
+                | cli::ComponentCommand::Accept { component_dir, .. },
+        } => component_dir,
+        _ => return,
+    };
+    if component_arg.is_none() {
+        *component_arg = Some(std::path::PathBuf::from(focus));
+    }
 }
 
 /// Names the destructive part of a command that needs an in-shell
@@ -1124,9 +1176,9 @@ fn destructive_gate(command: &cli::Command) -> Option<&'static str> {
         cli::Command::Component {
             command: cli::ComponentCommand::Accept { commit: true, .. },
         } => Some("component accept --commit (creates a Git commit)"),
-        cli::Command::Vcs {
-            command: cli::VcsCommand::CommitAccepted { .. },
-        } => Some("vcs commit-accepted (creates an acceptance commit)"),
+        cli::Command::Component {
+            command: cli::ComponentCommand::Commit { .. },
+        } => Some("component commit (creates an acceptance commit)"),
         _ => None,
     }
 }
@@ -1154,9 +1206,6 @@ fn is_interactive_command(command: &cli::Command) -> bool {
         command,
         cli::Command::Agent {
             command: cli::AgentCommand::Setup { .. }
-                | cli::AgentCommand::Profile {
-                    command: Some(cli::AgentProfileCommand::Add { .. })
-                }
         }
     )
 }
@@ -1447,7 +1496,7 @@ mod tests {
     fn is_streaming_command_classifies_correctly() {
         let task_run = cli::Command::Task {
             command: cli::TaskCommand::Run {
-                component_dir: ".".into(),
+                component_dir: Some(".".into()),
                 task_id: Some("t1".to_owned()),
                 stream: true,
             },
@@ -1456,18 +1505,111 @@ mod tests {
 
         let task_next = cli::Command::Task {
             command: cli::TaskCommand::Next {
-                component_dir: ".".into(),
+                component_dir: Some(".".into()),
             },
         };
         assert!(!is_streaming_command(&task_next));
 
-        let tree = cli::Command::Tree(cli::ProjectDirectory { path: ".".into() });
+        let tree = cli::Command::Tree {
+            path: Some(".".into()),
+        };
         assert!(!is_streaming_command(&tree));
 
         let agent_list = cli::Command::Agent {
             command: cli::AgentCommand::List,
         };
         assert!(!is_streaming_command(&agent_list));
+    }
+
+    #[test]
+    fn inject_command_focus_fills_omitted_component_args_only() {
+        // Omitted component arguments take the `cd` focus.
+        let mut next = cli::Command::Task {
+            command: cli::TaskCommand::Next {
+                component_dir: None,
+            },
+        };
+        inject_command_focus(&mut next, Some("engine"));
+        match next {
+            cli::Command::Task { command } => match command {
+                cli::TaskCommand::Next { component_dir, .. } => {
+                    assert_eq!(
+                        component_dir.as_deref(),
+                        Some(std::path::Path::new("engine"))
+                    )
+                }
+                _ => panic!("expected task next"),
+            },
+            _ => panic!("expected task command"),
+        }
+
+        // Explicit arguments always win over the focus.
+        let mut run = cli::Command::Task {
+            command: cli::TaskCommand::Run {
+                component_dir: Some(".".into()),
+                task_id: None,
+                stream: false,
+            },
+        };
+        inject_command_focus(&mut run, Some("engine"));
+        match run {
+            cli::Command::Task {
+                command: cli::TaskCommand::Run { component_dir, .. },
+            } => assert_eq!(component_dir.as_deref(), Some(std::path::Path::new("."))),
+            _ => panic!("expected task run"),
+        }
+
+        // Component commands and the args-parsed task forms participate too.
+        let mut accept = cli::Command::Component {
+            command: cli::ComponentCommand::Accept {
+                component_dir: None,
+                commit: false,
+                message: None,
+            },
+        };
+        inject_command_focus(&mut accept, Some("engine"));
+        let mut transition = cli::Command::Task {
+            command: cli::TaskCommand::Transition {
+                args: vec!["write-tests".to_owned(), "blocked".to_owned()],
+                component_dir: None,
+                task_id: String::new(),
+                status: cli::TaskStatusArgument::default(),
+                reason: None,
+                _unparsed: std::marker::PhantomData,
+            },
+        };
+        inject_command_focus(&mut transition, Some("engine"));
+        match (accept, transition) {
+            (
+                cli::Command::Component {
+                    command: cli::ComponentCommand::Accept { component_dir, .. },
+                },
+                cli::Command::Task {
+                    command:
+                        cli::TaskCommand::Transition {
+                            component_dir: tdir,
+                            ..
+                        },
+                },
+            ) => {
+                assert_eq!(
+                    component_dir.as_deref(),
+                    Some(std::path::Path::new("engine"))
+                );
+                assert_eq!(tdir.as_deref(), Some(std::path::Path::new("engine")));
+            }
+            _ => panic!("expected component accept and task transition"),
+        }
+
+        // Non component-scoped commands are left untouched, and an empty
+        // focus changes nothing.
+        let mut tree = cli::Command::Tree { path: None };
+        inject_command_focus(&mut tree, Some("engine"));
+        inject_command_focus(&mut tree, None);
+        match tree {
+            cli::Command::Tree { path } => assert!(path.is_none()),
+            _ => panic!("expected tree"),
+        }
     }
 
     #[test]
@@ -1857,14 +1999,14 @@ mod tests {
     fn destructive_gate_covers_the_declared_destructive_set() {
         let unlock = cli::Command::Task {
             command: cli::TaskCommand::Unlock {
-                component_dir: ".".into(),
+                component_dir: Some(".".into()),
                 force: true,
             },
         };
         assert!(destructive_gate(&unlock).is_some());
         let unlock_soft = cli::Command::Task {
             command: cli::TaskCommand::Unlock {
-                component_dir: ".".into(),
+                component_dir: Some(".".into()),
                 force: false,
             },
         };
@@ -1879,21 +2021,21 @@ mod tests {
         assert!(destructive_gate(&remove_all).is_some());
         let accept_commit = cli::Command::Component {
             command: cli::ComponentCommand::Accept {
-                component_dir: ".".into(),
+                component_dir: Some(".".into()),
                 commit: true,
                 message: None,
             },
         };
         assert!(destructive_gate(&accept_commit).is_some());
-        let commit_accepted = cli::Command::Vcs {
-            command: cli::VcsCommand::CommitAccepted {
+        let commit_accepted = cli::Command::Component {
+            command: cli::ComponentCommand::Commit {
                 acceptance_id: "a1".to_owned(),
             },
         };
         assert!(destructive_gate(&commit_accepted).is_some());
         let plain_run = cli::Command::Task {
             command: cli::TaskCommand::Run {
-                component_dir: ".".into(),
+                component_dir: Some(".".into()),
                 task_id: Some("t1".to_owned()),
                 stream: false,
             },

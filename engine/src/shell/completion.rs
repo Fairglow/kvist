@@ -785,10 +785,8 @@ mod tests {
             "reverse-discover",
             "prompt",
             "status",
-            "overview",
             "task",
             "component",
-            "vcs",
             "agent",
             "completions",
             "vendor",
@@ -806,7 +804,7 @@ mod tests {
         ] {
             assert!(got.contains(&name), "missing {name} in {got:?}");
         }
-        assert_eq!(got.len(), 17 + 10);
+        assert_eq!(got.len(), 15 + 10);
     }
 
     #[test]

@@ -429,7 +429,7 @@ exactly like the vendored registry:
 path`: `<root>/bin/cargo`, a complete rustlib layout, cargo beneath the
   root). Without a pin, the rustup default is resolved as today and recorded
   as `default` in the manifest.
-- **Provisioning step (host, outside the sandbox).** `kvist toolchain ensure
+- **Provisioning step (host, outside the sandbox).** `kvist toolchain
 [PROJECT_DIR]` resolves the effective channel, runs `rustup toolchain
 install <channel>` when the channel is not present in `rustup toolchain
 list` (the supported upgrade/downgrade path; bounded output capture, host
@@ -447,10 +447,10 @@ list` (the supported upgrade/downgrade path; bounded output capture, host
   toolchain from the pin (channel-explicit). When the manifest exists, the
   resolved toolchain root and cargo digest MUST match the recorded values; a
   mismatch fails closed with an actionable message ("toolchain drifted; run
-  `kvist toolchain ensure`"). When the manifest is absent, resolution proceeds
+  `kvist toolchain`"). When the manifest is absent, resolution proceeds
   without a recorded baseline (today's behavior), so the feature is additive.
   A pinned channel that is not installed fails closed with an actionable
-  message naming `kvist toolchain ensure`.
+  message naming `kvist toolchain`.
 
 **Authoring-phase toolchain gap.** The authoring phase cannot receive the
 offline Cargo topology under the current shared runner contract: the runner's

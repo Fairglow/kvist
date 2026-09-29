@@ -17,6 +17,7 @@ use tempfile::TempDir;
 
 use agent_runtime::{ModelProfile, upsert_profile};
 use kvist::config;
+use kvist::init::initialize;
 use kvist::wizard::{run_wizard, run_wizard_with_force, run_wizard_with_profile_config};
 
 #[test]
@@ -230,6 +231,7 @@ fn wizard_does_not_persist_a_failed_model_test_without_confirmation() {
 #[test]
 fn agent_setup_force_persists_after_failed_qualification() {
     let project = TempDir::new().expect("create temp dir");
+    initialize(project.path()).expect("initialize project");
     let script_path = project.path().join("provider.sh");
     fs::write(&script_path, "#!/bin/sh\nexit 7\n").expect("write provider");
     fs::set_permissions(&script_path, fs::Permissions::from_mode(0o700))
@@ -268,6 +270,7 @@ fn agent_setup_force_persists_after_failed_qualification() {
 #[test]
 fn json_agent_setup_keeps_stdout_machine_readable() {
     let project = TempDir::new().expect("create temp dir");
+    initialize(project.path()).expect("initialize project");
     let script_path = project.path().join("provider.sh");
     fs::write(
         &script_path,
@@ -313,6 +316,7 @@ fn json_agent_setup_keeps_stdout_machine_readable() {
 #[test]
 fn agent_setup_force_does_not_persist_after_cancellation() {
     let project = TempDir::new().expect("create temp dir");
+    initialize(project.path()).expect("initialize project");
     let marker = project.path().join("qualification-started");
     let script_path = project.path().join("provider.sh");
     fs::write(
@@ -356,7 +360,12 @@ fn agent_setup_force_does_not_persist_after_cancellation() {
             .expect("UTF-8 stderr")
             .contains("cancelled")
     );
-    assert!(!project.path().join("kvist.toml").exists());
+    let configuration =
+        fs::read_to_string(project.path().join("kvist.toml")).expect("read configuration");
+    assert!(
+        !configuration.contains("[agent.profiles.cancelled]"),
+        "cancellation must not persist the profile: {configuration}"
+    );
 }
 
 #[cfg(unix)]

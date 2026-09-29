@@ -16,6 +16,7 @@ use tempfile::NamedTempFile;
 use crate::{
     KvistError, Result,
     component_documents::{self, DocumentKind},
+    context,
     discovery::{self, ComponentArtifact},
     file_io::{replace_file_atomically, sync_directory, write_new_file_atomically},
     filesystem::is_link_like,
@@ -30,20 +31,21 @@ use crate::{
 /// Selects the first ready task in declared queue order, using the same
 /// definition as the overview, the shell, and the blank-task `task run`
 /// suggestion.
-pub fn next(component_path: &Path) -> Result<String> {
-    let context = validate_context(component_path)?;
+pub fn next(project_dir: &Path, component_path: &Path) -> Result<String> {
+    let context = validate_context(project_dir, component_path)?;
     let queue = read_queue(&context.component_dir)?;
     Ok(next_ready_task_id(&queue.tasks).unwrap_or_else(|| "no ready task".to_owned()))
 }
 
 /// Persists a legal task transition with prepared and committed audit records.
 pub fn transition(
+    project_dir: &Path,
     component_path: &Path,
     task_id: &str,
     target: TaskStatus,
     reason: Option<&str>,
 ) -> Result<String> {
-    let context = validate_transition_context(component_path)?;
+    let context = validate_transition_context(project_dir, component_path)?;
     let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let lock = TaskLock::for_context(&context, task_id, &started_at)?;
 
@@ -153,28 +155,24 @@ fn untracked_durable_artifacts(inspection: &project_state::ProjectInspection) ->
     }
 }
 
-fn validate_context(component_path: &Path) -> Result<TaskContext> {
-    validate_context_with_blocked(component_path, false)
+fn validate_context(project_dir: &Path, component_path: &Path) -> Result<TaskContext> {
+    validate_context_with_blocked(project_dir, component_path, false)
 }
 
-fn validate_transition_context(component_path: &Path) -> Result<TaskContext> {
-    validate_context_with_blocked(component_path, true)
+fn validate_transition_context(project_dir: &Path, component_path: &Path) -> Result<TaskContext> {
+    validate_context_with_blocked(project_dir, component_path, true)
 }
 
 fn validate_context_with_blocked(
+    project_dir: &Path,
     component_path: &Path,
     allow_blocked_component: bool,
 ) -> Result<TaskContext> {
-    let component_path = normalize_component_path(component_path)?;
-    let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-        operation: "determine current project directory",
-        path: PathBuf::from("."),
-        source,
-    })?;
-    let inspection = project_state::inspect(&project_dir)?;
+    let component_path = context::normalize_component_path(component_path)?;
+    let inspection = project_state::inspect(project_dir)?;
     if inspection.state != ProjectState::Current {
         return Err(KvistError::TaskProjectNotCurrent {
-            project_dir,
+            project_dir: project_dir.to_path_buf(),
             state: inspection.state.name().to_owned(),
         });
     }
@@ -188,6 +186,7 @@ fn validate_context_with_blocked(
         .ok_or_else(|| KvistError::TaskComponentNotCurrent {
             component: component_path.clone(),
             state: "not a discovered component".to_owned(),
+            hint: context::component_not_found_hint(&component_path),
         })?;
     if component.state != ComponentState::Current
         && !(allow_blocked_component && component.state == ComponentState::Blocked)
@@ -195,6 +194,7 @@ fn validate_context_with_blocked(
         return Err(KvistError::TaskComponentNotCurrent {
             component: component_path.clone(),
             state: component.state.name().to_owned(),
+            hint: context::component_state_hint(component.state, &component_path),
         });
     }
     let component_root =
@@ -203,29 +203,13 @@ fn validate_context_with_blocked(
             .ok_or_else(|| KvistError::TaskComponentNotCurrent {
                 component: component_path.clone(),
                 state: "component root is unavailable".to_owned(),
+                hint: "run `kvist doctor` to inspect the project root".to_owned(),
             })?;
     Ok(TaskContext {
-        project_dir: project_dir.clone(),
+        project_dir: project_dir.to_path_buf(),
         component_dir: project_dir.join(component_root).join(&component_path),
         component_path,
     })
-}
-
-fn normalize_component_path(path: &Path) -> Result<PathBuf> {
-    if path == Path::new(".") {
-        return Ok(PathBuf::from("."));
-    }
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || !path
-            .components()
-            .all(|component| matches!(component, Component::Normal(_)))
-    {
-        return Err(KvistError::TaskComponentPathInvalid {
-            path: path.to_path_buf(),
-        });
-    }
-    Ok(path.to_path_buf())
 }
 
 fn read_queue(component_dir: &Path) -> Result<TaskQueue> {
@@ -1560,16 +1544,11 @@ fn status_name(status: TaskStatus) -> &'static str {
     }
 }
 
-fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
-    let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-        operation: "determine current project directory",
-        path: PathBuf::from("."),
-        source,
-    })?;
-    let inspection = project_state::inspect(&project_dir)?;
+fn validate_accept_context(project_dir: &Path, component_path: &Path) -> Result<TaskContext> {
+    let inspection = project_state::inspect(project_dir)?;
     if inspection.state != ProjectState::Current {
         return Err(KvistError::TaskProjectNotCurrent {
-            project_dir,
+            project_dir: project_dir.to_path_buf(),
             state: inspection.state.name().to_owned(),
         });
     }
@@ -1583,9 +1562,9 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
             .ok_or_else(|| KvistError::TaskComponentNotCurrent {
                 component: component_path.to_path_buf(),
                 state: "component root is unavailable".to_owned(),
+                hint: "run `kvist doctor` to inspect the project root".to_owned(),
             })?;
-    let component_path =
-        normalize_component_argument(component_path, &project_dir, &component_root)?;
+    let component_path = context::normalize_component_path(component_path)?;
     let component = inspection
         .components
         .iter()
@@ -1593,6 +1572,7 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
         .ok_or_else(|| KvistError::TaskComponentNotCurrent {
             component: component_path.clone(),
             state: "not a discovered component".to_owned(),
+            hint: context::component_not_found_hint(&component_path),
         })?;
 
     let has_valid_artifacts = component
@@ -1607,10 +1587,11 @@ fn validate_accept_context(component_path: &Path) -> Result<TaskContext> {
         return Err(KvistError::TaskComponentNotCurrent {
             component: component_path.clone(),
             state: component.state.name().to_owned(),
+            hint: context::component_state_hint(component.state, &component_path),
         });
     }
     Ok(TaskContext {
-        project_dir: project_dir.clone(),
+        project_dir: project_dir.to_path_buf(),
         component_dir: project_dir.join(component_root).join(&component_path),
         component_path,
     })
@@ -1686,22 +1667,17 @@ fn validate_commit_preconditions(project_dir: &Path, message: Option<&str>) -> R
 
 /// Records reviewed component-document and immediate-parent contract revisions.
 pub fn accept(
+    project_dir: &Path,
     component_path: &Path,
     commit: bool,
     message: Option<&str>,
     is_json: bool,
 ) -> Result<String> {
-    let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-        operation: "determine current project directory",
-        path: PathBuf::from("."),
-        source,
-    })?;
-
     if commit {
-        validate_commit_preconditions(&project_dir, message)?;
+        validate_commit_preconditions(project_dir, message)?;
     }
 
-    let context = validate_accept_context(component_path)?;
+    let context = validate_accept_context(project_dir, component_path)?;
     let started_at = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let lock = TaskLock::for_context(&context, "accept", &started_at)?;
 
@@ -1728,12 +1704,7 @@ pub fn accept(
                 .join(ComponentArtifact::Design.filename()),
         )?;
 
-        let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-            operation: "determine current project directory",
-            path: PathBuf::from("."),
-            source,
-        })?;
-        let inspection = project_state::inspect(&project_dir)?;
+        let inspection = project_state::inspect(project_dir)?;
         let component_root = project_dir.join(
             inspection
                 .component_root
@@ -1781,7 +1752,8 @@ pub fn accept(
         )?;
 
         let message_text = format!(
-            "accepted component document changes for {}",
+            "accepted component document changes for {} (the component is now current); next: kvist task next {}",
+            context.component_path.display(),
             context.component_path.display()
         );
 
@@ -2036,8 +2008,8 @@ fn read_validated_document(kind: DocumentKind, path: &Path) -> Result<String> {
 }
 
 /// Unlocks a locked component directory, optionally asking for confirmation.
-pub fn unlock(component_path: &Path, force: bool) -> Result<String> {
-    let context = validate_context(component_path)?;
+pub fn unlock(project_dir: &Path, component_path: &Path, force: bool) -> Result<String> {
+    let context = validate_context(project_dir, component_path)?;
     let lock_path = TaskLock::task_lock_path(&context)?;
 
     match fs::symlink_metadata(&lock_path) {
@@ -2098,6 +2070,7 @@ pub fn unlock(component_path: &Path, force: bool) -> Result<String> {
 /// Reconciles a fenced attempt only when host-authenticated evidence proves the
 /// runner descriptor was never launched and no write scope was exposed.
 pub fn recover(
+    project_dir: &Path,
     component_path: &Path,
     task_id: &str,
     attempt_id: &str,
@@ -2119,7 +2092,7 @@ pub fn recover(
         });
     }
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
-    let context = validate_context_with_blocked(component_path, true)?;
+    let context = validate_context_with_blocked(project_dir, component_path, true)?;
     ensure_task_attempt_is_recovery_candidate(&context, task_id, attempt_id)?;
     preflight_recovery_evidence(
         &existing_attempt_path(&context.component_dir, task_id),
@@ -2484,7 +2457,8 @@ fn recovery_inputs(
     task_id: &str,
     attempt_id: &str,
 ) -> Result<RecoveryInputs> {
-    let revalidated_context = validate_context_with_blocked(&context.component_path, true)?;
+    let revalidated_context =
+        validate_context_with_blocked(&context.project_dir, &context.component_path, true)?;
     if revalidated_context.project_dir != context.project_dir
         || revalidated_context.component_dir != context.component_dir
     {
@@ -2770,6 +2744,7 @@ fn valid_digest(value: &str) -> bool {
 ///
 /// A status message summarizing the finalization and commit operation.
 pub fn finalize(
+    project_dir: &Path,
     component_dir: &Path,
     task_id: &str,
     attempt_id: &str,
@@ -2778,7 +2753,7 @@ pub fn finalize(
     reason: Option<&str>,
     is_json: bool,
 ) -> Result<String> {
-    let context = validate_context(component_dir)?;
+    let context = validate_context(project_dir, component_dir)?;
     if commit {
         validate_commit_preconditions(&context.project_dir, None)?;
     }
@@ -3202,13 +3177,9 @@ pub fn finalize(
 }
 
 /// Commits an accepted state identified by its acceptance ID.
-pub fn commit_accepted(acceptance_id: &str, is_json: bool) -> Result<String> {
-    let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-        operation: "determine current project directory",
-        path: PathBuf::from("."),
-        source,
-    })?;
-    let record = crate::vcs_commit::load_acceptance_record(&project_dir, acceptance_id)?;
+pub fn commit_accepted(project_dir: &Path, acceptance_id: &str, is_json: bool) -> Result<String> {
+    let record = crate::vcs_commit::load_acceptance_record(project_dir, acceptance_id)?;
+    let project_dir = project_dir.to_path_buf();
     let commit_oid = crate::vcs_commit::commit_acceptance_record(&project_dir, &record)?;
     if is_json {
         let accepted_paths: Vec<String> = record
@@ -3218,7 +3189,7 @@ pub fn commit_accepted(acceptance_id: &str, is_json: bool) -> Result<String> {
             .collect();
         Ok(serde_json::json!({
             "status": "success",
-            "command": "vcs-commit-accepted",
+            "command": "component-commit",
             "acceptance_id": acceptance_id,
             "commit_oid": commit_oid,
             "accepted_paths": accepted_paths,
@@ -3228,29 +3199,6 @@ pub fn commit_accepted(acceptance_id: &str, is_json: bool) -> Result<String> {
         Ok(format!(
             "committed accepted state {acceptance_id} as {commit_oid}"
         ))
-    }
-}
-
-fn normalize_component_argument(
-    path: &Path,
-    project_dir: &Path,
-    component_root: &Path,
-) -> Result<PathBuf> {
-    let project_relative = if path.is_absolute() {
-        path.strip_prefix(project_dir)
-            .map_err(|_| KvistError::TaskComponentPathInvalid {
-                path: path.to_path_buf(),
-            })?
-    } else {
-        path
-    };
-    let component_relative = project_relative
-        .strip_prefix(component_root)
-        .unwrap_or(project_relative);
-    if component_relative.as_os_str().is_empty() {
-        Ok(PathBuf::from("."))
-    } else {
-        normalize_component_path(component_relative)
     }
 }
 
@@ -3611,7 +3559,7 @@ fn fence_pre_spawn_failure(
     secret: &[u8],
     runner_error: &KvistError,
 ) -> Result<()> {
-    let context = validate_context(component_path)?;
+    let context = validate_context(project_dir, component_path)?;
     let timestamp = Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
     let lock = TaskLock::for_context(&context, task_id, &timestamp)?;
     let result = (|| {
@@ -4015,14 +3963,14 @@ fn scope_hash_error(path: &Path, reason: &str) -> KvistError {
 
 /// Launches the external agent to execute a task, transitions the task to InProgress,
 /// captures logs, parses token usage, and transitions the task to Completed/Blocked based on exit.
-pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<String> {
-    let context = validate_context(component_path)?;
-    let project_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-        operation: "determine current project directory",
-        path: PathBuf::from("."),
-        source,
-    })?;
-    let config = crate::config::load(&project_dir)?;
+pub fn run_task(
+    project_dir: &Path,
+    component_path: &Path,
+    task_id: &str,
+    stream: bool,
+) -> Result<String> {
+    let context = validate_context(project_dir, component_path)?;
+    let config = crate::config::load(project_dir)?;
     if config.sandbox.is_none() {
         return Err(KvistError::UnapprovedExecutionPolicy {
             reason: "sandbox configuration is absent".to_owned(),
@@ -4083,7 +4031,7 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
     // transition. It prevents a second runner from selecting the same ready task.
     let lock = TaskLock::for_context(&context, task_id, &started_at)?;
     let result = (|| {
-        let context = validate_context(component_path)?;
+        let context = validate_context(project_dir, component_path)?;
         ensure_component_attempts_recovered(&context.component_dir)?;
         let mut queue = read_queue(&context.component_dir)?;
 
@@ -4447,9 +4395,11 @@ pub fn run_task(component_path: &Path, task_id: &str, stream: bool) -> Result<St
                     _ => "".to_owned(),
                 };
                 Ok(format!(
-                    "task `{task_id}` executed successfully and transitioned to completed.{}\nLogs written to: {}",
+                    "task `{task_id}` executed successfully and transitioned to completed.{}\nLogs written to: {}\nNext Step: Run 'kvist task log {} {}' to inspect the execution logs.",
                     token_summary,
-                    run_result.log_path.display()
+                    run_result.log_path.display(),
+                    component_path.display(),
+                    task_id
                 ))
             }
         } else {
@@ -4543,11 +4493,12 @@ pub(crate) fn confirm_run_suggestion(task_id: &str) -> Result<bool> {
 /// after an interactive confirmation; a non-interactive context fails instead
 /// of auto-executing.
 pub fn run_task_or_item(
+    project_dir: &Path,
     component_path: &Path,
     task_spec: Option<&str>,
     stream: bool,
 ) -> Result<String> {
-    let context = validate_context(component_path)?;
+    let context = validate_context(project_dir, component_path)?;
     let queue = read_queue(&context.component_dir)?;
 
     let task_spec = match task_spec {
@@ -4560,7 +4511,7 @@ pub fn run_task_or_item(
                     "Cancelled: did not run the suggested task `{task_id}`."
                 ));
             }
-            return run_task(component_path, &task_id, stream);
+            return run_task(project_dir, component_path, &task_id, stream);
         }
         Some(spec) => spec,
     };
@@ -4616,7 +4567,7 @@ pub fn run_task_or_item(
 
     let total = target_tasks.len();
     if total == 1 {
-        return run_task(component_path, &target_tasks[0], stream);
+        return run_task(project_dir, component_path, &target_tasks[0], stream);
     }
 
     let mut completed_count = 0;
@@ -4626,7 +4577,7 @@ pub fn run_task_or_item(
             "\n▶ [{step}/{total}] Running task `{task_id}` in `{}`...",
             component_path.display()
         );
-        match run_task(component_path, task_id, stream) {
+        match run_task(project_dir, component_path, task_id, stream) {
             Ok(output) => {
                 println!("✓ [{step}/{total}] Task `{task_id}` completed successfully.");
                 completed_count += 1;
@@ -4692,8 +4643,8 @@ fn is_runnable_task(task: &Task, tasks: &[Task]) -> bool {
 }
 
 /// Reads and returns the most recent execution log file for a specific task.
-pub fn task_log(component_path: &Path, task_id: &str) -> Result<String> {
-    let context = validate_context(component_path)?;
+pub fn task_log(project_dir: &Path, component_path: &Path, task_id: &str) -> Result<String> {
+    let context = validate_context(project_dir, component_path)?;
     let logs_dir = context.component_dir.join(".kvist").join("logs");
 
     let logs_metadata = fs::symlink_metadata(&logs_dir).ok();
@@ -4972,7 +4923,7 @@ pub fn approve_policy(project_path: &Path) -> Result<String> {
     })?;
     replace_file_atomically(&approved_path, &encoded)?;
     Ok(format!(
-        "Successfully approved execution policy with hash: {}",
+        "Successfully approved execution policy with hash: {}\nNext Step: Run 'kvist task run [COMPONENT_DIR] [TASK_ID]' to execute a task.",
         approval.approval_digest
     ))
 }
@@ -5768,8 +5719,8 @@ pub fn verify_task(
             runner: "<unconfigured>".to_owned(),
             reason: "task execution requires a project-local [sandbox] configuration".to_owned(),
         })?;
-    let normalized_component = normalize_component_path(component_path)?;
-    let context = validate_context(component_path)?;
+    let normalized_component = crate::context::normalize_component_path(component_path)?;
+    let context = validate_context(project_dir, component_path)?;
 
     // Vendored Rust verification runs `cargo test --locked` offline through the
     // closed cargo topology; every other vendored language uses its offline

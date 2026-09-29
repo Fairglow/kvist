@@ -1,11 +1,14 @@
 //! Command-line contract and dispatch for Kvist.
 
-use std::{io::IsTerminal, path::PathBuf};
+use std::{
+    io::IsTerminal,
+    path::{Path, PathBuf},
+};
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::{
-    KvistError, Result, component_documents, config, convert, discovery, import, init,
+    KvistError, Result, component_documents, config, context, convert, discovery, import, init,
     project_state, prompt_input, reverse_discovery, status, task_commands, task_queue::TaskStatus,
     toolchain, tree, vendor_command, wizard,
 };
@@ -16,25 +19,49 @@ use crate::{
     name = "kvist",
     version,
     about = "Spec-driven architecture workflow for human-directed AI development",
-    long_about = "Kvist manages filesystem-native requirements, contracts, designs, task queues, and compliance evidence."
+    long_about = "\
+Kvist manages filesystem-native requirements, contracts, designs, task queues, \
+and compliance evidence.\n\
+\
+Typical flow:\n\
+  1. kvist shell                start the interactive workspace shell (recommended)\n\
+  2. kvist status               where does the project stand, and what is next?\n\
+  3. kvist task run             execute the next ready task with a supervised agent\n\
+  4. kvist task log / finalize  inspect the run and record your decision\n\
+  5. kvist component accept     accept changed intent documents when they go stale\n\
+  6. kvist tree / doctor        browse the component tree / check project health\n\
+\nCommands work from the directory you are standing in: the project root is \
+found by walking upward to the nearest kvist.toml, and component commands act \
+on the component containing the current directory unless you name one \
+explicitly. Run `kvist <command> --help` for details."
 )]
 pub struct Cli {
     /// Output structured JSON instead of plain text.
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Command to execute.
+    /// Command to execute. Omit it inside a project for a status overview,
+    /// outside a project for this help.
     #[command(subcommand)]
-    pub command: Command,
+    pub command: Option<Command>,
 }
 
 /// Commands that form Kvist's public CLI contract.
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Start the interactive workspace shell.
-    Shell(ProjectDirectory),
+    /// Start the interactive workspace shell (the recommended way to work).
+    Shell {
+        /// Project directory; defaults to the nearest Kvist project at or
+        /// above the current directory.
+        #[arg(value_name = "PROJECT_DIR")]
+        path: Option<PathBuf>,
+    },
     /// Initialize a project with Kvist's root artifacts.
-    Init(ProjectDirectory),
+    Init {
+        /// Project directory; defaults to the current directory.
+        #[arg(value_name = "PROJECT_DIR")]
+        path: Option<PathBuf>,
+    },
     /// Convert an existing Rust project into a Kvist-managed component.
     Convert {
         /// Existing Rust project directory.
@@ -44,20 +71,23 @@ pub enum Command {
     /// Populate and enforce offline vendored dependencies so Rust builds and
     /// tests run with the sandbox network denied (ADR-0011).
     Vendor {
-        /// Project directory containing `Cargo.lock`; defaults to the current
-        /// directory.
-        #[arg(value_name = "PROJECT_DIR", default_value = ".")]
-        project_dir: PathBuf,
+        /// Project directory containing `Cargo.lock`; defaults to the nearest
+        /// Kvist project at or above the current directory.
+        #[arg(value_name = "PROJECT_DIR")]
+        project_dir: Option<PathBuf>,
         /// Use this directory as the vendored registry instead of the default
         /// `<project>/.kvist/vendored`.
         #[arg(long, value_name = "PATH")]
         vendored_dir: Option<PathBuf>,
     },
-    /// Host-authorized Rust toolchain provisioning (ADR-0012).
+    /// Provision the project's pinned Rust toolchain on the host, outside the
+    /// sandbox (ADR-0012).
     Toolchain {
-        /// Toolchain operation to execute.
-        #[command(subcommand)]
-        command: ToolchainCommand,
+        /// Project directory containing `rust-toolchain.toml` when pinned;
+        /// defaults to the nearest Kvist project at or above the current
+        /// directory.
+        #[arg(value_name = "PROJECT_DIR")]
+        project_dir: Option<PathBuf>,
     },
     /// Import Kvist artifacts from a Git repository.
     Import {
@@ -75,9 +105,19 @@ pub enum Command {
         dest_dir: PathBuf,
     },
     /// Render the component tree for a Kvist project.
-    Tree(ProjectDirectory),
+    Tree {
+        /// Project directory; defaults to the nearest Kvist project at or
+        /// above the current directory.
+        #[arg(value_name = "PROJECT_DIR")]
+        path: Option<PathBuf>,
+    },
     /// Inspect root artifacts without changing the project.
-    Doctor(ProjectDirectory),
+    Doctor {
+        /// Project directory; defaults to the nearest Kvist project at or
+        /// above the current directory.
+        #[arg(value_name = "PROJECT_DIR")]
+        path: Option<PathBuf>,
+    },
     /// Reverse-discover and generate Kvist artifacts from an existing implementation.
     ReverseDiscover {
         /// Path to the existing implementation directory.
@@ -125,13 +165,17 @@ pub enum Command {
         #[arg(long)]
         multi_turn: bool,
     },
-    /// Render a versioned project and component status report.
+    /// Answer "where do I stand?": project and component states, task
+    /// progress, and the exact next action for anything that needs it.
+    /// Defaults to the human-friendly report; `--format text|json` gives
+    /// the stable report forms for scripts.
     Status {
-        /// Project directory; defaults to the current working directory.
-        #[arg(value_name = "PROJECT_DIR", default_value = ".")]
-        path: PathBuf,
-        /// Stable report representation for scripts and tools.
-        #[arg(long, value_enum, default_value_t = status::StatusFormat::Text)]
+        /// Project directory; defaults to the nearest Kvist project at or
+        /// above the current directory.
+        #[arg(value_name = "PROJECT_DIR")]
+        path: Option<PathBuf>,
+        /// Report representation: human overview (default), stable text, or JSON.
+        #[arg(long, value_enum, default_value_t = status::StatusFormat::Overview)]
         format: status::StatusFormat,
         /// Show only requirements, contract, and design artifacts plus revalidation details.
         #[arg(long)]
@@ -143,8 +187,6 @@ pub enum Command {
         #[arg(long)]
         unfinished: bool,
     },
-    /// Render a human-friendly project overview with progress and next tasks.
-    Overview(ProjectDirectory),
     /// Select or transition component tasks.
     Task {
         /// Task operation to execute from the current project root.
@@ -157,13 +199,7 @@ pub enum Command {
         #[command(subcommand)]
         command: ComponentCommand,
     },
-    /// Version control system operations.
-    Vcs {
-        /// VCS subcommand to execute.
-        #[command(subcommand)]
-        command: VcsCommand,
-    },
-    /// Manage AI agent profiles, models, and configurations.
+    /// Manage AI agent model profiles and role assignments.
     Agent {
         /// Agent setup/management operation to execute.
         #[command(subcommand)]
@@ -212,15 +248,7 @@ impl From<SupportedShell> for clap_complete::Shell {
     }
 }
 
-/// An explicit project directory argument shared by project-scoped commands.
-#[derive(Debug, Args)]
-pub struct ProjectDirectory {
-    /// Project directory; defaults to the current working directory.
-    #[arg(value_name = "PROJECT_DIR", default_value = ".")]
-    pub path: PathBuf,
-}
-
-/// Component-document operations.
+/// Component intent-document operations.
 #[derive(Debug, Subcommand)]
 pub enum ComponentCommand {
     /// Create REQUIREMENTS.md, CONTRACT.md, and DESIGN.md templates.
@@ -231,15 +259,18 @@ pub enum ComponentCommand {
     },
     /// Validate a component's three intent documents.
     Validate {
-        /// Component directory containing the documents.
+        /// Component directory containing the documents; defaults to the
+        /// component containing the current directory.
         #[arg(value_name = "COMPONENT_DIR")]
-        component_dir: PathBuf,
+        component_dir: Option<PathBuf>,
     },
-    /// Record reviewed document and immediate-parent contract revisions.
+    /// Accept the component's intent documents: structurally validate them and
+    /// record their revisions in TODOS.yaml as the new baseline.
     Accept {
-        /// Component directory containing the intent documents to revalidate.
+        /// Component directory containing the intent documents; defaults to
+        /// the component containing the current directory.
         #[arg(value_name = "COMPONENT_DIR")]
-        component_dir: PathBuf,
+        component_dir: Option<PathBuf>,
         /// Create a local Git commit containing exactly the accepted changes.
         #[arg(long)]
         commit: bool,
@@ -247,26 +278,12 @@ pub enum ComponentCommand {
         #[arg(long)]
         message: Option<String>,
     },
-}
-
-/// Toolchain provisioning operations.
-#[derive(Debug, Subcommand)]
-pub enum ToolchainCommand {
-    /// Resolve and provision the project's pinned Rust toolchain on the host,
-    /// outside the sandbox, and record the durable toolchain manifest.
-    Ensure {
-        /// Project directory containing `rust-toolchain.toml` when pinned;
-        /// defaults to the current directory.
-        #[arg(value_name = "PROJECT_DIR", default_value = ".")]
-        project_dir: PathBuf,
-    },
-}
-
-/// VCS subcommands.
-#[derive(Debug, Subcommand)]
-pub enum VcsCommand {
-    /// Retry or perform a pending isolated index commit for an already accepted state.
-    CommitAccepted {
+    /// (Re)perform the isolated index commit for a pending acceptance.
+    ///
+    /// Use this when `component accept --commit` recorded the acceptance but
+    /// the Git commit could not be created; the pending state is reported in
+    /// that failure message.
+    Commit {
         /// Unique identifier of the pending acceptance state.
         #[arg(value_name = "ACCEPTANCE_ID")]
         acceptance_id: String,
@@ -274,35 +291,12 @@ pub enum VcsCommand {
 }
 
 /// Explicit human disposition for a task attempt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
 pub enum FinalizeDispositionArgument {
+    /// Accepted attempt; the `Default` placeholder for parsed forms.
+    #[default]
     Accept,
     Block,
-}
-
-/// Model profile management operations.
-#[derive(Debug, Subcommand)]
-pub enum AgentProfileCommand {
-    /// Add and qualify a new model profile.
-    Add {
-        /// Save a profile even when mandatory live qualification fails.
-        #[arg(long)]
-        force: bool,
-    },
-    /// List configured and available model profiles.
-    List,
-    /// Remove configured model profile(s).
-    Remove {
-        /// Name of the model profile to remove.
-        #[arg(value_name = "MODEL_NAME", required_unless_present = "all")]
-        name: Option<String>,
-        /// Remove all configured model profiles.
-        #[arg(long)]
-        all: bool,
-        /// Remove from global user configuration instead of project configuration.
-        #[arg(long)]
-        global: bool,
-    },
 }
 
 /// Role assignment operations for model profiles.
@@ -342,21 +336,25 @@ pub enum AgentRoleCommand {
 /// Agent setup, profile management, and role assignment operations.
 #[derive(Debug, Subcommand)]
 pub enum AgentCommand {
-    /// Manage model profiles (add, list, remove).
-    Profile {
-        #[command(subcommand)]
-        command: Option<AgentProfileCommand>,
-    },
-    /// Manage role bindings to model profiles (list, set, clear).
-    Role {
-        #[command(subcommand)]
-        command: Option<AgentRoleCommand>,
-    },
-    /// Configure and qualify a new model profile (alias for 'agent profile add').
+    /// Discover, qualify, and save a new model profile (interactive wizard).
     Setup {
         /// Save a profile even when mandatory live qualification fails.
         #[arg(long)]
         force: bool,
+    },
+    /// List configured model profiles and their role assignments.
+    List,
+    /// Remove configured model profile(s).
+    Remove {
+        /// Name of the model profile to remove.
+        #[arg(value_name = "MODEL_NAME", required_unless_present = "all")]
+        name: Option<String>,
+        /// Remove all configured model profiles and reset agent configuration.
+        #[arg(long)]
+        all: bool,
+        /// Remove from global user configuration instead of project configuration.
+        #[arg(long)]
+        global: bool,
     },
     /// Live-verify that configured model profiles are reachable and working.
     Check {
@@ -364,19 +362,10 @@ pub enum AgentCommand {
         #[arg(long)]
         global: bool,
     },
-    /// List configured and available agent models (alias for 'agent profile list').
-    List,
-    /// Remove configured agent model(s) (alias for 'agent profile remove').
-    Remove {
-        /// Name of the model profile to remove.
-        #[arg(value_name = "MODEL_NAME", required_unless_present = "all")]
-        name: Option<String>,
-        /// Remove all configured agent models and reset agent configuration.
-        #[arg(long)]
-        all: bool,
-        /// Remove from global user configuration instead of project configuration.
-        #[arg(long)]
-        global: bool,
+    /// Manage role bindings to model profiles (list, set, clear).
+    Role {
+        #[command(subcommand)]
+        command: Option<AgentRoleCommand>,
     },
 }
 
@@ -410,30 +399,42 @@ impl From<ReasoningEffortArgument> for agent_runtime::ReasoningEffort {
 pub enum TaskCommand {
     /// Print the first ready task without changing durable state.
     Next {
-        /// Component-root-relative component directory; `.` selects the root component.
+        /// Component directory; defaults to the component containing the
+        /// current directory.
         #[arg(value_name = "COMPONENT_DIR")]
-        component_dir: PathBuf,
+        component_dir: Option<PathBuf>,
     },
     /// Persist one legal task status transition and audit attempt.
+    ///
+    /// Form: `kvist task transition [COMPONENT_DIR] TASK_ID STATUS` where
+    /// COMPONENT_DIR defaults to the component containing the current
+    /// directory.
     Transition {
-        /// Component-root-relative component directory; `.` selects the root component.
-        #[arg(value_name = "COMPONENT_DIR")]
-        component_dir: PathBuf,
-        /// Queue-local task identifier.
-        #[arg(value_name = "TASK_ID")]
+        /// Optional component directory, then TASK_ID and STATUS.
+        #[arg(value_name = "ARG", num_args = 0..=3)]
+        args: Vec<String>,
+        /// Resolved component directory (filled during normalization).
+        #[arg(skip)]
+        component_dir: Option<PathBuf>,
+        /// Task ID (the first trailing positional argument).
+        #[arg(skip)]
         task_id: String,
         /// Requested durable task status.
-        #[arg(value_name = "STATUS")]
+        #[arg(skip)]
         status: TaskStatusArgument,
         /// Required nonblank blocker explanation only when STATUS is `blocked`.
         #[arg(long)]
         reason: Option<String>,
+        #[doc(hidden)]
+        #[arg(skip)]
+        _unparsed: std::marker::PhantomData<()>,
     },
     /// Run an external AI agent to execute a task, tracking progress and token usage.
     Run {
-        /// Component-root-relative component directory; `.` selects the root component.
+        /// Component directory; defaults to the component containing the
+        /// current directory.
         #[arg(value_name = "COMPONENT_DIR")]
-        component_dir: PathBuf,
+        component_dir: Option<PathBuf>,
         /// Queue-local task identifier; when omitted, the next ready task is
         /// suggested and run only after an interactive confirmation (a
         /// non-interactive context fails instead of auto-executing).
@@ -444,13 +445,22 @@ pub enum TaskCommand {
         stream: bool,
     },
     /// View the raw execution log of an agent task attempt.
+    ///
+    /// Form: `kvist task log [COMPONENT_DIR] TASK_ID` where COMPONENT_DIR
+    /// defaults to the component containing the current directory.
     Log {
-        /// Component-root-relative component directory; `.` selects the root component.
-        #[arg(value_name = "COMPONENT_DIR")]
-        component_dir: PathBuf,
+        /// Optional component directory, then TASK_ID.
+        #[arg(value_name = "ARG", num_args = 0..=2)]
+        args: Vec<String>,
+        /// Resolved component directory (filled during normalization).
+        #[arg(skip)]
+        component_dir: Option<PathBuf>,
         /// Queue-local task identifier.
-        #[arg(value_name = "TASK_ID")]
+        #[arg(skip)]
         task_id: String,
+        #[doc(hidden)]
+        #[arg(skip)]
+        _unparsed: std::marker::PhantomData<()>,
     },
     /// Replay an agent execution session from a structured JSONL journal file.
     Replay {
@@ -463,47 +473,67 @@ pub enum TaskCommand {
     },
     /// Approve the current test-command policy.
     ApprovePolicy {
-        /// Project directory; defaults to the current working directory.
-        #[arg(value_name = "PROJECT_DIR", default_value = ".")]
-        path: PathBuf,
+        /// Project directory; defaults to the nearest Kvist project at or
+        /// above the current directory.
+        #[arg(value_name = "PROJECT_DIR")]
+        path: Option<PathBuf>,
     },
     /// Unlock a locked component directory.
     Unlock {
-        /// Component-root-relative component directory; `.` selects the root component.
+        /// Component directory; defaults to the component containing the
+        /// current directory.
         #[arg(value_name = "COMPONENT_DIR")]
-        component_dir: PathBuf,
+        component_dir: Option<PathBuf>,
         /// Force unlocking without prompting for confirmation.
         #[arg(long)]
         force: bool,
     },
     /// Reconcile one fenced attempt only when durable host evidence proves no execution began.
+    ///
+    /// Form: `kvist task recover [COMPONENT_DIR] TASK_ID ATTEMPT_ID
+    /// --disposition execution-did-not-start` where COMPONENT_DIR defaults to
+    /// the component containing the current directory.
     Recover {
-        /// Component-root-relative component directory; `.` selects the root component.
-        #[arg(value_name = "COMPONENT_DIR")]
-        component_dir: PathBuf,
+        /// Optional component directory, then TASK_ID and ATTEMPT_ID.
+        #[arg(value_name = "ARG", num_args = 0..=3)]
+        args: Vec<String>,
+        /// Resolved component directory (filled during normalization).
+        #[arg(skip)]
+        component_dir: Option<PathBuf>,
         /// Queue-local task identifier.
-        #[arg(value_name = "TASK_ID")]
+        #[arg(skip)]
         task_id: String,
         /// Stable identity of the fenced attempt.
-        #[arg(value_name = "ATTEMPT_ID")]
+        #[arg(skip)]
         attempt_id: String,
         /// Explicit human disposition for the exact fenced attempt.
         #[arg(long, value_enum)]
         disposition: RecoveryDispositionArgument,
+        #[doc(hidden)]
+        #[arg(skip)]
+        _unparsed: std::marker::PhantomData<()>,
     },
     /// Finalize a completed task attempt with explicit human disposition.
+    ///
+    /// Form: `kvist task finalize [COMPONENT_DIR] TASK_ID ATTEMPT_ID
+    /// accept|block` where COMPONENT_DIR defaults to the component containing
+    /// the current directory.
     Finalize {
-        /// Component-root-relative component directory; `.` selects the root component.
-        #[arg(value_name = "COMPONENT_DIR")]
-        component_dir: PathBuf,
+        /// Optional component directory, then TASK_ID, ATTEMPT_ID, and
+        /// DISPOSITION.
+        #[arg(value_name = "ARG", num_args = 0..=4)]
+        args: Vec<String>,
+        /// Resolved component directory (filled during normalization).
+        #[arg(skip)]
+        component_dir: Option<PathBuf>,
         /// Queue-local task identifier.
-        #[arg(value_name = "TASK_ID")]
+        #[arg(skip)]
         task_id: String,
         /// Stable identity of the completed attempt.
-        #[arg(value_name = "ATTEMPT_ID")]
+        #[arg(skip)]
         attempt_id: String,
         /// Explicit human disposition for the exact completed attempt.
-        #[arg(value_name = "DISPOSITION", value_enum)]
+        #[arg(skip)]
         disposition: FinalizeDispositionArgument,
         /// Create a local Git commit containing exactly the accepted changes.
         #[arg(long)]
@@ -511,6 +541,9 @@ pub enum TaskCommand {
         /// Required nonblank blocker explanation only when DISPOSITION is `block`.
         #[arg(long)]
         reason: Option<String>,
+        #[doc(hidden)]
+        #[arg(skip)]
+        _unparsed: std::marker::PhantomData<()>,
     },
 }
 
@@ -521,8 +554,10 @@ pub enum RecoveryDispositionArgument {
 }
 
 /// Command-line spelling of a queue task status.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
 pub enum TaskStatusArgument {
+    /// Initial queue state; the `Default` placeholder for parsed forms.
+    #[default]
     Pending,
     InProgress,
     Blocked,
@@ -570,7 +605,10 @@ impl std::fmt::Display for CommandOutput {
 ///
 /// This dispatch layer deliberately contains no process handling; callers can
 /// test command behavior and choose how errors are presented.
-pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
+pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
+    let Some(command) = command else {
+        return bare_invocation(json);
+    };
     // The in-sandbox effect applier is internal plumbing, not a user-facing
     // command: dispatch it before any presentation handling so it always
     // returns the applier's bounded result verbatim.
@@ -582,6 +620,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
         return crate::authoring::apply::apply_intent(component, intent_file)
             .map(CommandOutput::message);
     }
+    let command = normalize_task_positionals(command)?;
     if json {
         match command {
             Command::Convert { project_dir } => convert::convert(&project_dir).map(|outcome| {
@@ -596,38 +635,42 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Vendor {
                 project_dir,
                 vendored_dir,
-            } => vendor_command::vendor_project(
-                &project_dir,
-                vendor_command::VendorOptions {
-                    vendored_dir,
-                    populate: true,
-                },
-            )
-            .map(|report| {
-                let mut project_dir_json = String::new();
-                let mut vendored_dir_json = String::new();
-                let mut message_json = String::new();
-                json_string_escape(&mut project_dir_json, &project_dir.to_string_lossy());
+            } => {
+                let project = context::ProjectContext::resolve(project_dir.as_deref())?;
+                vendor_command::vendor_project(
+                    &project.project_dir,
+                    vendor_command::VendorOptions {
+                        vendored_dir,
+                        populate: true,
+                    },
+                )
+                .map(|report| {
+                    let mut project_dir_json = String::new();
+                    let mut vendored_dir_json = String::new();
+                    let mut message_json = String::new();
+                    json_string_escape(&mut project_dir_json, &project.project_dir.to_string_lossy());
                 json_string_escape(&mut vendored_dir_json, report.vendored_dir());
                 json_string_escape(&mut message_json, &report.to_string());
                 CommandOutput::message(format!(
                     r#"{{"status":"success","command":"vendor","project_dir":{project_dir_json},"vendored_dir":{vendored_dir_json},"message":{message_json}}}"#
                 ))
-            }),
-            Command::Toolchain {
-                command: ToolchainCommand::Ensure { project_dir },
-            } => toolchain::ensure_toolchain(&project_dir, "toolchain ensure").map(|manifest| {
+            })
+        },
+        Command::Toolchain { project_dir } => {
+            let project = context::ProjectContext::resolve(project_dir.as_deref())?;
+            toolchain::ensure_toolchain(&project.project_dir, "toolchain").map(|manifest| {
                 let mut project_dir_json = String::new();
                 let mut channel_json = String::new();
                 let mut toolchain_root_json = String::new();
-                json_string_escape(&mut project_dir_json, &project_dir.to_string_lossy());
+                json_string_escape(&mut project_dir_json, &project.project_dir.to_string_lossy());
                 json_string_escape(&mut channel_json, &manifest.channel);
                 json_string_escape(&mut toolchain_root_json, &manifest.toolchain_root);
                 CommandOutput::message(format!(
-                    r#"{{"status":"success","command":"toolchain ensure","project_dir":{project_dir_json},"channel":{channel_json},"toolchain_root":{toolchain_root_json}}}"#
+                    r#"{{"status":"success","command":"toolchain","project_dir":{project_dir_json},"channel":{channel_json},"toolchain_root":{toolchain_root_json}}}"#
                 ))
-            }),
-            Command::Import {
+            })
+        }
+        Command::Import {
                 repo_url,
                 branch,
                 component,
@@ -708,68 +751,9 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 )))
             },
             Command::Agent {
-                command: AgentCommand::Profile { command },
-            } => {
-                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                    operation: "determine current project directory",
-                    path: PathBuf::from("."),
-                    source,
-                })?;
-                match command.unwrap_or(AgentProfileCommand::List) {
-                    AgentProfileCommand::List => {
-                        let text = wizard::list_models(&current_dir)?;
-                        let mut text_json = String::new();
-                        json_string_escape(&mut text_json, &text);
-                        Ok(CommandOutput::message(format!(
-                            r#"{{"status":"success","command":"agent-profile-list","output":{text_json}}}"#
-                        )))
-                    }
-                    AgentProfileCommand::Add { force } => {
-                        let mut reader = crate::interruptible_stdin::interruptible_reader();
-                        let mut writer = std::io::BufWriter::new(std::io::stderr());
-                        match wizard::run_wizard_with_force(&mut reader, &mut writer, &current_dir, force) {
-                            Ok(()) => Ok(CommandOutput::message(
-                                r#"{"status":"success","command":"agent-profile-add","message":"agent profile add complete"}"#.to_owned()
-                            )),
-                            Err(KvistError::AgentSetupCancelled) => Ok(CommandOutput::message(
-                                r#"{"status":"cancelled","command":"agent-profile-add","message":"agent profile add cancelled"}"#.to_owned()
-                            )),
-                            Err(source) => Err(source),
-                        }
-                    }
-                    AgentProfileCommand::Remove { name, all, global } => {
-                        let config_path = if global {
-                            config::global_user_config_path().ok_or_else(|| KvistError::AgentSetupFailed {
-                                reason: "cannot resolve user configuration directory".to_owned(),
-                            })?
-                        } else {
-                            current_dir.join("kvist.toml")
-                        };
-                        let msg = if all {
-                            wizard::remove_all_models(&config_path, &current_dir, !global)?
-                        } else if let Some(model_name) = name {
-                            wizard::remove_model(&config_path, &current_dir, !global, &model_name)?
-                        } else {
-                            return Err(KvistError::AgentSetupFailed {
-                                reason: "specify a model name or use --all to clear all agent configuration".to_owned(),
-                            });
-                        };
-                        let mut msg_json = String::new();
-                        json_string_escape(&mut msg_json, &msg);
-                        Ok(CommandOutput::message(format!(
-                            r#"{{"status":"success","command":"agent-profile-remove","message":{msg_json}}}"#
-                        )))
-                    }
-                }
-            }
-            Command::Agent {
                 command: AgentCommand::Role { command },
             } => {
-                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                    operation: "determine current project directory",
-                    path: PathBuf::from("."),
-                    source,
-                })?;
+                let (current_dir, fallback_global) = agent_scope()?;
                 match command.unwrap_or(AgentRoleCommand::List) {
                     AgentRoleCommand::List => {
                         let text = wizard::list_roles(&current_dir)?;
@@ -785,13 +769,8 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         thinking_effort,
                         global,
                     } => {
-                        let config_path = if global {
-                            config::global_user_config_path().ok_or_else(|| KvistError::AgentSetupFailed {
-                                reason: "cannot resolve user configuration directory".to_owned(),
-                            })?
-                        } else {
-                            current_dir.join("kvist.toml")
-                        };
+                        let global = global || fallback_global;
+                        let config_path = agent_config_path(&current_dir, global)?;
                         let effort = match thinking_effort {
                             Some(s) => Some(agent_runtime::ReasoningEffort::parse_effort(&s).ok_or_else(|| {
                                 KvistError::AgentSetupFailed {
@@ -808,13 +787,8 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         )))
                     }
                     AgentRoleCommand::Clear { role, all, global } => {
-                        let config_path = if global {
-                            config::global_user_config_path().ok_or_else(|| KvistError::AgentSetupFailed {
-                                reason: "cannot resolve user configuration directory".to_owned(),
-                            })?
-                        } else {
-                            current_dir.join("kvist.toml")
-                        };
+                        let global = global || fallback_global;
+                        let config_path = agent_config_path(&current_dir, global)?;
                         let msg = wizard::clear_role(&config_path, &current_dir, !global, role.as_deref(), all)?;
                         let mut msg_json = String::new();
                         json_string_escape(&mut msg_json, &msg);
@@ -827,11 +801,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Agent {
                 command: AgentCommand::Setup { force },
             } => {
-                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                    operation: "determine current project directory",
-                    path: PathBuf::from("."),
-                    source,
-                })?;
+                let (current_dir, _) = agent_scope()?;
                 let mut reader = crate::interruptible_stdin::interruptible_reader();
                 let mut writer = std::io::BufWriter::new(std::io::stderr());
                 match wizard::run_wizard_with_force(
@@ -852,11 +822,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Agent {
                 command: AgentCommand::List,
             } => {
-                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                    operation: "determine current project directory",
-                    path: PathBuf::from("."),
-                    source,
-                })?;
+                let (current_dir, _) = agent_scope()?;
                 let text = wizard::list_models(&current_dir)?;
                 let mut text_json = String::new();
                 json_string_escape(&mut text_json, &text);
@@ -867,18 +833,9 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Agent {
                 command: AgentCommand::Remove { name, all, global },
             } => {
-                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                    operation: "determine current project directory",
-                    path: PathBuf::from("."),
-                    source,
-                })?;
-                let config_path = if global {
-                    config::global_user_config_path().ok_or_else(|| KvistError::AgentSetupFailed {
-                        reason: "cannot resolve user configuration directory".to_owned(),
-                    })?
-                } else {
-                    current_dir.join("kvist.toml")
-                };
+                let (current_dir, fallback_global) = agent_scope()?;
+                let global = global || fallback_global;
+                let config_path = agent_config_path(&current_dir, global)?;
                 let msg = if all {
                     wizard::remove_all_models(&config_path, &current_dir, !global)?
                 } else if let Some(model_name) = name {
@@ -896,11 +853,8 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 )))
             },
             Command::Agent { command: AgentCommand::Check { global } } => {
-                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                    operation: "determine current project directory",
-                    path: PathBuf::from("."),
-                    source,
-                })?;
+                let (current_dir, fallback_global) = agent_scope()?;
+                let global = global || fallback_global;
                 let mut reader = crate::interruptible_stdin::interruptible_reader();
                 let mut writer = std::io::BufWriter::new(std::io::stderr());
                 match wizard::check_agents(&mut reader, &mut writer, &current_dir, global) {
@@ -913,25 +867,27 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     Err(source) => Err(source),
                 }
             },
-            Command::Shell(_) => Err(KvistError::SandboxUnavailable {
+            Command::Shell { .. } => Err(KvistError::SandboxUnavailable {
                 runner: "shell".to_owned(),
                 reason: "interactive shell is not supported in JSON mode".to_owned(),
             }),
-            Command::Init(project) => {
-                let outcome = init::initialize(&project.path)?;
+            Command::Init { path } => {
+                let dir = path.unwrap_or_else(|| PathBuf::from("."));
+                let outcome = init::initialize(&dir)?;
                 Ok(CommandOutput::message(format!(
                     "{{\"status\":\"success\",\"command\":\"init\",\"project_path\":\"{}\",\"message\":\"{}\"}}",
-                    project.path.to_string_lossy().replace('\\', "\\\\"),
+                    dir.to_string_lossy().replace('\\', "\\\\"),
                     outcome
                         .to_string()
                         .replace('\n', "\\n")
                         .replace('"', "\\\"")
                 )))
             }
-            Command::Tree(project) => {
-                let configuration = config::load(&project.path)?;
+            Command::Tree { path } => {
+                let project = context::ProjectContext::resolve(path.as_deref())?;
+                let configuration = config::load(&project.project_dir)?;
                 let discovery = discovery::discover_with_limits(
-                    &project.path.join(&configuration.component_root),
+                    &project.project_dir.join(&configuration.component_root),
                     configuration.discovery,
                 )?;
                 let components = discovery
@@ -954,8 +910,9 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     .to_string(),
                 ))
             }
-            Command::Doctor(project) => {
-                let inspection = project_state::inspect(&project.path)?;
+            Command::Doctor { path } => {
+                let project = context::ProjectContext::resolve(path.as_deref())?;
+                let inspection = project_state::inspect(&project.project_dir)?;
                 let status_json =
                     status::render(&inspection, status::StatusFormat::Json, false, false, false);
                 Ok(CommandOutput::message(format!(
@@ -969,7 +926,8 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 only_impls,
                 unfinished,
             } => {
-                let inspection = project_state::inspect(&path)?;
+                let project = context::ProjectContext::resolve(path.as_deref())?;
+                let inspection = project_state::inspect(&project.project_dir)?;
                 Ok(CommandOutput::message(status::render(
                     &inspection,
                     status::StatusFormat::Json,
@@ -978,20 +936,12 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     unfinished,
                 )))
             }
-            Command::Overview(project) => {
-                let inspection = project_state::inspect(&project.path)?;
-                Ok(CommandOutput::message(status::render(
-                    &inspection,
-                    status::StatusFormat::Json,
-                    false,
-                    false,
-                    false,
-                )))
-            }
             Command::Task {
                 command: TaskCommand::Next { component_dir },
             } => {
-                let ready_task = task_commands::next(&component_dir)?;
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                let ready_task = task_commands::next(&project.project_dir, &component)?;
                 let ready_task = if ready_task == "no ready task" {
                     "null".to_owned()
                 } else {
@@ -999,7 +949,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 };
                 Ok(CommandOutput::message(format!(
                     "{{\"status\":\"success\",\"command\":\"task-next\",\"component_dir\":\"{}\",\"ready_task_id\":{ready_task}}}",
-                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    component.to_string_lossy().replace('\\', "\\\\"),
                 )))
             }
             Command::Task {
@@ -1008,17 +958,21 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     task_id,
                     status,
                     reason,
+                    ..
                 },
             } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
                 let message = task_commands::transition(
-                    &component_dir,
+                    &project.project_dir,
+                    &component,
                     &task_id,
                     status.into(),
                     reason.as_deref(),
                 )?;
                 Ok(CommandOutput::message(format!(
                     "{{\"status\":\"success\",\"command\":\"task-transition\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"target_status\":\"{}\",\"message\":\"{}\"}}",
-                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    component.to_string_lossy().replace('\\', "\\\\"),
                     task_id,
                     task_status_name(status.into()),
                     message.replace('\n', "\\n").replace('"', "\\\"")
@@ -1031,15 +985,21 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     stream,
                 },
             } => {
-                let message =
-                    task_commands::run_task_or_item(&component_dir, task_id.as_deref(), stream)?;
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                let message = task_commands::run_task_or_item(
+                    &project.project_dir,
+                    &component,
+                    task_id.as_deref(),
+                    stream,
+                )?;
                 let task_id_field = match task_id.as_deref() {
                     Some(id) => format!("\"{id}\""),
                     None => "null".to_owned(),
                 };
                 Ok(CommandOutput::message(format!(
                     "{{\"status\":\"success\",\"command\":\"task-run\",\"component_dir\":\"{}\",\"task_id\":{task_id_field},\"message\":\"{}\"}}",
-                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    component.to_string_lossy().replace('\\', "\\\\"),
                     message.replace('\n', "\\n").replace('"', "\\\"")
                 )))
             }
@@ -1047,14 +1007,17 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 command: TaskCommand::Log {
                     component_dir,
                     task_id,
+                    ..
                 },
             } => {
-                let log_content = task_commands::task_log(&component_dir, &task_id)?;
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                let log_content = task_commands::task_log(&project.project_dir, &component, &task_id)?;
                 let mut escaped_log = String::new();
                 json_string_escape(&mut escaped_log, &log_content);
                 Ok(CommandOutput::message(format!(
                     "{{\"status\":\"success\",\"command\":\"task-log\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"log_content\":{escaped_log}}}",
-                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    component.to_string_lossy().replace('\\', "\\\\"),
                     task_id,
                 )))
             }
@@ -1076,10 +1039,11 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Task {
                 command: TaskCommand::ApprovePolicy { path },
             } => {
-                let message = task_commands::approve_policy(&path)?;
+                let project = context::ProjectContext::resolve(path.as_deref())?;
+                let message = task_commands::approve_policy(&project.project_dir)?;
                 Ok(CommandOutput::message(format!(
                     "{{\"status\":\"success\",\"command\":\"task-approve-policy\",\"policy_path\":\"{}\",\"message\":\"{}\"}}",
-                    path.to_string_lossy().replace('\\', "\\\\"),
+                    project.project_dir.to_string_lossy().replace('\\', "\\\\"),
                     message.replace('\n', "\\n").replace('"', "\\\"")
                 )))
             }
@@ -1089,10 +1053,12 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     force,
                 },
             } => {
-                let message = task_commands::unlock(&component_dir, force)?;
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                let message = task_commands::unlock(&project.project_dir, &component, force)?;
                 Ok(CommandOutput::message(format!(
                     "{{\"status\":\"success\",\"command\":\"task-unlock\",\"component_dir\":\"{}\",\"message\":\"{}\"}}",
-                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    component.to_string_lossy().replace('\\', "\\\\"),
                     message.replace('\n', "\\n").replace('"', "\\\"")
                 )))
             }
@@ -1103,17 +1069,21 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         task_id,
                         attempt_id,
                         disposition,
+                        ..
                     },
             } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
                 let message = task_commands::recover(
-                    &component_dir,
+                    &project.project_dir,
+                    &component,
                     &task_id,
                     &attempt_id,
                     disposition,
                 )?;
                 Ok(CommandOutput::message(format!(
                     "{{\"status\":\"success\",\"command\":\"task-recover\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"attempt_id\":\"{}\",\"message\":\"{}\"}}",
-                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    component.to_string_lossy().replace('\\', "\\\\"),
                     task_id,
                     attempt_id,
                     message.replace('\n', "\\n").replace('"', "\\\"")
@@ -1128,10 +1098,14 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         disposition,
                         commit,
                         reason,
+                        ..
                     },
             } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
                 let response = task_commands::finalize(
-                    &component_dir,
+                    &project.project_dir,
+                    &component,
                     &task_id,
                     &attempt_id,
                     disposition,
@@ -1141,12 +1115,6 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 )?;
                 Ok(CommandOutput::message(response))
             }
-            Command::Vcs { command } => match command {
-                VcsCommand::CommitAccepted { acceptance_id } => {
-                    let response = task_commands::commit_accepted(&acceptance_id, true)?;
-                    Ok(CommandOutput::message(response))
-                }
-            },
             Command::Component {
                 command: ComponentCommand::New { component_dir },
             } => {
@@ -1168,7 +1136,10 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Component {
                 command: ComponentCommand::Validate { component_dir },
             } => {
-                let validations = validate_component_documents(&component_dir)?;
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                let component_path = project.component_path(&component)?;
+                let validations = validate_component_documents(&component_path)?;
                 let mut diagnostics = Vec::new();
                 for (path, validation) in &validations {
                     for diagnostic in &validation.diagnostics {
@@ -1191,7 +1162,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     "status": if valid { "success" } else { "error" },
                     "command": "component-validate",
                     "valid": valid,
-                    "component_dir": component_dir,
+                    "component_dir": component,
                     "diagnostics": diagnostics,
                 })
                 .to_string();
@@ -1209,8 +1180,17 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         message,
                     },
             } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
                 let response =
-                    task_commands::accept(&component_dir, commit, message.as_deref(), true)?;
+                    task_commands::accept(&project.project_dir, &component, commit, message.as_deref(), true)?;
+                Ok(CommandOutput::message(response))
+            }
+            Command::Component {
+                command: ComponentCommand::Commit { acceptance_id },
+            } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let response = task_commands::commit_accepted(&project.project_dir, &acceptance_id, true)?;
                 Ok(CommandOutput::message(response))
             }
             Command::Completions { shell } => {
@@ -1241,22 +1221,26 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Vendor {
                 project_dir,
                 vendored_dir,
-            } => vendor_command::vendor_project(
-                &project_dir,
-                vendor_command::VendorOptions {
-                    vendored_dir,
-                    populate: true,
-                },
-            )
-            .map(|report| CommandOutput::message(report.to_string())),
-            Command::Toolchain {
-                command: ToolchainCommand::Ensure { project_dir },
-            } => toolchain::ensure_toolchain(&project_dir, "toolchain ensure").map(|manifest| {
-                CommandOutput::message(format!(
-                    "Toolchain ensured: channel `{}`, root `{}`",
-                    manifest.channel, manifest.toolchain_root
-                ))
-            }),
+            } => {
+                let project = context::ProjectContext::resolve(project_dir.as_deref())?;
+                vendor_command::vendor_project(
+                    &project.project_dir,
+                    vendor_command::VendorOptions {
+                        vendored_dir,
+                        populate: true,
+                    },
+                )
+                .map(|report| CommandOutput::message(report.to_string()))
+            }
+            Command::Toolchain { project_dir } => {
+                let project = context::ProjectContext::resolve(project_dir.as_deref())?;
+                toolchain::ensure_toolchain(&project.project_dir, "toolchain").map(|manifest| {
+                    CommandOutput::message(format!(
+                        "Toolchain ensured: channel `{}`, root `{}`",
+                        manifest.channel, manifest.toolchain_root
+                    ))
+                })
+            }
             Command::Import {
                 repo_url,
                 branch,
@@ -1315,70 +1299,9 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 Ok(CommandOutput::none())
             }
             Command::Agent {
-                command: AgentCommand::Profile { command },
-            } => {
-                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                    operation: "determine current project directory",
-                    path: PathBuf::from("."),
-                    source,
-                })?;
-                match command.unwrap_or(AgentProfileCommand::List) {
-                    AgentProfileCommand::List => {
-                        wizard::list_models(&current_dir).map(CommandOutput::message)
-                    }
-                    AgentProfileCommand::Add { force } => {
-                        let mut reader = crate::interruptible_stdin::interruptible_reader();
-                        let mut writer = std::io::BufWriter::new(std::io::stdout());
-                        match wizard::run_wizard_with_force(
-                            &mut reader,
-                            &mut writer,
-                            &current_dir,
-                            force,
-                        ) {
-                            Ok(()) => Ok(CommandOutput::message(
-                                "agent profile add complete".to_owned(),
-                            )),
-                            Err(KvistError::AgentSetupCancelled) => Ok(CommandOutput::message(
-                                "agent profile add cancelled".to_owned(),
-                            )),
-                            Err(source) => Err(source),
-                        }
-                    }
-                    AgentProfileCommand::Remove { name, all, global } => {
-                        let config_path = if global {
-                            config::global_user_config_path().ok_or_else(|| {
-                                KvistError::AgentSetupFailed {
-                                    reason: "cannot resolve user configuration directory"
-                                        .to_owned(),
-                                }
-                            })?
-                        } else {
-                            current_dir.join("kvist.toml")
-                        };
-                        if all {
-                            wizard::remove_all_models(&config_path, &current_dir, !global)
-                                .map(CommandOutput::message)
-                        } else if let Some(model_name) = name {
-                            wizard::remove_model(&config_path, &current_dir, !global, &model_name)
-                                .map(CommandOutput::message)
-                        } else {
-                            Err(KvistError::AgentSetupFailed {
-                                reason:
-                                    "specify a model name or use --all to clear all agent configuration"
-                                        .to_owned(),
-                            })
-                        }
-                    }
-                }
-            }
-            Command::Agent {
                 command: AgentCommand::Role { command },
             } => {
-                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                    operation: "determine current project directory",
-                    path: PathBuf::from("."),
-                    source,
-                })?;
+                let (current_dir, fallback_global) = agent_scope()?;
                 match command.unwrap_or(AgentRoleCommand::List) {
                     AgentRoleCommand::List => {
                         wizard::list_roles(&current_dir).map(CommandOutput::message)
@@ -1389,16 +1312,8 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         thinking_effort,
                         global,
                     } => {
-                        let config_path = if global {
-                            config::global_user_config_path().ok_or_else(|| {
-                                KvistError::AgentSetupFailed {
-                                    reason: "cannot resolve user configuration directory"
-                                        .to_owned(),
-                                }
-                            })?
-                        } else {
-                            current_dir.join("kvist.toml")
-                        };
+                        let global = global || fallback_global;
+                        let config_path = agent_config_path(&current_dir, global)?;
                         let effort = match thinking_effort {
                             Some(s) => Some(agent_runtime::ReasoningEffort::parse_effort(&s).ok_or_else(|| {
                                 KvistError::AgentSetupFailed {
@@ -1418,16 +1333,8 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         .map(CommandOutput::message)
                     }
                     AgentRoleCommand::Clear { role, all, global } => {
-                        let config_path = if global {
-                            config::global_user_config_path().ok_or_else(|| {
-                                KvistError::AgentSetupFailed {
-                                    reason: "cannot resolve user configuration directory"
-                                        .to_owned(),
-                                }
-                            })?
-                        } else {
-                            current_dir.join("kvist.toml")
-                        };
+                        let global = global || fallback_global;
+                        let config_path = agent_config_path(&current_dir, global)?;
                         wizard::clear_role(
                             &config_path,
                             &current_dir,
@@ -1442,11 +1349,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Agent {
                 command: AgentCommand::Setup { force },
             } => {
-                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                    operation: "determine current project directory",
-                    path: PathBuf::from("."),
-                    source,
-                })?;
+                let (current_dir, _) = agent_scope()?;
                 let mut reader = crate::interruptible_stdin::interruptible_reader();
                 let mut writer = std::io::BufWriter::new(std::io::stdout());
                 match wizard::run_wizard_with_force(&mut reader, &mut writer, &current_dir, force) {
@@ -1462,30 +1365,15 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Agent {
                 command: AgentCommand::List,
             } => {
-                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                    operation: "determine current project directory",
-                    path: PathBuf::from("."),
-                    source,
-                })?;
+                let (current_dir, _) = agent_scope()?;
                 wizard::list_models(&current_dir).map(CommandOutput::message)
             }
             Command::Agent {
                 command: AgentCommand::Remove { name, all, global },
             } => {
-                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                    operation: "determine current project directory",
-                    path: PathBuf::from("."),
-                    source,
-                })?;
-                let config_path = if global {
-                    config::global_user_config_path().ok_or_else(|| {
-                        KvistError::AgentSetupFailed {
-                            reason: "cannot resolve user configuration directory".to_owned(),
-                        }
-                    })?
-                } else {
-                    current_dir.join("kvist.toml")
-                };
+                let (current_dir, fallback_global) = agent_scope()?;
+                let global = global || fallback_global;
+                let config_path = agent_config_path(&current_dir, global)?;
                 if all {
                     wizard::remove_all_models(&config_path, &current_dir, !global)
                         .map(CommandOutput::message)
@@ -1503,11 +1391,8 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Agent {
                 command: AgentCommand::Check { global },
             } => {
-                let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-                    operation: "determine current project directory",
-                    path: PathBuf::from("."),
-                    source,
-                })?;
+                let (current_dir, fallback_global) = agent_scope()?;
+                let global = global || fallback_global;
                 let mut reader = crate::interruptible_stdin::interruptible_reader();
                 let mut writer = std::io::BufWriter::new(std::io::stdout());
                 match wizard::check_agents(&mut reader, &mut writer, &current_dir, global) {
@@ -1518,44 +1403,49 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                     Err(source) => Err(source),
                 }
             }
-            Command::Shell(project) => {
-                crate::shell::run_shell(&project.path)?;
+            Command::Shell { path } => {
+                let project = context::ProjectContext::resolve(path.as_deref())?;
+                crate::shell::run_shell(&project.project_dir)?;
                 Ok(CommandOutput::none())
             }
-            Command::Init(project) => init::initialize(&project.path)
-                .map(|outcome| CommandOutput::message(outcome.to_string())),
-            Command::Tree(project) => {
-                tree::render_project(&project.path).map(CommandOutput::message)
+            Command::Init { path } => {
+                let dir = path.unwrap_or_else(|| PathBuf::from("."));
+                init::initialize(&dir).map(|outcome| CommandOutput::message(outcome.to_string()))
             }
-            Command::Doctor(project) => project_state::inspect(&project.path)
-                .map(|inspection| CommandOutput::message(inspection.to_string())),
+            Command::Tree { path } => {
+                let project = context::ProjectContext::resolve(path.as_deref())?;
+                tree::render_project(&project.project_dir).map(CommandOutput::message)
+            }
+            Command::Doctor { path } => {
+                let project = context::ProjectContext::resolve(path.as_deref())?;
+                project_state::inspect(&project.project_dir)
+                    .map(|inspection| CommandOutput::message(inspection.to_string()))
+            }
             Command::Status {
                 path,
                 format,
                 only_documents,
                 only_impls,
                 unfinished,
-            } => project_state::inspect(&path).map(|inspection| {
-                CommandOutput::message(status::render(
-                    &inspection,
-                    format,
-                    only_documents,
-                    only_impls,
-                    unfinished,
-                ))
-            }),
-            Command::Overview(project) => project_state::inspect(&project.path).map(|inspection| {
-                CommandOutput::message(status::render(
-                    &inspection,
-                    status::StatusFormat::Overview,
-                    false,
-                    false,
-                    false,
-                ))
-            }),
+            } => {
+                let project = context::ProjectContext::resolve(path.as_deref())?;
+                project_state::inspect(&project.project_dir).map(|inspection| {
+                    CommandOutput::message(status::render(
+                        &inspection,
+                        format,
+                        only_documents,
+                        only_impls,
+                        unfinished,
+                    ))
+                })
+            }
             Command::Task {
                 command: TaskCommand::Next { component_dir },
-            } => task_commands::next(&component_dir).map(CommandOutput::message),
+            } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                task_commands::next(&project.project_dir, &component).map(CommandOutput::message)
+            }
             Command::Task {
                 command:
                     TaskCommand::Transition {
@@ -1563,14 +1453,20 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         task_id,
                         status,
                         reason,
+                        ..
                     },
-            } => task_commands::transition(
-                &component_dir,
-                &task_id,
-                status.into(),
-                reason.as_deref(),
-            )
-            .map(CommandOutput::message),
+            } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                task_commands::transition(
+                    &project.project_dir,
+                    &component,
+                    &task_id,
+                    status.into(),
+                    reason.as_deref(),
+                )
+                .map(CommandOutput::message)
+            }
             Command::Task {
                 command:
                     TaskCommand::Run {
@@ -1578,15 +1474,30 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         task_id,
                         stream,
                     },
-            } => task_commands::run_task_or_item(&component_dir, task_id.as_deref(), stream)
-                .map(CommandOutput::message),
+            } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                task_commands::run_task_or_item(
+                    &project.project_dir,
+                    &component,
+                    task_id.as_deref(),
+                    stream,
+                )
+                .map(CommandOutput::message)
+            }
             Command::Task {
                 command:
                     TaskCommand::Log {
                         component_dir,
                         task_id,
+                        ..
                     },
-            } => task_commands::task_log(&component_dir, &task_id).map(CommandOutput::message),
+            } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                task_commands::task_log(&project.project_dir, &component, &task_id)
+                    .map(CommandOutput::message)
+            }
             Command::Task {
                 command:
                     TaskCommand::Replay {
@@ -1597,14 +1508,22 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 .map(CommandOutput::message),
             Command::Task {
                 command: TaskCommand::ApprovePolicy { path },
-            } => task_commands::approve_policy(&path).map(CommandOutput::message),
+            } => {
+                let project = context::ProjectContext::resolve(path.as_deref())?;
+                task_commands::approve_policy(&project.project_dir).map(CommandOutput::message)
+            }
             Command::Task {
                 command:
                     TaskCommand::Unlock {
                         component_dir,
                         force,
                     },
-            } => task_commands::unlock(&component_dir, force).map(CommandOutput::message),
+            } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                task_commands::unlock(&project.project_dir, &component, force)
+                    .map(CommandOutput::message)
+            }
             Command::Task {
                 command:
                     TaskCommand::Recover {
@@ -1612,9 +1531,20 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         task_id,
                         attempt_id,
                         disposition,
+                        ..
                     },
-            } => task_commands::recover(&component_dir, &task_id, &attempt_id, disposition)
-                .map(CommandOutput::message),
+            } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                task_commands::recover(
+                    &project.project_dir,
+                    &component,
+                    &task_id,
+                    &attempt_id,
+                    disposition,
+                )
+                .map(CommandOutput::message)
+            }
             Command::Task {
                 command:
                     TaskCommand::Finalize {
@@ -1624,23 +1554,23 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         disposition,
                         commit,
                         reason,
+                        ..
                     },
-            } => task_commands::finalize(
-                &component_dir,
-                &task_id,
-                &attempt_id,
-                disposition,
-                commit,
-                reason.as_deref(),
-                false,
-            )
-            .map(CommandOutput::message),
-            Command::Vcs { command } => match command {
-                VcsCommand::CommitAccepted { acceptance_id } => {
-                    task_commands::commit_accepted(&acceptance_id, false)
-                        .map(CommandOutput::message)
-                }
-            },
+            } => {
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                task_commands::finalize(
+                    &project.project_dir,
+                    &component,
+                    &task_id,
+                    &attempt_id,
+                    disposition,
+                    commit,
+                    reason.as_deref(),
+                    false,
+                )
+                .map(CommandOutput::message)
+            }
             Command::Component {
                 command: ComponentCommand::New { component_dir },
             } => component_documents::create(&component_dir).map(|generated| {
@@ -1657,14 +1587,17 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
             Command::Component {
                 command: ComponentCommand::Validate { component_dir },
             } => {
-                let validations = validate_component_documents(&component_dir)?;
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                let component_path = project.component_path(&component)?;
+                let validations = validate_component_documents(&component_path)?;
                 if validations
                     .iter()
                     .all(|(_, validation)| validation.is_valid())
                 {
                     Ok(CommandOutput::message(format!(
                         "valid component documents: {}",
-                        component_dir.display()
+                        component.display()
                     )))
                 } else {
                     let diagnostics = validations
@@ -1680,7 +1613,7 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         .collect::<Vec<_>>()
                         .join("\n");
                     Err(KvistError::ComponentDocumentValidationFailed {
-                        path: component_dir,
+                        path: component,
                         diagnostics,
                     })
                 }
@@ -1693,9 +1626,23 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                         message,
                     },
             } => {
-                let response =
-                    task_commands::accept(&component_dir, commit, message.as_deref(), false)?;
+                let project = context::ProjectContext::resolve(None)?;
+                let component = project.resolve_component(component_dir.as_deref())?;
+                let response = task_commands::accept(
+                    &project.project_dir,
+                    &component,
+                    commit,
+                    message.as_deref(),
+                    false,
+                )?;
                 Ok(CommandOutput::message(response))
+            }
+            Command::Component {
+                command: ComponentCommand::Commit { acceptance_id },
+            } => {
+                let project = context::ProjectContext::resolve(None)?;
+                task_commands::commit_accepted(&project.project_dir, &acceptance_id, false)
+                    .map(CommandOutput::message)
             }
             Command::Completions { shell } => {
                 use clap::CommandFactory;
@@ -1713,6 +1660,163 @@ pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
                 intent_file,
             } => crate::authoring::apply::apply_intent(&component, &intent_file)
                 .map(CommandOutput::message),
+        }
+    }
+}
+
+/// Splits a task subcommand's positional arguments into an optional leading
+/// COMPONENT_DIR and the exact required tail, rejecting any other arity.
+fn split_component_and_tail(
+    args: Vec<String>,
+    tail_len: usize,
+) -> Result<(Option<PathBuf>, Vec<String>)> {
+    match args.len() {
+        n if n == tail_len => Ok((None, args)),
+        n if n == tail_len + 1 => Ok((Some(PathBuf::from(&args[0])), args[1..].to_vec())),
+        n => Err(usage_error(format!(
+            "expected {} positional argument(s) after an optional COMPONENT_DIR, got {n}",
+            tail_len
+        ))),
+    }
+}
+
+/// Builds a parser-level usage error (exit status 2) from a message.
+fn usage_error(message: String) -> KvistError {
+    KvistError::ArgumentParsing(clap::Error::raw(
+        clap::error::ErrorKind::InvalidValue,
+        message,
+    ))
+}
+
+/// Parses a task-status literal, rejecting anything outside the closed set.
+fn status_argument_from(value: String) -> Result<TaskStatusArgument> {
+    TaskStatusArgument::from_str(&value, true).map_err(|_| {
+        usage_error(format!(
+            "invalid task status `{value}`; expected pending, in-progress, blocked, awaiting-decision, or completed"
+        ))
+    })
+}
+
+/// Parses a finalize-disposition literal, rejecting anything outside the set.
+fn disposition_argument_from(value: String) -> Result<FinalizeDispositionArgument> {
+    FinalizeDispositionArgument::from_str(&value, true).map_err(|_| {
+        usage_error(format!(
+            "invalid disposition `{value}`; expected accept or block"
+        ))
+    })
+}
+
+/// Task subcommands that mix an optional COMPONENT_DIR with required trailing
+/// arguments (transition, log, recover, finalize) cannot be declared
+/// declaratively: clap forbids a non-required positional before a required
+/// one. They therefore parse into a raw argument vector and this function
+/// completes the parse immediately after argument parsing, keeping the
+/// dispatch surface uniform.
+fn normalize_task_positionals(command: Command) -> Result<Command> {
+    let Command::Task { command: task } = command else {
+        return Ok(command);
+    };
+    let task = match task {
+        TaskCommand::Transition { args, reason, .. } => {
+            let (component_dir, tail) = split_component_and_tail(args, 2)?;
+            let status = status_argument_from(tail[1].clone())?;
+            TaskCommand::Transition {
+                args: Vec::new(),
+                component_dir,
+                task_id: tail[0].clone(),
+                status,
+                reason,
+                _unparsed: Default::default(),
+            }
+        }
+        TaskCommand::Log { args, .. } => {
+            let (component_dir, tail) = split_component_and_tail(args, 1)?;
+            TaskCommand::Log {
+                args: Vec::new(),
+                component_dir,
+                task_id: tail[0].clone(),
+                _unparsed: Default::default(),
+            }
+        }
+        TaskCommand::Recover {
+            args, disposition, ..
+        } => {
+            let (component_dir, tail) = split_component_and_tail(args, 2)?;
+            TaskCommand::Recover {
+                args: Vec::new(),
+                component_dir,
+                task_id: tail[0].clone(),
+                attempt_id: tail[1].clone(),
+                disposition,
+                _unparsed: Default::default(),
+            }
+        }
+        TaskCommand::Finalize {
+            args,
+            commit,
+            reason,
+            ..
+        } => {
+            let (component_dir, tail) = split_component_and_tail(args, 3)?;
+            let disposition = disposition_argument_from(tail[2].clone())?;
+            TaskCommand::Finalize {
+                args: Vec::new(),
+                component_dir,
+                task_id: tail[0].clone(),
+                attempt_id: tail[1].clone(),
+                disposition,
+                commit,
+                reason,
+                _unparsed: Default::default(),
+            }
+        }
+        other => other,
+    };
+    Ok(Command::Task { command: task })
+}
+
+/// Handles `kvist` with no command: inside a project it answers "where do I
+/// stand and what is next?" with the same overview as `kvist status` plus a
+/// help pointer; outside a project it prints the guided help.
+fn bare_invocation(json: bool) -> Result<CommandOutput> {
+    use clap::CommandFactory;
+
+    match context::ProjectContext::resolve(None) {
+        Ok(project) => {
+            let inspection = project_state::inspect(&project.project_dir)?;
+            if json {
+                let report =
+                    status::render(&inspection, status::StatusFormat::Json, false, false, false);
+                Ok(CommandOutput::message(format!(
+                    r#"{{"status":"success","command":"status","report":{report}}}"#,
+                )))
+            } else {
+                let mut text = status::render(
+                    &inspection,
+                    status::StatusFormat::Overview,
+                    false,
+                    false,
+                    false,
+                );
+                text.push_str("\n\ntip: run `kvist help` for all commands");
+                Ok(CommandOutput::message(text))
+            }
+        }
+        Err(_) => {
+            if json {
+                Ok(CommandOutput::message(
+                    r#"{"status":"error","reason":"not-in-project","hint":"run `kvist init <DIR>` to create a project, or pass an explicit PROJECT_DIR"}"#.to_owned(),
+                ))
+            } else {
+                Cli::command()
+                    .print_long_help()
+                    .map_err(|source| KvistError::Io {
+                        operation: "render command-line help",
+                        path: PathBuf::new(),
+                        source,
+                    })?;
+                Ok(CommandOutput::none())
+            }
         }
     }
 }
@@ -1965,6 +2069,43 @@ fn delegate_interactive_prompt(
     Ok(true)
 }
 
+/// Resolves the configuration scope for an agent command.
+///
+/// Agent configuration exists per project and per user. Inside a project the
+/// project configuration is the scope; outside a project the commands target
+/// the global user configuration, exactly as if `--global` had been passed,
+/// so configuring agents never requires a project that may not exist yet.
+/// Returns `(directory, effective_global)`: the directory whose `kvist.toml`
+/// holds the project configuration when not global, and a usable base
+/// directory otherwise.
+fn agent_scope() -> Result<(PathBuf, bool)> {
+    match context::ProjectContext::resolve(None) {
+        Ok(project) => Ok((project.project_dir, false)),
+        Err(KvistError::NotInProject { .. }) => Ok((global_user_config_dir()?, true)),
+        Err(error) => Err(error),
+    }
+}
+
+/// The directory containing the global user configuration file.
+fn global_user_config_dir() -> Result<PathBuf> {
+    config::global_user_config_path()
+        .and_then(|path| path.parent().map(PathBuf::from))
+        .ok_or_else(|| KvistError::AgentSetupFailed {
+            reason: "cannot resolve user configuration directory".to_owned(),
+        })
+}
+
+/// The configuration file an agent command operates on for one scope.
+fn agent_config_path(current_dir: &Path, global: bool) -> Result<PathBuf> {
+    if global {
+        config::global_user_config_path().ok_or_else(|| KvistError::AgentSetupFailed {
+            reason: "cannot resolve user configuration directory".to_owned(),
+        })
+    } else {
+        Ok(current_dir.join("kvist.toml"))
+    }
+}
+
 fn validate_component_documents(
     component_dir: &std::path::Path,
 ) -> Result<Vec<(PathBuf, component_documents::DocumentValidation)>> {
@@ -1987,26 +2128,33 @@ mod tests {
     use super::*;
     use clap::error::ErrorKind;
 
+    /// Parses and completes the positional normalization a dispatched command
+    /// goes through.
+    fn normalized(cli: Cli) -> Command {
+        normalize_task_positionals(cli.command.expect("a command was parsed"))
+            .expect("positional normalization succeeds")
+    }
+
     #[test]
     fn parses_shell_with_the_current_directory_by_default() {
         let cli = Cli::try_parse_from(["kvist", "shell"]).expect("valid shell command");
 
-        let Command::Shell(project) = cli.command else {
+        let Some(Command::Shell { path: project }) = cli.command else {
             panic!("expected shell command");
         };
 
-        assert_eq!(project.path, PathBuf::from("."));
+        assert_eq!(project, None);
     }
 
     #[test]
     fn parses_init_with_the_current_directory_by_default() {
         let cli = Cli::try_parse_from(["kvist", "init"]).expect("valid init command");
 
-        let Command::Init(project) = cli.command else {
+        let Some(Command::Init { path: project }) = cli.command else {
             panic!("expected init command");
         };
 
-        assert_eq!(project.path, PathBuf::from("."));
+        assert_eq!(project, None);
     }
 
     #[test]
@@ -2014,18 +2162,18 @@ mod tests {
         let cli =
             Cli::try_parse_from(["kvist", "tree", "projects/demo"]).expect("valid tree command");
 
-        let Command::Tree(project) = cli.command else {
+        let Some(Command::Tree { path: project }) = cli.command else {
             panic!("expected tree command");
         };
 
-        assert_eq!(project.path, PathBuf::from("projects/demo"));
+        assert_eq!(project, Some(PathBuf::from("projects/demo")));
     }
 
     #[test]
     fn prompt_command_parses_multi_turn_flag() {
         let cli = Cli::try_parse_from(["kvist", "prompt", "refactor this", "--multi-turn"])
             .expect("valid prompt command");
-        let Command::Prompt { multi_turn, .. } = cli.command else {
+        let Some(Command::Prompt { multi_turn, .. }) = cli.command else {
             panic!("expected prompt command");
         };
         assert!(multi_turn, "--multi-turn opts into an autonomous loop");
@@ -2034,7 +2182,7 @@ mod tests {
     #[test]
     fn prompt_command_defaults_to_a_single_model_turn() {
         let cli = Cli::try_parse_from(["kvist", "prompt", "explain this"]).expect("valid prompt");
-        let Command::Prompt { multi_turn, .. } = cli.command else {
+        let Some(Command::Prompt { multi_turn, .. }) = cli.command else {
             panic!("expected prompt command");
         };
         assert!(!multi_turn, "a prompt defaults to a single model turn");
@@ -2101,11 +2249,11 @@ mod tests {
     fn parses_doctor_with_the_current_directory_by_default() {
         let cli = Cli::try_parse_from(["kvist", "doctor"]).expect("valid doctor command");
 
-        let Command::Doctor(project) = cli.command else {
+        let Some(Command::Doctor { path: project }) = cli.command else {
             panic!("expected doctor command");
         };
 
-        assert_eq!(project.path, PathBuf::from("."));
+        assert_eq!(project, None);
     }
 
     #[test]
@@ -2113,9 +2261,9 @@ mod tests {
         let cli = Cli::try_parse_from(["kvist", "component", "new", "src/network"])
             .expect("valid component creation command");
 
-        let Command::Component {
+        let Some(Command::Component {
             command: ComponentCommand::New { component_dir },
-        } = cli.command
+        }) = cli.command
         else {
             panic!("expected component new command");
         };
@@ -2128,14 +2276,14 @@ mod tests {
         let cli = Cli::try_parse_from(["kvist", "component", "validate", "src/network"])
             .expect("valid component validation command");
 
-        let Command::Component {
+        let Some(Command::Component {
             command: ComponentCommand::Validate { component_dir },
-        } = cli.command
+        }) = cli.command
         else {
             panic!("expected component validate command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("src/network"));
+        assert_eq!(component_dir, Some(PathBuf::from("src/network")));
     }
 
     #[test]
@@ -2143,7 +2291,7 @@ mod tests {
         let cli = Cli::try_parse_from(["kvist", "convert", "/path/to/project"])
             .expect("valid convert command");
 
-        let Command::Convert { project_dir } = cli.command else {
+        let Some(Command::Convert { project_dir }) = cli.command else {
             panic!("expected convert command");
         };
 
@@ -2155,14 +2303,14 @@ mod tests {
         let cli =
             Cli::try_parse_from(["kvist", "task", "next", "src"]).expect("valid task next command");
 
-        let Command::Task {
+        let Some(Command::Task {
             command: TaskCommand::Next { component_dir },
-        } = cli.command
+        }) = cli.command
         else {
             panic!("expected task next command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(component_dir, Some(PathBuf::from("src")));
     }
 
     #[test]
@@ -2184,13 +2332,14 @@ mod tests {
                     task_id,
                     status,
                     reason,
+                    ..
                 },
-        } = cli.command
+        } = normalized(cli)
         else {
             panic!("expected task transition command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(component_dir, Some(PathBuf::from("src")));
         assert_eq!(task_id, "task-1");
         assert_eq!(status, TaskStatusArgument::InProgress);
         assert_eq!(reason, None);
@@ -2217,13 +2366,14 @@ mod tests {
                     task_id,
                     status,
                     reason,
+                    ..
                 },
-        } = cli.command
+        } = normalized(cli)
         else {
             panic!("expected task transition command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(component_dir, Some(PathBuf::from("src")));
         assert_eq!(task_id, "task-1");
         assert_eq!(status, TaskStatusArgument::Blocked);
         assert_eq!(reason, Some("waiting on PR".to_string()));
@@ -2234,19 +2384,19 @@ mod tests {
         let cli = Cli::try_parse_from(["kvist", "task", "run", "src", "task-1"])
             .expect("valid task run command");
 
-        let Command::Task {
+        let Some(Command::Task {
             command:
                 TaskCommand::Run {
                     component_dir,
                     task_id,
                     stream,
                 },
-        } = cli.command
+        }) = cli.command
         else {
             panic!("expected task run command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(component_dir, Some(PathBuf::from("src")));
         assert_eq!(task_id, Some("task-1".to_owned()));
         assert!(!stream);
     }
@@ -2256,19 +2406,19 @@ mod tests {
         let cli = Cli::try_parse_from(["kvist", "task", "run", "src"])
             .expect("valid task run command without a task id");
 
-        let Command::Task {
+        let Some(Command::Task {
             command:
                 TaskCommand::Run {
                     component_dir,
                     task_id,
                     stream,
                 },
-        } = cli.command
+        }) = cli.command
         else {
             panic!("expected task run command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(component_dir, Some(PathBuf::from("src")));
         assert_eq!(task_id, None);
         assert!(!stream);
     }
@@ -2278,19 +2428,19 @@ mod tests {
         let cli = Cli::try_parse_from(["kvist", "task", "run", "src", "task-1", "--stream"])
             .expect("valid task run command with task id");
 
-        let Command::Task {
+        let Some(Command::Task {
             command:
                 TaskCommand::Run {
                     component_dir,
                     task_id,
                     stream,
                 },
-        } = cli.command
+        }) = cli.command
         else {
             panic!("expected task run command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(component_dir, Some(PathBuf::from("src")));
         assert_eq!(task_id, Some("task-1".to_owned()));
         assert!(stream);
     }
@@ -2316,13 +2466,14 @@ mod tests {
                     task_id,
                     attempt_id,
                     disposition,
+                    ..
                 },
-        } = cli.command
+        } = normalized(cli)
         else {
             panic!("expected task recover command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("engine"));
+        assert_eq!(component_dir, Some(PathBuf::from("engine")));
         assert_eq!(task_id, "task-1");
         assert_eq!(attempt_id, "attempt-0001");
         assert!(matches!(
@@ -2341,13 +2492,14 @@ mod tests {
                 TaskCommand::Log {
                     component_dir,
                     task_id,
+                    ..
                 },
-        } = cli.command
+        } = normalized(cli)
         else {
             panic!("expected task log command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(component_dir, Some(PathBuf::from("src")));
         assert_eq!(task_id, "task-1".to_string());
     }
 
@@ -2363,13 +2515,13 @@ mod tests {
         ])
         .expect("valid task replay command");
 
-        let Command::Task {
+        let Some(Command::Task {
             command:
                 TaskCommand::Replay {
                     session_file,
                     max_turns,
                 },
-        } = cli.command
+        }) = cli.command
         else {
             panic!("expected task replay command");
         };
@@ -2383,14 +2535,14 @@ mod tests {
         let cli = Cli::try_parse_from(["kvist", "task", "approve-policy", "/path/to/project"])
             .expect("valid task approve-policy command");
 
-        let Command::Task {
+        let Some(Command::Task {
             command: TaskCommand::ApprovePolicy { path },
-        } = cli.command
+        }) = cli.command
         else {
             panic!("expected task approve-policy command");
         };
 
-        assert_eq!(path, PathBuf::from("/path/to/project"));
+        assert_eq!(path, Some(PathBuf::from("/path/to/project")));
     }
 
     #[test]
@@ -2398,18 +2550,18 @@ mod tests {
         let cli = Cli::try_parse_from(["kvist", "task", "unlock", "src", "--force"])
             .expect("valid task unlock command");
 
-        let Command::Task {
+        let Some(Command::Task {
             command:
                 TaskCommand::Unlock {
                     component_dir,
                     force,
                 },
-        } = cli.command
+        }) = cli.command
         else {
             panic!("expected task unlock command");
         };
 
-        assert_eq!(component_dir, PathBuf::from("src"));
+        assert_eq!(component_dir, Some(PathBuf::from("src")));
         assert!(force);
     }
 
@@ -2422,30 +2574,67 @@ mod tests {
     }
 
     #[test]
+    fn task_transition_rejects_an_invalid_status_with_a_usage_error() {
+        let parsed = Cli::try_parse_from(["kvist", "task", "transition", "write-tests", "flying"])
+            .expect("parses raw arguments");
+        let error = normalize_task_positionals(parsed.command.expect("command"))
+            .expect_err("invalid status must fail");
+        assert!(
+            error.to_string().contains("invalid task status `flying`"),
+            "got: {error}"
+        );
+    }
+
+    #[test]
+    fn task_finalize_rejects_a_missing_disposition_with_a_usage_error() {
+        let parsed =
+            Cli::try_parse_from(["kvist", "task", "finalize", "write-tests", "attempt-0001"])
+                .expect("parses raw arguments");
+        let error = normalize_task_positionals(parsed.command.expect("command"))
+            .expect_err("missing disposition must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("expected 3 positional argument(s)"),
+            "got: {error}"
+        );
+    }
+
+    #[test]
     fn help_lists_the_complete_phase_one_command_surface() {
         let error = Cli::try_parse_from(["kvist", "--help"]).expect_err("help exits successfully");
 
         assert_eq!(error.kind(), ErrorKind::DisplayHelp);
         let help = error.to_string();
+        for expected in [
+            "shell",
+            "init",
+            "convert",
+            "reverse-discover",
+            "import",
+            "vendor",
+            "toolchain",
+            "tree",
+            "doctor",
+            "status",
+            "task",
+            "component",
+            "agent",
+            "prompt",
+            "completions",
+        ] {
+            assert!(
+                help.contains(expected),
+                "help should mention {expected} command"
+            );
+        }
         assert!(
-            help.contains("convert"),
-            "help should mention convert command"
+            !help.contains("overview"),
+            "overview is merged into status and must not appear as a command"
         );
-        assert!(help.contains("init"), "help should mention init command");
-        assert!(help.contains("tree"), "help should mention tree command");
         assert!(
-            help.contains("doctor"),
-            "help should mention doctor command"
-        );
-        assert!(
-            help.contains("status"),
-            "help should mention status command"
-        );
-        assert!(help.contains("spec"), "help should mention spec command");
-        assert!(help.contains("task"), "help should mention task command");
-        assert!(
-            help.contains("completions"),
-            "help should mention completions command"
+            !help.contains("vcs"),
+            "vcs commit-accepted moved under component commit"
         );
     }
 
@@ -2461,7 +2650,7 @@ mod tests {
         let cli = Cli::try_parse_from(["kvist", "completions", "bash"])
             .expect("valid completions command");
 
-        let Command::Completions { shell } = cli.command else {
+        let Some(Command::Completions { shell }) = cli.command else {
             panic!("expected completions command");
         };
 
@@ -2471,9 +2660,9 @@ mod tests {
     #[test]
     fn generates_bash_completions() {
         let outcome = execute(
-            Command::Completions {
+            Some(Command::Completions {
                 shell: SupportedShell::Bash,
-            },
+            }),
             false,
         )
         .expect("generates completions");
@@ -2486,8 +2675,8 @@ mod tests {
     fn generates_json_output() {
         let project = tempfile::TempDir::new().expect("create project");
         let outcome = execute(
-            Command::Init(ProjectDirectory {
-                path: project.path().to_path_buf(),
+            Some(Command::Init {
+                path: Some(project.path().to_path_buf()),
             }),
             true,
         )

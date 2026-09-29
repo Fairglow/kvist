@@ -22,51 +22,77 @@ generic command supervision, or reusable provider profiles.
 
 ## Provided interfaces
 
-The `kvist` executable provides:
+The `kvist` executable provides (the authoritative design is
+[`docs/command-set.md`](../docs/command-set.md)):
 
+- _(no arguments)_: inside a project, the human-friendly project overview plus
+  a tip pointing at `kvist help`; outside a project, the guided top-level help
 - `shell [PROJECT_DIR]`
 - `init [PROJECT_DIR]`
 - `convert PROJECT_DIR`
 - `import REPO_URL [--branch BRANCH] [--component PATH] [DEST_DIR]`
 - `reverse-discover PATH`
 - `doctor [PROJECT_DIR]`
-- `status [PROJECT_DIR] [--format text|json|overview] [--only-documents]
-[--only-impls] [--unfinished]`
-- `overview [PROJECT_DIR]`
+- `status [PROJECT_DIR] [--format overview|text|json] [--only-documents]
+[--only-impls] [--unfinished]`; the default format is the human-friendly
+  overview, and `text`/`json` are the stable report forms for scripts
 - `tree [PROJECT_DIR]`
 - `component new COMPONENT_DIR`
-- `component validate COMPONENT_DIR`
-- `component accept COMPONENT_DIR [--commit] [--message TEXT]`
-- `task next COMPONENT_DIR`
-- `task transition COMPONENT_DIR TASK_ID STATUS [--reason TEXT]`
-- `task run COMPONENT_DIR [TASK_ID] [--stream]`
-- `task log COMPONENT_DIR TASK_ID`
+- `component validate [COMPONENT_DIR]`
+- `component accept [COMPONENT_DIR] [--commit] [--message TEXT]`
+- `component commit ACCEPTANCE_ID`
+- `task next [COMPONENT_DIR]`
+- `task transition [COMPONENT_DIR] TASK_ID STATUS [--reason TEXT]`
+- `task run [COMPONENT_DIR] [TASK_ID] [--stream]`
+- `task log [COMPONENT_DIR] TASK_ID`
 - `task replay SESSION_JSONL [--max-turns N]`
 - `task approve-policy [PROJECT_DIR]`
-- `task unlock COMPONENT_DIR [--force]`
-- `task recover COMPONENT_DIR TASK_ID ATTEMPT_ID --disposition execution-did-not-start`
-- `task finalize COMPONENT_DIR TASK_ID ATTEMPT_ID DISPOSITION [--commit]
+- `task unlock [COMPONENT_DIR] [--force]`
+- `task recover [COMPONENT_DIR] TASK_ID ATTEMPT_ID --disposition execution-did-not-start`
+- `task finalize [COMPONENT_DIR] TASK_ID ATTEMPT_ID DISPOSITION [--commit]
 [--reason TEXT]` with DISPOSITION `accept` or `block`
 - `vendor [PROJECT_DIR] [--vendored-dir PATH]`
-- `toolchain ensure [PROJECT_DIR]`
+- `toolchain [PROJECT_DIR]`
 - `prompt` with one explicit prompt source or redirected input, optional
   `--role`, `--model`, and `--reasoning-effort`
 - `agent setup [--force]`
-- `agent profile add [--force]`, `agent profile list`, and
-  `agent profile remove [MODEL_NAME] [--all] [--global]`
+- `agent list`
+- `agent remove [MODEL_NAME] [--all] [--global]`
 - `agent role list`, `agent role set ROLE MODEL_NAME [--effort EFFORT]
 [--global]`, and `agent role clear [ROLE] [--all] [--global]`
 - `agent check [--global]`
-- `agent list` and `agent remove [MODEL_NAME] [--all] [--global]`
-- `vcs commit-accepted ACCEPTANCE_ID`
 - `completions SHELL`
+
+**Context resolution.** Project-level commands resolve the project root by
+walking upward from the current working directory to the nearest directory
+containing a regular `kvist.toml` (an explicit `PROJECT_DIR` argument always
+wins and is interpreted relative to the current directory). Component-level
+commands take an optional `COMPONENT_DIR`: when omitted, the nearest
+discovered component containing the current working directory is selected; when
+given, it is interpreted relative to the project's component root, and absolute
+paths outside the project are rejected. `component new` keeps its required
+directory. Failing outside a project names the missing marker and suggests
+`kvist init` or an explicit directory.
 
 `task run` without TASK_ID suggests the first ready task of the component and
 executes it only after an explicit interactive confirmation (a bare ENTER
 accepts; a refusal changes no state). When no task is ready, or when standard
 input is not an interactive terminal, it fails with an actionable diagnostic
-and changes no durable state. `vcs commit-accepted` retries or performs the
-isolated index commit for an already accepted set.
+and changes no durable state. `component commit` retries or performs the
+isolated index commit for an already accepted set (the acceptance id is
+reported when `component accept --commit` records the acceptance but cannot
+create the Git commit).
+
+**Guidance.** Project-state domain failures end with a `hint:` line naming the
+concrete unblocking command. `status` (overview) renders, per component, state,
+document validity, task progress, the next ready task, an Action line for every
+non-current state, and — for stale components — each changed document with its
+expected and observed revision plus a `git diff HEAD -- <path>` review hint.
+Gating success messages chain to the next lifecycle stage (`component accept`
+points at `task next`; `task run` points at `task log`; `task approve-policy`
+points at `task run`). Agent configuration commands operate on the project
+configuration inside a project and on the global user configuration outside one
+(as if `--global` were passed).
 
 `vendor` is a host-authorized provisioning step (ADR-0011, ADR-0013): it
 detects the project's language strategy and performs that language's
@@ -367,7 +393,7 @@ on the host and runs its real build/test offline inside the sandbox.
 
 The Rust toolchain used by offline verification is pinned by the project's
 `rust-toolchain.toml` or `rust-toolchain` when present (else the rustup
-default), provisioned by `kvist toolchain ensure` on the host, and recorded in
+default), provisioned by `kvist toolchain` on the host, and recorded in
 the `.kvist/` toolchain manifest. Verification resolves the toolchain
 channel-explicitly, independent of the process working directory, and fails
 closed with an actionable message when the pinned toolchain is absent or the

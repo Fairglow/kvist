@@ -61,6 +61,7 @@ fn global_json_flag_generates_structured_outputs() {
                 .to_str()
                 .expect("UTF-8 component path"),
         ])
+        .current_dir(project.path())
         .output()
         .expect("run component validate --json");
     assert!(validate_output.status.success());
@@ -72,21 +73,25 @@ fn global_json_flag_generates_structured_outputs() {
 
 #[test]
 fn invalid_component_documents_return_structured_json_failure() {
-    let component = TempDir::new().expect("component");
-    std::fs::write(component.path().join("REQUIREMENTS.md"), "# invalid\n")
+    let project = TempDir::new().expect("project");
+    let init = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args(["init", project.path().to_str().expect("UTF-8 project path")])
+        .output()
+        .expect("run init");
+    assert!(
+        init.status.success(),
+        "init: {}",
+        String::from_utf8_lossy(&init.stderr)
+    );
+    let root = project.path().join("src");
+    std::fs::write(root.join("REQUIREMENTS.md"), "# invalid\n")
         .expect("write invalid requirements");
-    std::fs::write(component.path().join("CONTRACT.md"), "# invalid\n")
-        .expect("write invalid contract");
-    std::fs::write(component.path().join("DESIGN.md"), "# invalid\n")
-        .expect("write invalid design");
+    std::fs::write(root.join("CONTRACT.md"), "# invalid\n").expect("write invalid contract");
+    std::fs::write(root.join("DESIGN.md"), "# invalid\n").expect("write invalid design");
 
     let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
-        .args([
-            "--json",
-            "component",
-            "validate",
-            component.path().to_str().expect("UTF-8 component path"),
-        ])
+        .args(["--json", "component", "validate", "."])
+        .current_dir(project.path())
         .output()
         .expect("run component validation");
 

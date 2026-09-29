@@ -1,6 +1,9 @@
 //! Deterministic, read-only project status rendering.
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use clap::ValueEnum;
 
@@ -294,6 +297,7 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
         docs_summary: String,
         tasks_summary: Option<String>,
         next_task: Option<(String, String)>,
+        stale_details: Option<String>,
         guidance: Option<String>,
     }
 
@@ -406,9 +410,43 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
                 (None, None)
             };
 
+        // For stale components, show exactly what changed (expected vs
+        // observed revision per document) plus a concrete diff command, so
+        // the user can review before re-accepting.
+        let stale_details = matches!(component.state, ComponentState::Stale)
+            .then(|| {
+                let mut lines = Vec::new();
+                for cause in &component.revalidation_causes {
+                    lines.push(format!("│    Changed:   {}\n", cause.path));
+                    lines.push(format!(
+                        "              expected  {}\n",
+                        short_revision(&cause.expected_revision)
+                    ));
+                    lines.push(format!(
+                        "              observed  {}\n",
+                        short_revision(&cause.observed_revision)
+                    ));
+                    let diff_path = normalize_relative_path(&{
+                        let comp_rel = match &inspection.component_root {
+                            Some(root) if root != Path::new(".") => root.join(&component.path),
+                            _ => component.path.clone(),
+                        };
+                        comp_rel.join(&cause.path)
+                    })
+                    .to_string_lossy()
+                    .into_owned();
+                    lines.push(format!(
+                        "              (under Git: git diff HEAD -- {})\n",
+                        diff_path
+                    ));
+                }
+                lines.join("")
+            })
+            .filter(|details| !details.is_empty());
+
         let guidance = match component.state {
             ComponentState::Stale => Some(format!(
-                "Run 'kvist component accept {comp_path_str}' after review."
+                "Review the changed documents above, then run 'kvist component accept {comp_path_str}'"
             )),
             ComponentState::Blocked => Some(format!(
                 "Resolve blocked tasks in {comp_path_str}/TODOS.yaml."
@@ -431,6 +469,7 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
             docs_summary,
             tasks_summary,
             next_task,
+            stale_details,
             guidance,
         });
     }
@@ -476,6 +515,9 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
                 next_id, next_title
             ));
         }
+        if let Some(details) = comp.stale_details {
+            output.push_str(&details);
+        }
         if let Some(hint) = comp.guidance {
             output.push_str(&format!("│    Action:    {}\n", hint));
         }
@@ -483,4 +525,60 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
 
     output.push_str("╰─────────────────────────────────────────────────────────────────");
     output
+}
+
+/// Shortens a `sha256:<64 hex>` revision for overview display.
+fn short_revision(revision: &str) -> String {
+    match revision.strip_prefix("sha256:") {
+        Some(hex) if hex.len() > 12 => format!("sha256:{}…", &hex[..12]),
+        _ => revision.to_owned(),
+    }
+}
+
+/// Collapses `.` and `..` segments in a relative path for display.
+fn normalize_relative_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push("..");
+                }
+            }
+            std::path::Component::CurDir => {}
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_revision_truncates_long_sha256_revisions() {
+        assert_eq!(
+            short_revision("sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcd"),
+            "sha256:1234567890ab…"
+        );
+        assert_eq!(short_revision("sha256:abc"), "sha256:abc");
+        assert_eq!(short_revision(""), "");
+    }
+
+    #[test]
+    fn normalize_relative_path_collapses_dot_segments() {
+        assert_eq!(
+            normalize_relative_path(Path::new("src/ordinary/../../CONTRACT.md")),
+            PathBuf::from("CONTRACT.md")
+        );
+        assert_eq!(
+            normalize_relative_path(Path::new("src/engine/REQUIREMENTS.md")),
+            PathBuf::from("src/engine/REQUIREMENTS.md")
+        );
+        assert_eq!(
+            normalize_relative_path(Path::new("..")),
+            PathBuf::from("..")
+        );
+    }
 }

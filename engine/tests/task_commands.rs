@@ -546,7 +546,7 @@ fn component_accept_resolves_staleness_and_updates_queue_revisions() {
     fs::write(&requirements_path, &updated).expect("write updated requirements");
 
     // Verify it is stale under status
-    let output = run_kvist(&project, &["status", "."]);
+    let output = run_kvist(&project, &["status", "--format", "text", "."]);
     assert!(String::from_utf8_lossy(&output.stdout).contains("state: stale"));
 
     let output = run_kvist(&project, &["component", "accept", "."]);
@@ -822,7 +822,7 @@ tasks: []
     fs::write(child_dir.join("TODOS.yaml"), child_queue).expect("write child queue");
     track_project(&project);
 
-    let status = run_kvist(&project, &["status", "."]);
+    let status = run_kvist(&project, &["status", "--format", "text", "."]);
     assert!(
         String::from_utf8_lossy(&status.stdout)
             .contains("component: ordinary/component state: invalid")

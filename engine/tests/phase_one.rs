@@ -28,7 +28,11 @@ fn phase_one_cli_workflow_initializes_generates_validates_and_renders() {
     assert!(generate.status.success());
     assert!(generate.stderr.is_empty());
 
-    let validate = run_kvist(&["component", "validate", component_path]);
+    let validate = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args(["component", "validate", component_path])
+        .current_dir(project.path())
+        .output()
+        .expect("run component validate");
     assert!(validate.status.success());
     assert!(validate.stderr.is_empty());
 

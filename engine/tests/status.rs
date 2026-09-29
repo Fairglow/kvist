@@ -67,6 +67,8 @@ fn status_reports_a_current_initialized_project_in_stable_text_and_json() {
 
     let text = run_kvist(&[
         "status",
+        "--format",
+        "text",
         project.path().to_str().expect("UTF-8 project path"),
     ]);
     assert!(text.status.success());
@@ -165,6 +167,8 @@ fn status_surfaces_component_missing_unsupported_stale_and_blocked_states_withou
 
     let output = run_kvist(&[
         "status",
+        "--format",
+        "text",
         project.path().to_str().expect("UTF-8 project path"),
     ]);
     assert!(output.status.success());
@@ -204,6 +208,8 @@ fn status_escapes_control_characters_in_text_component_paths() {
 
     let output = run_kvist(&[
         "status",
+        "--format",
+        "text",
         project.path().to_str().expect("UTF-8 project path"),
     ]);
     assert!(output.status.success());
@@ -229,9 +235,11 @@ fn status_filters_components_and_artifacts() {
     )
     .expect("write stale queue");
 
-    // 1. Test default status output first (shows current root, stale-comp, and all artifacts)
+    // 1. Test the stable text status first (shows current root, stale-comp, and all artifacts)
     let default_output = run_kvist(&[
         "status",
+        "--format",
+        "text",
         project.path().to_str().expect("UTF-8 project path"),
     ]);
     assert!(default_output.status.success());
@@ -248,6 +256,8 @@ fn status_filters_components_and_artifacts() {
     // 2. Test --only-documents
     let documents_output = run_kvist(&[
         "status",
+        "--format",
+        "text",
         "--only-documents",
         project.path().to_str().expect("UTF-8 project path"),
     ]);
@@ -267,6 +277,8 @@ fn status_filters_components_and_artifacts() {
     // 3. Test --only-impls
     let impls_output = run_kvist(&[
         "status",
+        "--format",
+        "text",
         "--only-impls",
         project.path().to_str().expect("UTF-8 project path"),
     ]);
@@ -284,6 +296,8 @@ fn status_filters_components_and_artifacts() {
     // 4. Test --unfinished (omits current, shows stale-comp)
     let unfinished_output = run_kvist(&[
         "status",
+        "--format",
+        "text",
         "--unfinished",
         project.path().to_str().expect("UTF-8 project path"),
     ]);
@@ -353,6 +367,8 @@ fn status_transparent_namespace_parent_contract() {
     // Let's run status
     let output = run_kvist(&[
         "status",
+        "--format",
+        "text",
         project.path().to_str().expect("UTF-8 project path"),
     ]);
     assert!(output.status.success());
@@ -375,6 +391,8 @@ fn status_transparent_namespace_parent_contract() {
 
     let output_stale = run_kvist(&[
         "status",
+        "--format",
+        "text",
         project.path().to_str().expect("UTF-8 project path"),
     ]);
     assert!(output_stale.status.success());
@@ -402,6 +420,8 @@ fn status_attributes_contract_and_design_changes_independently() {
 
         let output = run_kvist(&[
             "status",
+            "--format",
+            "text",
             project.path().to_str().expect("UTF-8 project path"),
         ]);
         assert!(output.status.success());
@@ -434,6 +454,8 @@ fn parent_requirements_and_design_do_not_stale_a_child() {
 
     let output = run_kvist(&[
         "status",
+        "--format",
+        "text",
         project.path().to_str().expect("UTF-8 project path"),
     ]);
     assert!(output.status.success());
@@ -460,13 +482,39 @@ fn status_overview_reports_compact_docs_and_task_progress() {
     assert!(stdout.contains("Documents: all valid (5/5)"));
     assert!(stdout.contains("Progress:"));
 
-    // Test with overview command
+    // A bare `status` defaults to the same human-friendly view.
     let output2 = run_kvist(&[
-        "overview",
+        "status",
         project.path().to_str().expect("UTF-8 project path"),
     ]);
     assert!(output2.status.success());
     let stdout2 = String::from_utf8(output2.stdout).expect("UTF-8 status");
     assert!(stdout2.contains("Project Status"));
     assert!(stdout2.contains("Documents: all valid (5/5)"));
+}
+
+#[test]
+fn status_overview_lists_changed_documents_with_revisions_and_diff_hint() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    let design = project.path().join("src").join("DESIGN.md");
+    let mut contents = fs::read_to_string(&design).expect("read design");
+    contents.push_str("\n\n<!-- changed -->\n");
+    fs::write(design, contents).expect("change design");
+
+    let output = run_kvist(&[
+        "status",
+        "--format",
+        "overview",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 overview");
+    assert!(stdout.contains("Component: ."));
+    assert!(stdout.contains("State:     stale"));
+    assert!(stdout.contains("Changed:   DESIGN.md"));
+    assert!(stdout.contains("expected  sha256:"));
+    assert!(stdout.contains("observed  sha256:"));
+    assert!(stdout.contains("git diff HEAD -- src/DESIGN.md"));
+    assert!(stdout.contains("kvist component accept ."));
 }

@@ -301,7 +301,7 @@ fn active_rustup_cargo() -> Option<String> {
 }
 
 /// End-to-end: a project pinned via `rust-toolchain.toml` is provisioned by
-/// `kvist toolchain ensure` (ADR-0012), and the offline verification resolves
+/// `kvist toolchain` (ADR-0012), and the offline verification resolves
 /// that exact pinned toolchain channel-explicitly and builds against it.
 #[test]
 fn offline_cargo_verification_uses_pinned_toolchain() {
@@ -471,7 +471,7 @@ fn write_zero_dep_cargo_project(dir: &Path) {
 }
 
 /// End-to-end: a project pinned to the `nightly` channel via
-/// `rust-toolchain.toml` is provisioned by `kvist toolchain ensure`
+/// `rust-toolchain.toml` is provisioned by `kvist toolchain`
 /// (ADR-0012), the offline verification resolves exactly that pinned channel
 /// (not the host default), and a network-denied `cargo test --locked` builds
 /// and runs against it. This proves the alternate-toolchain story end to end,

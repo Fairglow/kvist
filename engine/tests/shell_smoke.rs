@@ -11,9 +11,20 @@
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// Initializes a Kvist project in `dir` so context-dependent commands have a
+/// project to resolve.
+fn init_project(dir: &std::path::Path) {
+    let status = Command::new(env!("CARGO_BIN_EXE_kvist"))
+        .args(["init", dir.to_str().expect("UTF-8 project path")])
+        .status()
+        .expect("initialize the project");
+    assert!(status.success(), "kvist init must succeed in {dir:?}");
+}
+
 #[test]
 fn shell_rejects_a_non_interactive_stdin() {
     let dir = tempfile::tempdir().expect("tempdir");
+    init_project(dir.path());
     let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
         .arg("shell")
         .current_dir(dir.path())
@@ -196,6 +207,7 @@ fn shell_on_a_pty_shows_the_banner_and_exits_cleanly() {
     use std::os::fd::AsFd;
 
     let dir = tempfile::tempdir().expect("tempdir");
+    init_project(dir.path());
     // Isolate the child from the user's real state and configuration.
     let state_home = dir.path().join("state");
     let config_home = dir.path().join("config");
