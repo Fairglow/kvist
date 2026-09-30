@@ -303,7 +303,7 @@ fn validate_transition(
         {
             return Err(KvistError::TaskNotReady {
                 task_id: task.id.clone(),
-                reason: "it must be pending or blocked with all dependency-chain tasks completed"
+                reason: "it must be pending or blocked with all dependency-chain tasks completed — see `kvist help task-states`"
                     .to_owned(),
             });
         }
@@ -337,11 +337,29 @@ fn validate_transition(
 }
 
 fn transition_error(task: &Task, target: TaskStatus, reason: &str) -> KvistError {
+    // Pair every illegal move with the legal ones: enumerate the closed state
+    // set in declaration order so the hint is deterministic, and point at the
+    // task-states help topic for the full picture.
+    let legal: Vec<&str> = TaskStatus::all_states()
+        .iter()
+        .copied()
+        .filter(|state| task.status.can_transition_to(*state))
+        .map(status_name)
+        .collect();
+    let legal_text = if legal.is_empty() {
+        "(none; terminal state)".to_owned()
+    } else {
+        legal.join(", ")
+    };
     KvistError::TaskTransitionInvalid {
         task_id: task.id.clone(),
         from: status_name(task.status).to_owned(),
         to: status_name(target).to_owned(),
-        reason: reason.to_owned(),
+        reason: format!(
+            "{reason}; legal from `{}`: {} — see `kvist help task-states`",
+            status_name(task.status),
+            legal_text
+        ),
     }
 }
 

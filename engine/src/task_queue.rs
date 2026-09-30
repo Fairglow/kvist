@@ -208,6 +208,18 @@ pub enum TaskStatus {
 }
 
 impl TaskStatus {
+    /// Every state in declaration order (deterministic enumeration for hints
+    /// and reports).
+    pub const fn all_states() -> [Self; 5] {
+        [
+            Self::Pending,
+            Self::InProgress,
+            Self::Blocked,
+            Self::AwaitingDecision,
+            Self::Completed,
+        ]
+    }
+
     /// Returns whether a durable state update may move from `self` to `next`.
     pub const fn can_transition_to(self, next: Self) -> bool {
         matches!(
@@ -1219,6 +1231,31 @@ mod tests {
         // A dependency missing from the queue is never satisfied.
         let tasks = vec![task("a", TaskStatus::Pending, &["missing"])];
         assert_eq!(next_ready_task_id(&tasks), None);
+    }
+
+    #[test]
+    fn all_states_lists_the_closed_set_in_declaration_order() {
+        let names: Vec<&str> = TaskStatus::all_states()
+            .iter()
+            .copied()
+            .map(|state| match state {
+                TaskStatus::Pending => "pending",
+                TaskStatus::InProgress => "in-progress",
+                TaskStatus::Blocked => "blocked",
+                TaskStatus::AwaitingDecision => "awaiting-decision",
+                TaskStatus::Completed => "completed",
+            })
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "pending",
+                "in-progress",
+                "blocked",
+                "awaiting-decision",
+                "completed"
+            ]
+        );
     }
 
     #[test]

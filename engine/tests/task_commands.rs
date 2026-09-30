@@ -531,6 +531,67 @@ fn task_transition_requires_a_block_reason() {
 
 #[test]
 #[cfg(target_os = "linux")]
+fn task_transition_error_reports_legal_transitions_and_help_topic() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    let queue_path = project.path().join("src/TODOS.yaml");
+    fs::write(&queue_path, queue()).expect("write queue");
+    track_project(&project);
+
+    // pending -> completed is illegal; the error lists the legal targets
+    // from the current state and points at the task-states help topic.
+    let output = run_kvist(
+        &project,
+        &["task", "transition", ".", "implement-code", "completed"],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot transition task `implement-code` from pending to completed"));
+    assert!(stderr.contains("legal from `pending`: in-progress, blocked"));
+    assert!(stderr.contains("kvist help task-states"));
+
+    // A blocked task lists its own legal targets (pending, in-progress).
+    let mut blocked_fixture = queue();
+    let marker = "  - id: implement-code";
+    let index = blocked_fixture
+        .find(marker)
+        .expect("fixture has implement-code");
+    let tail = blocked_fixture[index..]
+        .replace("status: pending", "status: blocked")
+        .replace(
+            "blocked_reason: null",
+            "blocked_reason: Waiting on a human decision.",
+        );
+    blocked_fixture.replace_range(index.., &tail);
+    fs::write(&queue_path, blocked_fixture).expect("write blocked queue");
+    let output = run_kvist(
+        &project,
+        &[
+            "task",
+            "transition",
+            ".",
+            "implement-code",
+            "awaiting-decision",
+        ],
+    );
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr
+            .contains("cannot transition task `implement-code` from blocked to awaiting-decision")
+    );
+    assert!(stderr.contains("legal from `blocked`: pending, in-progress"));
+    assert!(stderr.contains("kvist help task-states"));
+    // The state machine did not change the queue.
+    assert!(
+        fs::read_to_string(&queue_path)
+            .expect("read queue")
+            .contains("status: blocked")
+    );
+}
+
+#[test]
+#[cfg(target_os = "linux")]
 fn component_accept_resolves_staleness_and_updates_queue_revisions() {
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
