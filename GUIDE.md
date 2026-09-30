@@ -430,7 +430,7 @@ Type these directly at the `kvist` prompt (no `kvist` prefix needed):
 | Command                          | Description                                                                                                                         |
 | :------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------- |
 | `cd [COMPONENT]`                 | Set the current component: `run`, `tasks`, completion, and dispatched commands like `task next` / `component accept` all target it. |
-| `tasks [COMPONENT] [--status S]` | List tasks with status; filter by `pending`, `in-progress`, `blocked`, `completed`.                                                 |
+| `tasks [COMPONENT] [--status S]` | List tasks with status; filter by `pending`, `in-progress`, `blocked`, `awaiting-decision`, `completed`.                            |
 | `run [COMPONENT] [TASK]`         | Run a task (exact ID, item prefix, or `all`), or the next ready task when omitted.                                                  |
 | `last [COUNT]`                   | Show recent agent runs with tokens and log links.                                                                                   |
 | `history [COUNT]`                | Show recent editor history lines.                                                                                                   |

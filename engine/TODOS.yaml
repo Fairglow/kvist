@@ -2825,7 +2825,7 @@ tasks:
     purpose: "Establish executable evidence that every state surface answers what the state means and what to run next before the guidance implementation."
     expected_outcome: "Tests fail on the current surfaces and pin the topic set, the blocked/awaiting-decision detail lines with exact commands, the legal-transition hints, and the documented multi-task run forms."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Provided-interfaces"
@@ -2834,17 +2834,17 @@ tasks:
     timestamps:
       created_at: "2026-09-29T22:23:20Z"
       updated_at: "2026-09-29T22:23:20Z"
-      completed_at: null
+      completed_at: "2026-09-30T04:55:18Z"
     blocked_reason: null
     recovery_state: null
   - id: "help-guidance-implement-code"
     title: "Implement help topics and actionable status guidance"
-    description: "Add the pure help module (HelpTopic closed set plus render for the tour, concepts, lifecycle, and task-states topics) with a `kvist help [TOPIC]` command and the shell `help [TOPIC]` builtin sharing the renderer and tab completion; extend status overview and text reports with per-task blocked/awaiting-decision details, truncated reasons, and exact next commands derived from dependency completion; make invalid-transition errors enumerate the legal transitions from the current state with a task-states pointer; document the exact-ID, item-prefix, and `all` task specifications in the `task run` help; and align GUIDE.md and docs/command-set.md with the help topics, the multi-task run forms, and the full status set."
+    description: "Add the pure help module (HelpTopic closed set plus render for the tour, concepts, lifecycle, and task-states topics) with a `kvist help [TOPIC]` command and the shell `help [TOPIC]` builtin sharing the renderer and tab completion; extend status overview and text reports with per-task blocked/awaiting-decision details, truncated reasons, and exact next commands derived from dependency completion; make invalid-transition errors enumerate the legal transitions from the current state with a task-states pointer; document the exact-ID, item-prefix, and `all` task specifications in the `task run` help; align GUIDE.md and docs/command-set.md with the help topics, the multi-task run forms, and the full status set; render the same next-command details per blocked/awaiting-decision row in the shell `tasks` table with single-line bounded reasons; emit a structured {status, command, topic, text} payload for `--json help`; and name all five durable states in the shell `--status` usage strings."
     context: "The intent for REQ-HELP-GUIDANCE is accepted; the failing tests from help-guidance-write-tests define the expected surfaces."
     purpose: "Deliver the guided help and actionable status guidance required by REQ-HELP-GUIDANCE."
     expected_outcome: "All help-guidance-write-tests pass; every non-current state surface names the cause and a concrete next command or the help topic explaining the decision; help topics are identical in shell and CLI and tab-completable."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "help-guidance-write-tests"
     requirements:
@@ -2854,18 +2854,18 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-29T22:23:20Z"
-      updated_at: "2026-09-29T22:23:20Z"
-      completed_at: null
+      updated_at: "2026-09-30T04:55:18Z"
+      completed_at: "2026-09-30T04:55:18Z"
     blocked_reason: null
     recovery_state: null
   - id: "help-guidance-security-audit"
     title: "Audit help and status guidance surfaces"
     description: "Independently review the new help rendering, status detail lines, and transition hints for untrusted-input handling (bounded and redacted blocked reasons, no secrets in help output), deterministic output, and no behavior change beyond presentation and error text."
-    context: "The guidance surfaces render queue-derived strings into user output and error messages."
+    context: "The guidance surfaces render queue-derived strings into user output and error messages. Internal/implementer review of the new presentation paths; this is not the source-blind certification — the independent gate is the compliance-review task. Passed with no code findings: task IDs are kebab-case at parse time and reasons are renderer-bounded to their first nonblank line (96 chars in status, 100 chars in the shell tasks table), so untrusted queue text cannot break report layout; help text is static; legal-state and dependency enumeration are deterministic declaration order with a BTreeSet; no change beyond presentation and error text (JSON status report and transition validation unchanged, no new I/O, dependencies, or authority). One doc fix: DESIGN.md claimed reasons are redacted when recorded, but bounding happens at render time."
     purpose: "Preserve independent confirmation that the new presentation paths introduce no new authority, disclosure, or nondeterminism."
     expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
     kind: security-audit
-    status: pending
+    status: completed
     depends_on:
       - "help-guidance-implement-code"
     requirements:
@@ -2873,8 +2873,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-09-29T22:23:20Z"
-      updated_at: "2026-09-29T22:23:20Z"
-      completed_at: null
+      updated_at: "2026-09-30T06:30:00Z"
+      completed_at: "2026-09-30T06:30:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "help-guidance-compliance-review"

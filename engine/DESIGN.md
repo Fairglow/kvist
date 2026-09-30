@@ -720,8 +720,9 @@ documentation (`GUIDE.md`, `docs/command-set.md`, or a component's
 Status guidance in `status.rs` reuses the `TODOS.yaml` parse it already
 performs for task progress. For a blocked component it lists each blocked
 task with its `blocked_reason` first line truncated to a bounded 96
-characters (reasons are redacted when recorded, so no new secret path is
-introduced) and derives the exact next command from
+characters (the queue parser bounds task IDs to kebab-case, and the renderer
+bounds the untrusted reason text, so queue content cannot break the report
+layout) and derives the exact next command from
 `task_queue::dependencies_completed(task, tasks)`: when the dependency chain
 is completed the command is `kvist task run <COMPONENT_DIR> <TASK_ID>`
 (blocked → in-progress is legal); otherwise it is `kvist task transition
@@ -730,6 +731,10 @@ Awaiting-decision tasks are listed with a pointer to `kvist help
 task-states` because resuming them is a human decision. The details render as
 separate indented lines under the overview Action line and as `blocked:` /
 `decision:` entries in the stable text report; the JSON report is unchanged.
+The shell's `tasks` table reuses the same `dependencies_completed` /
+`incomplete_dependency_count` selection in `next_command_for` and renders one
+bounded single-line reason plus one `next:` line per blocked or
+awaiting-decision row, so table columns never drift.
 
 `task transition` failures (`transition_error`) enumerate the legal target
 statuses from `TaskStatus::can_transition_to` — the closed five-state set in

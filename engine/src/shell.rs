@@ -402,6 +402,7 @@ impl Shell {
                 kind: task.kind,
                 title: task.title.clone(),
                 blocked_reason: task.blocked_reason.clone(),
+                next: next_command_for(task, &scope.tasks, &component),
             })
             .collect();
         display_output(&render_tasks(
@@ -872,6 +873,7 @@ struct TaskRow {
     kind: TaskKind,
     title: String,
     blocked_reason: Option<String>,
+    next: Option<String>,
 }
 
 /// The CLI spelling of a durable task status.
@@ -910,6 +912,7 @@ fn parse_task_status(value: &str) -> std::result::Result<TaskStatus, String> {
 }
 
 /// Parsed `tasks` builtin arguments.
+#[derive(Debug)]
 struct TasksArgs {
     component: Option<String>,
     status: Option<TaskStatus>,
@@ -925,7 +928,7 @@ fn parse_tasks_args(args: &[String]) -> std::result::Result<TasksArgs, String> {
         if arg == "--status" {
             let Some(value) = args.get(i + 1) else {
                 return Err(
-                    "--status needs a value: pending, in-progress, blocked, or completed"
+                    "--status needs a value: pending, in-progress, blocked, awaiting-decision, or completed"
                         .to_owned(),
                 );
             };
@@ -1018,6 +1021,42 @@ fn status_style(theme: Theme, status: TaskStatus) -> String {
     }
 }
 
+/// The exact next command for a non-current task row, so a blocked or paused
+/// task never appears without the step that resolves it (same command logic
+/// as the status report).
+fn next_command_for(
+    task: &task_queue::Task,
+    tasks: &[task_queue::Task],
+    component: &str,
+) -> Option<String> {
+    match task.status {
+        TaskStatus::Blocked => {
+            if task_queue::dependencies_completed(task, tasks) {
+                Some(format!("kvist task run {component} {}", task.id))
+            } else {
+                let n = task_queue::incomplete_dependency_count(task, tasks);
+                let unit = if n == 1 { "task" } else { "tasks" };
+                Some(format!(
+                    "kvist task transition {component} {} pending ({} dependency {unit} incomplete)",
+                    task.id, n
+                ))
+            }
+        }
+        TaskStatus::AwaitingDecision => {
+            Some("human decision needed; 'kvist help task-states' explains resuming".to_owned())
+        }
+        _ => None,
+    }
+}
+
+/// The first nonblank line of a recorded reason (table rows are single-line).
+fn first_nonblank_line(value: &str) -> &str {
+    value
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("")
+}
+
 /// Renders the `tasks` table (pure, so it is testable without a terminal).
 fn render_tasks(
     theme: Theme,
@@ -1049,8 +1088,14 @@ fn render_tasks(
         if let Some(reason) = &row.blocked_reason {
             text.push_str(&format!(
                 "   {}\n",
-                theme.dim(&format!("blocked: {}", truncate(reason, 100)))
+                theme.dim(&format!(
+                    "blocked: {}",
+                    truncate(first_nonblank_line(reason), 100)
+                ))
             ));
+        }
+        if let Some(next) = &row.next {
+            text.push_str(&format!("   {}\n", theme.dim(&format!("next:    {next}"))));
         }
     }
     if let Some(next) = next_ready {
@@ -1115,7 +1160,9 @@ fn render_help(theme: Theme) -> String {
     text.push_str(
         "  cd [COMPONENT]                 set the current component for builtins and completion\n",
     );
-    text.push_str("  tasks [COMPONENT] [--status S] list tasks; S: pending, in-progress, blocked, completed\n");
+    text.push_str(
+        "  tasks [COMPONENT] [--status S] list tasks; S: pending, in-progress, blocked, awaiting-decision, completed\n",
+    );
     text.push_str(
         "  run [COMPONENT] [TASK]         run a task; omit TASK to confirm the next ready one\n",
     );
@@ -1865,6 +1912,51 @@ mod tests {
     }
 
     #[test]
+    fn tasks_status_usage_names_every_durable_state() {
+        let error = parse_tasks_args(&["--status".to_owned()]).expect_err("missing value");
+        for status in [
+            "pending",
+            "in-progress",
+            "blocked",
+            "awaiting-decision",
+            "completed",
+        ] {
+            assert!(error.contains(status), "usage missing {status}: {error}");
+        }
+    }
+
+    #[test]
+    fn tasks_next_command_names_run_or_transition_per_dependency_chain() {
+        // Completed chain: the exact re-run command.
+        let ready = ready_task("done", TaskStatus::Completed, &[]);
+        let blocked = ready_task("b1", TaskStatus::Blocked, &["done"]);
+        let tasks = vec![blocked.clone(), ready];
+        let next = next_command_for(&blocked, &tasks, "engine").expect("command");
+        assert_eq!(next, "kvist task run engine b1");
+
+        // Incomplete chain: reopen with the incomplete-dependency count.
+        let pending = ready_task("p1", TaskStatus::Pending, &[]);
+        let blocked = ready_task("b2", TaskStatus::Blocked, &["p1"]);
+        let tasks = vec![blocked.clone(), pending];
+        let next = next_command_for(&blocked, &tasks, "engine").expect("command");
+        assert_eq!(
+            next,
+            "kvist task transition engine b2 pending (1 dependency task incomplete)"
+        );
+
+        // Awaiting-decision points at the help topic; other states have none.
+        let paused = ready_task("d1", TaskStatus::AwaitingDecision, &[]);
+        let next = next_command_for(&paused, &[], "engine").expect("command");
+        assert!(next.contains("kvist help task-states"));
+        assert!(
+            next_command_for(&ready_task("x", TaskStatus::Pending, &[]), &[], "engine").is_none()
+        );
+        assert!(
+            next_command_for(&ready_task("x", TaskStatus::Completed, &[]), &[], "engine").is_none()
+        );
+    }
+
+    #[test]
     fn component_focus_hint_only_when_requested_differs_from_focus() {
         // No focus: naming a component suggests focusing it.
         assert_eq!(
@@ -1922,6 +2014,7 @@ mod tests {
             kind: TaskKind::Test,
             title: format!("title {id}"),
             blocked_reason: None,
+            next: None,
         }
     }
 
@@ -1942,10 +2035,26 @@ mod tests {
             kind: TaskKind::Implementation,
             title: "t".to_owned(),
             blocked_reason: Some("waiting on x".to_owned()),
+            next: Some("kvist task run . c".to_owned()),
         }];
         let text = render_tasks(Theme::plain(), ".", &blocked, None);
         assert!(text.contains("implementation"));
         assert!(text.contains("blocked: waiting on x"));
+        assert!(text.contains("next:    kvist task run . c"));
+        // A multi-line reason renders as its first nonblank line only.
+        let multiline = vec![TaskRow {
+            id: "d".to_owned(),
+            status: TaskStatus::Blocked,
+            kind: TaskKind::Test,
+            title: "t".to_owned(),
+            blocked_reason: Some("first line\nsecond line".to_owned()),
+            next: Some(
+                "kvist task transition . d pending (1 dependency task incomplete)".to_owned(),
+            ),
+        }];
+        let text = render_tasks(Theme::plain(), ".", &multiline, None);
+        assert!(text.contains("blocked: first line"));
+        assert!(!text.contains("second line"));
         assert!(render_tasks(Theme::plain(), "engine", &[], None).contains("match the filter"));
 
         // A colored theme keeps every line at the same visible width as the
@@ -2028,6 +2137,10 @@ mod tests {
         assert!(
             text.contains("kvist help"),
             "help should point at the CLI help command"
+        );
+        assert!(
+            text.contains("awaiting-decision"),
+            "tasks usage must name the pause state"
         );
     }
 

@@ -74,7 +74,7 @@ cross-cutting concern. No aliases, no overlapping subgroups:
 | manual state        | `kvist task transition`                                  |
 | policy gate         | `kvist task approve-policy`                              |
 | lock maintenance    | `kvist task unlock`                                      |
-| agent configuration | `kvist agent setup                                       | list | remove | check | role` |
+| agent configuration | `kvist agent setup\|list\|remove\|check\|role`           |
 | onboarding          | `kvist init` / `convert` / `reverse-discover` / `import` |
 | offline build       | `kvist vendor` / `kvist toolchain`                       |
 

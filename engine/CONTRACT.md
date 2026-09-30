@@ -99,7 +99,8 @@ each blocked task with its truncated `blocked_reason` first line and the exact
 next command (`task run <COMPONENT_DIR> <TASK_ID>` when the task's dependency
 chain is completed, else `task transition <COMPONENT_DIR> <TASK_ID> pending`
 with the incomplete-dependency count); awaiting-decision tasks are listed with
-a pointer to the task-states help topic. Every Action line names a concrete
+a pointer to the task-states help topic. The shell's `tasks` table carries the
+same per-task reason and next-command details. Every Action line names a concrete
 next command or the `kvist help <TOPIC>` that explains a required human
 decision. Invalid `task transition` failures report the legal transitions from
 the current state plus a pointer to `kvist help task-states`.
@@ -217,7 +218,10 @@ the session. The shell builtins are `cd [COMPONENT_DIR]`,
 `help [TOPIC]`, `last [COUNT]`, `history [COUNT]`, `journal`, `locks
 [clean]`, and `exit`/`quit`. `help` with no topic lists the builtins and the
 available help topics; with a topic it renders that topic, exactly as
-`kvist help [TOPIC]` does. `cd` remembers a default component for the builtins and for
+`kvist help [TOPIC]` does. The `tasks` table lists each blocked and
+awaiting-decision task with its truncated reason first line and the exact next
+command (the same run/transition logic as the status report), so no non-current
+task is shown without the step that resolves it. `cd` remembers a default component for the builtins and for
 completion ordering; when `tasks` or `run` names a component different from the
 current focus, the shell prints a hint to switch and leaves the focus
 unchanged. `run` without a task ID suggests the first ready task of the

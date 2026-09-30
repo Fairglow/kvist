@@ -1226,7 +1226,16 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 )))
             }
             Command::Help { topic } => {
-                Ok(CommandOutput::message(crate::help::render(topic)))
+                let text = crate::help::render(topic);
+                let mut text_json = String::new();
+                json_string_escape(&mut text_json, &text);
+                let topic_json = match topic {
+                    Some(topic) => format!("\"{}\"", topic.name()),
+                    None => "null".to_owned(),
+                };
+                Ok(CommandOutput::message(format!(
+                    r#"{{"status":"success","command":"help","topic":{topic_json},"text":{text_json}}}"#
+                )))
             }
             // Dispatched above before presentation handling; retained so the
             // match stays total and the JSON branch never sees it.
@@ -2629,6 +2638,37 @@ mod tests {
         assert!(topic.is_none());
         // An unknown topic is a parser error, not a silent success.
         assert!(Cli::try_parse_from(["kvist", "help", "bogus"]).is_err());
+    }
+
+    #[test]
+    fn help_json_payload_is_structured_json() {
+        let output = execute(
+            Some(Command::Help {
+                topic: Some(HelpTopic::Concepts),
+            }),
+            true,
+        )
+        .expect("help succeeds");
+        let json: serde_json::Value =
+            serde_json::from_str(&output.to_string()).expect("valid JSON payload");
+        assert_eq!(json["status"], "success");
+        assert_eq!(json["command"], "help");
+        assert_eq!(json["topic"], "concepts");
+        assert!(
+            json["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("Kvist core concepts"))
+        );
+
+        let output = execute(Some(Command::Help { topic: None }), true).expect("tour");
+        let json: serde_json::Value =
+            serde_json::from_str(&output.to_string()).expect("valid JSON payload");
+        assert!(json["topic"].is_null());
+        assert!(
+            json["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("30 seconds"))
+        );
     }
 
     #[test]
