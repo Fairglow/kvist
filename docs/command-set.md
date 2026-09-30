@@ -49,7 +49,7 @@ author intent ──► validate ──► accept ──► run tasks ──► 
 ```
 
 When intent documents change after acceptance, the component becomes
-**stale**: Kvist records *which* document changed and what the expected and
+**stale**: Kvist records _which_ document changed and what the expected and
 observed revisions are, and every surface (status, errors) tells the user to
 review the change and run `kvist component accept` again.
 
@@ -60,23 +60,23 @@ review the change and run `kvist component accept` again.
 There is one canonical command for each stage of the lifecycle and for each
 cross-cutting concern. No aliases, no overlapping subgroups:
 
-| Concern            | Canonical command                        |
-| ------------------ | ---------------------------------------- |
-| interactive work   | `kvist shell`                            |
-| inspect state      | `kvist status` (default view), `tree`, `doctor` |
-| create component   | `kvist component new`                    |
-| check intent docs  | `kvist component validate`               |
-| accept intent      | `kvist component accept`                 |
-| pick a task        | `kvist task next`                        |
-| execute a task     | `kvist task run`                         |
-| inspect execution  | `kvist task log` / `task replay`         |
-| human disposition  | `kvist task finalize` / `task recover`   |
-| manual state       | `kvist task transition`                  |
-| policy gate        | `kvist task approve-policy`              |
-| lock maintenance   | `kvist task unlock`                      |
-| agent configuration| `kvist agent setup|list|remove|check|role` |
-| onboarding         | `kvist init` / `convert` / `reverse-discover` / `import` |
-| offline build      | `kvist vendor` / `kvist toolchain`       |
+| Concern             | Canonical command                                        |
+| ------------------- | -------------------------------------------------------- |
+| interactive work    | `kvist shell`                                            |
+| inspect state       | `kvist status` (default view), `tree`, `doctor`          |
+| create component    | `kvist component new`                                    |
+| check intent docs   | `kvist component validate`                               |
+| accept intent       | `kvist component accept`                                 |
+| pick a task         | `kvist task next`                                        |
+| execute a task      | `kvist task run`                                         |
+| inspect execution   | `kvist task log` / `task replay`                         |
+| human disposition   | `kvist task finalize` / `task recover`                   |
+| manual state        | `kvist task transition`                                  |
+| policy gate         | `kvist task approve-policy`                              |
+| lock maintenance    | `kvist task unlock`                                      |
+| agent configuration | `kvist agent setup                                       | list | remove | check | role` |
+| onboarding          | `kvist init` / `convert` / `reverse-discover` / `import` |
+| offline build       | `kvist vendor` / `kvist toolchain`                       |
 
 Removed from the previous surface (and why):
 
@@ -91,7 +91,7 @@ Removed from the previous surface (and why):
   ceremony. `kvist toolchain [PROJECT_DIR]` does it.
 - `kvist vcs commit-accepted` — the acceptance-commit concept belongs to the
   component that owns acceptance. It is now `kvist component commit
-  <ACCEPTANCE_ID>`.
+<ACCEPTANCE_ID>`.
 
 ### P2 — The working directory is context
 
@@ -110,8 +110,8 @@ Removed from the previous surface (and why):
   component root, as before.
 - **The shell's `cd` builtin** does the same job interactively: after
   `cd engine`, every dispatched command — `task next`, `component
-  validate`, `task run`, ... — targets `engine` without repetition. The
-  prompt shows the focus, and typing a command that names a *different*
+validate`, `task run`, ... — targets `engine` without repetition. The
+  prompt shows the focus, and typing a command that names a _different_
   component prints a one-line reminder.
 - **Failure outside a project** is never cryptic: the error names what is
   missing and suggests the two exits (`kvist init` here, or pass an
@@ -135,7 +135,7 @@ Guidance is part of the contract, not an afterthought:
   an **Action** line with the exact command to run. For stale components it
   lists each changed document with expected vs. observed revision and a
   hint to diff the listed documents against the last accepted revision
-  (e.g. `git diff HEAD -- <path>` under Git) to see *what* changed.
+  (e.g. `git diff HEAD -- <path>` under Git) to see _what_ changed.
 - **Bare `kvist`** (no arguments) inside a project prints the same overview
   as `kvist status` plus a footer pointing at `kvist help` — so the answer
   to "what do I do now?" is always one keystroke away. Outside a project it
@@ -148,11 +148,17 @@ Guidance is part of the contract, not an afterthought:
 ### P4 — Help is a tour
 
 - Top-level `kvist --help` leads with the typical flow (five commands)
-  before listing the surface; every command's `about` text says *when to
-  use it*, not just what it does.
-- The shell's `help` builtin lists builtins, then the workflow commands
-  that matter day-to-day, with their focus-aware forms (no component
-  argument needed after `cd`).
+  before listing the surface; every command's `about` text says _when to
+  use it_, not just what it does.
+- `kvist help [TOPIC]` renders the guided tour (core concepts, lifecycle)
+  plus closed-set topics — `concepts`, `lifecycle`, `task-states` (the
+  durable task states, the legal transitions, and the command that achieves
+  each). Topics are tab-completable. Every topic ends with a pointer to the
+  deeper documentation (`GUIDE.md`, `docs/command-set.md`, a component's
+  `CONTRACT.md`).
+- The shell's `help [TOPIC]` builtin shares the same renderer: builtins and
+  workflow commands with their focus-aware forms (no component argument
+  needed after `cd`), and the same topics with completion.
 - `kvist completions <SHELL>` remains for tab completion outside the shell.
 
 ### P5 — Explicit stays deterministic
@@ -167,60 +173,61 @@ script: no confirmation, no pager, no terminal.
 
 ### 4.1 Top level
 
-| Command | Form | Purpose (when to use) |
-| ------- | ---- | --------------------- |
-| `kvist` | *(no args)* | Inside a project: overview + what to do next. Outside: guided help. |
-| `kvist shell [PROJECT_DIR]` | start the interactive workspace shell (recommended entry point) |
-| `kvist status [PROJECT_DIR] [--format overview\|text\|json] [--only-documents] [--only-impls] [--unfinished]` | "where do I stand?" — overview by default; stable text/json for scripts |
-| `kvist tree [PROJECT_DIR]` | browse the component hierarchy |
-| `kvist doctor [PROJECT_DIR]` | verify root artifacts, VCS, versions (read-only health check) |
-| `kvist init [PROJECT_DIR]` | start a new project here |
-| `kvist convert PROJECT_DIR` | onboard an existing Rust crate (drafts in `.kvist/`) |
-| `kvist reverse-discover PATH` | draft intent + queue from an existing codebase |
-| `kvist import REPO_URL [--branch BR] [--component PATH] [DEST_DIR]` | import a Kvist component from Git |
-| `kvist vendor [PROJECT_DIR] [--vendored-dir PATH]` | populate offline vendored dependencies (ADR-0011) |
-| `kvist toolchain [PROJECT_DIR]` | provision the pinned Rust toolchain on the host (ADR-0012) |
-| `kvist task <...>` | work the queue (below) |
-| `kvist component <...>` | manage intent (below) |
-| `kvist agent <...>` | configure models/roles (below) |
-| `kvist prompt [PROMPT] [options]` | run a free-form supervised prompt |
-| `kvist completions SHELL` | shell completion scripts |
-| `kvist authoring-apply` | *(hidden)* internal effect-applier entry point |
+| Command                                                                                                       | Form                                                                         | Purpose (when to use)                                               |
+| ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `kvist`                                                                                                       | _(no args)_                                                                  | Inside a project: overview + what to do next. Outside: guided help. |
+| `kvist shell [PROJECT_DIR]`                                                                                   | start the interactive workspace shell (recommended entry point)              |
+| `kvist status [PROJECT_DIR] [--format overview\|text\|json] [--only-documents] [--only-impls] [--unfinished]` | "where do I stand?" — overview by default; stable text/json for scripts      |
+| `kvist tree [PROJECT_DIR]`                                                                                    | browse the component hierarchy                                               |
+| `kvist doctor [PROJECT_DIR]`                                                                                  | verify root artifacts, VCS, versions (read-only health check)                |
+| `kvist init [PROJECT_DIR]`                                                                                    | start a new project here                                                     |
+| `kvist convert PROJECT_DIR`                                                                                   | onboard an existing Rust crate (drafts in `.kvist/`)                         |
+| `kvist reverse-discover PATH`                                                                                 | draft intent + queue from an existing codebase                               |
+| `kvist import REPO_URL [--branch BR] [--component PATH] [DEST_DIR]`                                           | import a Kvist component from Git                                            |
+| `kvist vendor [PROJECT_DIR] [--vendored-dir PATH]`                                                            | populate offline vendored dependencies (ADR-0011)                            |
+| `kvist toolchain [PROJECT_DIR]`                                                                               | provision the pinned Rust toolchain on the host (ADR-0012)                   |
+| `kvist task <...>`                                                                                            | work the queue (below)                                                       |
+| `kvist component <...>`                                                                                       | manage intent (below)                                                        |
+| `kvist agent <...>`                                                                                           | configure models/roles (below)                                               |
+| `kvist prompt [PROMPT] [options]`                                                                             | run a free-form supervised prompt                                            |
+| `kvist help [TOPIC]`                                                                                          | guided tour; TOPIC: `concepts`, `lifecycle`, `task-states` (tab-completable) |
+| `kvist completions SHELL`                                                                                     | shell completion scripts                                                     |
+| `kvist authoring-apply`                                                                                       | _(hidden)_ internal effect-applier entry point                               |
 
 ### 4.2 `kvist task`
 
 All component-scoped forms take an optional `COMPONENT_DIR` (P2):
 
-| Command | Form | Purpose |
-| ------- | ---- | ------- |
-| `task next` | `kvist task next [COMPONENT_DIR]` | print the first ready task (no state change) |
-| `task run` | `kvist task run [COMPONENT_DIR] [TASK_ID] [--stream]` | execute one task with the supervised agent; omitted task = suggest the next ready one (confirmed interactively; non-interactive contexts fail clearly) |
-| `task log` | `kvist task log [COMPONENT_DIR] TASK_ID` | print the most recent bounded, redacted execution log |
-| `task replay` | `kvist task replay SESSION_JSONL [--max-turns N]` | replay a recorded trajectory |
-| `task transition` | `kvist task transition [COMPONENT_DIR] TASK_ID STATUS [--reason R]` | one audited manual status transition |
-| `task finalize` | `kvist task finalize [COMPONENT_DIR] TASK_ID ATTEMPT_ID accept\|block [--commit] [--reason R]` | human disposition of a completed attempt |
-| `task recover` | `kvist task recover [COMPONENT_DIR] TASK_ID ATTEMPT_ID --disposition execution-did-not-start` | reconcile a fenced attempt with no execution evidence |
-| `task approve-policy` | `kvist task approve-policy [PROJECT_DIR]` | approve the effective test-execution policy |
-| `task unlock` | `kvist task unlock [COMPONENT_DIR] [--force]` | release a stale component lock |
+| Command               | Form                                                                                           | Purpose                                                                                                                                                                                                                                                                                                  |
+| --------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task next`           | `kvist task next [COMPONENT_DIR]`                                                              | print the first ready task (no state change)                                                                                                                                                                                                                                                             |
+| `task run`            | `kvist task run [COMPONENT_DIR] [TASK_ID] [--stream]`                                          | execute with the supervised agent; TASK_ID = exact task ID, an item prefix selecting every task of that item, or `all` (every uncompleted task, sequentially, stopping at the first failure); omitted task = suggest the next ready one (confirmed interactively; non-interactive contexts fail clearly) |
+| `task log`            | `kvist task log [COMPONENT_DIR] TASK_ID`                                                       | print the most recent bounded, redacted execution log                                                                                                                                                                                                                                                    |
+| `task replay`         | `kvist task replay SESSION_JSONL [--max-turns N]`                                              | replay a recorded trajectory                                                                                                                                                                                                                                                                             |
+| `task transition`     | `kvist task transition [COMPONENT_DIR] TASK_ID STATUS [--reason R]`                            | one audited manual status transition                                                                                                                                                                                                                                                                     |
+| `task finalize`       | `kvist task finalize [COMPONENT_DIR] TASK_ID ATTEMPT_ID accept\|block [--commit] [--reason R]` | human disposition of a completed attempt                                                                                                                                                                                                                                                                 |
+| `task recover`        | `kvist task recover [COMPONENT_DIR] TASK_ID ATTEMPT_ID --disposition execution-did-not-start`  | reconcile a fenced attempt with no execution evidence                                                                                                                                                                                                                                                    |
+| `task approve-policy` | `kvist task approve-policy [PROJECT_DIR]`                                                      | approve the effective test-execution policy                                                                                                                                                                                                                                                              |
+| `task unlock`         | `kvist task unlock [COMPONENT_DIR] [--force]`                                                  | release a stale component lock                                                                                                                                                                                                                                                                           |
 
 ### 4.3 `kvist component`
 
-| Command | Form | Purpose |
-| ------- | ---- | ------- |
-| `component new` | `kvist component new COMPONENT_DIR` | scaffold `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md` |
-| `component validate` | `kvist component validate [COMPONENT_DIR]` | validate the three intent documents |
-| `component accept` | `kvist component accept [COMPONENT_DIR] [--commit] [--message M]` | record accepted revisions; `--commit` also creates the Git commit |
-| `component commit` | `kvist component commit ACCEPTANCE_ID` | (re)perform the isolated index commit for a pending acceptance |
+| Command              | Form                                                              | Purpose                                                           |
+| -------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `component new`      | `kvist component new COMPONENT_DIR`                               | scaffold `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`            |
+| `component validate` | `kvist component validate [COMPONENT_DIR]`                        | validate the three intent documents                               |
+| `component accept`   | `kvist component accept [COMPONENT_DIR] [--commit] [--message M]` | record accepted revisions; `--commit` also creates the Git commit |
+| `component commit`   | `kvist component commit ACCEPTANCE_ID`                            | (re)perform the isolated index commit for a pending acceptance    |
 
 ### 4.4 `kvist agent`
 
-| Command | Form | Purpose |
-| ------- | ---- | ------- |
-| `agent setup` | `kvist agent setup [--force]` | wizard: discover, qualify, save a model profile |
-| `agent list` | `kvist agent list` | profiles and their role assignments |
-| `agent remove` | `kvist agent remove [MODEL_NAME] [--all] [--global]` | remove profile(s) |
-| `agent check` | `kvist agent check [--global]` | live-verify configured profiles |
-| `agent role` | `kvist agent role [list\|set ROLE MODEL [--effort E]\|clear ROLE [--all]] [--global]` | bind roles (developer, architect, security-reviewer) to profiles |
+| Command        | Form                                                                                  | Purpose                                                          |
+| -------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `agent setup`  | `kvist agent setup [--force]`                                                         | wizard: discover, qualify, save a model profile                  |
+| `agent list`   | `kvist agent list`                                                                    | profiles and their role assignments                              |
+| `agent remove` | `kvist agent remove [MODEL_NAME] [--all] [--global]`                                  | remove profile(s)                                                |
+| `agent check`  | `kvist agent check [--global]`                                                        | live-verify configured profiles                                  |
+| `agent role`   | `kvist agent role [list\|set ROLE MODEL [--effort E]\|clear ROLE [--all]] [--global]` | bind roles (developer, architect, security-reviewer) to profiles |
 
 ## 5. Context resolution rules (normative)
 
@@ -232,8 +239,8 @@ All component-scoped forms take an optional `COMPONENT_DIR` (P2):
      the nearest directory containing a regular `kvist.toml`. Found → that
      is the project root. Not found → error:
      `not inside a Kvist project (no kvist.toml found above the current
-     directory)` with hint: `run 'kvist init <DIR>' to create a project,
-     or pass an explicit PROJECT_DIR`.
+directory)` with hint: `run 'kvist init <DIR>' to create a project,
+or pass an explicit PROJECT_DIR`.
 2. `resolve_component(project, explicit)`:
    - explicit: normalize exactly as before (relative to the component root;
      `.` selects the root component; absolute paths outside the project are
@@ -249,24 +256,32 @@ All component-scoped forms take an optional `COMPONENT_DIR` (P2):
        select `.`; otherwise error listing the known components.
 3. `kvist` with no arguments: resolve the project with rule 1 (omitted).
    Success → render the overview and a footer: `tip: run 'kvist help' for
-   all commands`. Failure (not in a project) → print the top-level help
+all commands`. Failure (not in a project) → print the top-level help
    with exit status 0.
 4. The interactive shell's `cd [COMPONENT]` builtin sets the session focus.
    When a dispatched command has an omitted optional component argument and
    a focus is set, the shell injects the focus value before execution.
    Explicit component arguments in the typed command always win, with the
-   existing one-line reminder.
+   existing one-line reminder. The shell's `help [TOPIC]` builtin offers the
+   same topics as `kvist help [TOPIC]` with tab completion.
 
 ## 6. Output and guidance rules (normative)
 
 1. Every Kvist domain error that arises from project state (not parser
    syntax) ends with a blank line + `hint:` + the concrete unblocking
    action, where one exists. Hints name real commands and, where needed,
-   the exact component path involved.
-2. `kvist status` (overview) shows, per component: state, document
+   the exact component path involved. An invalid `task transition` reports
+   the legal transitions from the current state plus a pointer to
+   `kvist help task-states`.
+2. `kvist status` (overview and text) shows, per component: state, document
    validity summary, task progress, next ready task, and an **Action**
    line for every non-current state. Stale components additionally list
    each changed document (expected vs observed revision) and a diff hint.
+   Blocked components list each blocked task with its truncated
+   `blocked_reason` and the exact next command (`task run` when the
+   dependency chain is completed, else `task transition … pending` with the
+   incomplete-dependency count); awaiting-decision tasks are listed with a
+   pointer to `kvist help task-states`.
 3. Gating success messages chain to the next lifecycle stage
    (`accept` → `task next`; `run` → `task log` / `task finalize`;
    `approve-policy` → `task run`).
@@ -279,7 +294,7 @@ All component-scoped forms take an optional `COMPONENT_DIR` (P2):
 - No new persistent state: resolution is derived from the filesystem on
   every invocation; nothing is cached.
 - No project auto-detection beyond the `kvist.toml` marker: Kvist still
-  never searches *sideways*, and an explicit path always wins.
+  never searches _sideways_, and an explicit path always wins.
 - No change to durable artifact schemas, queue semantics, sandboxing, or
   VCS policy. This design changes the surface, context resolution, and
   guidance only.

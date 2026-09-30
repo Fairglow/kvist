@@ -440,14 +440,23 @@ pub enum TaskCommand {
         _unparsed: std::marker::PhantomData<()>,
     },
     /// Run an external AI agent to execute a task, tracking progress and token usage.
+    ///
+    /// TASK_ID selects what runs: an exact task ID, an item prefix selecting
+    /// every task of that item (e.g. `sa-02`), or `all` for every uncompleted
+    /// task of the component, run sequentially and stopping at the first
+    /// failure. When omitted, the next ready task is suggested and run only
+    /// after an interactive confirmation (a non-interactive context fails
+    /// instead of auto-executing).
     Run {
         /// Component directory; defaults to the component containing the
         /// current directory.
         #[arg(value_name = "COMPONENT_DIR")]
         component_dir: Option<PathBuf>,
-        /// Queue-local task identifier; when omitted, the next ready task is
-        /// suggested and run only after an interactive confirmation (a
-        /// non-interactive context fails instead of auto-executing).
+        /// Exact task ID, an item prefix selecting every task of that item,
+        /// or `all` (every uncompleted task, sequentially, stopping at the
+        /// first failure); when omitted, the next ready task is suggested and
+        /// run only after an interactive confirmation (a non-interactive
+        /// context fails instead of auto-executing).
         #[arg(value_name = "TASK_ID")]
         task_id: Option<String>,
         /// Optional flag to stream agent stdout and stderr directly to the console.
@@ -2585,6 +2594,41 @@ mod tests {
 
         assert_eq!(error.kind(), ErrorKind::DisplayHelp);
         assert_eq!(KvistError::from(error).exit_code(), 0);
+    }
+
+    #[test]
+    fn task_run_help_documents_the_multi_task_specifications() {
+        let error =
+            Cli::try_parse_from(["kvist", "task", "run", "--help"]).expect_err("help exits");
+        let help = error.to_string();
+        assert!(help.contains("item prefix"), "help missing item prefix");
+        assert!(help.contains("`all`"), "help missing `all`");
+        assert!(
+            help.contains("stopping at the first failure"),
+            "help missing sequential-stop semantics"
+        );
+        assert!(
+            help.contains("exact task ID"),
+            "help missing exact task ID form"
+        );
+    }
+
+    #[test]
+    fn help_command_parses_the_closed_topic_set() {
+        for topic in ["concepts", "lifecycle", "task-states"] {
+            let cli = Cli::try_parse_from(["kvist", "help", topic]).expect("topic parses");
+            let Some(Command::Help { topic: parsed }) = cli.command else {
+                panic!("expected help command for {topic}");
+            };
+            assert_eq!(parsed, Some(HelpTopic::from_str(topic, true).unwrap()));
+        }
+        let cli = Cli::try_parse_from(["kvist", "help"]).expect("bare help parses");
+        let Some(Command::Help { topic }) = cli.command else {
+            panic!("expected help command");
+        };
+        assert!(topic.is_none());
+        // An unknown topic is a parser error, not a silent success.
+        assert!(Cli::try_parse_from(["kvist", "help", "bogus"]).is_err());
     }
 
     #[test]
