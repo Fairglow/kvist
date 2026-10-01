@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:8c7b920bed24f4c916e426eba86b3714ae7925a581df9bae6119d6601b7c61cf"
-  contract_revision: "sha256:483ccceb61db963ea1c246ba25459df49772170ae1f7941c7a6c3d875ca92294"
-  design_revision: "sha256:e9bb99782030b7461b3169ddf22e3f4df8d3926bb458854fc035b76189b68996"
+  requirements_revision: "sha256:3d971935e8b59ab1d977550b5c2146caff46dc7af0dc6c15c7b18d414d0ccae5"
+  contract_revision: "sha256:b696d5e646a0e5a8067b9460b35e2fe0cbca39a04f4fc6b7ca2deded0d8dd973"
+  design_revision: "sha256:fd70d407e48fdb960c2ef8f433f39930fdb7dd7fb5bf1ac6dda35058efc9aafd"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-30T06:34:38Z"
+    checked_at: "2026-10-01T06:26:28Z"
     stale_since: null
     causes: []
 tasks:
@@ -2894,6 +2894,84 @@ tasks:
     timestamps:
       created_at: "2026-09-29T22:23:20Z"
       updated_at: "2026-09-29T22:23:20Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "soft-wrap-write-tests"
+    title: "Define soft-wrap tests"
+    description: "Write failing tests for the pure wrapping primitives (word-boundary wrap with continuation indentation, hard-split of unbreakable words, ANSI span re-emission, identity for fitting lines, bordered `│…│` line wrap with the border re-drawn per physical line), the titled-box behavior (rows wrap to the inner width so the box never extends past the terminal cap, the Prompt stage keeps the full command line), and the display policy (wrapped only for a terminal with a known width; byte-identical when piped or width unknown)."
+    context: "Shell output currently overflows the terminal width: titled boxes extend past the cap and plain lines break the borders of boxed reports, so long content is unreadable and misaligned on narrow terminals."
+    purpose: "Establish executable evidence that shell output fits the terminal width with borders and indentation intact before the wrapping implementation."
+    expected_outcome: "Tests fail on the current surfaces and pin the wrap primitives, the box behavior, and the terminal-only wrapping policy."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-SOFT-WRAP"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-30T07:00:00Z"
+      updated_at: "2026-10-01T06:24:33Z"
+      completed_at: "2026-10-01T06:24:33Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "soft-wrap-implement-code"
+    title: "Implement shell soft wrapping"
+    description: "Add the pure wrapping primitives to the shell style module (styled-piece parse, visible-width word wrap with leading-whitespace continuation indent, hard-split, bordered-line wrap) and apply them in titled_box (rows wrap to the inner width, box fits the terminal cap), the Prompt stage (full command line, no truncation), display_output (terminal-only, width-known wrapping, bordered lines via the bordered primitive), and report_error (continuation indent)."
+    context: "REQ-SOFT-WRAP is accepted; the failing tests from soft-wrap-write-tests define the expected behavior."
+    purpose: "Deliver terminal-width-fitting shell output with borders and indentation intact."
+    expected_outcome: "All soft-wrap-write-tests pass; no line rendered by the shell exceeds the terminal width, and piped or width-unknown output is byte-identical to the previous form."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "soft-wrap-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-SOFT-WRAP"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-30T07:00:00Z"
+      updated_at: "2026-10-01T06:24:33Z"
+      completed_at: "2026-10-01T06:24:33Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "soft-wrap-security-audit"
+    title: "Audit shell soft wrapping"
+    description: "Independently review the wrapping paths for untrusted-input handling (styled pieces from queue- and command-derived text, no escape-sequence injection or corruption through re-emission), determinism (stable wrap for a given text and width), and no behavior change beyond presentation (piped/captured output byte-identical, no new I/O or authority)."
+    context: "Wrapping transforms user-visible output built from command and queue-derived strings before it reaches the terminal. Internal/implementer review of the new wrapping paths; this is not the source-blind certification — the independent gate is the compliance-review task. Passed with no code findings: the parse/tokenize/place paths treat queue- and command-derived text as inert data — all byte slices sit on char boundaries derived from char-safe APIs (strip_prefix, trim, char_indices), and unrecognized escape sequences are kept as literal text, so untrusted input is preserved verbatim without corruption or new injection; the only unwraps are provable invariants (a non-empty line list, is_some-guarded prefix/suffix pairs, a char at a found ESC offset), never recoverable input; wrapping is a pure function of (text, width) with stable ordering, no I/O, no time, and no randomness; presentation-only, because display_output wraps only when stdout is a terminal with a probed width and piped, captured, and width-unknown output is byte-identical (identity pinned by tests), with no new dependencies, I/O, or authority."
+    purpose: "Preserve independent confirmation that the presentation paths introduce no disclosure, corruption, or nondeterminism."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "soft-wrap-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-30T07:00:00Z"
+      updated_at: "2026-10-01T06:24:33Z"
+      completed_at: "2026-10-01T06:24:33Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "soft-wrap-compliance-review"
+    title: "Review soft-wrap compliance"
+    description: "Derive observed behavior from source and tests in a clean-slate context, then compare the implementation record with REQ-SOFT-WRAP, the contract, and the design in a source-blind context, retaining discrepancies for human arbitration."
+    context: "Per the project's current enforcement note, component accept only structurally validates and records revisions; this gate awaits the separate source-blind reviewer and must never be self-certified."
+    purpose: "Retain an independent disposition for the soft-wrapping surfaces."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "soft-wrap-security-audit"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-SOFT-WRAP"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-30T07:00:00Z"
+      updated_at: "2026-09-30T07:00:00Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

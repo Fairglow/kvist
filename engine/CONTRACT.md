@@ -233,11 +233,19 @@ the task context and submits only after explicit confirmation.
 Shell presentation degrades to plain text when `NO_COLOR` is set (any value),
 `CLICOLOR=0`, `TERM=dumb`, or stdout is not a terminal; `CLICOLOR_FORCE` (any
 value but `0`) forces styling even when stdout is not a terminal. Styled
-rendering keeps table columns aligned on visible width. Titled boxes (welcome
-banner, streaming stages) fit the terminal width: at least 40 columns, never
-wider than the terminal width minus a margin or 100 columns, whichever is
-smaller, and a box extends rather than truncating content that is wider than
-the cap. Output is paged only when it would scroll past the terminal height
+rendering keeps table columns aligned on visible width. When stdout is a
+terminal with a known width, the shell soft-wraps output at word boundaries so
+no line overflows: titled boxes (welcome banner, streaming stages, the
+`Prompt` stage) wrap their rows to the box's inner width — at least 40
+columns, never wider than the terminal width minus a margin or 100 columns,
+whichever is smaller — and the border is drawn on every physical line; bordered
+status-report lines (`│…│`) wrap their inner content with the border and
+padding re-drawn per line; plain lines wrap with each continuation line
+prefixed by the line's leading whitespace so text blocks keep their
+indentation. Unbreakable words longer than the available width are hard-split.
+Wrapping is a presentation-only transformation: piped, captured, or
+width-unknown output is byte-identical to the unwrapped form. Output is paged
+only when it would scroll past the terminal height
 minus the prompt row (a 15-line fallback when the height is unknown), and
 `KVIST_NO_PAGER` disables paging. The prompt reports the last command's exit
 state with a failure marker until a command succeeds; Ctrl+L clears the screen

@@ -151,12 +151,13 @@ impl StreamManager {
         ProgressSpinner::start(format!("Running {command_name}"))
     }
 
-    /// Prints the Prompt stage: a closed box holding the command line.
+    /// Prints the Prompt stage: a closed box holding the full command line;
+    /// a line wider than the box wraps inside it (see `style::titled_box`).
     pub fn print_prompt_stage(&self, prompt_line: &str) {
         let titled = style::titled_box(
             self.theme,
             "Prompt",
-            &[crate::shell::truncate(prompt_line, self.row_limit())],
+            &[prompt_line.to_owned()],
             self.width(),
         );
         println!(

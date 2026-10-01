@@ -557,6 +557,20 @@ state together with a pointer to the task-states help topic. The `task run`
 help MUST document the multi-task task specifications (exact task ID, item
 prefix, `all`).
 
+### REQ-SOFT-WRAP
+
+Interactive shell output MUST fit the terminal width: long lines MUST be soft
+wrapped at word boundaries before rendering, so that (1) boxed surfaces — the
+welcome banner, the prompt/working/result stages, and bordered status reports —
+keep their borders intact on every physical line, and (2) text blocks keep
+their indentation, with continuation lines prefixed by the line's leading
+whitespace. Wrapping MUST be a pure function of the text and the probed
+terminal width, and ANSI styling MUST survive wrapping (a styled span re-emits
+on every physical line it touches). Output that is piped, captured, or rendered
+without a known width MUST be byte-identical to the unwrapped form so scripts
+and stable report consumers are unaffected. Unbreakable words longer than the
+available width MUST be hard-split at the width rather than dropped.
+
 ### REQ-CONTRACT-VERIFICATION
 
 Kvist MUST plan stable contract-clause locators, initially using existing

@@ -35,12 +35,34 @@ pub fn pager_policy(
     text.lines().count() > threshold
 }
 
+/// Wraps `text` to a visible `width` per line: `│`-framed lines keep their
+/// frame on every physical line, plain lines keep their indentation.
+/// The identity for an unknown width (zero).
+pub fn prepare_display(text: &str, width: usize) -> String {
+    if width == 0 {
+        return text.to_owned();
+    }
+    text.lines()
+        .flat_map(|line| {
+            if line.starts_with('│') {
+                super::style::wrap_bordered_line(line, width)
+            } else {
+                super::style::wrap_line(line, width)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Displays output text to the user.
 ///
 /// If stdout is an interactive terminal and the output would scroll past the
 /// terminal height, the output is paginated cleanly using the `minus` pager;
 /// otherwise (and whenever the pager is unavailable or fails) it is printed
-/// directly, so output is never lost.
+/// directly, so output is never lost. For an interactive terminal of known
+/// width the text is soft-wrapped first (see [`prepare_display`]), so framed
+/// reports keep their borders; piped, captured, and width-unknown output is
+/// printed byte-identical.
 pub fn display_output(text: &str) {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -57,21 +79,25 @@ pub fn display_output(text: &str) {
     {
         let no_pager = std::env::var_os("KVIST_NO_PAGER").is_some();
         let is_terminal = std::io::stdout().is_terminal();
-        let rows =
-            super::style::terminal_size().map(|(_, rows)| u16::try_from(rows).unwrap_or(u16::MAX));
-        if pager_policy(text, no_pager, is_terminal, rows) {
+        let size = super::style::terminal_size();
+        let rows = size.map(|(_, rows)| u16::try_from(rows).unwrap_or(u16::MAX));
+        let prepared = size
+            .map(|(width, _)| prepare_display(text, width))
+            .unwrap_or_else(|| text.to_owned());
+        if pager_policy(&prepared, no_pager, is_terminal, rows) {
             let pager = Pager::new();
-            if pager.push_str(text).is_ok() && minus::page_all(pager).is_ok() {
+            if pager.push_str(&prepared).is_ok() && minus::page_all(pager).is_ok() {
                 return;
             }
             // A pager that cannot start or page must not swallow output.
         }
-        println!("{text}");
+        println!("{prepared}");
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::style::visible_len;
     use super::*;
 
     fn long_lines(n: usize) -> String {
@@ -103,6 +129,31 @@ mod tests {
         assert!(!pager_policy(&text, false, false, Some(40)));
         assert!(!pager_policy(&text, true, true, Some(40)));
         assert!(!pager_policy(&text, true, false, None));
+    }
+
+    #[test]
+    fn prepare_display_wraps_bordered_and_plain_lines_for_a_known_width() {
+        let text = "│  hello world foo bar    │\n  blocked: a very long reason text\nplain";
+        let wrapped = prepare_display(text, 16);
+        let lines: Vec<&str> = wrapped.lines().collect();
+        // The bordered line wraps with the frame re-drawn on every physical
+        // line; the plain line keeps its two-space indent; nothing overflows.
+        for line in &lines {
+            assert!(visible_len(line) <= 16, "line overflows: {line:?}");
+        }
+        assert!(lines.iter().all(|line| {
+            !line.starts_with('│') || (line.ends_with('│') && visible_len(line) == 16)
+        }));
+        assert!(lines.contains(&"  blocked: a"));
+        assert!(lines.contains(&"  very long"));
+        assert!(lines.contains(&"  reason text"));
+        assert!(lines.contains(&"plain"));
+    }
+
+    #[test]
+    fn prepare_display_is_the_identity_without_a_width() {
+        let text = "│  long line that overflows the width   │\n  long indented line that overflows";
+        assert_eq!(prepare_display(text, 0), text);
     }
 
     #[test]

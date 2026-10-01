@@ -742,6 +742,33 @@ deterministic declaration order — followed by a pointer to
 `kvist help task-states`, so an illegal move is always paired with the legal
 moves.
 
+### Soft wrapping
+
+`style.rs` owns the pure wrapping primitives so every surface shares one
+algorithm. `wrap_line` parses a line into styled pieces (the shell's SGR spans
+are a single open plus a reset, so the parser tracks the current code),
+splits at word boundaries by _visible_ width, and re-emits each physical line
+with the piece styles, so ANSI styling survives wrapping. Continuation lines
+are prefixed with the original line's leading whitespace, which keeps text
+block indentation; an unbreakable word longer than the remaining width is
+hard-split at the width. `prepare_display` in `pager.rs` applies the right
+primitive per line (bordered for `│`-framed rows, plain otherwise) and is the
+identity when the width is zero or unknown. `wrap_bordered_line` handles the
+`│content│` lines of the bordered status report: it strips the frame, wraps
+the inner content (trimming the right padding first), and re-draws the border
+and padding on every physical line, so the report's frame never breaks. Each
+primitive is the identity for a line that already fits, so output is
+byte-identical until a line actually overflows.
+
+`titled_box` wraps its rows to the box's inner width before sizing, so a box
+fits the terminal cap (40-column floor, width-minus-margin or 100-column
+cap) and its border stays intact instead of extending past the terminal; the
+`Prompt` stage passes the full command line to the box and no longer
+truncates it. `display_output` applies the per-line wrapping only when stdout
+is a terminal with a probed width, choosing `wrap_bordered_line` for `│`-framed
+lines and `wrap_line` otherwise; piped, captured, and width-unknown output is
+never transformed, keeping stable report consumers and scripts unaffected.
+
 ## Failure and recovery
 
 Readers return contextual domain errors or read-only invalid states. Writers
