@@ -1319,16 +1319,36 @@ impl App {
 
     /// The largest scroll offset that still shows the last history row.
     fn history_max_scroll(&self) -> u16 {
-        self.history_items
-            .len()
-            .saturating_sub(self.visible_rows() as usize) as u16
+        // Count physical rows, not items: a long session id wraps onto
+        // several rows at the content width.
+        let width = self.content_width();
+        let item_rows: usize = self
+            .history_items
+            .iter()
+            .map(|item| wrap(&format!("  {}  {}", item.id, item.describe()), width).len())
+            .sum();
+        let header = wrap(" session history ", width).len()
+            + 1
+            + wrap("  up/down or j/k select · enter replay · esc back", width).len()
+            + 1;
+        (item_rows + header).saturating_sub(self.visible_rows() as usize) as u16
     }
 
     /// The largest scroll offset that still shows the last replay row.
     fn replay_bottom(&self) -> u16 {
-        self.replay_lines
-            .len()
-            .saturating_sub(self.visible_rows() as usize) as u16
+        // Count physical rows, not logical lines: each replay line wraps at
+        // the content width, and the fixed header rows can wrap too.
+        let width = self.content_width();
+        let rows: usize = self
+            .replay_lines
+            .iter()
+            .map(|line| wrap(line, width).len())
+            .sum::<usize>();
+        let fixed = wrap(&format!(" replay {} ", self.replay_title), width).len()
+            + 1
+            + wrap("  esc back to history", width).len()
+            + 1;
+        (rows + fixed).saturating_sub(self.visible_rows() as usize) as u16
     }
 
     /// Sets the directory the history overlay reads past transcripts from. The
@@ -1469,37 +1489,50 @@ fn base64_encode(input: &[u8]) -> String {
 }
 
 fn wrap(text: &str, width: usize) -> Vec<String> {
-    let width = width.max(10);
+    let width = width.max(1);
     let mut lines = Vec::new();
     for paragraph in text.split('\n') {
         if paragraph.is_empty() {
             lines.push(String::new());
             continue;
         }
-        let mut current = String::new();
+        // Continuation lines carry the paragraph's leading whitespace so an
+        // indented block (code, lists) keeps its shape after wrapping.
+        let indent_len = paragraph.len() - paragraph.trim_start().len();
+        let indent = &paragraph[..indent_len];
+        let budget = width.saturating_sub(indent.chars().count()).max(1);
+        let mut current = String::from(indent);
         for word in paragraph.split_whitespace() {
-            let candidate = if current.is_empty() {
-                word.to_owned()
-            } else {
-                format!(" {}", word)
-            };
-            if candidate.chars().count() > width {
-                if !current.is_empty() {
+            let word_len = word.chars().count();
+            if word_len > budget {
+                // The word is longer than a full line: push the accumulated
+                // line, then hard-split the word at the per-line budget.
+                if current != indent {
                     lines.push(std::mem::take(&mut current));
                 }
-                for chunk in split_long(word, width) {
+                let mut chunks = split_long(word, budget).into_iter();
+                // The first chunk shares the line with the indent; later
+                // chunks fill the full budget on their own lines.
+                current = format!(
+                    "{indent}{}",
+                    chunks
+                        .next()
+                        .expect("a non-empty word yields at least one chunk")
+                );
+                for chunk in chunks {
                     lines.push(chunk);
                 }
-            } else if current.chars().count() + candidate.chars().count() > width
-                && !current.is_empty()
-            {
+            } else if current == indent {
+                current = format!("{indent}{word}");
+            } else if current.chars().count() + 1 + word_len > width {
                 lines.push(std::mem::take(&mut current));
-                current = candidate;
+                current = format!("{indent}{word}");
             } else {
-                current.push_str(&candidate);
+                current.push(' ');
+                current.push_str(word);
             }
         }
-        if !current.is_empty() {
+        if current != indent {
             lines.push(current);
         }
     }
@@ -2217,7 +2250,25 @@ mod tests {
     #[test]
     fn wrap_wraps_when_a_line_overflows() {
         let rendered = super::wrap("alpha beta gamma", 10);
-        assert_eq!(rendered, vec!["alpha beta".to_owned(), " gamma".to_owned()]);
+        assert_eq!(rendered, vec!["alpha beta".to_owned(), "gamma".to_owned()]);
+    }
+
+    #[test]
+    fn wrap_keeps_the_source_indentation_on_continuation_lines() {
+        // A two-space text block keeps its indentation on every physical line.
+        assert_eq!(
+            super::wrap("  hello world foo bar", 12),
+            vec![
+                "  hello".to_owned(),
+                "  world foo".to_owned(),
+                "  bar".to_owned()
+            ]
+        );
+        // Multi-paragraph input keeps each paragraph's own indentation.
+        assert_eq!(
+            super::wrap("a b c\n  d e f g", 6),
+            vec!["a b c".to_owned(), "  d e".to_owned(), "  f g".to_owned()]
+        );
     }
 
     #[test]

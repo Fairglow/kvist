@@ -231,10 +231,18 @@ model, the selected effort, the running flag, the input buffer, a scroll
 offset, and a help-overlay flag. Rendering is a pure function of `App` state, so
 the transcript model is unit-tested without a terminal.
 
-Transcript text is wrapped to the box's inner width (the full terminal width
-minus the two vertical borders) so no line extends past the visible area, and
-tool-call events carry a short description of what applied where (file,
-directory, or command). Events from `run::spawn` are folded into `App` each frame. Key handling: Enter
+Transcript text is pre-wrapped to the box's inner width (the full terminal
+width minus the two vertical borders) so no line extends past the visible
+area, and tool-call events carry a short description of what applied where
+(file, directory, or command). The `wrap` helper splits each source line at
+word boundaries and prefixes every continuation line with that line's leading
+whitespace, so text blocks keep their indentation in the transcript; an
+unbreakable word is hard-split at the width. The help, menu, session-history,
+and replay panels render through ratatui `Paragraph` widgets with soft wrapping
+(`Wrap { trim: false }`) so long lines (configuration paths, session
+summaries, replayed content) wrap inside the panel border instead of being
+truncated, and their scroll clamps use the paragraph's rendered line count for
+the panel width so all wrapped content stays reachable. Events from `run::spawn` are folded into `App` each frame. Key handling: Enter
 submits the input as a prompt, Ctrl+C cancels the current turn (and quits when
 idle), Esc toggles help, and Ctrl+Up/Down, PageUp/PageDown scroll the transcript.
 The status bar shows `model | effort | status` and a cancel hint; the prompt line

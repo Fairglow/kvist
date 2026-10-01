@@ -4,7 +4,7 @@ use ratatui::layout::{Alignment, Constraint, Rect};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
-    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
 use super::app::{App, MENU_HOTKEYS, MENU_ITEMS, Overlay};
@@ -185,19 +185,20 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         " help",
         Style::default().fg(Color::Cyan).bold(),
     ));
-    // Clamp the scroll to the rendered content so a short terminal never shows
-    // a blank box: the help is taller than the transcript box, so it scrolls,
-    // but the offset must stay within the help's own lines.
-    let content_height = lines.len() as u16;
+    // The scroll clamp must use the wrapped line count, not the logical line
+    // count: on a narrow terminal each long line renders as several physical
+    // lines, so `lines.len()` would undercount and hide the bottom of the help.
+    let inner_width = area.width.saturating_sub(2).max(1);
     let inner_height = area.height.saturating_sub(2).max(1);
-    let scroll = app
-        .help_scroll
-        .min(content_height.saturating_sub(inner_height));
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
         .alignment(Alignment::Left)
-        .scroll((scroll, 0));
-    f.render_widget(paragraph, area);
+        .wrap(Wrap { trim: false });
+    let content_height = paragraph.line_count(inner_width) as u16;
+    let scroll = app
+        .help_scroll
+        .min(content_height.saturating_sub(inner_height));
+    f.render_widget(paragraph.scroll((scroll, 0)), area);
 }
 
 /// The action overlay menu, reached with Esc. Items are navigated with the
@@ -233,7 +234,8 @@ fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
     ));
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
-        .alignment(Alignment::Left);
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
 }
 
@@ -273,13 +275,21 @@ fn render_history(f: &mut ratatui::Frame, app: &App, area: Rect) {
         " sessions",
         Style::default().fg(Color::Cyan).bold(),
     ));
+    // The scroll clamp must use the wrapped line count so long session ids
+    // that wrap onto several physical lines stay reachable.
+    let inner_width = area.width.saturating_sub(2).max(1);
     let inner_height = area.height.saturating_sub(2).max(1);
-    let max_scroll = lines.len().saturating_sub(inner_height as usize) as u16;
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
         .alignment(Alignment::Left)
-        .scroll((app.history_scroll.min(max_scroll), 0));
-    f.render_widget(paragraph, area);
+        .wrap(Wrap { trim: false });
+    let max_scroll = paragraph
+        .line_count(inner_width)
+        .saturating_sub(inner_height as usize) as u16;
+    f.render_widget(
+        paragraph.scroll((app.history_scroll.min(max_scroll), 0)),
+        area,
+    );
 }
 
 /// A read-only replay of one past session's transcript. Esc returns to the
@@ -303,13 +313,21 @@ fn render_replay(f: &mut ratatui::Frame, app: &App, area: Rect) {
         " replay",
         Style::default().fg(Color::Cyan).bold(),
     ));
+    // The scroll clamp must use the wrapped line count so long replayed lines
+    // that wrap onto several physical lines stay reachable.
+    let inner_width = area.width.saturating_sub(2).max(1);
     let inner_height = area.height.saturating_sub(2).max(1);
-    let max_scroll = lines.len().saturating_sub(inner_height as usize) as u16;
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
         .alignment(Alignment::Left)
-        .scroll((app.replay_scroll.min(max_scroll), 0));
-    f.render_widget(paragraph, area);
+        .wrap(Wrap { trim: false });
+    let max_scroll = paragraph
+        .line_count(inner_width)
+        .saturating_sub(inner_height as usize) as u16;
+    f.render_widget(
+        paragraph.scroll((app.replay_scroll.min(max_scroll), 0)),
+        area,
+    );
 }
 
 fn highlight(text: &str, active: bool) -> Span<'static> {
@@ -327,11 +345,12 @@ fn highlight(text: &str, active: bool) -> Span<'static> {
 mod tests {
     use super::render;
     use crate::session::Event;
-    use crate::tui::app::App;
+    use crate::tui::app::{App, Overlay};
     use agent_runtime::ReasoningEffort;
     use crossterm::event::KeyCode;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use std::path::PathBuf;
 
     /// Draws one frame and returns the test backend for inspection.
     fn draw(app: &App) -> TestBackend {
@@ -414,6 +433,115 @@ mod tests {
             out.push('\n');
         }
         out
+    }
+
+    #[test]
+    fn help_overlay_wraps_long_lines_inside_the_border() {
+        let mut app = App::new(
+            &["local".to_owned()],
+            "local",
+            ReasoningEffort::Medium,
+            None,
+            40,
+            45,
+        );
+        app.show_help = true;
+        app.config_path = Some(PathBuf::from(
+            "/opt/very/deep/llama/server/path/with/a/long/agent-runner.toml",
+        ));
+        let text = buffer_text(&draw(&app));
+        // The path is far longer than the 38-column inner width; with soft
+        // wrapping its tail stays visible inside the box instead of being
+        // truncated at the border.
+        assert!(
+            text.contains("agent-runner.toml"),
+            "wrapped tail missing:\n{text}"
+        );
+        for line in text.lines() {
+            assert!(line.chars().count() <= 40, "line overflows: {line:?}");
+        }
+    }
+
+    #[test]
+    fn help_overlay_scroll_reaches_the_wrapped_bottom() {
+        let mut app = App::new(
+            &["local".to_owned()],
+            "local",
+            ReasoningEffort::Medium,
+            None,
+            40,
+            12,
+        );
+        app.show_help = true;
+        app.config_path = Some(PathBuf::from(
+            "/opt/very/deep/llama/server/path/with/a/long/agent-runner.toml",
+        ));
+        // Scroll past the end; the clamp must account for the wrapped line
+        // count so the last help line stays reachable on a short terminal.
+        app.help_scroll = 10_000;
+        let text = buffer_text(&draw(&app));
+        assert!(
+            text.contains("working directory"),
+            "wrapped bottom not reachable:\n{text}"
+        );
+    }
+
+    #[test]
+    fn replay_wraps_long_lines_inside_the_border() {
+        let mut app = App::new(
+            &["local".to_owned()],
+            "local",
+            ReasoningEffort::Medium,
+            None,
+            40,
+            12,
+        );
+        app.overlay = Overlay::Replay;
+        app.replay_title = "session".to_owned();
+        app.replay_lines =
+            vec!["a replayed line that extends well past the forty column panel width".to_owned()];
+        // Scroll past the end; the clamp must account for the wrapped line
+        // count so the wrapped tail stays reachable in the short box.
+        app.replay_scroll = 10_000;
+        let text = buffer_text(&draw(&app));
+        assert!(
+            text.contains("panel width"),
+            "wrapped tail missing:\n{text}"
+        );
+        for line in text.lines() {
+            assert!(line.chars().count() <= 40, "line overflows: {line:?}");
+        }
+    }
+
+    #[test]
+    fn history_wraps_long_session_entries_inside_the_border() {
+        let mut app = App::new(
+            &["local".to_owned()],
+            "local",
+            ReasoningEffort::Medium,
+            None,
+            40,
+            12,
+        );
+        app.overlay = Overlay::History;
+        // Scroll past the end; the clamp must account for the wrapped item
+        // rows so the wrapped tail of the long entry stays visible.
+        app.history_scroll = 10_000;
+        app.history_items = vec![crate::history::SessionEntry {
+            id: "a session identifier that is much longer than the forty column panel".to_owned(),
+            path: PathBuf::from("missing.jsonl"),
+            turns: None,
+            tokens: None,
+            success: None,
+        }];
+        let text = buffer_text(&draw(&app));
+        assert!(
+            text.contains("forty column panel"),
+            "wrapped tail missing:\n{text}"
+        );
+        for line in text.lines() {
+            assert!(line.chars().count() <= 40, "line overflows: {line:?}");
+        }
     }
 
     #[test]

@@ -42,6 +42,10 @@ Successful use produces:
   during the session, with the current choice always visible;
 - a live transcript that shows the agent's reasoning, every tool call it makes,
   and the result of each call, without exposing raw transport noise;
+- output that fits the terminal width: the transcript, help, menu, session
+  history, and replay wrap long lines at word boundaries inside their boxes so
+  the borders stay intact, and text blocks keep their indentation, with
+  continuation lines prefixed by the line's leading whitespace;
 - tools that are pre-approved in configuration and never prompt for permission:
   a generous set of common Linux tools plus a package manager and build tools
   for one or more language profiles;

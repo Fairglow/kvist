@@ -1,12 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:e92a7d9c1a602c5b4c18db60ea1b20e414ce4cef6adb5b23f04bf11577472846"
-  contract_revision: "sha256:b82f218025914971b41ec3f045985803193fbdd6e4a02fd57efe49570872c85d"
-  design_revision: "sha256:edc07b4cb148c2124ee8ffe38b934bf883b1345d995954384f8550d2d53d4f93"
+  requirements_revision: "sha256:a6c103fbf5e1f44aabaf62cde0ea7c4c9ec2f98ddeaf6dd991ecb3e847b99ace"
+  contract_revision: "sha256:c9757675fbaf8fccdbda725d011cf06ad645a71f647a14bc87af269b15b63355"
+  design_revision: "sha256:767161aa34a323a01168ba03b99dcdd8319bc3bd10fac0de0c1699a014b2a1f9"
   parent_contract: null
   revalidation:
     state: current
-    checked_at: "2026-09-29T21:15:10Z"
+    checked_at: "2026-10-01T06:26:28Z"
     stale_since: null
     causes: []
 tasks:
@@ -514,6 +514,84 @@ tasks:
     timestamps:
       created_at: "2026-09-19T01:20:00Z"
       updated_at: "2026-09-19T15:26:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-soft-wrap-write-tests"
+    title: "Define TUI soft-wrap tests"
+    description: "Write failing tests for the transcript wrap helper (word-boundary wrap that keeps each source line's leading indentation on continuation lines, hard-split of unbreakable words, identity for fitting lines) and for the panel rendering (help, menu, session-history, and replay paragraphs soft-wrap at the panel width and their scroll clamps use the rendered wrapped line count so all content stays reachable)."
+    context: "The transcript pre-wrap drops source-line indentation, and the help, menu, session-history, and replay panels render without wrapping, so long lines (configuration paths, session summaries, replayed content) are truncated at the box border on narrow terminals."
+    purpose: "Establish executable evidence that every panel fits the terminal width with borders and indentation intact before the wrapping implementation."
+    expected_outcome: "Tests fail on the current surfaces and pin the indentation-preserving wrap and the wrapped panel rendering with correct scroll extents."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#Functional-requirements"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-30T07:00:00Z"
+      updated_at: "2026-10-01T06:24:33Z"
+      completed_at: "2026-10-01T06:24:33Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-soft-wrap-implement-code"
+    title: "Implement TUI soft wrapping"
+    description: "Keep source-line leading indentation in the transcript wrap helper (prefix continuation lines with it) and add soft wrapping to the help, menu, session-history, and replay paragraphs (ratatui Wrap with trim disabled), with scroll clamps derived from the rendered wrapped line count."
+    context: "The wrapping requirement is accepted; the failing tests from agent-runner-soft-wrap-write-tests define the expected behavior."
+    purpose: "Deliver terminal-width-fitting panels with borders and indentation intact."
+    expected_outcome: "All soft-wrap-write-tests pass; no panel line extends past its border and wrapped content stays fully reachable."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-soft-wrap-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#Functional-requirements"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-30T07:00:00Z"
+      updated_at: "2026-10-01T06:24:33Z"
+      completed_at: "2026-10-01T06:24:33Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-soft-wrap-security-audit"
+    title: "Audit TUI soft wrapping"
+    description: "Independently review the wrapping and panel rendering for untrusted-input handling (model- and journal-derived text through the wrap path and panels), determinism (stable wrap for a given text and width), and no behavior change beyond presentation (no new I/O, authority, or state)."
+    context: "Wrapping transforms transcript and panel content derived from model, tool, and session-journal strings before rendering. Internal/implementer review of the new wrapping paths; this is not the source-blind certification — the independent gate is the compliance-review task. Passed with no code findings: the wrap helper is a pure function of (text, width) over model- and journal-derived text — all slices sit on char boundaries derived from len/trim_start, the only expect is a provable invariant (a non-empty word yields at least one hard-split chunk), and no I/O, state, time, or randomness is introduced; the panel change adds ratatui Wrap { trim: false } (a presentation flag) and scroll clamps derived from the paragraph's rendered line count via the vendored ratatui 0.30.2 line_count API enabled through the unstable-rendered-line-info feature — rendering-only, with no new dependencies, I/O, or authority."
+    purpose: "Preserve independent confirmation that the presentation paths introduce no disclosure, corruption, or nondeterminism."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "agent-runner-soft-wrap-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-30T07:00:00Z"
+      updated_at: "2026-10-01T06:24:33Z"
+      completed_at: "2026-10-01T06:24:33Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-soft-wrap-compliance-review"
+    title: "Review TUI soft-wrap compliance"
+    description: "Derive observed behavior from source and tests in a clean-slate context, then compare the implementation record with the requirements, contract, and design in a source-blind context, retaining discrepancies for human arbitration."
+    context: "Per the project's current enforcement note, component accept only structurally validates and records revisions; this gate awaits the separate source-blind reviewer and must never be self-certified."
+    purpose: "Retain an independent disposition for the soft-wrapping surfaces."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "agent-runner-soft-wrap-security-audit"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#Functional-requirements"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-09-30T07:00:00Z"
+      updated_at: "2026-09-30T07:00:00Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

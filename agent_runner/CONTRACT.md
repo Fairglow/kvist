@@ -513,6 +513,12 @@ Options:
   remains under the hard limit without losing the durable audit trail.
 - The executor emits exactly one `SandboxRequest` per tool call and reports any
   deviation as an `Err` before spawning the runner.
+- The terminal UI never renders a line wider than its box: transcript text is
+  pre-wrapped at the box's inner width, and the help, menu, session-history,
+  and replay panels soft-wrap their lines at word boundaries, so every panel
+  keeps its borders on narrow terminals; wrapped text keeps the source line's
+  leading indentation on continuation lines, and scroll extents account for the
+  wrapped line count so all content stays reachable.
 
 ## Errors and failure semantics
 
