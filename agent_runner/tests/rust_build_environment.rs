@@ -25,6 +25,16 @@ fn runner() -> PathBuf {
         .expect("set KVIST_RUST_TEST_RUNNER to an independently built runner outside the fixture")
 }
 
+/// Whether the trusted system rustup that `RustEnvironment::resolve` requires is
+/// present. The "absent install" trial asserts a version-specific, actionable
+/// error for a pin whose toolchain is not installed; that error is only produced
+/// once an installed host rustup at `/usr/bin/rustup` has been queried. CI's
+/// toolcache rustup (dtolnay/rust-toolchain) does not live there, so the trial
+/// gates on this and skips rather than failing for the wrong reason.
+fn host_rustup_resolves() -> bool {
+    std::fs::canonicalize("/usr/bin/rustup").is_ok()
+}
+
 fn resolve(workdir: &std::path::Path) -> agent_runner::Result<ToolRegistry> {
     let settings = ToolProfile::CONFIGURABLE
         .iter()
@@ -74,6 +84,13 @@ fn rejects_malicious_ambiguous_and_oversized_pins() {
 
 #[test]
 fn absent_install_is_actionable_and_auto_is_honest() {
+    if !host_rustup_resolves() {
+        eprintln!(
+            "skip absent_install_is_actionable_and_auto_is_honest: no /usr/bin/rustup; \
+             asserting a version-specific 'absent install' error requires an installed host rustup"
+        );
+        return;
+    }
     let directory = fixture();
     fs::write(directory.path().join("rust-toolchain"), "9.99.99").unwrap();
     let error = resolve(directory.path()).unwrap_err().to_string();
