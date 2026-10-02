@@ -59,6 +59,39 @@ impl ScreenLine {
     }
 }
 
+/// A transcript content section, used to give each kind a distinct, subtle
+/// background so the live transcript reads as clearly separated blocks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Section {
+    /// The user's prompt as echoed into the transcript (`You: …`).
+    Prompt,
+    /// Model reasoning / thinking, already rendered dim.
+    Reasoning,
+    /// A proposed tool call (`→ tool: …`).
+    ToolCall,
+    /// A tool's finished result (success).
+    ToolResult,
+    /// A failed tool result.
+    ToolResultFailure,
+}
+
+/// A subtle, low-intensity background for one [`Section`], tuned for a dark
+/// terminal. Each section gets a distinct tint so the sections read apart, but
+/// every tint is intentionally dark so it complements (rather than competes
+/// with) the existing foreground color coding. Callers combine it with the
+/// section's existing foreground via [`Style::patch`], which keeps the foreground
+/// color and modifiers while filling in only the background.
+fn section_background(section: Section) -> Style {
+    let tint = match section {
+        Section::Prompt => Color::Rgb(46, 50, 64),
+        Section::Reasoning => Color::Rgb(34, 34, 38),
+        Section::ToolCall => Color::Rgb(36, 42, 58),
+        Section::ToolResult => Color::Rgb(38, 50, 44),
+        Section::ToolResultFailure => Color::Rgb(58, 38, 36),
+    };
+    Style::default().bg(tint)
+}
+
 /// Maximum number of transcript lines retained before dropping the oldest.
 const MAX_LINES: usize = 5000;
 /// The braille spinner frames cycled in the header while a turn generates.
@@ -304,7 +337,10 @@ impl App {
         }
         if text.chars().count() > MAX_PROMPT_CHARS {
             self.note(
-                Style::default().fg(Color::White).bold(),
+                Style::default()
+                    .fg(Color::White)
+                    .bold()
+                    .patch(section_background(Section::Prompt)),
                 &format!("You: {text} (too long; shown but not started)"),
             );
             self.note(
@@ -317,7 +353,10 @@ impl App {
         }
         self.editor.set_lines(vec![text.clone()], (0, 0));
         self.note(
-            Style::default().fg(Color::White).bold(),
+            Style::default()
+                .fg(Color::White)
+                .bold()
+                .patch(section_background(Section::Prompt)),
             &format!("You: {text} (auto-started)"),
         );
         self.pending_prompt = Some(text);
@@ -364,7 +403,9 @@ impl App {
             Event::ToolCall { description, .. } => {
                 self.flush_pending();
                 self.note(
-                    Style::default().fg(Color::Blue),
+                    Style::default()
+                        .fg(Color::Blue)
+                        .patch(section_background(Section::ToolCall)),
                     &format!("→ tool: {description}"),
                 );
             }
@@ -375,9 +416,13 @@ impl App {
             } => {
                 self.flush_pending();
                 let style = if failed {
-                    Style::default().fg(Color::Red)
+                    Style::default()
+                        .fg(Color::Red)
+                        .patch(section_background(Section::ToolResultFailure))
                 } else {
-                    Style::default().fg(Color::Green)
+                    Style::default()
+                        .fg(Color::Green)
+                        .patch(section_background(Section::ToolResult))
                 };
                 self.note(style, &format!("✓ tool {description} finished"));
             }
@@ -385,7 +430,12 @@ impl App {
                 self.flush_pending();
                 self.quit_running();
                 self.status = "done".to_owned();
-                self.note(Style::default().fg(Color::Green), &format!("✓ {message}"));
+                self.note(
+                    Style::default()
+                        .fg(Color::Green)
+                        .patch(section_background(Section::ToolResult)),
+                    &format!("✓ {message}"),
+                );
             }
             // The prompt loop exited with no answer. Without this the UI would
             // keep showing "working…" forever once the single-turn cap (or the
@@ -497,7 +547,8 @@ impl App {
     fn push_reasoning_lines(&mut self, text: &str) {
         let style = Style::default()
             .fg(Color::Gray)
-            .add_modifier(ratatui::style::Modifier::DIM);
+            .add_modifier(ratatui::style::Modifier::DIM)
+            .patch(section_background(Section::Reasoning));
         for line in wrap(text, self.content_width()) {
             self.lines
                 .push(ScreenLine::plain(line, style, LineKind::Reasoning));
@@ -849,7 +900,10 @@ impl App {
         self.history.push(text.clone());
         self.history_index = None;
         self.note(
-            Style::default().fg(Color::White).bold(),
+            Style::default()
+                .fg(Color::White)
+                .bold()
+                .patch(section_background(Section::Prompt)),
             &format!("You: {text}"),
         );
         self.editor.clear();
@@ -1806,7 +1860,7 @@ fn bargraph(fraction: f64, width: u16) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, KeyAction, LineKind, MAX_LINES, MENU_ITEMS, Overlay, ScreenLine, Style,
+        App, Color, KeyAction, LineKind, MAX_LINES, MENU_ITEMS, Overlay, ScreenLine, Style,
         next_block_end, wrap,
     };
     use crate::session::Event;
@@ -1877,6 +1931,84 @@ mod tests {
             message: "done".to_owned(),
         });
         assert!(app.lines.len() >= 7, "every event produced transcript rows");
+    }
+
+    #[test]
+    fn section_lines_carry_distinct_backgrounds_and_kept_foregrounds() {
+        let mut app = app();
+        // Echoed user prompt.
+        app.editor.set_lines(vec!["hello world".to_owned()], (0, 0));
+        app.submit();
+        app.push_event(Event::Reasoning("a reason".to_owned()));
+        app.push_event(Event::ToolCall {
+            description: "ls".to_owned(),
+            name: "shell".to_owned(),
+        });
+        app.push_event(Event::ToolResult {
+            description: "ls".to_owned(),
+            name: "shell".to_owned(),
+            failed: false,
+        });
+        app.push_event(Event::ToolResult {
+            description: "cat".to_owned(),
+            name: "shell".to_owned(),
+            failed: true,
+        });
+        app.push_event(Event::Finished {
+            message: "done".to_owned(),
+        });
+
+        let background_for = |needle: &str| -> Option<Color> {
+            app.lines
+                .iter()
+                .find(|line| line.line.to_string().contains(needle))
+                .and_then(|line| line.line.spans.first().and_then(|span| span.style.bg))
+        };
+        let foreground_for = |needle: &str| -> Option<Color> {
+            app.lines
+                .iter()
+                .find(|line| line.line.to_string().contains(needle))
+                .and_then(|line| line.line.spans.first().and_then(|span| span.style.fg))
+        };
+
+        // A subtle background is applied to each section, with the existing
+        // foreground color left intact.
+        assert_eq!(
+            background_for("You: hello world"),
+            Some(Color::Rgb(46, 50, 64))
+        );
+        assert_eq!(foreground_for("You: hello world"), Some(Color::White));
+        assert_eq!(background_for("a reason"), Some(Color::Rgb(34, 34, 38)));
+        assert_eq!(foreground_for("a reason"), Some(Color::Gray));
+        assert_eq!(background_for("→ tool: ls"), Some(Color::Rgb(36, 42, 58)));
+        assert_eq!(foreground_for("→ tool: ls"), Some(Color::Blue));
+        assert_eq!(
+            background_for("✓ tool ls finished"),
+            Some(Color::Rgb(38, 50, 44))
+        );
+        assert_eq!(foreground_for("✓ tool ls finished"), Some(Color::Green));
+        assert_eq!(
+            background_for("✓ tool cat finished"),
+            Some(Color::Rgb(58, 38, 36))
+        );
+        assert_eq!(foreground_for("✓ tool cat finished"), Some(Color::Red));
+        assert_eq!(background_for("✓ done"), Some(Color::Rgb(38, 50, 44)));
+        assert_eq!(foreground_for("✓ done"), Some(Color::Green));
+
+        // The five section backgrounds are pairwise distinct, which is the whole
+        // point of giving each section its own tint.
+        let backgrounds = [
+            background_for("You: hello world").unwrap(),
+            background_for("a reason").unwrap(),
+            background_for("→ tool: ls").unwrap(),
+            background_for("✓ tool ls finished").unwrap(),
+            background_for("✓ tool cat finished").unwrap(),
+        ];
+        for (index, a) in backgrounds.iter().enumerate() {
+            for b in backgrounds.iter().skip(index + 1) {
+                assert_ne!(a, b, "section backgrounds must be distinct");
+            }
+        }
     }
 
     #[test]
