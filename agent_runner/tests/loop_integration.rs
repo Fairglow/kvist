@@ -124,6 +124,27 @@ fn answer_turn(text: &str) -> ModelTurn {
     }
 }
 
+#[test]
+fn invalid_injected_turn_limits_fail_before_model_io() {
+    for limit in [0, MAX_TURNS + 1, u32::MAX] {
+        let transport = ScriptedTransport::new(vec![answer_turn("not sent")]);
+        let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+        let mut session = make_session();
+        session.push_user("go");
+        let result = AgentRunner::with_retry(limit, fast_retry()).run(
+            &mut session,
+            &transport,
+            &executor,
+            &Collector::default(),
+            &CancellationToken::new(),
+            &mut ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+        );
+        assert!(matches!(result, Err(Error::Config { .. })));
+        assert_eq!(transport.turns.lock().unwrap().len(), 1);
+    }
+}
+
 fn success_outcome(stdout: &str) -> ToolOutcome {
     ToolOutcome {
         exited: true,
@@ -143,6 +164,7 @@ struct RecordingExecutor {
     policy: ToolPolicy,
     workdir: PathBuf,
     executed: Arc<Mutex<Vec<(String, String)>>>,
+    cancel_after: Option<CancellationToken>,
 }
 
 impl RecordingExecutor {
@@ -151,6 +173,7 @@ impl RecordingExecutor {
             policy,
             workdir,
             executed: Arc::new(Mutex::new(Vec::new())),
+            cancel_after: None,
         }
     }
 
@@ -205,6 +228,9 @@ impl ToolExecutor for RecordingExecutor {
 impl RecordingExecutor {
     fn record(&self, tool: String, summary: String) {
         self.executed.lock().unwrap().push((tool, summary));
+        if let Some(token) = &self.cancel_after {
+            token.cancel();
+        }
     }
 }
 
@@ -236,22 +262,45 @@ struct FakeRecorder {
     tool_results: Arc<Mutex<Vec<String>>>,
     session_started: AtomicBool,
     session_finished: AtomicBool,
+    terminal_calls: AtomicUsize,
+    fail_dispatch: bool,
 }
 
 impl Recorder for FakeRecorder {
-    fn session_start(&mut self) {
+    fn session_start(&mut self) -> agent_runner::Result<()> {
         self.session_started.store(true, Ordering::SeqCst);
+        Ok(())
     }
 
-    fn turn_start(&mut self, turn: &ModelTurn) -> usize {
+    fn request(&mut self, _request: &ModelRequest, _attempt: u32) -> agent_runner::Result<()> {
+        Ok(())
+    }
+
+    fn turn_start(&mut self, turn: &ModelTurn) -> agent_runner::Result<usize> {
         let index = self.turns.fetch_add(1, Ordering::SeqCst) + 1;
         if let Some(reasoning) = &turn.reasoning {
             self.reasoning.lock().unwrap().push(reasoning.clone());
         }
-        index
+        Ok(index)
     }
 
-    fn turn_finish(&mut self, _turn: usize, _usage: &Option<ModelUsage>, _finish_reason: &str) {}
+    fn turn_finish(
+        &mut self,
+        _turn: usize,
+        _usage: &Option<ModelUsage>,
+        _finish_reason: &str,
+    ) -> agent_runner::Result<()> {
+        Ok(())
+    }
+
+    fn tool_dispatch(&mut self, _turn: usize, _intent: &ToolIntent) -> agent_runner::Result<()> {
+        if self.fail_dispatch {
+            return Err(Error::Recording {
+                reason: "injected pre-effect write failure".into(),
+            });
+        }
+        Ok(())
+    }
 
     fn tool_result(
         &mut self,
@@ -260,15 +309,19 @@ impl Recorder for FakeRecorder {
         tool: &str,
         _args: &serde_json::Value,
         outcome: &ToolOutcome,
-    ) {
+    ) -> agent_runner::Result<()> {
         self.tool_results
             .lock()
             .unwrap()
             .push(format!("turn {turn} {tool} failed={}", outcome.failed()));
+        Ok(())
     }
 
-    fn session_finish(&mut self, success: bool) {
-        self.session_finished.store(success, Ordering::SeqCst);
+    fn session_finish(&mut self, summary: &RunSummary) -> agent_runner::Result<()> {
+        self.session_finished
+            .store(summary.success(), Ordering::SeqCst);
+        self.terminal_calls.fetch_add(1, Ordering::SeqCst);
+        Ok(())
     }
 }
 
@@ -279,6 +332,10 @@ impl FakeRecorder {
 }
 
 fn make_session() -> AgentSession {
+    make_session_with_tools(ToolRegistry::new(ToolPolicy::minimum()).tool_definitions())
+}
+
+fn make_session_with_tools(tool_defs: Vec<agent_runtime::ToolDefinition>) -> AgentSession {
     let model = Model {
         id: "test".to_owned(),
         provider: ModelProvider::LlamaServer,
@@ -290,7 +347,6 @@ fn make_session() -> AgentSession {
         retry_max_delay_secs: 30,
         cadence_timeout_secs: 30,
     };
-    let tool_defs = ToolRegistry::new(ToolPolicy::minimum()).tool_definitions();
     AgentSession::new(
         model,
         ReasoningEffort::Medium,
@@ -458,7 +514,8 @@ fn a_denied_shell_command_is_reported_but_not_fatal() {
         e,
         Event::ToolResult { name, failed, .. } if name == "shell" && *failed
     )));
-    assert!(events.iter().any(|e| matches!(e, Event::Failed(_))));
+    assert!(events.iter().any(|e| matches!(e, Event::Note(_))));
+    assert!(!events.iter().any(|e| matches!(e, Event::Failed(_))));
 }
 
 #[test]
@@ -504,13 +561,13 @@ fn context_compacts_across_prompts_but_the_record_keeps_everything() {
             "shell",
             json!({ "command": "echo first task output" }),
         ),
-        answer_turn("finished first"),
+        answer_turn(&"finished first ".repeat(100)),
         tool_turn(
             "working on the second task and reporting back now",
             "shell",
             json!({ "command": "echo second task output" }),
         ),
-        answer_turn("finished second"),
+        answer_turn(&"finished second ".repeat(100)),
         tool_turn(
             "working on the third task and reporting back now",
             "shell",
@@ -519,12 +576,16 @@ fn context_compacts_across_prompts_but_the_record_keeps_everything() {
         answer_turn("finished third"),
     ]);
     let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
-    // 160-token window, warm-up at 120, keep the most recent turn in full.
-    let mut context = ContextManager::new(160, 1);
+    // Includes full instructions/schema and the enforced 1024-token reserve.
+    let mut context = ContextManager::new(2000, 1);
     let mut recorder = FakeRecorder::default();
     let cancellation = CancellationToken::new();
 
-    let mut session = make_session();
+    let mut session = make_session_with_tools(vec![agent_runtime::ToolDefinition {
+        name: "shell".into(),
+        description: "Run a sandboxed command".into(),
+        parameters: json!({"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}),
+    }]);
     let mut last_answer = None;
     for prompt in ["task one", "task two", "task three"] {
         session.push_user(prompt);
@@ -748,8 +809,13 @@ fn cancellation_before_a_tool_is_executed_stops_the_loop() {
     assert_eq!(summary.tools_executed, 0);
     assert!(executor.executed().is_empty());
     let events = sink.events();
-    assert!(events.iter().any(|e| matches!(e, Event::TurnStart { .. })));
+    assert_eq!(
+        summary.turns, 0,
+        "pre-cancelled prompts never reach the provider"
+    );
+    assert!(!events.iter().any(|e| matches!(e, Event::TurnStart { .. })));
     assert!(!events.iter().any(|e| matches!(e, Event::ToolResult { .. })));
+    assert_eq!(recorder.terminal_calls.load(Ordering::SeqCst), 1);
 }
 
 /// A transport that fails the first `failures` attempts with a transient error,
@@ -814,6 +880,472 @@ fn fast_retry() -> RetryPolicy {
     // A tiny budget and sub-millisecond back-off so the loop recovers quickly
     // in tests while still exercising the real back-off code path.
     RetryPolicy::new(3, Duration::from_millis(1), Duration::from_millis(5))
+}
+
+#[test]
+fn llama_wire_stop_or_missing_finish_with_tools_never_dispatches() {
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::time::Instant;
+
+    for finish in [json!("stop"), serde_json::Value::Null] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let body = format!(
+            "data: {}\n\ndata: [DONE]\n\n",
+            json!({
+                "model": "test-model",
+                "choices": [{
+                    "index": 0,
+                    "delta": {"tool_calls": [{
+                        "index": 0, "id": "reject-call", "type": "function",
+                        "function": {"name": "shell", "arguments": "{\"command\":\"echo unsafe\"}"}
+                    }]},
+                    "finish_reason": finish
+                }]
+            })
+        );
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(Instant::now() < deadline, "provider was not contacted");
+                        thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("fixture accept failed: {error}"),
+                }
+            };
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = Vec::new();
+            let header_end = loop {
+                let mut bytes = [0; 4096];
+                let count = socket.read(&mut bytes).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&bytes[..count]);
+                assert!(request.len() <= 65536);
+                if let Some(position) = request.windows(4).position(|v| v == b"\r\n\r\n") {
+                    break position + 4;
+                }
+            };
+            let length = std::str::from_utf8(&request[..header_end])
+                .unwrap()
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().unwrap())
+                })
+                .unwrap();
+            assert!(header_end + length <= 65536);
+            while request.len() < header_end + length {
+                let mut bytes = [0; 4096];
+                let count = socket.read(&mut bytes).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&bytes[..count]);
+            }
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        });
+        let model = Model {
+            id: "wire-test".into(),
+            provider: ModelProvider::LlamaServer,
+            base_url: endpoint,
+            model: "test-model".into(),
+            deadline_secs: 5,
+            max_attempts: 1,
+            retry_base_delay_secs: 1,
+            retry_max_delay_secs: 1,
+            cadence_timeout_secs: 1,
+        };
+        let transport = model.transport().unwrap();
+        let mut session = AgentSession::new(
+            model,
+            ReasoningEffort::None,
+            ToolRegistry::new(ToolPolicy::minimum()).tool_definitions(),
+            "system".into(),
+        );
+        session.push_user("go");
+        let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+        let sink = Collector::default();
+        let result = AgentRunner::with_retry(1, fast_retry()).run(
+            &mut session,
+            &transport,
+            &executor,
+            &sink,
+            &CancellationToken::new(),
+            &mut ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+        );
+        server.join().unwrap();
+        let summary = result.unwrap();
+        assert_eq!(summary.tools_executed, 0);
+        assert!(!summary.success());
+        assert!(summary.answer.is_none());
+        assert!(executor.executed.lock().unwrap().is_empty());
+        assert!(sink.events().iter().any(|e| matches!(e, Event::Failed(_))));
+    }
+}
+
+#[test]
+fn hardening_truncated_or_filtered_turns_never_execute_tools_or_finish() {
+    for reason in [
+        FinishReason::Stop,
+        FinishReason::Length,
+        FinishReason::ContentFilter,
+        FinishReason::Other("unknown".into()),
+    ] {
+        let mut proposal = tool_turn("incomplete", "shell", json!({"command": "echo unsafe"}));
+        proposal.finish_reason = reason;
+        let transport = ScriptedTransport::new(vec![proposal]);
+        let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+        let mut session = make_session();
+        session.push_user("go");
+        let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+        let mut recorder = FakeRecorder::default();
+        let (summary, sink) = run_collected(
+            &mut session,
+            &transport,
+            &executor,
+            &CancellationToken::new(),
+            &mut context,
+            &mut recorder,
+        );
+        assert_eq!(
+            summary.tools_executed, 0,
+            "truncated proposals cannot cause effects"
+        );
+        assert!(summary.answer.is_none());
+        assert!(sink.events().iter().any(|e| matches!(e, Event::Failed(_))));
+    }
+}
+
+#[test]
+fn hardening_length_without_tools_is_not_a_final_answer() {
+    let mut value = answer_turn("partial answer");
+    value.finish_reason = FinishReason::Length;
+    let transport = ScriptedTransport::new(vec![value]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("go");
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let (summary, _) = run_collected(
+        &mut session,
+        &transport,
+        &executor,
+        &CancellationToken::new(),
+        &mut context,
+        &mut recorder,
+    );
+    assert!(summary.answer.is_none(), "length termination is incomplete");
+}
+
+#[test]
+fn hardening_duplicate_call_ids_reject_the_entire_turn() {
+    let mut proposal = tool_turn("work", "shell", json!({"command": "echo first"}));
+    proposal.tool_intents.push(proposal.tool_intents[0].clone());
+    let transport = ScriptedTransport::new(vec![proposal, answer_turn("done")]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("go");
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let (summary, _) = run_collected(
+        &mut session,
+        &transport,
+        &executor,
+        &CancellationToken::new(),
+        &mut context,
+        &mut recorder,
+    );
+    assert_eq!(summary.tools_executed, 0);
+}
+
+#[test]
+fn hardening_previous_answer_is_not_returned_after_a_failed_followup() {
+    let transport = ScriptedTransport::new(vec![answer_turn("old answer")]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    session.push_user("first");
+    let (first, _) = run_collected(
+        &mut session,
+        &transport,
+        &executor,
+        &CancellationToken::new(),
+        &mut context,
+        &mut recorder,
+    );
+    assert_eq!(first.answer.as_deref(), Some("old answer"));
+    session.push_user("next");
+    let failure = RetryingTransport::new(usize::MAX, answer_turn("never"));
+    let second = AgentRunner::with_retry(1, fast_retry())
+        .run(
+            &mut session,
+            &failure,
+            &executor,
+            &Collector::default(),
+            &CancellationToken::new(),
+            &mut context,
+            Some(&mut recorder),
+        )
+        .unwrap();
+    assert!(second.answer.is_none());
+}
+
+#[test]
+fn hardening_tool_output_status_and_combined_preview_are_bounded() {
+    let mut session = make_session();
+    session.push_user("inspect");
+    session.apply_assistant(tool_turn("read", "shell", json!({"command": "echo ok"})));
+    let mut outcome = success_outcome(&"x".repeat(100_000));
+    outcome.stderr = vec![b'y'; 100_000];
+    outcome.status = Some(7);
+    session.record_tool_result("call-1", "shell", &outcome);
+    let request = session.next_request().unwrap();
+    let Some(ModelMessage::ToolResult { content, .. }) = request.messages.last() else {
+        panic!("result present");
+    };
+    assert!(
+        content.len() <= 8_192,
+        "combined output is one bounded preview"
+    );
+    assert!(content.contains("7"), "the model must see the exit status");
+    assert!(
+        content.contains("truncated"),
+        "omitted output must be visible"
+    );
+}
+
+#[test]
+fn hardening_no_status_timeout_and_cancellation_are_failed_outcomes() {
+    assert!(ToolOutcome::rejected_with("denied").failed());
+    let mut outcome = success_outcome("");
+    outcome.timed_out = true;
+    assert!(outcome.failed());
+    outcome.timed_out = false;
+    outcome.cancelled = true;
+    assert!(outcome.failed());
+}
+
+#[test]
+fn cancelled_multicall_turn_is_valid_for_a_subsequent_prompt() {
+    let cancellation = CancellationToken::new();
+    let mut proposal = tool_turn("first", "shell", json!({"command":"echo first"}));
+    let mut second = proposal.tool_intents[0].clone();
+    second.id = "call-2".into();
+    second.arguments = json!({"command":"echo second"});
+    proposal.tool_intents.push(second);
+    let transport = ScriptedTransport::new(vec![proposal, answer_turn("continued")]);
+    let mut executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    executor.cancel_after = Some(cancellation.clone());
+    let mut session = make_session();
+    session.push_user("start");
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let (interrupted, _) = run_collected(
+        &mut session,
+        &transport,
+        &executor,
+        &cancellation,
+        &mut context,
+        &mut recorder,
+    );
+    assert!(interrupted.cancelled);
+    assert_eq!(interrupted.tools_executed, 1);
+    session.push_user("continue");
+    let (continued, _) = run_collected(
+        &mut session,
+        &transport,
+        &executor,
+        &CancellationToken::new(),
+        &mut context,
+        &mut recorder,
+    );
+    assert!(continued.success(), "{continued:?}");
+    assert_eq!(continued.answer.as_deref(), Some("continued"));
+    assert_eq!(executor.executed().len(), 1);
+}
+
+#[test]
+fn hardening_unchanged_repeated_actions_are_not_executed_again() {
+    let proposal = tool_turn("repeat", "shell", json!({"command": "echo same"}));
+    let transport =
+        ScriptedTransport::new(vec![proposal.clone(), proposal, answer_turn("stopped")]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("work");
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let (summary, sink) = run_collected(
+        &mut session,
+        &transport,
+        &executor,
+        &CancellationToken::new(),
+        &mut context,
+        &mut recorder,
+    );
+    assert_eq!(summary.tools_executed, 1);
+    assert_eq!(summary.answer.as_deref(), Some("stopped"));
+    assert!(sink.events().iter().any(|e| matches!(e, Event::Note(_))));
+}
+
+#[test]
+fn hardening_record_failure_precedes_effects_and_closes_unsuccessfully() {
+    let transport = ScriptedTransport::new(vec![tool_turn(
+        "write",
+        "shell",
+        json!({"command":"echo effect"}),
+    )]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("work");
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder {
+        fail_dispatch: true,
+        ..FakeRecorder::default()
+    };
+    let result = AgentRunner::default().run(
+        &mut session,
+        &transport,
+        &executor,
+        &Collector::default(),
+        &CancellationToken::new(),
+        &mut context,
+        Some(&mut recorder),
+    );
+    assert!(result.is_err());
+    assert!(executor.executed().is_empty());
+    assert_eq!(recorder.terminal_calls.load(Ordering::SeqCst), 1);
+    assert!(!recorder.session_finished.load(Ordering::SeqCst));
+}
+
+#[test]
+fn hardening_transport_failure_closes_exactly_once() {
+    let transport = RetryingTransport::new(usize::MAX, answer_turn("never"));
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("work");
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let summary = AgentRunner::with_retry(1, fast_retry())
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &Collector::default(),
+            &CancellationToken::new(),
+            &mut context,
+            Some(&mut recorder),
+        )
+        .unwrap();
+    assert!(summary.failure.is_some());
+    assert!(!summary.success());
+    assert_eq!(recorder.terminal_calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn hardening_token_budget_is_charged_before_any_provider_attempt() {
+    let transport = RetryingTransport::new(0, answer_turn("never"));
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("work");
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let summary = AgentRunner::default()
+        .with_limits(agent_runner::RunLimits {
+            max_tokens: 1,
+            ..agent_runner::RunLimits::default()
+        })
+        .unwrap()
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &Collector::default(),
+            &CancellationToken::new(),
+            &mut context,
+            Some(&mut recorder),
+        )
+        .unwrap();
+    assert!(summary.budget_exhausted);
+    assert_eq!(*transport.attempts.lock().unwrap(), 0);
+    assert_eq!(recorder.terminal_calls.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn hardening_cancellation_interrupts_backoff_without_another_attempt() {
+    let transport = RetryingTransport::new(usize::MAX, answer_turn("never"));
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("work");
+    let cancellation = CancellationToken::new();
+    let canceller = cancellation.clone();
+    let thread = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(50));
+        canceller.cancel();
+    });
+    let started = std::time::Instant::now();
+    let summary = AgentRunner::with_retry(
+        2,
+        RetryPolicy::new(2, Duration::from_secs(5), Duration::from_secs(5)),
+    )
+    .run(
+        &mut session,
+        &transport,
+        &executor,
+        &Collector::default(),
+        &cancellation,
+        &mut ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+        None,
+    )
+    .unwrap();
+    thread.join().unwrap();
+    assert!(summary.cancelled);
+    assert_eq!(*transport.attempts.lock().unwrap(), 1);
+    assert!(started.elapsed() < Duration::from_secs(1));
+}
+
+#[test]
+fn hardening_shared_deadline_bounds_backoff() {
+    let transport = RetryingTransport::new(usize::MAX, answer_turn("never"));
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("work");
+    let started = std::time::Instant::now();
+    let summary = AgentRunner::with_retry(
+        2,
+        RetryPolicy::new(2, Duration::from_secs(5), Duration::from_secs(5)),
+    )
+    .with_limits(agent_runner::RunLimits {
+        wall_time: Duration::from_millis(50),
+        ..agent_runner::RunLimits::default()
+    })
+    .unwrap()
+    .run(
+        &mut session,
+        &transport,
+        &executor,
+        &Collector::default(),
+        &CancellationToken::new(),
+        &mut ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+        None,
+    )
+    .unwrap();
+    assert!(summary.budget_exhausted);
+    assert!(!summary.cancelled);
+    assert_eq!(*transport.attempts.lock().unwrap(), 1);
+    assert!(started.elapsed() < Duration::from_secs(1));
 }
 
 #[test]

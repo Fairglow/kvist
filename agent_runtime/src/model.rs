@@ -147,6 +147,9 @@ pub struct ModelRequest {
     /// Optional host-owned JSON Schema used as a provider generation constraint.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<Value>,
+    /// Optional generation limit of 1–1,048,576 output tokens; absence preserves provider defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
 }
 
 /// A complete untrusted tool proposal returned by a model.
@@ -170,11 +173,11 @@ pub enum FinishReason {
     Stop,
     /// Provider output limit.
     Length,
-    /// One or more tool intents were returned.
+    /// Provider tool-call completion, including Ollama's native terminal convention.
     ToolCalls,
     /// Provider content policy stopped output.
     ContentFilter,
-    /// Provider-specific terminal reason retained in bounded form.
+    /// Provider-specific reason, or `unknown` when llama-server supplied no terminal reason.
     Other(String),
 }
 

@@ -1,285 +1,351 @@
-//! Durable session log for the agent loop.
+//! Private local operational journal and diagnostic transcript.
 //!
-//! Every turn is recorded in two complementary forms, so the full transcript —
-//! including the agent's reasoning / thinking — survives even when compaction
-//! removes older turns from the model context and the UI collapses thinking:
-//!
-//! * a structured `.jsonl` journal built on `agent_runtime::TrajectoryRecorder`,
-//!   which is what an automated replay or the compliance review consumes; and
-//! * a human-readable transcript log, which is what a curious person reads to
-//!   follow how a conclusion was reached.
-//!
-//! The journal uses the same closed event vocabulary as the broader Kvist
-//! runtime, so the two remain interchangeable. Nothing here leaks secrets: tool
-//! results are bounded exactly as they are folded back to the model, and only
-//! tool *names* and their argument shapes reach the structured record.
+//! Arguments and outputs are represented by hashes in the versioned journal.
+//! The bounded transcript may contain sensitive user/model/tool text. Neither
+//! file is engine evidence or an executable checkpoint; an unanswered dispatch
+//! is an unknown effect and must not be automatically replayed.
 
-use std::fs::{File, OpenOptions};
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::io::{self, Write};
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use crate::session::Recorder;
-use agent_runtime::{ModelTurn, ModelUsage, TrajectoryEvent, TrajectoryRecorder};
+use agent_runtime::{ModelRequest, ModelTurn, ModelUsage, ToolIntent};
+use nix::fcntl::{OFlag, openat};
+use nix::sys::stat::{Mode, mkdirat};
+use serde::Serialize;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
-/// Default location for the structured journal and readable transcript.
+use crate::error::{Error, Result, io_error};
+use crate::sandbox::ToolOutcome;
+use crate::session::{Recorder, RunSummary};
+
+/// Interactive history location; this agent-writable history is not evidence.
 pub const DEFAULT_LOG_DIR: &str = ".agent-runner/runs";
-/// Maximum bytes of a single tool result written to the log (matches the
-/// value folded back to the model).
-const MAX_LOG_OUTPUT_BYTES: usize = 64 * 1024;
+const MAX_TRANSCRIPT_TEXT: usize = 64 * 1024;
+static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
-/// Collapses a reasoning string to a single readable line for the transcript.
-fn reason_lines(reasoning: &str) -> String {
-    let one: String = reasoning.lines().collect::<Vec<_>>().join(" ");
-    bounded_string(&one, 500)
+/// The actual boundary of a workspace session, not engine task authority.
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionScope {
+    SandboxedWorkspace,
+    HostUnconfined,
+    Unspecified,
 }
 
-/// Truncates `text` to at most `max` bytes, lossily and with an ellipsis.
-fn bounded_string(text: &str, max: usize) -> String {
-    let bytes = text.as_bytes();
-    if bytes.len() <= max {
-        text.to_owned()
-    } else {
-        let kept = String::from_utf8_lossy(&bytes[..max]).into_owned();
-        format!("...{kept}")
+impl ExecutionScope {
+    /// Persistent operator-facing scope label.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::SandboxedWorkspace => "SANDBOX",
+            Self::HostUnconfined => "HOST UNCONFINED",
+            Self::Unspecified => "SCOPE UNKNOWN",
+        }
     }
 }
 
-/// Bounds the tool stdout shown in the structured record.
-fn bounded_stdout(stdout: &str) -> String {
-    bounded_string(stdout, MAX_LOG_OUTPUT_BYTES)
+/// Descriptive provenance for an operational record, never approval evidence.
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionMetadata {
+    pub execution_scope: ExecutionScope,
+    pub working_directory: PathBuf,
+    pub write_root: String,
+    pub policy_identity: String,
+    pub context_limit: usize,
+    pub response_reserve: u32,
+    pub max_run_tokens: u64,
+    pub max_run_secs: u64,
 }
 
-/// Bounds the tool stderr shown in the structured record.
-fn bounded_stderr(stderr: &str) -> String {
-    bounded_string(stderr, MAX_LOG_OUTPUT_BYTES)
+fn hash(bytes: &[u8]) -> String {
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
-/// The durable session log: structured journal plus readable transcript, with
-/// token and timing stats for the live working-speed display.
+fn bounded(text: &str) -> &str {
+    let mut end = text.len().min(MAX_TRANSCRIPT_TEXT);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+fn argument_shape(args: &Value) -> Value {
+    let Some(fields) = args.as_object() else {
+        return json!("invalid");
+    };
+    let shape: serde_json::Map<String, Value> = fields
+        .iter()
+        .map(|(key, value)| {
+            let kind = match value {
+                Value::Null => "null",
+                Value::Bool(_) => "boolean",
+                Value::Number(_) => "number",
+                Value::String(_) => "string",
+                Value::Array(_) => "array",
+                Value::Object(_) => "object",
+            };
+            (key.clone(), json!(kind))
+        })
+        .collect();
+    Value::Object(shape)
+}
+
+fn private_directory(path: &Path) -> io::Result<(PathBuf, File)> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut dir = File::open("/")?;
+    for component in absolute.components() {
+        let name = match component {
+            Component::RootDir => continue,
+            Component::Normal(name) => name,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "log directory must not contain . or ..",
+                ));
+            }
+        };
+        let flags = OFlag::O_RDONLY | OFlag::O_DIRECTORY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+        let fd = match openat(&dir, name, flags, Mode::empty()) {
+            Ok(fd) => fd,
+            Err(nix::errno::Errno::ENOENT) => {
+                match mkdirat(&dir, name, Mode::S_IRWXU) {
+                    Ok(()) => dir.sync_all()?,
+                    Err(nix::errno::Errno::EEXIST) => {}
+                    Err(error) => return Err(error.into()),
+                }
+                openat(&dir, name, flags, Mode::empty())?
+            }
+            Err(error) => return Err(error.into()),
+        };
+        dir = File::from(fd);
+    }
+    if dir.metadata()?.permissions().mode() & 0o077 != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "log directory must be private (chmod 700), and all directory components must be non-links",
+        ));
+    }
+    Ok((absolute, dir))
+}
+
+#[derive(Serialize)]
+struct Envelope<'a> {
+    schema_version: u32,
+    sequence: u64,
+    event: &'a Value,
+}
+
+/// A fallible, held-descriptor journal; path substitution cannot redirect writes.
 #[derive(Debug)]
 pub struct SessionLog {
-    recorder: TrajectoryRecorder,
-    transcript: Option<File>,
+    journal: File,
+    directory: File,
+    transcript: File,
+    journal_path: PathBuf,
     transcript_path: PathBuf,
-    started_at: Instant,
+    session_id: String,
     task_id: String,
+    started_at: Instant,
+    sequence: u64,
+    prompt: u64,
     turn: usize,
     total_input_tokens: u64,
     total_output_tokens: u64,
+    metadata: Option<SessionMetadata>,
 }
 
 impl SessionLog {
-    /// Opens a new journal and transcript under `log_dir`, timestamped by the
-    /// current time. Creates the log directory if needed.
-    pub fn open(log_dir: &Path, task_id: impl Into<String>) -> std::io::Result<SessionLog> {
-        std::fs::create_dir_all(log_dir)?;
+    /// Creates no-clobber mode-0600 files under a non-link mode-0700 directory.
+    pub fn open(log_dir: &Path, task_id: impl Into<String>) -> io::Result<Self> {
+        let (log_dir, directory) = private_directory(log_dir)?;
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_micros())
-            .unwrap_or(0);
-        let journal = log_dir.join(format!("session-{stamp}.jsonl"));
-        let transcript_path = log_dir.join(format!("session-{stamp}.log"));
-        // Eagerly create the journal so it exists as soon as the log opens,
-        // matching the transcript below. `record_event` only opens it with
-        // `append`, so it would not otherwise exist until the first write.
-        std::fs::File::create(&journal)?;
-        let recorder = TrajectoryRecorder::new(journal.clone());
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&transcript_path)?;
-        Ok(SessionLog {
-            recorder,
-            transcript: Some(file),
-            transcript_path,
-            started_at: Instant::now(),
+            .map_err(io::Error::other)?
+            .as_nanos();
+        let session_id = format!(
+            "{stamp:032}-{}-{}",
+            std::process::id(),
+            NEXT_FILE.fetch_add(1, Ordering::Relaxed)
+        );
+        let journal_name = format!("session-{session_id}.jsonl");
+        let transcript_name = format!("session-{session_id}.log");
+        let flags =
+            OFlag::O_WRONLY | OFlag::O_CREAT | OFlag::O_EXCL | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC;
+        let mode = Mode::S_IRUSR | Mode::S_IWUSR;
+        let journal = File::from(openat(&directory, journal_name.as_str(), flags, mode)?);
+        let transcript = File::from(openat(&directory, transcript_name.as_str(), flags, mode)?);
+        directory.sync_all()?;
+        Ok(Self {
+            journal,
+            directory,
+            transcript,
+            journal_path: log_dir.join(journal_name),
+            transcript_path: log_dir.join(transcript_name),
+            session_id,
             task_id: task_id.into(),
+            started_at: Instant::now(),
+            sequence: 0,
+            prompt: 0,
             turn: 0,
             total_input_tokens: 0,
             total_output_tokens: 0,
+            metadata: None,
         })
     }
 
-    /// The journal path, for reporting back to the user.
-    pub fn journal_path(&self) -> &Path {
-        self.recorder.path()
+    /// Attaches caller-supplied operational scope; absence is recorded explicitly.
+    pub fn with_metadata(mut self, metadata: SessionMetadata) -> Self {
+        self.metadata = Some(metadata);
+        self
     }
 
-    /// The transcript path, for reporting back to the user.
+    /// Location of the version-one journal.
+    pub fn journal_path(&self) -> &Path {
+        &self.journal_path
+    }
+    /// Location of the bounded, potentially sensitive transcript.
     pub fn transcript_path(&self) -> &Path {
         &self.transcript_path
     }
-
-    /// The running task identifier.
+    /// Caller-supplied descriptive label; not an engine approval identity.
     pub fn task_id(&self) -> &str {
         &self.task_id
     }
-
-    /// Cumulative input tokens observed across the session.
+    /// Cumulative provider input usage.
     pub fn total_input_tokens(&self) -> u64 {
         self.total_input_tokens
     }
-
-    /// Cumulative output tokens observed across the session.
+    /// Cumulative provider output usage.
     pub fn total_output_tokens(&self) -> u64 {
         self.total_output_tokens
     }
-
-    /// Total tokens observed across the session.
+    /// Cumulative provider total usage.
     pub fn total_tokens(&self) -> u64 {
-        self.total_input_tokens + self.total_output_tokens
+        self.total_input_tokens
+            .saturating_add(self.total_output_tokens)
     }
-
-    /// Wall-clock seconds since the session started.
+    /// Wall time since this file was opened.
     pub fn elapsed_secs(&self) -> f64 {
         self.started_at.elapsed().as_secs_f64()
     }
 
-    fn transcript(&mut self, line: &str) {
-        if let Some(file) = self.transcript.as_mut() {
-            let _ = writeln!(file, "{line}");
-        }
+    fn record(&mut self, event: Value) -> Result<()> {
+        self.sequence += 1;
+        serde_json::to_writer(
+            &mut self.journal,
+            &Envelope {
+                schema_version: 1,
+                sequence: self.sequence,
+                event: &event,
+            },
+        )
+        .map_err(|error| Error::Recording {
+            reason: format!("encode/write journal: {error}"),
+        })?;
+        self.journal
+            .write_all(b"\n")
+            .map_err(|source| io_error("write journal", None, source))
     }
 
-    fn record(&self, event: TrajectoryEvent) {
-        let _ = self.recorder.record_event(&event);
+    fn text(&mut self, label: &str, text: &str) -> Result<()> {
+        let preview = bounded(text);
+        writeln!(
+            self.transcript,
+            "{label}: {preview}{}",
+            if preview.len() < text.len() {
+                "\n[transcript truncated]"
+            } else {
+                ""
+            }
+        )
+        .map_err(|source| io_error("write transcript", None, source))
     }
 
-    fn timestamp_ms() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
-    }
-
-    /// Writes the structured session-start event.
-    pub fn session_start(&mut self) {
-        self.record(TrajectoryEvent::SessionStart {
-            session_id: self.task_id.clone(),
-            task_id: self.task_id.clone(),
-            timestamp: Self::timestamp_ms(),
-        });
-        self.transcript(&format!(
-            "== session {} started {}s ago ==",
-            self.task_id,
-            self.elapsed_secs().round()
-        ));
-    }
-
-    /// Begins recording one turn and captures the full reasoning trace for this
-    /// turn, which compaction and the UI may drop but the log keeps.
-    pub fn turn_start(&mut self, turn: &ModelTurn) -> usize {
-        self.turn += 1;
-        let turn_idx = self.turn;
-        self.record(TrajectoryEvent::TurnStart {
-            turn: turn_idx,
-            timestamp: Self::timestamp_ms(),
-        });
-        if let Some(reasoning) = &turn.reasoning
-            && !reasoning.trim().is_empty()
-        {
-            self.record(TrajectoryEvent::ModelReasoning {
-                turn: turn_idx,
-                reasoning: reasoning.clone(),
-            });
-            self.transcript(&format!(
-                "[turn {turn_idx}] reasoning: {}",
-                reason_lines(reasoning)
-            ));
-        }
-        turn_idx
-    }
-
-    /// Records a completed turn, folding in provider token usage.
-    pub fn turn_finish(
-        &mut self,
-        turn: usize,
-        usage: &Option<agent_runtime::ModelUsage>,
-        finish_reason: &str,
-    ) {
-        if let Some(usage) = usage {
-            self.total_input_tokens += usage.input_tokens;
-            self.total_output_tokens += usage.output_tokens;
-        }
-        let output = usage.map(|u| u.output_tokens).unwrap_or(0);
-        let input = usage.map(|u| u.input_tokens).unwrap_or(0);
-        self.record(TrajectoryEvent::TurnFinish {
-            turn,
-            output_tokens: Some(output),
-            finish_reason: finish_reason.to_owned(),
-        });
-        self.record(TrajectoryEvent::PromptEval {
-            turn,
-            cached_tokens: None,
-            new_tokens: Some(input),
-            eval_duration_ms: None,
-        });
-    }
-
-    /// Records an approved tool dispatch and its sandbox observation.
-    pub fn tool_result(
-        &mut self,
-        turn: usize,
-        call_id: &str,
-        tool: &str,
-        args: &serde_json::Value,
-        outcome: &crate::sandbox::ToolOutcome,
-    ) {
-        let stdout = outcome.output_text(MAX_LOG_OUTPUT_BYTES);
-        let stderr = outcome.error_text(MAX_LOG_OUTPUT_BYTES);
-        self.record(TrajectoryEvent::ToolDispatch {
-            turn,
-            call_id: call_id.to_owned(),
-            tool: tool.to_owned(),
-            args: args.clone(),
-            action_hash: format!("{tool}:{call_id}"),
-        });
-        self.record(TrajectoryEvent::ToolResult {
-            turn,
-            call_id: call_id.to_owned(),
-            tool: tool.to_owned(),
-            stdout: bounded_stdout(&stdout),
-            stderr: bounded_stderr(&stderr),
-            exit_code: outcome.status.unwrap_or(-1),
-            bytes: outcome.stdout.len() + outcome.stderr.len(),
-            state_mutated: !outcome.stdout.is_empty() || !outcome.stderr.is_empty(),
-        });
-        let summary = format!("[turn {turn}] {tool} {call_id}: {stdout}{stderr}");
-        self.transcript(&summary);
-    }
-
-    /// Writes the terminal session-finish event with session totals.
-    pub fn session_finish(&mut self, success: bool) {
-        self.record(TrajectoryEvent::SessionFinish {
-            session_id: self.task_id.clone(),
-            task_id: self.task_id.clone(),
-            total_turns: self.turn,
-            total_tokens: self.total_tokens(),
-            success,
-        });
-        self.transcript(&format!(
-            "== session {} finished: {} turns, {} tokens, {}s, {} ==",
-            self.task_id,
-            self.turn,
-            self.total_tokens(),
-            self.elapsed_secs().round(),
-            if success { "ok" } else { "cancelled/failed" }
-        ));
+    fn synchronize(&self) -> Result<()> {
+        self.journal
+            .sync_data()
+            .and_then(|()| self.transcript.sync_data())
+            .and_then(|()| self.directory.sync_all())
+            .map_err(|source| io_error("synchronize session record", None, source))
     }
 }
 
 impl Recorder for SessionLog {
-    fn session_start(&mut self) {
-        SessionLog::session_start(self);
+    fn session_start(&mut self) -> Result<()> {
+        self.prompt += 1;
+        self.record(json!({"type":"session_start", "session_id":self.session_id,
+            "prompt":self.prompt, "task_id":self.task_id, "canonical_evidence":false,
+            "execution_scope":self.metadata.as_ref().map_or(ExecutionScope::Unspecified, |meta| meta.execution_scope),
+            "metadata":self.metadata}))?;
+        writeln!(
+            self.transcript,
+            "== session {} started {}s ago ==",
+            self.task_id,
+            self.elapsed_secs().round()
+        )?;
+        Ok(())
     }
 
-    fn turn_start(&mut self, turn: &ModelTurn) -> usize {
-        SessionLog::turn_start(self, turn)
+    fn request(&mut self, request: &ModelRequest, attempt: u32) -> Result<()> {
+        let bytes = serde_json::to_vec(request).map_err(|error| Error::Recording {
+            reason: error.to_string(),
+        })?;
+        self.record(
+            json!({"type":"model_request", "attempt":attempt, "request_hash":hash(&bytes),
+            "model":request.model, "message_count":request.messages.len(),
+            "tools":request.tools.iter().map(|tool| &tool.name).collect::<Vec<_>>(),
+            "max_output_tokens":request.max_output_tokens}),
+        )?;
+        if attempt == 1
+            && let Some(agent_runtime::ModelMessage::User(text)) = request.messages.last()
+        {
+            self.text("user", text)?;
+        }
+        Ok(())
     }
 
-    fn turn_finish(&mut self, turn: usize, usage: &Option<ModelUsage>, finish_reason: &str) {
-        SessionLog::turn_finish(self, turn, usage, finish_reason);
+    fn turn_start(&mut self, turn: &ModelTurn) -> Result<usize> {
+        self.turn += 1;
+        self.record(
+            json!({"type":"turn_start", "turn":self.turn, "text_hash":hash(turn.text.as_bytes()),
+            "response_id":turn.response_id, "model":turn.model, "provider":turn.provider,
+            "reasoning_hash":turn.reasoning.as_ref().map(|text| hash(text.as_bytes()))}),
+        )?;
+        self.text("assistant", &turn.text)?;
+        if let Some(reasoning) = &turn.reasoning {
+            self.text("provider reasoning", reasoning)?;
+        }
+        Ok(self.turn)
+    }
+
+    fn turn_finish(
+        &mut self,
+        turn: usize,
+        usage: &Option<ModelUsage>,
+        finish_reason: &str,
+    ) -> Result<()> {
+        if let Some(usage) = usage {
+            self.total_input_tokens = self.total_input_tokens.saturating_add(usage.input_tokens);
+            self.total_output_tokens = self.total_output_tokens.saturating_add(usage.output_tokens);
+        }
+        self.record(json!({"type":"turn_finish", "turn":turn, "usage":usage, "finish_reason":finish_reason}))
+    }
+
+    fn tool_dispatch(&mut self, turn: usize, intent: &ToolIntent) -> Result<()> {
+        self.record(
+            json!({"type":"tool_dispatch", "turn":turn, "call_id":intent.id, "tool":intent.name,
+            "argument_shape":argument_shape(&intent.arguments),
+            "action_hash":agent_runtime::compute_action_hash(&intent.name, &intent.arguments)}),
+        )?;
+        self.synchronize()
     }
 
     fn tool_result(
@@ -287,14 +353,39 @@ impl Recorder for SessionLog {
         turn: usize,
         call_id: &str,
         tool: &str,
-        args: &serde_json::Value,
-        outcome: &crate::sandbox::ToolOutcome,
-    ) {
-        SessionLog::tool_result(self, turn, call_id, tool, args, outcome);
+        _args: &Value,
+        outcome: &ToolOutcome,
+    ) -> Result<()> {
+        self.record(json!({"type":"tool_result", "turn":turn, "call_id":call_id, "tool":tool,
+            "stdout_hash":hash(&outcome.stdout), "stderr_hash":hash(&outcome.stderr),
+            "exited":outcome.exited, "status":outcome.status, "timed_out":outcome.timed_out,
+            "cancelled":outcome.cancelled, "output_limit_exceeded":outcome.output_limit_exceeded,
+            "bytes":outcome.stdout.len().saturating_add(outcome.stderr.len()), "state_mutated":null}))?;
+        self.text("tool stdout", &outcome.output_text(MAX_TRANSCRIPT_TEXT))?;
+        self.text("tool stderr", &outcome.error_text(MAX_TRANSCRIPT_TEXT))
     }
 
-    fn session_finish(&mut self, success: bool) {
-        SessionLog::session_finish(self, success);
+    fn session_finish(&mut self, summary: &RunSummary) -> Result<()> {
+        self.record(
+            json!({"type":"session_finish", "session_id":self.session_id,
+            "prompt":self.prompt, "disposition":summary.disposition(), "turns":summary.turns,
+            "tools_executed":summary.tools_executed, "success":summary.success(),
+            "failure":summary.failure, "total_tokens":self.total_tokens()}),
+        )?;
+        writeln!(
+            self.transcript,
+            "== session {} finished: {} turns, {} tokens, {}s, {} ==",
+            self.task_id,
+            self.turn,
+            self.total_tokens(),
+            self.elapsed_secs().round(),
+            if summary.success() {
+                "ok"
+            } else {
+                summary.disposition()
+            }
+        )?;
+        self.synchronize()
     }
 }
 
@@ -302,69 +393,115 @@ impl Recorder for SessionLog {
 mod tests {
     use super::*;
 
-    #[test]
-    fn journal_and_transcript_are_created_under_log_dir() {
+    fn private_tempdir() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
-        let log = SessionLog::open(dir.path(), "task-1").expect("open");
-        let jp = log.journal_path().to_string_lossy().to_string();
-        let tp = log.transcript_path().to_string_lossy().to_string();
-        assert!(jp.ends_with(".jsonl"));
-        assert!(tp.ends_with(".log"));
-        assert!(Path::new(&jp).exists());
-        assert!(Path::new(&tp).exists());
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        dir
     }
 
     #[test]
-    fn session_records_start_and_finish_events() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut log = SessionLog::open(dir.path(), "task-2").expect("open");
-        log.session_start();
-        log.session_finish(true);
-        let contents = std::fs::read_to_string(log.journal_path()).unwrap();
-        assert!(contents.contains("session_start"));
-        assert!(contents.contains("session_finish"));
+    fn private_no_clobber_files_and_versioned_records() {
+        let dir = private_tempdir();
+        let mut first = SessionLog::open(dir.path(), "test").unwrap();
+        let second = SessionLog::open(dir.path(), "test").unwrap();
+        assert_ne!(first.journal_path(), second.journal_path());
+        assert_eq!(
+            first.journal.metadata().unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        first.session_start().unwrap();
+        first
+            .session_finish(&RunSummary {
+                answer: Some("done".into()),
+                ..RunSummary::default()
+            })
+            .unwrap();
+        for (index, line) in std::fs::read_to_string(first.journal_path())
+            .unwrap()
+            .lines()
+            .enumerate()
+        {
+            let event: Value = serde_json::from_str(line).unwrap();
+            assert_eq!(event["schema_version"], 1);
+            assert_eq!(event["sequence"], index + 1);
+        }
     }
 
     #[test]
-    fn tokens_accumulate_across_turns() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut log = SessionLog::open(dir.path(), "task-3").expect("open");
-        let usage = Some(agent_runtime::ModelUsage {
-            input_tokens: 10,
-            output_tokens: 5,
-            total_tokens: 15,
-        });
-        log.turn_finish(1, &usage, "stop");
-        log.turn_finish(2, &usage, "stop");
-        assert_eq!(log.total_input_tokens(), 20);
-        assert_eq!(log.total_output_tokens(), 10);
-        assert_eq!(log.total_tokens(), 30);
-    }
-
-    #[test]
-    fn transcript_records_reasoning() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut log = SessionLog::open(dir.path(), "task-4").expect("open");
-        log.session_start();
-        let turn = ModelTurn {
-            text: "done".to_owned(),
-            reasoning: Some("because reasons".to_owned()),
-            tool_intents: vec![],
-            finish_reason: agent_runtime::FinishReason::Stop,
-            provider: agent_runtime::LocalModelProvider::LlamaServer,
-            model: "m".to_owned(),
-            response_id: None,
-            provider_request_id: None,
-            usage: Some(agent_runtime::ModelUsage {
-                input_tokens: 1,
-                output_tokens: 1,
-                total_tokens: 2,
-            }),
+    fn argument_values_and_output_are_not_in_journal_and_mutation_is_unknown() {
+        let dir = private_tempdir();
+        let mut log = SessionLog::open(dir.path(), "test").unwrap();
+        let intent = ToolIntent {
+            id: "call".into(),
+            provider_id: None,
+            name: "shell".into(),
+            arguments: json!({"command":"secret-test-string"}),
         };
-        let idx = log.turn_start(&turn);
-        log.turn_finish(idx, &turn.usage, "stop");
-        let transcript = std::fs::read_to_string(log.transcript_path()).unwrap();
-        assert!(transcript.contains("reasoning"));
-        assert!(transcript.contains("because reasons"));
+        log.tool_dispatch(1, &intent).unwrap();
+        log.tool_result(
+            1,
+            "call",
+            "shell",
+            &intent.arguments,
+            &ToolOutcome::rejected_with("sensitive-output"),
+        )
+        .unwrap();
+        let journal = std::fs::read_to_string(log.journal_path()).unwrap();
+        assert!(!journal.contains("secret-test-string"));
+        assert!(!journal.contains("sensitive-output"));
+        assert!(journal.contains("\"state_mutated\":null"));
+        assert!(journal.contains("\"action_hash\":\"sha256:"));
+    }
+
+    #[test]
+    fn scope_metadata_is_explicit_and_not_engine_evidence() {
+        let dir = private_tempdir();
+        let mut log =
+            SessionLog::open(dir.path(), "test")
+                .unwrap()
+                .with_metadata(SessionMetadata {
+                    execution_scope: ExecutionScope::HostUnconfined,
+                    working_directory: PathBuf::from("/tmp/workspace"),
+                    write_root: "/workspace".into(),
+                    policy_identity: "sha256:test".into(),
+                    context_limit: 8192,
+                    response_reserve: 1024,
+                    max_run_tokens: 10000,
+                    max_run_secs: 30,
+                });
+        log.session_start().unwrap();
+        let value: Value =
+            serde_json::from_str(std::fs::read_to_string(log.journal_path()).unwrap().trim())
+                .unwrap();
+        assert_eq!(value["event"]["execution_scope"], "host_unconfined");
+        assert_eq!(value["event"]["canonical_evidence"], false);
+        assert_eq!(
+            value["event"]["metadata"]["working_directory"],
+            "/tmp/workspace"
+        );
+        assert_eq!(value["event"]["metadata"]["response_reserve"], 1024);
+    }
+
+    #[test]
+    fn write_failure_is_returned() {
+        let dir = private_tempdir();
+        let mut log = SessionLog::open(dir.path(), "test").unwrap();
+        log.journal = std::fs::OpenOptions::new()
+            .write(true)
+            .open("/dev/full")
+            .unwrap();
+        assert!(log.session_start().is_err());
+    }
+
+    #[test]
+    fn rejects_symlink_and_nonprivate_log_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(dir.path(), &link).unwrap();
+        assert!(SessionLog::open(&link, "test").is_err());
+        let public = dir.path().join("public");
+        std::fs::create_dir(&public).unwrap();
+        std::fs::set_permissions(&public, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(SessionLog::open(&public, "test").is_err());
     }
 }

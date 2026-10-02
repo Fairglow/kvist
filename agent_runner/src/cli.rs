@@ -66,6 +66,26 @@ pub struct Cli {
     #[arg(long)]
     pub no_logs: bool,
 
+    /// Run one sandboxed prompt without a terminal; requires durable logging.
+    #[arg(long, requires = "prompt", conflicts_with_all = ["allow_host_execution", "host_turns", "no_logs", "list_models", "import_kvist"])]
+    pub headless: bool,
+
+    /// Emit version-one NDJSON events rather than only the final answer.
+    #[arg(long, requires = "headless")]
+    pub json: bool,
+
+    /// Output-token reserve, enforced in each provider request.
+    #[arg(long, default_value_t = 1024, value_parser = clap::value_parser!(u32).range(1..=1_048_576))]
+    pub response_reserve: u32,
+
+    /// Whole-prompt wall time, including requests, retry waits and tools.
+    #[arg(long, default_value_t = 1800, value_parser = clap::value_parser!(u64).range(1..=86_400))]
+    pub max_run_secs: u64,
+
+    /// Estimated input plus reserved output tokens across all model attempts.
+    #[arg(long, default_value_t = 1_000_000, value_parser = clap::value_parser!(u64).range(1..=1_000_000_000))]
+    pub max_run_tokens: u64,
+
     /// An initial prompt to submit (optional).
     pub prompt: Option<String>,
 
@@ -83,7 +103,7 @@ pub struct Cli {
     /// `--allow-host-execution` is set. Off by default (one turn), because the
     /// elevated privileges are the overuse concern. Valid when host execution is
     /// enabled.
-    #[arg(long, value_name = "N")]
+    #[arg(long, value_name = "N", requires = "allow_host_execution")]
     pub host_turns: Option<u32>,
 }
 
@@ -188,8 +208,7 @@ fn xdg_system_config_dirs(
 /// Parses a thinking effort level for the CLI, with a descriptive error.
 pub fn parse_effort(value: &str) -> std::result::Result<agent_runtime::ReasoningEffort, String> {
     agent_runtime::ReasoningEffort::from_str(value).map_err(|_| {
-        "invalid thinking effort `{value}`; expected none, minimal, low, medium, high, xhigh, or max"
-            .to_owned()
+        format!("invalid thinking effort `{value}`; expected none, minimal, low, medium, high, xhigh, or max")
     })
 }
 
@@ -198,6 +217,21 @@ mod tests {
     use super::*;
     use clap::Parser;
     use std::path::Path;
+
+    #[test]
+    fn headless_is_terminal_free_but_has_no_host_or_recording_escape() {
+        assert!(Cli::try_parse_from(["agent-runner", "--headless", "--json", "inspect"]).is_ok());
+        for flag in ["--allow-host-execution", "--host-turns", "--no-logs"] {
+            let mut args = vec!["agent-runner", "--headless", flag];
+            if flag == "--host-turns" {
+                args.push("2");
+            }
+            args.push("inspect");
+            assert!(Cli::try_parse_from(args).is_err(), "{flag}");
+        }
+        assert!(Cli::try_parse_from(["agent-runner", "--headless"]).is_err());
+        assert!(Cli::try_parse_from(["agent-runner", "--json", "inspect"]).is_err());
+    }
 
     #[test]
     fn parses_model_effort_cwd_profile_overrides_and_prompt() {
@@ -260,6 +294,11 @@ mod tests {
         assert!(cli.allow_host_execution);
         assert_eq!(cli.host_turns, Some(5));
         assert_eq!(cli.prompt.as_deref(), Some("refactor this"));
+    }
+
+    #[test]
+    fn host_turns_without_host_execution_is_rejected() {
+        assert!(Cli::try_parse_from(["agent-runner", "--host-turns", "5"]).is_err());
     }
 
     #[test]

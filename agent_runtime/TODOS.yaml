@@ -10,6 +10,110 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: model-stream-integrity-write-tests
+    title: "Pin finish and semantic cadence boundaries"
+    description: "Reproduce inconsistent/missing/malformed finishes and heartbeat-delayed stalls; exercise meaningful tool-fragment progress."
+    context: "Independent comparison identified finish normalization and byte-cadence gaps."
+    purpose: "Define provider-specific integrity before repairs."
+    expected_outcome: "Five finish and three cadence fixtures fail before code; current fixtures pass."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:08:15Z", completed_at: "2026-10-02T00:08:15Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: model-stream-integrity-implement-code
+    title: "Preserve finishes and decoded generation progress"
+    description: "Preserve explicit llama finishes, reject malformed reasons, retain valid native Ollama classification and separate semantic cadence from HTTP/body progress."
+    context: "Provider wire regressions and local intent precede repairs."
+    purpose: "Prevent malformed tool proposals and misleading liveness."
+    expected_outcome: "Provider fixtures pass without weakening caller deadlines or cancellation."
+    kind: implementation
+    status: completed
+    depends_on: [model-stream-integrity-write-tests]
+    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:08:15Z", completed_at: "2026-10-02T00:08:15Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: model-stream-integrity-security-audit
+    title: "Audit finish and watchdog repairs"
+    description: "Independently inspect malformed wire input, bounded decoding, semantic progress, callback limits and caller deadline propagation."
+    context: "Provider stream repairs are implemented."
+    purpose: "Find exploitable integrity or resource-policy bypasses."
+    expected_outcome: "Recorded scoped audit and any corrections."
+    kind: security-audit
+    status: completed
+    depends_on: [model-stream-integrity-implement-code]
+    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:27:08Z", completed_at: "2026-10-02T00:27:08Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: model-stream-integrity-compliance-review
+    title: "Compare provider stream observations with intent"
+    description: "Compare independently derived current behavior and named wire-test evidence in a separate source-blind context."
+    context: "Provider security audit follows implementation."
+    purpose: "Retain actual provider distinctions and bounded watchdog limits."
+    expected_outcome: "Independent comparison rather than implementer certification."
+    kind: compliance-review
+    status: completed
+    depends_on: [model-stream-integrity-security-audit]
+    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: model-output-bound-write-tests
+    title: "Define provider output-bound tests"
+    description: "Write failing llama-server and Ollama fixtures for positive bounded max_output_tokens, absent bounds and invalid pre-I/O rejection."
+    context: "The agent-runner needs an enforced response reserve."
+    purpose: "Pin output-budget wire semantics before code."
+    expected_outcome: "Tests fail before optional output bounds are implemented."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["CONTRACT.md#Data-and-schemas", "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: model-output-bound-implement-code
+    title: "Implement canonical provider output bounds"
+    description: "Add optional max_output_tokens and translate to llama-server max_tokens and Ollama options.num_predict without changing absent-bound behavior."
+    context: "Defined provider output-bound fixtures."
+    purpose: "Enforce caller response budgets in both local providers."
+    expected_outcome: "Output-bound fixtures and existing transport tests pass."
+    kind: implementation
+    status: completed
+    depends_on: [model-output-bound-write-tests]
+    requirements: ["CONTRACT.md#Data-and-schemas", "REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: model-output-bound-security-audit
+    title: "Audit provider output bounds"
+    description: "Independently inspect bounds, wire translation and invalid-input network behavior."
+    context: "Output bounds are implemented."
+    purpose: "Find resource-policy bypasses."
+    expected_outcome: "Recorded audit findings and corrections."
+    kind: security-audit
+    status: completed
+    depends_on: [model-output-bound-implement-code]
+    requirements: ["CONTRACT.md#Data-and-schemas"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: model-output-bound-compliance-review
+    title: "Review provider output-bound compliance"
+    description: "Compare intended output bounds with independent source-only implementation and source-blind review evidence."
+    context: "Security audit follows provider implementation."
+    purpose: "Retain discrepancies without implementer certification."
+    expected_outcome: "Independent evidence and explicit unresolved discrepancies."
+    kind: compliance-review
+    status: completed
+    depends_on: [model-output-bound-security-audit]
+    requirements: ["CONTRACT.md#Data-and-schemas"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: "sa-01-write-tests"
     title: "Define standalone supervision tests"
     description: "Write failing library and CLI tests for shell-free rendering, explicit host acknowledgement, prompt files, retry context, terminal process failures, loop detection, and idle termination."

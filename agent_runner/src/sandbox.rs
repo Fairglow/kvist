@@ -7,12 +7,11 @@
 //! unavailable rather than executing on the host.
 
 use std::collections::BTreeMap;
-use std::io::{BufReader, Read, Write};
+use std::io::Read;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock, mpsc};
-use std::thread;
+use std::process::Command;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use agent_runtime::CancellationToken;
@@ -34,10 +33,11 @@ const PROTOCOL_ID: &str = "kvist-sandbox-request-v1";
 const PROTOCOL_VERSION: u32 = 1;
 /// The maximum encoded request size before parsing.
 const MAX_REQUEST_BYTES: usize = 1 << 20;
-/// The maximum size of a single stdout/stderr drain chunk.
-const DRAIN_CHUNK_BYTES: usize = 8192;
-/// How long the main loop waits on a drain channel before re-checking limits.
-const DRAIN_POLL: Duration = Duration::from_millis(50);
+const MAX_IDENTITY_BYTES: u64 = 256 << 20;
+const MAX_SCOPE_ENTRIES: usize = 1_000_000;
+const MAX_SCOPE_DEPTH: usize = 128;
+const MAX_SCOPE_PATH_BYTES: usize = 32 << 20;
+const MAX_PREFLIGHT_TIME: Duration = Duration::from_secs(30);
 
 /// System `PATH` made available inside the sandbox so tools resolve by name.
 const SANDBOX_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
@@ -62,7 +62,8 @@ pub struct BuildRequest<'a> {
     pub argv: &'a [String],
     /// The host working directory, granted read-write at the write root.
     pub working_directory: &'a Path,
-    /// Host directories to expose read-only, in addition to the system layout.
+    /// Regular non-link host context files to expose read-only at `/context/N`.
+    /// Directories, missing paths, overlaps and unsupported entries fail closed.
     pub read_roots: &'a [PathBuf],
     /// Environment variables to forward, filtered for portable, safe names.
     pub environment: BTreeMap<String, String>,
@@ -147,9 +148,13 @@ impl ToolOutcome {
         truncate_text(&self.stderr, limit)
     }
 
-    /// Whether the process exited with a non-zero status.
+    /// Whether execution failed to produce an observed, uninterrupted zero exit.
     pub fn failed(&self) -> bool {
-        self.exited && self.status != Some(0)
+        !self.exited
+            || self.status != Some(0)
+            || self.timed_out
+            || self.output_limit_exceeded
+            || self.cancelled
     }
 }
 
@@ -174,8 +179,21 @@ struct GrantWire {
 
 /// Builds a closed version-one `Authoring` phase request.
 pub fn build_request(sandbox: &SandboxPaths, request: &BuildRequest) -> Result<SandboxRequest> {
-    let runner_identity = read_file_identity("sandbox runner", &sandbox.runner)?;
-    let backend_identity = backend_identity("sandbox backend", &sandbox.backend)?;
+    build_request_cancellable(sandbox, request, &CancellationToken::new())
+}
+
+pub(crate) fn build_request_cancellable(
+    sandbox: &SandboxPaths,
+    request: &BuildRequest,
+    cancellation: &CancellationToken,
+) -> Result<SandboxRequest> {
+    let preflight = Preflight {
+        cancellation,
+        started: Instant::now(),
+    };
+    preflight.check()?;
+    let runner_identity = read_file_identity("sandbox runner", &sandbox.runner, &preflight)?;
+    let backend_identity = backend_identity("sandbox backend", &sandbox.backend, &preflight)?;
 
     let workdir = request.working_directory.canonicalize().map_err(|source| {
         io_error(
@@ -184,6 +202,17 @@ pub fn build_request(sandbox: &SandboxPaths, request: &BuildRequest) -> Result<S
             source,
         )
     })?;
+    let runner = sandbox
+        .runner
+        .canonicalize()
+        .map_err(|source| io_error("resolve installed sandbox runner", None, source))?;
+    if runner.starts_with(&workdir) {
+        return Err(Error::SandboxBuild {
+            reason:
+                "the independently installed sandbox runner must be outside the writable workspace"
+                    .to_owned(),
+        });
+    }
 
     // The writable authoring grant maps the working directory to the write root.
     let write_root = request.policy.write_root.clone();
@@ -192,13 +221,14 @@ pub fn build_request(sandbox: &SandboxPaths, request: &BuildRequest) -> Result<S
             reason: "the write root must be a non-empty absolute path".to_owned(),
         });
     }
-    check_writable_scope(&workdir)?;
+    check_writable_scope(&workdir, &preflight)?;
     let authoring = grant(
         &workdir,
         &write_root,
         Access::ReadWrite,
         Purpose::Authoring,
         &digest_input(b"authoring", workdir.to_string_lossy().as_bytes()),
+        &preflight,
     )?;
 
     // Read-only context grants for any declared read roots. A read root that
@@ -208,29 +238,33 @@ pub fn build_request(sandbox: &SandboxPaths, request: &BuildRequest) -> Result<S
     // disjoint, so the runner's overlap check also passes.
     let mut wires = vec![authoring];
     for (index, root) in request.read_roots.iter().enumerate() {
-        match root.canonicalize() {
-            Ok(canonical_root) => {
-                if roots_overlap(&canonical_root, &workdir) {
-                    return Err(Error::SandboxBuild {
-                        reason: format!(
-                            "read root `{}` overlaps the write root `{}`;
-                             declare a read root outside the working directory scope",
-                            root.display(),
-                            workdir.display()
-                        ),
-                    });
-                }
-                match build_context_grant(&canonical_root, index) {
-                    Some(grant) => wires.push(grant),
-                    None => {
-                        tracing::debug!(root = ?root, "skipping unreadable read-only grant")
-                    }
-                }
-            }
-            Err(source) => {
-                tracing::debug!(root = ?root, error = %source, "skipping unreadable read-only grant")
-            }
+        preflight.check()?;
+        let metadata = std::fs::symlink_metadata(root).map_err(|e| {
+            io_error(
+                "inspect declared read-only context file",
+                Some(&root.to_string_lossy()),
+                e,
+            )
+        })?;
+        if !metadata.is_file() || metadata.file_type().is_symlink() {
+            return Err(Error::SandboxBuild {
+                reason: "read_roots supports regular non-link context files only, not directories"
+                    .to_owned(),
+            });
         }
+        let canonical_root = root.canonicalize().map_err(|e| {
+            io_error(
+                "resolve declared read-only context file",
+                Some(&root.to_string_lossy()),
+                e,
+            )
+        })?;
+        if roots_overlap(&canonical_root, &workdir) {
+            return Err(Error::SandboxBuild {
+                reason: "read-only context file overlaps the writable workspace".to_owned(),
+            });
+        }
+        wires.push(build_context_grant(&canonical_root, index, &preflight)?);
     }
     if wires.is_empty() {
         return Err(Error::SandboxBuild {
@@ -289,16 +323,33 @@ pub fn build_request(sandbox: &SandboxPaths, request: &BuildRequest) -> Result<S
         reason: error.to_string(),
     })?;
 
+    preflight.check()?;
     Ok(request)
 }
 
-fn read_file_identity(label: &str, path: &Path) -> Result<String> {
-    let bytes = read_trusted_file(label, path)?;
-    Ok(digest(&bytes))
+struct Preflight<'a> {
+    cancellation: &'a CancellationToken,
+    started: Instant,
 }
 
-fn backend_identity(label: &str, path: &Path) -> Result<BackendIdentity> {
-    let bytes = read_trusted_file(label, path)?;
+impl Preflight<'_> {
+    fn check(&self) -> Result<()> {
+        crate::executor::check_cancelled(self.cancellation)?;
+        if self.started.elapsed() >= MAX_PREFLIGHT_TIME {
+            return Err(Error::SandboxBuild {
+                reason: "sandbox preflight exceeded 30 seconds; narrow the working directory or reduce context files".into(),
+            });
+        }
+        Ok(())
+    }
+}
+
+fn backend_identity(
+    label: &str,
+    path: &Path,
+    preflight: &Preflight<'_>,
+) -> Result<BackendIdentity> {
+    let identity = read_file_identity(label, path, preflight)?;
     let canonical = path.canonicalize().map_err(|source| {
         io_error(
             &format!("canonicalize {label}"),
@@ -309,51 +360,81 @@ fn backend_identity(label: &str, path: &Path) -> Result<BackendIdentity> {
     Ok(BackendIdentity {
         kind: BackendKind::Bubblewrap,
         path: canonical.to_string_lossy().into_owned(),
-        digest: digest(&bytes),
+        digest: identity,
     })
 }
 
-fn read_trusted_file(label: &str, path: &Path) -> Result<Vec<u8>> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|source| {
+fn read_file_identity(label: &str, path: &Path, preflight: &Preflight<'_>) -> Result<String> {
+    preflight.check()?;
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|source| {
+            io_error(
+                &format!("open {label}"),
+                Some(&path.to_string_lossy()),
+                source,
+            )
+        })?;
+    let metadata = file.metadata().map_err(|source| {
         io_error(
             &format!("inspect {label}"),
             Some(&path.to_string_lossy()),
             source,
         )
     })?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+    if !metadata.file_type().is_file() {
         return Err(Error::SandboxUnavailable {
             runner: Some(path.to_string_lossy().into_owned()),
             reason: format!("{label} must be a regular non-link file"),
         });
     }
-    std::fs::read(path).map_err(|source| {
-        io_error(
-            &format!("read {label}"),
-            Some(&path.to_string_lossy()),
-            source,
-        )
-    })
+    if metadata.len() > MAX_IDENTITY_BYTES {
+        return Err(Error::SandboxBuild {
+            reason: format!("{label} exceeds the 256 MiB identity bound"),
+        });
+    }
+    let mut hash = Sha256::new();
+    let mut bytes = [0_u8; 65536];
+    let mut total = 0_u64;
+    loop {
+        preflight.check()?;
+        let count = file.read(&mut bytes).map_err(|source| {
+            io_error(
+                &format!("read {label}"),
+                Some(&path.to_string_lossy()),
+                source,
+            )
+        })?;
+        if count == 0 {
+            break;
+        }
+        total += count as u64;
+        if total > MAX_IDENTITY_BYTES {
+            return Err(Error::SandboxBuild {
+                reason: format!("{label} grew beyond the 256 MiB identity bound"),
+            });
+        }
+        hash.update(&bytes[..count]);
+    }
+    preflight.check()?;
+    Ok(format!("sha256:{}", hex::encode(hash.finalize())))
 }
 
-fn build_context_grant(root: &Path, index: usize) -> Option<GrantWire> {
-    let source = root.canonicalize().ok()?;
-    let metadata = std::fs::symlink_metadata(&source).ok()?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-        return None;
-    }
-    let destination = format!("/ro/{index}");
-    let bytes = std::fs::read(&source).ok()?;
-    Some(GrantWire {
-        source: source.to_string_lossy().into_owned(),
+fn build_context_grant(root: &Path, index: usize, preflight: &Preflight<'_>) -> Result<GrantWire> {
+    let destination = format!("/context/{index}");
+    let identity = read_file_identity("read-only context file", root, preflight)?;
+    Ok(GrantWire {
+        source: root.to_string_lossy().into_owned(),
         destination,
         access: Access::ReadOnly,
         purpose: Purpose::Context,
-        identity: digest(&bytes),
+        identity,
     })
 }
 
-fn check_writable_scope(workdir: &Path) -> Result<()> {
+fn check_writable_scope(workdir: &Path, preflight: &Preflight<'_>) -> Result<()> {
     // `workdir` is canonical in the caller, so it is a real directory: the scope
     // root. The sandbox bind-mounts it read-write, so every symlink inside it is
     // live to the sandboxed process. The escape risk is a symlink whose resolved
@@ -361,12 +442,19 @@ fn check_writable_scope(workdir: &Path) -> Result<()> {
     // root. Symlinks that stay inside the scope are common (Node's `.bin` links,
     // in-project aliases) and safe, so they are allowed; only scope-escaping links
     // fail the build, named with the target they point at.
-    let mut stack: Vec<PathBuf> = vec![workdir.to_path_buf()];
+    let mut stack: Vec<(PathBuf, usize)> = Vec::new();
     let mut visited: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
-    while let Some(dir) = stack.pop() {
-        if !visited.insert(dir.clone()) {
-            continue;
-        }
+    let mut path_bytes = 0;
+    queue_scope_directory(
+        workdir.to_owned(),
+        0,
+        &mut stack,
+        &mut visited,
+        &mut path_bytes,
+    )?;
+    let mut count = 0;
+    while let Some((dir, depth)) = stack.pop() {
+        preflight.check()?;
         let entries = std::fs::read_dir(&dir).map_err(|source| {
             io_error(
                 "inspect working directory scope for the sandbox",
@@ -374,7 +462,16 @@ fn check_writable_scope(workdir: &Path) -> Result<()> {
                 source,
             )
         })?;
-        for entry in entries.flatten() {
+        for entry in entries {
+            preflight.check()?;
+            admit_scope_entry(&mut count)?;
+            let entry = entry.map_err(|source| {
+                io_error(
+                    "enumerate working directory scope",
+                    Some(&dir.to_string_lossy()),
+                    source,
+                )
+            })?;
             let path = entry.path();
             let file_type = entry.file_type().map_err(|source| {
                 io_error(
@@ -384,13 +481,19 @@ fn check_writable_scope(workdir: &Path) -> Result<()> {
                 )
             })?;
             if file_type.is_dir() {
-                stack.push(path);
+                queue_scope_directory(path, depth + 1, &mut stack, &mut visited, &mut path_bytes)?;
                 continue;
             }
             if !file_type.is_symlink() {
                 continue;
             }
-            let target = std::fs::read_link(&path).unwrap_or_default();
+            let target = std::fs::read_link(&path).map_err(|source| {
+                io_error(
+                    "read working directory symbolic link",
+                    Some(&path.to_string_lossy()),
+                    source,
+                )
+            })?;
             let resolved = resolve_link_target(&target, &path);
             if target_escapes_scope(&resolved, workdir) {
                 return Err(Error::SandboxBuild {
@@ -409,14 +512,84 @@ fn check_writable_scope(workdir: &Path) -> Result<()> {
             // In-scope link is allowed, but if it points at a directory keep
             // walking its canonical target so links reachable through it are still
             // checked -- without ever following the link at sandbox runtime.
-            if let Ok(canonical) = std::fs::canonicalize(&path)
-                && canonical.starts_with(workdir)
-                && canonical.is_dir()
-            {
-                stack.push(canonical);
+            let canonical = match std::fs::canonicalize(&path) {
+                Ok(canonical) => canonical,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(source) => {
+                    return Err(io_error(
+                        "resolve working directory symbolic link",
+                        Some(&path.to_string_lossy()),
+                        source,
+                    ));
+                }
+            };
+            if !canonical.starts_with(workdir) {
+                return Err(Error::SandboxBuild {
+                    reason: "symbolic link left the working directory during inspection".into(),
+                });
+            }
+            let metadata = std::fs::metadata(&canonical).map_err(|source| {
+                io_error(
+                    "inspect symbolic link target",
+                    Some(&path.to_string_lossy()),
+                    source,
+                )
+            })?;
+            if metadata.is_dir() {
+                let target_depth = canonical
+                    .strip_prefix(workdir)
+                    .map_err(|_| Error::SandboxBuild {
+                        reason: "symbolic link left the working directory during inspection".into(),
+                    })?
+                    .components()
+                    .count();
+                queue_scope_directory(
+                    canonical,
+                    target_depth,
+                    &mut stack,
+                    &mut visited,
+                    &mut path_bytes,
+                )?;
             }
         }
     }
+    Ok(())
+}
+
+fn admit_scope_entry(count: &mut usize) -> Result<()> {
+    *count = count.saturating_add(1);
+    if *count > MAX_SCOPE_ENTRIES {
+        return Err(Error::SandboxBuild {
+            reason: "working directory scan exceeds 1000000 entries; narrow the working directory"
+                .into(),
+        });
+    }
+    Ok(())
+}
+
+fn queue_scope_directory(
+    path: PathBuf,
+    depth: usize,
+    stack: &mut Vec<(PathBuf, usize)>,
+    visited: &mut std::collections::BTreeSet<PathBuf>,
+    path_bytes: &mut usize,
+) -> Result<()> {
+    if depth > MAX_SCOPE_DEPTH {
+        return Err(Error::SandboxBuild {
+            reason: "working directory scan exceeds depth 128; narrow the working directory".into(),
+        });
+    }
+    if visited.contains(&path) {
+        return Ok(());
+    }
+    let charge = path.as_os_str().len().saturating_mul(2);
+    let total = path_bytes.saturating_add(charge);
+    if total > MAX_SCOPE_PATH_BYTES {
+        return Err(Error::SandboxBuild { reason: "working directory scan exceeds the 32 MiB path-storage bound; narrow the working directory".into() });
+    }
+    *path_bytes = total;
+    visited.insert(path.clone());
+    stack.push((path, depth));
     Ok(())
 }
 
@@ -511,6 +684,7 @@ pub fn execute(
     request: &SandboxRequest,
     cancellation: &CancellationToken,
 ) -> Result<ToolOutcome> {
+    crate::executor::check_cancelled(cancellation)?;
     let json = serde_json::to_vec(request).map_err(|source| Error::SandboxBuild {
         reason: format!("cannot serialize the sandbox request: {source}"),
     })?;
@@ -520,204 +694,23 @@ pub fn execute(
         });
     }
 
-    let mut child = Command::new(&sandbox.runner)
-        .arg(REQUEST_ARGUMENT)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|source| Error::SandboxUnavailable {
+    let output_limit =
+        usize::try_from(request.resources.max_output_bytes).map_err(|_| Error::SandboxBuild {
+            reason: "the output limit is not representable on this platform".to_owned(),
+        })?;
+    let mut command = Command::new(&sandbox.runner);
+    command.arg(REQUEST_ARGUMENT);
+    crate::process::run(
+        &mut command,
+        Some(&json),
+        Duration::from_millis(request.resources.wall_time_ms),
+        output_limit,
+        cancellation,
+        |source| Error::SandboxUnavailable {
             runner: Some(sandbox.runner.to_string_lossy().into_owned()),
             reason: format!("spawn sandbox runner: {source}"),
-        })?;
-
-    let started = Instant::now();
-    let wall_time = Duration::from_millis(request.resources.wall_time_ms);
-    let output_limit = request.resources.max_output_bytes as usize;
-    let limit_exceeded = Arc::new(AtomicBool::new(false));
-
-    let stdout_done = Arc::new(AtomicBool::new(false));
-    let stderr_done = Arc::new(AtomicBool::new(false));
-    let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
-    let (err_tx, err_rx) = mpsc::channel::<Vec<u8>>();
-
-    let stdout_pipe = child
-        .stdout
-        .take()
-        .ok_or_else(|| sandbox_unavailable(sandbox, "standard output"))?;
-    let stderr_pipe = child
-        .stderr
-        .take()
-        .ok_or_else(|| sandbox_unavailable(sandbox, "standard error"))?;
-    let limit_for_stdout = limit_exceeded.clone();
-    let stdout_done_for_stdout = stdout_done.clone();
-    thread::spawn(move || {
-        drain_pipe(
-            stdout_pipe,
-            limit_for_stdout,
-            stdout_done_for_stdout,
-            out_tx,
-        )
-    });
-    let limit_for_stderr = limit_exceeded.clone();
-    let stderr_done_for_stderr = stderr_done.clone();
-    thread::spawn(move || {
-        drain_pipe(
-            stderr_pipe,
-            limit_for_stderr,
-            stderr_done_for_stderr,
-            err_tx,
-        )
-    });
-
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-
-    // Write the bounded request once, then close stdin.
-    {
-        let mut stdin = child
-            .stdin
-            .take()
-            .ok_or_else(|| sandbox_unavailable(sandbox, "standard input"))?;
-        if let Err(source) = write_all(&mut stdin, &json) {
-            let _ = kill_group(&mut child);
-            return Err(io_error("write sandbox request", None, source));
-        }
-    }
-
-    let mut timed_out = false;
-    let mut cancelled = false;
-    let mut status = None;
-
-    loop {
-        if cancellation.is_cancelled() {
-            cancelled = true;
-            let _ = kill_group(&mut child);
-            break;
-        }
-        if started.elapsed() >= wall_time {
-            timed_out = true;
-            let _ = kill_group(&mut child);
-            break;
-        }
-        if !stdout_done.load(Ordering::SeqCst)
-            && let Ok(chunk) = out_rx.recv_timeout(DRAIN_POLL)
-        {
-            if stdout.len().saturating_add(chunk.len()) > output_limit {
-                limit_exceeded.store(true, Ordering::SeqCst);
-            } else if !limit_exceeded.load(Ordering::SeqCst) {
-                stdout.extend_from_slice(&chunk);
-            }
-        }
-        if !stderr_done.load(Ordering::SeqCst)
-            && let Ok(chunk) = err_rx.recv_timeout(DRAIN_POLL)
-        {
-            if stderr.len().saturating_add(chunk.len()) > output_limit {
-                limit_exceeded.store(true, Ordering::SeqCst);
-            } else if !limit_exceeded.load(Ordering::SeqCst) {
-                stderr.extend_from_slice(&chunk);
-            }
-        }
-        if let Ok(exited) = child.try_wait() {
-            if let Some(exit) = exited {
-                status = Some(exit);
-            }
-            if exited.is_some()
-                && stdout_done.load(Ordering::SeqCst)
-                && stderr_done.load(Ordering::SeqCst)
-            {
-                break;
-            }
-        }
-    }
-
-    // Flush whatever the drain threads already buffered before we stopped.
-    flush_blocking(&out_rx, &mut stdout);
-    flush_blocking(&err_rx, &mut stderr);
-
-    let _ = child.wait();
-
-    Ok(ToolOutcome {
-        exited: status.is_some(),
-        status: status.and_then(|s| s.code()),
-        stdout,
-        stderr,
-        timed_out,
-        output_limit_exceeded: limit_exceeded.load(Ordering::SeqCst),
-        cancelled,
-    })
-}
-
-pub(crate) fn drain_pipe<R>(
-    pipe: R,
-    limit: Arc<AtomicBool>,
-    done: Arc<AtomicBool>,
-    tx: mpsc::Sender<Vec<u8>>,
-) where
-    R: Read,
-{
-    let mut reader = BufReader::new(pipe);
-    let mut chunk = vec![0u8; DRAIN_CHUNK_BYTES];
-    loop {
-        if limit.load(Ordering::SeqCst) {
-            break;
-        }
-        match reader.read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => {
-                if tx.send(chunk[..n].to_vec()).is_err() {
-                    break;
-                }
-            }
-            Err(_) => break,
-        }
-    }
-    done.store(true, Ordering::SeqCst);
-}
-
-pub(crate) fn flush_blocking(rx: &mpsc::Receiver<Vec<u8>>, buffer: &mut Vec<u8>) {
-    while let Ok(chunk) = rx.recv() {
-        buffer.extend_from_slice(&chunk);
-    }
-}
-
-fn write_all<W: Write>(writer: &mut W, mut bytes: &[u8]) -> std::io::Result<()> {
-    while !bytes.is_empty() {
-        match writer.write(bytes) {
-            Ok(0) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::WriteZero,
-                    "short write",
-                ));
-            }
-            Ok(n) => bytes = &bytes[n..],
-            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(())
-}
-
-fn sandbox_unavailable(sandbox: &SandboxPaths, stream: &str) -> Error {
-    Error::SandboxUnavailable {
-        runner: Some(sandbox.runner.to_string_lossy().into_owned()),
-        reason: format!("sandbox runner did not provide {stream}"),
-    }
-}
-
-pub(crate) fn kill_group(child: &mut std::process::Child) -> Result<()> {
-    use nix::sys::signal;
-    use nix::unistd::Pid;
-    let pid = child.id();
-    let negative = i32::try_from(pid).map(|p| -p).unwrap_or(0);
-    let result = signal::kill(Pid::from_raw(negative), signal::Signal::SIGTERM);
-    match result {
-        Ok(()) => Ok(()),
-        Err(_) => {
-            let _ = child.kill();
-            Ok(())
-        }
-    }
+        },
+    )
 }
 
 /// Resolves a bare program name to an absolute executable path by searching
@@ -761,6 +754,7 @@ fn grant(
     access: Access,
     purpose: Purpose,
     seed: &[u8],
+    preflight: &Preflight<'_>,
 ) -> Result<GrantWire> {
     let metadata = std::fs::symlink_metadata(source)
         .map_err(|source| io_error("inspect grant source", Some(&source.to_string()), source))?;
@@ -769,15 +763,9 @@ fn grant(
             reason: format!("grant source `{}` is a symbolic link", source.display()),
         });
     }
+
     let identity = if metadata.file_type().is_file() {
-        let bytes = std::fs::read(source).map_err(|source| {
-            io_error(
-                "read grant source for identity",
-                Some(&source.to_string()),
-                source,
-            )
-        })?;
-        digest(&bytes)
+        read_file_identity("grant source", source, preflight)?
     } else {
         digest(&digest_input(b"dir", seed))
     };
@@ -843,4 +831,132 @@ fn join_argv(argv: &[String]) -> Vec<u8> {
 
 fn digest(data: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(data)))
+}
+
+#[cfg(test)]
+mod preflight_tests {
+    use super::*;
+    use crate::tools::ToolPolicy;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    fn fixture(root: &Path, size: u64) -> (SandboxPaths, PathBuf) {
+        let runner = root.join("runner");
+        std::fs::File::create(&runner)
+            .unwrap()
+            .set_len(size)
+            .unwrap();
+        let backend = root.join("backend");
+        std::fs::write(&backend, "backend").unwrap();
+        let work = root.join("work");
+        std::fs::create_dir(&work).unwrap();
+        (SandboxPaths { runner, backend }, work)
+    }
+
+    #[test]
+    fn identity_read_rejects_more_than_256_mib_before_request_dispatch() {
+        let root = tempfile::tempdir().unwrap();
+        let (sandbox, work) = fixture(root.path(), (256 << 20) + 1);
+        let policy = ToolPolicy::minimum();
+        let argv = vec!["/bin/bash".into(), "-c".into(), "true".into()];
+        let request = BuildRequest {
+            argv: &argv,
+            working_directory: &work,
+            read_roots: &[],
+            environment: BTreeMap::new(),
+            policy: &policy,
+            resources: default_resources(),
+        };
+        let error = build_request(&sandbox, &request).unwrap_err();
+        assert!(error.to_string().contains("256 MiB"), "{error}");
+    }
+
+    #[test]
+    fn cancellation_during_identity_read_prevents_request_dispatch() {
+        let root = tempfile::tempdir().unwrap();
+        let (sandbox, work) = fixture(root.path(), 128 << 20);
+        let cancellation = CancellationToken::new();
+        let trigger = cancellation.clone();
+        let ready = Arc::new(Barrier::new(2));
+        let worker_ready = ready.clone();
+        let canceller = thread::spawn(move || {
+            worker_ready.wait();
+            thread::sleep(Duration::from_millis(1));
+            trigger.cancel();
+        });
+        let policy = ToolPolicy::minimum();
+        let argv = vec!["/bin/bash".into(), "-c".into(), "true".into()];
+        let request = BuildRequest {
+            argv: &argv,
+            working_directory: &work,
+            read_roots: &[],
+            environment: BTreeMap::new(),
+            policy: &policy,
+            resources: default_resources(),
+        };
+        ready.wait();
+        let result = build_request_cancellable(&sandbox, &request, &cancellation);
+        canceller.join().unwrap();
+        assert!(result.is_err(), "cancelled preflight returned a request");
+    }
+
+    #[test]
+    fn workspace_scan_rejects_directory_depth_over_128() {
+        let root = tempfile::tempdir().unwrap();
+        let mut path = root.path().to_owned();
+        for _ in 0..128 {
+            path.push("d");
+            std::fs::create_dir(&path).unwrap();
+        }
+        let token = CancellationToken::new();
+        let preflight = Preflight {
+            cancellation: &token,
+            started: Instant::now(),
+        };
+        check_writable_scope(root.path(), &preflight).unwrap();
+        path.push("d");
+        std::fs::create_dir(&path).unwrap();
+        let error = check_writable_scope(root.path(), &preflight).unwrap_err();
+        assert!(error.to_string().contains("128"), "{error}");
+    }
+
+    #[test]
+    fn scope_entry_quota_accepts_exactly_one_million() {
+        let mut count = 0;
+        for _ in 0..MAX_SCOPE_ENTRIES {
+            admit_scope_entry(&mut count).unwrap();
+        }
+        assert_eq!(count, 1_000_000);
+        assert!(admit_scope_entry(&mut count).is_err());
+    }
+
+    #[test]
+    fn scope_path_quota_accepts_exact_bound_then_rejects_growth() {
+        let mut stack = Vec::new();
+        let mut visited = std::collections::BTreeSet::new();
+        let mut bytes = MAX_SCOPE_PATH_BYTES - 2;
+        queue_scope_directory(PathBuf::from("d"), 0, &mut stack, &mut visited, &mut bytes).unwrap();
+        assert_eq!(bytes, 32 << 20);
+        assert!(
+            queue_scope_directory(PathBuf::from("e"), 0, &mut stack, &mut visited, &mut bytes)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn expired_preflight_and_cancellation_stop_scope_inspection() {
+        let root = tempfile::tempdir().unwrap();
+        let token = CancellationToken::new();
+        let expired = Preflight {
+            cancellation: &token,
+            started: Instant::now() - MAX_PREFLIGHT_TIME,
+        };
+        assert!(check_writable_scope(root.path(), &expired).is_err());
+        let current = Preflight {
+            cancellation: &token,
+            started: Instant::now(),
+        };
+        token.cancel();
+        assert!(check_writable_scope(root.path(), &current).is_err());
+    }
 }

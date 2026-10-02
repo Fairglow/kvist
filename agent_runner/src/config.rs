@@ -1,6 +1,7 @@
 //! Configuration model, loading, and validation.
 
 use std::collections::BTreeMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -17,6 +18,23 @@ pub const SCHEMA_VERSION: u32 = 1;
 const MIN_DEADLINE_SECS: u64 = 1;
 /// Maximum per-turn model deadline in seconds.
 const MAX_DEADLINE_SECS: u64 = 600;
+
+pub(crate) fn resolve_working_directory(path: &Path) -> Result<PathBuf> {
+    let resolved = path.canonicalize().map_err(|source| {
+        io_error(
+            "resolve working directory",
+            Some(&path.to_string_lossy()),
+            source,
+        )
+    })?;
+    if !resolved.is_dir() {
+        return Err(Error::InvalidPath {
+            path: resolved.display().to_string(),
+            reason: "not a directory".into(),
+        });
+    }
+    Ok(resolved)
+}
 
 /// The local model provider a model talks to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,6 +115,36 @@ pub struct Model {
     /// stream but well below a genuine stall.
     #[serde(default = "default_cadence_timeout_secs")]
     pub cadence_timeout_secs: u64,
+}
+
+impl Model {
+    /// Builds the sole direct transport with this model's bounded watchdogs.
+    pub fn transport(&self) -> Result<agent_runtime::DirectModelTransport> {
+        let mut transport = agent_runtime::DirectModelTransport::new(
+            self.provider.to_agent_provider(),
+            &self.base_url,
+            std::time::Duration::from_secs(self.deadline_secs),
+            8 * 1024 * 1024,
+        )
+        .map_err(|error| Error::ModelTransport {
+            model: Some(self.id.clone()),
+            reason: error.to_string(),
+        })?;
+        if self.cadence_timeout_secs > 0 {
+            transport = transport
+                .with_cadence_timeout(std::time::Duration::from_secs(self.cadence_timeout_secs));
+        }
+        Ok(transport)
+    }
+
+    /// Retry limits shared by both terminal and headless session construction.
+    pub fn retry_policy(&self) -> crate::retry::RetryPolicy {
+        crate::retry::RetryPolicy::new(
+            self.max_attempts,
+            std::time::Duration::from_secs(self.retry_base_delay_secs),
+            std::time::Duration::from_secs(self.retry_max_delay_secs),
+        )
+    }
 }
 
 fn default_deadline() -> u64 {
@@ -345,9 +393,8 @@ impl Config {
     /// Loads and validates the configuration at `path`.
     pub fn load(path: &Path) -> Result<Config> {
         let contents = read_configuration(path)?;
-        let raw: RawConfig = toml::from_str(&contents).map_err(|error| Error::Config {
-            path: Some(path.to_string_lossy().into_owned()),
-            reason: error.to_string(),
+        let raw: RawConfig = toml::from_str(&contents).map_err(|error: toml::de::Error| {
+            configuration_parse_error(path, &contents, error.span())
         })?;
         Config::validate(raw, path)
     }
@@ -379,11 +426,11 @@ impl Config {
                 ),
             });
         }
-        if !working_directory.exists() {
+        if !working_directory.is_dir() {
             return Err(Error::Config {
                 path: Some(path.to_string_lossy().into_owned()),
                 reason: format!(
-                    "working_directory `{}` does not exist",
+                    "working_directory `{}` must be an existing directory",
                     working_directory.display()
                 ),
             });
@@ -569,15 +616,17 @@ impl Config {
     }
 }
 
-fn read_configuration(path: &Path) -> Result<String> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|source| {
-        io_error(
-            "inspect configuration",
-            Some(&path.to_string_lossy()),
-            source,
-        )
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+pub(crate) fn read_configuration(path: &Path) -> Result<String> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_NONBLOCK).bits())
+        .open(path)
+        .map_err(|source| io_error("open configuration", Some(&path.to_string_lossy()), source))?;
+    let metadata = file
+        .metadata()
+        .map_err(|source| io_error("inspect configuration descriptor", None, source))?;
+    if !metadata.is_file() {
         return Err(Error::Config {
             path: Some(path.to_string_lossy().into_owned()),
             reason: "configuration must be a regular non-link file".to_owned(),
@@ -589,7 +638,56 @@ fn read_configuration(path: &Path) -> Result<String> {
             reason: format!("configuration exceeds the {MAX_CONFIG_BYTES}-byte limit"),
         });
     }
-    // `read_to_string` already rejects non-UTF-8 input.
-    std::fs::read_to_string(path)
-        .map_err(|source| io_error("read configuration", Some(&path.to_string_lossy()), source))
+    read_configuration_stream(file, path)
+}
+
+pub(crate) fn configuration_parse_error(
+    path: &Path,
+    contents: &str,
+    span: Option<std::ops::Range<usize>>,
+) -> Error {
+    let offset = span.map_or(0, |range| range.start.min(contents.len()));
+    let line = contents.as_bytes()[..offset]
+        .iter()
+        .filter(|byte| **byte == b'\n')
+        .count()
+        + 1;
+    Error::Config {
+        path: Some(path.to_string_lossy().into_owned()),
+        reason: format!(
+            "invalid TOML or field types at line {line}; check syntax, field names and the schema-one configuration contract"
+        ),
+    }
+}
+
+fn read_configuration_stream(reader: impl std::io::Read, path: &Path) -> Result<String> {
+    let mut bytes = Vec::new();
+    reader
+        .take(MAX_CONFIG_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|source| io_error("read configuration", Some(&path.to_string_lossy()), source))?;
+    if bytes.len() as u64 > MAX_CONFIG_BYTES {
+        return Err(Error::Config {
+            path: Some(path.to_string_lossy().into_owned()),
+            reason: format!("configuration exceeds the {MAX_CONFIG_BYTES}-byte read limit"),
+        });
+    }
+    String::from_utf8(bytes).map_err(|_| Error::Config {
+        path: Some(path.to_string_lossy().into_owned()),
+        reason: "configuration must be valid UTF-8".into(),
+    })
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    #[test]
+    fn configuration_stream_growth_cannot_exceed_the_byte_bound() {
+        let bytes = vec![b' '; MAX_CONFIG_BYTES as usize + 1];
+        assert!(
+            read_configuration_stream(std::io::Cursor::new(bytes), Path::new("config.toml"))
+                .is_err()
+        );
+    }
 }

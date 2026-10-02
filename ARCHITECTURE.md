@@ -6,6 +6,7 @@
 
 The system of interest is the local `kvist` CLI, its reusable `agent-runtime`
 component, its independently installed `sandbox-runner` enforcement component,
+its standalone sandboxed workspace-agent `agent-runner` component,
 and the durable project artifacts they read or write. The human architect is
 the approval and arbitration authority. External coding agents, models,
 version-control tools, editors, package sources, and operating-system isolation
@@ -55,13 +56,18 @@ trusted core.
 | `kvist.engine`   | `engine/`         | Project artifacts, component discovery, validation, status, queues, policy, task lifecycle, context selection, evidence, and CLI dispatch       | `kvist.cli/v1`, `kvist.artifacts/v1`, `kvist.host-authority/planned` | `agent-runtime.library/v1`, `sandbox-runner.protocol/v1`, operating-system and VCS services |
 | `agent-runtime`  | `agent_runtime/`  | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport, and reusable bounded runtime mechanisms | `agent-runtime.library/v1`, `agent-runtime.cli/v1`                   | Host authority interfaces and operating-system process/network services                     |
 | `sandbox-runner` | `sandbox_runner/` | Strict request validation and Linux Bubblewrap enforcement for approved task grants                                                             | `sandbox-runner.protocol/v1`, `sandbox-runner.cli/v1`                | Bubblewrap, Linux kernel isolation, and operating-system process/filesystem services        |
+| `agent-runner` | `agent_runner/` | Interactive/headless workspace agent, request budgets, native file tools and private operational journals; no task approval or canonical evidence | `agent-runner.library/v1`, `agent-runner.cli/v1` | `agent-runtime.library/v1`, `sandbox-runner.protocol/v1`, installed Linux enforcement |
 
 The repository layout places the root Rust workspace manifest at the project
-root (`/Cargo.toml`), with `engine/`, `agent_runtime/`, and `sandbox_runner/`
+root (`/Cargo.toml`), with `engine/`, `agent_runtime/`, `sandbox_runner/`, and `agent_runner/`
 as top-level peer components. `kvist.engine` depends on `agent-runtime` as a
 Rust library, while `sandbox-runner` is an independent execution boundary.
 Neither child imports Kvist engine types. The engine and installed runner
-communicate only through the versioned protocol. Provider libraries remain
+communicate only through the versioned protocol. The workspace agent uses that
+boundary but does not replace the engine's narrower protected task broker:
+its selected workspace is writable, its journals are diagnostics, and its
+interactive host opt-out is explicitly unconfined and forbidden headlessly.
+Provider libraries remain
 behind private adapters. A directory becomes a component candidate when it
 contains any member of the five-artifact set, so missing adjacent artifacts
 remain diagnosable. It is complete only when it owns all five. Sub-components,

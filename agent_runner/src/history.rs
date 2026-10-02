@@ -5,17 +5,64 @@
 //! list of past sessions — enough to choose one — and loads a single transcript
 //! for a read-only replay in the UI.
 //!
-//! Everything here treats the filesystem as untrusted input: directory listing
-//! failures degrade to an empty list, non-matching or malformed files are
-//! skipped, and each file read is size-bounded. Nothing reads secrets.
+//! Transcripts are private diagnostic text, potentially sensitive and never
+//! evidence. Unusable entries are logged; regular non-link reads are bounded
+//! before allocation and while reading, including concurrently growing files.
 
+use nix::fcntl::{OFlag, openat};
+use nix::sys::stat::Mode;
 use std::fs::{self, File};
-use std::io::{self, BufRead, BufReader, Read};
-use std::path::{Path, PathBuf};
+use std::io::{self, Read};
+use std::path::{Component, Path, PathBuf};
 
 /// Skip transcript files larger than this when building the history list, so a
 /// very long session cannot exhaust memory while merely listing sessions.
 const MAX_LISTED_BYTES: usize = 5 * 1024 * 1024;
+const MAX_DIRECTORY_ENTRIES: usize = 4096;
+
+fn read_transcript(path: &Path) -> io::Result<Vec<u8>> {
+    let path = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let mut file = File::open("/")?;
+    let mut parts = path.components().peekable();
+    while let Some(part) = parts.next() {
+        let name = match part {
+            Component::RootDir => continue,
+            Component::Normal(name) => name,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "history path must not contain . or ..",
+                ));
+            }
+        };
+        let mut flags = OFlag::O_RDONLY | OFlag::O_NOFOLLOW | OFlag::O_CLOEXEC | OFlag::O_NONBLOCK;
+        if parts.peek().is_some() {
+            flags |= OFlag::O_DIRECTORY;
+        }
+        file = File::from(openat(&file, name, flags, Mode::empty())?);
+    }
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_LISTED_BYTES as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "history needs a regular non-link transcript no larger than 5 MiB",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_LISTED_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > MAX_LISTED_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "transcript grew beyond 5 MiB while reading",
+        ));
+    }
+    Ok(bytes)
+}
 
 /// One past session, enough to identify it and judge whether to replay it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,12 +163,29 @@ fn strip_number(part: &str) -> Option<usize> {
 /// A listing failure (missing directory, permission error) yields an empty list
 /// rather than an error, so the history view never blocks the UI.
 pub fn list_sessions(log_dir: &Path) -> Vec<SessionEntry> {
-    let Ok(read_dir) = fs::read_dir(log_dir) else {
-        return Vec::new();
+    let read_dir = match fs::read_dir(log_dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            if error.kind() != io::ErrorKind::NotFound {
+                tracing::warn!(%error, "cannot list session history");
+            }
+            return Vec::new();
+        }
     };
-    let mut sessions: Vec<SessionEntry> = read_dir
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| {
+    let mut sessions = Vec::new();
+    for (index, entry) in read_dir.enumerate() {
+        if index >= MAX_DIRECTORY_ENTRIES {
+            tracing::warn!("session history directory exceeds 4096 entries");
+            return Vec::new();
+        }
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                tracing::warn!(%error, "cannot inspect history entry");
+                continue;
+            }
+        };
+        if let Some(session) = (|| {
             let path = entry.path();
             let name = path.file_name()?.to_string_lossy();
             if !(name.starts_with("session-") && name.ends_with(".log")) {
@@ -135,9 +199,11 @@ pub fn list_sessions(log_dir: &Path) -> Vec<SessionEntry> {
                 tokens,
                 success,
             })
-        })
-        .collect();
-    // Sort newest first; the filename embeds a fixed-width microsecond stamp, so
+        })() {
+            sessions.push(session);
+        }
+    }
+    // Sort newest first; the filename embeds a fixed-width nanosecond stamp, so
     // a reverse string sort matches reverse chronological order.
     sessions.sort_by(|a, b| {
         b.path
@@ -153,30 +219,25 @@ pub fn list_sessions(log_dir: &Path) -> Vec<SessionEntry> {
 /// Every line is examined uniformly, so a single-line transcript or a finish
 /// marker on the first line is not lost to a separate initial read.
 fn parse_transcript_meta(path: &Path) -> Option<FinishMeta> {
-    let file = File::open(path).ok()?;
-    let mut reader = BufReader::new(file);
+    let bytes = match read_transcript(path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            tracing::warn!(%error, "skipping unsafe or unreadable session transcript");
+            return None;
+        }
+    };
     let mut finish: Option<FinishMeta> = None;
     let mut first_id: Option<String> = None;
-    // Read lines until EOF or an unreadable (invalid-UTF8) line; either way the
-    // scan ends gracefully instead of aborting the whole file.
-    let mut line = String::new();
-    loop {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) | Err(_) => break,
-            Ok(_) => {}
-        }
-        // `read_line` retains the trailing newline; `BufRead::lines` does not, so
-        // drop it here to keep the parsers' `strip_suffix` matching intact.
-        line.truncate(line.trim_end_matches('\n').len());
+    let text = String::from_utf8_lossy(&bytes);
+    for line in text.lines() {
         // The start marker carries the id too; keep it as a fallback when the
         // run never wrote a finish line (an interrupted session).
         if first_id.is_none()
-            && let Some(id) = extract_id(&line)
+            && let Some(id) = extract_id(line)
         {
             first_id = Some(id);
         }
-        if let Some(parsed) = parse_finish(&line) {
+        if let Some(parsed) = parse_finish(line) {
             finish = Some(parsed);
         }
     }
@@ -192,13 +253,8 @@ fn extract_id(line: &str) -> Option<String> {
 
 /// Loads the full transcript lines for a replay, size-bounded and UTF-8 lossy.
 pub fn transcript_lines(path: &Path) -> io::Result<Vec<String>> {
-    let mut file = File::open(path)?;
-    let mut buffer = String::new();
-    file.read_to_string(&mut buffer)?;
-    // Bound the replay so an unusually large transcript cannot exhaust memory.
-    if buffer.len() > MAX_LISTED_BYTES {
-        buffer.truncate(MAX_LISTED_BYTES);
-    }
+    let bytes = read_transcript(path)?;
+    let buffer = String::from_utf8_lossy(&bytes);
     Ok(buffer
         .split('\n')
         .map(|line| line.trim_end().to_owned())
@@ -293,5 +349,40 @@ mod tests {
                 "== session s1 finished: 1 turns, 2 tokens, 1s, ok ==".to_owned(),
             ]
         );
+    }
+
+    #[test]
+    fn history_rejects_link_targets_and_link_ancestors() {
+        let dir = tempfile::tempdir().unwrap();
+        write_transcript(
+            dir.path(),
+            "real.log",
+            "== session private started 0s ago ==",
+        );
+        let link = dir.path().join("session-link.log");
+        std::os::unix::fs::symlink(dir.path().join("real.log"), &link).unwrap();
+        assert!(transcript_lines(&link).is_err());
+        assert!(list_sessions(dir.path()).is_empty());
+        let alias = dir.path().join("alias");
+        std::os::unix::fs::symlink(dir.path(), &alias).unwrap();
+        assert!(transcript_lines(&alias.join("real.log")).is_err());
+    }
+
+    #[test]
+    fn history_rejects_oversized_files_before_reading() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session-large.log");
+        let file = File::create(&path).unwrap();
+        file.set_len(MAX_LISTED_BYTES as u64 + 1).unwrap();
+        assert!(transcript_lines(&path).is_err());
+        assert!(parse_transcript_meta(&path).is_none());
+    }
+
+    #[test]
+    fn replay_decodes_invalid_utf8_without_panicking() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session-bytes.log");
+        fs::write(&path, [b'x', 0xff, b'\n']).unwrap();
+        assert_eq!(transcript_lines(&path).unwrap(), vec!["x\u{fffd}"]);
     }
 }

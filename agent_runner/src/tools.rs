@@ -1,15 +1,16 @@
 //! Model-facing tools and their mapping to sandbox-executed commands.
 //!
 //! Tools never execute directly. Each [`ToolRegistry::render`] call produces an
-//! argv (with an absolute canonical program) that the sandbox executes, plus an
-//! optional staged write that lets the agent create files larger than the
-//! sandbox argv byte limit without leaving the write root.
+//! argv and, for native file tools, a bounded typed payload. Rendering never
+//! performs filesystem effects; the executor privately stages that payload.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use agent_runtime::{ToolDefinition, ToolIntent};
 use serde_json::Value;
+
+use crate::file_tools::FileRequest;
 
 // Re-export the policy type so consumers can refer to it as `agent_runner::tools::ToolPolicy`.
 pub use crate::config::ToolPolicy;
@@ -19,15 +20,20 @@ pub use crate::config::ToolPolicy;
 // refer to them as `agent_runner::tools::ToolProfile`, etc.
 pub use crate::toolchain::{ProfileSetting, ToolProfile, ToolchainProbe};
 
-/// The staging directory tail shared by the host and sandbox staging paths.
-/// On the host it joins under the working directory; in the sandbox it joins
-/// under the configured write root. Kept hidden so it does not collide with
-/// user files and stays inside the writable scope.
-const HOST_STAGING_DIR: &str = ".agent-writes";
 /// The number of leading characters kept in a tool summary.
 const MAX_SUMMARY_BYTES: usize = 120;
 /// The number of leading characters kept in a path summary.
 const MAX_PATH_SUMMARY_CHARS: usize = 60;
+
+pub(crate) fn default_file_helper_path() -> crate::error::Result<PathBuf> {
+    std::env::current_exe()
+        .map_err(|e| crate::error::io_error("locate executable for native helper", None, e))?
+        .parent()
+        .map(|parent| parent.join("agent-runner-file-tool"))
+        .ok_or_else(|| crate::error::Error::SandboxBuild {
+            reason: "cannot find executable directory for native helper".to_owned(),
+        })
+}
 
 /// Per-call execution context shared by rendering and execution.
 #[derive(Debug, Clone)]
@@ -48,18 +54,6 @@ impl ExecContext {
     }
 }
 
-/// A staged write: content is written to `host_path` on the host before the
-/// rendered argv runs, and the argv then moves `sandbox_path` into place.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StagedWrite {
-    /// The host path content must be written to before execution.
-    pub host_path: PathBuf,
-    /// The sandbox path the staged file appears at.
-    pub sandbox_path: String,
-    /// The final target path inside the sandbox.
-    pub target: String,
-}
-
 /// The result of rendering a tool call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderedTool {
@@ -67,8 +61,11 @@ pub struct RenderedTool {
     pub argv: Vec<String>,
     /// A short human description shown in the UI and logs.
     pub summary: String,
-    /// Present only for staged writes (`write_file`).
-    pub staged_write: Option<StagedWrite>,
+    /// A bounded, validated native file operation for read-only payload staging.
+    pub file_request: Option<FileRequest>,
+    /// An explicit configured helper override; absence selects the executable
+    /// next to the running agent-runner binary at execution time.
+    pub file_helper: Option<PathBuf>,
 }
 
 /// The registry of model-facing tools and their sandbox rendering.
@@ -77,24 +74,18 @@ pub struct ToolRegistry {
     bash: PathBuf,
     policy: ToolPolicy,
     profiles: Vec<ToolProfile>,
+    file_helper: Option<PathBuf>,
 }
 
 impl ToolRegistry {
-    /// Builds a registry advertising the built-in generic Linux tooling plus
-    /// the Python interpreter. Advertising a Rust/Cargo toolchain here would be
-    /// dishonest: the authoring sandbox uses a single `System` toolchain rooted
-    /// at the read-only `/usr` host layout, and `CONTRACT.md`/`DESIGN.md`
-    /// document that the authoring phase declares no `Cargo` toolchain. The only
-    /// `cargo`/`rustc` reachable inside `/usr` is a `rustup` stub with no
-    /// installed toolchain, so it cannot build. Python is advertised because it
-    /// is a real interpreter at `/usr/bin/python3` on that same read-only layout,
-    /// so advertising it is honest. Language profiles can still be narrowed with
-    /// [`ToolRegistry::with_profiles`].
+    /// Builds a pure registry with Generic only; production language
+    /// availability is established by [`ToolRegistry::resolve`].
     pub fn new(policy: ToolPolicy) -> Self {
         ToolRegistry {
             bash: PathBuf::from("/usr/bin/bash"),
             policy,
-            profiles: vec![ToolProfile::Generic, ToolProfile::Python],
+            profiles: vec![ToolProfile::Generic],
+            file_helper: None,
         }
     }
 
@@ -108,6 +99,9 @@ impl ToolRegistry {
     /// when available, and `Off` never does. An explicit request therefore never
     /// resolves to a dishonest tool list. The `probe` is judged against what
     /// reaches the sandbox, never against the host `PATH`.
+    /// The installed helper location is supplied next to the current executable;
+    /// its regular-file identity and writable-scope separation are checked by
+    /// the executor before staging or spawning.
     pub fn resolve(
         policy: ToolPolicy,
         settings: &BTreeMap<ToolProfile, ProfileSetting>,
@@ -121,12 +115,20 @@ impl ToolRegistry {
             bash,
             policy,
             profiles,
+            file_helper: Some(default_file_helper_path()?),
         })
     }
 
     /// Overrides the resolved `bash` path (used by tests).
     pub fn with_bash(mut self, bash: impl Into<PathBuf>) -> Self {
         self.bash = bash.into();
+        self
+    }
+
+    /// Overrides the installed native helper location. The executor rejects
+    /// absent, link-like, nonregular or workspace-writable helper paths.
+    pub fn with_file_helper(mut self, helper: impl Into<PathBuf>) -> Self {
+        self.file_helper = Some(helper.into());
         self
     }
 
@@ -159,88 +161,127 @@ impl ToolRegistry {
             .map(|p| p.toolkit())
             .collect::<Vec<_>>()
             .join(", ");
-        vec![
-            ToolDefinition {
-                name: "shell".to_owned(),
-                description: format!(
-                    "Run a shell command inside the sandbox. Use it to build, test, query, and \
+        let mut definitions = vec![ToolDefinition {
+            name: "shell".to_owned(),
+            description: format!(
+                "Run a shell command inside the sandbox. Use it to build, test, query, and \
                      manipulate the project. Available tooling: {toolkit}. Commands run under the \
-                     working directory scope; writes outside it are refused."
-                ),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "command": {
-                            "type": "string",
-                            "description": "The shell command to run."
-                        }
-                    },
-                    "required": ["command"],
-                }),
-            },
-            ToolDefinition {
-                name: "read_file".to_owned(),
-                description: "Read a text file inside the sandbox and return its contents."
-                    .to_owned(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "The absolute path of the file to read."
-                        }
-                    },
-                    "required": ["path"],
-                }),
-            },
-            ToolDefinition {
-                name: "write_file".to_owned(),
-                description:
-                    "Write content to a file inside the working directory (create or overwrite)."
-                        .to_owned(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "The absolute path of the file to write, under the working directory."
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "The full content to write to the file."
-                        }
-                    },
-                    "required": ["path", "content"],
-                }),
-            },
-            ToolDefinition {
-                name: "list_dir".to_owned(),
-                description: "List the entries of a directory inside the sandbox.".to_owned(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "The absolute path of the directory to list."
-                        }
-                    },
-                    "required": ["path"],
-                }),
-            },
-        ]
+                     working directory scope; sandbox mounts enforce write authority. \
+                     The command denylist is an advisory filter, not isolation."
+            ),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to run."
+                    }
+                },
+                "required": ["command"],
+                "additionalProperties": false,
+            }),
+        }];
+        for (name, description, extra, required, read) in [
+            (
+                "read_file",
+                "Read a UTF-8 byte page (default 4096, maximum 16384), with full-file sha256, total_bytes and next_offset. Complete files are bounded to 1 MiB. Pages dynamically shrink on UTF-8 boundaries so complete JSON and digest metadata fit within 7000 encoded bytes; resume at actual next_offset until null.",
+                None,
+                vec!["path"],
+                true,
+            ),
+            (
+                "write_file",
+                "Atomically create or replace a file strictly inside the write root. Content is bounded to 64 KiB; existing files to 1 MiB. Optional expected_sha256 rejects stale preimages.",
+                Some(("content", "The complete replacement UTF-8 content.")),
+                vec!["path", "content"],
+                false,
+            ),
+            (
+                "list_dir",
+                "List deterministically sorted directory entries in bounded pages (default 100, maximum 256). Pages shrink to fit 7000 encoded bytes; resume at actual next_offset until null.",
+                None,
+                vec!["path"],
+                false,
+            ),
+            (
+                "find_files",
+                "Find regular files under this directory using a literal substring of the scoped path. Sorted pages shrink to 7000 encoded bytes; use actual next_offset. Recursion/count/depth bounds fail explicitly; symlinks are skipped.",
+                Some((
+                    "pattern",
+                    "Literal substring, not a glob or regular expression; empty matches all.",
+                )),
+                vec!["path", "pattern"],
+                false,
+            ),
+            (
+                "search_files",
+                "Search UTF-8 files recursively under this directory for a nonempty literal substring. Sorted path/line pages shrink to 7000 encoded bytes; use actual next_offset. A single oversized entry fails explicitly. Binary files and symlinks are counted as skipped; scan bounds fail explicitly.",
+                Some((
+                    "query",
+                    "Nonempty literal substring, not a regular expression.",
+                )),
+                vec!["path", "query"],
+                false,
+            ),
+            (
+                "edit_file",
+                "Atomically replace exactly one occurrence of old_text, including overlapping matches, only when expected_sha256 matches. Preserves unrelated bytes, CRLF, missing final newline and mode.",
+                None,
+                vec!["path", "old_text", "new_text", "expected_sha256"],
+                false,
+            ),
+        ] {
+            let mut properties = serde_json::json!({
+                "path":{"type":"string","description":"Canonical absolute path; no . or .. components.","maxLength":4096}
+            });
+            if matches!(
+                name,
+                "read_file" | "list_dir" | "find_files" | "search_files"
+            ) {
+                properties["offset"] = serde_json::json!({"type":"integer","minimum":0,"maximum":if read {1048576} else {4096},"default":0});
+                properties["limit"] = serde_json::json!({"type":"integer","minimum":1,"maximum":if read {16384} else {256},"default":if read {4096} else {100}});
+            }
+            if let Some((field, desc)) = extra {
+                properties[field] = serde_json::json!({"type":"string","description":desc,"maxLength":if field == "content" {65536} else {1024}});
+            }
+            if name == "edit_file" {
+                properties["old_text"] =
+                    serde_json::json!({"type":"string","minLength":1,"maxLength":65536});
+                properties["new_text"] = serde_json::json!({"type":"string","maxLength":65536});
+            }
+            if matches!(name, "write_file" | "edit_file") {
+                properties["expected_sha256"] = serde_json::json!({"type":"string","description":"sha256: followed by 64 lowercase hexadecimal digits."});
+            }
+            definitions.push(ToolDefinition {
+                name: name.to_owned(), description: description.to_owned(),
+                parameters: serde_json::json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}),
+            });
+        }
+        definitions
     }
 
     /// Renders a tool intent to a sandbox argv.
     pub fn render(
         &self,
         intent: &ToolIntent,
-        context: &ExecContext,
+        _context: &ExecContext,
     ) -> crate::error::Result<RenderedTool> {
         match intent.name.as_str() {
             "shell" => self.render_shell(intent),
-            "read_file" => self.render_read(intent),
-            "write_file" => self.render_write(intent, context),
-            "list_dir" => self.render_list(intent),
+            "read_file" | "write_file" | "list_dir" | "find_files" | "search_files"
+            | "edit_file" => {
+                let request = FileRequest::for_registry(
+                    &self.policy.write_root,
+                    &intent.name,
+                    intent.arguments.clone(),
+                )?;
+                Ok(RenderedTool {
+                    argv: vec!["/context/1".to_owned(), "/context/0".to_owned()],
+                    summary: describe_tool_call(intent),
+                    file_request: Some(request),
+                    file_helper: self.file_helper.clone(),
+                })
+            }
             other => Err(crate::error::Error::ToolRender {
                 tool: other.to_owned(),
                 reason: "unknown or disabled tool".to_owned(),
@@ -249,11 +290,21 @@ impl ToolRegistry {
     }
 
     fn render_shell(&self, intent: &ToolIntent) -> crate::error::Result<RenderedTool> {
-        let command = string_arg(intent, "command")?;
-        if command.trim().is_empty() {
+        if !intent
+            .arguments
+            .as_object()
+            .is_some_and(|args| args.len() == 1 && args.contains_key("command"))
+        {
             return Err(crate::error::Error::ToolRender {
                 tool: "shell".to_owned(),
-                reason: "command must not be empty".to_owned(),
+                reason: "expected exactly the command argument".to_owned(),
+            });
+        }
+        let command = string_arg(intent, "command")?;
+        if command.trim().is_empty() || command.len() > 16 * 1024 || command.contains('\0') {
+            return Err(crate::error::Error::ToolRender {
+                tool: "shell".to_owned(),
+                reason: "command must be nonempty, NUL-free and within 16384 bytes".to_owned(),
             });
         }
         if !self.policy.shell_permitted(&command) {
@@ -270,85 +321,10 @@ impl ToolRegistry {
                     "agent-runner".to_owned(),
                 ],
                 summary: describe_tool_call(intent),
-                staged_write: None,
+                file_request: None,
+                file_helper: None,
             })
         }
-    }
-
-    fn render_read(&self, intent: &ToolIntent) -> crate::error::Result<RenderedTool> {
-        let path = string_arg(intent, "path")?;
-        Ok(RenderedTool {
-            argv: vec![
-                self.bash.to_string_lossy().into_owned(),
-                "-c".to_owned(),
-                "exec cat -- \"$1\"".to_owned(),
-                "agent-runner".to_owned(),
-                path.clone(),
-            ],
-            summary: describe_tool_call(intent),
-            staged_write: None,
-        })
-    }
-
-    fn render_list(&self, intent: &ToolIntent) -> crate::error::Result<RenderedTool> {
-        let path = string_arg(intent, "path")?;
-        Ok(RenderedTool {
-            argv: vec![
-                self.bash.to_string_lossy().into_owned(),
-                "-c".to_owned(),
-                "exec ls -la -- \"$1\"".to_owned(),
-                "agent-runner".to_owned(),
-                path.clone(),
-            ],
-            summary: describe_tool_call(intent),
-            staged_write: None,
-        })
-    }
-
-    fn render_write(
-        &self,
-        intent: &ToolIntent,
-        context: &ExecContext,
-    ) -> crate::error::Result<RenderedTool> {
-        let path = string_arg(intent, "path")?;
-        if !under_write_root(&path, &self.policy.write_root) {
-            return Err(crate::error::Error::ToolPolicy {
-                tool: "write_file".to_owned(),
-                reason: format!(
-                    "target `{path}` is outside the write root `{}`",
-                    self.policy.write_root
-                ),
-            });
-        }
-        // The content is staged inside the working directory (already mounted
-        // read-write as the sandbox write root) so arbitrarily large files can
-        // be written without exceeding the sandbox argv byte limit, then moved
-        // into place.
-        // The sandbox staging path is anchored under the configured write root
-        // (the bind-mounted write scope), not the sandbox filesystem root, so the
-        // in-sandbox `mv` locates the staged file regardless of the configured root.
-        let root = self.policy.write_root.trim_end_matches('/');
-        let sandbox_staging = format!("{root}/{}/{}", HOST_STAGING_DIR, context.call_id);
-        let host_staging = context
-            .workdir
-            .join(HOST_STAGING_DIR)
-            .join(&context.call_id);
-        Ok(RenderedTool {
-            argv: vec![
-                self.bash.to_string_lossy().into_owned(),
-                "-c".to_owned(),
-                "exec mv -f -- \"$1\" \"$2\"".to_owned(),
-                "agent-runner".to_owned(),
-                sandbox_staging.clone(),
-                path.clone(),
-            ],
-            summary: describe_tool_call(intent),
-            staged_write: Some(StagedWrite {
-                host_path: host_staging,
-                sandbox_path: sandbox_staging,
-                target: path,
-            }),
-        })
     }
 }
 
@@ -378,14 +354,6 @@ fn value_kind(value: &Value) -> &'static str {
         Value::Object(_) => "object",
         Value::Null => "null",
     }
-}
-
-/// Whether `path` is inside `root` on a `/`-separated sandbox path namespace.
-///
-/// Requires the root boundary, not a bare `starts_with`, so that a sibling such
-/// as `/workspace-evil` cannot be accepted when the write root is `/workspace`.
-fn under_write_root(path: &str, root: &str) -> bool {
-    path == root || path.starts_with(&format!("{root}/"))
 }
 
 fn summarize_path(path: &str) -> String {
@@ -450,25 +418,20 @@ pub fn describe_tool_call(intent: &ToolIntent) -> String {
 mod tests {
     use super::*;
 
-    /// The authoring sandbox provides only the generic Linux tools and the
-    /// Python interpreter (both real binaries under the read-only `/usr` host
-    /// layout); it does not provide a working Rust/Cargo toolchain, so the
-    /// default registry must advertise generic and python only. Advertising a
-    /// Rust toolchain would falsely promise the agent a compiler it cannot run.
     #[test]
-    fn default_registry_advertises_generic_and_python_toolchains() {
+    fn default_registry_advertises_only_generic_without_probing() {
         let registry = ToolRegistry::new(ToolPolicy::minimum());
         let advertised = registry.profiles();
         // `profiles()` sorts and dedupes, so the default set is stable order.
         assert_eq!(
             advertised,
-            vec!["generic", "python"],
-            "default registry must advertise generic and python only, got {advertised:?}"
+            vec!["generic"],
+            "pure registry must not advertise unprobed languages, got {advertised:?}"
         );
     }
 
     #[test]
-    fn shell_tool_description_does_not_claim_the_unavailable_rust_toolchain() {
+    fn shell_tool_description_does_not_claim_unprobed_languages() {
         let registry = ToolRegistry::new(ToolPolicy::minimum());
         let shell = registry
             .tool_definitions()
@@ -477,12 +440,12 @@ mod tests {
             .expect("the shell tool is always available");
         let description = shell.description.to_lowercase();
         assert!(
-            description.contains("python3") || description.contains("python"),
-            "the shell tool must advertise the Python interpreter it actually has: {description}"
+            !description.contains("python"),
+            "the pure registry must not claim an unprobed Python interpreter: {description}"
         );
         assert!(
             !description.contains("cargo"),
-            "the shell tool must not advertise a Rust/Cargo toolchain the authoring sandbox does not provide: {description}"
+            "the pure registry must not claim an unprobed Rust/Cargo toolchain: {description}"
         );
     }
 

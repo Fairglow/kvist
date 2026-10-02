@@ -79,6 +79,11 @@ and version, input/output schema, effect class, required capability/resource
 scope, timeout/output bounds, and retry/idempotency semantics. No external
 schema file is currently the canonical library API.
 
+`ModelRequest.max_output_tokens: Option<u32>` bounds generation when supplied.
+Accepted values are `1..=1_048_576`; invalid values fail before network I/O.
+llama-server receives `max_tokens`; Ollama receives `options.num_predict`.
+An absent bound leaves existing provider defaults unchanged.
+
 `{prompt}`, `{prompt_json}`, `{context_files}`, `{target_directory}`, and
 `{reasoning_effort}` are the documented command-template placeholders.
 `{prompt_json}` emits one complete JSON string value. A requested reasoning
@@ -112,6 +117,37 @@ The direct transport is the sole model transport. Structured-output schemas
 and callable tools cannot be requested in the same turn; that combination
 fails before provider I/O. Callers must parse and validate returned content
 independently.
+
+llama-server preserves explicit `finish_reason: "stop"` as `FinishReason::Stop`,
+including when tool intents are present. Missing or null unary finish reasons,
+or streams ending with `[DONE]` without an explicit non-null finish reason,
+return `FinishReason::Other("unknown")`. Null or absent reasons on intermediate
+stream deltas do not replace an explicit reason already received. These turns
+remain untrusted; callers decide whether a finish reason permits final output
+or tool dispatch. Non-string, oversized, or control-bearing finish reasons
+return a typed malformed-response error.
+
+Ollama's native `done: true` convention is distinct: stop, missing, or null
+`done_reason` yields `ToolCalls` when native tool calls are present and `Stop`
+otherwise. Both providers preserve explicit length, content-filter, and
+provider-specific reasons without treating accompanying tools as success.
+
+`DirectModelTransport::with_cadence_timeout` enables a streaming generation
+progress watchdog. It starts after the first decoded nonempty answer/reasoning
+fragment or native tool name/argument progress, and resets only on subsequent
+such progress. llama-server tool name and JSON argument-string fragments count
+as soon as their containing provider records decode; Ollama's decoded native
+tool calls count before terminal intent delivery. Comments, heartbeats, empty
+deltas, role/identity/control fields, usage-only records, HTTP chunk framing,
+and undecoded record bytes do not reset cadence. Unary requests ignore cadence.
+
+The slot watchdog bounds HTTP header acquisition; the first-body watchdog
+bounds initial streaming body acquisition, not the first decoded token.
+Receiving an incomplete initial record does not start cadence. Until meaningful
+progress decodes, the caller's wall deadline and response/record byte bounds
+still apply. Once cadence starts, an incomplete later record remains subject
+to that cadence deadline. The earliest applicable deadline and cancellation
+remain effective through response framing and event delivery.
 
 A streaming transport call may carry an explicit per-call deadline that
 overrides the transport's configured deadline, so a retrying caller can grant

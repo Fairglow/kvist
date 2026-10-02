@@ -16,6 +16,10 @@ name = "agent_runner"
 name = "agent-runner"
 path = "src/main.rs"
 
+[[bin]]
+name = "agent-runner-file-tool"
+path = "src/bin/file_tool.rs"
+
 [dependencies]
 agent-runtime = { version = "=0.2.0", path = "../agent_runtime" }
 kvist-sandbox-runner = { version = "=0.2.0", path = "../sandbox_runner" }
@@ -31,6 +35,8 @@ hex = "0.4"
 nix = { version = "0.31", default-features = false, features = ["fs", "poll", "process", "signal", "term"] }
 thiserror = "2.0"
 tracing = "0.1"
+# Private host-owned request staging outside the writable workspace.
+tempfile = "3.27"
 pulldown-cmark = "0.13"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }

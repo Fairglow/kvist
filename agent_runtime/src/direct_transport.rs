@@ -22,6 +22,7 @@ const MAX_TOOLS: usize = 128;
 const MAX_OUTPUT_SCHEMA_BYTES: usize = 256 * 1024;
 const MAX_OUTPUT_SCHEMA_DEPTH: usize = 32;
 const MAX_OUTPUT_SCHEMA_NODES: usize = 4096;
+const MAX_OUTPUT_TOKENS: u32 = 1_048_576;
 const MAX_HEADER_BYTES: usize = 64 * 1024;
 const MAX_RECORD_BYTES: usize = 1024 * 1024;
 const IO_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -177,7 +178,7 @@ impl DirectModelTransport {
         self
     }
 
-    /// Configures the optional Inter-Token Cadence Watchdog timeout for streaming responses.
+    /// Bounds stalls after decoded text, reasoning, or native tool generation progress.
     pub fn with_cadence_timeout(mut self, timeout: Duration) -> Self {
         self.cadence_watchdog_timeout = Some(timeout);
         self
@@ -204,7 +205,7 @@ impl DirectModelTransport {
         stream: bool,
         cancellation: &CancellationToken,
         deadline: Duration,
-        on_body: &mut dyn FnMut(&[u8]) -> Result<()>,
+        on_body: &mut dyn FnMut(&[u8]) -> Result<bool>,
     ) -> Result<()> {
         check_cancelled(cancellation)?;
         validate_request(request)?;
@@ -306,7 +307,7 @@ pub(crate) fn get_bounded(
         max_response_bytes,
         &mut |chunk| {
             body.extend_from_slice(chunk);
-            Ok(())
+            Ok(false)
         },
     )?;
     Ok(body)
@@ -363,7 +364,7 @@ impl ModelTransport for DirectModelTransport {
         let mut body = Vec::new();
         self.execute_with_body(request, false, cancellation, self.deadline, &mut |chunk| {
             body.extend_from_slice(chunk);
-            Ok(())
+            Ok(false)
         })?;
         match self.provider {
             LocalModelProvider::Ollama => parse_ollama_unary(&body, request),
@@ -509,6 +510,14 @@ pub(crate) fn validate_request(request: &ModelRequest) -> Result<()> {
     }
     if request.tools.len() > MAX_TOOLS {
         return invalid_request("tool count exceeds 128");
+    }
+    if request
+        .max_output_tokens
+        .is_some_and(|bound| bound == 0 || bound > MAX_OUTPUT_TOKENS)
+    {
+        return invalid_request(&format!(
+            "output token limit must be between 1 and {MAX_OUTPUT_TOKENS}"
+        ));
     }
 
     let mut text_bytes = 0_usize;
@@ -798,6 +807,16 @@ fn encode_request(
         ),
     );
     root.insert("stream".to_owned(), Value::Bool(stream));
+    if let Some(bound) = request.max_output_tokens {
+        match provider {
+            LocalModelProvider::LlamaServer => {
+                root.insert("max_tokens".to_owned(), json!(bound));
+            }
+            LocalModelProvider::Ollama => {
+                root.insert("options".to_owned(), json!({"num_predict": bound}));
+            }
+        }
+    }
     if let Some(effort) = request.reasoning_effort {
         match provider {
             LocalModelProvider::LlamaServer => {
@@ -959,13 +978,76 @@ struct ResponseWatchdogs {
     is_streaming: bool,
 }
 
+struct BodyWatchdog {
+    deadline: Instant,
+    first_body: bool,
+    ttft: Option<(Duration, Instant)>,
+    cadence: Option<Duration>,
+    cadence_deadline: Option<Instant>,
+}
+
+impl BodyWatchdog {
+    fn new(
+        deadline: Instant,
+        first_body: bool,
+        ttft: Option<Duration>,
+        cadence: Option<Duration>,
+    ) -> Self {
+        Self {
+            deadline,
+            first_body,
+            ttft: ttft.map(|timeout| (timeout, Instant::now() + timeout)),
+            cadence,
+            cadence_deadline: None,
+        }
+    }
+
+    fn read_deadline(&self) -> Instant {
+        let stage = if self.first_body {
+            self.ttft.map(|(_, deadline)| deadline)
+        } else {
+            self.cadence_deadline
+        };
+        stage.map_or(self.deadline, |stage| self.deadline.min(stage))
+    }
+
+    fn map_error(&self, error: Error) -> Error {
+        if !matches!(error, Error::ModelTransportTimedOut) {
+            return error;
+        }
+        if self.read_deadline() == self.deadline {
+            return error;
+        }
+        if self.first_body {
+            if let Some((timeout, _)) = self.ttft {
+                return Error::TtftTimedOut { timeout };
+            }
+        } else if let Some(timeout) = self.cadence {
+            return Error::InterTokenCadenceTimedOut { timeout };
+        }
+        error
+    }
+
+    fn check(&self, cancellation: &CancellationToken) -> Result<()> {
+        check_cancelled(cancellation)?;
+        check_deadline(self.read_deadline()).map_err(|error| self.map_error(error))
+    }
+
+    fn observe_body(&mut self, progress: bool) {
+        self.first_body = false;
+        if progress {
+            self.cadence_deadline = self.cadence.map(|timeout| Instant::now() + timeout);
+        }
+    }
+}
+
 fn read_response(
     mut stream: TcpStream,
     cancellation: &CancellationToken,
     deadline: Instant,
     watchdogs: ResponseWatchdogs,
     max_response_bytes: usize,
-    on_body: &mut dyn FnMut(&[u8]) -> Result<()>,
+    on_body: &mut dyn FnMut(&[u8]) -> Result<bool>,
 ) -> Result<()> {
     let mut received = Vec::new();
     let slot_deadline = Instant::now() + watchdogs.slot_allocation_timeout;
@@ -1024,6 +1106,7 @@ fn read_response(
         None
     };
 
+    let mut body_watchdog = BodyWatchdog::new(deadline, initial.is_empty(), ttft_opt, cadence_opt);
     if chunked {
         let mut socket = BufferedSocket {
             stream,
@@ -1032,81 +1115,19 @@ fn read_response(
         read_chunked_body(
             &mut socket,
             cancellation,
-            deadline,
-            ttft_opt,
-            cadence_opt,
+            &mut body_watchdog,
             max_response_bytes,
             on_body,
         )?;
-    } else if let Some(length) = content_length {
-        if length > max_response_bytes {
+    } else {
+        if content_length.is_some_and(|length| length > max_response_bytes) {
             return Err(Error::ModelResponseLimitExceeded {
                 max_bytes: max_response_bytes,
             });
         }
-        if initial.len() > length {
+        if content_length.is_some_and(|length| initial.len() > length) {
             return malformed("response contains bytes beyond Content-Length");
         }
-        let mut received_body = initial.len();
-        if !initial.is_empty() {
-            on_body(&initial)?;
-        }
-        let mut first_body_chunk = initial.is_empty();
-        let ttft_deadline = ttft_opt.map(|d| Instant::now() + d);
-        let mut cadence_deadline = None;
-        while received_body < length {
-            let mut buffer = [0_u8; 8192];
-            let current_deadline = if first_body_chunk {
-                if let Some(td) = ttft_deadline {
-                    deadline.min(td)
-                } else {
-                    deadline
-                }
-            } else if let Some(cd) = cadence_deadline {
-                deadline.min(cd)
-            } else {
-                deadline
-            };
-            let count = match read_checked(
-                &mut stream,
-                &mut buffer,
-                cancellation,
-                current_deadline,
-                "reading response body",
-            ) {
-                Ok(n) => n,
-                Err(Error::ModelTransportTimedOut)
-                    if first_body_chunk && ttft_deadline.is_some_and(|td| Instant::now() >= td) =>
-                {
-                    let _ = stream.shutdown(std::net::Shutdown::Both);
-                    return Err(Error::TtftTimedOut {
-                        timeout: watchdogs.ttft_watchdog_timeout,
-                    });
-                }
-                Err(Error::ModelTransportTimedOut)
-                    if !first_body_chunk
-                        && cadence_deadline.is_some_and(|cd| Instant::now() >= cd) =>
-                {
-                    let _ = stream.shutdown(std::net::Shutdown::Both);
-                    return Err(Error::InterTokenCadenceTimedOut {
-                        timeout: cadence_opt.unwrap_or(watchdogs.ttft_watchdog_timeout),
-                    });
-                }
-                Err(error) => return Err(error),
-            };
-            if count == 0 {
-                return malformed("response body ended before Content-Length");
-            }
-            let remaining = length - received_body;
-            if count > remaining {
-                return malformed("response contains bytes beyond Content-Length");
-            }
-            on_body(&buffer[..count])?;
-            received_body += count;
-            first_body_chunk = false;
-            cadence_deadline = cadence_opt.map(|d| Instant::now() + d);
-        }
-    } else {
         let mut received_body = initial.len();
         if received_body > max_response_bytes {
             return Err(Error::ModelResponseLimitExceeded {
@@ -1114,68 +1135,42 @@ fn read_response(
             });
         }
         if !initial.is_empty() {
-            on_body(&initial)?;
+            body_watchdog.check(cancellation)?;
+            body_watchdog.observe_body(on_body(&initial)?);
+            body_watchdog.check(cancellation)?;
         }
-        let mut first_body_chunk = initial.is_empty();
-        let ttft_deadline = ttft_opt.map(|d| Instant::now() + d);
-        let mut cadence_deadline = None;
         loop {
-            if received_body > max_response_bytes {
-                return Err(Error::ModelResponseLimitExceeded {
-                    max_bytes: max_response_bytes,
-                });
+            if content_length == Some(received_body) {
+                break;
             }
+            body_watchdog.check(cancellation)?;
             let mut buffer = [0_u8; 8192];
-            let current_deadline = if first_body_chunk {
-                if let Some(td) = ttft_deadline {
-                    deadline.min(td)
-                } else {
-                    deadline
-                }
-            } else if let Some(cd) = cadence_deadline {
-                deadline.min(cd)
-            } else {
-                deadline
-            };
-            let count = match read_checked(
+            let count = read_checked(
                 &mut stream,
                 &mut buffer,
                 cancellation,
-                current_deadline,
+                body_watchdog.read_deadline(),
                 "reading response body",
-            ) {
-                Ok(n) => n,
-                Err(Error::ModelTransportTimedOut)
-                    if first_body_chunk && ttft_deadline.is_some_and(|td| Instant::now() >= td) =>
-                {
-                    let _ = stream.shutdown(std::net::Shutdown::Both);
-                    return Err(Error::TtftTimedOut {
-                        timeout: watchdogs.ttft_watchdog_timeout,
-                    });
-                }
-                Err(Error::ModelTransportTimedOut)
-                    if !first_body_chunk
-                        && cadence_deadline.is_some_and(|cd| Instant::now() >= cd) =>
-                {
-                    let _ = stream.shutdown(std::net::Shutdown::Both);
-                    return Err(Error::InterTokenCadenceTimedOut {
-                        timeout: cadence_opt.unwrap_or(watchdogs.ttft_watchdog_timeout),
-                    });
-                }
-                Err(error) => return Err(error),
-            };
+            )
+            .map_err(|error| body_watchdog.map_error(error))?;
+            body_watchdog.check(cancellation)?;
             if count == 0 {
+                if content_length.is_some() {
+                    return malformed("response body ended before Content-Length");
+                }
                 break;
+            }
+            if content_length.is_some_and(|length| count > length - received_body) {
+                return malformed("response contains bytes beyond Content-Length");
             }
             if received_body.saturating_add(count) > max_response_bytes {
                 return Err(Error::ModelResponseLimitExceeded {
                     max_bytes: max_response_bytes,
                 });
             }
-            on_body(&buffer[..count])?;
+            body_watchdog.observe_body(on_body(&buffer[..count])?);
+            body_watchdog.check(cancellation)?;
             received_body += count;
-            first_body_chunk = false;
-            cadence_deadline = cadence_opt.map(|d| Instant::now() + d);
         }
     }
 
@@ -1236,49 +1231,17 @@ fn parse_response_head(head: &str) -> Result<(u16, Option<usize>, bool)> {
 fn read_chunked_body(
     socket: &mut BufferedSocket,
     cancellation: &CancellationToken,
-    deadline: Instant,
-    ttft_watchdog_timeout: Option<Duration>,
-    cadence_watchdog_timeout: Option<Duration>,
+    watchdog: &mut BodyWatchdog,
     max_response_bytes: usize,
-    on_body: &mut dyn FnMut(&[u8]) -> Result<()>,
+    on_body: &mut dyn FnMut(&[u8]) -> Result<bool>,
 ) -> Result<()> {
     let mut body_bytes = 0_usize;
-    let mut first_chunk = socket.buffered.is_empty();
-    let ttft_deadline = ttft_watchdog_timeout.map(|d| Instant::now() + d);
-    let mut cadence_deadline = None;
     loop {
-        let current_deadline = if first_chunk {
-            if let Some(td) = ttft_deadline {
-                deadline.min(td)
-            } else {
-                deadline
-            }
-        } else if let Some(cd) = cadence_deadline {
-            deadline.min(cd)
-        } else {
-            deadline
-        };
-
-        let line = match socket.read_crlf_line(cancellation, current_deadline, 1024) {
-            Ok(l) => l,
-            Err(Error::ModelTransportTimedOut)
-                if first_chunk && ttft_deadline.is_some_and(|td| Instant::now() >= td) =>
-            {
-                let _ = socket.stream.shutdown(std::net::Shutdown::Both);
-                return Err(Error::TtftTimedOut {
-                    timeout: ttft_watchdog_timeout.unwrap_or(DEFAULT_TTFT_WATCHDOG_TIMEOUT),
-                });
-            }
-            Err(Error::ModelTransportTimedOut)
-                if !first_chunk && cadence_deadline.is_some_and(|cd| Instant::now() >= cd) =>
-            {
-                let _ = socket.stream.shutdown(std::net::Shutdown::Both);
-                return Err(Error::InterTokenCadenceTimedOut {
-                    timeout: cadence_watchdog_timeout.unwrap_or(DEFAULT_TTFT_WATCHDOG_TIMEOUT),
-                });
-            }
-            Err(error) => return Err(error),
-        };
+        watchdog.check(cancellation)?;
+        let line = socket
+            .read_crlf_line(cancellation, watchdog.read_deadline(), 1024)
+            .map_err(|error| watchdog.map_error(error))?;
+        watchdog.check(cancellation)?;
         let size_text = line.split(|byte| *byte == b';').next().unwrap_or_default();
         let size_text =
             std::str::from_utf8(size_text).map_err(|_| Error::MalformedModelResponse {
@@ -1292,7 +1255,11 @@ fn read_chunked_body(
         if size == 0 {
             let mut trailer_bytes = 0_usize;
             loop {
-                let trailer = socket.read_crlf_line(cancellation, deadline, MAX_HEADER_BYTES)?;
+                watchdog.check(cancellation)?;
+                let trailer = socket
+                    .read_crlf_line(cancellation, watchdog.read_deadline(), MAX_HEADER_BYTES)
+                    .map_err(|error| watchdog.map_error(error))?;
+                watchdog.check(cancellation)?;
                 trailer_bytes = trailer_bytes.saturating_add(trailer.len() + 2);
                 if trailer_bytes > MAX_HEADER_BYTES {
                     return Err(Error::ModelResponseLimitExceeded {
@@ -1311,42 +1278,54 @@ fn read_chunked_body(
         }
         let mut remaining = size;
         while remaining > 0 {
-            let count = remaining.min(8192);
-            let chunk = match socket.read_exact(cancellation, current_deadline, count) {
-                Ok(c) => c,
-                Err(Error::ModelTransportTimedOut)
-                    if first_chunk && ttft_deadline.is_some_and(|td| Instant::now() >= td) =>
-                {
-                    let _ = socket.stream.shutdown(std::net::Shutdown::Both);
-                    return Err(Error::TtftTimedOut {
-                        timeout: ttft_watchdog_timeout.unwrap_or(DEFAULT_TTFT_WATCHDOG_TIMEOUT),
-                    });
-                }
-                Err(Error::ModelTransportTimedOut)
-                    if !first_chunk && cadence_deadline.is_some_and(|cd| Instant::now() >= cd) =>
-                {
-                    let _ = socket.stream.shutdown(std::net::Shutdown::Both);
-                    return Err(Error::InterTokenCadenceTimedOut {
-                        timeout: cadence_watchdog_timeout.unwrap_or(DEFAULT_TTFT_WATCHDOG_TIMEOUT),
-                    });
-                }
-                Err(error) => return Err(error),
-            };
-            on_body(&chunk)?;
-            body_bytes += count;
-            remaining -= count;
-            first_chunk = false;
-            cadence_deadline = cadence_watchdog_timeout.map(|d| Instant::now() + d);
+            watchdog.check(cancellation)?;
+            let chunk = socket
+                .read_some(cancellation, watchdog.read_deadline(), remaining.min(8192))
+                .map_err(|error| watchdog.map_error(error))?;
+            watchdog.check(cancellation)?;
+            if chunk.is_empty() {
+                return malformed("chunked response ended before chunk completed");
+            }
+            body_bytes += chunk.len();
+            remaining -= chunk.len();
+            watchdog.observe_body(on_body(&chunk)?);
+            watchdog.check(cancellation)?;
         }
-        if socket.read_exact(cancellation, deadline, 2)? != b"\r\n" {
+        let ending = socket
+            .read_exact(cancellation, watchdog.read_deadline(), 2)
+            .map_err(|error| watchdog.map_error(error))?;
+        watchdog.check(cancellation)?;
+        if ending != b"\r\n" {
             return malformed("HTTP chunk is missing CRLF");
         }
-        first_chunk = false;
-        cadence_deadline = cadence_watchdog_timeout.map(|d| Instant::now() + d);
     }
 }
 
 impl BufferedSocket {
+    fn read_some(
+        &mut self,
+        cancellation: &CancellationToken,
+        deadline: Instant,
+        length: usize,
+    ) -> Result<Vec<u8>> {
+        check_cancelled(cancellation)?;
+        check_deadline(deadline)?;
+        if !self.buffered.is_empty() {
+            let count = length.min(self.buffered.len());
+            return Ok(self.buffered.drain(..count).collect());
+        }
+        let mut output = vec![0_u8; length];
+        let count = read_checked(
+            &mut self.stream,
+            &mut output,
+            cancellation,
+            deadline,
+            "reading chunked response body",
+        )?;
+        output.truncate(count);
+        Ok(output)
+    }
+
     fn read_byte(&mut self, cancellation: &CancellationToken, deadline: Instant) -> Result<u8> {
         if let Some(byte) = self.buffered.pop_front() {
             return Ok(byte);
@@ -1485,7 +1464,7 @@ fn parse_openai_unary(body: &[u8], request: &ModelRequest) -> Result<ModelTurn> 
     let text = optional_string(message.get("content"), "message content")?;
     let reasoning = parse_reasoning(message, &["reasoning_content", "reasoning", "thinking"])?;
     let tool_intents = parse_openai_tool_calls(message.get("tool_calls"))?;
-    let finish_reason = parse_finish_reason(choice.get("finish_reason"), !tool_intents.is_empty())?;
+    let finish_reason = parse_finish_reason(choice.get("finish_reason"))?;
 
     Ok(ModelTurn {
         text,
@@ -1515,7 +1494,8 @@ fn parse_ollama_unary(body: &[u8], request: &ModelRequest) -> Result<ModelTurn> 
     let text = optional_string(message.get("content"), "message content")?;
     let reasoning = parse_reasoning(message, &["thinking", "reasoning"])?;
     let tool_intents = parse_ollama_tool_calls(message.get("tool_calls"), 0)?;
-    let finish_reason = parse_finish_reason(root.get("done_reason"), !tool_intents.is_empty())?;
+    let finish_reason =
+        parse_ollama_finish_reason(root.get("done_reason"), !tool_intents.is_empty())?;
 
     Ok(ModelTurn {
         text,
@@ -1569,9 +1549,10 @@ impl StreamDecoder {
         cancellation: &CancellationToken,
         deadline: Instant,
         on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         self.pending.extend_from_slice(bytes);
         let mut consumed = 0_usize;
+        let mut progress = false;
         loop {
             check_cancelled(cancellation)?;
             check_deadline(deadline)?;
@@ -1596,14 +1577,14 @@ impl StreamDecoder {
             if line.last() == Some(&b'\r') {
                 line.pop();
             }
-            self.process_line(&line, on_event)?;
+            progress |= self.process_line(&line, on_event)?;
             consumed = newline + 1;
         }
         if consumed > 0 {
             self.pending.copy_within(consumed.., 0);
             self.pending.truncate(self.pending.len() - consumed);
         }
-        Ok(())
+        Ok(progress)
     }
 
     fn finish(
@@ -1629,7 +1610,7 @@ impl StreamDecoder {
         &mut self,
         line: &[u8],
         on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let line = std::str::from_utf8(line).map_err(|_| Error::MalformedModelResponse {
             reason: "stream record is not UTF-8".to_owned(),
         })?;
@@ -1645,9 +1626,9 @@ impl OpenAiStreamState {
         &mut self,
         line: &str,
         on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         if line.is_empty() || line.starts_with(':') {
-            return Ok(());
+            return Ok(false);
         }
         let Some(data) = line.strip_prefix("data:") else {
             return malformed("SSE record contains an unsupported field");
@@ -1655,7 +1636,7 @@ impl OpenAiStreamState {
         let data = data.strip_prefix(' ').unwrap_or(data);
         if data == "[DONE]" {
             self.terminal = true;
-            return Ok(());
+            return Ok(false);
         }
         if self.terminal {
             return malformed("SSE data followed terminal marker");
@@ -1675,16 +1656,17 @@ impl OpenAiStreamState {
             .ok_or_else(|| Error::MalformedModelResponse {
                 reason: "streaming response has no choices array".to_owned(),
             })?;
+        let mut progress = false;
         for choice in choices {
             if let Some(reason) = choice.get("finish_reason").filter(|value| !value.is_null()) {
-                self.finish_reason =
-                    Some(parse_finish_reason(Some(reason), !self.calls.is_empty())?);
+                self.finish_reason = Some(parse_finish_reason(Some(reason))?);
             }
             let Some(delta) = choice.get("delta").and_then(Value::as_object) else {
                 continue;
             };
             if let Some(fragment) = delta.get("content").and_then(Value::as_str) {
                 self.text.push_str(fragment);
+                progress |= !fragment.is_empty();
                 on_event(ModelStreamEvent::TextDelta(fragment.to_owned()))?;
             }
             if let Some(fragment) =
@@ -1692,11 +1674,12 @@ impl OpenAiStreamState {
                 && !fragment.is_empty()
             {
                 self.reasoning.push_str(fragment);
+                progress = true;
                 on_event(ModelStreamEvent::ReasoningDelta(fragment.to_owned()))?;
             }
-            merge_openai_tool_deltas(delta.get("tool_calls"), &mut self.calls)?;
+            progress |= merge_openai_tool_deltas(delta.get("tool_calls"), &mut self.calls)?;
         }
-        Ok(())
+        Ok(progress)
     }
 
     fn finish(self, on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>) -> Result<ModelTurn> {
@@ -1712,7 +1695,7 @@ impl OpenAiStreamState {
             reasoning: (!self.reasoning.is_empty()).then_some(self.reasoning),
             finish_reason: self
                 .finish_reason
-                .unwrap_or_else(|| infer_finish_reason(!tool_intents.is_empty())),
+                .unwrap_or_else(|| FinishReason::Other("unknown".to_owned())),
             tool_intents,
             provider: LocalModelProvider::LlamaServer,
             model: self.model.unwrap_or(self.requested_model),
@@ -1728,10 +1711,10 @@ impl OllamaStreamState {
         &mut self,
         line: &str,
         on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let line = line.trim();
         if line.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
         if self.terminal {
             return malformed("NDJSON record followed terminal record");
@@ -1739,16 +1722,19 @@ impl OllamaStreamState {
         let chunk = parse_json(line.as_bytes())?;
         self.model = optional_bounded_string(chunk.get("model"), "model identity", 256)?
             .or(self.model.take());
+        let mut progress = false;
         if let Some(message) = chunk.get("message").and_then(Value::as_object) {
             if let Some(fragment) = first_string(message, &["thinking", "reasoning"])?
                 && !fragment.is_empty()
             {
                 self.reasoning.push_str(fragment);
+                progress = true;
                 on_event(ModelStreamEvent::ReasoningDelta(fragment.to_owned()))?;
             }
             if let Some(fragment) = message.get("content").and_then(Value::as_str) {
                 self.text.push_str(fragment);
                 if !fragment.is_empty() {
+                    progress = true;
                     on_event(ModelStreamEvent::TextDelta(fragment.to_owned()))?;
                 }
             }
@@ -1761,17 +1747,18 @@ impl OllamaStreamState {
                     return Err(Error::DuplicateToolCall);
                 }
             }
+            progress |= !calls.is_empty();
             self.tool_intents.append(&mut calls);
         }
         if chunk.get("done").and_then(Value::as_bool) == Some(true) {
             self.terminal = true;
-            self.finish_reason = Some(parse_finish_reason(
+            self.finish_reason = Some(parse_ollama_finish_reason(
                 chunk.get("done_reason"),
                 !self.tool_intents.is_empty(),
             )?);
             self.usage = parse_ollama_usage(&chunk)?;
         }
-        Ok(())
+        Ok(progress)
     }
 
     fn finish(self, on_event: &mut dyn FnMut(ModelStreamEvent) -> Result<()>) -> Result<ModelTurn> {
@@ -1786,7 +1773,7 @@ impl OllamaStreamState {
             reasoning: (!self.reasoning.is_empty()).then_some(self.reasoning),
             finish_reason: self
                 .finish_reason
-                .unwrap_or_else(|| infer_finish_reason(!self.tool_intents.is_empty())),
+                .unwrap_or_else(|| infer_ollama_finish_reason(!self.tool_intents.is_empty())),
             tool_intents: self.tool_intents,
             provider: LocalModelProvider::Ollama,
             model: self.model.unwrap_or(self.requested_model),
@@ -1886,15 +1873,16 @@ fn parse_openai_tool_calls(value: Option<&Value>) -> Result<Vec<ToolIntent>> {
 fn merge_openai_tool_deltas(
     value: Option<&Value>,
     calls: &mut BTreeMap<usize, PartialToolCall>,
-) -> Result<()> {
+) -> Result<bool> {
     let Some(value) = value else {
-        return Ok(());
+        return Ok(false);
     };
     let deltas = value
         .as_array()
         .ok_or_else(|| Error::MalformedModelResponse {
             reason: "stream tool calls must be an array".to_owned(),
         })?;
+    let mut progress = false;
     for delta in deltas {
         let index = delta
             .get("index")
@@ -1917,15 +1905,31 @@ fn merge_openai_tool_deltas(
             }
             entry.provider_id = Some(id);
         }
-        if let Some(function) = delta.get("function").and_then(Value::as_object) {
-            if let Some(name) = function.get("name").and_then(Value::as_str) {
+        if let Some(function) = delta.get("function") {
+            let function = function
+                .as_object()
+                .ok_or_else(|| Error::MalformedModelResponse {
+                    reason: "stream tool call function must be an object".to_owned(),
+                })?;
+            if let Some(name) = function.get("name") {
+                let name = name.as_str().ok_or_else(|| Error::MalformedModelResponse {
+                    reason: "stream tool name must be text".to_owned(),
+                })?;
                 entry.name.push_str(name);
+                progress |= !name.is_empty();
                 if entry.name.len() > 128 {
                     return malformed("stream tool name exceeds limit");
                 }
             }
-            if let Some(arguments) = function.get("arguments").and_then(Value::as_str) {
+            if let Some(arguments) = function.get("arguments") {
+                let arguments =
+                    arguments
+                        .as_str()
+                        .ok_or_else(|| Error::MalformedModelResponse {
+                            reason: "stream tool arguments must be JSON text".to_owned(),
+                        })?;
                 entry.arguments.push_str(arguments);
+                progress |= !arguments.is_empty();
                 if entry.arguments.len() > MAX_RECORD_BYTES {
                     return Err(Error::ModelResponseLimitExceeded {
                         max_bytes: MAX_RECORD_BYTES,
@@ -1934,7 +1938,7 @@ fn merge_openai_tool_deltas(
             }
         }
     }
-    Ok(())
+    Ok(progress)
 }
 
 fn finish_openai_tool_calls(calls: BTreeMap<usize, PartialToolCall>) -> Result<Vec<ToolIntent>> {
@@ -2055,13 +2059,10 @@ fn validate_provider_tool_name(value: &str) -> Result<()> {
     Ok(())
 }
 
-fn parse_finish_reason(value: Option<&Value>, has_tools: bool) -> Result<FinishReason> {
-    let Some(value) = value else {
-        return Ok(infer_finish_reason(has_tools));
+fn parse_finish_reason(value: Option<&Value>) -> Result<FinishReason> {
+    let Some(value) = value.filter(|value| !value.is_null()) else {
+        return Ok(FinishReason::Other("unknown".to_owned()));
     };
-    if value.is_null() {
-        return Ok(infer_finish_reason(has_tools));
-    }
     let value = value
         .as_str()
         .ok_or_else(|| Error::MalformedModelResponse {
@@ -2071,7 +2072,6 @@ fn parse_finish_reason(value: Option<&Value>, has_tools: bool) -> Result<FinishR
         return malformed("finish reason is invalid");
     }
     Ok(match value {
-        "stop" if has_tools => FinishReason::ToolCalls,
         "stop" => FinishReason::Stop,
         "length" => FinishReason::Length,
         "tool_calls" | "tool_call" => FinishReason::ToolCalls,
@@ -2080,7 +2080,18 @@ fn parse_finish_reason(value: Option<&Value>, has_tools: bool) -> Result<FinishR
     })
 }
 
-fn infer_finish_reason(has_tools: bool) -> FinishReason {
+fn parse_ollama_finish_reason(value: Option<&Value>, has_tools: bool) -> Result<FinishReason> {
+    if value.is_none_or(Value::is_null) {
+        return Ok(infer_ollama_finish_reason(has_tools));
+    }
+    let reason = parse_finish_reason(value)?;
+    Ok(match reason {
+        FinishReason::Stop => infer_ollama_finish_reason(has_tools),
+        reason => reason,
+    })
+}
+
+fn infer_ollama_finish_reason(has_tools: bool) -> FinishReason {
     if has_tools {
         FinishReason::ToolCalls
     } else {
@@ -2153,6 +2164,7 @@ mod tests {
             tool_choice: ToolChoice::None,
             reasoning_effort: None,
             output_schema: None,
+            max_output_tokens: None,
         }
     }
 
@@ -2170,7 +2182,7 @@ mod tests {
             r#"{"choices":[{"delta":{"role":"assistant","content":null,"reasoning_content":"We "}}]}"#,
             r#"{"choices":[{"delta":{"role":"assistant","content":null,"reasoning_content":"reply"}}]}"#,
             r#"{"choices":[{"delta":{"role":"assistant","content":"hello"}}]}"#,
-            r#"{"choices":[{"delta":{"role":"assistant","content":" world","finish_reason":"stop"}}]}"#,
+            r#"{"choices":[{"delta":{"role":"assistant","content":" world"},"finish_reason":"stop"}]}"#,
             "[DONE]",
         ];
         for record in records {

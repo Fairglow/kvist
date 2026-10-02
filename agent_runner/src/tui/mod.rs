@@ -27,7 +27,6 @@ use crate::context::ContextManager;
 use crate::error::{Error, Result};
 use crate::executor::SandboxExecutor;
 use crate::host::HostExecutor;
-use crate::retry::RetryPolicy;
 use crate::run::{self, start};
 use crate::session::{AgentSession, MAX_TURNS, Recorder, ToolExecutor};
 use crate::session_log::SessionLog;
@@ -61,6 +60,8 @@ pub struct Overrides {
     pub host_turns: Option<u32>,
     /// A prefilled prompt that is auto-started when the session begins.
     pub prompt: Option<String>,
+    /// Shared prompt and provider response limits.
+    pub limits: crate::session::RunLimits,
 }
 
 /// Resolves the autonomous turn cap for a session and validates it.
@@ -80,6 +81,11 @@ fn resolve_max_turns(allow_host_execution: bool, host_turns: Option<u32>) -> Res
             }),
             None => Ok(1),
         }
+    } else if host_turns.is_some() {
+        Err(Error::Config {
+            path: None,
+            reason: "host-turn overrides require explicit host execution".into(),
+        })
     } else {
         Ok(MAX_TURNS)
     }
@@ -120,12 +126,26 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
     };
 
     let app_model_label = app_model_id(&config, &model);
+    if let Err(error) = overrides.limits.validate().and_then(|_| {
+        validate_context_limit(overrides.context_limit, overrides.limits.response_reserve)
+    }) {
+        eprintln!("{}", error.describe());
+        return ExitCode::from(error.exit_code());
+    }
 
     let effort = overrides.effort.unwrap_or(config.default_thinking_effort);
-    let working_directory = overrides
-        .cwd
-        .clone()
-        .unwrap_or_else(|| config.working_directory.clone());
+    let working_directory = match crate::config::resolve_working_directory(
+        overrides
+            .cwd
+            .as_deref()
+            .unwrap_or(&config.working_directory),
+    ) {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("{}", error.describe());
+            return ExitCode::from(error.exit_code());
+        }
+    };
 
     // Resolve the session-transcript directory once so both the worker and the
     // history overlay read and write the same location.
@@ -209,6 +229,8 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         no_logs: overrides.no_logs,
         working_directory,
         max_turns,
+        limits: overrides.limits,
+        allow_host_execution: overrides.allow_host_execution,
     };
 
     let initial = match builder.start(&model, effort) {
@@ -232,6 +254,11 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
     // Point the history overlay at the same directory the worker logs to, so
     // "Session history" lists the transcripts this run contributes to.
     app.set_log_dir(log_dir);
+    app.execution_scope = if overrides.allow_host_execution {
+        crate::session_log::ExecutionScope::HostUnconfined
+    } else {
+        crate::session_log::ExecutionScope::SandboxedWorkspace
+    };
     // Prefill and auto-start a caller-supplied prompt (for example one produced
     // by `kvist prompt`). The startup dispatch in `run_ui` sends the staged
     // text to the worker before the interactive loop begins.
@@ -261,13 +288,16 @@ struct SessionBuilder {
     no_logs: bool,
     working_directory: PathBuf,
     max_turns: u32,
+    limits: crate::session::RunLimits,
+    allow_host_execution: bool,
 }
 
 /// One live session worker: the model loop thread plus its channels.
 struct Worker {
-    handle: run::SessionHandle,
-    rx: mpsc::Receiver<crate::session::Event>,
+    // Close both channels before the joining handle is dropped.
     prompt_tx: mpsc::Sender<String>,
+    rx: mpsc::Receiver<crate::session::Event>,
+    handle: run::SessionHandle,
     model_id: String,
     effort: ReasoningEffort,
 }
@@ -275,19 +305,22 @@ struct Worker {
 impl SessionBuilder {
     /// Starts a session worker for `model` with `effort`.
     fn start(&self, model: &Model, effort: ReasoningEffort) -> Result<Worker> {
-        let transport = build_transport(model)?;
+        let transport = model.transport()?;
         // Derive the retry policy from the model's own settings so a turn that
         // is generation-bound recovers from transient failures with back-off.
-        let retry = RetryPolicy::new(
-            model.max_attempts,
-            Duration::from_secs(model.retry_base_delay_secs),
-            Duration::from_secs(model.retry_max_delay_secs),
-        );
+        let retry = model.retry_policy();
         let session = AgentSession::new(
             model.clone(),
             effort,
             self.tool_defs.clone(),
-            run::system_prompt(&self.config.tool_policy.write_root),
+            if self.allow_host_execution {
+                run::host_system_prompt(
+                    &self.config.tool_policy.write_root,
+                    &self.working_directory,
+                )
+            } else {
+                run::system_prompt(&self.config.tool_policy.write_root)
+            },
         );
         let context = ContextManager::new(self.context_limit, 6);
         let recorder = if self.no_logs {
@@ -297,22 +330,30 @@ impl SessionBuilder {
                 self.working_directory
                     .join(crate::session_log::DEFAULT_LOG_DIR)
             });
-            match SessionLog::open(&dir, format!("agent-runner-{}", model.id)) {
-                Ok(log) => Some(Box::new(log) as Box<dyn Recorder>),
-                Err(error) => {
-                    // Logging is best-effort: report, then continue without it.
-                    eprintln!(
-                        "{}",
-                        Error::Io {
-                            operation: "open session log directory".to_owned(),
-                            path: Some(dir.to_string_lossy().into_owned()),
-                            source: error,
-                        }
-                        .describe()
-                    );
-                    None
-                }
-            }
+            Some(Box::new(
+                SessionLog::open(&dir, format!("agent-runner-{}", model.id))
+                    .map_err(|source| {
+                        crate::error::io_error(
+                            "open private session log directory",
+                            Some(&dir.to_string_lossy()),
+                            source,
+                        )
+                    })?
+                    .with_metadata(crate::session_log::SessionMetadata {
+                        execution_scope: if self.allow_host_execution {
+                            crate::session_log::ExecutionScope::HostUnconfined
+                        } else {
+                            crate::session_log::ExecutionScope::SandboxedWorkspace
+                        },
+                        working_directory: self.working_directory.clone(),
+                        write_root: self.config.tool_policy.write_root.clone(),
+                        policy_identity: self.config.tool_policy.identity(),
+                        context_limit: self.context_limit,
+                        response_reserve: self.limits.response_reserve,
+                        max_run_tokens: self.limits.max_tokens,
+                        max_run_secs: self.limits.wall_time.as_secs(),
+                    }),
+            ) as Box<dyn Recorder>)
         };
         let (handle, rx, prompt_tx) = start(
             session,
@@ -322,7 +363,8 @@ impl SessionBuilder {
             recorder,
             retry,
             self.max_turns,
-        );
+            self.limits,
+        )?;
         Ok(Worker {
             handle,
             rx,
@@ -342,27 +384,15 @@ fn app_model_id(config: &Config, model: &Model) -> String {
         .unwrap_or_else(|| model.id.clone())
 }
 
-fn build_transport(model: &Model) -> Result<agent_runtime::DirectModelTransport> {
-    let provider = model.provider.to_agent_provider();
-    let deadline = Duration::from_secs(model.deadline_secs.max(1));
-    let mut transport = agent_runtime::DirectModelTransport::new(
-        provider,
-        &model.base_url,
-        deadline,
-        8 * 1024 * 1024,
-    )
-    .map_err(|error| Error::ModelTransport {
-        model: Some(model.id.clone()),
-        reason: error.to_string(),
-    })?;
-    // A generous per-turn deadline is safe to relax because the inter-token
-    // cadence watchdog bounds a stalled provider: if no token arrives within
-    // `cadence_timeout_secs` after the first token, the turn is retried instead
-    // of hanging until the (long) deadline. `0` disables the watchdog.
-    if model.cadence_timeout_secs > 0 {
-        transport = transport.with_cadence_timeout(Duration::from_secs(model.cadence_timeout_secs));
+pub(crate) fn validate_context_limit(limit: Option<usize>, reserve: u32) -> Result<()> {
+    let limit = limit.unwrap_or(crate::context::DEFAULT_CONTEXT_TOKENS);
+    if limit <= reserve as usize || limit > 1_048_576 {
+        return Err(Error::Config {
+            path: None,
+            reason: "--context-limit must exceed --response-reserve and be at most 1048576".into(),
+        });
     }
-    Ok(transport)
+    Ok(())
 }
 
 fn ui_loop(mut app: App, builder: &SessionBuilder, mut worker: Option<Worker>) -> Result<()> {
@@ -496,6 +526,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn startup_working_directory_rejects_missing_and_regular_paths() {
+        let dir = tempfile::tempdir().expect("directory");
+        let regular = dir.path().join("file");
+        std::fs::write(&regular, b"not a directory").expect("file");
+        for path in [dir.path().join("missing"), regular] {
+            assert!(crate::config::resolve_working_directory(&path).is_err());
+        }
+    }
+
+    #[test]
+    fn startup_working_directory_canonicalizes_relative_and_link_paths() {
+        let current = std::env::current_dir().expect("current directory");
+        assert_eq!(
+            crate::config::resolve_working_directory(std::path::Path::new(".")).expect("relative"),
+            current.canonicalize().expect("canonical")
+        );
+        let dir = tempfile::tempdir().expect("directory");
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&current, &link).expect("link");
+        assert_eq!(
+            crate::config::resolve_working_directory(&link).expect("linked directory"),
+            current.canonicalize().expect("canonical")
+        );
+    }
+
+    #[test]
     fn sandboxed_work_is_multi_turn_by_default() {
         assert_eq!(
             resolve_max_turns(false, None).expect("default cap"),
@@ -505,12 +561,13 @@ mod tests {
     }
 
     #[test]
-    fn sandboxed_ignores_any_host_turn_cap() {
-        assert_eq!(
-            resolve_max_turns(false, Some(1)).expect("cap"),
-            MAX_TURNS,
-            "the host cap is only relevant in the elevated (host) case"
-        );
+    fn sandboxed_rejects_any_host_turn_cap() {
+        for turns in [0, 1, MAX_TURNS, u32::MAX] {
+            assert!(matches!(
+                resolve_max_turns(false, Some(turns)),
+                Err(Error::Config { .. })
+            ));
+        }
     }
 
     #[test]
@@ -534,6 +591,11 @@ mod tests {
             MAX_TURNS,
             "the maximum in-range value is honored"
         );
+    }
+
+    #[test]
+    fn host_turns_without_host_execution_is_rejected_by_resolver() {
+        assert!(resolve_max_turns(false, Some(5)).is_err());
     }
 
     #[test]

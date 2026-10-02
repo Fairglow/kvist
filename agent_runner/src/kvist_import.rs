@@ -14,7 +14,7 @@ use std::str::FromStr;
 
 use serde::Deserialize;
 
-use crate::config::{MAX_CONFIG_BYTES, ModelProvider};
+use crate::config::ModelProvider;
 use crate::error::{Error, Result, io_error};
 
 /// The Kvist project configuration file name searched in the current directory.
@@ -71,10 +71,9 @@ struct KvistProfile {
 /// Renders `[[models]]` entries, in stable key order, for every agent profile
 /// declared in the Kvist configuration at `path`.
 pub fn import_models(path: &Path) -> Result<String> {
-    let contents = read_untrusted_config(path)?;
-    let raw: KvistConfig = toml::from_str(&contents).map_err(|error| Error::Config {
-        path: Some(path.to_string_lossy().into_owned()),
-        reason: format!("invalid {KVIST_CONFIG_FILE}: {error}"),
+    let contents = crate::config::read_configuration(path)?;
+    let raw: KvistConfig = toml::from_str(&contents).map_err(|error: toml::de::Error| {
+        crate::config::configuration_parse_error(path, &contents, error.span())
     })?;
     let profiles = raw.agent.map(|agent| agent.profiles).unwrap_or_default();
     if profiles.is_empty() {
@@ -127,37 +126,6 @@ pub fn import_models(path: &Path) -> Result<String> {
         ));
     }
     Ok(out)
-}
-
-/// Reads a local configuration file, rejecting symlinks, non-files, oversized
-/// input, and non-UTF-8 content.
-fn read_untrusted_config(path: &Path) -> Result<String> {
-    let metadata = std::fs::symlink_metadata(path).map_err(|source| {
-        io_error(
-            "inspect kvist configuration",
-            Some(&path.to_string_lossy()),
-            source,
-        )
-    })?;
-    if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
-        return Err(Error::Config {
-            path: Some(path.to_string_lossy().into_owned()),
-            reason: "kvist configuration must be a regular non-link file".to_owned(),
-        });
-    }
-    if metadata.len() > MAX_CONFIG_BYTES {
-        return Err(Error::Config {
-            path: Some(path.to_string_lossy().into_owned()),
-            reason: format!("kvist configuration exceeds the {MAX_CONFIG_BYTES}-byte limit"),
-        });
-    }
-    std::fs::read_to_string(path).map_err(|source| {
-        io_error(
-            "read kvist configuration",
-            Some(&path.to_string_lossy()),
-            source,
-        )
-    })
 }
 
 /// Escapes a value as a TOML basic string.

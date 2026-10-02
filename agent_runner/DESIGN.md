@@ -2,6 +2,53 @@
 
 # Agent Runner — Design
 
+## Security-first hardening design
+
+No new task-approval, credential or promotion authority is
+introduced.
+
+The coordinator performs full-request preflight before every request, including
+the system prompt, complete schemas, and an enforced output reserve. Context
+groups end only when all assistant calls have results; autonomous tool turns
+are individually compactable while the latest user goal remains explicit.
+Summaries carry a lossy/non-authoritative label. Failure to fit is an explicit
+error, not a larger send or a silent discard of instructions.
+
+Each prompt gets fresh answer and loop-detection state. A wall deadline spans
+requests/backoff/effects. An owned deadline watcher cooperatively cancels the
+same token used by providers and executors, and is joined on every exit.
+Backoff polls cancellation with short bounded waits. Rejected/cancelled calls
+get paired results before returning. Model terminal reasons are classified
+before any effects; malformed, truncated, duplicate and filtered proposals
+cannot execute.
+
+Recording is fallible, pre-effect and synchronized. A local, versioned journal
+separates dispatch from result, records argument shape/content hashes and
+process flags, and represents mutation as unknown unless observed. The
+readable transcript is private diagnostic text, not secret-free evidence.
+Required headless recording cannot share an agent-writable directory.
+Every exit attempts a terminal record; recording errors remain observable.
+Unknown effects after interruption remain fenced by the absence of automatic
+replay.
+
+File tools are implemented in Rust using bounded input, closed typed arguments
+and descriptor-relative no-follow traversal for writable paths. A separate
+small helper runs inside the installed isolation boundary; it does not confer
+process isolation when manually invoked. The broker mounts the helper and a
+private payload read-only, and never stages files using provider IDs or writes
+payloads into the workspace. Exact editing preserves raw unrelated bytes and
+requires a SHA-256 preimage. Atomic replacement is per file, with stale-content
+revalidation immediately before replacement; unrelated external writers are
+not a transactional locking participant. Paginated reads/search/discovery are
+deterministic and bounded, including recursion, scanned bytes, file size and
+encoded output.
+
+The headless CLI and TUI share transport/executor/session construction. NDJSON
+events have a version and sequence; stdout is reserved for events or answer
+text, with diagnostics on stderr. Headless mode has no host-execution escape
+hatch and always records. The engine's separate protected broker remains the
+only task-authoring integration.
+
 This document explains how `agent-runner` realizes the requirements and contract.
 It covers module layout, the agent loop, tool rendering, tool-chain advertisement
 and gating, sandbox request construction, the terminal UI, cancellation, and the
@@ -19,6 +66,14 @@ src/
   config.rs     Config, Model, SandboxPaths, loading and validation
   toolchain.rs  ToolProfile/ProfileSetting/ToolchainProbe, detection and gating
   tools.rs      ToolRegistry, ToolPolicy, tool -> sandbox command rendering
+  file_tools.rs closed native requests, bounded traversal, exact file effects
+  bin/file_tool.rs separately installed sandboxed native helper entry point
+  executor.rs   private payload staging, helper grants and tool execution
+  host.rs       explicit interactive unconfined opt-out, never fallback
+  process.rs    shared bounded tool I/O, stdin and owned process-group cleanup
+  context.rs    complete-request preflight and complete-group compaction
+  session_log.rs private versioned fallible operational journal
+  headless.rs   terminal-free same-loop execution and NDJSON
   sandbox.rs    request construction (Authoring phase) + executor
   session.rs    AgentSession (turn model) + AgentRunner (loop + events)
   run.rs        worker: drives AgentRunner on a thread, channel of events
@@ -27,15 +82,20 @@ src/
     app.rs      App state: transcript, selectors, input, status
     render.rs   pure transcript model + ratatui drawing
 tests/
-  config.rs, tools.rs, sandbox.rs, session.rs, run.rs, cli.rs, tui.rs, integration.rs
+  component_tests.rs   configuration, registry and sandbox requests
+  loop_integration.rs  injected transport/executor/recording lifecycle
+  context_preflight.rs complete-request and group-boundary regressions
+  native_file_tools.rs strict file semantics, bounds and staging
+  headless_cli.rs      actual CLI and loopback provider fixtures
+  live_llama.rs        opt-in actual provider and installed-boundary trials
 ```
 
 Separation of concerns: `config`/`toolchain`/`tools`/`sandbox` build trusted
 structures from untrusted inputs; `session` owns the model-agnostic conversation
 and loop policy;
 `run` owns process/thread plumbing; `tui` owns only presentation. Nothing in
-`session` performs blocking subprocess I/O directly — it hands argv to an
-`Executor` trait, which the worker implements over the sandbox. Tests inject a
+`session` performs blocking subprocess I/O directly — it hands tool intents to a
+`ToolExecutor` trait implemented over the sandbox. Tests inject a
 fake transport and a recording executor.
 
 ## Internal structure
@@ -43,8 +103,8 @@ fake transport and a recording executor.
 `config`/`toolchain`/`tools`/`sandbox` build trusted structures from untrusted
 inputs; `session` owns the model-agnostic conversation and loop policy; `run`
 owns process and thread plumbing; and `tui` owns only presentation. Nothing in
-`session` performs blocking subprocess I/O directly — it hands argv to an
-`Executor` trait that the worker implements over the sandbox, which keeps the
+`session` performs blocking subprocess I/O directly — it hands tool intents to a
+`ToolExecutor` trait implemented over the sandbox, which keeps the
 conversation model unit-testable in isolation.
 
 ## Interactions and state
@@ -62,10 +122,10 @@ The loop is the classic stream-and-execute cycle, kept transport-agnostic:
    (rejecting policy violations), executes it in the sandbox (bounded,
    cancellable), and emits `Event::ToolResult`.
 4. Each tool result is folded into the conversation as a `ToolResult` message
-   (redacted, bounded) and the loop repeats.
-5. The loop stops when the turn ends with `FinishReason::Stop` or proposes no
-   tool intents; the assistant text of the final turn is delivered as the
-   session answer.
+   (combined bounded preview with process status) and the loop repeats.
+5. The loop accepts only normal `Stop`, no tools and nonblank text as a final
+   answer. Invalid finishes/identities fail before effects. Every rejected or
+   interrupted pending call gets a paired result.
 
 Cancellation: a shared `CancellationToken` (from `agent_runtime`) is checked
 between turns and is threaded through the sandbox executor, which terminates the
@@ -73,42 +133,42 @@ process group on interrupt. `agent_runtime::install_handler` routes Ctrl+C/SIGTE
 to a cooperative flag so the whole process stays safe.
 
 Why a worker thread: the model transport and sandbox are blocking. The UI runs
-on the main thread and would otherwise freeze for the whole turn. `run::spawn`
-starts the loop on a detached thread and pushes `Event`s over a bounded channel;
+on the main thread and would otherwise freeze for the whole turn. `run::start`
+starts a fallibly spawned owned thread and pushes `Event`s over a bounded channel;
 the UI reads events each frame and renders them, showing a status spinner while
-a turn is in flight.
+a turn is in flight. Handle drop sets cancellation and a separate shutdown flag,
+then joins. Event sends and prompt waits poll shutdown; retained prompt senders
+and full event queues cannot prevent teardown. UI worker field order closes both
+channels before joining on quit, errors and model switches.
 
 ## Algorithms and decisions
 
-Long-running sessions grow one turn per step, so `ContextManager` keeps the
-model's live context bounded. It estimates request size with the ~4-chars-per-token
-heuristic (`estimate_messages`), which accounts for each message plus the
-always-present tool-definition framing, and starts compacting at 75% of the
-window.
+`ContextManager::prepare` runs before every request. Complete canonical JSON
+serialization includes system instructions, full schemas, framing and
+byte-aware text costs. Input estimate plus an enforced output reserve must fit;
+this deliberately heuristic estimate is not a tokenizer guarantee.
 
-`compact` first keeps the configured `keep_full_turns` most recent turns in full.
-If that still exceeds the hard `limit_tokens`, it keeps rolling older turns into
-the rolling summary while reducing how many recent turns stay full, until the
-estimated context is bounded. The single most recent turn is always kept in full
-as the floor: that is the only case where keeping it cannot bring the context
-under the limit, and it preserves the model's immediate context and any pending
-tool continuity. The rolling summary is trimmed to `MAX_SUMMARY_CHARS` (keeping
-the newest content), so it never grows unbounded.
+The grouping pass validates unique assistant call IDs and matching tool
+results, never splitting a pending call/result group. Autonomous iterations
+under a single user goal can compact independently. It preserves all system
+messages, the latest user goal and the newest complete group, retaining more
+recent groups when they fit. The rolling summary is bounded and explicitly
+lossy/non-authoritative. If the immutable/current material cannot fit, request
+and summary remain unchanged and sending fails.
 
-Compaction only ever removes material from the _model_ context; the full
-transcript, including every reasoning trace, is preserved separately in the
-durable session log (`crate::session_log`). A compacted turn is never lost — it
-is simply moved from the live context into the record. This keeps the model's
-context bounded without weakening the audit trail Kvist relies on.
+Compaction affects only model context. The optional private transcript records
+bounded diagnostic text, including provider reasoning, and may contain secrets.
+It is not guaranteed complete, is not canonical evidence and cannot restore
+effects. The legacy `compact` helper is diagnostic only, not the send path.
 
-The loop calls `maybe_compact` after each turn; when a compaction happens it
-emits `Event::Note` describing how many turns were rolled up. The UI surfaces
+When a compaction happens the loop emits `Event::Note`. The UI surfaces
 context utilization and a compaction progress bar via `Event::Progress`.
 
 ### Tool rendering
 
-The registry exposes four tools, in stable order: `shell`, `read_file`,
-`write_file`, `list_dir`. Each is rendered to an argv whose `[0]` is an absolute
+The registry exposes seven tools, in stable order: `shell`, `read_file`,
+`write_file`, `list_dir`, `find_files`, `search_files`, `edit_file`.
+Each is rendered to an argv whose `[0]` is an absolute
 canonical path, so the sandbox accepts it and no shell globbing or PATH lookup
 happens on our argv.
 
@@ -116,29 +176,29 @@ happens on our argv.
   command string is the agent's own script. Bash resolves inner tool names via
   the sandbox `PATH` we set (`/usr/bin:/bin:/usr/sbin:/sbin`). The `shell`
   command string is checked against the denylist before rendering.
-- `read_file { path }` → `["<bash>", "-c", "exec cat -- \"$1\"", "agent-runner",
-"<path>"]`. The path arrives as a bash argument, so it is never re-parsed as
-  shell.
-- `write_file { path, content }` → a staged write. The content is written to a
-  host path inside the working directory first (see `StagedWrite`), then the
-  rendered argv `["<bash>", "-c", "exec mv -f -- \"$1\" \"$2\", "agent-runner",
-"<sandbox-staging>", "<path>"]` moves it into place inside the sandbox. Staging
-  lets arbitrarily large files be written without exceeding the sandbox argv byte
-  limit; the staged file already lives under the read-write write root, so the
-  move stays inside the writable scope. Both staging paths share the same
-  `.agent-writes/<call_id>` tail: the host staging path joins under the working
-  directory (`PathBuf::join` keeps it relative), and the sandbox staging path
-  joins under the configured `write_root`, so the in-sandbox `mv` finds the file
-  regardless of the configured root (`write_root` is not assumed to be `/`).
-- `list_dir { path }` → `["<bash>", "-c", "exec ls -la -- \"$1\"",
-"agent-runner", "<path>"]`.
+- Native file operations carry closed typed JSON, never shell snippets.
+  The executor stages the payload mode 0600 in a mode-0700 host-owned temporary
+  directory outside the workspace, with RAII cleanup on every exit. Provider
+  IDs do not select host paths.
+- The installed non-link executable helper and payload are exact read-only
+  context-file grants at `/context/1` and `/context/0`. The helper receives only
+  that payload path; absent/untrusted/workspace-contained helpers fail closed.
+- Reads return UTF-8 text, digest and accurate byte-page metadata. List/find/
+  literal-search results are stable bounded pages. Complete encoded results
+  fit 7000 bytes, leaving room for the loop's 8-KiB process-status preview.
+- Mutation uses descriptor-relative no-follow directory traversal, rejects
+  linked targets and uses atomic per-file replacement, preserving permissions.
+  Exact edits require a SHA-256 preimage and one literal occurrence, including
+  rejecting overlapping matches. CRLF and unrelated/missing-newline bytes stay
+  unchanged. External writers do not participate in a transactional lock:
+  stale checks do not promise atomic compare-and-swap against arbitrary writers.
 
 `bash` is resolved once to its canonical path at request construction. The
 registry renders the sandbox-relative path the agent passes (typically under the
 write root `/workspace`); the agent works in the sandbox view, so tool output
 paths are consistent.
 
-Write scope is enforced in two places. The registry rejects `write_file` when the
+Write scope is enforced in two places. The registry rejects writes/edits when the
 target is not inside the configured `write_root` on a slash boundary (so a sibling
 such as `/workspace-evil` is rejected when the write root is `/workspace`, not
 merely when it fails a bare `starts_with`), and the sandbox grants read-write
@@ -179,6 +239,40 @@ never receives a tool list that promises a compiler it cannot invoke.
 
 ## Failure and recovery
 
+Built-in executors share bounded subprocess supervision. Combined capture
+accounts for both output streams before buffering, including fast exits and
+final draining. Nonblocking pipes or finite queues keep intermediate storage
+bounded. Stdin pumping shares cancellation and wall checks, so a non-reading
+runner cannot strand the worker. Each spawned child owns a fresh process group;
+error/cancellation/timeout/overflow cleanup signals the original owned group
+and independently terminates the retained direct child before reaping it.
+An absent or successfully signalled group does not establish direct-child
+termination: an unconfined child can change its group membership. Cleanup
+never follows that child into the supervisor's own group.
+Request construction checks the same cancellation/deadline token while hashing
+identity files in 64-KiB blocks and scanning the workspace. A held non-following
+regular descriptor limits identities to 256 MiB, including concurrent growth.
+Deduplicated directory scheduling charges two retained path representations,
+caps their bytes at 32 MiB, and rejects depth above 128 or more than 1,000,000
+entries. One 30-second cooperative preflight guard bounds both stages.
+Enumeration/read-link failures are errors, not skipped entries or empty targets.
+Post-exit retained streams have a finite cleanup window and explicit failure.
+No drain reader is detached. Uninterruptible kernel work and genuinely escaped
+host descendants are not claimed terminated merely because cleanup was attempted.
+
+Configuration opens use nonblocking no-follow descriptors, regular-file
+validation and a bounded read that detects growth. Pure registries advertise
+only Generic; language resolution requires executable candidates under mounted
+system roots and does not run arbitrary probes or promise every companion tool.
+
+Streaming Markdown buffers incomplete fence openers until a newline arrives.
+Consumed block lengths include leading separators. Wrapping preserves grapheme
+order and measures terminal cells, carrying indentation onto continuation rows.
+History/replay offsets and physical row counts use `usize`; render only the
+selected wrapped viewport rather than narrowing offsets to the widget's `u16`.
+Replay Down/PageDown advances before clamping. CLI host-turn overrides require
+the explicit host-execution flag, even when no prompt is supplied.
+
 - A turn that hits a recoverable, temporal transport error (dropped connection,
   provider timeout, or transient server error) is retried: the worker waits a
   capped exponential `backoff_delay` and replays the turn with a fresh request and
@@ -208,7 +302,8 @@ of them keeps the request auditable and self-consistent, and `identities.toolcha
 is required to equal the toolchain block identity.
 
 Grants: one read-write `authoring` grant (working directory → sandbox write
-root) and one read-only `context` grant per declared read root. No scratch
+root) and one read-only `context` grant per exact regular non-link context file.
+Missing/directory/overlapping context sources fail explicitly. No scratch
 grant is declared: the runner already mounts a private `/tmp` tmpfs in every
 sandbox, so that area serves as scratch and `HOME` points at `/tmp` (a dangling
 `HOME` would break tools that write home-relative state). Destinations are
@@ -224,12 +319,38 @@ phase requires. Resources are bounded well below the runner's maxima.
 
 ## Terminal UI
 
+Startup resolves the selected default or override directory through one
+canonical existing-directory validator shared with headless execution, before
+terminal setup or tool selection. Markdown rows distinguish the source-bearing
+first row from explicit continuation rows; resize replaces only those rows,
+never subsequent plain notices or reasoning. Styled wrapping and clipping use
+terminal cells and whole graphemes. Final rendered rows are wrapped after
+gutter/list/table decoration, and resized transcript retention remains bounded.
+An indivisible glyph wider than the available viewport cannot be made to fit;
+this physical limit is not a promise of universal terminal/font behavior.
+Code keeps complete highlighted spans for final cell wrapping rather than
+clipping tails. Each table cell is split into whole-grapheme chunks and emitted
+on successive rows; decoration is wrapped afterward. Revealed reasoning is
+reflowed at the current width and rejoins bounded visible retention. Evicted
+placeholders discard their corresponding hidden runs so surviving placeholders
+cannot restore the wrong reasoning.
+Wrapped placeholder continuations are explicitly distinct from the first
+placeholder row and never consume another hidden run during reveal.
+Initial placeholder construction also wraps to the current width with the same
+head/continuation distinction, before any resize occurs.
+Highlighted code wrapping repeats source-leading whitespace on continuation
+rows when it fits; the gutter remains on the first row. Overwide indentation
+still requires the explicitly unresolved width/indentation policy decision.
+
 The UI is built with `ratatui` + `crossterm`, following the same line-editor and
 theme-detection spirit as the Kvist shell but as a full-screen transcript rather
 than a line REPL. `App` holds the transcript (`Vec<TranscriptRow>`), the selected
 model, the selected effort, the running flag, the input buffer, a scroll
 offset, and a help-overlay flag. Rendering is a pure function of `App` state, so
-the transcript model is unit-tested without a terminal.
+the transcript model is unit-tested without a terminal. The header persistently
+labels actual sandboxed or HOST UNCONFINED scope; model instructions use the
+same selected scope. Reasoning collapse retains other rows and restores hidden
+reasoning in order.
 
 Transcript text is pre-wrapped to the box's inner width (the full terminal
 width minus the two vertical borders) so no line extends past the visible
@@ -242,9 +363,11 @@ and replay panels render through ratatui `Paragraph` widgets with soft wrapping
 (`Wrap { trim: false }`) so long lines (configuration paths, session
 summaries, replayed content) wrap inside the panel border instead of being
 truncated, and their scroll clamps use the paragraph's rendered line count for
-the panel width so all wrapped content stays reachable. Events from `run::spawn` are folded into `App` each frame. Key handling: Enter
-submits the input as a prompt, Ctrl+C cancels the current turn (and quits when
-idle), Esc toggles help, and Ctrl+Up/Down, PageUp/PageDown scroll the transcript.
+the panel width so all wrapped content stays reachable. Events from `run::start`
+are folded into `App` each frame. Ctrl+Enter submits; Enter submits on a blank
+line and otherwise inserts a newline. Ctrl+C cancels (or quits when idle),
+Esc opens the action menu, Ctrl+H opens help, PageUp/PageDown scroll, and
+Ctrl+P/Ctrl+N navigate prompt history.
 The status bar shows `model | effort | status` and a cancel hint; the prompt line
 shows the input with autocomplete-free editing to keep the dependency surface
 small.
@@ -268,7 +391,8 @@ trust. No speculative or misleading number is ever shown.
 ## Verification strategy
 
 - Empty prompt is ignored, not submitted.
-- A model turn with zero tool intents ends the loop and returns the answer.
+- A normal nonblank Stop with no tools returns an answer; other zero-tool
+  finishes fail.
 - A tool that renders outside the write root is rejected before the sandbox; a
   sibling prefix such as `/workspace-evil` is rejected when the write root is
   `/workspace`.
@@ -286,9 +410,8 @@ trust. No speculative or misleading number is ever shown.
 - `detect_languages` reports the project's detected language without gating
   advertisement.
 - Deterministic ordering of tool definitions, grants, and identities.
-- Compaction keeps recent turns in full and fits under the limit; when the
-  window is tight it reduces the number of full turns (flooring at one) while
-  always keeping the most recent turn.
+- Preflight fits complete request plus reserve or fails before I/O; compaction
+  keeps systems/current goal/newest complete group and never orphans results.
 - The rolling summary contains each rolled turn line exactly once, even when a
   tight window forces multiple compaction passes.
 - Progress accounting is emitted after every turn with cumulative input/output
@@ -306,6 +429,8 @@ trust. No speculative or misleading number is ever shown.
   bounded before parsing.
 - Environment values passed to the sandbox are a small allowlist; dangerous
   names (`LD_*`, `GIT_*`, `CARGO_*`, proxies) are not forwarded.
-- Secrets are never logged; only redacted, bounded summaries reach tracing.
+- Arguments and output values are hash-only in the operational journal.
+  Private transcripts may contain sensitive text; logging can be explicitly
+  disabled in interactive mode, never headless. Neither file is engine evidence.
 - The denylist and write-root enforcement are tested so a regression cannot
   silently widen authority.

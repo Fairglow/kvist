@@ -10,6 +10,474 @@ component:
     stale_since: null
     causes: []
 tasks:
+  - id: runner-content-write-tests
+    title: "Pin retained code and table tails and revealed reasoning"
+    description: "Reproduce long code/table tail loss, old-width revealed reasoning, stale hidden-run mapping after placeholder eviction/wrapping, initial narrow-placeholder overflow and missing fitting code-continuation indentation."
+    context: "Independent handoff comparison found remaining concrete C2 reachability defects."
+    purpose: "Exercise current-width content retention before repairs."
+    expected_outcome: "Seven targeted cases fail before implementation."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["CONTRACT.md#Behavioral-guarantees", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T01:47:16Z", updated_at: "2026-10-02T02:29:45Z", completed_at: "2026-10-02T02:29:45Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-content-implement-code
+    title: "Preserve wrapped code and table content"
+    description: "Wrap complete highlighted code, render multirow table cells and reflow revealed reasoning while retaining visible-row bounds."
+    context: "Reachability regressions follow existing intent."
+    purpose: "Avoid losing retained content before viewport wrapping."
+    expected_outcome: "Content and existing layout cases pass without widening authority."
+    kind: implementation
+    status: completed
+    depends_on: [runner-content-write-tests]
+    requirements: ["CONTRACT.md#Behavioral-guarantees", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T01:47:16Z", updated_at: "2026-10-02T02:29:45Z", completed_at: "2026-10-02T02:29:45Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-content-security-audit
+    title: "Audit final content wrapping"
+    description: "Independently inspect untrusted styled content bounds, cell wrapping and reasoning reconstruction."
+    context: "Content retention fixes follow failing tests."
+    purpose: "Find concrete untrusted-input failures without certifying terminal implementations."
+    expected_outcome: "Scoped independent audit recorded."
+    kind: security-audit
+    status: completed
+    depends_on: [runner-content-implement-code]
+    requirements: ["CONTRACT.md#Behavioral-guarantees", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T01:47:16Z", updated_at: "2026-10-02T02:29:45Z", completed_at: "2026-10-02T02:29:45Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-content-compliance-review
+    title: "Compare content reachability with current intent"
+    description: "Refresh source-only observations and compare retained tails and revealed reasoning in the distinct source-blind context."
+    context: "Security review follows content implementation."
+    purpose: "Separate resolved defects from physical and contradictory indentation guarantees."
+    expected_outcome: "Independent final comparison, not acceptance or universal certification."
+    kind: compliance-review
+    status: completed
+    depends_on: [runner-content-security-audit]
+    requirements: ["CONTRACT.md#Behavioral-guarantees", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T01:47:16Z", updated_at: "2026-10-02T02:29:45Z", completed_at: "2026-10-02T02:29:45Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-final-ui-write-tests
+    title: "Pin validated startup and resize preservation"
+    description: "Reproduce invalid interactive cwd selection, plain-row loss after Markdown resize and cell-width overflow in styled Markdown; verify repeated resizing and shared headless directory selection."
+    context: "Final source-blind comparison exposed C5 and C6 and remaining C2 layout gaps."
+    purpose: "Pin existing startup and presentation promises before repairs."
+    expected_outcome: "Focused regressions fail before fixes and pass afterward."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["CONTRACT.md#Command-line-interface", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T01:25:37Z", updated_at: "2026-10-02T01:33:13Z", completed_at: "2026-10-02T01:33:13Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-final-ui-implement-code
+    title: "Validate startup and preserve resized transcript rows"
+    description: "Share canonical directory validation before UI startup, represent Markdown continuation provenance explicitly and enforce styled cell-width wrapping."
+    context: "Existing intent and reproduced regressions precede implementation."
+    purpose: "Remove deferred directory errors, resize data loss and measurable styled overflow without changing authority."
+    expected_outcome: "New and existing presentation/startup cases pass."
+    kind: implementation
+    status: completed
+    depends_on: [runner-final-ui-write-tests]
+    requirements: ["CONTRACT.md#Command-line-interface", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T01:25:37Z", updated_at: "2026-10-02T01:33:13Z", completed_at: "2026-10-02T01:33:13Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-final-ui-security-audit
+    title: "Audit final startup and rendering repairs"
+    description: "Independently inspect invalid directory handling, untrusted styled text and resize provenance boundaries."
+    context: "Final UI corrections follow failing tests."
+    purpose: "Find exploitable startup or presentation failures without certifying enforcement."
+    expected_outcome: "Scoped independent findings recorded."
+    kind: security-audit
+    status: completed
+    depends_on: [runner-final-ui-implement-code]
+    requirements: ["CONTRACT.md#Command-line-interface", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T01:25:37Z", updated_at: "2026-10-02T01:33:13Z", completed_at: "2026-10-02T01:33:13Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-final-ui-compliance-review
+    title: "Compare final startup and rendering observations"
+    description: "Refresh the source-only record and use a distinct source-blind comparison for C2/C5/C6 and exact new run evidence."
+    context: "Independent audit follows final UI corrections."
+    purpose: "Retain actual layout and kernel limitations without hiding concrete defects."
+    expected_outcome: "Independent comparison recorded; review completion is not acceptance."
+    kind: compliance-review
+    status: completed
+    depends_on: [runner-final-ui-security-audit]
+    requirements: ["CONTRACT.md#Command-line-interface", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T01:25:37Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-preflight-write-tests
+    title: "Pin bounded cancellable sandbox preflight"
+    description: "Reproduce oversized identity reads, ignored cancellation during hashing and excess scan depth; verify exact entry/path/time quotas and interrupted multicall reuse."
+    context: "Independent F2/F8 comparison identified remaining built-in preparation gaps."
+    purpose: "Exercise preparation and subsequent-prompt recovery before claiming bounds."
+    expected_outcome: "Three preflight regressions fail before repairs; exact-bound cases pass afterward."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T01:03:33Z", updated_at: "2026-10-02T01:03:33Z", completed_at: "2026-10-02T01:03:33Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-preflight-implement-code
+    title: "Bound sandbox identity and workspace preparation"
+    description: "Stream held-descriptor hashes, propagate prompt cancellation, cap workspace traversal and cooperative preparation time, and surface enumeration/read-link errors."
+    context: "Preflight regressions and existing bounded-input intent precede substantive repairs."
+    purpose: "Remove whole-file allocations and uncancellable unbounded scanning."
+    expected_outcome: "Preflight and existing sandbox/native regressions pass."
+    kind: implementation
+    status: completed
+    depends_on: [runner-preflight-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T01:03:33Z", updated_at: "2026-10-02T01:03:33Z", completed_at: "2026-10-02T01:03:33Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-preflight-security-audit
+    title: "Audit bounded sandbox preparation"
+    description: "Independently inspect descriptor/type checks, growth bounds, traversal quotas, cancellation and unchanged namespace authority."
+    context: "Preparation repairs are implemented."
+    purpose: "Find exploitable preparation failures."
+    expected_outcome: "Scoped independent findings and any corrections recorded."
+    kind: security-audit
+    status: completed
+    depends_on: [runner-preflight-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T01:03:33Z", updated_at: "2026-10-02T01:09:24Z", completed_at: "2026-10-02T01:09:24Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-preflight-compliance-review
+    title: "Compare sandbox preparation with intent"
+    description: "Refresh source-only observations and compare them with bounded preparation promises and named evidence in a distinct source-blind context."
+    context: "Preparation audit follows implementation."
+    purpose: "Resolve concrete built-in gaps while retaining kernel/callback limits."
+    expected_outcome: "Independent comparison, not unconditional real-time certification."
+    kind: compliance-review
+    status: completed
+    depends_on: [runner-preflight-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T01:03:33Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-display-write-tests
+    title: "Pin untrusted presentation and flag semantics"
+    description: "Reproduce incomplete-fence panics, separator consumption, long-word ordering, Unicode cell wrapping, large replay offsets and unacknowledged host-turn flags."
+    context: "Independent source-blind comparison identified current C1-C3 defects."
+    purpose: "Define robust observable presentation before fixes."
+    expected_outcome: "Focused regressions fail before production repairs."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T00:45:16Z", updated_at: "2026-10-02T01:03:33Z", completed_at: "2026-10-02T01:03:33Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-display-implement-code
+    title: "Repair presentation and host flag boundaries"
+    description: "Wait safely for fence newlines, consume exact prefixes, wrap terminal-cell graphemes in order, render large-offset viewports and require host acknowledgement for host-turn flags."
+    context: "Display regressions and existing consumer promises precede code."
+    purpose: "Prevent input panics and unreachable or misleading displayed content."
+    expected_outcome: "Display and existing UI/CLI regressions pass."
+    kind: implementation
+    status: completed
+    depends_on: [runner-display-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T00:45:16Z", updated_at: "2026-10-02T01:03:33Z", completed_at: "2026-10-02T01:03:33Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-display-security-audit
+    title: "Audit presentation repairs"
+    description: "Independently inspect untrusted fence/Unicode input, viewport bounds and host-execution flag gating."
+    context: "Display and parser fixes are implemented."
+    purpose: "Find exploitable presentation and authority failures."
+    expected_outcome: "Recorded scoped independent audit."
+    kind: security-audit
+    status: completed
+    depends_on: [runner-display-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T00:45:16Z", updated_at: "2026-10-02T01:09:24Z", completed_at: "2026-10-02T01:09:24Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-display-compliance-review
+    title: "Compare presentation repairs with intent"
+    description: "Compare a refreshed source-only record and named evidence in a separate source-blind context while preserving original findings."
+    context: "Independent audit follows presentation implementation."
+    purpose: "Resolve concrete C1-C3 findings without self-certification."
+    expected_outcome: "Independent comparison and remaining limits recorded."
+    kind: compliance-review
+    status: completed
+    depends_on: [runner-display-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T00:45:16Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-process-write-tests
+    title: "Pin bounded subprocess supervision"
+    description: "Reproduce combined-cap, final-drain, retained-pipe, blocked-stdin, cancellation and early-exit failures before replacing executor collectors."
+    context: "Independent intent comparison identified subprocess boundary gaps."
+    purpose: "Exercise real host and sandbox executor paths."
+    expected_outcome: "Failed-before cases and passing current-source named regressions."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:08:15Z", completed_at: "2026-10-02T00:08:15Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-process-implement-code
+    title: "Bound and own executor subprocesses"
+    description: "Share nonblocking combined-cap supervision, bounded stdin/drain/reap and owned process-group termination while preserving ordinary failure outcomes."
+    context: "Process regressions and explicit local lifecycle intent precede code."
+    purpose: "Remove unbounded reader queues and blocking cleanup."
+    expected_outcome: "Process regressions and native helper workloads pass."
+    kind: implementation
+    status: completed
+    depends_on: [runner-process-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:08:15Z", completed_at: "2026-10-02T00:08:15Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-process-security-audit
+    title: "Audit executor supervision repairs"
+    description: "Independently inspect process-group ownership, byte bounds, descriptor lifetime, termination and explicit cleanup failures."
+    context: "Shared supervisor is integrated into both executors."
+    purpose: "Find exploitable resource and cleanup failures."
+    expected_outcome: "Scoped independent findings and corrections, without enforcement certification."
+    kind: security-audit
+    status: completed
+    depends_on: [runner-process-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:27:08Z", completed_at: "2026-10-02T00:27:08Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-process-compliance-review
+    title: "Compare supervisor observations with intent"
+    description: "Use a fresh source-only record and distinct source-blind comparison to resolve process findings or retain bounded limitations."
+    context: "Security audit follows supervisor implementation."
+    purpose: "Separate observed behavior from intended guarantees."
+    expected_outcome: "Recorded independent comparison, not formal acceptance."
+    kind: compliance-review
+    status: completed
+    depends_on: [runner-process-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-input-write-tests
+    title: "Pin configuration and capability boundaries"
+    description: "Reproduce growing configuration reads, secret-bearing parse diagnostics, non-executable interpreters and unprobed Python advertisement."
+    context: "Independent comparison identified configuration and toolchain gaps."
+    purpose: "Define truthful bounded startup behavior before repairs."
+    expected_outcome: "Four regressions fail before code and pass afterward."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY"]
+    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:08:15Z", completed_at: "2026-10-02T00:08:15Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-input-implement-code
+    title: "Bound configuration and gate language claims"
+    description: "Use held regular no-follow descriptors and actual read caps, suppress malformed-value payloads and advertise language profiles only through executable probes."
+    context: "Input regressions and local intent precede repairs."
+    purpose: "Bound untrusted startup data and avoid unsupported tool promises."
+    expected_outcome: "Input and existing configuration/profile cases pass."
+    kind: implementation
+    status: completed
+    depends_on: [runner-input-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY"]
+    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:08:15Z", completed_at: "2026-10-02T00:08:15Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-input-security-audit
+    title: "Audit startup input repairs"
+    description: "Independently inspect read-time bounds, descriptor checks, diagnostic disclosure and capability probes."
+    context: "Configuration/import/probe repairs are implemented."
+    purpose: "Find exploitable input and diagnostic failures."
+    expected_outcome: "Recorded scoped audit findings."
+    kind: security-audit
+    status: completed
+    depends_on: [runner-input-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY"]
+    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:27:08Z", completed_at: "2026-10-02T00:27:08Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-input-compliance-review
+    title: "Compare startup input observations with intent"
+    description: "Compare fresh source-only configuration and capability observations with local promises in a source-blind context."
+    context: "Input security audit follows implementation."
+    purpose: "Retain remaining capability qualification limits."
+    expected_outcome: "Independent evidence without fabricated acceptance."
+    kind: compliance-review
+    status: completed
+    depends_on: [runner-input-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY"]
+    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-context-write-tests
+    title: "Define request and prompt-budget regressions"
+    description: "Write failing tests for full request accounting, output reserve, autonomous compaction, complete call/result groups, irreducible overflow, finish classification, repeated prompts, cancellation and retry limits."
+    context: "Security-first runtime improvement request; intent is defined in the hardening extension."
+    purpose: "Pin safe request and prompt boundaries before code."
+    expected_outcome: "Targeted regressions fail before implementation."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-CONTEXT"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-context-implement-code
+    title: "Implement bounded request and prompt coordination"
+    description: "Preflight complete requests, compact valid groups, bound outputs, classify finishes, cancel bounded retries and stop stuck actions."
+    context: "Defined context and prompt regression cases."
+    purpose: "Prevent invalid oversized requests and unbounded autonomous work."
+    expected_outcome: "Context and prompt regressions pass without widening authority."
+    kind: implementation
+    status: completed
+    depends_on: [runner-context-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-CONTEXT"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-context-security-audit
+    title: "Audit bounded request coordination"
+    description: "Independently audit context loss, malformed proposals, cancellation, retry and budget bypasses."
+    context: "Implemented request coordinator."
+    purpose: "Find exploitable authority and resource-control failures."
+    expected_outcome: "Record reviewed findings and fixes without self-certification."
+    kind: security-audit
+    status: completed
+    depends_on: [runner-context-implement-code]
+    requirements: ["CONTRACT.md#Runtime-hardening-extension"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-context-compliance-review
+    title: "Review bounded coordination compliance"
+    description: "Compare intent with a source-only derived implementation record and test evidence in a separate source-blind context."
+    context: "Independent security audit follows implementation."
+    purpose: "Retain discrepancies for human arbitration."
+    expected_outcome: "Independent review evidence, not implementer certification."
+    kind: compliance-review
+    status: completed
+    depends_on: [runner-context-security-audit]
+    requirements: ["CONTRACT.md#Runtime-hardening-extension"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-tools-write-tests
+    title: "Define native file-tool regressions"
+    description: "Write failing tests for strict arguments, bounded deterministic pages, exact/stale/ambiguous edits, CRLF, symlinks, traversal and private staging cleanup."
+    context: "A native sandboxed helper replaces provider-ID workspace staging."
+    purpose: "Pin precise file effects before implementation."
+    expected_outcome: "Regression tests fail on missing tools and unsafe staging."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOLS"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-tools-implement-code
+    title: "Implement native confined file tools"
+    description: "Add the Rust helper, exact preimage editing, bounded reads/search/discovery and private read-only payload grants."
+    context: "Defined native file-tool regression cases."
+    purpose: "Improve coding capability without host effects from model arguments."
+    expected_outcome: "File-tool tests pass and all effects remain sandboxed."
+    kind: implementation
+    status: completed
+    depends_on: [runner-tools-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOLS"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-tools-security-audit
+    title: "Audit native file-tool authority"
+    description: "Independently audit descriptor paths, staging, executable/mount identity, bounded reads and atomic mutation."
+    context: "Native helper and executor are implemented."
+    purpose: "Find exploitable path and mutation-boundary failures."
+    expected_outcome: "Recorded audit with fixes or explicit blockers."
+    kind: security-audit
+    status: completed
+    depends_on: [runner-tools-implement-code]
+    requirements: ["CONTRACT.md#Runtime-hardening-extension"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-tools-compliance-review
+    title: "Review native file-tool compliance"
+    description: "Use independent source-derived and source-blind contexts to compare file-tool intent and evidence."
+    context: "Security audit follows implementation."
+    purpose: "Retain file-effect discrepancies for human arbitration."
+    expected_outcome: "Separate review evidence without fabricated acceptance."
+    kind: compliance-review
+    status: completed
+    depends_on: [runner-tools-security-audit]
+    requirements: ["CONTRACT.md#Runtime-hardening-extension"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-lifecycle-write-tests
+    title: "Define recording and headless regressions"
+    description: "Write failing tests for fallible pre-effect recording, all terminal paths, journal privacy and sequence/versioned headless execution."
+    context: "Recorded failures must stop effects, and headless mode must retain isolation."
+    purpose: "Pin durable lifecycle semantics before code."
+    expected_outcome: "Regression tests expose post-effect/infallible recording and absent headless support."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-HEADLESS", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-lifecycle-implement-code
+    title: "Implement fallible recording and headless execution"
+    description: "Synchronize acknowledged dispatch records, preserve explicit terminal outcomes, secure journals and add terminal-free NDJSON execution over the existing loop."
+    context: "Defined recording and headless regression cases."
+    purpose: "Make operational state inspectable without widening task authority."
+    expected_outcome: "Lifecycle/headless tests pass with sandbox-only execution."
+    kind: implementation
+    status: completed
+    depends_on: [runner-lifecycle-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-HEADLESS", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-lifecycle-security-audit
+    title: "Audit durable and headless authority"
+    description: "Independently audit journal substitution/disclosure, acknowledgment ordering, unknown effects and CLI escape hatches."
+    context: "Recording and headless execution are implemented."
+    purpose: "Find exploitable evidence and authority failures."
+    expected_outcome: "Recorded findings with fixes or explicit blockers."
+    kind: security-audit
+    status: completed
+    depends_on: [runner-lifecycle-implement-code]
+    requirements: ["CONTRACT.md#Runtime-hardening-extension"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: runner-lifecycle-compliance-review
+    title: "Review lifecycle and headless compliance"
+    description: "Compare intent with independently derived implementation and test evidence in a source-blind context."
+    context: "Separate security audit follows implementation."
+    purpose: "Retain outcome/evidence discrepancies for arbitration."
+    expected_outcome: "Independent review evidence without claiming human acceptance."
+    kind: compliance-review
+    status: completed
+    depends_on: [runner-lifecycle-security-audit]
+    requirements: ["CONTRACT.md#Runtime-hardening-extension"]
+    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: "agent-runner-foundation-write-tests"
     title: "Define foundation tests for agent-runner"
     description: "Write failing tests for configuration loading and validation, the error/exit-code contract, logging initialization idempotence, and CLI argument parsing (model/effort/cwd/profile overrides, list-models, non-interactive refusal)."

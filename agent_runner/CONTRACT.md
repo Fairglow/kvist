@@ -2,6 +2,69 @@
 
 # Agent Runner — Contract
 
+## Runtime hardening extension
+
+The pre-release API has no compatibility or migration promise.
+
+`agent-runner --headless PROMPT` runs without a terminal. `--json` selects
+NDJSON envelopes `{schema_version: 1, sequence: N, event: ...}` with a final
+run-summary event. Human diagnostics go to stderr. Headless mode rejects
+`--allow-host-execution`, `--host-turns`, and `--no-logs`; it uses exactly the
+same sandboxed loop as the UI, not the engine's protected task broker.
+Neither interface authorizes engine tasks or creates canonical evidence.
+The workspace remains fully writable; protected task execution must use the
+engine's narrow broker, never this workspace shell.
+
+`--response-reserve TOKENS` defaults to 1024; `--max-run-secs SECONDS` defaults
+to 1800; `--max-run-tokens TOKENS` defaults to 1,000,000 estimated tokens.
+The context limit must be greater than the reserve. Every model request
+is preflighted using complete canonical serialization and byte-aware heuristic
+accounting, and carries a provider output bound equal to the reserve.
+Oversized immutable/current context is a typed failure before I/O. Compaction
+preserves system instructions, the current user goal, and complete
+assistant/tool-result groups; summaries are explicitly lossy and nonbinding.
+Combined model-facing stdout/stderr and result metadata fit a single bounded
+preview; omitted bytes are marked, and every result includes process status.
+
+Recorder operations return `Result`; dispatch acknowledgment precedes effects.
+The local journal has a versioned envelope and records content-derived action
+identities, process flags, and an explicit disposition, without claiming
+filesystem mutation from stdout. Arguments are represented by their hashes and
+shape, not raw values. Private transcripts may contain user/model/tool text and
+are not guaranteed secret-free. Files are created with no-clobber/private
+permissions and are synchronized at dispatch and terminal boundaries.
+Session-start metadata identifies the execution scope, workspace, policy digest,
+context limit and prompt budgets. Missing library-supplied metadata is explicitly
+unspecified. The UI persistently labels sandboxed or HOST UNCONFINED execution;
+host-mode model instructions do not promise sandbox confinement.
+Required headless logs must be outside the writable workspace. Startup/output
+failures may prevent the final NDJSON envelope. A dispatched
+call without a result is an unknown effect; there is no automatic replay/resume.
+
+`RunSummary` exposes answer, turns, executed tools, cancelled/exhausted flags
+and an optional failure diagnostic. Only a normal `stop` with no tools supplies
+a final answer; length, filtering, unknown finishes, duplicate call IDs and
+invalid finish/tool combinations fail without tool execution. Rejected tools
+are nonterminal notices with paired error results. Cancellation/budget limits
+close every pending call with an explicit not-executed result. Retries receive
+distinct attempt notices; partial streamed text is provisional. All waits and
+attempt deadlines are clipped to the prompt deadline.
+
+The registry exposes `shell`, `read_file`, `write_file`, `list_dir`,
+`find_files`, `search_files`, and `edit_file`, in that stable order.
+`read_file` accepts byte `offset` and bounded `limit`; it returns text, digest,
+and next-offset metadata. `list_dir`, search and discovery return bounded,
+deterministically sorted pages. `edit_file` requires `path`, `old_text`,
+`new_text` and `expected_sha256`; it performs one exact replacement only when
+the file's digest matches. A stale/no-match/multiple-match result changes
+nothing. File tools use the separately installed `agent-runner-file-tool`
+Rust helper, mounted read-only outside the writable scope, and private
+read-only payload grants. No model-selected path or call ID is used for host
+staging. Mutation paths are canonical, confined, and non-link. External
+writers are not participants in a transactional lock; preimage checks detect
+stale content but do not promise atomic compare-and-swap against arbitrary
+external writers.
+
 ## Boundary and ownership
 
 This document defines what `agent-runner` exposes to consumers: the library
@@ -16,7 +79,7 @@ interact only through these items.
 
 ### `Error` / `Result`
 
-`agent_runner::Error` is the crate error type (thiserror). `agent_runner::Result<T>`
+`agent_runner::Error` is the crate domain error type. `agent_runner::Result<T>`
 is `Result<T, Error>`. Errors carry an `exit_code() -> u8` and a `describe() ->
 String` that produces an actionable, non-secret message. Errors never unwrap the
 underlying source when printing; formatting failures degrade gracefully.
@@ -60,8 +123,10 @@ wrong `schema_version`, unknown model selector, circular/invalid tool policy,
 or any bound violation. `Config::from_parts(...)` builds an in-memory config for
 tests. The default working directory is the process current directory when not
 specified.
+Configuration reads use a held regular non-link descriptor and a 64-KiB
+read-time byte bound, not only a pathname metadata check.
 
-### `ToolRegistry`, `ExecContext`, and `StagedWrite`
+### `ToolRegistry`, `ExecContext`, and `RenderedTool`
 
 `agent_runner::tools::ToolRegistry` owns the model-facing tool definitions and
 renders a sandbox command for an approved tool intent.
@@ -71,8 +136,8 @@ struct ToolRegistry { /* bash, policy, profiles */ }
 ```
 
 - `ToolRegistry::new(policy: ToolPolicy) -> ToolRegistry` builds a registry
-  advertising the built-in generic base plus the Python interpreter, a fixed and
-  honest default for the authoring sandbox (see `ToolProfile`); it never panics.
+  advertising only the fixed generic base, without probing or claiming language
+  availability. Production language advertisement uses `resolve`.
 - `ToolRegistry::resolve(policy, settings, probe, forced) ->
 Result<ToolRegistry>` resolves the canonical `bash` path and the honest, gated
   profile set (see `ToolProfile`, `ProfileSetting`, `ToolchainProbe`,
@@ -91,24 +156,77 @@ Result<ToolRegistry>` resolves the canonical `bash` path and the honest, gated
 Result<RenderedTool>` — maps a model tool intent to an argv to execute inside
   the sandbox, or `Err` when the tool is unknown, the arguments are malformed, or
   the call violates policy.
-- `RenderedTool { argv: Vec<String>, summary: String, staged_write: Option<StagedWrite> }` —
+- `RenderedTool { argv: Vec<String>, summary: String, file_request: Option<FileRequest>,
+file_helper: Option<PathBuf> }` —
   `argv[0]` is an absolute canonical path; `summary` is a short human description
-  shown in the UI and logs; `staged_write` is present only for large
-  `write_file` calls.
+  shown in the UI and logs. Native operations carry a typed payload and helper
+  path, not files already written to the workspace.
 - `ExecContext { workdir: PathBuf, call_id: String }` supplies the renderer the
-  host working directory (the sandbox write-root source) and a per-call id.
-- `StagedWrite { host_path: PathBuf, sandbox_path: String, target: String }` —
-  stages `write_file` content on the host inside the working directory before the
-  rendered `mv` moves it into place, so large files can be written without
-  exceeding the sandbox argv byte limit. `sandbox_path` is the staged file's path
-  inside the sandbox; it is anchored under the configured `write_root` (where the
-  host working directory is bind-mounted read-write), never at the sandbox
-  filesystem root, so the `mv` locates the staged file for any configured root.
-  `host_path` is the equivalent path under the host working directory.
+  host working directory and a descriptive per-call id. IDs never select
+  staging paths.
+- `ToolRegistry::with_file_helper(path)` explicitly selects the installed helper.
+  Production resolution defaults to `agent-runner-file-tool` adjacent to the
+  calling executable.   The executor rejects absent, nonregular, linked or
+  workspace-contained helpers; it never falls back to host execution.
 - `ToolProfile` (ids `generic`, `python`, `rust`, `javascript`, `go`, `c`)
   surfaces the relevant package and build tools for each language; `Generic` is
   the always-present base and is never configured or gated (see
   `Tool profiles, settings, and detection`).
+
+### Native file-tool inputs and results
+
+All argument objects are closed. Paths are canonical absolute UTF-8, at most
+4096 bytes, without NUL, traversal, duplicate separators or trailing separators
+except `/`. Digests are `sha256:` plus 64 lowercase hexadecimal digits.
+
+| Tool | Required arguments | Optional arguments |
+| --- | --- | --- |
+| `shell` | `command`: nonblank, NUL-free, at most 16384 bytes | None |
+| `read_file` | `path` | `offset=0` (0..=1048576 bytes), `limit=4096` (1..=16384 bytes) |
+| `write_file` | `path`, `content` | `expected_sha256` |
+| `list_dir` | `path` | `offset=0` (0..=4096 entries), `limit=100` (1..=256 entries) |
+| `find_files` | `path`, `pattern` (literal substring, empty matches all) | Same pagination as listing |
+| `search_files` | `path`, `query` (nonempty literal substring) | Same pagination as listing |
+| `edit_file` | `path`, nonempty `old_text`, `new_text`, `expected_sha256` | None |
+
+Content/old/new text each fit 65536 bytes; pattern/query fit 1024 bytes and
+reject NUL. Explicit null is not omission. Native request JSON fits 262144
+bytes. Complete reads, mutation preimages, scanned files and resulting edits
+fit 1048576 bytes/file. Complete native stdout, including LF, fits 7000 bytes.
+Pages shrink to fit encoded JSON without truncating digest or entry metadata;
+an irreducibly oversized entry is an explicit error.
+
+Result objects:
+
+| Operation | JSON fields |
+| --- | --- |
+| Read | `content`, `sha256`, `offset`, `next_offset`, `total_bytes` |
+| Write/edit | `path`, `sha256`, `total_bytes` |
+| List | `entries:[{name,kind}]`, `offset`, `next_offset`, `total` |
+| Find | `files:[absolute_path]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `visited_entries` |
+| Search | `matches:[{path,line,match_byte_offset,content,truncated}]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_binary`, `visited_entries`, `scanned_bytes` |
+
+`next_offset` is the actual continuation offset or null. Beyond-end offsets
+fail; exactly-at-end offsets return an empty terminal page. Read digests cover
+the whole bounded regular UTF-8 file; offsets must be UTF-8 boundaries and a
+limit too small for the next character fails. Reads may follow links to paths
+accessible in the sandbox namespace; the helper itself is not a read sandbox.
+Directory operations reject linked ancestors, list links and skip/count links
+in recursive traversal. Results sort by name/path, with search then by line.
+Search uses one-based line numbers and a first byte offset per matching line;
+previews exclude LF, retain CR and are bounded to 1024 UTF-8 bytes.
+
+Listing caps 4096 entries/directory. Recursive operations cap 4096 visited
+descendants and depth 32. Search caps 8388608 scanned bytes and 4096 matching
+lines; binary files are counted and skipped. Discovery does not inspect file
+contents. Unreadable/unsupported ordinary entries fail explicitly.
+
+Write/edit parents must exist. New files use mode 0644; replacements preserve
+mode bits, not ownership, ACLs, xattrs or hard-link alias updates. Whole-file
+write creates or replaces; supplying a digest requires an existing matching
+file. Exact edit requires existing UTF-8 and precisely one occurrence,
+including rejecting overlapping matches. Atomic replacement is per file;
+arbitrary external writers are not locked transactionally.
 
 ### `Tool profiles, settings, and detection`
 
@@ -176,7 +294,8 @@ argv and passes it here. It:
 
 - resolves and hashes the runner and backend identities,
 - builds one read-write `authoring` grant mapping the working directory to the
-  sandbox write root, and one read-only `context` grant per declared read root
+  sandbox write root, and one read-only `context` grant per exact regular
+  non-link context file (missing/directory sources fail)
   (destinations disjoint from the write root); no scratch grant is declared —
   the sandbox's private `/tmp` tmpfs serves as scratch and `HOME` points there,
 - sets `Network::Deny`, bounded `Resources`, and a `System` toolchain whose
@@ -199,9 +318,24 @@ cancellation: &CancellationToken) -> Result<ToolOutcome>` — spawns
 `kvist-sandbox-runner --kvist-sandbox-request-v1`, writes the request to its
 stdin, supervises stdout/stderr (bounded, timeout, cancellation), kills the
 process group on interrupt, and returns the captured output as a `ToolOutcome`.
+Captured stdout plus stderr and intermediate buffering are bounded; final
+draining cannot bypass the cap. Stdin writes and post-exit drains check the same
+deadline/cancellation. Retained descendant descriptors cause explicit cleanup
+failure, never indefinite joining or a successful result. Escaped host
+descendants or uninterruptible kernel work cannot be promised forcibly
+terminated; failures remain explicit.
 `ToolOutcome` uses byte-accurate capture (`stdout`/`stderr` are `Vec<u8>`)
 with `output_text`/`error_text` truncation helpers so non-UTF-8 output never
 panics.
+
+Sandbox request preflight streams regular non-link identity files in 64-KiB
+blocks, with a 256-MiB/file read-time bound. Workspace inspection bounds
+1,000,000 entries, depth 128 (root depth zero), and 32 MiB of charged directory
+path bytes for its two retained representations. Both stages check cancellation
+between I/O operations and share a 30-second cooperative preflight limit;
+the executor supplies the prompt's cancellation/deadline token. Oversized
+workspaces fail explicitly with narrowing guidance. Filesystem/kernel calls
+are not preemptible, and preflight is not a substitute for namespace enforcement.
 
 ### `ToolOutcome`
 
@@ -240,6 +374,7 @@ struct AgentSession {
 - `AgentSession::new(model, thinking_effort, tool_defs, system_prompt)` — builds
   one turn request shape.
 - `AgentSession::push_user(&mut self, text)` — appends a `User` message.
+  It clears any previous final answer.
 - `AgentSession::model_selector(&self) -> &str` — the selected model id.
 - `AgentSession::next_request(&self) -> Option<ModelRequest>` — returns the next
   turn request, built from the accumulated messages, tool definitions, the
@@ -247,10 +382,12 @@ struct AgentSession {
 - `AgentSession::apply_assistant(&mut self, turn: ModelTurn) -> Vec<ToolIntent>`
   — folds a model turn (text + tool intents) into the conversation as an
   `Assistant` message, records the final turn's assistant text as the session
-  answer when it proposes no tools, and returns the tool intents the turn
+  answer only for a normal nonblank `Stop` with no tools, and returns the tool intents the turn
   proposed.
 - `AgentSession::record_tool_result(&mut self, call_id, name, outcome)` — folds a
-  tool result into the conversation as a `ToolResult` message (redacted, bounded).
+  tool result into the conversation as a `ToolResult` message. Combined
+  stdout/stderr, process flags and truncation markers fit 8 KiB; this preview
+  is not automatic secret redaction.
 
 The session never executes tools itself; it records the tool intents the turn
 proposed and lets the caller (via [`ToolExecutor`]) execute them. This keeps it
@@ -262,11 +399,13 @@ transport- and environment-independent and unit-testable.
   renders and executes one tool intent inside the sandbox. The loop is
   transport- and environment-independent because it hands argv to this trait
   rather than spawning processes directly.
-- `Recorder` is a durable, pluggable sink for the session record
-  (`session_start`, `turn_start`, `turn_finish`, `tool_result`,
-  `session_finish`). The production [`SessionLog`] captures the full reasoning
-  trace here, so thinking stays inspectable even after compaction removes it from
-  the model context.
+- `Recorder` is a fallible pluggable operational sink: `session_start`,
+  `request`, `turn_start`, `turn_finish`, `tool_dispatch`, `tool_result` and
+  `session_finish` return `Result`. Dispatch must be acknowledged before invoking
+  the executor. Recording errors terminate further effects. `SessionLog`
+  synchronizes dispatch/result and terminal records. Its private diagnostic
+  transcript bounds each text item to 64 KiB; it is neither a complete replay
+  checkpoint nor guaranteed secret-free.
 
 ### `Event`
 
@@ -276,6 +415,7 @@ worker streams over a bounded channel:
 ```
 enum Event {
     TurnStart { model: String },
+    AttemptStart { attempt: u32 },
     Reasoning(String),
     Text(String),
     ToolCall { description: String, name: String },
@@ -283,6 +423,7 @@ enum Event {
     Finished { message: String },
     Failed(String),
     Note(String),
+    PromptEnd { exhausted: bool, cancelled: bool },
     Progress {
         input_tokens: u64,
         output_tokens: u64,
@@ -321,8 +462,8 @@ AgentRunner::run::<M, E, S>(
 
 repeats: `next_request`, stream the turn forwarding text/reasoning/tool-intent
 events, execute each tool intent (bounded, cancellable), apply its results, and
-stop on `FinishReason::Stop` or zero pending tool intents. Compaction trims only
-the model context; the optional `recorder` is the durable source of truth. The
+stop only on a validated normal `Stop` with nonblank text and no tools.
+Compaction trims only the model context; the optional `recorder` is an operational record. The
 loop reports token accounting and compaction via `Event::Progress`.
 
 `AgentRunner` also carries a `RetryPolicy` that makes a turn resilient to
@@ -340,7 +481,18 @@ try. Cancellation is never retried. Between attempts the loop emits an
 is in progress and that a longer budget is being granted; the retry budget is
 `max_attempts` total tries. A turn that exhausts the budget, or one that fails
 with a non-retryable error, is surfaced as `Event::Failed` and stops the session
-while still returning a completed [`RunSummary`] with `turns` set.
+while returning a failed [`RunSummary`] with `turns` set. Infrastructure,
+recording and event-delivery errors return `Err`, never a successful default.
+Repeated identical argument hashes are rejected and eventually circuit-break;
+the detector does not observe or prove unchanged filesystem state.
+
+`RunLimits` defaults to a 1800-second prompt wall budget, 1,000,000
+conservatively estimated request/reserve tokens, and 1024 response tokens.
+Allowed maxima are 24 hours, 1,000,000,000 estimated tokens, and 1,048,576
+response tokens; each must be positive. Every attempt, including retries,
+charges its complete estimated input plus reserve before I/O. Turn limits are
+1..=50. Provider attempt deadlines and backoff are clipped to the prompt
+deadline; cancellation is cooperative for injected transports/executors.
 
 ### `RunSummary`
 
@@ -351,28 +503,40 @@ struct RunSummary {
     tools_executed: u32,
     cancelled: bool,
     exhausted: bool,
+    budget_exhausted: bool,
+    failure: Option<String>,
 }
 ```
+
+`success()` requires an answer without failure/cancellation/exhaustion.
+`disposition()` returns `completed`, `failed`, `cancelled`, `turn_limit`,
+`budget_exhausted` or `no_work`. A previous prompt's answer is never reused.
 
 ### `ContextManager` (rolling context)
 
 `agent_runner::context::ContextManager` bounds the model context across a session
 so long-running work stays reliable. It estimates the token size of the next
-request (`estimate_messages`), reports when it crosses a warm-up threshold
+request (`estimate_request`), reports when it crosses a warm-up threshold
 (75% of the window by default), and compacts the oldest completed turns into a
 rolling summary while the most recent turns stay in full.
 
 - `ContextManager::new(limit_tokens, keep_full_turns)` — compaction starts at
-  75% of the window and always keeps the last `keep_full_turns` completed turns
-  in full.
+  75% of the window; recent complete groups are retained when they fit.
+- `ContextManager::prepare(&mut self, &mut ModelRequest, response_reserve) ->
+Result<Option<Compaction>>` is the authoritative pre-I/O path. It estimates
+  complete canonical serialization, sets the provider output bound, compacts
+  complete groups, and checks input plus reserve. System messages, the latest
+  user goal and the newest complete group are retained. Inconsistent
+  call/result identities and irreducible overflow are errors; failure changes
+  neither request nor rolling summary. Summaries are explicitly lossy and
+  non-authoritative. This is a byte-aware heuristic, not an exact tokenizer.
 - `ContextManager::compact(&mut self, messages, tool_definitions) ->
 (Vec<ModelMessage>, Compaction)` — keeps as many of the most recent turns in
   full as fit under the hard `limit_tokens`, rolling the rest into the summary.
   It keeps reducing how many recent turns stay full (compacting more) until the
   estimated context is under the limit, always keeping the single most recent
-  turn in full as a best effort. This guarantees the live context stays bounded
-  even when individual turns are large, so the session can run for long durations
-  without repeatedly sending requests the model rejects.
+  turn in full as a best effort. This older diagnostic API cannot reject
+  irreducible requests and is not the runner's sending path; use `prepare`.
 - `ContextManager::should_compact`, `utilization`, and `compaction_progress`
   drive the live stats and the compaction progress bar shown in the UI.
 
@@ -381,8 +545,8 @@ rolling summary while the most recent turns stay in full.
 - **Model transport.** The session and loop are transport-agnostic: they consume a
   `ModelTransport` from `agent_runtime` for streaming turns and never spawn or
   talk to a model directly.
-- **Executor.** Rendering only produces an argv; execution is handed to an
-  `Executor` trait, so the session, loop, and loop policy are unit-testable with a
+- **Executor.** The loop hands tool intents to `ToolExecutor`; the production
+  executor renders argv/payloads and supervises execution. Loop policy is unit-testable with a
   recording executor and never perform blocking subprocess I/O themselves.
 - **Sandbox runner.** Tool execution is delegated to the externally installed
   `kvist-sandbox-runner` subprocess (`--kvist-sandbox-request-v1`); `agent-runner`
@@ -455,8 +619,9 @@ agent-runner [OPTIONS] [PROMPT]
 
 Options:
   -c, --config <PATH>         Path to the TOML configuration (default: search
-                              $CONFIG_HOME/agent-runner/config.toml, then the
-                              working directory for kvist.toml-style config)
+                              ./agent-runner.toml, then the per-user
+                              agent-runner/config.toml, then XDG_CONFIG_DIRS
+                              (default /etc/xdg))
   -m, --model <ID>            Select a configured model id for this session
   -e, --effort <LEVEL>        Set the thinking effort for this session
       --cwd <PATH>            Set the working directory (must exist)
@@ -464,8 +629,15 @@ Options:
                               (generic, python, rust, javascript, go, c)
   --log-dir <PATH>            Directory for the session journal and transcript
   --context-limit <TOKENS>    Model context window in tokens (default 8192)
+  --response-reserve <TOKENS> Provider output cap (default 1024)
+  --max-run-secs <SECONDS>    Whole-prompt wall budget (default 1800)
+  --max-run-tokens <TOKENS>   Estimated attempt budget (default 1000000)
+  --headless <PROMPT>         Terminal-free, sandbox-only, required recording
+  --json                     Version-one ordered NDJSON (headless only)
   --no-logs                   Skip the durable session journal and transcript
   --list-models               Print the configured models and exit
+  --import-kvist              Print model entries imported from kvist.toml
+  --kvist-config <PATH>       Explicit import source (default ./kvist.toml)
       --allow-host-execution  Bypass the Bubblewrap sandbox and run the agent's
                               commands directly on the host. Never the default;
                               without it the agent is confined to the sandbox and
@@ -477,8 +649,7 @@ Options:
   -V, --version               Print version
 ```
 
-- With no interactive terminal on stdin, the tool prints an actionable error and
-  exits non-zero.
+- Interactive mode requires a terminal; otherwise use `--headless`.
 - A positional `PROMPT` starts the session and submits the first prompt; the
   session can continue with further input in the UI.
 - `--list-models` is non-interactive and exits zero.
@@ -488,29 +659,42 @@ Options:
   driving an unbounded autonomous loop under those privileges. `--host-turns`
   raises that cap (restricted to `1..=50`) and is only meaningful with
   `--allow-host-execution`; a cap outside the range is rejected before the UI
-  starts. Setting `--host-turns` without `--allow-host-execution` has no effect,
-  since sandboxed work is already multi-turn.
+  starts. `--host-turns` requires `--allow-host-execution`.
 - `--config`, `--model`, `--effort`, `--cwd`, `--profile` override configuration
   and are validated before the UI starts. A `--profile` name is one of
   `generic`, `python`, `rust`, `javascript`, `go`, `c`; selecting an unavailable
   profile (via `-p` or a setting of `on`) fails startup rather than advertising a
   tool the sandbox cannot run. `--log-dir`, `--context-limit`, and `--no-logs`
   configure the durable session record and the compaction window.
+- Headless mode rejects host/no-log flags and conflicting list/import modes.
+  Prompts must be nonblank and at most 64 KiB. Plain stdout contains only the
+  successful final answer; NDJSON ends with a run-summary disposition.
+  Interactive logs default to `.agent-runner/runs`; headless logs default to
+  `$XDG_STATE_HOME/agent-runner/runs` or `$HOME/.local/state/agent-runner/runs`.
+  Required logs must be private, non-linked and outside the writable workspace.
+  Plain answers/diagnostics visibly escape terminal controls except LF/tab;
+  JSON and private transcripts preserve original text. History reads reject
+  nonregular files and links in any path component; metadata and bounded reads
+  cap a file at 5 MiB, including concurrent growth. Directories over 4096 entries
+  and unusable entries generate diagnostics. Replay is lossy UTF-8 diagnostic
+  display, not executable resume or trusted task evidence.
 
 ## Behavioral guarantees
 
 - The loop is multi-turn: it repeats `next_request`, streams text, reasoning, and
   tool-intent events, executes each tool intent (bounded and cancellable) inside
-  the sandbox, folds results back, and stops on `FinishReason::Stop` or zero
-  pending tool intents, delivering the final assistant text as the session answer.
+  the sandbox, folds results back, and accepts only a validated normal final
+  answer. Tool proposals require `ToolCalls`; truncated, filtered, unknown,
+  inconsistent and duplicate-ID turns fail before execution.
 - A turn that hits a recoverable, temporal transport error is retried with capped
   exponential backoff and a per-turn deadline that grows with the attempt number
   and caps at the deadline times `max_attempts`; an exhausted budget is reported
   as `Event::Failed`, never hidden, and cancellation is never retried.
 - The model context stays bounded across long sessions: `ContextManager` compacts
   the oldest completed turns into a rolling summary (trimmed to `MAX_SUMMARY_CHARS`)
-  while always keeping the single most recent turn in full, so the live context
-  remains under the hard limit without losing the durable audit trail.
+  while retaining the current goal and newest complete group. Irreducible
+  overflow fails before I/O; records are bounded diagnostics, not a full audit
+  transcript or canonical task evidence.
 - The executor emits exactly one `SandboxRequest` per tool call and reports any
   deviation as an `Err` before spawning the runner.
 - The terminal UI never renders a line wider than its box: transcript text is
@@ -522,7 +706,7 @@ Options:
 
 ## Errors and failure semantics
 
-- `agent_runner::Error` (thiserror) and `agent_runner::Result<T>` carry an
+- `agent_runner::Error` and `agent_runner::Result<T>` carry an
   `exit_code() -> u8` and a `describe() -> String` that produce actionable,
   non-secret messages; formatting failures degrade gracefully and errors never
   unwrap their underlying source when printing.
@@ -540,7 +724,7 @@ Options:
 ## Security and authority
 
 The executor emits exactly one `SandboxRequest` per tool call, shaped as in
-`src/sandbox.rs`, matching `sandbox_runner/schema/kvist-sandbox-probe-v1.schema.json`
+`src/sandbox.rs`, matching `../sandbox_runner/schema/kvist-sandbox-request-v1.schema.json`
 and the runner's closed version-one protocol. Guarantees:
 
 - `phase = "authoring"`, `network.mode = "deny"`, no Cargo cache.
@@ -560,7 +744,7 @@ Any deviation is reported as an `Err` before spawning the runner.
 ## Compatibility and verification
 
 - The sandbox request matches the shared version-one `kvist_sandbox_runner::protocol`
-  wire shape and the closed version-one `kvist-sandbox-probe-v1.schema.json`, so the
+  wire shape and the closed version-one request schema (JSON Schema draft 2020-12), so the
   wire format stays identical to the runner's own statement of the contract.
 - `schema_version` is `1`; unknown top-level fields, unknown profile keys, and
   unrecognized settings fail at load. `deadline_secs` is bounded to `1..=600` and

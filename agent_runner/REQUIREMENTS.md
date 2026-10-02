@@ -13,10 +13,12 @@ can also be launched from Kvist.
 
 The person enters a natural-language prompt, selects a model and a thinking
 effort, and then follows along live as the agent reasons, decides what to do,
-runs tools, and reports results. Every tool the agent runs is executed inside
+runs tools, and reports results. By default every tool is executed inside
 the independently installed Bubblewrap sandbox, so the agent never asks the
 person for per-action permission: the available tools, the working directory,
 and the authority boundaries are declared once, up front, in configuration.
+The explicit interactive host opt-out is visibly unconfined and unavailable
+headlessly.
 
 ## Stakeholders and concerns
 
@@ -54,8 +56,9 @@ Successful use produces:
   advertises only when the interpreter is available inside the sandbox, and an
   explicitly requested or `on` profile that is unavailable fails startup rather
   than advertising a tool the sandbox cannot run;
-- enforced authority boundaries — writes stay within the working directory, and
-  the agent runs only in the sandbox, with process, output, and network limits;
+- enforced default authority boundaries — persisted writes stay within the
+  working directory, with sandbox process/output/network limits, and an honest
+  warning for the explicit interactive unconfined opt-out;
 - clear, actionable errors and structured logging instead of panics; and
 - a test suite that covers configuration, tool policy, sandbox request
   construction, and the agent loop with an injected transport.
@@ -69,8 +72,9 @@ Successful use produces:
   the sandbox runner and backend paths.
 - A model-agnostic agent loop that performs streaming turns and executes the
   tool intents the model proposes, feeding results back.
-- A small, robust set of tools mapped to sandbox-executed commands: a shell
-  tool, file read/write helpers, and a directory lister.
+- A small, robust set of sandbox-executed tools: shell, bounded/paginated file
+  reads, whole-file writes, exact preimage edits, listing, literal search and
+  file discovery.
 - Command policy enforcement (an allow-by-default shell with a safe denylist and
   language profiles that surface the relevant package and build tools).
 - Language tool-chain detection, configuration, and gating: advertise profiles
@@ -90,9 +94,8 @@ Successful use produces:
   network by contract; dependency acquisition is a separate sandbox phase and
   is planned behind an explicit configuration switch. Package managers are
   present and usable for offline and local operations.
-- Structured file-edit tools that parse and patch existing files token by token.
-  The shell tool plus atomic write cover this today; a merge-aware editor is a
-  later tool.
+- Fuzzy/merge-aware editing, automatic effect replay, remote credentials,
+  arbitrary plugins, parallel effectful tools, and automatic VCS promotion.
 - Multi-model concurrent sessions, remote model brokering, and any daemon.
 - Non-Linux targets and any cloud or credential requirement for core commands.
 
@@ -100,7 +103,9 @@ Successful use produces:
 
 - The tool MUST NOT ask the person for permission for individual tool actions.
   Authority is established once in configuration.
-- Every agent tool call MUST run inside the sandbox. It MUST NEVER fall back to
+- Every agent tool call MUST run inside the sandbox unless the person explicitly
+  selects the interactive host-execution opt-out. Headless mode forbids this
+  opt-out. The tool MUST NEVER fall back to
   unconstrained host execution when the sandbox is unavailable; it MUST fail
   closed with an actionable diagnostic.
 - The working directory and everything beneath it is writable by default.
@@ -108,8 +113,9 @@ Successful use produces:
   is built and, in any case, cannot succeed because the sandbox grants write
   authority only there.
 - Reading is intentionally lenient: within the sandbox the agent can read files
-  in the working directory and the read-only system layout; additional read
-  roots may be declared in configuration.
+  in the working directory and the read-only system layout. The executor may
+  supply exact read-only context files; general configurable read roots remain
+  unsupported.
 - Invalid state MUST be modeled out of existence with types. Recoverable
   failures (filesystem, parsing, subprocess, model transport) MUST use
   explicit errors, never unwrap/expect/panic.
@@ -169,3 +175,84 @@ Successful use produces:
   with backoff and completes when a later attempt finishes; each retry reports
   that it is in progress with its enlarged budget, and a failure that exhausts
   the retry budget is reported as a terminal failure without crashing.
+
+## Security-first runtime hardening
+
+This extension implements the P0/P1 recommendations in
+`../docs/agent-runtime/upstream-agent-comparison.md`. The user's improvement
+request authorizes these conservative changes; remote authority and automatic
+resume remain deliberately deferred. Advisory intent-review enforcement is not
+implemented and no acceptance receipt is claimed.
+
+### RUN-REQ-AUTHORITY
+
+This is an interactive workspace agent, not the engine's
+  protected-task broker. Sandboxed effects remain network-denied; host execution
+  remains an explicit interactive opt-out. Headless execution MUST reject host
+  opt-out and disabled recording. It MUST NOT authorize tasks, write engine
+  evidence, accept intent, or promote results.
+  The UI and model instructions MUST identify the actual execution scope.
+  Operational records MUST identify the scope, workspace, policy and limits
+  without claiming engine authorization.
+  Plain answers and human diagnostics MUST visibly escape terminal controls
+  other than LF/tab; JSON and private transcripts retain the original text.
+### RUN-REQ-CONTEXT
+
+Before every provider request, account for the complete
+  serialized canonical request, including system instructions and tool schemas,
+  with an explicit output-token reserve enforced at the provider. Estimates are
+  not tokenizer guarantees. Compact only complete tool-call/result groups;
+  preserve active user goals and system instructions. An irreducibly oversized
+  request MUST fail before provider I/O. Summaries are explicitly lossy,
+  non-authoritative history. Combined model-facing tool output MUST be bounded.
+### RUN-REQ-LIFECYCLE
+
+Recording MUST be fallible. A required dispatch record
+  MUST be synchronized before invoking an executor. Recording failure MUST stop
+  further effects. Final answer, failed, cancelled, exhausted, and budget-limited
+  runs MUST be distinguishable; a previous prompt's answer MUST NOT become a new
+  prompt's result. Interrupted dispatches have unknown effects, never replayable
+  effects. Journals are local operational records, not compliance certification.
+  Worker teardown MUST join even with retained prompt senders or a full event
+  queue. Collapsing reasoning MUST preserve all non-reasoning transcript rows.
+  History reads MUST reject links/nonregular files and bound bytes before
+  allocation, including growth after opening; unusable entries are logged.
+  Built-in tool executors MUST bound combined captured bytes and intermediate
+  buffering on every exit path. Stdin writes and post-exit drains MUST be
+  cancellation/deadline-aware. Reader ownership and process-group cleanup MUST
+  be explicit; retained output descriptors MUST fail instead of hanging or
+  returning success.
+### RUN-REQ-BUDGET
+
+One prompt deadline bounds model requests, retries, waits,
+  and cooperative tool execution. Retry waits MUST be cancellable. Identical
+  repeated action arguments MUST receive correction and eventually stop without silently
+  widening authority. Cancelled multi-call turns MUST retain valid paired
+  results for subsequent prompts. Injected turn limits MUST be in 1..=50.
+### RUN-REQ-TOOLS
+
+Provide bounded/paginated text reads, directory listing,
+  literal search and scoped file discovery, plus exact-single-occurrence edits
+  bound to an expected SHA-256 preimage. Preserve unrelated bytes, CRLF and
+  missing final newlines. Reject stale/ambiguous matches, malformed/unknown
+  arguments, traversal, and symbolic-link mutation paths. File effects run in a
+  small Rust helper through the same sandbox executor. Payload staging MUST be
+  host-owned, private, outside the writable workspace, unrelated to provider
+  call IDs, and cleaned on every return path.
+### RUN-REQ-HEADLESS
+
+Provide terminal-free execution over the same loop with
+  versioned NDJSON events, ordered sequence IDs, diagnostics on stderr, an
+  explicit final disposition and nonzero unsuccessful status. Required journal
+  files MUST be private, no-clobber and outside the sandbox writable scope.
+### RUN-REQ-PROVIDERS
+
+Preserve llama-server and Ollama. Honor output bounds in
+  both wire protocols. Test fragmented streaming tools, finish classification,
+  transport/cancellation failures, context rejection, and retry boundaries
+  deterministically. Keep live llama-server qualification explicit and opt-in.
+
+Acceptance requires tests before production changes, targeted formatting and
+lint/build gates, native isolated file-tool trials, opt-in llama-server trials,
+a separate security audit, and independently derived/source-blind review
+evidence. Unavailable isolation MUST be reported, never bypassed to pass a test.

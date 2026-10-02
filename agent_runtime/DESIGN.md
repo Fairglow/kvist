@@ -110,6 +110,33 @@ types. A requested reasoning effort fails before provider I/O when the
 selected command does not declare the placeholder; transport failure never
 triggers automatic replay.
 
+Finish parsing separates the providers' completion conventions. A common
+bounded parser preserves explicit reason spellings and maps missing or null
+input to the stable unknown sentinel. llama-server uses that parser without
+tool-presence inference; its SSE decoder retains the last explicit non-null
+reason, and `[DONE]` only satisfies stream framing. A stream without such a
+reason returns the same unknown sentinel as unary input. The Ollama-specific
+wrapper alone infers `Stop` or `ToolCalls` for absent/null native reasons and
+normal native stop. Other explicit reasons and malformed field failures pass
+through unchanged. Neither parsing path authorizes tools.
+
+The private streaming body callback reports whether decoding advanced
+generation, independently of public event delivery. Decoder progress includes
+nonempty text/reasoning and validated tool name/argument fragments; native
+Ollama tool records advance it without waiting for terminal intent events.
+The body watchdog shares this signal across Content-Length, close-delimited,
+and chunked framing. It disables the first-body I/O timer on body acquisition,
+starts cadence only on decoded progress, and leaves cadence unchanged for
+metadata, comments, empty deltas, and incomplete records. Chunk reads expose
+available bounded payload slices rather than waiting for a whole HTTP chunk,
+so generation records inside a slowly delivered chunk can advance the timer.
+Every read uses the earliest active caller, first-body, or cadence deadline;
+framing bytes and trailers are not generation progress.
+
+The optional canonical output-token bound is validated before connecting and
+translated into `max_tokens` (llama-server) or `options.num_predict` (Ollama).
+No provider capability fallback silently drops a supplied bound.
+
 An optional canonical JSON object schema is validated against a bounded common
 provider subset. Ollama sends it unchanged as `format`; for llama-server the
 adapter supplies a private typed `response_format.json_schema` extension with

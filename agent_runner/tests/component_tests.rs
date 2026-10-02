@@ -206,7 +206,18 @@ fn tool_intent(name: &str, arguments: serde_json::Value) -> ToolIntent {
 fn tool_definitions_have_stable_order_and_names() {
     let defs = registry().tool_definitions();
     let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
-    assert_eq!(names, ["shell", "read_file", "write_file", "list_dir"]);
+    assert_eq!(
+        names,
+        [
+            "shell",
+            "read_file",
+            "write_file",
+            "list_dir",
+            "find_files",
+            "search_files",
+            "edit_file"
+        ]
+    );
 }
 
 #[test]
@@ -263,16 +274,11 @@ fn write_file_inside_write_root_is_allowed() {
             &ExecContext::new("/tmp/work", "c"),
         )
         .expect("write inside root renders");
-    assert!(rendered.staged_write.is_some());
+    assert!(rendered.file_request.is_some());
 }
 
 #[test]
-fn write_file_stages_under_the_working_directory_not_the_root() {
-    // Regression: the host staging path reused the sandbox form (`/.agent-writes`,
-    // leading slash) joined onto the workdir, which `PathBuf::join` treats as
-    // absolute and replaces with the filesystem root, so staging failed with
-    // permission denied at `/`. The host path must stay relative so it joins
-    // under the working directory.
+fn write_file_rendering_does_not_allocate_model_named_staging_paths() {
     let reg = registry();
     let rendered = reg
         .render(
@@ -283,20 +289,16 @@ fn write_file_stages_under_the_working_directory_not_the_root() {
             &ExecContext::new("/tmp/work", "call-1"),
         )
         .expect("write inside root renders");
-    let staged = rendered.staged_write.expect("write stages a host file");
-    assert_eq!(
-        staged.host_path,
-        PathBuf::from("/tmp/work/.agent-writes/call-1"),
-        "host staging stays under the working directory"
+    assert!(
+        rendered.file_request.is_some(),
+        "content is a bounded native payload"
     );
     assert!(
-        staged.host_path.starts_with("/tmp/work"),
-        "host path is scoped to the workdir, not the filesystem root"
+        !rendered
+            .argv
+            .iter()
+            .any(|arg| arg.contains(".agent-writes") || arg.contains("call-1"))
     );
-    // The sandbox staging path is anchored under the configured write root
-    // (/workspace by default), so it resolves inside the bind-mounted write scope
-    // rather than at the sandbox filesystem root.
-    assert_eq!(staged.sandbox_path, "/workspace/.agent-writes/call-1");
 }
 
 #[test]
@@ -413,7 +415,7 @@ fn write_root_is_enforced_on_a_slash_boundary_for_custom_roots() {
             &ExecContext::new("/tmp/work", "c"),
         )
         .expect("/work/x is inside root /work");
-    assert!(accepted.staged_write.is_some());
+    assert!(accepted.file_request.is_some());
 }
 
 #[test]
@@ -641,7 +643,7 @@ fn build_request_rejects_read_root_inside_write_root() {
     let sb = fake_sandbox(&scope);
     let workdir = tempdir().expect("temp workdir");
     let read_root = workdir.path().join("context");
-    std::fs::create_dir_all(&read_root).expect("read root dir");
+    std::fs::write(&read_root, "context").expect("read root file");
     let argv: Vec<String> = shell_argv();
     let read_roots: Vec<PathBuf> = vec![read_root];
     let environment: BTreeMap<String, String> = BTreeMap::new();
@@ -651,7 +653,7 @@ fn build_request_rejects_read_root_inside_write_root() {
         &build(&argv, workdir.path(), &read_roots, environment, &policy),
     )
     .expect_err("overlapping read root must be rejected");
-    assert_sandbox_build_reason(&err, "read root");
+    assert_sandbox_build_reason(&err, "overlaps");
 }
 
 #[test]
@@ -668,7 +670,7 @@ fn build_request_rejects_read_root_equal_to_write_root() {
         &build(&argv, workdir.path(), &read_roots, environment, &policy),
     )
     .expect_err("a read root equal to the write root must be rejected");
-    assert_sandbox_build_reason(&err, "read root");
+    assert_sandbox_build_reason(&err, "regular");
 }
 
 #[test]

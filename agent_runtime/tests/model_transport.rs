@@ -1,13 +1,13 @@
 use std::{
     io::{Read, Write},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     sync::mpsc,
     thread,
     time::{Duration, Instant},
 };
 
 use agent_runtime::{
-    CancellationToken, DirectModelTransport, FinishReason, LocalModelProvider, ModelMessage,
+    CancellationToken, DirectModelTransport, Error, FinishReason, LocalModelProvider, ModelMessage,
     ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn, ReasoningEffort, ToolChoice,
     ToolDefinition,
 };
@@ -18,6 +18,39 @@ struct CapturedRequest {
     body: Value,
 }
 
+fn capture_request(stream: &mut TcpStream) -> CapturedRequest {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("set read timeout");
+    let mut request = Vec::new();
+    let header_end = loop {
+        let mut buffer = [0_u8; 1024];
+        let count = stream.read(&mut buffer).expect("read request");
+        assert!(count > 0, "request ended before headers");
+        request.extend_from_slice(&buffer[..count]);
+        if let Some(index) = request.windows(4).position(|value| value == b"\r\n\r\n") {
+            break index + 4;
+        }
+    };
+    let head = String::from_utf8(request[..header_end].to_vec()).expect("UTF-8 request head");
+    let content_length = head
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("Content-Length: ")
+                .and_then(|value| value.trim().parse::<usize>().ok())
+        })
+        .expect("content length");
+    while request.len() < header_end + content_length {
+        let mut buffer = [0_u8; 1024];
+        let count = stream.read(&mut buffer).expect("read request body");
+        assert!(count > 0, "request body ended early");
+        request.extend_from_slice(&buffer[..count]);
+    }
+    let body =
+        serde_json::from_slice(&request[header_end..header_end + content_length]).expect("JSON");
+    CapturedRequest { head, body }
+}
+
 fn serve_once(response_parts: Vec<Vec<u8>>) -> (String, mpsc::Receiver<CapturedRequest>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind fake provider");
     let address = listener.local_addr().expect("fake provider address");
@@ -25,37 +58,7 @@ fn serve_once(response_parts: Vec<Vec<u8>>) -> (String, mpsc::Receiver<CapturedR
 
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept request");
-        stream
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .expect("set read timeout");
-
-        let mut request = Vec::new();
-        let header_end = loop {
-            let mut buffer = [0_u8; 1024];
-            let count = stream.read(&mut buffer).expect("read request");
-            assert!(count > 0, "request ended before headers");
-            request.extend_from_slice(&buffer[..count]);
-            if let Some(index) = request.windows(4).position(|value| value == b"\r\n\r\n") {
-                break index + 4;
-            }
-        };
-        let head = String::from_utf8(request[..header_end].to_vec()).expect("UTF-8 request head");
-        let content_length = head
-            .lines()
-            .find_map(|line| {
-                line.strip_prefix("Content-Length: ")
-                    .and_then(|value| value.trim().parse::<usize>().ok())
-            })
-            .expect("content length");
-        while request.len() < header_end + content_length {
-            let mut buffer = [0_u8; 1024];
-            let count = stream.read(&mut buffer).expect("read request body");
-            assert!(count > 0, "request body ended early");
-            request.extend_from_slice(&buffer[..count]);
-        }
-        let body = serde_json::from_slice(&request[header_end..header_end + content_length])
-            .expect("JSON");
-        let _ = sender.send(CapturedRequest { head, body });
+        let _ = sender.send(capture_request(&mut stream));
 
         for part in response_parts {
             stream.write_all(&part).expect("write fake response");
@@ -65,6 +68,62 @@ fn serve_once(response_parts: Vec<Vec<u8>>) -> (String, mpsc::Receiver<CapturedR
     });
 
     (format!("http://{address}"), receiver)
+}
+
+#[derive(Clone, Copy)]
+enum FixtureFraming {
+    Length,
+    Chunked,
+    OneChunk,
+    Close,
+}
+
+fn serve_timed(
+    framing: FixtureFraming,
+    records: Vec<(Duration, String)>,
+) -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind timed provider");
+    let endpoint = format!(
+        "http://{}",
+        listener.local_addr().expect("provider address")
+    );
+    let worker = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("accept timed request");
+        let _ = capture_request(&mut stream);
+        let length: usize = records.iter().map(|(_, record)| record.len()).sum();
+        let framing_head = match framing {
+            FixtureFraming::Length => format!("Content-Length: {length}\r\n"),
+            FixtureFraming::Chunked | FixtureFraming::OneChunk => {
+                "Transfer-Encoding: chunked\r\n".to_owned()
+            }
+            FixtureFraming::Close => String::new(),
+        };
+        let mut head = format!("HTTP/1.1 200 OK\r\n{framing_head}Connection: close\r\n\r\n");
+        if matches!(framing, FixtureFraming::OneChunk) {
+            head.push_str(&format!("{length:x}\r\n"));
+        }
+        if stream.write_all(head.as_bytes()).is_err() {
+            return;
+        }
+        for (delay, record) in records {
+            thread::sleep(delay);
+            let part = if matches!(framing, FixtureFraming::Chunked) {
+                format!("{:x}\r\n{record}\r\n", record.len())
+            } else {
+                record
+            };
+            if stream.write_all(part.as_bytes()).is_err() {
+                return;
+            }
+        }
+        if matches!(framing, FixtureFraming::OneChunk) {
+            let _ = stream.write_all(b"\r\n");
+        }
+        if matches!(framing, FixtureFraming::Chunked | FixtureFraming::OneChunk) {
+            let _ = stream.write_all(b"0\r\n\r\n");
+        }
+    });
+    (endpoint, worker)
 }
 
 fn json_response(status: &str, value: Value) -> Vec<Vec<u8>> {
@@ -136,6 +195,347 @@ fn request(tool_choice: ToolChoice) -> ModelRequest {
         tool_choice,
         reasoning_effort: None,
         output_schema: None,
+        max_output_tokens: None,
+    }
+}
+
+fn request_with_output_bound(bound: Option<u32>) -> ModelRequest {
+    let mut value = serde_json::to_value(request(ToolChoice::None)).expect("serialize request");
+    if let Some(bound) = bound {
+        value["max_output_tokens"] = json!(bound);
+    }
+    serde_json::from_value(value).expect("deserialize bounded request")
+}
+
+fn text_response(provider: LocalModelProvider, streaming: bool) -> Vec<Vec<u8>> {
+    match (provider, streaming) {
+        (LocalModelProvider::Ollama, false) => json_response(
+            "200 OK",
+            json!({"message": {"content": "ok"}, "done": true, "done_reason": "stop"}),
+        ),
+        (LocalModelProvider::Ollama, true) => stream_response(
+            "application/x-ndjson",
+            &["{\"message\":{\"content\":\"ok\"},\"done\":true,\"done_reason\":\"stop\"}\n"],
+        ),
+        (LocalModelProvider::LlamaServer, false) => json_response(
+            "200 OK",
+            json!({"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}),
+        ),
+        (LocalModelProvider::LlamaServer, true) => stream_response(
+            "text/event-stream",
+            &[
+                "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n",
+                "data: [DONE]\n\n",
+            ],
+        ),
+    }
+}
+
+fn finish_response(
+    provider: LocalModelProvider,
+    streaming: bool,
+    reason: Option<Value>,
+    has_tools: bool,
+) -> Vec<Vec<u8>> {
+    let mut message = json!({"content": "answer"});
+    if has_tools {
+        let arguments = match provider {
+            LocalModelProvider::LlamaServer => json!("{}"),
+            LocalModelProvider::Ollama => json!({}),
+        };
+        message["tool_calls"] = json!([{
+            "index": 0,
+            "id": "call-1",
+            "type": "function",
+            "function": {"name": "workspace.read", "arguments": arguments}
+        }]);
+    }
+    match (provider, streaming) {
+        (LocalModelProvider::LlamaServer, false) => {
+            let mut choice = json!({"message": message});
+            if let Some(reason) = reason {
+                choice["finish_reason"] = reason;
+            }
+            json_response("200 OK", json!({"choices": [choice]}))
+        }
+        (LocalModelProvider::LlamaServer, true) => {
+            let mut final_choice = json!({"delta": {}});
+            if let Some(reason) = reason {
+                final_choice["finish_reason"] = reason;
+            }
+            let body = format!(
+                "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
+                json!({"choices": [{"delta": message, "finish_reason": null}]}),
+                json!({"choices": [final_choice]})
+            );
+            stream_response("text/event-stream", &[&body])
+        }
+        (LocalModelProvider::Ollama, false) => {
+            let mut root = json!({"message": message, "done": true});
+            if let Some(reason) = reason {
+                root["done_reason"] = reason;
+            }
+            json_response("200 OK", root)
+        }
+        (LocalModelProvider::Ollama, true) => {
+            let mut terminal = json!({"message": {}, "done": true});
+            if let Some(reason) = reason {
+                terminal["done_reason"] = reason;
+            }
+            let body = format!(
+                "{}\n{}\n",
+                json!({"message": message, "done": false}),
+                terminal
+            );
+            stream_response("application/x-ndjson", &[&body])
+        }
+    }
+}
+
+fn assert_llama_finish(streaming: bool, reason: Option<Value>, expected: FinishReason) {
+    for has_tools in [false, true] {
+        let (endpoint, _) = serve_once(finish_response(
+            LocalModelProvider::LlamaServer,
+            streaming,
+            reason.clone(),
+            has_tools,
+        ));
+        let transport = transport(LocalModelProvider::LlamaServer, &endpoint);
+        let cancellation = CancellationToken::new();
+        let turn = if streaming {
+            transport.stream(&request(ToolChoice::Auto), &cancellation, &mut |_| Ok(()))
+        } else {
+            transport.complete(&request(ToolChoice::Auto), &cancellation)
+        }
+        .expect("retain finish reason and tool intent for caller decision");
+        assert_eq!(turn.finish_reason, expected);
+        assert_eq!(turn.tool_intents.len(), usize::from(has_tools));
+    }
+}
+
+#[test]
+fn llama_server_unary_explicit_stop_with_tools_remains_stop() {
+    assert_llama_finish(false, Some(json!("stop")), FinishReason::Stop);
+}
+
+#[test]
+fn llama_server_stream_explicit_stop_with_tools_remains_stop() {
+    assert_llama_finish(true, Some(json!("stop")), FinishReason::Stop);
+}
+
+#[test]
+fn llama_server_unary_missing_or_null_finish_is_unknown_even_with_tools() {
+    for reason in [None, Some(Value::Null)] {
+        assert_llama_finish(false, reason, FinishReason::Other("unknown".to_owned()));
+    }
+}
+
+#[test]
+fn llama_server_stream_missing_or_null_finish_is_unknown_even_with_tools() {
+    for reason in [None, Some(Value::Null)] {
+        assert_llama_finish(true, reason, FinishReason::Other("unknown".to_owned()));
+    }
+}
+
+#[test]
+fn llama_server_stream_terminal_marker_alone_does_not_infer_stop() {
+    let (endpoint, _) = serve_once(stream_response("text/event-stream", &["data: [DONE]\n\n"]));
+    let turn = transport(LocalModelProvider::LlamaServer, &endpoint)
+        .stream(
+            &request(ToolChoice::None),
+            &CancellationToken::new(),
+            &mut |_| Ok(()),
+        )
+        .expect("retain unknown finish on an empty terminal stream");
+    assert_eq!(
+        turn.finish_reason,
+        FinishReason::Other("unknown".to_owned())
+    );
+}
+
+#[test]
+fn llama_server_stream_null_or_absent_deltas_do_not_erase_explicit_finish() {
+    let records = [
+        "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"length\"}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":null}]}\n\n",
+        "data: {\"choices\":[{\"delta\":{}}]}\n\n",
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":2,\"total_tokens\":3}}\n\n",
+        "data: [DONE]\n\n",
+    ];
+    let (endpoint, _) = serve_once(stream_response("text/event-stream", &records));
+    let turn = transport(LocalModelProvider::LlamaServer, &endpoint)
+        .stream(
+            &request(ToolChoice::None),
+            &CancellationToken::new(),
+            &mut |_| Ok(()),
+        )
+        .expect("retain explicit finish across metadata deltas");
+    assert_eq!(turn.finish_reason, FinishReason::Length);
+    assert_eq!(turn.usage.expect("terminal usage").total_tokens, 3);
+}
+
+#[test]
+fn both_providers_reject_malformed_finish_reasons() {
+    for provider in [LocalModelProvider::LlamaServer, LocalModelProvider::Ollama] {
+        for streaming in [false, true] {
+            for reason in [
+                json!(false),
+                json!(7),
+                json!({}),
+                json!([]),
+                json!("stop\n"),
+                json!("x".repeat(129)),
+            ] {
+                let (endpoint, _) = serve_once(vec![
+                    finish_response(provider, streaming, Some(reason), true).concat(),
+                ]);
+                let transport = transport(provider, &endpoint);
+                let cancellation = CancellationToken::new();
+                let mut events = Vec::new();
+                let error = if streaming {
+                    transport.stream(&request(ToolChoice::Auto), &cancellation, &mut |event| {
+                        events.push(event);
+                        Ok(())
+                    })
+                } else {
+                    transport.complete(&request(ToolChoice::Auto), &cancellation)
+                }
+                .expect_err("reject malformed finish reason");
+                assert!(matches!(error, Error::MalformedModelResponse { .. }));
+                assert!(
+                    events
+                        .iter()
+                        .all(|event| !matches!(event, ModelStreamEvent::ToolIntent(_)))
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn ollama_native_terminal_stop_or_absence_keeps_tool_call_convention() {
+    for streaming in [false, true] {
+        for reason in [None, Some(Value::Null), Some(json!("stop"))] {
+            for has_tools in [false, true] {
+                let (endpoint, _) = serve_once(finish_response(
+                    LocalModelProvider::Ollama,
+                    streaming,
+                    reason.clone(),
+                    has_tools,
+                ));
+                let transport = transport(LocalModelProvider::Ollama, &endpoint);
+                let cancellation = CancellationToken::new();
+                let turn = if streaming {
+                    transport.stream(&request(ToolChoice::Auto), &cancellation, &mut |_| Ok(()))
+                } else {
+                    transport.complete(&request(ToolChoice::Auto), &cancellation)
+                }
+                .expect("decode native Ollama completion convention");
+                let expected = if has_tools {
+                    FinishReason::ToolCalls
+                } else {
+                    FinishReason::Stop
+                };
+                assert_eq!(turn.finish_reason, expected);
+                assert_eq!(turn.tool_intents.len(), usize::from(has_tools));
+            }
+        }
+    }
+}
+
+#[test]
+fn model_request_output_bound_has_optional_canonical_wire_shape() {
+    let unbounded = request_with_output_bound(None);
+    let value = serde_json::to_value(&unbounded).expect("serialize unbounded request");
+    assert!(value.get("max_output_tokens").is_none());
+    for bound in [1, 128, 1_048_576] {
+        let bounded = request_with_output_bound(Some(bound));
+        assert_eq!(
+            serde_json::to_value(&bounded).expect("serialize bounded request")["max_output_tokens"],
+            bound
+        );
+    }
+    let mut value = serde_json::to_value(unbounded).expect("serialize request");
+    value["max_output_tokens"] = Value::Null;
+    let decoded: ModelRequest = serde_json::from_value(value).expect("decode null output bound");
+    assert!(
+        serde_json::to_value(decoded)
+            .expect("serialize absent output bound")
+            .get("max_output_tokens")
+            .is_none()
+    );
+}
+
+#[test]
+fn direct_transports_encode_output_bounds_and_preserve_absent_defaults() {
+    for provider in [LocalModelProvider::LlamaServer, LocalModelProvider::Ollama] {
+        for streaming in [false, true] {
+            for bound in [None, Some(1), Some(128), Some(1_048_576)] {
+                let (endpoint, captured) = serve_once(text_response(provider, streaming));
+                let transport = transport(provider, &endpoint);
+                let request = request_with_output_bound(bound);
+                let cancellation = CancellationToken::new();
+                let turn = if streaming {
+                    transport.stream(&request, &cancellation, &mut |_| Ok(()))
+                } else {
+                    transport.complete(&request, &cancellation)
+                }
+                .expect("complete output-bound fixture");
+                assert_eq!(turn.text, "ok");
+                let body = captured.recv().expect("captured request").body;
+                assert_eq!(body["stream"], streaming);
+                match (provider, bound) {
+                    (LocalModelProvider::LlamaServer, Some(bound)) => {
+                        assert_eq!(body["max_tokens"], bound);
+                        assert!(body.get("options").is_none());
+                    }
+                    (LocalModelProvider::Ollama, Some(bound)) => {
+                        assert_eq!(body["options"], json!({"num_predict": bound}));
+                        assert!(body.get("max_tokens").is_none());
+                    }
+                    (_, None) => {
+                        assert!(body.get("max_tokens").is_none());
+                        assert!(body.get("options").is_none());
+                    }
+                }
+                assert!(body.get("max_output_tokens").is_none());
+            }
+        }
+    }
+}
+
+#[test]
+fn invalid_output_bounds_fail_before_connect_for_both_providers() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind unused endpoint");
+    listener
+        .set_nonblocking(true)
+        .expect("nonblocking listener");
+    let endpoint = format!("http://{}", listener.local_addr().expect("local address"));
+    for provider in [LocalModelProvider::LlamaServer, LocalModelProvider::Ollama] {
+        let transport =
+            DirectModelTransport::new(provider, &endpoint, Duration::from_millis(100), 1024)
+                .expect("construct transport");
+        for bound in [0, 1_048_577, u32::MAX] {
+            for streaming in [false, true] {
+                let request = request_with_output_bound(Some(bound));
+                let cancellation = CancellationToken::new();
+                let error = if streaming {
+                    transport.stream(&request, &cancellation, &mut |_| Ok(()))
+                } else {
+                    transport.complete(&request, &cancellation)
+                }
+                .expect_err("reject invalid bound");
+                assert!(
+                    matches!(error, Error::InvalidModelRequest { .. }),
+                    "unexpected error: {error:?}"
+                );
+                assert!(error.to_string().contains("output token"));
+                assert!(matches!(
+                    listener.accept(),
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock
+                ));
+            }
+        }
     }
 }
 
@@ -475,6 +875,7 @@ fn ollama_unary_keeps_provider_reasoning_separate_from_answer_content() {
 #[test]
 fn llama_server_stream_assembles_text_and_fragmented_tool_arguments() {
     let records = [
+        "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"reasoning_content\":\"Check first.\"},\"finish_reason\":null}]}\n\n",
         "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"content\":\"Read\"},\"finish_reason\":null}]}\n\n",
         "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"content\":\"ing\",\"tool_calls\":[{\"index\":0,\"id\":\"call-1\",\"type\":\"function\",\"function\":{\"name\":\"workspace.read\",\"arguments\":\"{\\\"path\\\":\"}}]},\"finish_reason\":null}]}\n\n",
         "data: {\"id\":\"chatcmpl-stream\",\"model\":\"server-model\",\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"\\\"REQUIREMENTS.md\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\n",
@@ -496,6 +897,7 @@ fn llama_server_stream_assembles_text_and_fragmented_tool_arguments() {
         .expect("stream request");
 
     assert_eq!(turn.text, "Reading");
+    assert_eq!(turn.reasoning.as_deref(), Some("Check first."));
     assert_eq!(turn.finish_reason, FinishReason::ToolCalls);
     assert_eq!(
         turn.tool_intents[0].arguments,
@@ -504,6 +906,7 @@ fn llama_server_stream_assembles_text_and_fragmented_tool_arguments() {
     assert_eq!(
         events,
         [
+            ModelStreamEvent::ReasoningDelta("Check first.".to_owned()),
             ModelStreamEvent::TextDelta("Read".to_owned()),
             ModelStreamEvent::TextDelta("ing".to_owned()),
             ModelStreamEvent::ToolIntent(turn.tool_intents[0].clone()),
@@ -796,6 +1199,194 @@ fn preserves_explicit_length_finish_with_a_tool_call() {
 }
 
 #[test]
+fn both_providers_preserve_non_success_finishes_with_tool_intents() {
+    for provider in [LocalModelProvider::LlamaServer, LocalModelProvider::Ollama] {
+        for streaming in [false, true] {
+            for (reason, expected) in [
+                ("length", FinishReason::Length),
+                ("content_filter", FinishReason::ContentFilter),
+                (
+                    "provider_stopped",
+                    FinishReason::Other("provider_stopped".to_owned()),
+                ),
+            ] {
+                let calls = match provider {
+                    LocalModelProvider::LlamaServer => json!([{
+                        "index": 0,
+                        "id": "call-1",
+                        "type": "function",
+                        "function": {"name": "workspace.read", "arguments": "{\"path\":\"file\"}"}
+                    }]),
+                    LocalModelProvider::Ollama => json!([{
+                        "id": "call-1",
+                        "function": {"name": "workspace.read", "arguments": {"path": "file"}}
+                    }]),
+                };
+                let message = json!({"content": "partial", "tool_calls": calls});
+                let response = match (provider, streaming) {
+                    (LocalModelProvider::LlamaServer, false) => json_response(
+                        "200 OK",
+                        json!({"choices": [{"message": message, "finish_reason": reason}]}),
+                    ),
+                    (LocalModelProvider::LlamaServer, true) => {
+                        let record = format!(
+                            "data: {}\n\ndata: [DONE]\n\n",
+                            json!({"choices": [{"delta": message, "finish_reason": reason}]})
+                        );
+                        stream_response("text/event-stream", &[&record])
+                    }
+                    (LocalModelProvider::Ollama, false) => json_response(
+                        "200 OK",
+                        json!({"message": message, "done": true, "done_reason": reason}),
+                    ),
+                    (LocalModelProvider::Ollama, true) => {
+                        let record = format!(
+                            "{}\n",
+                            json!({"message": message, "done": true, "done_reason": reason})
+                        );
+                        stream_response("application/x-ndjson", &[&record])
+                    }
+                };
+                let (endpoint, _) = serve_once(response);
+                let transport = transport(provider, &endpoint);
+                let cancellation = CancellationToken::new();
+                let mut events = Vec::new();
+                let turn = if streaming {
+                    transport.stream(&request(ToolChoice::Auto), &cancellation, &mut |event| {
+                        events.push(event);
+                        Ok(())
+                    })
+                } else {
+                    transport.complete(&request(ToolChoice::Auto), &cancellation)
+                }
+                .expect("decode explicitly terminated turn");
+                assert_eq!(turn.finish_reason, expected);
+                assert_eq!(turn.tool_intents.len(), 1);
+                if streaming {
+                    assert_eq!(
+                        events,
+                        [
+                            ModelStreamEvent::TextDelta("partial".to_owned()),
+                            ModelStreamEvent::ToolIntent(turn.tool_intents[0].clone())
+                        ]
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn llama_server_stream_rejects_truncated_sse_and_provider_errors() {
+    for records in [
+        vec![
+            "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n",
+        ],
+        vec!["data: {\"choices\":["],
+        vec!["data: {\"error\":{\"message\":\"SENTINEL_PROVIDER_SECRET\"}}\n\n"],
+    ] {
+        let (endpoint, _) = serve_once(stream_response("text/event-stream", &records));
+        let error = transport(LocalModelProvider::LlamaServer, &endpoint)
+            .stream(
+                &request(ToolChoice::None),
+                &CancellationToken::new(),
+                &mut |_| Ok(()),
+            )
+            .expect_err("reject incomplete or failed provider stream");
+        assert!(matches!(error, Error::MalformedModelResponse { .. }));
+        assert!(!error.to_string().contains("SENTINEL_PROVIDER_SECRET"));
+        assert!(!format!("{error:?}").contains("SENTINEL_PROVIDER_SECRET"));
+    }
+}
+
+#[test]
+fn streaming_cancellation_after_a_delta_returns_no_terminal_turn() {
+    for provider in [LocalModelProvider::LlamaServer, LocalModelProvider::Ollama] {
+        let (endpoint, _) = serve_once(vec![text_response(provider, true).concat()]);
+        let cancellation = CancellationToken::new();
+        let mut events = Vec::new();
+        let error = transport(provider, &endpoint)
+            .stream(&request(ToolChoice::None), &cancellation, &mut |event| {
+                events.push(event);
+                cancellation.cancel();
+                Ok(())
+            })
+            .expect_err("reject cancellation during streaming delivery");
+        assert!(matches!(error, Error::ModelTransportCancelled));
+        assert_eq!(events, [ModelStreamEvent::TextDelta("ok".to_owned())]);
+    }
+}
+
+#[test]
+fn streams_reject_duplicate_call_ids_before_delivering_tool_intents() {
+    for provider in [LocalModelProvider::LlamaServer, LocalModelProvider::Ollama] {
+        let records = match provider {
+            LocalModelProvider::LlamaServer => vec![
+                "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"same\",\"function\":{\"name\":\"one\",\"arguments\":\"{}\"}},{\"index\":1,\"id\":\"same\",\"function\":{\"name\":\"two\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+                "data: [DONE]\n\n",
+            ],
+            LocalModelProvider::Ollama => vec![
+                "{\"message\":{\"tool_calls\":[{\"id\":\"same\",\"function\":{\"name\":\"one\",\"arguments\":{}}}]},\"done\":false}\n",
+                "{\"message\":{\"tool_calls\":[{\"id\":\"same\",\"function\":{\"name\":\"two\",\"arguments\":{}}}]},\"done\":true,\"done_reason\":\"stop\"}\n",
+            ],
+        };
+        let content_type = match provider {
+            LocalModelProvider::LlamaServer => "text/event-stream",
+            LocalModelProvider::Ollama => "application/x-ndjson",
+        };
+        let (endpoint, _) = serve_once(stream_response(content_type, &records));
+        let mut events = Vec::new();
+        let error = transport(provider, &endpoint)
+            .stream(
+                &request(ToolChoice::Auto),
+                &CancellationToken::new(),
+                &mut |event| {
+                    events.push(event);
+                    Ok(())
+                },
+            )
+            .expect_err("duplicate identities fail closed");
+        assert!(matches!(error, Error::DuplicateToolCall));
+        assert!(events.is_empty());
+    }
+}
+
+#[test]
+fn llama_server_stream_rejects_malformed_tool_deltas_without_repairing_them() {
+    for malformed_function in [
+        json!(false),
+        json!({"name": 7}),
+        json!({"arguments": {"path": "file"}}),
+    ] {
+        let first = format!(
+            "data: {}\n\n",
+            json!({"choices": [{"delta": {"tool_calls": [{
+                "index": 0, "id": "call-1", "function": malformed_function
+            }]}, "finish_reason": null}]})
+        );
+        let records = [
+            first.as_str(),
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"name\":\"workspace.read\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+            "data: [DONE]\n\n",
+        ];
+        let (endpoint, _) = serve_once(stream_response("text/event-stream", &records));
+        let mut events = Vec::new();
+        let error = transport(LocalModelProvider::LlamaServer, &endpoint)
+            .stream(
+                &request(ToolChoice::Auto),
+                &CancellationToken::new(),
+                &mut |event| {
+                    events.push(event);
+                    Ok(())
+                },
+            )
+            .expect_err("malformed deltas cannot be silently discarded");
+        assert!(matches!(error, Error::MalformedModelResponse { .. }));
+        assert!(events.is_empty());
+    }
+}
+
+#[test]
 fn cancellation_and_provider_errors_are_typed_and_redacted() {
     let cancellation = CancellationToken::new();
     cancellation.cancel();
@@ -1084,4 +1675,272 @@ fn inter_token_cadence_watchdog_aborts_hung_stream() {
         "error: {error}"
     );
     assert_eq!(events.len(), 1);
+}
+
+fn cadence_fixture(provider: LocalModelProvider, first_kind: &str) -> Vec<(Duration, String)> {
+    let message = match first_kind {
+        "reasoning" => json!({"reasoning_content": "thinking", "thinking": "thinking"}),
+        "tool" => match provider {
+            LocalModelProvider::LlamaServer => json!({"tool_calls": [{
+                "index": 0, "id": "call-1",
+                "function": {"name": "workspace.read", "arguments": "{"}
+            }]}),
+            LocalModelProvider::Ollama => json!({"tool_calls": [{
+                "id": "call-1", "function": {"name": "workspace.read", "arguments": {}}
+            }]}),
+        },
+        _ => json!({"content": "Hello"}),
+    };
+    let first = match provider {
+        LocalModelProvider::LlamaServer => {
+            format!("data: {}\n\n", json!({"choices": [{"delta": message}]}))
+        }
+        LocalModelProvider::Ollama => {
+            format!("{}\n", json!({"message": message, "done": false}))
+        }
+    };
+    let mut records = vec![(Duration::ZERO, first)];
+    for index in 0..18 {
+        let noise = match (provider, index % 4) {
+            (LocalModelProvider::LlamaServer, 0) => ": heartbeat\n\n",
+            (_, 1) => "\n",
+            (LocalModelProvider::LlamaServer, 2) => {
+                "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\n"
+            }
+            (LocalModelProvider::LlamaServer, _) => {
+                "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_content\":\"\",\"tool_calls\":[]}}]}\n\n"
+            }
+            (LocalModelProvider::Ollama, _) => {
+                "{\"message\":{\"content\":\"\",\"thinking\":\"\"},\"done\":false,\"eval_count\":1}\n"
+            }
+        };
+        records.push((Duration::from_millis(30), noise.to_owned()));
+    }
+    let last = match provider {
+        LocalModelProvider::LlamaServer if first_kind == "tool" => {
+            "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n"
+        }
+        LocalModelProvider::LlamaServer => {
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"
+        }
+        LocalModelProvider::Ollama => "{\"message\":{},\"done\":true,\"done_reason\":\"stop\"}\n",
+    };
+    records.push((Duration::ZERO, last.to_owned()));
+    records
+}
+
+fn assert_semantic_cadence(
+    provider: LocalModelProvider,
+    framing: FixtureFraming,
+    first_kind: &str,
+) {
+    let (endpoint, worker) = serve_timed(framing, cadence_fixture(provider, first_kind));
+    let error = transport(provider, &endpoint)
+        .with_cadence_timeout(Duration::from_millis(120))
+        .stream(
+            &request(ToolChoice::Auto),
+            &CancellationToken::new(),
+            &mut |_| Ok(()),
+        )
+        .expect_err("metadata cannot extend decoded generation cadence");
+    worker.join().expect("join heartbeat provider");
+    assert!(
+        matches!(error, Error::InterTokenCadenceTimedOut { .. }),
+        "{error:?}"
+    );
+}
+
+#[test]
+fn cadence_ignores_heartbeats_empty_control_and_usage_frames_in_every_framing() {
+    for provider in [LocalModelProvider::LlamaServer, LocalModelProvider::Ollama] {
+        for framing in [
+            FixtureFraming::Length,
+            FixtureFraming::Chunked,
+            FixtureFraming::OneChunk,
+            FixtureFraming::Close,
+        ] {
+            assert_semantic_cadence(provider, framing, "text");
+        }
+    }
+}
+
+#[test]
+fn reasoning_and_native_tool_progress_start_cadence_before_intent_delivery() {
+    for provider in [LocalModelProvider::LlamaServer, LocalModelProvider::Ollama] {
+        for first_kind in ["reasoning", "tool"] {
+            assert_semantic_cadence(provider, FixtureFraming::Chunked, first_kind);
+        }
+    }
+}
+
+#[test]
+fn cadence_does_not_start_on_slow_fragmented_initial_records() {
+    for provider in [LocalModelProvider::LlamaServer, LocalModelProvider::Ollama] {
+        for framing in [
+            FixtureFraming::Length,
+            FixtureFraming::Chunked,
+            FixtureFraming::OneChunk,
+            FixtureFraming::Close,
+        ] {
+            let mut records = cadence_fixture(provider, "text");
+            let first = records.remove(0).1;
+            let last = records.pop().expect("terminal record").1;
+            let split = first.len() / 3;
+            let (endpoint, worker) = serve_timed(
+                framing,
+                vec![
+                    (Duration::ZERO, first[..split].to_owned()),
+                    (
+                        Duration::from_millis(150),
+                        first[split..2 * split].to_owned(),
+                    ),
+                    (Duration::from_millis(150), first[2 * split..].to_owned()),
+                    (Duration::ZERO, last),
+                ],
+            );
+            let turn = transport(provider, &endpoint)
+                .with_cadence_timeout(Duration::from_millis(80))
+                .with_ttft_timeout(Duration::from_secs(1))
+                .stream(
+                    &request(ToolChoice::None),
+                    &CancellationToken::new(),
+                    &mut |_| Ok(()),
+                )
+                .expect("body fragments before decoded progress do not arm cadence");
+            worker.join().expect("join fragmented provider");
+            assert_eq!(turn.text, "Hello");
+        }
+    }
+}
+
+#[test]
+fn cadence_tracks_tool_fragments_and_reasoning_before_late_tool_events() {
+    for provider in [LocalModelProvider::LlamaServer, LocalModelProvider::Ollama] {
+        for framing in [
+            FixtureFraming::Length,
+            FixtureFraming::Chunked,
+            FixtureFraming::OneChunk,
+            FixtureFraming::Close,
+        ] {
+            let mut records = vec![(
+                Duration::ZERO,
+                cadence_fixture(provider, "text").remove(0).1,
+            )];
+            let reasoning = match provider {
+                LocalModelProvider::LlamaServer => {
+                    "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"working\"}}]}\n\n"
+                }
+                LocalModelProvider::Ollama => {
+                    "{\"message\":{\"thinking\":\"working\"},\"done\":false}\n"
+                }
+            };
+            records.push((Duration::from_millis(60), reasoning.to_owned()));
+            match provider {
+                LocalModelProvider::LlamaServer => {
+                    for function in [
+                        json!({"name": "workspace.", "arguments": "{"}),
+                        json!({"name": "read"}),
+                        json!({"arguments": "\"path\":"}),
+                        json!({"arguments": "\"file\"}"}),
+                    ] {
+                        records.push((
+                            Duration::from_millis(60),
+                            format!(
+                                "data: {}\n\n",
+                                json!({"choices": [{"delta": {"tool_calls": [{
+                                    "index": 0, "id": "call-1", "function": function
+                                }]}}]})
+                            ),
+                        ));
+                    }
+                    records.push((Duration::ZERO,
+                        "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\ndata: [DONE]\n\n".to_owned()));
+                }
+                LocalModelProvider::Ollama => {
+                    for index in 0..4 {
+                        records.push((Duration::from_millis(60), format!(
+                            "{}\n",
+                            json!({"message": {"tool_calls": [{
+                                "id": format!("call-{index}"),
+                                "function": {"name": "workspace.read", "arguments": {"path": "file"}}
+                            }]}, "done": false})
+                        )));
+                    }
+                    records.push((
+                        Duration::ZERO,
+                        "{\"message\":{},\"done\":true,\"done_reason\":\"stop\"}\n".to_owned(),
+                    ));
+                }
+            }
+            let (endpoint, worker) = serve_timed(framing, records);
+            let mut events = Vec::new();
+            let turn = transport(provider, &endpoint)
+                .with_cadence_timeout(Duration::from_millis(130))
+                .stream(
+                    &request(ToolChoice::Auto),
+                    &CancellationToken::new(),
+                    &mut |event| {
+                        events.push(event);
+                        Ok(())
+                    },
+                )
+                .expect("generation fragments refresh cadence before tool events");
+            worker.join().expect("join tool-fragment provider");
+            assert_eq!(turn.finish_reason, FinishReason::ToolCalls);
+            assert_eq!(turn.reasoning.as_deref(), Some("working"));
+            assert!(matches!(&events[2], ModelStreamEvent::ToolIntent(_)));
+            assert_eq!(
+                turn.tool_intents.len(),
+                if provider == LocalModelProvider::Ollama {
+                    4
+                } else {
+                    1
+                }
+            );
+        }
+    }
+}
+
+#[test]
+fn caller_deadline_and_cancellation_still_bound_heartbeat_streams() {
+    for cancel in [false, true] {
+        let provider = LocalModelProvider::LlamaServer;
+        let (endpoint, worker) =
+            serve_timed(FixtureFraming::Chunked, cadence_fixture(provider, "text"));
+        let cancellation = CancellationToken::new();
+        let (start_sender, start_receiver) = mpsc::channel();
+        let cancel_token = cancellation.clone();
+        let canceller = thread::spawn(move || {
+            start_receiver.recv().expect("first decoded event");
+            if cancel {
+                thread::sleep(Duration::from_millis(30));
+                cancel_token.cancel();
+            }
+        });
+        let mut start_sender = Some(start_sender);
+        let error = transport(provider, &endpoint)
+            .with_cadence_timeout(Duration::from_secs(1))
+            .stream_with_deadline(
+                &request(ToolChoice::None),
+                &cancellation,
+                &mut |_| {
+                    if let Some(sender) = start_sender.take() {
+                        sender.send(()).expect("notify cancellation worker");
+                    }
+                    Ok(())
+                },
+                Duration::from_millis(150),
+            )
+            .expect_err("caller authority still interrupts heartbeat streams");
+        worker.join().expect("join heartbeat provider");
+        canceller.join().expect("join cancellation worker");
+        assert!(
+            if cancel {
+                matches!(error, Error::ModelTransportCancelled)
+            } else {
+                matches!(error, Error::ModelTransportTimedOut)
+            },
+            "{error:?}"
+        );
+    }
 }

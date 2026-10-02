@@ -113,6 +113,28 @@ streamed text and structured tool-intent translation without executing tools.
 Endpoints, requests, responses, deadlines, cancellation, identities, usage,
 finish reason, and errors MUST remain explicit.
 
+llama-server finish reasons MUST NOT be inferred from tool-call presence or
+the streaming terminal marker. An explicit `stop` MUST remain `Stop` even
+when tool intents accompany it; a missing or null terminal reason MUST remain
+unknown rather than being promoted to successful text or tool completion.
+Malformed non-null finish reasons MUST fail explicitly. Native Ollama terminal
+tool calls MAY normalize a normal stop or absent reason to `ToolCalls`, but
+explicit length, content-filter, and unknown reasons MUST remain distinct.
+
+An enabled streaming cadence watchdog MUST start only after meaningful decoded
+generation progress and MUST reset only on nonempty text, provider-supplied
+reasoning, or native tool name/argument progress. HTTP framing, SSE comments,
+empty deltas, control fields, and usage records MUST NOT extend that watchdog.
+Tool fragments MUST count before complete tool intents are emitted. Header/slot
+allocation and first-body watchdogs MUST remain separate I/O stages; caller
+deadlines and cancellation MUST continue to bound every stage.
+
+An optional `ModelRequest.max_output_tokens` MUST be positive and bounded when
+present, MUST be honored as llama-server `max_tokens` and Ollama
+`options.num_predict`, and MUST not execute tools. Missing output bounds retain
+provider defaults. Qualifying fixtures MUST cover both protocols and reject
+invalid bounds before provider I/O.
+
 The direct transport MUST accept a bounded host-owned common JSON Schema
 2020-12 provider subset for provider-native structured output, MUST reject
 incompatible schema-and-tool requests before provider I/O rather than silently

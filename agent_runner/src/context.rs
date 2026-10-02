@@ -1,40 +1,88 @@
-//! Rolling context management for the agent loop.
+//! Deterministic, byte-aware context estimates and atomic request preflight.
 //!
-//! The model conversation grows by one turn every step. `ContextManager`
-//! estimates the token size of the conversation that will next be sent to the
-//! model, reports when it crosses a warm-up threshold, and compacts the oldest
-//! completed turns into a concise rolling summary while the most recent turns
-//! stay in full.
-//!
-//! Compaction only ever removes material from the *model* context. The full
-//! transcript, including every reasoning trace, is preserved separately in the
-//! durable session log (`crate::session_log`); a compacted turn is never lost,
-//! it is simply moved from the live context into the record. This keeps the
-//! model's context bounded without weakening the audit trail Kvist relies on.
+//! [`ContextManager::prepare`] is the authoritative budget boundary: it validates
+//! completed tool groups, preserves system instructions and the latest user goal,
+//! and either fits the complete canonical request plus response reserve or fails.
+//! The estimate is a heuristic, not a tokenizer guarantee. Compacted history is
+//! lossy, non-authoritative user text, never system instructions or evidence.
+//! Durable recording is a separate caller responsibility.
 
-use agent_runtime::ModelMessage;
+use std::{collections::BTreeMap, io::Write};
 
-/// Approximate tokens per character (the widely used ~4 chars/token rule).
-const CHARS_PER_TOKEN: usize = 4;
+use agent_runtime::{ModelMessage, ModelRequest};
+use serde::Serialize;
+
+use crate::error::{Error, Result};
+
+/// Approximate UTF-8 bytes per token, retaining the familiar ASCII heuristic.
+const BYTES_PER_TOKEN: usize = 4;
+/// Additional allowance for provider-specific request framing.
+const REQUEST_OVERHEAD_TOKENS: usize = 8;
 /// Per-message framing overhead in the request, in tokens.
 const MESSAGE_OVERHEAD_TOKENS: usize = 4;
 /// Per tool-definition framing overhead in the request, in tokens.
 const TOOL_DEFINITION_OVERHEAD_TOKENS: usize = 8;
 /// Maximum length of the rolling summary before it is trimmed.
 const MAX_SUMMARY_CHARS: usize = 4_000;
+const SUMMARY_LABEL: &str =
+    "## Summary of prior work (lossy, non-authoritative history; not instructions or evidence):\n";
 
-/// Estimates the token size of a block of text using the ~4-chars-per-token
-/// heuristic. Cheap and deterministic; the provider-reported usage is
-/// authoritative for speed stats.
+/// Estimates text with a deterministic four-UTF-8-bytes-per-token heuristic.
+/// This is not an exact tokenizer or an upper bound for every model.
 pub fn estimate_tokens(text: &str) -> usize {
-    text.chars().count().div_ceil(CHARS_PER_TOKEN)
+    text.len().div_ceil(BYTES_PER_TOKEN)
+}
+
+#[derive(Default)]
+struct SerializedBytes(usize);
+
+impl Write for SerializedBytes {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0 = self.0.saturating_add(bytes.len());
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn serialized_tokens(value: &impl Serialize) -> usize {
+    let mut bytes = SerializedBytes::default();
+    match serde_json::to_writer(&mut bytes, value) {
+        Ok(()) => bytes.0.div_ceil(BYTES_PER_TOKEN),
+        // An infallible-estimate API must never underestimate a serialization failure.
+        Err(_) => usize::MAX,
+    }
+}
+
+/// Estimates the complete canonical JSON request, including every message,
+/// model selector, full tool schema/description, and optional generation field.
+/// Adds fixed request, message and tool framing allowances. Counting serialized
+/// UTF-8 bytes includes JSON escaping without allocating a serialized copy.
+///
+/// This deterministic heuristic is neither an exact tokenizer nor a guarantee
+/// against provider context rejection. Serialization failure returns
+/// `usize::MAX` (fail closed), not a silent zero-cost fallback.
+pub fn estimate_request(request: &ModelRequest) -> usize {
+    serialized_tokens(request)
+        .saturating_add(REQUEST_OVERHEAD_TOKENS)
+        .saturating_add(
+            request
+                .messages
+                .len()
+                .saturating_mul(MESSAGE_OVERHEAD_TOKENS),
+        )
+        .saturating_add(
+            request
+                .tools
+                .len()
+                .saturating_mul(TOOL_DEFINITION_OVERHEAD_TOKENS),
+        )
 }
 
 fn estimate_intent_tokens(intent: &agent_runtime::ToolIntent) -> usize {
-    match serde_json::to_string(intent) {
-        Ok(json) => estimate_tokens(&json) + MESSAGE_OVERHEAD_TOKENS,
-        Err(_) => MESSAGE_OVERHEAD_TOKENS,
-    }
+    serialized_tokens(intent).saturating_add(MESSAGE_OVERHEAD_TOKENS)
 }
 
 fn message_tokens(message: &ModelMessage) -> usize {
@@ -44,7 +92,7 @@ fn message_tokens(message: &ModelMessage) -> usize {
         ModelMessage::Assistant { text, tool_intents } => {
             total += estimate_tokens(text);
             for intent in tool_intents {
-                total += estimate_intent_tokens(intent);
+                total = total.saturating_add(estimate_intent_tokens(intent));
             }
         }
         ModelMessage::ToolResult { content, .. } => total += estimate_tokens(content),
@@ -53,12 +101,14 @@ fn message_tokens(message: &ModelMessage) -> usize {
 }
 
 /// Estimates the token size of the message list that would be sent as one
-/// request, accounting for each message plus the always-present tool
-/// definitions. This is the figure `ContextManager` tracks against its limits.
+/// request, accounting for message content and a tool-count framing allowance.
+/// This legacy API cannot account for full schemas, system/model request fields,
+/// or a response reserve; use [`estimate_request`] and [`ContextManager::prepare`]
+/// for provider preflight.
 pub fn estimate_messages(messages: &[ModelMessage], tool_definitions: usize) -> usize {
-    let mut total = tool_definitions * TOOL_DEFINITION_OVERHEAD_TOKENS;
+    let mut total = tool_definitions.saturating_mul(TOOL_DEFINITION_OVERHEAD_TOKENS);
     for message in messages {
-        total += message_tokens(message);
+        total = total.saturating_add(message_tokens(message));
     }
     total
 }
@@ -75,7 +125,7 @@ fn utilization(used: usize, limit: usize) -> f64 {
 /// can be logged and shown as progress.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Compaction {
-    /// How many completed turns were rolled into the summary.
+    /// How many completed history units were rolled into the summary.
     pub compacted_turns: usize,
     /// Length of the rolling summary after compaction, in characters.
     pub summary_chars: usize,
@@ -92,7 +142,7 @@ pub struct ContextManager {
     limit_tokens: usize,
     /// Start compacting above this many tokens (75% of the limit by default).
     warmup_tokens: usize,
-    /// The most recent completed turns always stay in full, never summarized.
+    /// Preferred number of recent completed units kept in full, budget permitting.
     keep_full_turns: usize,
     /// Rolling summary text representing compacted history.
     summary: String,
@@ -101,21 +151,17 @@ pub struct ContextManager {
 impl ContextManager {
     /// Builds a manager for a model context window of `limit_tokens`.
     ///
-    /// Compaction begins at 75% of the window and always keeps the last
-    /// `keep_full_turns` completed turns in full.
+    /// Compaction begins near 75% of the window and prefers retaining the last
+    /// `keep_full_turns` completed units. Preflight may reduce this to the newest
+    /// safe unit. Invalid settings are reported by [`Self::prepare`].
     pub fn new(limit_tokens: usize, keep_full_turns: usize) -> Self {
-        let warmup_tokens = limit_tokens.div_ceil(4) * 3;
+        let warmup_tokens = limit_tokens.saturating_sub(limit_tokens.div_ceil(4));
         Self::with_bounds(limit_tokens, warmup_tokens, keep_full_turns)
     }
 
     /// Builds a manager with explicit warm-up and hard limits. Exposed for
     /// tests and for tuning on models with small windows.
     pub fn with_bounds(limit_tokens: usize, warmup_tokens: usize, keep_full_turns: usize) -> Self {
-        debug_assert!(limit_tokens > warmup_tokens, "limit must exceed warm-up");
-        debug_assert!(
-            keep_full_turns >= 1,
-            "at least one turn must be kept in full"
-        );
         ContextManager {
             limit_tokens,
             warmup_tokens,
@@ -134,7 +180,7 @@ impl ContextManager {
         self.warmup_tokens
     }
 
-    /// How many completed turns are always kept in full.
+    /// Preferred number of completed units kept in full when the budget permits.
     pub fn keep_full_turns(&self) -> usize {
         self.keep_full_turns
     }
@@ -164,8 +210,8 @@ impl ContextManager {
         }
     }
 
-    /// Whether the estimated `context_tokens` has reached or passed the limit,
-    /// meaning a request would be rejected by the model.
+    /// Whether an estimate has reached or passed the configured limit.
+    /// It does not predict exact provider tokenizer behavior.
     pub fn at_limit(&self, context_tokens: usize) -> bool {
         context_tokens >= self.limit_tokens
     }
@@ -174,6 +220,127 @@ impl ContextManager {
     /// (`0.0..=1.0+`), for the context bargraph.
     pub fn utilization(&self, context_tokens: usize) -> f64 {
         utilization(context_tokens, self.limit_tokens)
+    }
+
+    /// Validates and prepares every provider request, including the first.
+    ///
+    /// The enforced provider output bound is set to `response_reserve` on
+    /// success. Complete canonical request cost plus that reserve must fit at
+    /// or below the window. All system messages, the latest genuine user goal,
+    /// and the newest safe unit remain exact. Tool turns are atomic units ending
+    /// only after all calls have exactly one matching result. Malformed or
+    /// incomplete history is rejected even if no compaction is necessary.
+    ///
+    /// Older complete units become bounded lossy/non-authoritative user history.
+    /// The preferred retention may shrink to fit. The summary itself is trimmed
+    /// to actual available space, or omitted when even its label cannot fit.
+    /// Neither the request nor rolling summary changes on failure.
+    pub fn prepare(
+        &mut self,
+        request: &mut ModelRequest,
+        response_reserve: u32,
+    ) -> Result<Option<Compaction>> {
+        let reserve = response_reserve as usize;
+        if !(1..=1_048_576).contains(&response_reserve)
+            || self.limit_tokens <= reserve
+            || self.warmup_tokens >= self.limit_tokens
+            || self.keep_full_turns == 0
+        {
+            return Err(Error::Config {
+                path: None,
+                reason: "context limit must exceed response reserve (1..=1048576), warm-up must be below the limit, and at least one recent unit must be retained".into(),
+            });
+        }
+
+        let prior_envelope = summary_message(&self.summary);
+        let prior_summary_index = if self.summary.is_empty() {
+            None
+        } else {
+            request
+                .messages
+                .iter()
+                .position(|message| message == &prior_envelope)
+        };
+        let groups = complete_groups(&request.messages, prior_summary_index)?;
+        let active_goal = request
+            .messages
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(index, message)| {
+                (Some(index) != prior_summary_index && matches!(message, ModelMessage::User(_)))
+                    .then_some(index)
+            });
+        let newest = groups.len().checked_sub(1);
+        let eligible: Vec<usize> = groups
+            .iter()
+            .enumerate()
+            .filter_map(|(index, group)| {
+                (Some(index) != newest && !active_goal.is_some_and(|goal| group.contains(&goal)))
+                    .then_some(index)
+            })
+            .collect();
+        let mut candidate = request.clone();
+        candidate.max_output_tokens = Some(response_reserve);
+        let initial_used = estimate_request(&candidate).saturating_add(reserve);
+        if initial_used <= self.limit_tokens && !self.should_compact(initial_used) {
+            *request = candidate;
+            return Ok(None);
+        }
+
+        let preferred_start = groups.len().saturating_sub(self.keep_full_turns);
+        let mut compacted = eligible.partition_point(|index| *index < preferred_start);
+        let mut rolled = self.summary.clone();
+        for &index in &eligible[..compacted] {
+            append_group_summary(&mut rolled, &request.messages, &groups[index]);
+        }
+        let mut removed = vec![false; request.messages.len()];
+        if let Some(index) = prior_summary_index {
+            removed[index] = true;
+        }
+        for &index in &eligible[..compacted] {
+            for &message in &groups[index] {
+                removed[message] = true;
+            }
+        }
+
+        loop {
+            candidate.messages = request
+                .messages
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| !removed[*index])
+                .map(|(_, message)| message.clone())
+                .collect();
+            let irreducible_used = estimate_request(&candidate).saturating_add(reserve);
+            if irreducible_used <= self.limit_tokens {
+                if compacted == 0 && prior_summary_index.is_none() {
+                    *request = candidate;
+                    return Ok(None);
+                }
+                rolled = fit_summary(&mut candidate, &rolled, reserve, self.limit_tokens);
+                let changed = compacted > 0 || rolled != self.summary;
+                let compaction = changed.then_some(Compaction {
+                    compacted_turns: compacted,
+                    summary_chars: rolled.chars().count(),
+                });
+                self.summary = rolled;
+                *request = candidate;
+                return Ok(compaction);
+            }
+            let Some(&index) = eligible.get(compacted) else {
+                return Err(Error::ContextBudget {
+                    used: estimate_request(&candidate),
+                    limit: self.limit_tokens,
+                    reserve,
+                });
+            };
+            append_group_summary(&mut rolled, &request.messages, &groups[index]);
+            for &message in &groups[index] {
+                removed[message] = true;
+            }
+            compacted += 1;
+        }
     }
 
     /// Compacts `messages` (excluding the leading system message, which is
@@ -186,11 +353,10 @@ impl ContextManager {
     /// the hard `limit_tokens`, rolling the rest into the summary. It starts by
     /// keeping `keep_full_turns` recent turns in full, then keeps rolling more
     /// into the summary (reducing how many recent turns stay full) until the
-    /// estimated context is bounded. This guarantees a long-running session's
-    /// live context stays under the window even when individual turns are large;
+    /// estimated context is reduced. This legacy API has no full-request or
+    /// output-reserve budget guarantee and does not validate tool groups;
     /// the single most recent turn is always kept in full as a best effort,
-    /// since that is the only case where keeping it cannot bring the context
-    /// under the limit.
+    /// use [`Self::prepare`] as the authoritative provider preflight instead.
     pub fn compact(
         &mut self,
         messages: &[ModelMessage],
@@ -281,6 +447,134 @@ impl ContextManager {
     }
 }
 
+fn invalid_group(reason: &str) -> Error {
+    Error::InvalidModelTurn {
+        reason: reason.into(),
+    }
+}
+
+/// A group is either one user/text-only assistant or an assistant and all its
+/// paired results. Systems and the manager's own summary are never groups.
+fn complete_groups(
+    messages: &[ModelMessage],
+    prior_summary_index: Option<usize>,
+) -> Result<Vec<Vec<usize>>> {
+    let mut groups = Vec::new();
+    let mut pending = BTreeMap::new();
+    let mut current = Vec::new();
+    for (index, message) in messages.iter().enumerate() {
+        if Some(index) == prior_summary_index {
+            if !pending.is_empty() {
+                return Err(invalid_group(
+                    "history summary interrupts pending tool results",
+                ));
+            }
+            continue;
+        }
+        match message {
+            ModelMessage::ToolResult { call_id, name, .. } => {
+                let Some(expected_name) = pending.remove(call_id) else {
+                    return Err(invalid_group("orphan or duplicate tool result"));
+                };
+                if expected_name != name {
+                    return Err(invalid_group("tool result name does not match its call"));
+                }
+                current.push(index);
+                if pending.is_empty() {
+                    groups.push(std::mem::take(&mut current));
+                }
+            }
+            _ if !pending.is_empty() => {
+                return Err(invalid_group(
+                    "assistant tool calls lack a complete set of results",
+                ));
+            }
+            ModelMessage::System(_) => {}
+            ModelMessage::User(_) => groups.push(vec![index]),
+            ModelMessage::Assistant { tool_intents, .. } => {
+                for intent in tool_intents {
+                    if intent.id.is_empty() || intent.name.is_empty() {
+                        return Err(invalid_group(
+                            "tool call identity and name must be nonempty",
+                        ));
+                    }
+                    if pending.insert(&intent.id, &intent.name).is_some() {
+                        return Err(invalid_group(
+                            "duplicate tool call identity in an assistant turn",
+                        ));
+                    }
+                }
+                if pending.is_empty() {
+                    groups.push(vec![index]);
+                } else {
+                    current.push(index);
+                }
+            }
+        }
+    }
+    if !pending.is_empty() {
+        return Err(invalid_group(
+            "assistant tool calls lack a complete set of results",
+        ));
+    }
+    Ok(groups)
+}
+
+fn summary_message(summary: &str) -> ModelMessage {
+    ModelMessage::User(format!("{SUMMARY_LABEL}{summary}"))
+}
+
+fn append_group_summary(rolled: &mut String, messages: &[ModelMessage], group: &[usize]) {
+    let references: Vec<&ModelMessage> = group.iter().map(|&index| &messages[index]).collect();
+    let line = turn_summary(&references);
+    if !line.is_empty() {
+        if !rolled.is_empty() {
+            rolled.push('\n');
+        }
+        rolled.push_str(&line);
+        *rolled = bounded_summary(&[std::mem::take(rolled)]);
+    }
+}
+
+/// Keep the newest summary suffix that actually fits the serialized request.
+/// The label's own cost is included; zero spare space permits zero history.
+fn fit_summary(request: &mut ModelRequest, summary: &str, reserve: usize, limit: usize) -> String {
+    if summary.is_empty() {
+        return String::new();
+    }
+    let insertion = request
+        .messages
+        .iter()
+        .position(|message| !matches!(message, ModelMessage::System(_)))
+        .unwrap_or(request.messages.len());
+    request.messages.insert(insertion, summary_message(summary));
+    if estimate_request(request).saturating_add(reserve) <= limit {
+        return summary.into();
+    }
+
+    let chars: Vec<char> = summary.chars().collect();
+    let mut low = 0;
+    let mut high = chars.len();
+    while low < high {
+        let length = low + (high - low).div_ceil(2);
+        let suffix: String = chars[chars.len() - length..].iter().collect();
+        request.messages[insertion] = summary_message(&suffix);
+        if estimate_request(request).saturating_add(reserve) <= limit {
+            low = length;
+        } else {
+            high = length - 1;
+        }
+    }
+    if low == 0 {
+        request.messages.remove(insertion);
+        String::new()
+    } else {
+        let suffix: String = chars[chars.len() - low..].iter().collect();
+        request.messages[insertion] = summary_message(&suffix);
+        suffix
+    }
+}
+
 /// Joins accumulated summary lines (oldest first) and trims the result to
 /// `MAX_SUMMARY_CHARS`, keeping the most recent content so the rolling summary
 /// never grows past its bound.
@@ -289,7 +583,6 @@ fn bounded_summary(parts: &[String]) -> String {
     if joined.chars().count() > MAX_SUMMARY_CHARS {
         let trim = joined.chars().count() - MAX_SUMMARY_CHARS;
         joined = joined.chars().skip(trim).collect();
-        joined.push('\u{2026}');
     }
     joined
 }
@@ -359,8 +652,9 @@ fn turn_summary(segment: &[&ModelMessage]) -> String {
                 }
                 for intent in tool_intents {
                     line.push_str(&format!(" ran {}(=)", intent.name));
-                    if let Ok(json) = serde_json::to_string(&intent.arguments) {
-                        line.push_str(&truncate(&json, 100));
+                    match serde_json::to_string(&intent.arguments) {
+                        Ok(json) => line.push_str(&truncate(&json, 100)),
+                        Err(_) => line.push_str(" [arguments could not be serialized]"),
                     }
                 }
             }

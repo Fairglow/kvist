@@ -1,26 +1,47 @@
 //! The worker thread that runs a session loop off the UI thread.
 //!
 //! The model transport and sandbox executor are blocking, so the loop runs on a
-//! detached thread and pushes [`Event`]s over a bounded channel. The UI owns the
+//! owned thread and pushes [`Event`]s over a bounded channel. The UI owns the
 //! channel receiver and renders each event. Cancellation flows from a shared
 //! [`CancellationToken`], and new prompts flow from the UI over a prompt channel.
 
 use std::sync::mpsc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use agent_runtime::{CancellationToken, ModelTransport};
 
 use crate::context::ContextManager;
 use crate::error::{Error, Result};
 use crate::retry::RetryPolicy;
-use crate::session::{AgentRunner, AgentSession, Event, EventSink, Recorder, ToolExecutor};
+use crate::session::{
+    AgentRunner, AgentSession, Event, EventSink, Recorder, RunLimits, ToolExecutor,
+};
 
 /// Receives [`Event`]s from the worker; implements [`EventSink`].
-struct ChannelSink(mpsc::SyncSender<Event>);
+struct ChannelSink {
+    sender: mpsc::SyncSender<Event>,
+    shutdown: Arc<AtomicBool>,
+}
 
 impl EventSink for ChannelSink {
     fn send(&self, event: Event) -> Result<()> {
-        self.0.send(event).map_err(|_| Error::ChannelClosed)
+        let mut pending = event;
+        loop {
+            if self.shutdown.load(Ordering::SeqCst) {
+                return Err(Error::ChannelClosed);
+            }
+            match self.sender.try_send(pending) {
+                Ok(()) => return Ok(()),
+                Err(mpsc::TrySendError::Disconnected(_)) => return Err(Error::ChannelClosed),
+                Err(mpsc::TrySendError::Full(event)) => pending = event,
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 }
 
@@ -28,6 +49,7 @@ impl EventSink for ChannelSink {
 pub struct SessionHandle {
     cancellation: CancellationToken,
     thread: Option<JoinHandle<()>>,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl SessionHandle {
@@ -36,18 +58,23 @@ impl SessionHandle {
         self.cancellation.cancel();
     }
 
-    /// Reports whether a turn is still running.
+    /// Reports whether the owned worker is alive (including idle prompt waits).
     #[allow(dead_code)]
     pub fn is_running(&self) -> bool {
-        self.thread.is_some()
+        self.thread
+            .as_ref()
+            .is_some_and(|thread| !thread.is_finished())
     }
 }
 
 impl Drop for SessionHandle {
     fn drop(&mut self) {
         self.cancel();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+        self.shutdown.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take()
+            && thread.join().is_err()
+        {
+            tracing::error!("session worker failed");
         }
     }
 }
@@ -63,6 +90,7 @@ impl Drop for SessionHandle {
 /// the loop stops. A value of one yields a single-shot prompt (the model takes
 /// one turn, its tools run, and control returns); a larger value permits the
 /// autonomous multi-turn loop that a caller opts into explicitly.
+#[allow(clippy::too_many_arguments)]
 pub fn start<M, E>(
     mut session: AgentSession,
     transport: M,
@@ -71,7 +99,8 @@ pub fn start<M, E>(
     mut recorder: Option<Box<dyn Recorder>>,
     retry: RetryPolicy,
     max_turns: u32,
-) -> (SessionHandle, mpsc::Receiver<Event>, mpsc::Sender<String>)
+    limits: RunLimits,
+) -> Result<(SessionHandle, mpsc::Receiver<Event>, mpsc::Sender<String>)>
 where
     M: ModelTransport + Send + 'static,
     E: ToolExecutor + Send + 'static,
@@ -80,46 +109,70 @@ where
     let (tx, rx) = mpsc::sync_channel(128);
     let cancellation = CancellationToken::new();
     let handle_cancellation = cancellation.clone();
-    let thread = thread::spawn(move || {
-        let sink = ChannelSink(tx);
-        // The worker stays alive across turns; it exits only when every prompt
-        // sender is dropped. `AgentRunner::run` records each turn's session
-        // boundary in the durable recorder, so the worker does not manage the
-        // record lifecycle itself. Cancellation re-arms the token after each
-        // turn so a cancelled turn does not end the session.
-        while let Some(text) = wait_for_prompt(&prompt_rx) {
-            session.push_user(text);
-            let runner = AgentRunner::with_retry(max_turns, retry);
-            // Borrow the recorder only for this run; the borrow ends before the
-            // next iteration, and each run starts and finishes its own record.
-            let _ = runner
-                .run(
-                    &mut session,
-                    &transport,
-                    &executor,
-                    &sink,
-                    &cancellation,
-                    &mut context,
-                    borrow_recorder(&mut recorder),
-                )
-                .unwrap_or_else(|_| crate::session::RunSummary::default());
-            cancellation.reset();
-        }
-    });
-    (
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let worker_shutdown = Arc::clone(&shutdown);
+    let thread = thread::Builder::new()
+        .name("agent-session".into())
+        .spawn(move || {
+            let sink = ChannelSink {
+                sender: tx,
+                shutdown: Arc::clone(&worker_shutdown),
+            };
+            // The worker stays alive until shutdown or prompt disconnection.
+            // `AgentRunner::run` records each prompt's session
+            // boundary in the durable recorder, so the worker does not manage the
+            // record lifecycle itself. Cancellation re-arms the token after each
+            // turn so a cancelled turn does not end the session.
+            while let Some(text) = wait_for_prompt(&prompt_rx, &worker_shutdown) {
+                session.push_user(text);
+                let runner = AgentRunner::with_retry(max_turns, retry);
+                // Borrow the recorder only for this run; the borrow ends before the
+                // next iteration, and each run starts and finishes its own record.
+                let result = runner.with_limits(limits).and_then(|runner| {
+                    runner.run(
+                        &mut session,
+                        &transport,
+                        &executor,
+                        &sink,
+                        &cancellation,
+                        &mut context,
+                        borrow_recorder(&mut recorder),
+                    )
+                });
+                cancellation.reset();
+                if let Err(error) = result {
+                    if !worker_shutdown.load(Ordering::SeqCst)
+                        && let Err(send_error) = sink.send(Event::Failed(error.describe()))
+                    {
+                        tracing::debug!(%send_error, "session event receiver closed");
+                    }
+                    // A failed recorder or broken channel must not drive later effects.
+                    break;
+                }
+            }
+        })?;
+    Ok((
         SessionHandle {
             cancellation: handle_cancellation,
             thread: Some(thread),
+            shutdown,
         },
         rx,
         prompt_tx,
-    )
+    ))
 }
 
 /// Blocks until the next prompt arrives or every prompt sender is dropped.
 /// Returns `None` when the channel closes, which ends the worker.
-fn wait_for_prompt(rx: &mpsc::Receiver<String>) -> Option<String> {
-    rx.recv().ok()
+fn wait_for_prompt(rx: &mpsc::Receiver<String>, shutdown: &AtomicBool) -> Option<String> {
+    while !shutdown.load(Ordering::SeqCst) {
+        match rx.recv_timeout(Duration::from_millis(25)) {
+            Ok(prompt) => return Some(prompt),
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
+    }
+    None
 }
 
 /// Reborrow the recorder as `Option<&mut dyn Recorder>` for a single call.
@@ -140,7 +193,23 @@ pub fn system_prompt(write_root: &str) -> String {
     format!(
         "You are a coding agent running inside a sandbox. The working directory is mounted at {write_root} \
          and is the only place you may write. You can read files under {write_root} and the read-only system \
-         layout. Prefer small, reversible steps. When editing files, write complete files. State what you did."
+         layout. This workspace shell is NOT Kvist's protected task broker and cannot accept intent, \
+         approve tasks, mint canonical evidence or promote output. Network is denied for tools. \
+         Prefer bounded reads/searches and exact edit_file with the SHA-256 returned by read_file. \
+         Tools return process status; check failures. Prefer small, reversible steps. State what you did."
+    )
+}
+
+/// Describes the explicit interactive host opt-out without claiming confinement.
+pub fn host_system_prompt(write_root: &str, workdir: &std::path::Path) -> String {
+    format!(
+        "You are a coding agent in explicit HOST UNCONFINED execution mode. Shell commands run with \
+         real host privileges from {}. Host writes and network are NOT sandbox constrained. \
+         File-tool paths use {write_root}, mapped to that working directory. \
+         This workspace shell is NOT Kvist's protected task broker and cannot accept intent, \
+         approve tasks, mint canonical evidence or promote output. Prefer bounded reads and \
+         exact preimage-bound edits. Check process status and state what you did.",
+        workdir.display()
     )
 }
 
@@ -238,7 +307,9 @@ mod tests {
             None,
             RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
             1,
-        );
+            RunLimits::default(),
+        )
+        .expect("start worker");
         drop(prompt_tx);
 
         // join() (inside SessionHandle::drop) must return promptly. Run it on a
@@ -256,5 +327,99 @@ mod tests {
                 panic!("worker did not exit after the prompt channel closed: join hung")
             }
         }
+    }
+
+    #[test]
+    fn worker_drop_joins_with_a_retained_prompt_sender() {
+        let (handle, rx, prompt_tx) = start(
+            test_session(),
+            NoopTransport,
+            NoopExecutor,
+            ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+            RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
+            1,
+            RunLimits::default(),
+        )
+        .unwrap();
+        let (done_tx, done_rx) = mpsc::channel();
+        thread::spawn(move || {
+            drop(handle);
+            done_tx.send(()).unwrap();
+        });
+        done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("join must not depend on closing the prompt sender");
+        assert!(prompt_tx.send("after shutdown".into()).is_err());
+        drop(rx);
+    }
+
+    struct FloodTransport(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl ModelTransport for FloodTransport {
+        fn complete(
+            &self,
+            _: &ModelRequest,
+            _: &CancellationToken,
+        ) -> agent_runtime::Result<ModelTurn> {
+            Err(AgentError::ModelTransportCancelled)
+        }
+        fn stream(
+            &self,
+            _: &ModelRequest,
+            _: &CancellationToken,
+            emit: &mut dyn FnMut(ModelStreamEvent) -> agent_runtime::Result<()>,
+        ) -> agent_runtime::Result<ModelTurn> {
+            for index in 1..=1000 {
+                self.0.store(index, Ordering::SeqCst);
+                emit(ModelStreamEvent::TextDelta("provisional".into()))?;
+            }
+            Err(AgentError::ModelTransportCancelled)
+        }
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(30)
+        }
+    }
+
+    #[test]
+    fn worker_drop_joins_when_the_event_queue_is_full() {
+        let attempted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (handle, rx, prompt_tx) = start(
+            test_session(),
+            FloodTransport(Arc::clone(&attempted)),
+            NoopExecutor,
+            ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+            RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
+            1,
+            RunLimits::default(),
+        )
+        .unwrap();
+        prompt_tx.send("flood".into()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while attempted.load(Ordering::SeqCst) < 127 && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            attempted.load(Ordering::SeqCst) >= 127,
+            "fill the 128-slot queue before teardown"
+        );
+        let (done_tx, done_rx) = mpsc::channel();
+        thread::spawn(move || {
+            drop(handle);
+            done_tx.send(()).unwrap();
+        });
+        done_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("backpressure must not prevent join");
+        drop((rx, prompt_tx));
+    }
+
+    #[test]
+    fn host_prompt_does_not_claim_sandbox_confinement() {
+        let prompt = host_system_prompt("/workspace", std::path::Path::new("/tmp/project"));
+        assert!(prompt.contains("HOST UNCONFINED") && prompt.contains("/tmp/project"));
+        assert!(prompt.contains("NOT sandbox constrained"));
+        assert!(!prompt.contains("running inside a sandbox"));
     }
 }

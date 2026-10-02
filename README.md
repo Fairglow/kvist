@@ -41,6 +41,13 @@ unrestricted autonomy. See [Why Kvist](docs/why-kvist.md) for a grounded
 comparison with coding agents, specification kits, agent frameworks,
 sandboxes, and governance tools.
 
+For a source-backed assessment of what `agent_runner` can reuse or learn from
+Goose, OpenCode, Codex, and other runtimes, see the
+[upstream agent comparison](docs/agent-runtime/upstream-agent-comparison.md).
+The [security-first runner guide](docs/agent-runtime/runner-hardening.md)
+documents the implemented improvements, native-helper installation, headless
+llama-server usage, authority limits and independent qualification record.
+
 ## CLI contract
 
 Commands resolve their context from the working directory: the project root

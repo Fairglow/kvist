@@ -136,7 +136,82 @@ pub fn render_document_styles(
         renderer.handle_event(event);
     }
     renderer.flush_current();
-    renderer.out
+    renderer
+        .out
+        .into_iter()
+        .flat_map(|rendered| {
+            wrap_styled_line(rendered.line, width)
+                .into_iter()
+                .map(move |line| RenderedLine {
+                    line,
+                    is_code: rendered.is_code,
+                })
+        })
+        .collect()
+}
+
+pub(crate) fn split_cell_chunks(text: &str, width: usize) -> Vec<String> {
+    wrap_styled_line(Line::from(text.to_owned()), width.max(1))
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect()
+}
+
+fn wrap_styled_line(line: Line<'static>, width: usize) -> Vec<Line<'static>> {
+    wrap_styled_line_with_prefix(line, width, &[])
+}
+
+fn wrap_styled_line_with_prefix(
+    line: Line<'static>,
+    width: usize,
+    prefix: &[Span<'static>],
+) -> Vec<Line<'static>> {
+    if line.width() <= width {
+        return vec![line];
+    }
+    let mut rows = Vec::new();
+    let mut current = Line::default().style(line.style);
+    let prefix_width: usize = prefix.iter().map(Span::width).sum();
+    let mut cells = 0;
+    for grapheme in line.styled_graphemes(line.style) {
+        let next_cells = Span::raw(grapheme.symbol).width();
+        if !current.spans.is_empty() && cells + next_cells > width {
+            rows.push(std::mem::replace(
+                &mut current,
+                Line::from(prefix.to_vec()).style(line.style),
+            ));
+            cells = prefix_width;
+        }
+        if let Some(last) = current.spans.last_mut()
+            && last.style == grapheme.style
+        {
+            last.content.to_mut().push_str(grapheme.symbol);
+        } else {
+            current
+                .spans
+                .push(Span::styled(grapheme.symbol.to_owned(), grapheme.style));
+        }
+        cells += next_cells;
+    }
+    if !current.spans.is_empty() {
+        rows.push(current);
+    }
+    rows
+}
+
+fn cell_prefix(text: &str, width: usize) -> String {
+    let span = Span::raw(text);
+    let mut cells = 0;
+    let mut prefix = String::new();
+    for grapheme in span.styled_graphemes(RStyle::default()) {
+        let next_cells = Span::raw(grapheme.symbol).width();
+        if cells + next_cells > width {
+            break;
+        }
+        cells += next_cells;
+        prefix.push_str(grapheme.symbol);
+    }
+    prefix
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -543,26 +618,34 @@ impl<'a> Render<'a> {
                 is_code: true,
             });
         }
-        let area = self.content_width().saturating_sub(2).max(1);
         let mut sources: Vec<&str> = code.pending.split('\n').collect();
         if sources.last().is_some_and(|s| s.is_empty()) {
             sources.pop();
         }
         for source in sources {
+            let indentation = source.len() - source.trim_start_matches(char::is_whitespace).len();
+            let prefix = vec![Span::styled(
+                source[..indentation].to_owned(),
+                RStyle::default().bg(bg),
+            )];
             let ranges = code
                 .hl
                 .highlight_line(source, self.ss)
                 .unwrap_or_else(|_| vec![(SStyle::default(), source)]);
-            let spans = clip_ranges(ranges, area, bg);
+            let spans = ranges
+                .into_iter()
+                .map(|(style, text)| Span::styled(text.to_owned(), syntect_style(style, bg)));
             let mut line = Line::from(vec![
                 Span::styled(GUTTER, self.styles.code_gutter),
                 Span::styled(" ", self.styles.code_gutter),
             ]);
             line.spans.extend(spans);
-            self.emit(RenderedLine {
-                line,
-                is_code: true,
-            });
+            for line in wrap_styled_line_with_prefix(line, self.content_width(), &prefix) {
+                self.emit(RenderedLine {
+                    line,
+                    is_code: true,
+                });
+            }
         }
     }
 
@@ -619,12 +702,12 @@ impl<'a> Render<'a> {
             .map(|c| {
                 header
                     .get(c)
-                    .map(|cells| cells.chars().count())
+                    .map(|cells| Span::raw(cells).width())
                     .unwrap_or(0)
                     .max(
                         rows.iter()
                             .filter_map(|r| r.get(c))
-                            .map(|c| c.chars().count())
+                            .map(|c| Span::raw(c).width())
                             .max()
                             .unwrap_or(0),
                     )
@@ -639,9 +722,7 @@ impl<'a> Render<'a> {
                 *w = w.saturating_sub(*w * overflow / sum_widths.max(1)).max(1);
             }
         }
-        if let Some(header_line) =
-            render_table_row(&header, &widths, &aligns, self.styles.table_header)
-        {
+        for header_line in render_table_rows(&header, &widths, &aligns, self.styles.table_header) {
             self.emit(RenderedLine {
                 line: header_line,
                 is_code: false,
@@ -654,7 +735,7 @@ impl<'a> Render<'a> {
             });
         }
         for row in rows {
-            if let Some(line) = render_table_row(&row, &widths, &aligns, self.styles.paragraph) {
+            for line in render_table_rows(&row, &widths, &aligns, self.styles.paragraph) {
                 self.emit(RenderedLine {
                     line,
                     is_code: false,
@@ -723,7 +804,7 @@ struct Word {
 /// Wraps styled runs to `width`, merging same-style runs and breaking only at
 /// whitespace; an over-long token is chunked rather than dropped.
 fn wrap_runs(runs: &[Run], width: usize) -> Vec<Line<'static>> {
-    let width = width.max(10);
+    let width = width.max(1);
     let chunks: Vec<&[Run]> = {
         let mut chunks = Vec::new();
         let mut start = 0;
@@ -770,18 +851,12 @@ fn wrap_runs(runs: &[Run], width: usize) -> Vec<Line<'static>> {
 fn greedy_wrap(words: Vec<Word>, width: usize, lines: &mut Vec<Line<'static>>) {
     lines.push(Line::from(vec![]));
     for word in words {
-        let word_len = word.text.chars().count();
+        let word_len = Span::raw(&word.text).width();
         if word_len > width {
             if !lines.last().expect("a line exists").spans.is_empty() {
                 lines.push(Line::from(vec![]));
             }
-            for chunk in word
-                .text
-                .chars()
-                .collect::<Vec<char>>()
-                .chunks(width)
-                .map(|c| c.iter().collect::<String>())
-            {
+            for chunk in split_cell_chunks(&word.text, width) {
                 lines.push(Line::from(vec![Span::styled(chunk, word.style)]));
             }
             continue;
@@ -803,26 +878,6 @@ fn greedy_wrap(words: Vec<Word>, width: usize, lines: &mut Vec<Line<'static>>) {
     }
 }
 
-fn clip_ranges(ranges: Vec<(SStyle, &str)>, max_chars: usize, bg: Color) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let mut used = 0usize;
-    for (style, text) in ranges {
-        let chars: Vec<char> = text.chars().collect();
-        if used + chars.len() <= max_chars {
-            spans.push(Span::styled(text.to_owned(), syntect_style(style, bg)));
-            used += chars.len();
-        } else {
-            let remaining = max_chars.saturating_sub(used);
-            if remaining > 0 {
-                let s: String = chars[..remaining].iter().collect();
-                spans.push(Span::styled(s, syntect_style(style, bg)));
-            }
-            break;
-        }
-    }
-    spans
-}
-
 fn syntect_style(style: SStyle, bg: Color) -> RStyle {
     let mut out = RStyle::default().fg(srgb(style.foreground)).bg(bg);
     let fs = style.font_style;
@@ -838,30 +893,46 @@ fn syntect_style(style: SStyle, bg: Color) -> RStyle {
     out
 }
 
-fn render_table_row(
+fn render_table_rows(
     cells: &[String],
     widths: &[usize],
     aligns: &[Alignment],
     style: RStyle,
-) -> Option<Line<'static>> {
+) -> Vec<Line<'static>> {
     if cells.is_empty() {
-        return None;
+        return Vec::new();
     }
-    let mut spans = vec![Span::styled(" ", style)];
-    for (i, width) in widths.iter().enumerate() {
-        if i > 0 {
-            spans.push(Span::styled(" ", style));
+    let chunks: Vec<Vec<String>> = widths
+        .iter()
+        .enumerate()
+        .map(|(index, width)| {
+            split_cell_chunks(cells.get(index).map(String::as_str).unwrap_or(""), *width)
+        })
+        .collect();
+    let height = chunks.iter().map(Vec::len).max().unwrap_or(0);
+    let mut rows = Vec::with_capacity(height);
+    for row in 0..height {
+        let mut spans = vec![Span::styled(" ", style)];
+        for (i, width) in widths.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::styled(" ", style));
+            }
+            let cell = chunks[i].get(row).map(String::as_str).unwrap_or("");
+            let aligned = if Span::raw(cell).width() > *width {
+                cell.to_owned()
+            } else {
+                align_cell(
+                    cell,
+                    *width,
+                    aligns.get(i).copied().unwrap_or(Alignment::Left),
+                )
+            };
+            spans.push(Span::styled(aligned, style));
         }
-        let cell = cells.get(i).map(String::as_str).unwrap_or("");
-        let aligned = align_cell(
-            cell,
-            *width,
-            aligns.get(i).copied().unwrap_or(Alignment::Left),
-        );
-        spans.push(Span::styled(aligned, style));
+        spans.push(Span::styled(" ", style));
+        rows.push(Line::from(spans));
     }
-    spans.push(Span::styled(" ", style));
-    Some(Line::from(spans))
+    rows
 }
 
 fn render_table_separator(
@@ -903,20 +974,20 @@ fn separator_cell(width: usize, align: Alignment) -> String {
 }
 
 fn align_cell(cell: &str, width: usize, align: Alignment) -> String {
-    let shown: Vec<char> = cell.chars().take(width).collect();
-    let len = shown.len();
+    let shown = cell_prefix(cell, width);
+    let len = Span::raw(&shown).width();
     if len >= width {
-        return shown.iter().collect();
+        return shown;
     }
     let padding = width - len;
     let (left, right) = match align {
-        Alignment::Right => (0, padding),
+        Alignment::Right => (padding, 0),
         Alignment::Center => (padding / 2, padding - padding / 2),
-        _ => (padding, 0),
+        _ => (0, padding),
     };
     let mut out = String::new();
     out.push_str(&" ".repeat(left));
-    out.extend(shown);
+    out.push_str(&shown);
     out.push_str(&" ".repeat(right));
     out
 }
@@ -924,6 +995,98 @@ fn align_cell(cell: &str, width: usize, align: Alignment) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn styled_markdown_wraps_whole_graphemes_by_terminal_cells() {
+        let source = "a\u{301}你好👩\u{200d}💻b";
+        let rows = render_document(&format!("**{source}**"), 4);
+        assert_eq!(
+            rows.iter()
+                .map(|row| row.line.to_string())
+                .collect::<String>(),
+            source
+        );
+        assert!(rows.iter().all(|row| row.line.width() <= 4));
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.line.to_string().starts_with('\u{301}'))
+        );
+    }
+
+    #[test]
+    fn decorated_markdown_stays_within_narrow_cell_widths() {
+        for source in [
+            "alpha beta gamma",
+            "# 你好你好",
+            "> 你好你好\n",
+            "1. 你好你好\n",
+            "```text\n你好你好\n```\n",
+            "| left | right |\n| --- | --- |\n| 你好 | 世界 |\n",
+        ] {
+            for width in [3, 4, 7, 10] {
+                let rows = render_document(source, width);
+                assert!(!rows.is_empty());
+                assert!(
+                    rows.iter().all(|row| row.line.width() <= width),
+                    "{source:?}, width={width}: {rows:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn table_alignment_clips_only_at_grapheme_boundaries() {
+        for width in [2, 3] {
+            let value = align_cell("a\u{301}你好", width, Alignment::Left);
+            assert_eq!(Span::raw(&value).width(), width);
+            assert!(value.contains("a\u{301}"));
+            assert_eq!(value.contains('你'), width == 3);
+        }
+    }
+
+    #[test]
+    fn table_padding_follows_declared_alignment() {
+        assert_eq!(align_cell("x", 3, Alignment::Left), "x  ");
+        assert_eq!(align_cell("x", 3, Alignment::Right), "  x");
+        assert_eq!(align_cell("x", 3, Alignment::Center), " x ");
+    }
+
+    #[test]
+    fn highlighted_code_keeps_the_complete_tail_when_wrapped() {
+        let value = "abcdefghijklmnopqrst你好";
+        let rows = render_document(&format!("```\n{value}\n```"), 5);
+        assert!(joined(&rows).contains(value), "{rows:?}");
+        assert!(rows.iter().all(|row| row.line.width() <= 5));
+    }
+
+    #[test]
+    fn code_continuations_preserve_fitting_source_indentation() {
+        let rows = render_document("```\n  abcdefghijklmnop\n```", 8);
+        assert!(rows.len() > 1);
+        assert!(rows.iter().all(|row| row.line.width() <= 8));
+        assert!(
+            rows.iter()
+                .skip(1)
+                .all(|row| row.line.to_string().starts_with("  "))
+        );
+        let value = rows
+            .iter()
+            .map(|row| row.line.to_string())
+            .collect::<String>()
+            .replace([' ', '\u{258f}'], "");
+        assert_eq!(value, "abcdefghijklmnop");
+    }
+
+    #[test]
+    fn narrow_tables_keep_complete_cell_tails() {
+        for value in ["abcdefghijklmnopqrst", "你好世界你好世界"] {
+            let rows = render_document(&format!("| value |\n| --- |\n| {value} |"), 5);
+            let text = joined(&rows).replace(' ', "");
+            assert!(text.contains(value), "{text:?}");
+            assert!(rows.iter().all(|row| row.line.width() <= 5));
+        }
+    }
 
     fn joined(lines: &[RenderedLine]) -> String {
         lines.iter().map(|rl| rl.line.to_string()).collect()

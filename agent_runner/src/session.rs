@@ -6,7 +6,16 @@
 //! [`EventSink`]. Nothing here performs blocking subprocess I/O directly; the
 //! executor is injected so the loop is unit-testable with fakes.
 
+use std::collections::HashSet;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc,
+};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
+
+use serde::Serialize;
 
 use agent_runtime::{
     CancellationToken, ModelMessage, ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn,
@@ -15,14 +24,14 @@ use agent_runtime::{
 
 use crate::config::Model;
 use crate::context::ContextManager;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::retry::RetryPolicy;
 use crate::sandbox::ToolOutcome;
 
 /// The maximum number of model turns in one session before the loop stops.
 pub const MAX_TURNS: u32 = 50;
 /// The maximum bytes of a tool result folded back to the model.
-pub const MAX_TOOL_RESULT_BYTES: usize = 64 * 1024;
+pub const MAX_TOOL_RESULT_BYTES: usize = 8 * 1024;
 
 /// Minimum gap between live progress updates emitted while a turn streams, so
 /// the stats bar tracks progress without flooding the sink on every token.
@@ -76,10 +85,13 @@ fn emit_live_progress<S: EventSink>(
 }
 
 /// A progress event emitted while a session runs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum Event {
     /// A model turn began.
     TurnStart { model: String },
+    /// A fresh model attempt; streamed text remains provisional until completion.
+    AttemptStart { attempt: u32 },
     /// A fragment of model reasoning text.
     Reasoning(String),
     /// A fragment of model answer text.
@@ -168,6 +180,7 @@ impl AgentSession {
 
     /// Appends a user message. The session then has pending work.
     pub fn push_user(&mut self, text: impl Into<String>) {
+        self.answer = None;
         self.messages.push(ModelMessage::User(text.into()));
     }
 
@@ -201,6 +214,7 @@ impl AgentSession {
             tool_choice: ToolChoice::Auto,
             reasoning_effort: Some(self.thinking_effort),
             output_schema: None,
+            max_output_tokens: None,
         })
     }
 
@@ -212,30 +226,48 @@ impl AgentSession {
             text: turn.text.clone(),
             tool_intents: turn.tool_intents,
         });
-        if tool_intents.is_empty() {
+        if tool_intents.is_empty()
+            && matches!(turn.finish_reason, agent_runtime::FinishReason::Stop)
+            && !turn.text.trim().is_empty()
+        {
             self.answer = Some(turn.text);
+        } else {
+            self.answer = None;
         }
         tool_intents
     }
 
-    /// Records one tool result, redacted and bounded, as a model message.
+    /// Records a status-bearing, combined bounded preview as a model message.
     pub fn record_tool_result(&mut self, call_id: &str, name: &str, outcome: &ToolOutcome) {
-        let mut body = outcome.output_text(MAX_TOOL_RESULT_BYTES);
-        let stderr = outcome.error_text(MAX_TOOL_RESULT_BYTES);
+        let mut body = format!(
+            "[process: exited={}, status={:?}, timed_out={}, cancelled={}, output_limit_exceeded={}]\n",
+            outcome.exited,
+            outcome.status,
+            outcome.timed_out,
+            outcome.cancelled,
+            outcome.output_limit_exceeded,
+        );
+        const TRUNCATION_NOTICE: &str = "\n[output truncated; use a smaller read/search page]\n";
+        let available = MAX_TOOL_RESULT_BYTES.saturating_sub(body.len() + TRUNCATION_NOTICE.len());
+        let stderr_budget = available.min(outcome.stderr.len()).min(available / 2);
+        let stdout = outcome.output_text(available.saturating_sub(stderr_budget));
+        let stderr = outcome.error_text(stderr_budget);
+        let truncated = stdout.len() < outcome.stdout.len() || stderr.len() < outcome.stderr.len();
+        body.push_str(&stdout);
         if !stderr.is_empty() {
-            if !body.is_empty() {
-                body.push('\n');
-            }
-            body.push_str(&format!("[stderr] {stderr}"));
+            body.push_str("\n[stderr] ");
+            body.push_str(&stderr);
         }
-        if outcome.timed_out {
-            body.push_str("\n[sandbox: wall-clock timeout]");
+        // Lossy UTF-8 decoding may expand bytes; bound the final encoded preview.
+        let cap = MAX_TOOL_RESULT_BYTES.saturating_sub(TRUNCATION_NOTICE.len());
+        let mut end = body.len().min(cap);
+        while !body.is_char_boundary(end) {
+            end -= 1;
         }
-        if outcome.output_limit_exceeded {
-            body.push_str(&format!(
-                "\n[sandbox: output limited to {} bytes]",
-                MAX_TOOL_RESULT_BYTES
-            ));
+        let expanded = end < body.len();
+        body.truncate(end);
+        if truncated || expanded || outcome.output_limit_exceeded {
+            body.push_str(TRUNCATION_NOTICE);
         }
         self.messages.push(ModelMessage::ToolResult {
             call_id: call_id.to_owned(),
@@ -247,7 +279,10 @@ impl AgentSession {
     /// The token size of the conversation that would next be sent to the model,
     /// plus the always-present tool definitions. Used to track context usage.
     pub fn estimate_context_tokens(&self, tool_definitions: usize) -> usize {
-        crate::context::estimate_messages(&self.messages, tool_definitions)
+        let _ = tool_definitions;
+        self.next_request()
+            .as_ref()
+            .map_or(0, crate::context::estimate_request)
     }
 
     /// Compacts the conversation when it crosses the manager's warm-up threshold,
@@ -296,12 +331,21 @@ pub trait ToolExecutor: Send + Sync {
 /// compaction removes it from the model context.
 pub trait Recorder: Send {
     /// Writes the session-start event. Called once, before the first turn.
-    fn session_start(&mut self);
+    fn session_start(&mut self) -> Result<()>;
+    /// Records a model attempt, without granting execution authority.
+    fn request(&mut self, request: &ModelRequest, attempt: u32) -> Result<()>;
     /// Begins one turn, capturing its reasoning trace. Returns the turn index
     /// used by later tool records.
-    fn turn_start(&mut self, turn: &ModelTurn) -> usize;
+    fn turn_start(&mut self, turn: &ModelTurn) -> Result<usize>;
     /// Completes one turn, folding in provider token usage.
-    fn turn_finish(&mut self, turn: usize, usage: &Option<ModelUsage>, finish_reason: &str);
+    fn turn_finish(
+        &mut self,
+        turn: usize,
+        usage: &Option<ModelUsage>,
+        finish_reason: &str,
+    ) -> Result<()>;
+    /// Synchronizes a dispatch intent before the executor may cause effects.
+    fn tool_dispatch(&mut self, turn: usize, intent: &ToolIntent) -> Result<()>;
     /// Records an approved tool call and its sandbox outcome.
     fn tool_result(
         &mut self,
@@ -310,13 +354,13 @@ pub trait Recorder: Send {
         tool: &str,
         args: &serde_json::Value,
         outcome: &ToolOutcome,
-    );
+    ) -> Result<()>;
     /// Writes the terminal session-finish event with session totals.
-    fn session_finish(&mut self, success: bool);
+    fn session_finish(&mut self, summary: &RunSummary) -> Result<()>;
 }
 
 /// The outcome of running a session loop.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct RunSummary {
     /// The final answer text, when the loop produced one.
     pub answer: Option<String>,
@@ -328,6 +372,203 @@ pub struct RunSummary {
     pub cancelled: bool,
     /// Whether the loop stopped after too many turns.
     pub exhausted: bool,
+    /// Whether the shared wall/token budget ended the prompt.
+    pub budget_exhausted: bool,
+    /// A terminal failure diagnostic, if the prompt did not complete.
+    pub failure: Option<String>,
+}
+
+impl RunSummary {
+    /// Only an answer with no interrupted/failed disposition is successful.
+    pub fn success(&self) -> bool {
+        self.answer.is_some()
+            && !self.cancelled
+            && !self.exhausted
+            && !self.budget_exhausted
+            && self.failure.is_none()
+    }
+
+    /// Stable machine-readable terminal disposition.
+    pub fn disposition(&self) -> &'static str {
+        if self.budget_exhausted {
+            "budget_exhausted"
+        } else if self.cancelled {
+            "cancelled"
+        } else if self.failure.is_some() {
+            "failed"
+        } else if self.exhausted {
+            "turn_limit"
+        } else if self.success() {
+            "completed"
+        } else {
+            "no_work"
+        }
+    }
+}
+
+/// Shared resource limits for one submitted prompt, including all retries.
+#[derive(Debug, Clone, Copy)]
+pub struct RunLimits {
+    /// Whole-prompt wall time; executors must honor cooperative cancellation.
+    pub wall_time: Duration,
+    /// Conservative estimated input plus reserved output across all attempts.
+    pub max_tokens: u64,
+    /// Provider-enforced output tokens reserved in every context preflight.
+    pub response_reserve: u32,
+}
+
+impl Default for RunLimits {
+    fn default() -> Self {
+        Self {
+            wall_time: Duration::from_secs(1800),
+            max_tokens: 1_000_000,
+            response_reserve: 1024,
+        }
+    }
+}
+
+impl RunLimits {
+    /// Rejects invalid limits before starting a provider or watcher.
+    pub fn validate(self) -> Result<Self> {
+        if self.wall_time.is_zero()
+            || self.wall_time > Duration::from_secs(86_400)
+            || self.max_tokens == 0
+            || self.max_tokens > 1_000_000_000
+            || !(1..=1_048_576).contains(&self.response_reserve)
+        {
+            return Err(Error::Config {
+                path: None,
+                reason: "run limits require positive wall time <=24h, tokens <=1000000000, and response reserve <=1048576".into(),
+            });
+        }
+        Ok(self)
+    }
+}
+
+fn validate_turn(turn: &ModelTurn) -> Result<()> {
+    let valid_finish = matches!(turn.finish_reason, agent_runtime::FinishReason::Stop)
+        && turn.tool_intents.is_empty()
+        && !turn.text.trim().is_empty()
+        || matches!(turn.finish_reason, agent_runtime::FinishReason::ToolCalls)
+            && !turn.tool_intents.is_empty();
+    if !valid_finish {
+        return Err(Error::InvalidModelTurn {
+            reason: format!(
+                "incomplete or inconsistent finish `{}`",
+                finish_reason_str(&turn.finish_reason)
+            ),
+        });
+    }
+    if turn.tool_intents.len() > 32 {
+        return Err(Error::InvalidModelTurn {
+            reason: "more than 32 tool calls in one turn".into(),
+        });
+    }
+    let mut seen = HashSet::new();
+    for intent in &turn.tool_intents {
+        if intent.id.is_empty()
+            || intent.id.len() > 256
+            || intent.id.contains('\0')
+            || intent.name.is_empty()
+            || intent.name.len() > 128
+            || intent.name.contains('\0')
+            || !seen.insert(&intent.id)
+            || !intent.arguments.is_object()
+        {
+            return Err(Error::InvalidModelTurn {
+                reason: "invalid or duplicate tool identity/arguments".into(),
+            });
+        }
+        let args =
+            serde_json::to_vec(&intent.arguments).map_err(|error| Error::InvalidModelTurn {
+                reason: format!("tool argument encoding failed: {error}"),
+            })?;
+        if args.len() > 1024 * 1024 {
+            return Err(Error::InvalidModelTurn {
+                reason: "tool arguments exceed 1 MiB".into(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn fold_outcome<S: EventSink>(
+    session: &mut AgentSession,
+    recorder: &mut Option<&mut dyn Recorder>,
+    sink: &S,
+    turn: usize,
+    intent: &ToolIntent,
+    outcome: &ToolOutcome,
+) -> Result<()> {
+    session.record_tool_result(&intent.id, &intent.name, outcome);
+    if let Some(recorder) = recorder.as_mut() {
+        recorder.tool_result(turn, &intent.id, &intent.name, &intent.arguments, outcome)?;
+    }
+    sink.send(Event::ToolResult {
+        description: crate::tools::describe_tool_call(intent),
+        name: intent.name.clone(),
+        failed: outcome.failed(),
+    })
+}
+
+struct PromptBudget {
+    deadline: Instant,
+    expired: Arc<AtomicBool>,
+    stop: Option<mpsc::Sender<()>>,
+    watcher: Option<JoinHandle<()>>,
+}
+
+impl PromptBudget {
+    fn start(wall_time: Duration, cancellation: &CancellationToken) -> Result<Self> {
+        let deadline = Instant::now() + wall_time;
+        let expired = Arc::new(AtomicBool::new(false));
+        let thread_expired = Arc::clone(&expired);
+        let token = cancellation.clone();
+        let (stop, rx) = mpsc::channel();
+        let watcher = thread::Builder::new()
+            .name("prompt-deadline".into())
+            .spawn(move || {
+                loop {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        thread_expired.store(true, Ordering::SeqCst);
+                        token.cancel();
+                        break;
+                    }
+                    match rx.recv_timeout(remaining.min(Duration::from_millis(25))) {
+                        Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            if agent_runtime::take_interrupted() {
+                                token.cancel();
+                            }
+                        }
+                    }
+                }
+            })?;
+        Ok(Self {
+            deadline,
+            expired,
+            stop: Some(stop),
+            watcher: Some(watcher),
+        })
+    }
+
+    fn remaining(&self) -> Duration {
+        self.deadline.saturating_duration_since(Instant::now())
+    }
+}
+
+impl Drop for PromptBudget {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(watcher) = self.watcher.take()
+            && watcher.join().is_err()
+        {
+            tracing::error!("prompt deadline watcher failed");
+        }
+    }
 }
 
 /// Maps a `FinishReason` to a short, stable string for the session record.
@@ -346,6 +587,8 @@ pub struct AgentRunner {
     pub max_turns: u32,
     /// How to retry a turn that ends in a transient, recoverable failure.
     pub retry: RetryPolicy,
+    /// Limits shared by the complete prompt rather than reset on retries.
+    pub limits: RunLimits,
 }
 
 impl Default for AgentRunner {
@@ -353,6 +596,7 @@ impl Default for AgentRunner {
         AgentRunner {
             max_turns: MAX_TURNS,
             retry: RetryPolicy::default(),
+            limits: RunLimits::default(),
         }
     }
 }
@@ -360,7 +604,17 @@ impl Default for AgentRunner {
 impl AgentRunner {
     /// Creates a loop driver with an explicit retry policy.
     pub fn with_retry(max_turns: u32, retry: RetryPolicy) -> Self {
-        AgentRunner { max_turns, retry }
+        AgentRunner {
+            max_turns,
+            retry,
+            limits: RunLimits::default(),
+        }
+    }
+
+    /// Sets validated whole-prompt limits.
+    pub fn with_limits(mut self, limits: RunLimits) -> Result<Self> {
+        self.limits = limits.validate()?;
+        Ok(self)
     }
 }
 
@@ -390,35 +644,118 @@ impl AgentRunner {
         E: ToolExecutor,
         S: EventSink,
     {
-        let tool_definitions = session.tool_definitions().len();
-        let mut summary = RunSummary::default();
-        let mut turn = 0u32;
-        let started_at = Instant::now();
-        let mut cumulative_tokens: u64 = 0;
-        let mut cumulative_input: u64 = 0;
-        let mut cumulative_output: u64 = 0;
-
-        // Record the durable session boundary before any turn, so the record
-        // has a clean start (and a matching finish) even for an empty run.
-        if let Some(recorder) = recorder.as_mut() {
-            recorder.session_start();
+        self.limits.validate()?;
+        if !(1..=MAX_TURNS).contains(&self.max_turns) {
+            return Err(Error::Config {
+                path: None,
+                reason: format!("turn limit must be in 1..={MAX_TURNS}"),
+            });
         }
+        let budget = PromptBudget::start(self.limits.wall_time, cancellation)?;
+        let mut summary = RunSummary::default();
+        session.answer = None;
+        let result = (|| {
+            if let Some(recorder) = recorder.as_mut() {
+                recorder.session_start()?;
+            }
+            self.run_inner(
+                session,
+                transport,
+                executor,
+                sink,
+                cancellation,
+                context,
+                &mut recorder,
+                &budget,
+                &mut summary,
+            )
+        })();
+        summary.budget_exhausted |= budget.expired.load(Ordering::SeqCst)
+            || budget.remaining().is_zero()
+            || matches!(result, Err(Error::RunBudget { .. }));
+        summary.cancelled |= cancellation.is_cancelled() && !summary.budget_exhausted;
+        if let Err(error) = &result {
+            summary.failure = Some(error.describe());
+        }
+        if summary.cancelled || summary.budget_exhausted || summary.failure.is_some() {
+            summary.answer = None;
+            session.answer = None;
+        }
+        if let Some(recorder) = recorder.as_mut()
+            && let Err(error) = recorder.session_finish(&summary)
+        {
+            return Err(Error::Recording {
+                reason: match &result {
+                    Ok(()) => error.describe(),
+                    Err(original) => format!(
+                        "{}; terminal record: {}",
+                        original.describe(),
+                        error.describe()
+                    ),
+                },
+            });
+        }
+        result?;
+        let terminal = if let Some(failure) = &summary.failure {
+            Event::Failed(failure.clone())
+        } else if let Some(answer) = &summary.answer {
+            Event::Finished {
+                message: answer.clone(),
+            }
+        } else {
+            Event::PromptEnd {
+                exhausted: summary.exhausted || summary.budget_exhausted,
+                cancelled: summary.cancelled,
+            }
+        };
+        sink.send(terminal)?;
+        Ok(summary)
+    }
 
-        while turn < self.max_turns {
-            let Some(request) = session.next_request() else {
+    #[allow(clippy::too_many_arguments)]
+    fn run_inner<M: ModelTransport, E: ToolExecutor, S: EventSink>(
+        &self,
+        session: &mut AgentSession,
+        transport: &M,
+        executor: &E,
+        sink: &S,
+        cancellation: &CancellationToken,
+        context: &mut ContextManager,
+        recorder: &mut Option<&mut dyn Recorder>,
+        budget: &PromptBudget,
+        summary: &mut RunSummary,
+    ) -> Result<()> {
+        let started_at = Instant::now();
+        let mut input = 0_u64;
+        let mut output = 0_u64;
+        let mut total = 0_u64;
+        let mut tokens_remaining = self.limits.max_tokens;
+        let mut actions = agent_runtime::ActionHashRing::new();
+        while summary.turns < self.max_turns {
+            if cancellation.is_cancelled() || budget.remaining().is_zero() {
+                break;
+            }
+            let Some(mut request) = session.next_request() else {
                 break;
             };
-            turn += 1;
-
+            if let Some(compaction) = context.prepare(&mut request, self.limits.response_reserve)?
+                && compaction.compacted_turns > 0
+            {
+                sink.send(Event::Note(format!(
+                    "context compacted: {} complete groups in a lossy, non-authoritative summary",
+                    compaction.compacted_turns,
+                )))?;
+            }
+            session.messages = request
+                .messages
+                .iter()
+                .skip(usize::from(!session.system_prompt.is_empty()))
+                .cloned()
+                .collect();
+            summary.turns += 1;
             sink.send(Event::TurnStart {
-                model: session.model_selector().to_owned(),
+                model: session.model_selector().into(),
             })?;
-
-            // Stream the turn, forwarding text/reasoning/tool intents to the UI
-            // and retrying transient failures with backoff (see `drive_turn`).
-            // A turn that cannot be recovered after exhausting the policy is
-            // surfaced as an `Event::Failed` and stops the session, matching the
-            // pre-retry contract rather than aborting the run with an error.
             let turn_value = match self.drive_turn(
                 &request,
                 transport,
@@ -427,169 +764,116 @@ impl AgentRunner {
                 &LiveProgress {
                     session,
                     context,
-                    tool_defs: tool_definitions,
+                    tool_defs: session.tool_defs.len(),
                     started_at,
-                    cumulative_total: cumulative_input + cumulative_output,
+                    cumulative_total: input.saturating_add(output),
                 },
+                budget,
+                &mut tokens_remaining,
+                recorder,
             ) {
-                Ok(turn) => turn,
+                Ok(value) => value,
                 Err(error) => {
-                    sink.send(Event::Failed(error.to_string()))?;
-                    summary.cancelled = cancellation.is_cancelled();
-                    // Account for the turn that was attempted before stopping, so
-                    // the failure summary mirrors the normal completion path
-                    // (which sets `turns` and `answer` after the loop).
-                    summary.turns = turn;
-                    summary.answer = session.answer.clone();
-                    return Ok(summary);
+                    if matches!(error, Error::RunBudget { .. }) {
+                        summary.budget_exhausted = true;
+                    } else if !cancellation.is_cancelled() {
+                        summary.failure = Some(error.describe());
+                    }
+                    break;
                 }
             };
-
-            // Capture the full record first: reasoning + finish + usage. This is
-            // the durable copy that compaction and the UI may later drop.
-            let turn_index = recorder.as_mut().map(|rec| rec.turn_start(&turn_value));
-            let finish_reason = finish_reason_str(&turn_value.finish_reason);
-            if let Some(recorder) = recorder.as_mut() {
-                recorder.turn_finish(turn_index.unwrap_or(0), &turn_value.usage, finish_reason);
-            }
-            if let Some(usage) = &turn_value.usage {
-                cumulative_tokens += usage.total_tokens;
-                cumulative_input += usage.input_tokens;
-                cumulative_output += usage.output_tokens;
-            }
-
-            // No tools proposed: this assistant text is the final answer.
-            let tool_intents = session.apply_assistant(turn_value);
-            let terminal = tool_intents.is_empty();
-
-            if !terminal {
-                for intent in tool_intents {
-                    if cancellation.is_cancelled() {
-                        summary.cancelled = true;
-                        // Cancel before a tool ran: tell the UI control has
-                        // returned so it stops showing "working…" (this path
-                        // previously emitted no terminal event at all).
-                        let _ = sink.send(Event::PromptEnd {
-                            exhausted: false,
-                            cancelled: true,
-                        });
-                        return Ok(summary);
-                    }
-                    match executor.execute(&intent, cancellation) {
-                        Ok(outcome) => {
-                            summary.tools_executed += 1;
-                            session.record_tool_result(&intent.id, &intent.name, &outcome);
-                            if let Some(recorder) = recorder.as_mut() {
-                                recorder.tool_result(
-                                    turn_index.unwrap_or(0),
-                                    &intent.id,
-                                    &intent.name,
-                                    &intent.arguments,
-                                    &outcome,
-                                );
-                            }
-                            let _ = sink.send(Event::ToolResult {
-                                description: crate::tools::describe_tool_call(&intent),
-                                name: intent.name.clone(),
-                                failed: outcome.failed(),
-                            });
-                        }
-                        Err(error) => {
-                            // A rejected or failed tool is reported, not fatal.
-                            // Record the rejection into the conversation as well so
-                            // the model sees the reason and the assistant->tool
-                            // message sequence stays valid: an unanswered assistant
-                            // message with tool_calls would leave the next request
-                            // ending on it, which an OpenAI-compatible backend
-                            // rejects with 400 "Cannot continue an assistant message
-                            // that contains tool calls".
-                            let rejected = ToolOutcome::rejected_with(error.describe());
-                            session.record_tool_result(&intent.id, &intent.name, &rejected);
-                            if let Some(recorder) = recorder.as_mut() {
-                                recorder.tool_result(
-                                    turn_index.unwrap_or(0),
-                                    &intent.id,
-                                    &intent.name,
-                                    &intent.arguments,
-                                    &ToolOutcome::rejected(),
-                                );
-                            }
-                            let _ = sink.send(Event::ToolResult {
-                                description: crate::tools::describe_tool_call(&intent),
-                                name: intent.name.clone(),
-                                failed: true,
-                            });
-                            let _ = sink.send(Event::Failed(error.describe()));
-                        }
-                    }
-
-                    // Compact the model context now that this turn is fully
-                    // recorded, so the next request stays within the model's
-                    // window. The record is untouched.
-                    if let Some(compaction) = session.maybe_compact(context, tool_definitions)
-                        && compaction.compacted_turns > 0
-                    {
-                        let _ = sink.send(Event::Note(format!(
-                        "context compacted: {} earlier turn(s) rolled into a summary (kept in the session log)",
-                        compaction.compacted_turns
-                    )));
-                    }
+            let turn_index = match recorder.as_mut() {
+                Some(recorder) => {
+                    let index = recorder.turn_start(&turn_value)?;
+                    recorder.turn_finish(
+                        index,
+                        &turn_value.usage,
+                        finish_reason_str(&turn_value.finish_reason),
+                    )?;
+                    index
                 }
+                None => summary.turns as usize,
+            };
+            if let Some(usage) = turn_value.usage {
+                input = input.saturating_add(usage.input_tokens);
+                output = output.saturating_add(usage.output_tokens);
+                total = total.saturating_add(usage.total_tokens);
             }
-
-            // Report accounting after every turn — including the final one,
-            // whose report doubles as the session's last — so the live stats
-            // bar (speed, context utilization, compaction progress, and the
-            // compaction ETA) tracks the session while it runs, not only when
-            // it ends.
-            self.emit_progress(
-                sink,
-                session,
-                context,
-                cumulative_input,
-                cumulative_output,
-                cumulative_tokens,
-                started_at,
-            )?;
-            if terminal {
+            if let Err(error) = validate_turn(&turn_value) {
+                summary.failure = Some(error.describe());
+                break;
+            }
+            let intents = session.apply_assistant(turn_value);
+            let terminal = intents.is_empty();
+            for (index, intent) in intents.iter().enumerate() {
+                if cancellation.is_cancelled() || summary.failure.is_some() {
+                    for remaining in &intents[index..] {
+                        fold_outcome(
+                            session,
+                            recorder,
+                            sink,
+                            turn_index,
+                            remaining,
+                            &ToolOutcome::rejected_with("not executed: prompt interrupted"),
+                        )?;
+                    }
+                    break;
+                }
+                let hash = agent_runtime::compute_action_hash(&intent.name, &intent.arguments);
+                let decision = actions.check_proposed_action(&hash);
+                if decision.is_loop_break() {
+                    let reason = "Repeated identical tool arguments are blocked. Inspect the current state or choose a different action; filesystem change was not observed by this detector.";
+                    fold_outcome(
+                        session,
+                        recorder,
+                        sink,
+                        turn_index,
+                        intent,
+                        &ToolOutcome::rejected_with(reason),
+                    )?;
+                    sink.send(Event::Note(reason.into()))?;
+                    if matches!(decision, agent_runtime::LoopDecision::CircuitBreaker { .. }) {
+                        summary.failure = Some(
+                            "Repeated-action circuit breaker: too many identical tool proposals"
+                                .into(),
+                        );
+                    }
+                    continue;
+                }
+                if let Some(recorder) = recorder.as_mut() {
+                    recorder.tool_dispatch(turn_index, intent)?;
+                }
+                let outcome = match executor.execute(intent, cancellation) {
+                    Ok(outcome) => {
+                        summary.tools_executed += 1;
+                        actions.record_action(hash, intent.name.clone());
+                        outcome
+                    }
+                    Err(error) => {
+                        if matches!(error, Error::ToolPolicy { .. } | Error::ToolRender { .. }) {
+                            sink.send(Event::Note(error.describe()))?;
+                        } else {
+                            summary.failure = Some(error.describe());
+                        }
+                        ToolOutcome::rejected_with(error.describe())
+                    }
+                };
+                if outcome.cancelled {
+                    cancellation.cancel();
+                }
+                fold_outcome(session, recorder, sink, turn_index, intent, &outcome)?;
+            }
+            self.emit_progress(sink, session, context, input, output, total, started_at)?;
+            if terminal || summary.failure.is_some() || cancellation.is_cancelled() {
                 break;
             }
         }
-
-        // A prompt that stopped because the model gave a final answer is a clean
-        // completion even when it consumed every permitted turn. Only report
-        // exhaustion when the turn limit cut the model off before it produced an
-        // answer, which is the case where work still remained.
-        if turn >= self.max_turns && session.answer.is_none() {
-            summary.exhausted = true;
-        }
-        summary.turns = turn;
         summary.answer = session.answer.clone();
-        match &session.answer {
-            Some(answer) => {
-                let _ = sink.send(Event::Finished {
-                    message: answer.clone(),
-                });
-            }
-            None => {
-                // The loop exited with no answer (the single-turn tool cap, or
-                // the multi-turn limit cutting the model off). Emit a terminal
-                // event so the UI stops showing "working…"; without it `running`
-                // stays `true` after control returns and the UI looks stuck.
-                let _ = sink.send(Event::PromptEnd {
-                    exhausted: summary.exhausted,
-                    cancelled: false,
-                });
-            }
-        }
-        // Close the durable session record. A run that was cancelled or
-        // exhausted after too many turns is recorded as unsuccessful; a normal
-        // completion (with or without a final answer) is recorded as success.
-        let success = !summary.cancelled && !summary.exhausted;
-        if let Some(recorder) = recorder.as_mut() {
-            recorder.session_finish(success);
-        }
-        Ok(summary)
+        summary.exhausted = summary.turns >= self.max_turns
+            && summary.answer.is_none()
+            && summary.failure.is_none()
+            && !cancellation.is_cancelled();
+        Ok(())
     }
 
     /// Streams one turn, retrying transient failures with bounded backoff.
@@ -612,6 +896,7 @@ impl AgentRunner {
     /// caller reports it. Between attempts an [`Event::Note`] is emitted so the
     /// user sees the retry is in progress; the best-effort sink send only means
     /// the UI is gone.
+    #[allow(clippy::too_many_arguments)]
     fn drive_turn<M, S>(
         &self,
         request: &ModelRequest,
@@ -619,7 +904,10 @@ impl AgentRunner {
         sink: &S,
         cancellation: &CancellationToken,
         progress: &LiveProgress,
-    ) -> agent_runtime::Result<ModelTurn>
+        budget: &PromptBudget,
+        tokens_remaining: &mut u64,
+        recorder: &mut Option<&mut dyn Recorder>,
+    ) -> Result<ModelTurn>
     where
         M: ModelTransport,
         S: EventSink,
@@ -633,83 +921,133 @@ impl AgentRunner {
         let base = transport.deadline();
         let mut attempt = 1u32;
         loop {
+            if cancellation.is_cancelled() {
+                return Err(agent_runtime::Error::ModelTransportCancelled.into());
+            }
+            if budget.remaining().is_zero() {
+                return Err(Error::RunBudget {
+                    reason: "wall time".into(),
+                });
+            }
+            let charge = (crate::context::estimate_request(request) as u64)
+                .saturating_add(u64::from(self.limits.response_reserve));
+            if charge > *tokens_remaining {
+                return Err(Error::RunBudget {
+                    reason: "estimated input/output tokens".into(),
+                });
+            }
+            *tokens_remaining -= charge;
             let attempt_deadline = base
                 .saturating_mul(attempt)
-                .min(base.saturating_mul(self.retry.max_attempts));
-            let attempt_deadline_secs = attempt_deadline.as_secs_f64();
+                .min(base.saturating_mul(self.retry.max_attempts))
+                .min(budget.remaining());
+            sink.send(Event::AttemptStart { attempt })?;
+            if let Some(recorder) = recorder.as_mut() {
+                recorder.request(request, attempt)?;
+            }
             // Running output estimate and last live-update time for this attempt,
             // so the stats bar refreshes at a bounded rate while the model streams
             // rather than only after the turn completes.
             let mut attempt_output_chars: u64 = 0;
             let mut last_emit = Instant::now();
-            // The callback must return `agent_runtime::Result`, so forwarding to
-            // the sink is best-effort: a closed channel only means the UI is gone,
-            // which the loop surfaces on the next turn's own `sink.send`.
+            let mut sink_error = None;
             let result = transport.stream_with_deadline(
                 request,
                 cancellation,
                 &mut |event| {
-                    match event {
+                    if cancellation.is_cancelled() {
+                        return Err(agent_runtime::Error::ModelTransportCancelled);
+                    }
+                    let emitted = match event {
                         ModelStreamEvent::TextDelta(delta) => {
-                            if !delta.is_empty() {
-                                attempt_output_chars += delta.chars().count() as u64;
-                                let _ = sink.send(Event::Text(delta));
-                            }
+                            attempt_output_chars =
+                                attempt_output_chars.saturating_add(delta.chars().count() as u64);
+                            sink.send(Event::Text(delta))
                         }
                         ModelStreamEvent::ReasoningDelta(delta) => {
-                            if !delta.is_empty() {
-                                attempt_output_chars += delta.chars().count() as u64;
-                                let _ = sink.send(Event::Reasoning(delta));
-                            }
+                            attempt_output_chars =
+                                attempt_output_chars.saturating_add(delta.chars().count() as u64);
+                            sink.send(Event::Reasoning(delta))
                         }
                         ModelStreamEvent::ToolIntent(intent) => {
                             let description = crate::tools::describe_tool_call(&intent);
-                            let _ = sink.send(Event::ToolCall {
+                            sink.send(Event::ToolCall {
                                 description,
                                 name: intent.name.clone(),
-                            });
+                            })
                         }
+                    };
+                    if let Err(error) = emitted {
+                        sink_error = Some(error);
+                        cancellation.cancel();
+                        return Err(agent_runtime::Error::ModelTransportCancelled);
                     }
                     // Refresh the live stats bar at a bounded rate so the user
                     // sees the turn making progress while the model streams.
                     let now = Instant::now();
                     if now.saturating_duration_since(last_emit) >= LIVE_PROGRESS_INTERVAL {
                         last_emit = now;
-                        let _ = emit_live_progress(sink, progress, attempt_output_chars, now);
+                        if let Err(error) =
+                            emit_live_progress(sink, progress, attempt_output_chars, now)
+                        {
+                            sink_error = Some(error);
+                            cancellation.cancel();
+                            return Err(agent_runtime::Error::ModelTransportCancelled);
+                        }
                     }
                     Ok(())
                 },
                 attempt_deadline,
             );
-
+            if let Some(error) = sink_error {
+                return Err(error);
+            }
             match result {
                 Ok(turn) => return Ok(turn),
                 // Retry only temporal, recoverable failures, and only while the
                 // attempt budget remains and the turn was not cancelled.
                 Err(error) if error.is_retryable() => {
                     if attempt >= self.retry.max_attempts || cancellation.is_cancelled() {
-                        return Err(error);
+                        return Err(error.into());
                     }
                     let next = attempt + 1;
-                    let delay = self.retry.backoff_delay(next);
+                    let delay = self.retry.backoff_delay(next).min(budget.remaining());
                     let delay_secs = delay.as_secs_f64();
+                    let next_budget_secs = base
+                        .saturating_mul(next)
+                        .min(budget.remaining())
+                        .as_secs_f64();
                     // Show the turn is recovering and that a longer budget is
                     // being granted, not just another identical try.
-                    let _ = sink.send(Event::Note(format!(
-                        "model request failed ({error}); retrying {next}/{max} in {delay_secs:.1}s with a {attempt_deadline_secs:.0}s budget",
+                    sink.send(Event::Note(format!(
+                        "model request failed ({error}); retrying {next}/{max} in {delay_secs:.1}s with at most {next_budget_secs:.0}s; earlier streamed text is provisional",
                         max = self.retry.max_attempts,
-                    )));
+                    )))?;
                     attempt = next;
-                    std::thread::sleep(delay);
+                    let wake_at = Instant::now() + delay;
+                    while Instant::now() < wake_at {
+                        if cancellation.is_cancelled() {
+                            return Err(agent_runtime::Error::ModelTransportCancelled.into());
+                        }
+                        if budget.remaining().is_zero() {
+                            return Err(Error::RunBudget {
+                                reason: "wall time during retry".into(),
+                            });
+                        }
+                        thread::sleep(
+                            wake_at
+                                .saturating_duration_since(Instant::now())
+                                .min(Duration::from_millis(25)),
+                        );
+                    }
                 }
-                Err(error) => return Err(error),
+                Err(error) => return Err(error.into()),
             }
         }
     }
 
     /// Emits a single accounting event so the UI can update the speed stat, the
-    /// context bargraph, and the compaction progress bar. Non-fatal: a dropped
-    /// sink only means the UI is gone.
+    /// context bargraph, and the compaction progress bar. A closed sink stops work.
     #[allow(clippy::too_many_arguments)]
     fn emit_progress<S: EventSink>(
         &self,
@@ -736,5 +1074,49 @@ impl AgentRunner {
             total_tokens,
             elapsed_secs: elapsed,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_runtime::{FinishReason, LocalModelProvider};
+
+    #[test]
+    fn assistant_helper_only_accepts_normal_nonblank_final_answers() {
+        let model = Model {
+            id: "test".into(),
+            provider: crate::config::ModelProvider::LlamaServer,
+            base_url: "http://127.0.0.1:1".into(),
+            model: "test".into(),
+            deadline_secs: 30,
+            max_attempts: 1,
+            retry_base_delay_secs: 1,
+            retry_max_delay_secs: 1,
+            cadence_timeout_secs: 0,
+        };
+        for (reason, text, expected) in [
+            (FinishReason::Length, "partial", None),
+            (FinishReason::ContentFilter, "filtered", None),
+            (FinishReason::ToolCalls, "inconsistent", None),
+            (FinishReason::Other("unknown".into()), "unknown", None),
+            (FinishReason::Stop, "  ", None),
+            (FinishReason::Stop, "done", Some("done")),
+        ] {
+            let mut session =
+                AgentSession::new(model.clone(), ReasoningEffort::None, vec![], String::new());
+            session.apply_assistant(ModelTurn {
+                text: text.into(),
+                reasoning: None,
+                tool_intents: vec![],
+                finish_reason: reason,
+                provider: LocalModelProvider::LlamaServer,
+                model: "test".into(),
+                response_id: None,
+                provider_request_id: None,
+                usage: None,
+            });
+            assert_eq!(session.answer.as_deref(), expected);
+        }
     }
 }

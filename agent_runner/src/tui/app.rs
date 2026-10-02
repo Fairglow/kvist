@@ -13,7 +13,7 @@ use tui_textarea::TextArea;
 
 use crate::error::Result;
 use crate::history::{self, SessionEntry};
-use crate::markdown::render_document;
+use crate::markdown::{render_document, split_cell_chunks};
 use crate::session::Event;
 
 /// Classifies a transcript line so it can be collapsed for a cleaner overview.
@@ -25,20 +25,27 @@ pub enum LineKind {
     Reasoning,
     /// A collapsed placeholder standing in for hidden thinking.
     Placeholder,
+    /// A wrapped continuation of a placeholder, not a separate hidden run.
+    PlaceholderContinuation,
 }
 
 /// A single pre-wrapped, styled transcript row.
 ///
 /// A row holds one or more styled spans so Markdown inline formatting
 /// (bold, italic, inline code, links) can mix on a single line. [`ScreenLine::md`]
-/// carries the raw Markdown that produced the row; it is `Some` only on the
-/// first row of a Markdown block, which lets [`App::resize`] re-render the whole
-/// block at a new width instead of reflowing already-styled spans.
+/// distinguishes source-bearing starts and continuation rows, so resize never
+/// consumes following plain rows while replacing a Markdown block.
 #[derive(Debug, Clone)]
 pub struct ScreenLine {
     pub line: Line<'static>,
     pub kind: LineKind,
-    pub md: Option<String>,
+    pub md: Option<MarkdownRow>,
+}
+
+#[derive(Debug, Clone)]
+pub enum MarkdownRow {
+    Start(String),
+    Continuation,
 }
 
 impl ScreenLine {
@@ -150,6 +157,8 @@ pub struct App {
     /// The currently selected thinking effort (a valid enum value).
     pub effort: ReasoningEffort,
     pub running: bool,
+    /// Actual execution boundary, visible independently of transient status.
+    pub execution_scope: crate::session_log::ExecutionScope,
     /// Wall-clock time the current turn began generating, so the header can
     /// derive an animated spinner frame and the UI can tell "working" from
     /// "done"/"awaiting". `None` while idle, set on `TurnStart`, cleared on any
@@ -164,7 +173,7 @@ pub struct App {
     /// The past sessions available when the history overlay is open.
     pub history_items: Vec<SessionEntry>,
     /// The scroll offset of the history list.
-    pub history_scroll: u16,
+    pub history_scroll: usize,
     /// The highlighted index into `history_items`.
     pub history_selection: usize,
     /// The transcript lines shown while the replay overlay is open.
@@ -172,7 +181,7 @@ pub struct App {
     /// The session id labelled on the replay overlay.
     pub replay_title: String,
     /// The scroll offset of the replay transcript.
-    pub replay_scroll: u16,
+    pub replay_scroll: usize,
     /// Where to look for past-session transcripts, resolved from overrides.
     log_dir: Option<PathBuf>,
     pub width: u16,
@@ -220,7 +229,7 @@ impl App {
         width: u16,
         height: u16,
     ) -> Self {
-        let width = width.max(20);
+        let width = width.max(1);
         let mut editor = TextArea::new(vec![String::new()]);
         editor.set_wrap_mode(tui_textarea::WrapMode::Word);
         // The cursor line is underlined by default; disable it because the
@@ -246,6 +255,7 @@ impl App {
             model: model_id.to_owned(),
             effort,
             running: false,
+            execution_scope: crate::session_log::ExecutionScope::SandboxedWorkspace,
             running_since: None,
             show_help: false,
             overlay: Overlay::None,
@@ -316,6 +326,15 @@ impl App {
     /// Feeds one loop event into the transcript, wrapping at the current width.
     pub fn push_event(&mut self, event: Event) {
         match event {
+            Event::AttemptStart { attempt } => {
+                if attempt > 1 {
+                    self.flush_pending();
+                    self.note(
+                        Style::default().fg(Color::Yellow),
+                        &format!("attempt {attempt}: prior streamed text was provisional"),
+                    );
+                }
+            }
             Event::TurnStart { model } => {
                 self.flush_pending();
                 self.running = true;
@@ -386,7 +405,7 @@ impl App {
                     self.status = "exhausted".to_owned();
                     self.note(
                         Style::default().fg(Color::Yellow),
-                        "single-turn cap reached with no answer — send a follow-up to continue",
+                        "prompt limit reached with no answer — send a follow-up to continue",
                     );
                 } else {
                     self.status = "awaiting".to_owned();
@@ -485,8 +504,7 @@ impl App {
     }
 
     /// Collapses or reveals reasoning lines in the transcript for a cleaner
-    /// overview. The removed thinking is retained (in memory here, and always in
-    /// the session log), so reveal restores it exactly.
+    /// overview. Removed thinking is retained in memory, so reveal restores it.
     pub fn set_collapse_reasoning(&mut self, collapse: bool) {
         if collapse == self.collapse_reasoning {
             return;
@@ -498,30 +516,46 @@ impl App {
             for line in std::mem::take(&mut self.lines) {
                 if line.kind == LineKind::Reasoning {
                     current_run.push(line);
-                } else if !current_run.is_empty() {
-                    self.hidden_reasoning.push(std::mem::take(&mut current_run));
-                    next.push(collapse_placeholder());
+                } else {
+                    if !current_run.is_empty() {
+                        self.hidden_reasoning.push(std::mem::take(&mut current_run));
+                        next.extend(collapse_placeholder_rows(self.content_width()));
+                    }
+                    next.push(line);
                 }
             }
             if !current_run.is_empty() {
                 self.hidden_reasoning.push(std::mem::take(&mut current_run));
-                next.push(collapse_placeholder());
+                next.extend(collapse_placeholder_rows(self.content_width()));
             }
             self.lines = next;
         } else {
             let mut next: Vec<ScreenLine> = Vec::with_capacity(self.lines.len());
+            let mut hidden = std::mem::take(&mut self.hidden_reasoning).into_iter();
             for line in std::mem::take(&mut self.lines) {
                 if line.kind == LineKind::Placeholder {
-                    if let Some(run) = self.hidden_reasoning.first().cloned() {
-                        self.hidden_reasoning.remove(0);
-                        next.extend(run);
+                    if let Some(run) = hidden.next() {
+                        for row in run {
+                            let style = row
+                                .line
+                                .spans
+                                .first()
+                                .map(|span| span.style)
+                                .unwrap_or_default();
+                            next.extend(
+                                wrap(&row.line.to_string(), self.content_width())
+                                    .into_iter()
+                                    .map(|text| ScreenLine::plain(text, style, row.kind)),
+                            );
+                        }
                     }
-                } else {
+                } else if line.kind != LineKind::PlaceholderContinuation {
                     next.push(line);
                 }
             }
             self.lines = next;
         }
+        self.maybe_truncate();
         self.clamp_scroll();
         self.follow();
     }
@@ -925,7 +959,11 @@ impl App {
             self.lines.push(ScreenLine {
                 line: row.line,
                 kind: LineKind::Normal,
-                md: if index == 0 { Some(md.clone()) } else { None },
+                md: Some(if index == 0 {
+                    MarkdownRow::Start(md.clone())
+                } else {
+                    MarkdownRow::Continuation
+                }),
             });
         }
         self.maybe_truncate();
@@ -944,6 +982,12 @@ impl App {
     fn maybe_truncate(&mut self) {
         if self.lines.len() > MAX_LINES {
             let overflow = self.lines.len() - MAX_LINES;
+            let placeholders = self.lines[..overflow]
+                .iter()
+                .filter(|row| row.kind == LineKind::Placeholder)
+                .count();
+            self.hidden_reasoning
+                .drain(..placeholders.min(self.hidden_reasoning.len()));
             self.lines.drain(0..overflow);
             self.scroll = self.scroll.saturating_sub(overflow as u16);
         }
@@ -1012,7 +1056,10 @@ impl App {
             Overlay::Replay => {
                 self.following = false;
                 let bottom = self.replay_bottom();
-                self.replay_scroll = self.replay_scroll.saturating_sub(amount).min(bottom);
+                self.replay_scroll = self
+                    .replay_scroll
+                    .saturating_sub(usize::from(amount))
+                    .min(bottom);
             }
             _ => {
                 if self.show_help {
@@ -1035,7 +1082,10 @@ impl App {
             Overlay::Replay => {
                 self.following = false;
                 let bottom = self.replay_bottom();
-                self.replay_scroll = self.replay_scroll.saturating_add(amount).min(bottom);
+                self.replay_scroll = self
+                    .replay_scroll
+                    .saturating_add(usize::from(amount))
+                    .min(bottom);
             }
             _ => {
                 if self.show_help {
@@ -1274,15 +1324,23 @@ impl App {
                 KeyAction::Idle
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.replay_scroll = self.replay_scroll.min(self.replay_bottom());
+                self.replay_scroll = self
+                    .replay_scroll
+                    .saturating_add(1)
+                    .min(self.replay_bottom());
                 KeyAction::Idle
             }
             KeyCode::PageUp => {
-                self.replay_scroll = self.replay_scroll.saturating_sub(self.visible_rows());
+                self.replay_scroll = self
+                    .replay_scroll
+                    .saturating_sub(usize::from(self.visible_rows()));
                 KeyAction::Idle
             }
             KeyCode::PageDown => {
-                self.replay_scroll = self.replay_scroll.min(self.replay_bottom());
+                self.replay_scroll = self
+                    .replay_scroll
+                    .saturating_add(usize::from(self.visible_rows()))
+                    .min(self.replay_bottom());
                 KeyAction::Idle
             }
             _ => KeyAction::Idle,
@@ -1318,24 +1376,24 @@ impl App {
     }
 
     /// The largest scroll offset that still shows the last history row.
-    fn history_max_scroll(&self) -> u16 {
+    fn history_max_scroll(&self) -> usize {
         // Count physical rows, not items: a long session id wraps onto
         // several rows at the content width.
         let width = self.content_width();
         let item_rows: usize = self
             .history_items
             .iter()
-            .map(|item| wrap(&format!("  {}  {}", item.id, item.describe()), width).len())
+            .map(|item| wrap(&format!("    {}  {}", item.id, item.describe()), width).len())
             .sum();
         let header = wrap(" session history ", width).len()
             + 1
             + wrap("  up/down or j/k select · enter replay · esc back", width).len()
             + 1;
-        (item_rows + header).saturating_sub(self.visible_rows() as usize) as u16
+        (item_rows + header).saturating_sub(usize::from(self.visible_rows()))
     }
 
     /// The largest scroll offset that still shows the last replay row.
-    fn replay_bottom(&self) -> u16 {
+    fn replay_bottom(&self) -> usize {
         // Count physical rows, not logical lines: each replay line wraps at
         // the content width, and the fixed header rows can wrap too.
         let width = self.content_width();
@@ -1348,7 +1406,7 @@ impl App {
             + 1
             + wrap("  esc back to history", width).len()
             + 1;
-        (rows + fixed).saturating_sub(self.visible_rows() as usize) as u16
+        (rows + fixed).saturating_sub(usize::from(self.visible_rows()))
     }
 
     /// Sets the directory the history overlay reads past transcripts from. The
@@ -1402,7 +1460,7 @@ impl App {
 
     /// Updates the terminal size and re-wraps the transcript at the new width.
     pub fn resize(&mut self, width: u16, height: u16) {
-        let width = width.max(20);
+        let width = width.max(1);
         if width == self.width && height == self.height {
             return;
         }
@@ -1412,23 +1470,25 @@ impl App {
         let mut wrapped: Vec<ScreenLine> = Vec::new();
         let mut index = 0;
         while index < self.lines.len() {
-            if let Some(source) = &self.lines[index].md.clone() {
+            if let Some(MarkdownRow::Start(source)) = self.lines[index].md.clone() {
                 // Re-render a whole Markdown block at the new width, preserving
                 // its block marker on the first row for any later resize.
-                let rows = render_document(source, target);
+                let rows = render_document(&source, target);
                 let mut next = index + 1;
-                while next < self.lines.len() && self.lines[next].md.is_none() {
+                while next < self.lines.len()
+                    && matches!(self.lines[next].md, Some(MarkdownRow::Continuation))
+                {
                     next += 1;
                 }
                 for (offset, row) in rows.into_iter().enumerate() {
                     wrapped.push(ScreenLine {
                         line: row.line,
                         kind: LineKind::Normal,
-                        md: if offset == 0 {
-                            Some(source.clone())
+                        md: Some(if offset == 0 {
+                            MarkdownRow::Start(source.clone())
                         } else {
-                            None
-                        },
+                            MarkdownRow::Continuation
+                        }),
                     });
                 }
                 index = next;
@@ -1441,13 +1501,18 @@ impl App {
                     .map(|span| span.style)
                     .unwrap_or_default();
                 let text = self.lines[index].line.to_string();
-                for line in wrap(&text, target) {
-                    wrapped.push(ScreenLine::plain(line, style, self.lines[index].kind));
+                for (offset, line) in wrap(&text, target).into_iter().enumerate() {
+                    let kind = match self.lines[index].kind {
+                        LineKind::Placeholder if offset > 0 => LineKind::PlaceholderContinuation,
+                        kind => kind,
+                    };
+                    wrapped.push(ScreenLine::plain(line, style, kind));
                 }
                 index += 1;
             }
         }
         self.lines = wrapped;
+        self.maybe_truncate();
         self.clamp_scroll();
     }
 }
@@ -1488,7 +1553,7 @@ fn base64_encode(input: &[u8]) -> String {
     out
 }
 
-fn wrap(text: &str, width: usize) -> Vec<String> {
+pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut lines = Vec::new();
     for paragraph in text.split('\n') {
@@ -1500,31 +1565,26 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
         // indented block (code, lists) keeps its shape after wrapping.
         let indent_len = paragraph.len() - paragraph.trim_start().len();
         let indent = &paragraph[..indent_len];
-        let budget = width.saturating_sub(indent.chars().count()).max(1);
+        let budget = width.saturating_sub(Span::raw(indent).width()).max(1);
         let mut current = String::from(indent);
         for word in paragraph.split_whitespace() {
-            let word_len = word.chars().count();
+            let word_len = Span::raw(word).width();
             if word_len > budget {
                 // The word is longer than a full line: push the accumulated
                 // line, then hard-split the word at the per-line budget.
                 if current != indent {
                     lines.push(std::mem::take(&mut current));
                 }
-                let mut chunks = split_long(word, budget).into_iter();
-                // The first chunk shares the line with the indent; later
-                // chunks fill the full budget on their own lines.
-                current = format!(
-                    "{indent}{}",
-                    chunks
-                        .next()
-                        .expect("a non-empty word yields at least one chunk")
-                );
-                for chunk in chunks {
-                    lines.push(chunk);
+                current = indent.to_owned();
+                for chunk in split_cell_chunks(word, budget) {
+                    if current != indent {
+                        lines.push(std::mem::replace(&mut current, indent.to_owned()));
+                    }
+                    current.push_str(&chunk);
                 }
             } else if current == indent {
                 current = format!("{indent}{word}");
-            } else if current.chars().count() + 1 + word_len > width {
+            } else if Span::raw(&current).width() + 1 + word_len > width {
                 lines.push(std::mem::take(&mut current));
                 current = format!("{indent}{word}");
             } else {
@@ -1546,14 +1606,6 @@ fn normalize_soft_breaks(text: &str) -> String {
     text.replace('\n', " ")
 }
 
-fn split_long(word: &str, width: usize) -> Vec<String> {
-    word.chars()
-        .collect::<Vec<_>>()
-        .chunks(width.max(1))
-        .map(|chunk| chunk.iter().collect::<String>())
-        .collect()
-}
-
 /// Returns the byte length of the next complete Markdown block in `pending`, or
 /// `None` when the pending buffer holds no *closed* block yet (only an open
 /// paragraph without a blank line, or an unmatched code fence). The caller
@@ -1573,7 +1625,7 @@ fn next_block_end(pending: &str) -> Option<usize> {
     let first_line = &stripped[..first_line_end];
     if let Some((ch, len, _info)) = fence_split(first_line) {
         // Scan for a matching closer fence; only fence characters, no content.
-        let mut rest = &stripped[first_line_end + 1..];
+        let mut rest = stripped.get(first_line_end + 1..)?;
         let mut consumed = first_line_end + 1;
         loop {
             let line_end = rest.find('\n').unwrap_or(rest.len());
@@ -1584,7 +1636,7 @@ fn next_block_end(pending: &str) -> Option<usize> {
                 && clo_len >= len
                 && rest_str.trim().is_empty()
             {
-                return Some(consumed);
+                return Some(lead + consumed);
             }
             if line_end >= rest.len() {
                 // Reached the end without a matching closer.
@@ -1621,6 +1673,31 @@ fn fence_split(line: &str) -> Option<(char, usize, &str)> {
 }
 
 /// The dim placeholder line shown where thinking has been collapsed.
+fn collapse_placeholder_rows(width: usize) -> Vec<ScreenLine> {
+    let placeholder = collapse_placeholder();
+    let style = placeholder
+        .line
+        .spans
+        .first()
+        .map(|span| span.style)
+        .unwrap_or_default();
+    wrap(&placeholder.line.to_string(), width)
+        .into_iter()
+        .enumerate()
+        .map(|(index, text)| {
+            ScreenLine::plain(
+                text,
+                style,
+                if index == 0 {
+                    LineKind::Placeholder
+                } else {
+                    LineKind::PlaceholderContinuation
+                },
+            )
+        })
+        .collect()
+}
+
 fn collapse_placeholder() -> ScreenLine {
     ScreenLine::plain(
         "▸ thinking hidden — press T to reveal",
@@ -1712,10 +1789,14 @@ fn bargraph(fraction: f64, width: u16) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{App, KeyAction, LineKind, MENU_ITEMS, Overlay, Style};
+    use super::{
+        App, KeyAction, LineKind, MAX_LINES, MENU_ITEMS, Overlay, ScreenLine, Style,
+        next_block_end, wrap,
+    };
     use crate::session::Event;
     use agent_runtime::ReasoningEffort;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use ratatui::text::Span;
 
     fn models() -> Vec<String> {
         vec!["local".to_owned(), "ollama".to_owned()]
@@ -2098,6 +2179,47 @@ mod tests {
     }
 
     #[test]
+    fn collapsing_reasoning_preserves_answers_tools_and_notices() {
+        let mut app = app();
+        app.push_event(Event::Note("before reasoning".into()));
+        app.push_event(Event::Reasoning("first reason".into()));
+        app.push_event(Event::Text("first answer".into()));
+        app.push_event(Event::ToolCall {
+            description: "inspect a file".into(),
+            name: "read_file".into(),
+        });
+        app.push_event(Event::Reasoning("second reason".into()));
+        app.push_event(Event::Text("second answer".into()));
+        app.push_event(Event::Finished {
+            message: "done".into(),
+        });
+        let original: Vec<_> = app.lines.iter().map(|row| row.line.to_string()).collect();
+        let visible: Vec<_> = app
+            .lines
+            .iter()
+            .filter(|row| row.kind != LineKind::Reasoning)
+            .map(|row| row.line.to_string())
+            .collect();
+        app.set_collapse_reasoning(true);
+        assert_eq!(
+            app.lines
+                .iter()
+                .filter(|row| row.kind != LineKind::Placeholder)
+                .map(|row| row.line.to_string())
+                .collect::<Vec<_>>(),
+            visible
+        );
+        app.set_collapse_reasoning(false);
+        assert_eq!(
+            app.lines
+                .iter()
+                .map(|row| row.line.to_string())
+                .collect::<Vec<_>>(),
+            original
+        );
+    }
+
+    #[test]
     fn stats_line_is_empty_until_progress_then_reports_values() {
         let idle = app();
         assert!(idle.stats_line().is_empty());
@@ -2470,6 +2592,186 @@ mod tests {
             lines.iter().any(|line| line.contains("echo hi")),
             "the block renders whole once the fence closes: {lines:?}"
         );
+    }
+
+    #[test]
+    fn incomplete_markdown_fence_openers_wait_without_panicking() {
+        for opener in ["```", "```rust", "~~~", "~~~text", "\n\n```rust"] {
+            assert_eq!(next_block_end(opener), None);
+            let mut app = clean_app();
+            app.push_event(Event::Text(opener.to_owned()));
+            assert!(app.lines.is_empty());
+        }
+    }
+
+    #[test]
+    fn markdown_fence_block_length_includes_leading_newlines() {
+        for lead in ["\n", "\n\n", "\n\n\n"] {
+            let block = format!("{lead}```rust\nfn main() {{}}\n```");
+            assert_eq!(next_block_end(&block), Some(block.len()));
+        }
+    }
+
+    #[test]
+    fn long_words_preserve_order_and_indentation_when_wrapped() {
+        assert_eq!(wrap("  abcdefghij", 6), vec!["  abcd", "  efgh", "  ij"]);
+    }
+
+    #[test]
+    fn wrapping_preserves_graphemes_and_uses_terminal_cells() {
+        let text = "a\u{301}你好👩\u{200d}💻b";
+        let rows = wrap(text, 4);
+        assert_eq!(rows.concat(), text);
+        assert!(rows.iter().all(|row| Span::raw(row).width() <= 4));
+        assert!(!rows.iter().any(|row| row.starts_with('\u{301}')));
+    }
+
+    #[test]
+    fn resize_preserves_plain_notices_and_reasoning_after_markdown() {
+        let mut app = clean_app();
+        app.push_markdown_block("**answer** with a few words".to_owned());
+        app.lines.push(ScreenLine::plain(
+            "notice sentinel",
+            Style::default(),
+            LineKind::Normal,
+        ));
+        app.lines.push(ScreenLine::plain(
+            "reasoning sentinel",
+            Style::default(),
+            LineKind::Reasoning,
+        ));
+        for width in [30, 60, 22, 50] {
+            app.resize(width, 24);
+            let rows = rendered_text(&app).join("\n");
+            assert!(rows.contains("answer"), "{rows:?}");
+            assert!(rows.contains("notice sentinel"), "{rows:?}");
+            assert!(
+                app.lines.iter().any(|row| {
+                    row.kind == LineKind::Reasoning
+                        && row.line.to_string().contains("reasoning sentinel")
+                }),
+                "{rows:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn resize_keeps_narrow_transcript_rows_bounded() {
+        let mut app = clean_app();
+        for _ in 0..4000 {
+            app.lines.push(ScreenLine::plain(
+                "abcdefghijklmnopqrst",
+                Style::default(),
+                LineKind::Normal,
+            ));
+        }
+        app.resize(4, 24);
+        assert!(app.lines.len() <= MAX_LINES);
+        assert!(app.lines.iter().all(|row| row.line.width() <= 2));
+    }
+
+    #[test]
+    fn revealed_reasoning_reflows_at_the_current_width() {
+        let mut app = clean_app();
+        app.lines.push(ScreenLine::plain(
+            "abcdefghijklmnopqrst",
+            Style::default(),
+            LineKind::Reasoning,
+        ));
+        app.set_collapse_reasoning(true);
+        app.resize(8, 24);
+        app.set_collapse_reasoning(false);
+        assert!(app.lines.iter().all(|row| row.line.width() <= 6));
+        assert_eq!(rendered_text(&app).concat(), "abcdefghijklmnopqrst");
+    }
+
+    #[test]
+    fn evicted_placeholders_do_not_restore_the_wrong_reasoning() {
+        let mut app = clean_app();
+        app.lines.push(ScreenLine::plain(
+            "discarded",
+            Style::default(),
+            LineKind::Reasoning,
+        ));
+        for _ in 0..MAX_LINES {
+            app.lines.push(ScreenLine::plain(
+                "filler",
+                Style::default(),
+                LineKind::Normal,
+            ));
+        }
+        app.lines.push(ScreenLine::plain(
+            "kept",
+            Style::default(),
+            LineKind::Reasoning,
+        ));
+        app.set_collapse_reasoning(true);
+        app.maybe_truncate();
+        app.set_collapse_reasoning(false);
+        let rows = rendered_text(&app);
+        assert!(rows.iter().any(|row| row == "kept"));
+        assert!(!rows.iter().any(|row| row == "discarded"));
+        assert!(app.lines.len() <= MAX_LINES);
+    }
+
+    #[test]
+    fn wrapped_placeholders_keep_distinct_reasoning_runs_in_order() {
+        let mut app = clean_app();
+        app.lines.push(ScreenLine::plain(
+            "first",
+            Style::default(),
+            LineKind::Reasoning,
+        ));
+        app.lines.push(ScreenLine::plain(
+            "between",
+            Style::default(),
+            LineKind::Normal,
+        ));
+        app.lines.push(ScreenLine::plain(
+            "second",
+            Style::default(),
+            LineKind::Reasoning,
+        ));
+        app.set_collapse_reasoning(true);
+        app.resize(8, 24);
+        app.resize(10, 24);
+        app.set_collapse_reasoning(false);
+        let text = rendered_text(&app).concat();
+        assert_eq!(text, "firstbetweensecond");
+    }
+
+    #[test]
+    fn initial_collapsed_placeholders_fit_the_current_width() {
+        let mut app = clean_app();
+        app.resize(8, 24);
+        app.lines.push(ScreenLine::plain(
+            "first",
+            Style::default(),
+            LineKind::Reasoning,
+        ));
+        app.lines
+            .push(ScreenLine::plain("mid", Style::default(), LineKind::Normal));
+        app.lines.push(ScreenLine::plain(
+            "second",
+            Style::default(),
+            LineKind::Reasoning,
+        ));
+        app.set_collapse_reasoning(true);
+        assert!(app.lines.iter().all(|row| row.line.width() <= 6));
+        app.set_collapse_reasoning(false);
+        assert_eq!(rendered_text(&app).concat(), "firstmidsecond");
+    }
+
+    #[test]
+    fn replay_keys_advance_and_keep_large_row_offsets() {
+        let mut app = clean_app();
+        app.overlay = Overlay::Replay;
+        app.replay_lines = vec!["row".to_owned(); 70_000];
+        app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.replay_scroll, 1);
+        app.on_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+        assert_eq!(app.replay_scroll, 1 + usize::from(app.visible_rows()));
+        assert!(app.replay_bottom() > usize::from(u16::MAX));
     }
 
     #[test]

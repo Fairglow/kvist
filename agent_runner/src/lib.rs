@@ -14,12 +14,15 @@ mod host;
 mod kvist_import;
 mod logging;
 mod markdown;
+mod process;
 mod run;
 
 pub mod config;
 pub mod context;
 pub mod error;
 pub mod executor;
+pub mod file_tools;
+pub mod headless;
 pub mod history;
 pub mod retry;
 pub mod sandbox;
@@ -45,11 +48,12 @@ pub use retry::{
 pub use run::system_prompt;
 pub use sandbox::ToolOutcome;
 pub use session::{
-    AgentRunner, AgentSession, Event, EventSink, MAX_TURNS, Recorder, RunSummary, ToolExecutor,
+    AgentRunner, AgentSession, Event, EventSink, MAX_TURNS, Recorder, RunLimits, RunSummary,
+    ToolExecutor,
 };
 pub use session_log::{DEFAULT_LOG_DIR, SessionLog};
 pub use toolchain::{ProfileSetting, ToolProfile, ToolchainProbe};
-pub use tools::{ExecContext, RenderedTool, StagedWrite, ToolRegistry, describe_tool_call};
+pub use tools::{ExecContext, RenderedTool, ToolRegistry, describe_tool_call};
 
 /// Initializes logging for the binary.
 pub fn init_logging() {

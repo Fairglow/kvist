@@ -676,6 +676,7 @@ fn execute_host_turn(
         tool_choice: ToolChoice::Auto,
         reasoning_effort: profile.thinking_effort,
         output_schema: None,
+        max_output_tokens: None,
     };
 
     complete_turn(
@@ -2126,6 +2127,7 @@ mod tests {
             tool_choice: ToolChoice::None,
             reasoning_effort: None,
             output_schema: None,
+            max_output_tokens: None,
         }
     }
 

@@ -491,6 +491,7 @@ fn model(arguments: ModelArguments) -> agent_runtime::Result<()> {
         tool_choice: ToolChoice::None,
         reasoning_effort: arguments.reasoning_effort.map(Into::into),
         output_schema,
+        max_output_tokens: None,
     };
     let cancellation = CancellationToken::new();
     let stdout = std::io::stdout();

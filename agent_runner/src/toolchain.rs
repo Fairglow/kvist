@@ -227,6 +227,9 @@ pub fn language_available(profile: ToolProfile, search_dirs: &[PathBuf], mounted
             if canonical.file_name().is_some_and(|file| file == "rustup") {
                 continue;
             }
+            if nix::unistd::access(&canonical, nix::unistd::AccessFlags::X_OK).is_err() {
+                continue;
+            }
             if mounted_roots
                 .iter()
                 .any(|root| canonical == *root || canonical.strip_prefix(root).is_ok())
@@ -433,6 +436,8 @@ mod tests {
         std::fs::create_dir_all(&bin).unwrap();
         let interpreter = bin.join("python3");
         std::fs::write(&interpreter, "#!/bin/sh\n").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&interpreter, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         let mounted_root = root.join("usr").to_string_lossy().into_owned();
         assert!(language_available(
@@ -456,6 +461,8 @@ mod tests {
         std::fs::create_dir_all(&bin).unwrap();
         let real = bin.join("rustc");
         std::fs::write(&real, "").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(language_available(
             ToolProfile::Rust,
             std::slice::from_ref(&bin),

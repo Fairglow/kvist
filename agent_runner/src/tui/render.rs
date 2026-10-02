@@ -7,7 +7,7 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use super::app::{App, MENU_HOTKEYS, MENU_ITEMS, Overlay};
+use super::app::{App, MENU_HOTKEYS, MENU_ITEMS, Overlay, wrap};
 
 /// Rows reserved for the multiline prompt editor around the transcript.
 const INPUT_ROWS: u16 = 4;
@@ -68,8 +68,9 @@ fn render_header(f: &mut ratatui::Frame, app: &App, area: Rect) {
         None => Span::from(" "),
     };
     let title = format!(
-        "{} agent-runner  ·  model: {}  ·  thinking: {}  ·  status: {}",
+        "{} [{}] model: {} · thinking: {} · {}",
         spinner,
+        app.execution_scope.label(),
         highlight(&app.model, app.running),
         app.effort.as_str(),
         app.status
@@ -176,10 +177,26 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from("  just rolled back by a compaction, so the number is honest"),
         Line::from(""),
         Line::from("  Compaction keeps the model's context bounded by rolling"),
-        Line::from("  older turns into a summary. Full reasoning is always"),
-        Line::from("  saved to the session journal + transcript; Ctrl+T only"),
-        Line::from("  hides it in the live view. The agent runs inside the"),
-        Line::from("  sandbox. Writes stay inside the working directory."),
+        Line::from("  complete tool groups into a lossy, nonbinding summary."),
+        Line::from("  Private transcripts are bounded and may contain secrets;"),
+        Line::from("  --no-logs disables them. Ctrl+T only hides reasoning."),
+        Line::from(match app.execution_scope {
+            crate::session_log::ExecutionScope::SandboxedWorkspace => {
+                "  Sandboxed tools deny network."
+            }
+            _ => "  Do not assume sandbox network confinement.",
+        }),
+        Line::from(match app.execution_scope {
+            crate::session_log::ExecutionScope::HostUnconfined => {
+                "  WARNING: HOST UNCONFINED. Shell tools have real host privileges; writes and network are not sandbox constrained."
+            }
+            crate::session_log::ExecutionScope::SandboxedWorkspace => {
+                "  Writes: working directory only."
+            }
+            crate::session_log::ExecutionScope::Unspecified => {
+                "  Execution scope is unspecified; do not assume confinement."
+            }
+        }),
     ];
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         " help",
@@ -279,17 +296,16 @@ fn render_history(f: &mut ratatui::Frame, app: &App, area: Rect) {
     // that wrap onto several physical lines stay reachable.
     let inner_width = area.width.saturating_sub(2).max(1);
     let inner_height = area.height.saturating_sub(2).max(1);
-    let paragraph = Paragraph::new(Text::from(lines))
-        .block(block)
-        .alignment(Alignment::Left)
-        .wrap(Wrap { trim: false });
-    let max_scroll = paragraph
-        .line_count(inner_width)
-        .saturating_sub(inner_height as usize) as u16;
-    f.render_widget(
-        paragraph.scroll((app.history_scroll.min(max_scroll), 0)),
-        area,
+    let rows = visible_overlay_rows(
+        lines.into_iter(),
+        inner_width,
+        inner_height,
+        app.history_scroll,
     );
+    let paragraph = Paragraph::new(Text::from(rows))
+        .block(block)
+        .alignment(Alignment::Left);
+    f.render_widget(paragraph, area);
 }
 
 /// A read-only replay of one past session's transcript. Esc returns to the
@@ -303,12 +319,12 @@ fn render_replay(f: &mut ratatui::Frame, app: &App, area: Rect) {
     lines.push(Line::from(""));
     lines.push(Line::from("  esc back to history"));
     lines.push(Line::from(""));
-    for line in &app.replay_lines {
-        lines.push(Line::from(Span::styled(
-            line.clone(),
+    let content = app.replay_lines.iter().map(|line| {
+        Line::from(Span::styled(
+            line.as_str(),
             Style::default().fg(Color::White),
-        )));
-    }
+        ))
+    });
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         " replay",
         Style::default().fg(Color::Cyan).bold(),
@@ -317,17 +333,42 @@ fn render_replay(f: &mut ratatui::Frame, app: &App, area: Rect) {
     // that wrap onto several physical lines stay reachable.
     let inner_width = area.width.saturating_sub(2).max(1);
     let inner_height = area.height.saturating_sub(2).max(1);
-    let paragraph = Paragraph::new(Text::from(lines))
-        .block(block)
-        .alignment(Alignment::Left)
-        .wrap(Wrap { trim: false });
-    let max_scroll = paragraph
-        .line_count(inner_width)
-        .saturating_sub(inner_height as usize) as u16;
-    f.render_widget(
-        paragraph.scroll((app.replay_scroll.min(max_scroll), 0)),
-        area,
+    let rows = visible_overlay_rows(
+        lines.into_iter().chain(content),
+        inner_width,
+        inner_height,
+        app.replay_scroll,
     );
+    let paragraph = Paragraph::new(Text::from(rows))
+        .block(block)
+        .alignment(Alignment::Left);
+    f.render_widget(paragraph, area);
+}
+
+fn visible_overlay_rows<'a>(
+    lines: impl Iterator<Item = Line<'a>> + Clone,
+    width: u16,
+    height: u16,
+    offset: usize,
+) -> Vec<Line<'static>> {
+    let count = lines
+        .clone()
+        .map(|line| wrap(&line.to_string(), usize::from(width)).len())
+        .sum::<usize>();
+    let start = offset.min(count.saturating_sub(usize::from(height)));
+    lines
+        .flat_map(|line| {
+            let style = line
+                .spans
+                .first()
+                .map_or(line.style, |span| line.style.patch(span.style));
+            wrap(&line.to_string(), usize::from(width))
+                .into_iter()
+                .map(move |text| Line::styled(text, style))
+        })
+        .skip(start)
+        .take(usize::from(height))
+        .collect()
 }
 
 fn highlight(text: &str, active: bool) -> Span<'static> {
@@ -417,6 +458,29 @@ mod tests {
         assert!(
             stats_row.contains("tok/s") && stats_row.contains("compaction"),
             "placeholder:\n{stats_row:?}"
+        );
+    }
+
+    #[test]
+    fn execution_scope_stays_visible_on_narrow_terminals() {
+        let mut app = App::new(
+            &["local".into()],
+            "local",
+            ReasoningEffort::None,
+            None,
+            20,
+            12,
+        );
+        app.execution_scope = crate::session_log::ExecutionScope::HostUnconfined;
+        let text = buffer_text(&draw(&app));
+        assert!(text.lines().next().unwrap().contains("HOST UNCONFINED"));
+        app.execution_scope = crate::session_log::ExecutionScope::SandboxedWorkspace;
+        assert!(
+            buffer_text(&draw(&app))
+                .lines()
+                .next()
+                .unwrap()
+                .contains("SANDBOX")
         );
     }
 
@@ -511,6 +575,27 @@ mod tests {
         for line in text.lines() {
             assert!(line.chars().count() <= 40, "line overflows: {line:?}");
         }
+    }
+
+    #[test]
+    fn replay_rows_beyond_u16_remain_visible() {
+        let mut app = App::new(
+            &["local".to_owned()],
+            "local",
+            ReasoningEffort::Medium,
+            None,
+            40,
+            12,
+        );
+        app.overlay = Overlay::Replay;
+        app.replay_lines = vec!["row".to_owned(); 70_000];
+        app.replay_lines.push("last replay row".to_owned());
+        app.replay_scroll = usize::from(u16::MAX);
+        let before = buffer_text(&draw(&app));
+        assert!(!before.contains("last replay row"));
+        app.scroll_down(u16::MAX);
+        let after = buffer_text(&draw(&app));
+        assert!(after.contains("last replay row"), "{after}");
     }
 
     #[test]
@@ -637,7 +722,7 @@ mod tests {
         let text = buffer_text(&draw(&app));
         assert!(app.help_scroll > 0, "help scrolled");
         assert!(
-            text.contains("sandbox. Writes stay inside the working directory."),
+            text.contains("Writes: working directory only."),
             "bottom of the help is reachable:\n{text}"
         );
     }

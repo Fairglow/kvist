@@ -95,6 +95,30 @@ pub enum Error {
         /// The root cause message.
         reason: String,
     },
+    /// A complete request and its output reserve do not fit the context window.
+    ContextBudget {
+        /// Estimated input tokens.
+        used: usize,
+        /// Configured complete context window.
+        limit: usize,
+        /// Tokens reserved for generation.
+        reserve: usize,
+    },
+    /// An incomplete or internally inconsistent model proposal.
+    InvalidModelTurn {
+        /// Why the turn cannot safely be applied.
+        reason: String,
+    },
+    /// The shared prompt resource budget has been spent.
+    RunBudget {
+        /// The exhausted resource.
+        reason: String,
+    },
+    /// Durable recording failed, possibly alongside another failure.
+    Recording {
+        /// Actionable operational diagnostic.
+        reason: String,
+    },
     /// A generic input/output failure.
     Io {
         /// The operation in progress.
@@ -137,6 +161,10 @@ impl Error {
 
     /// An actionable, non-secret message describing the failure.
     pub fn describe(&self) -> String {
+        terminal_text(&self.describe_raw()).into_owned()
+    }
+
+    fn describe_raw(&self) -> String {
         match self {
             Error::Config { path, reason } => match path {
                 Some(path) => format!("invalid configuration `{path}`: {reason}"),
@@ -191,6 +219,17 @@ impl Error {
                 Some(model) => format!("model `{model}` request failed: {reason}"),
                 None => format!("model request failed: {reason}"),
             },
+            Error::ContextBudget {
+                used,
+                limit,
+                reserve,
+            } => format!(
+                "request needs approximately {used} input tokens plus {reserve} output tokens, \
+                 exceeding the {limit}-token context; shorten the prompt or increase --context-limit"
+            ),
+            Error::InvalidModelTurn { reason } => format!("invalid model turn: {reason}"),
+            Error::RunBudget { reason } => format!("prompt budget exhausted: {reason}"),
+            Error::Recording { reason } => format!("session recording failed: {reason}"),
             Error::Io {
                 operation,
                 path,
@@ -212,7 +251,31 @@ impl fmt::Display for Error {
     }
 }
 
-impl std::error::Error for Error {}
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io { source, .. } => Some(source),
+            _ => None,
+        }
+    }
+}
+
+/// Visibly escapes control characters before writing untrusted terminal text.
+pub fn terminal_text(text: &str) -> std::borrow::Cow<'_, str> {
+    let unsafe_control = |ch: char| ch.is_control() && ch != '\n' && ch != '\t';
+    if !text.chars().any(unsafe_control) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if unsafe_control(ch) {
+            escaped.extend(ch.escape_default());
+        } else {
+            escaped.push(ch);
+        }
+    }
+    std::borrow::Cow::Owned(escaped)
+}
 
 impl From<std::io::Error> for Error {
     fn from(source: std::io::Error) -> Self {
@@ -247,5 +310,29 @@ impl From<kvist_sandbox_runner::validation::ProtocolError> for Error {
         Error::SandboxBuild {
             reason: source.to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod terminal_tests {
+    use super::*;
+
+    #[test]
+    fn diagnostics_escape_path_controls_and_keep_io_sources() {
+        let error = Error::InvalidPath {
+            path: "file\u{1b}]52;c;sentinel\u{7}".into(),
+            reason: "not permitted".into(),
+        };
+        assert!(!error.describe().chars().any(char::is_control));
+        let io = io_error(
+            "read",
+            None,
+            std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        );
+        assert!(std::error::Error::source(&io).is_some());
+        assert!(matches!(
+            terminal_text("ordinary\ntext\t"),
+            std::borrow::Cow::Borrowed(_)
+        ));
     }
 }
