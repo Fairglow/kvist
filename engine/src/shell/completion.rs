@@ -316,7 +316,7 @@ fn complete_flag(
             }
         }
     }
-    dedupe(candidates)
+    dedupe(sort_unordered(candidates))
 }
 
 /// Returns a human-friendly description for candidates in dynamic domains
@@ -385,7 +385,7 @@ fn complete_option_value(
             });
         }
     }
-    dedupe(candidates)
+    dedupe(sort_unordered(candidates))
 }
 
 /// Completes the value of the positional under the cursor.
@@ -397,20 +397,26 @@ fn complete_positional(
     current_component: Option<&str>,
     span: (usize, usize),
 ) -> Vec<Candidate> {
-    let mut candidates = Vec::new();
-    for value in &positional.possible_values {
-        if value.starts_with(prefix) {
-            candidates.push(Candidate {
-                value: value.clone(),
-                description: positional
-                    .help
-                    .clone()
-                    .or_else(|| positional.value_name.clone()),
-                span,
-                append_whitespace: false,
-            });
-        }
-    }
+    // Static enum literals have no inherent order, so sort them for findability.
+    let mut candidates: Vec<Candidate> = positional
+        .possible_values
+        .iter()
+        .filter(|value| value.starts_with(prefix))
+        .map(|value| Candidate {
+            value: value.clone(),
+            description: positional
+                .help
+                .clone()
+                .or_else(|| positional.value_name.clone()),
+            span,
+            append_whitespace: false,
+        })
+        .collect();
+    candidates.sort_by(|a, b| a.value.cmp(&b.value));
+
+    // Dynamic values keep their domain-driven order (task queue, component
+    // discovery); sorting them would hide the next ready task and the current
+    // component, which is the whole point of offering them here.
     if let Some(domain) = positional_domain(positional.value_name.as_deref().unwrap_or("")) {
         let desc = domain_description(domain);
         for candidate in dynamic_values(domain, scope, prefix, state, current_component) {
@@ -438,7 +444,7 @@ fn complete_subcommands(node: &CommandNode, prefix: &str, span: (usize, usize)) 
             });
         }
     }
-    dedupe(candidates)
+    dedupe(sort_unordered(candidates))
 }
 
 /// Routes an option (by long name) to a dynamic value domain.
@@ -736,6 +742,18 @@ fn tokenize(region: &str) -> Vec<Token> {
     tokens
 }
 
+/// Orders completion candidates for a pool with no domain-driven order.
+///
+/// Task queues, component discovery, and the other ordered domains are produced
+/// in their meaningful order by their builders and are passed through untouched;
+/// this is the fallback for pools without an inherent order—subcommand names,
+/// flag spellings, and enum literals—using a stable, locale-independent string
+/// sort so the menu is deterministic and easy to scan.
+fn sort_unordered(mut candidates: Vec<Candidate>) -> Vec<Candidate> {
+    candidates.sort_by(|a, b| a.value.cmp(&b.value));
+    candidates
+}
+
 /// Removes duplicate candidates, preserving first-occurrence order.
 fn dedupe(candidates: Vec<Candidate>) -> Vec<Candidate> {
     let mut seen = std::collections::BTreeSet::new();
@@ -813,7 +831,7 @@ mod tests {
         assert_eq!(values(&complete(&c, "ta")), vec!["task", "tasks"]);
         assert_eq!(
             values(&complete(&c, "comp")),
-            vec!["component", "completions"]
+            vec!["completions", "component"]
         );
         assert_eq!(values(&complete(&c, "nope")), Vec::<&str>::new());
     }
@@ -912,11 +930,11 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                "pending",
-                "in-progress",
-                "blocked",
                 "awaiting-decision",
-                "completed"
+                "blocked",
+                "completed",
+                "in-progress",
+                "pending"
             ]
         );
     }
@@ -943,7 +961,7 @@ mod tests {
         let c = completer();
         assert_eq!(
             values(&complete(&c, "completions ")),
-            vec!["bash", "zsh", "fish", "powershell"]
+            vec!["bash", "fish", "powershell", "zsh"]
         );
     }
 
@@ -952,7 +970,7 @@ mod tests {
         let c = completer();
         assert_eq!(
             values(&complete(&c, "status --format ")),
-            vec!["text", "json", "overview"]
+            vec!["json", "overview", "text"]
         );
         assert_eq!(values(&complete(&c, "status --format j")), vec!["json"]);
         assert_eq!(values(&complete(&c, "status --format o")), vec!["overview"]);
@@ -963,7 +981,7 @@ mod tests {
         let c = completer();
         assert_eq!(
             values(&complete(&c, "status --format=")),
-            vec!["text", "json", "overview"]
+            vec!["json", "overview", "text"]
         );
         assert_eq!(values(&complete(&c, "status --format=j")), vec!["json"]);
         assert_eq!(values(&complete(&c, "status --format=o")), vec!["overview"]);
