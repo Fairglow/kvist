@@ -1,492 +1,773 @@
 <!-- kvist-implementation-record-version: 1 -->
+
 # Component Implementation Record
 
-## Observation inputs and limits
+## Observed implementation: agent-runner
 
-This is source-only observation with supplied execution evidence, not acceptance,
-implementation authority or compliance/security certification. It is derived
-from current component Rust implementation/test source, shell fixture,
-`agent_runner/Cargo.toml`, and these two files:
+## Observation basis
 
-- `/home/stefan/.copilot/session-state/b5e05792-9383-4aff-87cc-d325bf06e011/files/runtime-delivery-qualified.log`
-- `/home/stefan/.copilot/session-state/b5e05792-9383-4aff-87cc-d325bf06e011/files/live-delivery-qualified.log`
+This replacement record was derived on 2026-10-02 from this package's Rust
+implementation and tests, its Cargo manifest, and the permitted agent-runtime
+implementation and tests. No intent documents, previous implementation record,
+reviews, Git history, engine implementation, or sandbox-runner implementation
+were read. This is an implementation observation, not an intent review,
+authorization decision, or compliance certification.
 
-The previous record was not opened or reused. Intent, queues, reviews,
-Git/history and peer implementation are excluded. Runtime and sandbox backend
-internals were not inspected; their recorded hashes/results in allowed logs
-do not expand that source boundary.
+Source paths below are repository-relative. Claims about the external sandbox
+are limited to the requests constructed here and the native trials actually
+executed. Mock runners demonstrate construction and supervision, not isolation.
 
-The observer computed current source hashes but **did not execute tests/builds,
-live requests or executable hashing**. Those executions are supplied. Relevant
-mechanisms and assertions were inspected, including the prefix-aware styled
-wrapper and code continuation construction. Inventory matching is not a claim
-that every source assertion was individually examined. Only this record was
-written; source/tests were not changed.
+## Package and public surface
 
-There are **36 allowed files**: 26 implementation Rust, eight integration-test
-Rust, one shell fixture and one manifest. Every file matches both supplied logs:
-**36 matches per log, zero missing identities, zero mismatches**.
-Current Markdown implementation/local tests hash to
-`6b681962ef8ce917f245c94306419e2ee5123feef053f9cc4a5ff64191180d93`.
-The complete inventory below has aggregate SHA-256
-`b8467755254888b355f5904c1fdbc598b62d12e9b438de0fcd376f9dff117af8`.
+`agent_runner/Cargo.toml` defines package `agent-runner` 0.2.0, edition 2024,
+minimum Rust 1.95, library `agent_runner`, and binaries `agent-runner` and
+`agent-runner-file-tool`. The library forbids unsafe code. Its Unix filesystem
+and process APIs, `/proc` use, and Linux-only agent-runtime dependency make the
+observed implementation Linux-specific.
 
-## Supplied runs and source/caller identity
+`agent_runner/src/lib.rs` exposes:
 
-| Log | SHA-256 | Reported UTC start / end |
-|---|---|---|
-| `runtime-delivery-qualified.log` | `160031bfcf491dde59964ae6abfe91b85cbe3c0581c68b3777b7d42df192ece7` | `2026-10-02T02:21:47Z` / `2026-10-02T02:21:58Z` |
-| `live-delivery-qualified.log` | `cfaf987d285794d8ccd6023f55e5388432949c6e083cc026aa43bb9d3826f5c0` | `2026-10-02T02:21:47Z` / `2026-10-02T02:21:52Z` |
+- Configuration: `Cli`, `parse_effort`, `resolve_config_path`, `Config`, `Model`,
+  `ModelProvider`, `SandboxPaths`, `ToolPolicy`, `DEFAULT_WRITE_ROOT`;
+  `config::ModelBudgets` and configuration bounds are also publicly accessible.
+- Conversation and execution: `AgentSession`, `AgentRunner`, `Event`,
+  `EventSink`, `ToolExecutor`, `Recorder`, `RunSummary`, `RunLimits`, `MAX_TURNS`,
+  `SandboxExecutor`, `HostExecutor`, `ToolOutcome`, and `system_prompt`.
+- Context: `ContextManager`, `Compaction`, token/message estimates, and
+  `DEFAULT_CONTEXT_TOKENS`; `context::estimate_request` is public.
+- Tool construction: `ExecContext`, `RenderedTool`, `ToolRegistry`,
+  `describe_tool_call`, `ToolProfile`, `ProfileSetting`, `ToolchainProbe`.
+- Native primitives through `file_tools`, sandbox construction/execution
+  through `sandbox`, `RetryPolicy` and its defaults, `SessionLog` and
+  `DEFAULT_LOG_DIR`, history listing/replay through `history`,
+  `headless::run`, and `tui::{Overrides, run}`.
+- Kvist profile import: `KVIST_CONFIG_FILE`, `import_models`,
+  `resolve_kvist_config_path`; Markdown rendering: `MarkdownStyles`,
+  `RenderedLine`, `render_document`; `Error`, `Result`, `init_logging`.
 
-Both report rustc `1.99.0 (b940084d7 2026-09-28)` and cargo
-`1.99.0 (5f94df478 2026-08-27)`.
-Runtime names `cargo test --locked -p agent-runner -p agent-runtime`,
-with a 2.40-second build:
+The worker/thread implementation, CLI module, host module, Markdown module,
+and import module are private even when selected items are re-exported.
+`toolchain::rust_environment::RustEnvironment` is publicly reachable through
+the public toolchain module.
 
-| Runner target | Passed | Failed | Ignored |
-|---|---:|---:|---:|
-| Library | 180 | 0 | 0 |
-| Main binary | 0 | 0 | 0 |
-| File-helper binary | 0 | 0 | 0 |
-| `component_tests` | 35 | 0 | 0 |
-| `context_preflight` | 18 | 0 | 0 |
-| `headless_cli` | 4 | 0 | 0 |
-| `input_boundaries` | 3 | 0 | 0 |
-| `live_llama` | 0 | 0 | 3 |
-| `loop_integration` | 33 | 0 | 0 |
-| `native_file_tools` | 28 | 0 | 0 |
-| `subprocess_supervision` | 26 | 0 | 0 |
-| Runner doc tests | 0 | 0 | 0 |
-| **Runner subtotal** | **327** | **0** | **3** |
+## Configuration and startup
 
-The runtime dependency contributes 140 log-only passes: library 7, catalog 11,
-CLI 25, command 6, GBNF 9, loop detection 11, model CLI 2, model transport 44,
-profiles 4, setup 9, supervisor 9 and trajectory 3. Its main/doc targets have
-zero cases; failures/ignored are zero. Dependency bodies are excluded.
-The offline command therefore reports **467 passed, zero failed, three ignored**.
+`agent_runner/src/config.rs` reads at most 64 KiB of UTF-8 TOML from a regular
+file using `O_NOFOLLOW | O_NONBLOCK`. A second stream bound catches growth.
+Parse/type diagnostics identify the line without echoing TOML contents.
+The raw configuration and its nested model, sandbox, and policy tables reject
+unknown fields.
 
-Live first names
-`cargo test --locked -p agent-runner --test live_llama --no-run` (1.40-second
-build), then records source/executable hashes and invokes:
+The accepted input shape is:
+
+- `schema_version = 1`;
+- optional `working_directory`, otherwise current directory; a configured
+  value must be absolute and an existing directory;
+- `default_model`, matching one of the case-sensitive model IDs;
+- optional `default_thinking_effort`, default `medium`;
+- one or more `[[models]]` with `id`, `provider`, `model`, optional `base_url`,
+  `context_limit`, `response_reserve`, `deadline_secs`, `max_attempts`,
+  `retry_base_delay_secs`, `retry_max_delay_secs`, `cadence_timeout_secs`;
+- optional `[sandbox]` with `runner` and `backend`;
+- optional `[tool_policy]` with `shell_deny_substrings`,
+  `shell_deny_prefixes`, `write_root`;
+- optional `[tool_profiles]`, keyed by generic/python/rust/javascript/go/c,
+  with serde spellings `on`, `auto`, `off`.
+
+IDs must be unique, provider model text nonblank, deadlines 1–600 seconds,
+attempts at least one, backoff delays at most 3600 seconds with base no greater
+than maximum, cadence 0–600 seconds. Context is 2–1,048,576 tokens; reserve is
+1–1,048,576 and must be smaller than an explicitly paired context. There is
+no configured upper bound on `max_attempts`; whole-prompt budgets still apply.
+`ProfileSetting::parse` accepts extra synonyms, but the TOML serde enum uses
+the three canonical spellings. Configuring generic has no gating effect.
+
+Providers are `llama-server` and `ollama`, with default endpoints
+`http://127.0.0.1:9931` and `http://127.0.0.1:11434`. Defaults are deadline
+300 seconds, three attempts, 2-second base/30-second maximum backoff, and
+30-second cadence; zero cadence disables that watchdog. Transport construction
+uses agent-runtime's direct transport with an 8 MiB response limit. Loopback
+endpoint validation occurs when constructing that transport, not when parsing
+TOML. Default executables are `/usr/local/bin/kvist-sandbox-runner` and
+`/usr/bin/bwrap`.
+
+`Model::resolve_budgets` selects context and output overrides independently:
+CLI, then model configuration, then provider serving-capacity discovery for
+context or `clamp(context / 4, 1, 8192)` for output reserve. Missing/failed
+discovery asks for explicit capacity; it does not assume 8192 tokens.
+Provenance is recorded as CLI/configuration/provider/automatic.
+`DEFAULT_CONTEXT_TOKENS = 8192` remains a library constant, not the production
+unknown-model fallback. `Config::from_parts` only checks default-model
+membership and fills defaults; it is not equivalent to full TOML validation.
+Startup canonicalizes the chosen working directory, including relative or
+linked CLI overrides, and rejects non-directories.
+
+`agent_runner/src/cli.rs` searches explicit config, current-directory
+`agent-runner.toml`, XDG user config, then XDG system directories. Relative
+`XDG_CONFIG_HOME` falls back to `HOME/.config`; system paths come from
+colon-separated `XDG_CONFIG_DIRS`, default `/etc/xdg`. It does not search
+ancestor projects. `--list-models` loads and prints configured models without a
+terminal. `--import-kvist` does not need an agent-runner configuration:
+`agent_runner/src/kvist_import.rs` extracts `[agent.profiles]`, ignores unrelated
+fields and command templates, and prints sorted `[[models]]` snippets for the
+two supported providers, with escaped TOML strings and a 120-second import
+deadline default. Import is read-only and does not validate a complete target
+configuration or enforce the target's 600-second deadline maximum.
+
+Other flags include model, effort, cwd, profile, logs, context/output budgets,
+initial prompt, `--headless`, `--json`, `--allow-host-execution`, and
+`--host-turns`. Headless requires a prompt and conflicts with host authority,
+disabled logs, listing, and import; JSON requires headless. Whole-prompt CLI
+defaults are 1800 seconds and 1,000,000 estimated tokens, with maxima 24 hours
+and 1,000,000,000 tokens. Error exit codes are normally 1, selection/terminal/
+effort/toolchain/host-turn errors 2, policy errors 3
+(`agent_runner/src/error.rs`, `agent_runner/src/main.rs`).
+
+Evidence includes `agent_runner/tests/component_tests.rs`:
+`loads_a_valid_configuration`, `rejects_unknown_top_level_fields`,
+`rejects_duplicate_model_ids`, `rejects_out_of_bound_cadence`; and
+`agent_runner/tests/model_budgets.rs`:
+`configured_capacity_and_cli_precedence_have_no_8192_fallback`,
+`automatic_generation_reserve_has_room_for_reasoning_but_fits_small_windows`,
+`unavailable_discovery_requests_explicit_capacity_instead_of_assuming_8192`.
+
+## Tool model and authority
+
+`agent_runner/src/tools.rs` renders rather than executes tools. `ExecContext`
+contains host `workdir` and `call_id`; `RenderedTool` contains `argv`, human
+`summary`, optional typed `file_request`, and optional `file_helper`.
+Definitions are offered in stable order: shell, read_file, write_file, list_dir,
+find_files, search_files, edit_file. Language profiles change shell capability
+descriptions/resources, not these tool names.
+
+Shell accepts exactly `{"command": <string>}`: nonblank, NUL-free, at most
+16 KiB. Rendering produces absolute bash, `-c`, the unchanged command, and
+`agent-runner` as argv0. The built-in case-sensitive substring denylist includes
+`rm -rf`, `rm -fr`, `mkfs`, `dd if=`, `dd bs=`, `> /dev/`, `:() {`,
+`exec 9<>`, `reboot`, `shutdown`; trimmed-start prefix `mknod ` is denied.
+Configuration adds denials rather than removing the minimum. This is an
+advisory textual filter, not shell parsing or isolation. Policy identity hashes
+sorted, NUL-delimited write-root/deny entries. Unknown tools or malformed
+arguments fail before executor effects.
+
+`agent_runner/src/toolchain.rs` keeps generic enabled; configurable profiles
+default auto. On/forced requires availability, auto omits unavailable profiles,
+off excludes them. Non-Rust probing searches PATH, fixed system directories,
+and selected home paths, but accepts only executable canonical paths beneath
+the mounted system roots `/usr`, `/lib`, `/lib64`, `/bin`, `/sbin`; rustup
+proxies are not compilers. This is an interpreter probe, not proof that every
+named package manager/build tool works. Manifest-based language detection is
+advisory. Rust workspace resolution is a separate concrete-resource path.
+
+In normal execution `SandboxExecutor` is injected. `HostExecutor` is an
+explicit unconfined alternative, with inherited host environment, privileges,
+and network. It performs string replacement of write-root path occurrences in
+shell argv, not semantic shell-path confinement. Native operations instead
+map the write-root namespace onto the canonical host workdir and retain their
+own mutation checks. Host shell calls allow 120 seconds and 8 KiB combined
+capture; native helper calls allow 7001 captured bytes
+(`agent_runner/src/host.rs`). Neither executor makes operational logs canonical
+task evidence.
+
+## Native filesystem operations
+
+`agent_runner/src/file_tools.rs` defines closed `FileRequest` JSON:
+`write_root` and `operation`, the latter tagged by `tool` with `arguments`.
+Unknown fields/types fail. Request bytes are limited to 256 KiB; paths to
+4096 UTF-8 bytes; absolute lexical paths exclude NUL, empty components, `.`,
+`..`, and trailing slash except `/`. Mutations must be strictly inside the
+write root on a slash boundary. Read operations can address any permitted
+absolute path in the executor's namespace, not only the write root.
+
+- `read_file`: path, optional byte offset (default 0), byte limit (default
+  4096, maximum 16384). Reads/hashes a complete regular file of at most 1 MiB,
+  requires UTF-8 and boundary-aligned offsets, and returns `content`, `sha256`,
+  `offset`, `next_offset`, `total_bytes`. It follows read-path symlinks; unlike
+  mutations/search, this API is not a no-link traversal.
+- `write_file`: path, UTF-8 content up to 64 KiB, optional lowercase
+  `sha256:` plus 64-hex `expected_sha256`. May create or replace; an expected
+  digest requires an existing matching preimage.
+- `edit_file`: path, nonempty `old_text`, `new_text` (each at most 64 KiB),
+  mandatory expected digest. Exactly one occurrence, counting overlapping
+  matches, must exist. It retains unrelated bytes, CRLF, missing final newline,
+  and original mode.
+- `list_dir`: path and entry pagination (offset at most 4096, limit default
+  100/max 256); returns sorted `entries` with `name` and `kind`, pagination,
+  and total count.
+- `find_files`: directory path, literal scoped-path substring `pattern`
+  (empty permitted, at most 1024 bytes), pagination, `include_generated`.
+  Returns sorted `files`, totals, visited/skipped counts, and `complete`.
+- `search_files`: directory or one regular file, nonempty literal `query`
+  up to 1024 bytes, optional literal `file_pattern` of the same bound,
+  pagination, `include_generated`. Filters scoped relative paths, or basename
+  for a file scope. Returns sorted path/line matches with one result per
+  matching starting line, byte match offset, a UTF-8-safe line prefix up to
+  1024 bytes, and truncation/coverage metadata.
+
+All successful helper output, including newline, fits 7000 encoded bytes.
+Pages shrink to fit full JSON escaping and metadata; callers must resume at
+the returned offset, not requested page size. A single item that cannot fit
+fails explicitly. Search/list pagination offsets index results; read offsets
+index bytes. Optional typed strings reject explicit null.
+
+Directory traversal uses held descriptors, no-follow components, and
+`/proc/self/fd` enumeration. Recursive discovery/search skips links and, by
+default, directories named `.git`, `target`, `node_modules`, `vendor`,
+`vendored`, `.agent-runner`; explicit generated opt-in and an explicitly chosen
+scope remain available. Traversal is bounded to depth 32 and 4096 visited
+entries; unsupported ordinary entries or read errors fail rather than silently
+becoming an empty result. Search additionally limits each complete file to
+1 MiB, total scanned bytes to 8 MiB, and results to 4096; binary/NUL-bearing,
+oversized, linked, generated, and filtered exclusions are counted.
+`complete` describes coverage exclusions, independently of remaining pages.
+Scanned size changes are rejected, but equal-size concurrent changes are not
+a snapshot guarantee.
+
+Mutation traverses the write root and parents without links, opens a bounded
+regular preimage, validates it, constructs output metadata before effects,
+creates an exclusive mode-0600 sibling replacement, writes/chmods/syncs it,
+reopens/rechecks bytes/inode/device/mode, renames atomically, and syncs the
+parent. Existing mode is preserved; new files use 0644. RAII unlinks unused
+replacement names. This is not transactional compare-and-swap against arbitrary
+external writers; a race after recheck or an error after rename can leave an
+effect despite a failed result. Parent directories must already exist.
+
+`agent_runner/src/bin/file_tool.rs` requires exactly one payload file, opens it
+no-follow/nonblocking, verifies bounded regular-file type, parses/revalidates
+the request, and emits one JSON line. Failure prints a diagnostic and exits 2.
+The helper is not itself a sandbox.
+
+Executed evidence in `agent_runner/tests/native_file_tools.rs` includes
+`edits_preserve_unrelated_bytes_crlf_missing_newline_and_mode`,
+`stale_zero_multiple_and_overlapping_matches_never_mutate`,
+`mutations_reject_traversal_sibling_prefix_and_symlink_parents_or_targets`,
+`escaped_control_and_cjk_read_pages_are_complete_json_with_lossless_progress`,
+`native_search_generated_sources_are_excluded_and_counted_by_default`,
+`native_search_regular_file_scope_preserves_literal_matching_and_link_denials`,
+and `oversized_mutation_metadata_is_rejected_before_file_effects`.
+
+## Sandbox construction and process ownership
+
+`agent_runner/src/executor.rs` checks cancellation before rendering, staging,
+request construction, and execution. Native argv is `["/context/1",
+"/context/0"]`: helper then payload. The helper defaults beside the running
+executable; configured or default helper must be a regular non-link path with
+non-link ancestors, outside the canonical writable workspace.
+
+Payload staging uses a private mode-0700 generated directory in the workdir's
+canonical parent and a synchronized mode-0600 generated file. The model's
+path/call ID never chooses host staging names. The parent must be writable;
+filesystem-root workspaces cannot stage there. Payload and helper become
+read-only, byte-hashed context files; the RAII payload owner outlives execution
+and cleans up on success, build failure, or spawn failure.
+
+`agent_runner/src/sandbox.rs` constructs a shared protocol request with
+`protocol = kvist-sandbox-request-v1`, version 1, phase Authoring, argv,
+write-root working directory, environment, denied network with empty allowed
+sources, resources, identities, System toolchain rooted at `/usr`, grants, and
+no cache/scratch request objects. It invokes the dependency's local validation;
+the dependency implementation was not inspected.
+
+The workdir is canonicalized and granted read-write at the policy write root
+(default `/workspace`). Independently installed runner must be outside it.
+Runner/backend identities hash regular no-follow files, bounded to 256 MiB.
+Backend is identified as Bubblewrap with canonical path/digest. Declared
+`read_roots` support regular non-link files only, outside the workspace,
+mapped read-only to `/context/N`. Directory authoring identities bind path/
+domain data, not a complete workspace content snapshot. Command identity binds
+NUL-separated argv; mount-plan identity binds destinations/access/purpose.
+
+Workspace preflight checks scope-escaping symlinks, permits links provably
+within scope, follows in-scope directory targets with a visited set, and uses
+lexical containment for unresolved targets. Limits are 30 seconds, 1,000,000
+entries, depth 128, and 32 MiB retained directory-path accounting, with
+cancellation checks throughout. This is a preflight observation, not a
+transactional filesystem freeze or comprehensive hardlink/special-file audit.
+
+Requested default tool limits are 120,000 ms, 1 MiB combined output,
+256 processes, 4096 files, 64 MiB/file, and 1 GiB scratch.
+Environment starts with fixed system PATH and sandbox `/tmp` HOME, accepts
+portable caller names, and excludes `LD_*`, uppercase proxy variables, `GIT_*`,
+selected Cargo source/registry/HTTP names and registry token. Executing the
+request serializes at most 1 MiB JSON to the runner's stdin with
+`--kvist-sandbox-request-v1`. Failure never selects a host fallback.
+
+`agent_runner/src/process.rs` is a private single-threaded pump for both
+executors and bounded rustup queries. It spawns a new process group, uses
+nonblocking stdin/stdout/stderr, 8192-byte chunks and 5-ms idle polls, and shares
+one exact capture budget across streams. It drains output while feeding stdin,
+closes stdin after the request, and treats a successful early exit before
+complete delivery as failure. Ordinary nonzero exits preserve status and partial
+bytes rather than becoming spawn/protocol errors.
+
+Cancellation, timeout, and overflow trigger SIGKILL of the owned group and
+direct child; the direct kill also covers a leader that moved groups.
+`waitid(WNOWAIT)` observes leader exit without recycling its PID before
+signalling. Cleanup is attempted on every owned-child exit, with a 250-ms pipe
+drain window and 1-second reap window. Retained pipes/escaped descendants
+produce explicit errors, not delayed success; escaped descendants and
+uninterruptible kernel work cannot be universally terminated.
+
+Construction evidence includes
+`agent_runner/tests/component_tests.rs::build_request_produces_a_closed_authoring_request`;
+payload evidence includes
+`agent_runner/tests/native_file_tools.rs::private_payload_and_helper_are_readonly_hashed_context_files_and_cleaned_after_failure`.
+Executed `agent_runner/tests/subprocess_supervision.rs` covers
+`sandbox_writes_complete_large_request_without_deadlocking_on_output`,
+`successful_early_stdin_close_is_not_false_success`,
+`sandbox_retained_pipes_are_explicit_failure_not_delayed_success`,
+`independent_calls_do_not_share_cancellation_or_process_groups`, and the
+`moved_direct_child_*` cancellation/timeout/overflow cases.
+
+## Installed Rust and offline resources
+
+`agent_runner/src/rust_environment.rs` resolves an existing installation; it
+does not install dependencies/toolchains or consume engine toolchain manifests.
+It reads only top-level `rust-toolchain.toml` or `rust-toolchain`; both present
+is an error. Pins are bounded to 64 KiB. TOML permits channel, components,
+targets, profile only. Channel accepts bounded release/version tokens, not
+paths/options/custom linked names; component/target lists have at most 32
+bounded tokens, profiles minimal/default/complete. Requested components are
+checked against a limited supported list and requested target directories.
+
+Trusted `/usr/bin/rustup` is resolved beneath `/usr`, outside the workspace.
+Host HOME must be a canonical non-link directory outside it. Rustup queries run
+from `/` with cleared environment, HOME, fixed PATH, `RUSTUP_AUTO_INSTALL=0`,
+16 KiB output, and remaining preparation time. Absent pin uses host
+active-toolchain selection once; explicit pin never silently falls back.
+Concrete cargo must be exactly beneath
+`HOME/.rustup/toolchains/<selection>/bin/cargo`. Layout, executable cargo/rustc/
+rustdoc, native component manifest/libcore/libstd, and system cc/ar/as are
+checked and hashed; native library ambiguity/absence fails.
+
+Outside-workspace generated resources include a fixed Cargo wrapper and a
+private copy of `.kvist/vendored`, or an empty vendor directory. Snapshot
+rejects linked ancestors, links, special files, multi-link files, and observed
+file/directory drift. Bounds: 256 MiB/file, 1 GiB total file bytes, 100,000
+entries, depth 64, 32 MiB retained paths, 30-second preparation budget. Clone
+ownership is shared via Arc; final owner removes staged resources.
+
+Read-only Toolchain-purpose grants map the installation, wrapper runtime and
+vendor snapshot to `/rust/toolchain`, `/rust/runtime`, `/rust/vendor`.
+PATH prefers the wrapper and concrete installation; RUSTC/RUSTDOC point at the
+concrete binaries. HOME, CARGO_HOME, and CARGO_TARGET_DIR use sandbox scratch;
+CARGO_NET_OFFLINE=true. The wrapper invokes concrete cargo with `--offline`
+and command-line source replacement directed at `/rust/vendor`; it does not
+add `--locked`. Missing dependencies require separate host provisioning.
+Host homes, credentials, ambient Cargo/Rust overrides, and forged workspace
+resource manifests do not become new host grants.
+
+Each tool request rechecks workspace identity, project-pin digest, selected
+directory device/inode identities, and selected executable/library/wrapper
+hashes. Diagnostics expose selection and digests. This is not a digest of every
+toolchain file, nor continuous revalidation of arbitrary host changes. Auto Rust
+reports omission; explicit Rust fails startup on resolution failure. Host
+opt-out uses the simpler profile resolver, not these sandbox Rust resources.
+
+Native executed tests in `agent_runner/tests/rust_build_environment.rs` were
+`native_installed_rust_compiles_links_and_documents_offline`,
+`native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation`,
+and `changing_project_pin_after_resolution_fails_before_effects`.
+They exercise compiler/linker/rustdoc plus Cargo test/doc, offline vendor
+resolution despite misleading project config, snapshot independence,
+read-only resources, absent host credential/home mounts, denied host-loopback
+access, scratch target location, and changed-pin rejection. These specific
+trials do not independently verify all external runner quotas or all platforms.
+
+## Conversation, effects, accounting, and recovery
+
+`agent_runner/src/session.rs` provides the injectable blocking loop.
+`AgentSession` owns model, effort, host system prompt, ordered messages, tool
+definitions and last answer. Pushing a user clears the previous answer.
+Requests prepend the host system prompt, offer Auto tools and configured effort,
+and omit output schema. Only a nonblank Stop turn with no tool intents becomes
+an answer. The low-level assistant helper folds messages; the runner separately
+validates before accepting a turn.
+
+For each prompt, `AgentRunner::run` validates turn count 1–50 and whole-prompt
+limits, starts an owned deadline watcher, starts the recorder, performs request
+preflight, and then charges estimated request plus reserved output before each
+attempt. It never refunds retries based on missing/actual usage. Watcher checks
+interrupts/cancellation at bounded intervals (25 ms) and cancels when wall time
+expires; injected transports/executors must honor cancellation. Run summary
+contains answer, turns, tools_executed, cancelled, exhausted, budget_exhausted,
+failure; disposition precedence is budget_exhausted, cancelled, failed,
+turn_limit, completed, no_work.
+
+Sequence is request record before provider call; returned turn/reasoning and
+usage record before acceptance; whole-turn validation before any tool effects;
+synchronized dispatch record before calling an executor; outcome folded into
+conversation, recorded, and reported afterwards. Recording or sink errors stop
+effects and attempt terminal recording. Unexpected executor errors stop the
+prompt; policy/render errors instead become rejected tool results and notices
+so the model can recover. Interrupted/unexecuted remaining calls get explicit
+rejection results, preserving complete tool groups for later prompts.
+Completed tools are not automatically re-executed by transport retries.
+
+Accepted final shape is Stop with nonblank answer/no tools, or ToolCalls with
+at least one call. Length, filter, unknown or inconsistent endings cannot
+authorize effects. A turn has at most 32 calls; IDs are unique within the turn,
+nonempty, at most 256 bytes/NUL-free; names nonempty, at most 128 bytes/NUL-free;
+arguments objects with at most 1 MiB encoded bytes. Rendering/transport imposes
+additional name/argument restrictions.
+
+Transient agent-runtime errors receive deterministic capped exponential
+backoff (default three total attempts). Retries reuse unchanged accepted
+history and announce prior streaming text as provisional. Deadline grows
+linearly by attempt number, capped by total attempts and remaining prompt time.
+Cancellation, malformed responses, bounds and non-transient errors do not
+retry. A Length turn can be regenerated before effects with doubled reserve
+(up to 1,048,576), only if it fits the current context and shared token charge.
+Such partial turns are recorded separately; unsuccessful recovery is not a
+final answer.
+
+An action hash ring blocks repeated non-read arguments before effects and
+eventually trips a four-stall circuit breaker. Native read/list/find/search are
+exempt. Repeated read_file without offset receives a byte-pagination notice.
+Executed non-read actions enter history; successful outcomes reset stalls but
+do not erase repeat history. The runner does not use observation hashing or
+reasoning similarity, and it does not change provider temperature when the
+shared detector returns a temperature-jitter decision. Its notices explicitly
+do not claim filesystem change was observed.
+
+Model tool results include process flags/status and a combined encoded preview
+bounded to 8 KiB, with truncation notice. Binary/NUL/invalid-UTF8 output becomes
+byte count and SHA-256 rather than expanded binary text. This preview is
+separate from raw captured bytes and transcript limits. `ToolOutcome::failed`
+requires an observed zero status without timeout/cancel/overflow.
+
+Events are tagged `{type, data}` snake_case: turn_start, attempt_start,
+reasoning, text, tool_call, tool_result, finished, prompt_end, failed, note,
+progress. Proposals are not execution acknowledgements. Progress reports
+provider/estimated/unavailable provenance; streamed output is provisionally
+estimated from character count, emitted at roughly 250-ms intervals. Accepted
+turn usage accumulates provider totals, with incomplete usage marked unavailable.
+These displayed totals differ from conservative budget charges and context
+estimates. Terminal answer is cleared on failure/cancel/budget exhaustion.
+
+Executed loop evidence includes `agent_runner/tests/loop_integration.rs`:
+`hardening_duplicate_call_ids_reject_the_entire_turn`,
+`hardening_record_failure_precedes_effects_and_closes_unsuccessfully`,
+`cancelled_multicall_turn_is_valid_for_a_subsequent_prompt`,
+`reliability_length_is_regenerated_before_any_tool_effects`,
+`reliability_length_recovery_respects_window_and_shared_token_budgets`,
+`reliability_legitimate_native_rereads_do_not_trip_effect_breakers`,
+`a_follow_up_prompt_carries_the_earlier_prompt_in_context`, and
+`each_retry_grants_a_larger_and_capped_budget`.
+
+## Context and durable records
+
+`agent_runner/src/context.rs` estimates four UTF-8 bytes/token, full serialized
+canonical request including escaping/schema/optional fields, plus fixed
+request/message/tool framing. This is not a tokenizer or guaranteed upper
+bound. Serialization failure estimates usize::MAX.
+
+`ContextManager::prepare` validates complete assistant/tool-result groups even
+for small requests, preserves all system messages, latest genuine user goal,
+outstanding user goals since the latest nonblank text-only assistant completion,
+and newest safe group. Each call has exactly one correctly named result;
+duplicate/orphan/incomplete/interrupted groups fail. Turn-local IDs may recur
+in later complete groups.
+
+Preflight sets the output bound and requires full estimated input plus reserve
+at or below context limit. Warmup is approximately 75%; model-aware retention
+uses available capacity rather than a fixed six-group cap and targets 65%
+after compaction when possible. Older eligible groups become bounded
+lossy/non-authoritative User history, never System instructions. The rolling
+summary is at most 4000 characters and further shrinks/vanishes to fit.
+Irreducible excess errors without changing request/manager state. Legacy
+`compact`, `estimate_messages`, and `AgentSession::maybe_compact` do not provide
+this complete-request/reserve/group guarantee.
+
+Executed `agent_runner/tests/context_preflight.rs` includes
+`serialized_estimate_accounts_for_every_canonical_field_and_framing`,
+`malformed_groups_fail_even_when_the_request_is_small`,
+`an_error_after_a_success_does_not_change_the_rolling_summary`,
+`reliability_continuation_retains_the_complete_outstanding_original_goal`,
+and `reliability_large_window_retains_history_according_to_capacity`.
+
+`agent_runner/src/session_log.rs` opens generated no-clobber 0600 journal/
+transcript files under a private final 0700 directory, traversing all components
+no-follow with held descriptors. It rejects `.`, `..`, links, or nonprivate
+final directory; existing ancestor directory privacy is not universally
+required. Directory creation and effect-boundary writes are synchronized.
+Envelope is schema_version 1, monotonic sequence, event.
+
+Records include session_start (prompt ordinal, IDs, scope, metadata,
+canonical_evidence=false), model_request (attempt, request hash, model, counts,
+tool names, bound, estimate), turn_start (text/reasoning hashes, response/model/
+provider identities), turn_finish (usage/reason), tool_dispatch (call/name,
+argument shape, action hash), tool_result (output hashes, process flags,
+captured bytes, state_mutated=null), notice, session_finish (disposition,
+counts, failure, success, usage completeness, estimated budget charge).
+Argument values and raw output are not in the structured tool record; notices/
+diagnostics and metadata can still contain sensitive text. The transcript
+retains user/answer/reasoning/tool diagnostic text, bounded to 64 KiB per text
+item, not a total-session byte cap. It is potentially sensitive.
+
+Each submitted prompt resets accounting within a worker's shared log.
+Pending/unreported attempt usage makes final provider totals unknown; estimates
+remain separately reported. Dispatch and terminal finish sync both files and
+directory. A dispatch without result is an unknown effect, not a replayable
+checkpoint. Default interactive logs are within the writable workspace and
+explicitly not protected evidence.
+
+`agent_runner/src/history.rs` reads diagnostic transcripts only, newest filename
+first, with 4096 directory-entry and 5 MiB/file limits, no-link descriptor reads,
+growth bounds, and lossy UTF-8 replay. Missing/unusable histories do not block
+the UI. Replay is viewing, not command execution or model-state restoration.
+Unit evidence includes `private_no_clobber_files_and_versioned_records`,
+`argument_values_and_output_are_not_in_journal_and_mutation_is_unknown`
+in `agent_runner/src/session_log.rs`, and
+`history_rejects_link_targets_and_link_ancestors` in
+`agent_runner/src/history.rs`.
+
+## Headless and terminal behavior
+
+`agent_runner/src/headless.rs` accepts one nonblank prompt of at most 64 KiB,
+requires recording, and forbids host execution. It canonicalizes workdir and
+requires log paths outside its writable scope, with no dot traversal and
+SessionLog's no-link/private-directory checks. Default logs use absolute
+XDG_STATE_HOME or HOME/.local/state plus `agent-runner/runs`; unlike config
+discovery, relative state base is an error.
+
+JSON emits ordered flushed NDJSON envelopes with schema_version 1/sequence,
+starting run_start (scope/budgets/provenance/canonical_evidence=false), loop
+events, and final run_summary with disposition. Plain mode writes only a
+successful final answer to stdout; notices/diagnostics go to stderr.
+Returned loop errors are emitted as failed summaries before error propagation;
+startup failures do not manufacture success events. Main returns 0 for success,
+130 for cancellation summaries, otherwise 1; direct startup/errors use error
+mapping. Controls other than newline/tab are visibly escaped in plain output
+and error descriptions; JSON retains original text via JSON escaping and
+private transcripts retain original text.
+`agent_runner/tests/headless_cli.rs::headless_returns_ordered_versioned_events_without_a_terminal`,
+`headless_truncation_has_an_unsuccessful_final_disposition_and_exit`,
+`plain_answer_escapes_terminal_commands_but_private_text_is_preserved`,
+`headless_rejects_agent_writable_logs_before_model_io`, and
+`startup_uses_selected_serving_capacity_without_a_cli_override` were executed.
+
+`agent_runner/src/tui/mod.rs` requires terminal stdin, initializes raw mode,
+alternate screen, mouse capture and Ratatui. Sandboxed prompts permit 50 turns;
+host opt-out defaults to one and accepts explicit 1–50 caps. Scope remains
+visible in UI/record/system prompt; host mode does not claim confinement.
+`agent_runner/src/run.rs` owns a blocking worker, 128-slot event channel,
+unbounded prompt channel, cancellation token, and context across prompts.
+Drop cancels, stops backpressure/waits, and joins. Cancel resets the token for
+later prompts; a fatal recorder/channel error ends the worker. Model/effort
+changes start a fresh worker on next submission.
+
+`agent_runner/src/tui/app.rs` bounds submissions to 16,384 characters, keeps
+up to 5000 visible transcript rows, buffers streamed paragraphs/reasoning,
+shows provisional retry notices, completion/failure/cancellation/cap status,
+spinner, estimated context/ETA, provenance-specific speed, scrolling and
+collapse/reveal reasoning.
+The subsequently observed `App::stats_line` rendering distinguishes reported
+provider speed (`tok/s`) from provisional estimated speed (`~tok/s`), and
+renders `? tok/s` when usage is unavailable rather than presenting zero as an
+estimate. Total usage similarly says `(reported)`, `(estimated)`, or
+`provider usage unavailable`; context figures retain estimate markers.
+This rendering refinement was observed by reading only that function after
+the test executions recorded below; those executions are not claimed as
+verification of this subsequent rendering change.
+Ctrl+Enter submits; Enter inserts a newline except on a blank line after the
+first; Shift+Enter inserts; Tab/Shift+Tab select model/effort; Ctrl+C cancels
+when running and quits when idle; Ctrl+Q quits; Ctrl+D quits with empty editor.
+Esc opens menu/history/replay, Ctrl+H help, Ctrl+P/N prompt history, Ctrl+L
+clear, Ctrl+T reasoning view, Ctrl+S scrollbar. Explicit copy emits an OSC 52
+base64 clipboard sequence, suppressing duplicate copies.
+
+Menu “New session” currently clears display/status; it does not notify the
+worker to reset conversation/context. Prompt history and queued prompts are not
+globally byte-bounded. Visible-line limits are not a comprehensive cap on
+pending Markdown/reasoning/source buffers. Terminal teardown is explicit on
+the normal setup/run path, not a catch-all restoration guard for every partial
+setup failure. Interactive UI completion is not itself a prompt-success exit
+certification. These are source observations, not terminal trials.
+
+`agent_runner/src/markdown.rs` uses pulldown-cmark/syntect for headings,
+emphasis, code, quotes, lists/task lists, tables, links, strikethrough, and rules,
+wrapping styled rows and code/table tails. Tests use a TestBackend/pure rendering,
+not a real interactive terminal. Worker tests
+`worker_drop_joins_with_a_retained_prompt_sender` and
+`worker_drop_joins_when_the_event_queue_is_full` were executed from
+`agent_runner/src/run.rs`. Logging initializes once, stderr only, using
+AGENT_RUNNER_LOG then RUST_LOG, default warn (debug in unit tests), ANSI only
+for terminal stderr (`agent_runner/src/logging.rs`).
+
+## Executed verification and limits
+
+All commands used `TMPDIR` pointing to project-local fixture storage; that
+storage and observation-only captured outputs were removed before this record
+was written. No source/test edits were made by this observer.
+
+1. `cargo test -p agent-runner -p agent-runtime --offline --locked` initially
+   stopped in runner loop integration: 39 passed, one failed.
+   `reliability_successful_distinct_effect_resets_repeat_stalls` observed three
+   executed calls versus the compiled assertion's expectation of two.
+   A later permitted source read showed that assertion expecting three.
+   The targeted rerun passed (1 passed, 39 filtered). The observation therefore
+   spans a changing workspace, not an immutable source snapshot; the initial
+   failure is retained here rather than retroactively called successful.
+2. `cargo test -p agent-runner --offline --locked --test model_budgets
+   --test native_file_tools --test rust_build_environment
+   --test subprocess_supervision` passed: 3, 36, 3, and 26 tests respectively;
+   three native Rust tests remained ignored in that invocation.
+3. `KVIST_RUST_TEST_RUNNER=/opt/proj/kvist/target/rust-environment-runner/debug/kvist-sandbox-runner
+   cargo test -p agent-runner --offline --locked --test rust_build_environment
+   -- --include-ignored` passed all six tests, including the three named native
+   trials above. The executable was used, not inspected.
+4. Final `cargo test -p agent-runner --offline --locked` passed:
+
+   | Test target | Passed | Ignored |
+   | --- | ---: | ---: |
+   | Library unit tests | 190 | 0 |
+   | component_tests | 35 | 0 |
+   | context_preflight | 20 | 0 |
+   | headless_cli | 5 | 0 |
+   | input_boundaries | 3 | 0 |
+   | live_llama | 0 | 3 |
+   | loop_integration | 40 | 0 |
+   | model_budgets | 3 | 0 |
+   | native_file_tools | 36 | 0 |
+   | rust_build_environment | 3 | 3 |
+   | subprocess_supervision | 26 | 0 |
+
+   Total 361 passed, six ignored, zero failures; both binary unit targets and
+   doctests ran zero tests. A separate runner doctest invocation also passed
+   with zero tests.
+
+The live llama-server/model-driven sandbox tests in
+`agent_runner/tests/live_llama.rs` were not enabled. Native Rust trials do not
+substitute for those inference workflows. No formatter/linter, other packages'
+tests, real interactive terminal session, or comprehensive external sandbox
+resource-limit assessment was performed. Named coverage above is source/test
+evidence backed by the executions described here, not a compliance conclusion.
+
+## Subsequent observation: native-page encoding and compacted references
+
+This source/test refresh supersedes earlier descriptions of the native output
+size check and the argument prefix retained in compacted summaries. It changes
+no observation about the runtime package and makes no compliance conclusion.
+
+### Native output encoding
+
+In `agent_runner/src/file_tools.rs::output_fits`, `MAX_OUTPUT_BYTES` is 7000.
+The function serializes the complete outcome to a JSON string and rejects a
+raw encoding of 7000 bytes or more. It then serializes that string as a JSON
+string value, including quotes and escaping, and requires this nested encoding
+also to be strictly below 7000 bytes. Either serialization failure returns a
+file-outcome error. `ensure_output_bound` rejects an outcome that fails this
+check; read-page and listing-page sizing also use `output_fits`.
+The limit is therefore not merely a raw-JSON length check, nor a bound on the
+entire enclosing model request.
+
+`agent_runner/tests/loop_integration.rs::reliability_native_page_metadata_survives_outer_model_json_escaping`
+uses repeated quote, backslash, and newline content, generates a native read
+page, records it into a session, and parses the resulting model-facing payload
+as complete JSON. It checks retained digest, byte-based `next_offset`, total
+file size, and a serialized complete tool-result content length at most 8192
+bytes.
+
+### Compacted argument and result references
+
+`agent_runner/src/context.rs::turn_summary` now emits an explicit `path=`
+reference for a string-valued tool argument path before the short serialized
+full-arguments prefix. The path is JSON-string escaped and uses
+`truncate(path, 4096)`; this retains the first 4096 Unicode characters and adds
+a leading `...` when truncated, rather than guaranteeing a final reference of
+at most 4096 characters or bytes. The full-arguments prefix remains
+`truncate(json, 100)`.
+For tool results, the function attempts to parse JSON after the first newline
+and emits available `path`, `offset`, `next_offset`, `total_bytes`, and `sha256`
+fields before a short result preview. These references remain summary text,
+not execution authority. Aggregate summary limits and subsequent shrinking
+still apply; complete retention of every long path is not guaranteed.
+
+`agent_runner/tests/context_preflight.rs::reliability_compacted_native_references_precede_lossy_body_prefixes`
+places a long path after a 200-character argument field and combines an
+8000-character result body with pagination/digest metadata. After compaction,
+it checks retention of the complete fixture path, both offsets, digest, and
+process status despite lossy body/argument previews.
+
+### Additional executed evidence
+
+Using project-local fixture storage via `TMPDIR`, independently executed:
+
+- `cargo test -p agent-runner --offline --locked --test loop_integration reliability_native_page_metadata --quiet`:
+  one passed, zero failed/ignored, 40 filtered out.
+- `cargo test -p agent-runner --offline --locked --test context_preflight reliability_compacted_native_references --quiet`:
+  one passed, zero failed/ignored, 20 filtered out.
+
+These are targeted executions after the two refinements, not reruns of the
+earlier complete runner suite. The local fixture directory was removed.
+
+## Subsequent observation: locked Rust authoring
+
+This refresh supersedes the earlier observation that the generated Cargo
+wrapper does not add `--locked`. Unaffected implementation observations and
+their separately recorded execution evidence remain unchanged.
+
+### Current wrapper and diagnostic
+
+`agent_runner/src/rust_environment.rs:600–611` creates the trusted Cargo shim
+with `create_new`, mode `0500`, synchronizes it, and adds its hash to the
+executables revalidated before execution. The script now executes:
 
 ```text
-KVIST_LIVE_SANDBOX_RUNNER=/opt/target/release/kvist-sandbox-runner KVIST_LIVE_LLAMA_ENDPOINT=http://127.0.0.1:9931 KVIST_LIVE_LLAMA_MODEL=Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL cargo test --locked -p agent-runner --test live_llama -- --ignored --test-threads=1
+/rust/toolchain/bin/cargo --offline --locked --config 'source.crates-io.replace-with="vendored-sources"' --config 'source.vendored-sources.directory="/rust/vendor"' "$@"
 ```
 
-Endpoint/model are those recorded values and effort is `none`. The second
-build finishes in 1.48 seconds; the three named live tests pass in 2.80 seconds,
-with zero failed/ignored. Across commands there are **330 runner passes**, or
-**470 combined passes** including dependency results. The three offline
-ignored cases execute only in the separate live command.
+Thus ordinary calls through this wrapper receive `--locked` even when the
+caller supplies neither `--offline` nor `--locked`. The fixed offline vendor
+replacement is retained. `diagnostic` at
+`agent_runner/src/rust_environment.rs:629–652` now explicitly describes Cargo
+as offline and locked and instructs separate provisioning of a matching
+`Cargo.lock`. The source does not introduce automatic lockfile generation or
+repair. This is a wrapper option, not a read-only filesystem grant for the
+workspace lockfile or proof about every Cargo subcommand or explicit write.
 
-| Executable identity supplied in live build/hash/run sequence | SHA-256 |
-|---|---|
-| `/opt/target/debug/deps/live_llama-91e0887ff0465c78` | `08b82e8fd163951e364509aebe6904fd745bfc628fe5aec483e01cb7f912e381` |
-| `/opt/target/debug/agent-runner-file-tool` | `3a7264d97aadd70a89fcf08d7fa97ea57f8e09d3d6fc64ec6a2ab6c3378f9f97` |
-| `/opt/target/release/kvist-sandbox-runner` | `db631ad7a514a31c0b57f74815ef612f224b25ff8b662affb0a64d9af7fda1b3` |
-| `/usr/bin/bwrap` | `d9498f8b15b1c69e09791badee317d56f33abd359a306d6e96534f136381ad74` |
+### Current regression coverage
 
-The caller path executed is the path hashed in that sequence. Matching current
-local source plus supplied build/hash/run is the linkage observed; it is not
-independent binary attestation. Live server revision/executable and model weights
-identity are absent. No formatter, Clippy, real-terminal, cross-platform or
-wider-workspace execution is supplied here.
+`agent_runner/tests/rust_build_environment.rs::normal_cargo_requires_matching_lock_without_creating_or_updating_it`
+constructs a sandbox executor using an explicitly selected runner and
+`/usr/bin/bwrap`. Without caller-supplied lock flags, it checks:
 
-## Markdown prefix-aware wrapping
+- `cargo check` fails for a missing lockfile, reports `--locked`, and does not
+  create the lockfile.
+- `cargo build` and `cargo metadata --format-version=1` reject a stale package
+  version, report `--locked`, and leave the stale bytes unchanged.
+- A matching lock permits `cargo --version`, `cargo check`, and
+  `cargo metadata --format-version=1 --no-deps`; lock bytes stay unchanged and
+  no workspace `target` directory appears.
 
-### Styled-cell primitive
+This test is normally ignored because it requires the native runner and
+Bubblewrap. The existing installed-toolchain and vendor-snapshot native
+fixtures now explicitly provide matching lockfiles
+(`agent_runner/tests/rust_build_environment.rs:161,257–261`) before their
+compilation/documentation trials.
 
-`render_document` is a root-exported pure function returning styled
-RenderedLine values and code flags. Its private implementation enables
-tables, task lists and strikethrough and handles headings, inline formatting,
-lists/quotes, code and related parser events. Requested width and
-margin-adjusted content width floor at one.
+### Supplied execution evidence inspected
 
-Generic `wrap_styled_line` delegates to `wrap_styled_line_with_prefix` with an
-empty prefix. `split_cell_chunks` uses the generic path. The prefix-aware
-function returns a fitting Line unchanged. Otherwise it measures styled
-graphemes by terminal cells and, before adding a nonfitting grapheme to a
-nonempty row, emits that row and starts another with cloned prefix spans and
-their measured cell width. It retains grapheme/style, line base style and
-coalesces adjacent equal styles.
+The following files were explicitly supplied as execution evidence, not
+intent or review material. They were read directly; this refresh did not
+independently rerun their commands.
 
-Prefix is inserted on continuation boundaries, not prepended to the original
-input by this primitive. It is not clipped or independently required to leave
-space for the next grapheme. Consequently a prefix plus indivisible grapheme
-can exceed this intermediate width; a grapheme itself wider than budget is
-also retained whole. These are finite iteration mechanisms, not a universal
-fit guarantee or physical font qualification.
+- `/home/stefan/.copilot/session-state/b6381b27-3338-4699-8a06-e12c43d5ce0e/files/runner-locked-regression-before.txt`:
+  the new lock regression failed at the missing-lock assertion; zero passed,
+  one failed, six filtered out. This is the observed before-result, not a
+  claim that the present source still fails.
+- `/home/stefan/.copilot/session-state/b6381b27-3338-4699-8a06-e12c43d5ce0e/files/runner-locked-native-after.txt`:
+  all seven `rust_build_environment` tests passed, zero failed/ignored/filtered.
+  The names include the new lock regression, installed-toolchain build/doc,
+  vendor-snapshot, pin-drift, invalid-pin, absent-install, and symlink tests.
+  Current source has three ordinary tests and four normally ignored native
+  tests, all represented in that output.
 
-### Code line construction
+These logs show the specific native regression and target results, not a
+complete assessment of external sandbox enforcement. No result is claimed
+here for the further full affected suite, strict lint, or release rebuild
+reported as in progress.
+<!-- kvist-implementation-record-version: 1 -->
 
-For each collected code source line, `finish_code` finds its leading substring
-using `trim_start_matches(char::is_whitespace)` and constructs a continuation
-prefix containing that exact whitespace with code-background style. It then
-keeps **all** highlighted ranges, adds a gutter/space to the original line and
-invokes the prefix-aware wrapper at current content width before emission.
-Continuation prefix is source indentation, not a repeated gutter.
-
-Highlight failure uses plain ranges. Optional language label is a separate
-code row; one final empty split after trailing newline is removed. Parser/
-bundled syntax/theme invariant `expect` calls remain. Collected parser code
-is not raw Markdown byte restoration.
-
-All emitted rows, including these prewrapped code rows and any decorations,
-then undergo final **empty-prefix** wrapping at requested document width.
-Thus fitting indentation can repeat on code continuations, but excessive
-indentation, indivisible wide graphemes or further repartitioning do not imply
-the same indentation on every final row. Tabs/physical terminal tab stops are
-not separately resolved by this code. Prefix cloning can amplify intermediate
-text; rendering has no aggregate allocation/work quota. These observations
-are from source, not executed stress cases.
-
-`code_continuations_preserve_fitting_source_indentation` is recorded passing.
-Its inspected source renders a fenced line with two leading spaces and
-`abcdefghijklmnop` at width eight, asserts multiple measured rows through
-eight, all rows after the first begin with two spaces, and strips spaces/
-gutter before asserting complete body. It is not a test of arbitrary indent,
-tabs, all nested decorations or physical fonts.
-
-### Other content reachability and fidelity
-
-Styled-word wrapping merges equal-style runs, whitespace-splits words and
-can introduce a separator at inline style boundaries. Long tokens chunk
-without tail clipping. This is not exact whitespace/source reconstruction.
-
-Table rows chunk complete collected cells by whole graphemes, emit continuation
-fragments through the tallest cell, align/pad fitting fragments and keep
-overwide indivisible chunks without clipping. Columns shrink with a one-cell
-floor; decorated rows get final wrapping. Collected cell tails are available,
-not necessarily original syntax/spacing or intact mixed-column copy layout.
-Private alignment still clips a grapheme-safe prefix, but table production
-chunks before alignment and bypasses it on overwide chunks.
-
-The supplied log names these inspected tests as passing:
-
-- `highlighted_code_keeps_the_complete_tail_when_wrapped`: width-five complete
-  ASCII/CJK body in concatenated rows and measured width bounds.
-- `narrow_tables_keep_complete_cell_tails`: width-five one-column ASCII/CJK
-  values after removal of rendering spaces, not exact whitespace.
-- `styled_markdown_wraps_whole_graphemes_by_terminal_cells`: combining/CJK/ZWJ
-  string at width four with concatenated content and no split combining start.
-- `decorated_markdown_stays_within_narrow_cell_widths`: six selected paragraph/
-  heading/quote/list/code/table sources at widths 3/4/7/10.
-
-These finite assertions do not establish every parser construct, oversized
-grapheme, prefix/decorated combination or terminal/font behavior.
-
-## TUI rows, hidden reasoning and retention
-
-Markdown provenance is Start(raw source) followed by Continuation. Resize
-rerenders only that Start's consecutive Continuations, leaving following plain
-notices/reasoning/another Start distinct. Other rows rewrap displayed text with
-first-span style, not original paragraph/multi-span provenance.
-
-Reasoning collapse stores existing consecutive runs. Initial label construction
-already wraps at current content width and marks one Placeholder head plus
-PlaceholderContinuations. Resize preserves that distinction. Reveal consumes
-saved runs only at heads, discards label continuations and rewraps saved rows at
-current width, then applies retention/clamp/follow. Incoming reasoning pushes
-still create reasoning rows; collapse scans existing rows and repeating the
-same setting is a no-op.
-
-The 5000 retained-row cap drops oldest rows and drains hidden runs for evicted
-heads, not continuation fragments. Evicting a head may leave displayed orphan
-label fragments until reveal removes them. Markdown Starts can similarly be
-evicted while Continuations remain; subsequent plain fallback cannot reconstruct
-raw block/style. Retention is not block-atomic or a peak allocation cap:
-render/reflow vectors are constructed before truncation.
-
-Current app assertions named passing include initial width-eight labels/
-two-run round trip, repeated resize preserving two distinct hidden runs,
-width-eight reasoning reveal retaining 20 characters, old-head eviction
-discarding one run but keeping another across 5000 fillers, Markdown resize
-notice/reasoning sentinels and 4000 long-row expansion bounded after reflow.
-They do not enumerate all eviction/resize combinations.
-
-Plain wrapping carries leading indentation, normalizes inter-word whitespace,
-omits whitespace-only paragraph content and can overflow when indent exceeds
-width. Saved reasoning/plain rows are already wrapped; widening does not
-restore all original boundaries. Pending streams/raw source/hidden data,
-editor/history/queued prompts and replay have separate allocations beyond
-the visible-row cap.
-
-Streaming fences safely hold no-newline openers, match backtick/tilde characters,
-minimum three and sufficient closing run with no content tail, and count leading
-newlines in consumed bytes. Final flush may render unclosed text; pending
-buffers lack independent aggregate caps. Replay/history navigation uses `usize`
-physical wrapped rows/saturating increments and visible windows, including
-70000-row assertions; ordinary transcript/help offsets remain `u16`.
-OSC52 copies trimmed rendered text via staged base64/duplicate suppression,
-not exact original bytes. Physical clipboard/terminal execution is unsupplied.
-
-## Package/API and startup
-
-The manifest declares `agent-runner` 0.2.0, edition 2024, Rust minimum 1.95,
-`agent_runner` library and `agent-runner`/`agent-runner-file-tool` binaries.
-Library unsafe is forbidden. It directly uses Unix descriptors/process groups
-and Linux `/proc/self/fd`; portability equivalence is not observed.
-
-Public modules are config/context/error/executor/file_tools/headless/history/
-retry/sandbox/session/session_log/toolchain/tools/tui. Root exports include
-Cli/discovery/import helpers; Config/Model/ModelProvider/ToolPolicy/SandboxPaths;
-AgentSession/AgentRunner/RunLimits/RunSummary/Event/EventSink/ToolExecutor/
-Recorder; SandboxExecutor and unconfined HostExecutor/ToolOutcome; context/
-retry/profile/probe types; SessionLog; ToolRegistry/RenderedTool/ExecContext/
-descriptions; and selected private-module Markdown/system-prompt exports.
-Internal App/process/worker items are not public merely by internal spelling.
-
-Canonical runtime request/message/turn/intent/stream types and transport trait
-are consumed without provider-wire parsing here. Production config supports
-llama-server/Ollama direct transport, configured deadline and 8 MiB response
-bound passed to the dependency. Positive cadence sets a value; zero skips a
-setter, leaving constructor behavior uninspected despite “disables” comments.
-Injected library collaborators and directly constructible HostExecutor are
-not constrained by production CLI sandbox selection. Prompts/descriptions
-are not filesystem/network authority mechanisms.
-
-CLI includes config/model/effort/cwd/profile, logs/context/run budgets,
-headless/JSON, host opt-out/cap, prompt and listing/import dispatch.
-Headless requires prompt and conflicts with host/no-log/list/import; JSON needs
-headless. Host cap needs explicit host flag, defaults to one and validates
-1–50; sandbox defaults 50, with invalid library caps rejected before model I/O.
-
-Discovery is explicit/current-directory/user-XDG/system-XDG, not parent search.
-Relative user XDG falls back; system entries lack the same restriction.
-Closed schema-one TOML reads final no-follow regular UTF-8 through 64 KiB,
-including growth checks. Validation covers absolute existing configured cwd,
-model-list/default/duplicate IDs, nonblank provider model, effort/profile/
-timings. Public fields/from_parts do not reproduce all checks; selectors
-are not separately required nonblank.
-
-Defaults/ranges: medium effort; deadline 300 seconds, 1–600; attempts three,
-at least one without loader upper cap; delays 2/30 seconds, each 0–3600 and
-base at most max; cadence 30, 0–600. Provider default endpoints are loopback
-9931/11434; runner/backend default installed path and `/usr/bin/bwrap`.
-Diagnostics escape controls and avoid raw parse-source echoes, not general
-secret redaction.
-
-Both execution modes choose cwd override and canonicalize before executor/
-worker, rejecting missing/regular paths, resolving linked/relative directories.
-Config loads before override, so invalid configured cwd can fail first.
-Selected cwd feeds executor/metadata/default terminal logs/history/host prompt,
-without global chdir; relative explicit logs use process cwd.
-Startup advisory root enumeration has no quota/time and flattens entry errors.
-Profile on/auto/off executable probing fails unavailable forced/on but can skip
-auto; it does not qualify every described tool.
-
-## Loop data and context authority
-
-AgentSession owns ordered conversation/system/tools/model/effort and clears
-stale answer on new prompts/runs. Requests prepend system text/use auto tools.
-RunSummary separately reports answer, turns, executed tools, cancellation,
-turn/budget exhaustion and failure; only answer without adverse flags succeeds.
-
-Defaults are 1800 seconds, 1000000 estimated tokens, reserve 1024.
-Limits require positive wall through 24 hours, tokens through 1000000000,
-reserve 1–1048576. CLI window defaults 8192, exceeds reserve and caps at
-1048576. Context warm-up must be below limit and recent retention positive.
-
-Canonical JSON estimate is ceiling bytes/4 plus eight request, four/message,
-eight/tool tokens, including escaping/schemas/generation fields; failure costs
-`usize::MAX`. It is not an exact or universal model-token bound. Preparation
-sets output reserve, validates complete result groups even on small requests,
-preserves systems/latest genuine goal/newest safe group, compacts older groups
-into labelled lossy User history through 4000 characters and actual spare
-budget, and commits candidate/summary only on success. Legacy message
-estimation/compaction lacks that complete request guarantee.
-
-Joined watcher polls expiry/interrupts through 25 ms. Every attempt/retry
-prepays estimate/reserve, deadlines grow linearly within policy/prompt remainder,
-backoff is deterministic/capped with cooperative checks, and progress throttles
-250 ms. Failed-attempt text stays provisional display rather than conversation;
-sink failure cancels. Blocking injected callbacks/kernel I/O are not preempted.
-
-Turns are recorded before validation; accepted Stop is nonblank/no calls,
-ToolCalls has calls. Maximum 32, unique nonempty NUL-free IDs through 256 bytes,
-names through 128, object args through 1 MiB encoded each. Invalid/truncated/
-filtered turns never dispatch. Synchronized recorder dispatch precedes serial
-effects. Repetition hashes name/args, not filesystem mutation. Policy/render
-errors are feedback, other errors terminate; returned failed outcomes count
-executed and can be model-handled. Remaining interrupted calls get rejected
-pairs, but mid-fold record failure may leave incomplete history. No rollback.
-Model feedback is combined status-bearing 8192 encoded bytes, rebounded after
-lossy UTF-8 expansion.
-
-## Filesystem tools and delegated sandbox policy
-
-Stable generic tools are shell/read/write/list/find/search/edit. Rendering is
-effect-free. Shell is one nonblank NUL-free command through 16384 bytes, Bash
-argv and a literal case-sensitive denylist, not host confinement.
-
-Native closed typed requests validate absolute lexical paths through 4096
-bytes without dot/parent/NUL/duplicate separators. Mutations are strict
-descendants on slash boundaries; reads may follow links in existing authority.
-Bounds: 256 KiB helper payload, 1 MiB complete file, 64 KiB text argument,
-1024 literal query, read default/max 4096/16384, collection 100/256, offsets/
-visited/results through 4096, depth 32, scan 8 MiB, line preview 1024.
-Adaptive complete JSON is below 7000 bytes (newline at most 7000), exposes
-actual next offset and rejects oversized single entries. UTF-8 reads hash
-complete content; descriptor walks/listing no-follow sort, report link/binary
-skips and propagate ordinary errors. Literal search/find are not regex/glob;
-pages are not frozen.
-
-Mutation descriptor-walks non-link root/parents/target, checks preimage/digest,
-edits exactly one overlapping-aware occurrence, preserves unrelated bytes/
-CRLF/missing newline/mode, and exclusively stages sibling replacement with
-64 collision attempts. Write/mode/sync and fresh bytes/device/inode/mode check
-precede rename/directory sync. Not external-writer CAS, crash rollback or
-ownership/xattr/time/hard-link preservation; post-rename errors can follow effect.
-
-Helper validates bounded final no-follow payload. Production checks regular
-non-link outside-workspace helper/ancestors, not ownership/execute mode, and
-privately stages generated 0700/0600 requests in canonical workspace parent.
-Writable parent is required, root workspace fails, ordinary-error RAII cleanup
-does not imply crash cleanup, and no global staging fallback is used.
-
-Version-one Authoring requests declare write-root workspace, outside regular
-read-only contexts at `/context/N`, native payload/helper at `/context/0`/`1`,
-network Deny, System `/usr`, environment/identities. Runner is outside workspace,
-without equivalent backend builder separation. Workspace identity is path-based,
-toolchain a fixed `/usr` marker, not content snapshots. HOME=/tmp is request
-data, not independently observed backend mount behavior.
-
-Production declares 120000 ms wall, 1 MiB capture, 256 processes, 4096 files,
-64 MiB/file and 1 GiB scratch. Local supervision implements wall/capture;
-remaining enforcement belongs to excluded backend.
-
-Builder preflight checks actual token/shared 30 seconds, 1000000 entries,
-depth 128 and 32 MiB path accounting (two OS copies, not all allocator memory).
-Errors/escaping links fail; in-scope targets deduplicate/scan, unresolved
-targets receive lexical containment. Identity reads are final no-follow/
-nonblocking regular through 256 MiB each, growth checked and streaming-hashed
-in 65536-byte chunks with cooperative checks. There is no aggregate identity
-quota, locked tree/full ancestor descriptor identity walk/full spawn recheck.
-Public builder creates a fresh token; production uses prompt token.
-
-Execute rejects cancellation/encoded request over 1 MiB after allocation,
-without repeating builder work or requiring caller-default resources.
-Missing runner never becomes host fallback. Explicit host shell retains host
-authority; native safeguards remain, wall 120 seconds, combined shell capture
-8192/native 7001 bytes.
-
-## Process, recording and headless/UI recovery
-
-Shared owned-group pump uses nonblocking pipes, 8192-byte chunks and 5 ms idle
-polling, exact combined capacity on all drains, distinct EOF/error and overflow
-only beyond capacity. Cancel/time/overflow trigger termination; retained pipes
-have a 250 ms drain window. WNOWAIT pins leader until original-group SIGKILL
-and direct-child kill are independently attempted even on group success/ESRCH.
-RAII/error/normal cleanup attempts one-second reap. Partial failed raw bytes/
-status remain on successful cleanup; successful incomplete stdin is an error.
-Escaped descendants and uninterruptible kernel work are not universally killed.
-The shell fixture execs a sibling test script, not sandbox enforcement.
-
-SessionLog has held descriptor no-link/private final directory, exclusive 0600
-JSONL/transcript, sequence/schema one, operational scope/false canonical marker,
-hashes/argument shapes/process flags and null mutation. Dispatch/terminal sync
-is not every-event sync. Text caps at 64 KiB, not aggregate disk/rotation/
-authentication. No unresolved-dispatch reconciliation or crash replay/rollback.
-
-Worker keeps session/context across prompts and resets cancellation, with
-128-slot events/unbounded prompt queue. Backpressure checks shutdown every
-10 ms, not prompt token; idle polls 25 ms. Drop cancels/shuts down/joins but
-arbitrary blocking collaborators can delay it. Model/effort changes start fresh
-worker context; display clear does not reset conversation.
-
-Headless rejects host/no-log at public entry, requires nonblank prompt through
-64 KiB/private outside-workspace logs and default absolute XDG/HOME state,
-without terminal setup. JSON is flushed ordered schema-one start/events/summary;
-plain prints only successful control-escaped answer without added newline,
-private/JSON original remains. Main completion/cancel/failure exits 0/130/1;
-startup fails diagnostically.
-
-History limits 4096 entries, 5 MiB/no-follow regular transcript including growth,
-skips unusable entries and may return empty on overflow/list failure.
-Text markers are unauthenticated; replay trims/lossily decodes/drops empty lines,
-not exact bytes or executable resume, with no aggregate I/O/time limit.
-Terminal requires stdin terminal, selected-cwd worker before raw/alternate
-screen, sends staged prompt before loop/clears editor, polls 150 ms and
-tears down sequentially/fallibly without unconditional restoration guard.
-Prompt limit is 16384 characters, not aggregate history/editor memory.
-
-## Finite live assertions and remaining gaps
-
-The three supplied-passing live cases, directly inspected, establish:
-
-- `real_sandbox_confines_native_files_and_denies_host_network`: one native
-  workspace write/read, outside sentinel denial without leakage, one denied
-  host-loopback TCP/unconnected listener and no workspace staging.
-- `live_llama_streams_a_bounded_answer_without_tools`: cap 64/no tools/effort
-  none, trimmed `OK`, streamed equals final, Stop/no intents and usage bound
-  only when usage exists.
-- `live_llama_reads_edits_and_verifies_inside_the_real_sandbox`: production
-  loop/transport/executor, eight turns/180 seconds/100000 estimated tokens/
-  reserve 1024, success, exact `answer = 42\r\nunchanged = yes`, successful
-  edit plus at least two reads, no shell/write result or staging. Prompt `DONE`
-  is not an exact final-answer assertion.
-
-Other permitted tests contain finite config/input/context/loop/native/headless/
-process assertions, including fake-runner supervision. Their results are
-tabulated, not universal authority proof.
-
-Concrete limits are prefix/row reconstruction rather than all-indent fidelity,
-overwide indivisible cells/excessive prefixes, intermediate prefix-copy/
-render vectors without aggregate quotas, row-not-block eviction, separate
-unbounded pending/raw/hidden/history/queue allocations, unbounded advisory
-startup scan, cooperative callbacks/I/O, filesystem/writer races, non-transactional
-crash recovery and escaped descendants. Prefix-aware code wrapping has a
-recorded fitting-indent example; it does not justify a blanket “never repeats
-indentation” or “preserves all indentation” claim.
-
-Missing universal evidence is separate: all indent/tab/font/decorated cases,
-all collapse/resize/eviction combinations, all backend limits/escapes,
-runtime/backend internals, exact tokenization/zero-cadence defaults, server/
-weights identity and physical terminal/clipboard/non-Linux behavior are not
-qualified by supplied executions. No requirement satisfaction or certification
-is inferred.
-
-## Complete 36-file byte inventory
-
-Aggregate hashes lexicographically repository-path-sorted UTF-8 lines of hash,
-two spaces, repository-relative path and newline. All entries match both logs.
-Byte identity does not include ownership/permissions or unlisted dependencies.
-
-```text
-14e60a5926eaabff797996fd0cfa1a9e49859349b2cc95b21f356695f8cb2d4c  agent_runner/Cargo.toml
-52cf1d709d6beb4cf5f9a55b889c4bf3cab60912c50934793bcdaf8700be09ca  agent_runner/src/bin/file_tool.rs
-325c5bcd635425ee9c8d1b96a7597b1174d6e837abe3ac91298dcf9ab60b1f23  agent_runner/src/cli.rs
-bab8ee23d2f1444454516dfd78e7970c073430857a5a4bcec7932ea2282b1002  agent_runner/src/config.rs
-eee943aab3ea0874996e36df385e598394919fdc8b668e7ebc6bd38d6352fb76  agent_runner/src/context.rs
-81eab7097f9a3807c6986dbb77712426cd848f09ca010326016ccee1d2615714  agent_runner/src/error.rs
-58e71a462cbb2fe856427b4179997fadc380b8e7a2030662b49e87b2394e8e24  agent_runner/src/executor.rs
-06d325dc6397b39a1af34519fbe4f30acf3f06062da6656b469d2ec0457879fa  agent_runner/src/file_tools.rs
-9cd8c8a60bc3c6bb37afbdba41dc1d004763a4b4002671619b7700d483d95c91  agent_runner/src/headless.rs
-380a7d47d5f38d706e3ebb16cd6cc75fb3eabb262c7e11e35559a3e9091863e7  agent_runner/src/history.rs
-51ba9c3d0da6d7f1f4f3c756233ae95488ff07648ba0c5041160b02578825dfb  agent_runner/src/host.rs
-187cc3a7670aad10ffaa73587dfab04fcbb4f770586328b8efd0c91a8c2dc342  agent_runner/src/kvist_import.rs
-7fad87f4a0ece9ecbc83ebebd574c61f81f4a377f221ee76019c47dd64b517a1  agent_runner/src/lib.rs
-e1fd8911c0f16ec0c4b7d27d792a988833bf20934e5280ad3e43f1b3bbaea2e2  agent_runner/src/logging.rs
-9964b659c6c0aeb42c6e21a4e65c2fc5282e5fbd3e1e361864ebee1a47d0ff11  agent_runner/src/main.rs
-6b681962ef8ce917f245c94306419e2ee5123feef053f9cc4a5ff64191180d93  agent_runner/src/markdown.rs
-d0aacea446a4b2702c8a4ee84fc362e0e76d364c4d3a723b90f6f55e465bf97e  agent_runner/src/process.rs
-91895900f1d169ee215e60f11ba8d779917abee6a7492d5326e1f12f8e1de4bd  agent_runner/src/retry.rs
-6e0f21a026f04d19a5ec645b21fa204b250adacc4c062bba22bb483465ea512e  agent_runner/src/run.rs
-f69d77fc89288397118e7324e46d0d6c2276494caf23a3b546606c908d5afbd4  agent_runner/src/sandbox.rs
-98f40e74502d135297917f41bd3c2c9119f8265c2329226b279d18092d16a416  agent_runner/src/session.rs
-eb8513df7c8ef9a23da976b63a0c9f6f1fdd7c0bca2373a435e907791ebfccc4  agent_runner/src/session_log.rs
-69d92bf902b4a6285868fc236b928987e0e73d119e1234adda407d7c4f40436e  agent_runner/src/toolchain.rs
-04e364b48b0894c56547424bb6bd5c19f150cc064e3976d748c6368efd9e5a0b  agent_runner/src/tools.rs
-d50ece87784d06d272a5f7a9d4e3de6ec4d76aade92a34fc852694eb8165cdc7  agent_runner/src/tui/app.rs
-b63e3be005726f71f668096227304a068fa3f3bdea37f6b96d2c22217bbf3863  agent_runner/src/tui/mod.rs
-442235f5b1fec9e9de8afd37e9cf23abb106de1d37686a10b8b40b62360f89d7  agent_runner/src/tui/render.rs
-874e7ab70fc9b8b4c4f5cd72e9005b21edf1ea96c9ef5dccbf6a11d88c361946  agent_runner/tests/component_tests.rs
-b302849a1a50878813f9f133b7a26a4214e57319ad86e46610f9b51eb0ce906c  agent_runner/tests/context_preflight.rs
-eb89cfaad9ce4f61ff85405197c281e106838120cf0a8cf788af66189a9abba5  agent_runner/tests/fixtures/subprocess_runner.sh
-606512f914fe7a726c3ed78ce421c502801669c3198bfe849b4f828b9a40b8ee  agent_runner/tests/headless_cli.rs
-f64d046ec8898cb67287cc961115942f486eea89c9272b5bb3d41b382bda0ec9  agent_runner/tests/input_boundaries.rs
-74c26f530916e294710aa6be8ddfee0a10c97e21223d1c0b83106fc7c8b5bf6d  agent_runner/tests/live_llama.rs
-97efc8a85353fe69524f19b19a0770fc2b44f9ee94cfa4aa50b647d98b716ce4  agent_runner/tests/loop_integration.rs
-7d88376e10db1485fb8221c3f6b5469588322a7222dd8ea909f85c5813491419  agent_runner/tests/native_file_tools.rs
-221784293daa1b53d3f5fb106fbce51510456e12dd9306a9bfd815d40dbb838a  agent_runner/tests/subprocess_supervision.rs
-```
+# Component Implementation Record

@@ -592,7 +592,11 @@ explicitly draft rather than inferred truth.
 
 ## Quality requirements and constraints
 
-- Rust stable edition 2024 is required; unsafe Rust is forbidden.
+- Rust stable edition 2024 is required. Prefer safe Rust; necessary, minimally
+  scoped unsafe exceptions must satisfy the root contract's justification,
+  safety-invariant, targeted-verification, and independent-review rules.
+  Retain current compile-time unsafe guards unless deliberately approving
+  such an exception; this policy does not authorize their broad removal.
 - Executable support is Linux-only until independently tested platform
   boundaries exist.
 - Core inspection and lifecycle operations perform no hidden network or model

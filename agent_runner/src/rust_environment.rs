@@ -1,0 +1,1114 @@
+//! Host-resolved, read-only Rust resources for the workspace authoring sandbox.
+//!
+//! This is not the engine's provisioning or Cargo verification authority. It
+//! never installs anything, reads Cargo credentials, or trusts manifest paths.
+//! The existing System/Authoring protocol grants the compiler, fixed Cargo shim
+//! and dependency snapshot as read-only Toolchain build resources at disjoint
+//! `/rust/*` destinations. No Cargo-phase topology or cache authority is added.
+//! A snapshot is essential: a read-only alias of `.kvist/vendored` would still
+//! be mutable through the workspace's writable bind.
+//!
+//! Selection ignores ambient Rust/Cargo overrides and uses the standard
+//! `$HOME/.rustup/toolchains` installation layout. Channels, requested
+//! components/targets and executable/layout identities are checked without
+//! installing anything. Missing material must be provisioned separately on the
+//! host. The snapshot is bounded to 1 GiB, 100,000 entries and 30 seconds;
+//! scratch target/cache state is private to each sandbox invocation.
+
+use std::collections::BTreeMap;
+use std::fs::{self, File, OpenOptions};
+use std::io::{Read, Write};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use agent_runtime::CancellationToken;
+use kvist_sandbox_runner::protocol::{Access, Grant, Purpose};
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+
+use crate::error::{Error, Result, io_error};
+
+const TOOLCHAIN_DEST: &str = "/rust/toolchain";
+const RUNTIME_DEST: &str = "/rust/runtime";
+const VENDOR_DEST: &str = "/rust/vendor";
+const MAX_FILE_BYTES: u64 = 256 << 20;
+const MAX_VENDOR_BYTES: u64 = 1 << 30;
+const MAX_ENTRIES: usize = 100_000;
+const PREPARATION_BUDGET: Duration = Duration::from_secs(30);
+
+/// An exact installed selection and private immutable sandbox resources.
+///
+/// Clones share the staging owner; the final registry/executor drop removes
+/// staged wrappers and vendor bytes. No installed toolchain is modified.
+#[derive(Debug, Clone)]
+pub struct RustEnvironment {
+    resources: Arc<Resources>,
+}
+
+#[derive(Debug)]
+struct Resources {
+    workspace: PathBuf,
+    root: PathBuf,
+    channel: String,
+    identity: String,
+    executables: Vec<(PathBuf, String)>,
+    directories: Vec<(PathBuf, (u64, u64))>,
+    staging: tempfile::TempDir,
+    vendor_identity: String,
+    has_vendor: bool,
+    pin_identity: String,
+    pinned: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Pin {
+    toolchain: PinToolchain,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PinToolchain {
+    channel: String,
+    #[serde(default)]
+    components: Vec<String>,
+    #[serde(default)]
+    targets: Vec<String>,
+    profile: Option<String>,
+}
+
+struct Preparation<'a> {
+    started: Instant,
+    cancellation: &'a CancellationToken,
+}
+
+impl Preparation<'_> {
+    fn check(&self) -> Result<()> {
+        crate::executor::check_cancelled(self.cancellation)?;
+        if self.started.elapsed() >= PREPARATION_BUDGET {
+            return Err(failure(
+                "Rust preparation exceeded 30 seconds; narrow the workspace/vendor tree",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn failure(reason: impl Into<String>) -> Error {
+    Error::SandboxBuild {
+        reason: reason.into(),
+    }
+}
+
+fn label(bytes: &[u8]) -> String {
+    format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+}
+
+fn inspect_path(path: &Path) -> Result<fs::Metadata> {
+    crate::file_tools::canonical_path(
+        path.to_str()
+            .ok_or_else(|| failure("Rust resource path must be UTF-8"))?,
+    )?;
+    let mut prefix = PathBuf::from("/");
+    for component in path.components().filter_map(|part| match part {
+        std::path::Component::Normal(part) => Some(part),
+        _ => None,
+    }) {
+        prefix.push(component);
+        let metadata = fs::symlink_metadata(&prefix).map_err(|e| {
+            io_error(
+                "inspect non-link Rust resource",
+                Some(&prefix.to_string_lossy()),
+                e,
+            )
+        })?;
+        if metadata.file_type().is_symlink() {
+            return Err(failure(format!(
+                "Rust resource `{}` and its ancestors must not be symbolic links",
+                path.display()
+            )));
+        }
+    }
+    fs::symlink_metadata(path)
+        .map_err(|e| io_error("inspect Rust resource", Some(&path.to_string_lossy()), e))
+}
+
+fn file(path: &Path, maximum: u64) -> Result<File> {
+    let metadata = inspect_path(path)?;
+    if !metadata.is_file() || metadata.len() > maximum {
+        return Err(failure(format!(
+            "Rust resource `{}` must be a bounded regular file (maximum {maximum} bytes)",
+            path.display()
+        )));
+    }
+    let opened = OpenOptions::new()
+        .read(true)
+        .custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK)
+        .open(path)
+        .map_err(|e| io_error("open Rust resource", Some(&path.to_string_lossy()), e))?;
+    let actual = opened
+        .metadata()
+        .map_err(|e| io_error("inspect opened Rust resource", None, e))?;
+    if !actual.is_file() || (metadata.dev(), metadata.ino()) != (actual.dev(), actual.ino()) {
+        return Err(failure("Rust resource changed while opening"));
+    }
+    Ok(opened)
+}
+
+fn bounded_bytes(path: &Path, maximum: u64) -> Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    file(path, maximum)?
+        .take(maximum + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| io_error("read bounded Rust resource", None, e))?;
+    if bytes.len() as u64 > maximum {
+        return Err(failure("Rust resource grew beyond its byte bound"));
+    }
+    Ok(bytes)
+}
+
+fn fingerprint(metadata: &fs::Metadata) -> (u64, u64, u64, i64, i64, i64, i64) {
+    (
+        metadata.dev(),
+        metadata.ino(),
+        metadata.len(),
+        metadata.mtime(),
+        metadata.mtime_nsec(),
+        metadata.ctime(),
+        metadata.ctime_nsec(),
+    )
+}
+
+fn hash_file(path: &Path, preparation: &Preparation<'_>) -> Result<String> {
+    let mut opened = file(path, MAX_FILE_BYTES)?;
+    let before = opened
+        .metadata()
+        .map_err(|e| io_error("inspect Rust identity", None, e))?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0; 65536];
+    let mut total = 0_u64;
+    loop {
+        preparation.check()?;
+        let count = opened
+            .read(&mut buffer)
+            .map_err(|e| io_error("hash Rust executable", None, e))?;
+        if count == 0 {
+            break;
+        }
+        total += count as u64;
+        if total > MAX_FILE_BYTES {
+            return Err(failure(
+                "Rust executable grew beyond the 256 MiB identity bound",
+            ));
+        }
+        hash.update(&buffer[..count]);
+    }
+    let after = inspect_path(path)?;
+    if fingerprint(&before) != fingerprint(&after) {
+        return Err(failure("Rust executable changed while hashing"));
+    }
+    Ok(format!("sha256:{}", hex::encode(hash.finalize())))
+}
+
+fn token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'.' | b'_'))
+        && !value.starts_with('-')
+        && !value.contains("..")
+}
+
+fn channel(value: &str) -> Result<()> {
+    let base = value.split('-').next().unwrap_or_default();
+    let release = base.split('.').collect::<Vec<_>>();
+    if !token(value)
+        || !(matches!(base, "stable" | "beta" | "nightly")
+            || ((2..=3).contains(&release.len())
+                && release
+                    .iter()
+                    .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))))
+    {
+        return Err(failure(
+            "Rust channel must be a rustup release channel/version, never a path, option or custom linked toolchain",
+        ));
+    }
+    Ok(())
+}
+
+fn project_pin(workspace: &Path) -> Result<Option<PinToolchain>> {
+    let toml = workspace.join("rust-toolchain.toml");
+    let plain = workspace.join("rust-toolchain");
+    let present = |path: &Path| -> Result<bool> {
+        match fs::symlink_metadata(path) {
+            Ok(_) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(io_error("inspect project Rust pin", None, e)),
+        }
+    };
+    let (has_toml, has_plain) = (present(&toml)?, present(&plain)?);
+    if has_toml && has_plain {
+        return Err(failure(
+            "both rust-toolchain.toml and rust-toolchain exist; retain one authoritative project pin",
+        ));
+    }
+    let pin = if has_toml {
+        let bytes = bounded_bytes(&toml, 65536)?;
+        let text = std::str::from_utf8(&bytes).map_err(|_| failure("Rust pin must be UTF-8"))?;
+        toml::from_str::<Pin>(text).map_err(|_| failure("invalid rust-toolchain.toml; only channel, components, targets and profile are supported"))?.toolchain
+    } else if has_plain {
+        let bytes = bounded_bytes(&plain, 65536)?;
+        let text = std::str::from_utf8(&bytes).map_err(|_| failure("Rust pin must be UTF-8"))?;
+        if text.trim().contains(['\n', '\r']) {
+            return Err(failure("rust-toolchain must contain exactly one channel"));
+        }
+        PinToolchain {
+            channel: text.trim().to_owned(),
+            components: Vec::new(),
+            targets: Vec::new(),
+            profile: None,
+        }
+    } else {
+        return Ok(None);
+    };
+    channel(&pin.channel)?;
+    if pin.components.len() > 32
+        || pin.targets.len() > 32
+        || pin.components.iter().chain(&pin.targets).any(|s| !token(s))
+        || pin
+            .profile
+            .as_deref()
+            .is_some_and(|p| !matches!(p, "minimal" | "default" | "complete"))
+    {
+        return Err(failure(
+            "Rust pin has invalid/bounded components, targets or profile",
+        ));
+    }
+    Ok(Some(pin))
+}
+
+fn pin_identity(workspace: &Path) -> Result<String> {
+    let mut bytes = Vec::new();
+    for name in ["rust-toolchain.toml", "rust-toolchain"] {
+        let path = workspace.join(name);
+        match fs::symlink_metadata(&path) {
+            Ok(_) => {
+                bytes.extend_from_slice(name.as_bytes());
+                bytes.push(0);
+                bytes.extend_from_slice(&bounded_bytes(&path, 65536)?);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(io_error("recheck Rust project pin", None, e)),
+        }
+    }
+    Ok(label(&bytes))
+}
+
+fn native_library_layout(root: &Path) -> Result<Vec<PathBuf>> {
+    let manifest = root.join("lib/rustlib/components");
+    let bytes = bounded_bytes(&manifest, 65536)?;
+    let text = std::str::from_utf8(&bytes)
+        .map_err(|_| failure("installed Rust component manifest must be UTF-8"))?;
+    let native = text
+        .lines()
+        .filter_map(|s| s.strip_prefix("rustc-"))
+        .collect::<Vec<_>>();
+    if native.len() != 1 || !token(native[0]) {
+        return Err(failure(
+            "installed Rust lacks one native compiler component; repair/provision it on the host",
+        ));
+    }
+    let directory = root.join("lib/rustlib").join(native[0]).join("lib");
+    if !inspect_path(&directory)?.is_dir() {
+        return Err(failure(
+            "installed Rust lacks its native standard library; provision it on the host",
+        ));
+    }
+    let mut core = None;
+    let mut std = None;
+    let mut entries = 0;
+    for entry in
+        fs::read_dir(&directory).map_err(|e| io_error("inspect native Rust libraries", None, e))?
+    {
+        entries += 1;
+        if entries > 1024 {
+            return Err(failure(
+                "native Rust library directory exceeds 1024 entries",
+            ));
+        }
+        let entry = entry.map_err(|e| io_error("enumerate native Rust libraries", None, e))?;
+        let name = entry.file_name();
+        let name = name
+            .to_str()
+            .ok_or_else(|| failure("native Rust library names must be UTF-8"))?;
+        if name.ends_with(".rlib") && (name.starts_with("libcore-") || name.starts_with("libstd-"))
+        {
+            if !inspect_path(&entry.path())?.is_file() {
+                return Err(failure(
+                    "native Rust libraries must be regular non-link files",
+                ));
+            }
+            let slot = if name.starts_with("libcore-") {
+                &mut core
+            } else {
+                &mut std
+            };
+            if slot.replace(entry.path()).is_some() {
+                return Err(failure(
+                    "installed Rust has ambiguous native standard libraries; repair it on the host",
+                ));
+            }
+        }
+    }
+    Ok(vec![
+        manifest,
+        core.ok_or_else(|| {
+            failure("installed Rust lacks native libcore; provision rust-std on the host")
+        })?,
+        std.ok_or_else(|| {
+            failure("installed Rust lacks native libstd; provision rust-std on the host")
+        })?,
+    ])
+}
+
+fn query_rustup(
+    rustup: &Path,
+    home: &Path,
+    args: &[&str],
+    preparation: &Preparation<'_>,
+) -> Result<String> {
+    preparation.check()?;
+    let mut command = Command::new(rustup);
+    command
+        .args(args)
+        .current_dir("/")
+        .env_clear()
+        .env("HOME", home)
+        .env("PATH", "/usr/bin:/bin")
+        .env("RUSTUP_AUTO_INSTALL", "0");
+    let result = crate::process::run(
+        &mut command,
+        None,
+        PREPARATION_BUDGET.saturating_sub(preparation.started.elapsed()),
+        16384,
+        preparation.cancellation,
+        |e| io_error("query installed Rust toolchain (never installs)", None, e),
+    )?;
+    if result.failed() {
+        return Err(failure(
+            "installed Rust selection is unavailable; provision the project pin on the host before starting agent-runner (no installation or fallback is performed)",
+        ));
+    }
+    String::from_utf8(result.stdout).map_err(|_| failure("rustup selection output must be UTF-8"))
+}
+
+impl RustEnvironment {
+    /// Resolves only an already installed toolchain and snapshots local vendor
+    /// material. Ambient Cargo/Rust configuration and rustup overrides are not
+    /// forwarded. Absence is an error for callers that explicitly enable Rust.
+    pub fn resolve(workspace: &Path) -> Result<Self> {
+        let cancellation = CancellationToken::new();
+        let preparation = Preparation {
+            started: Instant::now(),
+            cancellation: &cancellation,
+        };
+        let workspace = workspace
+            .canonicalize()
+            .map_err(|e| io_error("resolve Rust workspace", None, e))?;
+        if !inspect_path(&workspace)?.is_dir() {
+            return Err(failure("Rust workspace must be a regular directory"));
+        }
+        let pin = project_pin(&workspace)?;
+        let pinned = pin.is_some();
+        let pin_identity = pin_identity(&workspace)?;
+        // Only the resolved system rustup is an executable authority. Neither
+        // repository config nor PATH may select this host subprocess.
+        let rustup = Path::new("/usr/bin/rustup")
+            .canonicalize()
+            .map_err(|e| io_error("resolve system rustup; provision Rust on the host", None, e))?;
+        if !rustup.starts_with("/usr")
+            || !inspect_path(&rustup)?.is_file()
+            || rustup.starts_with(&workspace)
+        {
+            return Err(failure(
+                "rustup must be a trusted system executable outside the writable workspace",
+            ));
+        }
+        let home = std::env::var_os("HOME").map(PathBuf::from).ok_or_else(|| {
+            failure("HOME is required to resolve the installed host Rust selection")
+        })?;
+        if !inspect_path(&home)?.is_dir() || home.starts_with(&workspace) {
+            return Err(failure(
+                "host HOME must be a canonical non-link directory outside the writable workspace",
+            ));
+        }
+        let selected = match &pin {
+            Some(pin) => pin.channel.clone(),
+            None => {
+                let text =
+                    query_rustup(&rustup, &home, &["show", "active-toolchain"], &preparation)?;
+                text.split_whitespace()
+                    .next()
+                    .ok_or_else(|| failure("rustup returned no installed default selection"))?
+                    .to_owned()
+            }
+        };
+        channel(&selected)?;
+        let cargo_output = query_rustup(
+            &rustup,
+            &home,
+            &["which", "--toolchain", &selected, "cargo"],
+            &preparation,
+        )
+        .map_err(|e| {
+            failure(format!(
+                "Rust `{selected}` is unavailable; provision it on the host before startup: {e}"
+            ))
+        })?;
+        let cargo = PathBuf::from(cargo_output.trim());
+        let root = cargo
+            .parent()
+            .and_then(Path::parent)
+            .ok_or_else(|| failure("rustup returned an invalid concrete cargo path"))?
+            .to_owned();
+        let installations = home.join(".rustup/toolchains");
+        if root.parent() != Some(installations.as_path())
+            || cargo != root.join("bin/cargo")
+            || root.starts_with(&workspace)
+        {
+            return Err(failure(
+                "Rust root must be an exact installed toolchain outside the writable workspace, not a custom linked or substituted root",
+            ));
+        }
+        let mut directories = Vec::new();
+        for path in [
+            &root,
+            &root.join("bin"),
+            &root.join("lib"),
+            &root.join("lib/rustlib"),
+        ] {
+            let metadata = inspect_path(path)?;
+            if !metadata.is_dir() {
+                return Err(failure(
+                    "installed Rust root lacks its bin/lib/rustlib layout",
+                ));
+            }
+            directories.push((path.to_owned(), (metadata.dev(), metadata.ino())));
+        }
+        if let Some(pin) = &pin {
+            for component in &pin.components {
+                let executable = match component.as_str() {
+                    "cargo" | "rustc" | "rustdoc" | "rustfmt" | "rust-analyzer" => {
+                        component.as_str()
+                    }
+                    "clippy" => "cargo-clippy",
+                    "rust-std" => continue,
+                    _ => {
+                        return Err(failure(format!(
+                            "unsupported requested Rust component `{component}`; verify/provision it on the host"
+                        )));
+                    }
+                };
+                inspect_path(&root.join("bin").join(executable))
+                    .map_err(|e| failure(format!("requested Rust component `{component}` is absent; provision it on the host: {e}")))?;
+            }
+            for target in &pin.targets {
+                if !inspect_path(&root.join("lib/rustlib").join(target).join("lib"))?.is_dir() {
+                    return Err(failure(
+                        "requested Rust target is absent; provision it on the host",
+                    ));
+                }
+            }
+        }
+        let mut executables = Vec::new();
+        for name in ["cargo", "rustc", "rustdoc"] {
+            let path = root.join("bin").join(name);
+            if inspect_path(&path)?.permissions().mode() & 0o111 == 0 {
+                return Err(failure(format!(
+                    "installed Rust `{name}` is not executable"
+                )));
+            }
+            executables.push((path.clone(), hash_file(&path, &preparation)?));
+        }
+        for path in native_library_layout(&root)? {
+            executables.push((path.clone(), hash_file(&path, &preparation)?));
+        }
+        for name in ["cc", "ar", "as"] {
+            let path = Path::new("/usr/bin")
+                .join(name)
+                .canonicalize()
+                .map_err(|e| io_error("resolve system Rust linker/archiver", None, e))?;
+            if !path.starts_with("/usr")
+                || path.starts_with(&workspace)
+                || inspect_path(&path)?.permissions().mode() & 0o111 == 0
+            {
+                return Err(failure(
+                    "Rust requires executable system cc/ar/as outside the writable workspace",
+                ));
+            }
+            executables.push((path.clone(), hash_file(&path, &preparation)?));
+        }
+        let identity = label(
+            format!(
+                "kvist/authoring-rust/v1\0{selected}\0{}\0{executables:?}",
+                root.display()
+            )
+            .as_bytes(),
+        );
+        let staging = tempfile::Builder::new()
+            .prefix(".agent-runner-rust-")
+            .tempdir_in(
+                workspace
+                    .parent()
+                    .ok_or_else(|| failure("Rust staging requires a writable workspace parent"))?,
+            )
+            .map_err(|e| io_error("create private Rust resources outside workspace", None, e))?;
+        fs::set_permissions(staging.path(), fs::Permissions::from_mode(0o700))
+            .map_err(|e| io_error("protect Rust resource staging", None, e))?;
+        let vendor = workspace.join(".kvist/vendored");
+        match fs::symlink_metadata(workspace.join(".kvist")) {
+            Ok(_) => {
+                if !inspect_path(&workspace.join(".kvist"))?.is_dir() {
+                    return Err(failure(
+                        "workspace .kvist must be a regular non-link directory",
+                    ));
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(io_error("inspect local vendor parent", None, e)),
+        }
+        let has_vendor = match fs::symlink_metadata(&vendor) {
+            Ok(_) => true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+            Err(e) => return Err(io_error("inspect local vendored registry", None, e)),
+        };
+        let vendor_identity = if has_vendor {
+            snapshot_vendor(&vendor, &staging.path().join("vendor"), &preparation)?
+        } else {
+            fs::create_dir(staging.path().join("vendor"))
+                .map_err(|e| io_error("create empty offline vendor resource", None, e))?;
+            label(b"empty offline authoring vendor")
+        };
+        fs::create_dir(staging.path().join("runtime"))
+            .map_err(|e| io_error("create private Rust runtime", None, e))?;
+        fs::create_dir(staging.path().join("runtime/bin"))
+            .map_err(|e| io_error("create private Rust wrappers", None, e))?;
+        let wrapper = staging.path().join("runtime/bin/cargo");
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o500)
+            .open(&wrapper)
+            .map_err(|e| io_error("create trusted Cargo shim", None, e))?;
+        file.write_all(b"#!/usr/bin/bash\nexec /rust/toolchain/bin/cargo --offline --locked --config 'source.crates-io.replace-with=\"vendored-sources\"' --config 'source.vendored-sources.directory=\"/rust/vendor\"' \"$@\"\n")
+            .map_err(|e| io_error("write fixed offline locked Cargo shim", None, e))?;
+        file.sync_all()
+            .map_err(|e| io_error("synchronize Cargo shim", None, e))?;
+        executables.push((wrapper.clone(), hash_file(&wrapper, &preparation)?));
+        Ok(Self {
+            resources: Arc::new(Resources {
+                workspace,
+                root,
+                channel: selected,
+                identity,
+                executables,
+                directories,
+                staging,
+                vendor_identity,
+                has_vendor,
+                pin_identity,
+                pinned,
+            }),
+        })
+    }
+
+    /// An inspectable exact selection, identity and offline-material diagnostic.
+    pub fn diagnostic(&self) -> String {
+        format!(
+            "Rust authoring: {} selects installed `{}` at `{}`; identity {}; pin digest {}; network denied, Cargo explicitly offline and locked, private HOME/cache/target; {}; vendor snapshot {}. Provision a matching Cargo.lock separately. No host home/Cargo credentials mounted; ambient Cargo/Rust overrides ignored.",
+            if self.resources.pinned {
+                "project pin"
+            } else {
+                "host default (resolved once; no project pin)"
+            },
+            self.resources.channel,
+            self.resources.root.display(),
+            self.resources.identity,
+            self.resources.pin_identity,
+            if self.resources.has_vendor {
+                "read-only snapshot of workspace .kvist/vendored"
+            } else {
+                "no vendored registry: only dependency-free/local-path builds can resolve; provision dependencies on the host"
+            },
+            self.resources.vendor_identity
+        )
+    }
+
+    pub(crate) fn validate(
+        &self,
+        workspace: &Path,
+        cancellation: &CancellationToken,
+    ) -> Result<()> {
+        let preparation = Preparation {
+            started: Instant::now(),
+            cancellation,
+        };
+        if workspace != self.resources.workspace {
+            return Err(failure(
+                "resolved Rust resources belong to a different writable workspace",
+            ));
+        }
+        if pin_identity(workspace)? != self.resources.pin_identity {
+            return Err(failure(
+                "project Rust pin changed since startup; restart to explicitly resolve the new installed selection",
+            ));
+        }
+        for (path, expected) in &self.resources.directories {
+            preparation.check()?;
+            let actual = inspect_path(path)?;
+            if !actual.is_dir() || (actual.dev(), actual.ino()) != *expected {
+                return Err(failure(
+                    "installed Rust root/layout changed since startup; restart after host provisioning",
+                ));
+            }
+        }
+        for (path, expected) in &self.resources.executables {
+            if hash_file(path, &preparation)? != *expected {
+                return Err(failure(
+                    "installed Rust executable or trusted shim drifted since startup; restart after host provisioning",
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn grants(&self) -> Vec<Grant> {
+        [
+            (
+                self.resources.root.clone(),
+                TOOLCHAIN_DEST,
+                self.resources.identity.clone(),
+            ),
+            (
+                self.resources.staging.path().join("runtime"),
+                RUNTIME_DEST,
+                self.resources.identity.clone(),
+            ),
+            (
+                self.resources.staging.path().join("vendor"),
+                VENDOR_DEST,
+                self.resources.vendor_identity.clone(),
+            ),
+        ]
+        .into_iter()
+        .map(|(source, destination, identity)| Grant {
+            source: source.to_string_lossy().into_owned(),
+            destination: destination.into(),
+            access: Access::ReadOnly,
+            purpose: Purpose::Toolchain,
+            identity,
+        })
+        .collect()
+    }
+
+    pub(crate) fn identity(&self) -> &str {
+        &self.resources.identity
+    }
+
+    pub(crate) fn environment(&self) -> BTreeMap<String, String> {
+        [
+            (
+                "PATH",
+                "/rust/runtime/bin:/rust/toolchain/bin:/usr/bin:/bin:/usr/sbin:/sbin",
+            ),
+            ("HOME", "/tmp"),
+            ("CARGO_HOME", "/tmp/cargo-home"),
+            ("CARGO_TARGET_DIR", "/tmp/target"),
+            ("CARGO_NET_OFFLINE", "true"),
+            ("RUSTC", "/rust/toolchain/bin/rustc"),
+            ("RUSTDOC", "/rust/toolchain/bin/rustdoc"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.into(), v.into()))
+        .collect()
+    }
+}
+
+fn snapshot_vendor(
+    source: &Path,
+    destination: &Path,
+    preparation: &Preparation<'_>,
+) -> Result<String> {
+    let source_root = source.to_owned();
+    let mut stack = vec![(source.to_owned(), destination.to_owned(), 0_usize)];
+    let mut count = 0_usize;
+    let mut total = 0_u64;
+    let mut identity = Sha256::new();
+    let mut directories = Vec::new();
+    let mut path_bytes = 0_usize;
+    while let Some((source, destination, depth)) = stack.pop() {
+        preparation.check()?;
+        let directory = inspect_path(&source)?;
+        if depth > 64 || !directory.is_dir() {
+            return Err(failure(
+                "vendor resource must be a non-link directory tree of depth at most 64",
+            ));
+        }
+        directories.push((source.clone(), fingerprint(&directory)));
+        fs::create_dir(&destination)
+            .map_err(|e| io_error("create private vendor snapshot directory", None, e))?;
+        let mut entries = Vec::new();
+        for entry in
+            fs::read_dir(&source).map_err(|e| io_error("read local vendored registry", None, e))?
+        {
+            preparation.check()?;
+            count += 1;
+            if count > MAX_ENTRIES {
+                return Err(failure("vendored registry exceeds 100000 snapshot entries"));
+            }
+            let entry =
+                entry.map_err(|e| io_error("enumerate local vendored registry", None, e))?;
+            path_bytes =
+                path_bytes.saturating_add(entry.path().as_os_str().len().saturating_mul(3));
+            if path_bytes > 32 << 20 {
+                return Err(failure(
+                    "vendor snapshot exceeds its 32 MiB retained-path bound",
+                ));
+            }
+            entries.push(entry);
+        }
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            preparation.check()?;
+            let src = entry.path();
+            let dst = destination.join(entry.file_name());
+            let metadata = inspect_path(&src)?;
+            if metadata.is_dir() {
+                stack.push((src, dst, depth + 1));
+                continue;
+            }
+            if !metadata.is_file() || metadata.nlink() != 1 {
+                return Err(failure(
+                    "vendored registry must contain only regular single-link files/directories, not links or special entries",
+                ));
+            }
+            let mut input = file(&src, MAX_FILE_BYTES)?;
+            let before = input
+                .metadata()
+                .map_err(|e| io_error("inspect vendor snapshot input", None, e))?;
+            let mut output = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o400)
+                .open(&dst)
+                .map_err(|e| io_error("create private vendor snapshot file", None, e))?;
+            let relative = src
+                .strip_prefix(&source_root)
+                .map_err(|_| failure("invalid vendor entry"))?
+                .as_os_str()
+                .as_encoded_bytes();
+            identity.update((relative.len() as u64).to_be_bytes());
+            identity.update(relative);
+            identity.update(before.len().to_be_bytes());
+            let mut bytes = [0; 65536];
+            let mut file_bytes = 0_u64;
+            loop {
+                preparation.check()?;
+                let n = input
+                    .read(&mut bytes)
+                    .map_err(|e| io_error("read local vendor snapshot", None, e))?;
+                if n == 0 {
+                    break;
+                }
+                file_bytes += n as u64;
+                total += n as u64;
+                if file_bytes > MAX_FILE_BYTES || total > MAX_VENDOR_BYTES {
+                    return Err(failure(
+                        "vendor snapshot exceeds 256 MiB/file or 1 GiB aggregate",
+                    ));
+                }
+                output
+                    .write_all(&bytes[..n])
+                    .map_err(|e| io_error("write private vendor snapshot", None, e))?;
+                identity.update(&bytes[..n]);
+            }
+            if fingerprint(&before) != fingerprint(&inspect_path(&src)?) {
+                return Err(failure(
+                    "vendored file changed while snapshotting; refresh on the host and restart",
+                ));
+            }
+        }
+    }
+    for (path, before) in directories {
+        preparation.check()?;
+        if fingerprint(&inspect_path(&path)?) != before {
+            return Err(failure(
+                "vendor directory changed while snapshotting; refresh on the host and restart",
+            ));
+        }
+    }
+    Ok(format!("sha256:{}", hex::encode(identity.finalize())))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::symlink;
+
+    fn fixture() -> tempfile::TempDir {
+        tempfile::Builder::new()
+            .prefix(".rust-resource-test-")
+            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+            .unwrap()
+    }
+
+    fn synthetic_environment(directory: &Path) -> RustEnvironment {
+        let directory = directory.canonicalize().unwrap();
+        let workspace = directory.join("workspace");
+        let root = directory.join("toolchain");
+        fs::create_dir(&workspace).unwrap();
+        fs::create_dir(&root).unwrap();
+        let executable = root.join("cargo");
+        fs::write(&executable, b"initial executable").unwrap();
+        let cancellation = CancellationToken::new();
+        let preparation = Preparation {
+            started: Instant::now(),
+            cancellation: &cancellation,
+        };
+        let metadata = inspect_path(&root).unwrap();
+        RustEnvironment {
+            resources: Arc::new(Resources {
+                pin_identity: pin_identity(&workspace).unwrap(),
+                workspace,
+                root: root.clone(),
+                channel: "stable".into(),
+                identity: label(b"synthetic"),
+                executables: vec![(
+                    executable.clone(),
+                    hash_file(&executable, &preparation).unwrap(),
+                )],
+                directories: vec![(root, (metadata.dev(), metadata.ino()))],
+                staging: tempfile::Builder::new()
+                    .prefix(".rust-staging-")
+                    .tempdir_in(directory)
+                    .unwrap(),
+                vendor_identity: label(b"empty"),
+                has_vendor: false,
+                pinned: false,
+            }),
+        }
+    }
+
+    #[test]
+    fn drift_and_substituted_roots_are_rejected_without_mutating_real_installs() {
+        let directory = fixture();
+        let environment = synthetic_environment(directory.path());
+        let workspace = &environment.resources.workspace;
+        let cancellation = CancellationToken::new();
+        environment.validate(workspace, &cancellation).unwrap();
+        fs::write(
+            environment.resources.root.join("cargo"),
+            b"substituted executable",
+        )
+        .unwrap();
+        assert!(environment.validate(workspace, &cancellation).is_err());
+        fs::rename(
+            &environment.resources.root,
+            directory.path().join("old-toolchain"),
+        )
+        .unwrap();
+        fs::create_dir(&environment.resources.root).unwrap();
+        assert!(environment.validate(workspace, &cancellation).is_err());
+        fs::remove_dir(&environment.resources.root).unwrap();
+        symlink(
+            directory
+                .path()
+                .join("old-toolchain")
+                .canonicalize()
+                .unwrap(),
+            &environment.resources.root,
+        )
+        .unwrap();
+        assert!(environment.validate(workspace, &cancellation).is_err());
+    }
+
+    #[test]
+    fn resources_are_read_only_disjoint_and_cleaned_with_final_owner() {
+        let directory = fixture();
+        let environment = synthetic_environment(directory.path());
+        let staging = environment.resources.staging.path().to_owned();
+        let clone = environment.clone();
+        for grant in environment.grants() {
+            assert_eq!(grant.access, Access::ReadOnly);
+            assert_eq!(grant.purpose, Purpose::Toolchain);
+            assert!(!Path::new(&grant.source).starts_with(&environment.resources.workspace));
+            assert!(!grant.destination.starts_with("/workspace"));
+        }
+        drop(environment);
+        assert!(staging.exists());
+        drop(clone);
+        assert!(!staging.exists());
+    }
+
+    #[test]
+    fn snapshot_rejects_linked_files_special_files_and_linked_ancestors() {
+        let directory = fixture();
+        let source = directory.path().join("vendor");
+        fs::create_dir(&source).unwrap();
+        let cancellation = CancellationToken::new();
+        let preparation = Preparation {
+            started: Instant::now(),
+            cancellation: &cancellation,
+        };
+        symlink("/etc/passwd", source.join("link")).unwrap();
+        assert!(
+            snapshot_vendor(
+                &source.canonicalize().unwrap(),
+                &directory.path().join("snapshot1"),
+                &preparation
+            )
+            .is_err()
+        );
+        fs::remove_file(source.join("link")).unwrap();
+        nix::unistd::mkfifo(&source.join("fifo"), nix::sys::stat::Mode::S_IRUSR).unwrap();
+        assert!(
+            snapshot_vendor(
+                &source.canonicalize().unwrap(),
+                &directory.path().join("snapshot2"),
+                &preparation
+            )
+            .is_err()
+        );
+        fs::remove_file(source.join("fifo")).unwrap();
+        fs::write(directory.path().join("outside"), b"not registry material").unwrap();
+        fs::hard_link(directory.path().join("outside"), source.join("hardlink")).unwrap();
+        assert!(
+            snapshot_vendor(
+                &source.canonicalize().unwrap(),
+                &directory.path().join("snapshot-hardlink"),
+                &preparation
+            )
+            .is_err()
+        );
+        fs::remove_file(source.join("hardlink")).unwrap();
+        symlink(
+            source.canonicalize().unwrap(),
+            directory.path().join("alias"),
+        )
+        .unwrap();
+        assert!(
+            snapshot_vendor(
+                &directory.path().join("alias"),
+                &directory.path().join("snapshot3"),
+                &preparation
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn snapshot_identity_binds_paths_and_bytes_and_copy_is_independent() {
+        let directory = fixture();
+        let source = directory.path().join("vendor");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(source.join("crate-a")).unwrap();
+        fs::write(source.join("crate-a/file"), b"initial").unwrap();
+        let source = source.canonicalize().unwrap();
+        let cancellation = CancellationToken::new();
+        let preparation = Preparation {
+            started: Instant::now(),
+            cancellation: &cancellation,
+        };
+        let first =
+            snapshot_vendor(&source, &directory.path().join("copy1"), &preparation).unwrap();
+        fs::rename(source.join("crate-a"), source.join("crate-b")).unwrap();
+        let second =
+            snapshot_vendor(&source, &directory.path().join("copy2"), &preparation).unwrap();
+        assert_ne!(first, second);
+        fs::write(source.join("crate-b/file"), b"replacement").unwrap();
+        let third =
+            snapshot_vendor(&source, &directory.path().join("copy3"), &preparation).unwrap();
+        assert_ne!(second, third);
+        assert_eq!(
+            fs::read(directory.path().join("copy1/crate-a/file")).unwrap(),
+            b"initial"
+        );
+    }
+
+    #[test]
+    fn preparation_is_cancelled_and_file_bound_is_checked_before_allocating() {
+        let directory = fixture();
+        let path = directory.path().join("large");
+        File::create(&path)
+            .unwrap()
+            .set_len(MAX_FILE_BYTES + 1)
+            .unwrap();
+        assert!(file(&path.canonicalize().unwrap(), MAX_FILE_BYTES).is_err());
+        let environment = synthetic_environment(directory.path());
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+        assert!(
+            environment
+                .validate(&environment.resources.workspace, &cancellation)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn native_standard_library_is_required_and_cannot_be_a_link() {
+        let directory = fixture();
+        let root = directory.path().canonicalize().unwrap();
+        assert!(native_library_layout(&root).is_err());
+        fs::create_dir_all(root.join("lib/rustlib/test-native/lib")).unwrap();
+        fs::write(root.join("lib/rustlib/components"), "rustc-test-native\n").unwrap();
+        assert!(native_library_layout(&root).is_err());
+        fs::write(
+            root.join("lib/rustlib/test-native/lib/libcore-test.rlib"),
+            b"core",
+        )
+        .unwrap();
+        fs::write(
+            root.join("lib/rustlib/test-native/lib/libstd-test.rlib"),
+            b"std",
+        )
+        .unwrap();
+        assert_eq!(native_library_layout(&root).unwrap().len(), 3);
+        fs::remove_file(root.join("lib/rustlib/test-native/lib/libstd-test.rlib")).unwrap();
+        symlink(
+            "/etc/passwd",
+            root.join("lib/rustlib/test-native/lib/libstd-test.rlib"),
+        )
+        .unwrap();
+        assert!(native_library_layout(&root).is_err());
+    }
+
+    #[test]
+    fn native_release_channel_tokens_accept_pins_but_not_paths_or_custom_roots() {
+        for value in [
+            "stable",
+            "beta",
+            "nightly-2026-01-01",
+            "1.95",
+            "1.95.0",
+            "stable-x86_64-unknown-linux-gnu",
+        ] {
+            channel(value).unwrap();
+        }
+        for value in [
+            "",
+            "custom",
+            "--help",
+            "/host/root",
+            "../../toolchain",
+            "stable\n",
+            "stable;echo",
+            "stable\\root",
+        ] {
+            assert!(channel(value).is_err(), "{value}");
+        }
+    }
+}

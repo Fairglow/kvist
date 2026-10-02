@@ -98,8 +98,12 @@ impl ToolExecutor for SandboxExecutor {
             policy: self.registry.policy(),
             resources: default_resources(),
         };
-        let request =
-            crate::sandbox::build_request_cancellable(&self.sandbox, &build, cancellation)?;
+        let request = crate::sandbox::build_request_with_rust(
+            &self.sandbox,
+            &build,
+            self.registry.rust_environment(),
+            cancellation,
+        )?;
         check_cancelled(cancellation)?;
         execute(&self.sandbox, &request, cancellation)
     }

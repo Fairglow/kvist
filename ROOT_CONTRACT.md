@@ -33,6 +33,13 @@ constraint set injected into component work.
   network access and builds offline from that vendored registry. Agents must not
   write queues, intent, implementation records, approval state, or canonical
   evidence.
+- Use `--offline --locked` for sandboxed Cargo builds, tests, and dependency
+  resolution. Provision a matching `Cargo.lock` and vendored dependencies
+  separately; builds must not create or update the dependency lock.
+- Prefer safe Rust. Unsafe is not categorically prohibited, but each use must
+  be necessary, minimally scoped, and justified by documented safety
+  invariants, targeted verification, and independent review. Existing
+  crate-level unsafe guards must not be broadly relaxed to bypass this rule.
 - Keep model networking and credentials outside the effect sandbox. Initial
   task execution may use local agents; future remote agents require a
   host-owned transport and typed tool broker rather than a mounted user home or

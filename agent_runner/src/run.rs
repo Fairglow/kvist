@@ -196,6 +196,10 @@ pub fn system_prompt(write_root: &str) -> String {
          layout. This workspace shell is NOT Kvist's protected task broker and cannot accept intent, \
          approve tasks, mint canonical evidence or promote output. Network is denied for tools. \
          Prefer bounded reads/searches and exact edit_file with the SHA-256 returned by read_file. \
+         read_file offsets are UTF-8 byte positions, not line numbers: pass actual next_offset to \
+         continue a page. Omitting offset intentionally reads page zero; describing an offset in prose \
+         does not supply it as a tool argument. Use directory or regular-file search scopes and \
+         bounded source filters; binary executables are not source text. \
          Tools return process status; check failures. Prefer small, reversible steps. State what you did."
     )
 }
@@ -281,6 +285,8 @@ mod tests {
             provider: ModelProvider::LlamaServer,
             base_url: "http://127.0.0.1:1".to_owned(),
             model: "test-model".to_owned(),
+            context_limit: None,
+            response_reserve: None,
             deadline_secs: 30,
             max_attempts: 1,
             retry_base_delay_secs: 1,

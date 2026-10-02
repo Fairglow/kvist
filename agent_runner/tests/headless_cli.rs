@@ -3,7 +3,7 @@ use std::net::TcpListener;
 use std::process::Command;
 use std::time::Duration;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 fn trial(finish: &str) -> std::process::Output {
     trial_text(finish, "OK", true).0
@@ -21,7 +21,8 @@ fn trial_text(finish: &str, content: &str, json_output: bool) -> (std::process::
         format!(
             "schema_version=1\nworking_directory={:?}\ndefault_model='test'\n\
          default_thinking_effort='none'\n[[models]]\nid='test'\n\
-         provider='llama-server'\nbase_url='http://{endpoint}'\nmodel='test'\n",
+         provider='llama-server'\nbase_url='http://{endpoint}'\nmodel='test'\n\
+         context_limit=8192\nresponse_reserve=1024\nmax_attempts=1\n",
             work.to_str().unwrap(),
         ),
     )
@@ -185,4 +186,92 @@ fn headless_rejects_agent_writable_logs_before_model_io() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("outside"));
     assert!(!logs.exists());
+}
+
+#[test]
+fn startup_uses_selected_serving_capacity_without_a_cli_override() {
+    let work = tempfile::tempdir().unwrap();
+    let logs = tempfile::tempdir().unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        let mut posted = Vec::new();
+        for expected in ["GET /props?model=test ", "POST /v1/chat/completions "] {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0; 8192];
+            let end = loop {
+                let count = socket.read(&mut buffer).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&buffer[..count]);
+                if let Some(at) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                    break at + 4;
+                }
+            };
+            let head = String::from_utf8(request[..end].to_vec()).unwrap();
+            assert!(head.starts_with(expected), "{head}");
+            let length = head
+                .lines()
+                .find_map(|line| line.strip_prefix("Content-Length: "))
+                .map(|value| value.trim().parse::<usize>().unwrap())
+                .unwrap_or(0);
+            while request.len() < end + length {
+                let count = socket.read(&mut buffer).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&buffer[..count]);
+            }
+            let body = if expected.starts_with("GET") {
+                json!({"default_generation_settings":{"n_ctx":262144}}).to_string()
+            } else {
+                posted = request[end..].to_vec();
+                format!(
+                    "data: {}\n\ndata: [DONE]\n\n",
+                    json!({"choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}]})
+                )
+            };
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+        }
+        posted
+    });
+    let config = work.path().join("config.toml");
+    std::fs::write(
+        &config,
+        format!(
+            "schema_version=1\ndefault_model='test'\n[[models]]\nid='test'\n\
+         provider='llama-server'\nbase_url='http://{endpoint}'\nmodel='test'\n"
+        ),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-runner"))
+        .args(["--headless", "--json", "--config"])
+        .arg(config)
+        .arg("--log-dir")
+        .arg(logs.path().join("private"))
+        .arg("--cwd")
+        .arg(work.path())
+        .arg("capacity test")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let request: Value = serde_json::from_slice(&server.join().unwrap()).unwrap();
+    assert_eq!(request["max_tokens"], 8192);
+    let events: Vec<Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(events[0]["event"]["data"]["context_limit"], 262144);
+    assert_eq!(events[0]["event"]["data"]["context_source"], "provider");
 }

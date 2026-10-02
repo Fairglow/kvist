@@ -83,6 +83,7 @@ const EFFORTS: [ReasoningEffort; 7] = [
 /// The latest context/token accounting from the loop, driving the stats bar.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Stats {
+    pub token_accounting: crate::session::TokenAccounting,
     /// Session-wide tokens per second.
     pub tokens_per_sec: f64,
     /// Tokens the model currently holds in context.
@@ -426,6 +427,7 @@ impl App {
                 self.note(Style::default().fg(Color::DarkGray), &text);
             }
             Event::Progress {
+                token_accounting,
                 tokens_per_sec,
                 context_tokens,
                 context_limit,
@@ -443,6 +445,7 @@ impl App {
                 );
                 self.last_growth = Some((elapsed_secs, context_tokens));
                 self.stats = Some(Stats {
+                    token_accounting,
                     tokens_per_sec,
                     context_tokens,
                     context_limit,
@@ -571,9 +574,17 @@ impl App {
         let Some(stats) = self.stats else {
             return String::new();
         };
-        let speed = format!("⚡ {:.0} tok/s  ·  ", stats.tokens_per_sec);
+        let speed = match stats.token_accounting {
+            crate::session::TokenAccounting::Provider => {
+                format!("⚡ {:.0} tok/s  ·  ", stats.tokens_per_sec)
+            }
+            crate::session::TokenAccounting::Estimated => {
+                format!("⚡ ~{:.0} tok/s  ·  ", stats.tokens_per_sec)
+            }
+            crate::session::TokenAccounting::Unavailable => "⚡ ? tok/s  ·  ".into(),
+        };
         let context = format!(
-            "▁▃▅▇{} {:+.0}% {}/{}  ·  ",
+            "▁▃▅▇{} ~{:+.0}% ~{}/{}  ·  ",
             bargraph(stats.utilization, 8),
             stats.utilization.clamp(0.0, 1.0) * 100.0,
             stats.context_tokens,
@@ -591,11 +602,16 @@ impl App {
             stats.compaction_progress.clamp(0.0, 1.0) * 100.0,
             eta_suffix
         );
-        let progress = format!(
-            " · {total} tok · {elapsed}",
-            total = stats.total_tokens,
-            elapsed = format_elapsed(stats.elapsed_secs)
-        );
+        let usage = match stats.token_accounting {
+            crate::session::TokenAccounting::Provider => {
+                format!("{} tok (reported)", stats.total_tokens)
+            }
+            crate::session::TokenAccounting::Estimated => {
+                format!("~{} tok (estimated)", stats.total_tokens)
+            }
+            crate::session::TokenAccounting::Unavailable => "provider usage unavailable".into(),
+        };
+        let progress = format!(" · {usage} · {}", format_elapsed(stats.elapsed_secs));
         format!("{speed}{context}{compaction}{progress}")
     }
 
@@ -2226,6 +2242,7 @@ mod tests {
 
         let mut app = app();
         app.push_event(Event::Progress {
+            token_accounting: crate::session::TokenAccounting::Provider,
             input_tokens: 0,
             output_tokens: 0,
             context_tokens: 100,
@@ -2241,12 +2258,20 @@ mod tests {
         assert!(line.contains("8192"));
         assert!(line.contains("512 tok"));
         assert!(line.contains("3:46"));
+        app.stats.as_mut().unwrap().token_accounting = crate::session::TokenAccounting::Unavailable;
+        let line = app.stats_line();
+        assert!(line.contains("provider usage unavailable"));
+        assert!(!line.contains("512 tok"));
+        assert!(line.contains("? tok/s"));
+        app.stats.as_mut().unwrap().token_accounting = crate::session::TokenAccounting::Estimated;
+        assert!(app.stats_line().contains("~512 tok (estimated)"));
     }
 
     #[test]
     fn eta_is_none_without_a_prior_sample() {
         let mut app = app();
         app.push_event(Event::Progress {
+            token_accounting: crate::session::TokenAccounting::Provider,
             input_tokens: 0,
             output_tokens: 0,
             context_tokens: 4000,
@@ -2265,6 +2290,7 @@ mod tests {
         let mut app = app();
         // First sample: establishes the growth baseline.
         app.push_event(Event::Progress {
+            token_accounting: crate::session::TokenAccounting::Provider,
             input_tokens: 0,
             output_tokens: 0,
             context_tokens: 3000,
@@ -2277,6 +2303,7 @@ mod tests {
         });
         // Second sample, 10s later: 1000 tokens added => 100 tok/s.
         app.push_event(Event::Progress {
+            token_accounting: crate::session::TokenAccounting::Provider,
             input_tokens: 0,
             output_tokens: 0,
             context_tokens: 4000,
@@ -2298,6 +2325,7 @@ mod tests {
         let mut app = app();
         let push = |app: &mut App, ctx: usize, elapsed: f64| {
             app.push_event(Event::Progress {
+                token_accounting: crate::session::TokenAccounting::Provider,
                 input_tokens: 0,
                 output_tokens: 0,
                 context_tokens: ctx,
@@ -2319,6 +2347,7 @@ mod tests {
         let mut app = app();
         let push = |app: &mut App, ctx: usize, elapsed: f64| {
             app.push_event(Event::Progress {
+                token_accounting: crate::session::TokenAccounting::Provider,
                 input_tokens: 0,
                 output_tokens: 0,
                 context_tokens: ctx,
@@ -2341,6 +2370,7 @@ mod tests {
         let mut app = app_at(60);
         let push = |app: &mut App, ctx: usize, elapsed: f64| {
             app.push_event(Event::Progress {
+                token_accounting: crate::session::TokenAccounting::Provider,
                 input_tokens: 0,
                 output_tokens: 0,
                 context_tokens: ctx,

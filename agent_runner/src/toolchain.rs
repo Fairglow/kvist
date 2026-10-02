@@ -8,6 +8,10 @@
 //! host PATH. Configuration lets each profile be forced on, gated on availability
 //! (auto), or turned off, and an explicit request for an unavailable profile is a
 //! startup error rather than a silent lie.
+//! Workspace resolution additionally uses [`rust_environment`] to expose one
+//! concrete host-installed Rust toolchain read-only, with explicitly offline
+//! dependencies and private scratch. The generic probe never treats rustup
+//! proxies as installed compilers.
 
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -18,6 +22,10 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
+
+/// Concrete read-only Rust resources; no engine provisioning authority.
+#[path = "rust_environment.rs"]
+pub mod rust_environment;
 
 /// A language or base tool-chain profile the registry can advertise.
 ///

@@ -87,8 +87,29 @@ Plain text escapes terminal controls except LF/tab; JSON retains original text.
 Token estimates are byte-aware heuristics, **not exact tokenizer guarantees**.
 The shared token budget charges complete estimated input plus reserved output
 for every attempt, including retries; it is not provider billing accounting.
-Default limits are 8192 context tokens, 1024 response tokens, 1800 seconds and
-1,000,000 estimated attempt tokens. Sandbox loops cap at 50 turns.
+Production startup uses explicit CLI/model context or bounded selected-model
+serving-capacity discovery; it has no assumed 8192-token context fallback.
+The initial output reserve is explicit CLI/model configuration or
+`min(8192, max(1, context/4))`. Default prompt limits remain 1800 seconds and
+1,000,000 estimated attempt tokens; sandbox loops cap at 50 turns. Length
+recovery can enlarge the output reserve before effects, sharing those limits.
+Compaction triggers near 75% and targets 65%, retaining outstanding goals and
+complete tool groups rather than discarding history after a fixed number of
+turns. Provider usage may be unavailable; journals use null, and UI/streamed
+estimates are explicitly distinguished from measured usage.
+
+Normal sandbox PATH Cargo forces `--offline --locked` against the private,
+read-only vendor snapshot. Provision a matching `Cargo.lock` separately;
+missing or stale locks fail rather than being created or updated by the build.
+Explicit alternate Cargo paths are not rewritten, and standalone authoring
+still permits workspace edits. Bounded compaction summaries may lose older
+references; this is not a guarantee of complete retained history.
+
+Unsafe Rust is not categorically forbidden: it must be necessary, minimally
+scoped, justified by documented safety invariants, independently reviewed, and
+covered by targeted verification. The runtime currently uses two unsafe
+`sigaction` calls for signal-handler installation. Its native tests exercise
+installation and forwarding, not a general proof of signal safety.
 
 Built-in process supervision polls idle pipes every 5 ms, permits 250 ms of
 post-exit/termination draining and bounds reaping to one second. Cleanup

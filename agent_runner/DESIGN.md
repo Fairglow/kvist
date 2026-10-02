@@ -2,6 +2,37 @@
 
 # Agent Runner — Design
 
+## October run remediation
+
+Resolve model budgets in one shared startup helper used by headless and each
+TUI worker. Use bounded model-qualified serving metadata for llama-server,
+and actual loaded Ollama context where advertised; configured capacity is the
+explicit fallback. Preserve CLI precedence without converting absence to 8192.
+Automatic output reserve is min(8192, window/4); explicit reserves must fit.
+
+The coordinator retains outstanding human messages independently of summaries
+until normal completion. Context preflight protects those messages, all system
+instructions and the newest complete tool group. Compact toward 65% of the
+window, retaining as many recent groups as possible; if protected context
+alone exceeds that target, fit against the hard limit or fail unchanged.
+Summary references retain paths, returned offsets and process status before
+lossy content prefixes. Binary previews are explicit text, not raw executable
+bytes, and escaped JSON costs bound previews before they enter context.
+
+Model-only length recovery clones the pre-effect request, increases output
+reserve within its context and attempt budgets, and never folds truncated
+intents into conversation or dispatches them. Operational notices are fallible
+recorder events. Native repeat classification is a fixed tool-name allowlist,
+never a guess about shell scripts. Distinct successful outcomes reset only
+consecutive stalls, not the effectful action history.
+
+Native traversal applies explicit generated-directory and literal path filters,
+accounts for exclusions/oversize without loading oversized files, and keeps
+all existing recursion/entry/byte and encoded-page ceilings. File search uses
+secure non-following descriptor access and explicit file-vs-directory errors.
+Rust integration remains a separately bounded host-selection/read-only-mount
+path; it must not import engine policy/types or relax its closed Cargo phases.
+
 ## Security-first hardening design
 
 No new task-approval, credential or promotion authority is
@@ -174,7 +205,8 @@ happens on our argv.
 
 - `shell { command }` → `["<bash>", "-c", "<command>", "agent-runner"]`. The
   command string is the agent's own script. Bash resolves inner tool names via
-  the sandbox `PATH` we set (`/usr/bin:/bin:/usr/sbin:/sbin`). The `shell`
+  the sandbox `PATH` we set (prepared `/rust/runtime/bin` first when available,
+  then `/usr/bin:/bin:/usr/sbin:/sbin`). The `shell`
   command string is checked against the denylist before rendering.
 - Native file operations carry closed typed JSON, never shell snippets.
   The executor stages the payload mode 0600 in a mode-0700 host-owned temporary
@@ -209,11 +241,31 @@ regardless.
 
 The `shell` tool advertises the tool-chains available inside the authoring
 sandbox through the `toolkit()` strings of the enabled `ToolProfile`s. Advertisement
-must be honest: the sandbox mounts only the read-only `/usr` layout and clears the
-environment, so a profile is advertised only when its interpreter genuinely reaches
+must be honest: the sandbox mounts the read-only System layout and, when
+prepared, explicit read-only Rust resources, while clearing the environment.
+A profile is advertised only when its interpreter genuinely reaches
 the sandbox, never against the host `PATH`.
 
-The gate lives in `ToolRegistry::resolve` (wired in `tui::run` and the CLI). It
+The System gate lives in `ToolRegistry::resolve`. Sandboxed terminal/headless
+startup uses `resolve_for_workspace`, adding validated installed Rust resources
+and a bounded private vendor snapshot without changing the engine Cargo topology.
+The fixed Cargo shim prepends `--offline --locked` and source overrides to every
+normal PATH Cargo invocation; Cargo handles missing/stale locks before a build
+can update them. Flags also apply to metadata and checks; version/help remain
+usable without a project lock. Explicit alternate executable paths are not
+rewritten. This is a locked-build default, not an artifact write-protection
+mechanism for the standalone writable workspace. Concrete compiler,
+rustdoc and native libraries remain under `/rust/toolchain`; the trusted shim
+is under `/rust/runtime`. `HOME=/tmp`, `CARGO_HOME=/tmp/cargo-home` and
+`CARGO_TARGET_DIR=/tmp/target` are private invocation scratch, not host caches.
+Selection uses the standard host rustup layout, ignoring ambient overrides and
+custom linked roots; engine `.kvist/rust-toolchain.json` is not authorization.
+Preparation bounds are 30 seconds, 1 GiB vendor aggregate, 256 MiB/file,
+100,000 entries, depth 64 and 32 MiB retained paths. Stage ownership is shared
+with the registry/executor and removed when the final owner drops. Pin/root
+substitution and tracked executable/library/shim drift fail before dispatch;
+the identity is not a complete toolchain-tree digest.
+Explicit host execution keeps the System-only registry. The System gate
 combines three inputs:
 
 - the per-profile `ProfileSetting` from `[tool_profiles]` (default `Auto` for every
@@ -405,7 +457,7 @@ trust. No speculative or misleading number is ever shown.
 - Config with wrong `schema_version` or unknown model selector fails to load.
 - A profile set to `on` or forced via `-p` that is not available inside the
   sandbox fails startup with `ToolchainUnavailable`; `auto` advertises only the
-  profiles whose interpreter reaches the read-only `/usr` layout, and `rustup`
+  profiles whose interpreter reaches the read-only System/prepared resources, and `rustup`
   stubs are not treated as usable tool-chains.
 - `detect_languages` reports the project's detected language without gating
   advertisement.

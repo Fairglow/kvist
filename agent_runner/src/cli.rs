@@ -57,8 +57,7 @@ pub struct Cli {
     #[arg(long, value_name = "PATH")]
     pub log_dir: Option<PathBuf>,
 
-    /// Model context window in tokens, controlling when compaction begins
-    /// (default 8192).
+    /// Override serving context in tokens (otherwise model config or discovery).
     #[arg(long, value_name = "TOKENS")]
     pub context_limit: Option<usize>,
 
@@ -74,9 +73,9 @@ pub struct Cli {
     #[arg(long, requires = "headless")]
     pub json: bool,
 
-    /// Output-token reserve, enforced in each provider request.
-    #[arg(long, default_value_t = 1024, value_parser = clap::value_parser!(u32).range(1..=1_048_576))]
-    pub response_reserve: u32,
+    /// Output reserve (otherwise model config or up to 8192, window permitting).
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=1_048_576))]
+    pub response_reserve: Option<u32>,
 
     /// Whole-prompt wall time, including requests, retry waits and tools.
     #[arg(long, default_value_t = 1800, value_parser = clap::value_parser!(u64).range(1..=86_400))]

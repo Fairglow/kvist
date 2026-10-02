@@ -15,7 +15,7 @@ use crate::{
 
 const MAX_DEADLINE: Duration = Duration::from_secs(24 * 60 * 60);
 const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const MAX_REQUEST_BYTES: usize = 2 * 1024 * 1024;
+const MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_MESSAGES: usize = 1024;
 const MAX_TOOLS: usize = 128;
@@ -199,6 +199,66 @@ impl DirectModelTransport {
         self.cadence_watchdog_timeout
     }
 
+    /// Reads selected-model serving capacity without inference or tool execution.
+    ///
+    /// Missing capacity is distinct from invalid advertised metadata. Discovery
+    /// retains the loopback endpoint restriction and a 5-second/1-MiB bound.
+    pub fn context_limit(
+        &self,
+        model: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<Option<usize>> {
+        if model.trim().is_empty() || model.len() > 256 || model.chars().any(char::is_control) {
+            return invalid_request("capacity discovery requires a bounded nonblank model id");
+        }
+        let path = match self.provider {
+            LocalModelProvider::LlamaServer => format!("/props?model={}", query_component(model)),
+            LocalModelProvider::Ollama => "/api/ps".into(),
+        };
+        let bytes = get_bounded(
+            &format!("http://{}", self.endpoint.authority),
+            &path,
+            self.deadline.min(Duration::from_secs(5)),
+            1024 * 1024,
+            cancellation,
+        )?;
+        let value = parse_json(&bytes)?;
+        if !value.is_object() {
+            return malformed("model capacity metadata must be an object");
+        }
+        match self.provider {
+            LocalModelProvider::LlamaServer => {
+                parse_context_limit(value.pointer("/default_generation_settings/n_ctx"))
+            }
+            LocalModelProvider::Ollama => {
+                let Some(models) = value.get("models") else {
+                    return Ok(None);
+                };
+                let models = models
+                    .as_array()
+                    .ok_or_else(|| Error::MalformedModelResponse {
+                        reason: "loaded model metadata must contain a models array".into(),
+                    })?;
+                if models.len() > 128 {
+                    return malformed("loaded model metadata exceeds 128 models");
+                }
+                let implicit_latest = format!("{model}:latest");
+                let untagged = model
+                    .rsplit('/')
+                    .next()
+                    .is_some_and(|name| !name.contains([':', '@']));
+                let selected = models.iter().find(|entry| {
+                    ["name", "model"].iter().any(|key| {
+                        entry.get(key).and_then(Value::as_str).is_some_and(|name| {
+                            name == model || (untagged && name == implicit_latest)
+                        })
+                    })
+                });
+                parse_context_limit(selected.and_then(|entry| entry.get("context_length")))
+            }
+        }
+    }
+
     fn execute_with_body(
         &self,
         request: &ModelRequest,
@@ -256,6 +316,31 @@ impl DirectModelTransport {
 
     fn connect(&self, cancellation: &CancellationToken, deadline: Instant) -> Result<TcpStream> {
         connect_endpoint(&self.endpoint, cancellation, deadline)
+    }
+}
+
+fn query_component(text: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::new();
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push('%');
+            encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+            encoded.push(char::from(HEX[usize::from(byte & 15)]));
+        }
+    }
+    encoded
+}
+
+fn parse_context_limit(value: Option<&Value>) -> Result<Option<usize>> {
+    match value {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => match value.as_u64() {
+            Some(limit @ 1..=1_048_576) => Ok(Some(limit as usize)),
+            _ => malformed("serving context must be an integer in 1..=1048576 tokens"),
+        },
     }
 }
 
@@ -807,6 +892,9 @@ fn encode_request(
         ),
     );
     root.insert("stream".to_owned(), Value::Bool(stream));
+    if stream && provider == LocalModelProvider::LlamaServer {
+        root.insert("stream_options".into(), json!({"include_usage": true}));
+    }
     if let Some(bound) = request.max_output_tokens {
         match provider {
             LocalModelProvider::LlamaServer => {
@@ -2165,6 +2253,40 @@ mod tests {
             reasoning_effort: None,
             output_schema: None,
             max_output_tokens: None,
+        }
+    }
+
+    #[test]
+    fn reliability_streaming_requests_ask_for_usage() {
+        let request = test_request();
+        let wire: Value = serde_json::from_slice(
+            &encode_request(LocalModelProvider::LlamaServer, &request, true).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(wire["stream_options"]["include_usage"], true);
+        let unary: Value = serde_json::from_slice(
+            &encode_request(LocalModelProvider::LlamaServer, &request, false).unwrap(),
+        )
+        .unwrap();
+        assert!(unary.get("stream_options").is_none());
+    }
+
+    #[test]
+    fn reliability_serving_capacity_is_positive_bounded_and_not_training_capacity() {
+        assert_eq!(
+            parse_context_limit(Some(&json!(262144))).unwrap(),
+            Some(262144)
+        );
+        assert_eq!(parse_context_limit(None).unwrap(), None);
+        assert_eq!(parse_context_limit(Some(&Value::Null)).unwrap(), None);
+        for bad in [
+            json!(0),
+            json!(-1),
+            json!(1048577),
+            json!("8192"),
+            json!(8192.5),
+        ] {
+            assert!(parse_context_limit(Some(&bad)).is_err(), "{bad}");
         }
     }
 

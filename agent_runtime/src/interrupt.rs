@@ -39,18 +39,21 @@ extern "C" fn signal_handler(_signal: i32) {
 ///
 /// # Safety contract
 ///
-/// This is the one `unsafe` block in the crate, and it is required because
-/// installing a signal handler cannot be expressed safely in Rust. The
-/// invariant that makes it sound:
+/// Unsafe is limited to the two `nix::sigaction` calls below: this API requires
+/// its caller to establish signal-handler safety. Their invariants are:
 ///
 /// - `signal_handler` performs only async-signal-safe operations (atomic
 ///   stores and `killpg`); it never allocates, locks, formats, or calls
 ///   into non-async-signal-safe runtime state.
-/// - Installation happens exactly once per process (`Once`), so concurrent
-///   installs cannot race, and the handler outlives the process.
-/// - `SA_RESTART` is set so in-flight system calls resume instead of
-///   failing with `EINTR`; supervision loops observe the interrupt through
+/// - Installation is attempted once per process (`Once`), so these installs
+///   cannot race each other, and the handler has static lifetime.
+/// - `SA_RESTART` allows restartable system calls to resume; supervision loops
+///   observe the interrupt through
 ///   [`take_interrupted`] on their next bounded poll.
+///
+/// Installation failures are logged and leave the existing signal disposition
+/// unchanged. Tests cover idempotence, flag handling, and process-group
+/// forwarding, not a general proof of signal safety.
 pub fn install_handler() {
     HANDLER_INSTALLED.call_once(|| {
         use nix::sys::signal::{SaFlags, SigAction, SigHandler, SigSet, sigaction};
@@ -63,14 +66,14 @@ pub fn install_handler() {
         if let Err(error) = unsafe { sigaction(Signal::SIGINT, &action) } {
             tracing::warn!(
                 ?error,
-                "could not install SIGINT handler; interrupts fall back to default behavior"
+                "could not install SIGINT handler; existing signal disposition is unchanged"
             );
         }
         // SAFETY: see the safety contract on this function.
         if let Err(error) = unsafe { sigaction(Signal::SIGTERM, &action) } {
             tracing::warn!(
                 ?error,
-                "could not install SIGTERM handler; interrupts fall back to default behavior"
+                "could not install SIGTERM handler; existing signal disposition is unchanged"
             );
         }
     });

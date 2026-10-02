@@ -75,17 +75,21 @@ pub struct ToolRegistry {
     policy: ToolPolicy,
     profiles: Vec<ToolProfile>,
     file_helper: Option<PathBuf>,
+    rust_environment: Option<crate::toolchain::rust_environment::RustEnvironment>,
+    diagnostics: Vec<String>,
 }
 
 impl ToolRegistry {
     /// Builds a pure registry with Generic only; production language
-    /// availability is established by [`ToolRegistry::resolve`].
+    /// availability is established by [`ToolRegistry::resolve_for_workspace`].
     pub fn new(policy: ToolPolicy) -> Self {
         ToolRegistry {
             bash: PathBuf::from("/usr/bin/bash"),
             policy,
             profiles: vec![ToolProfile::Generic],
             file_helper: None,
+            rust_environment: None,
+            diagnostics: Vec::new(),
         }
     }
 
@@ -116,7 +120,67 @@ impl ToolRegistry {
             policy,
             profiles,
             file_helper: Some(default_file_helper_path()?),
+            rust_environment: None,
+            diagnostics: Vec::new(),
         })
+    }
+
+    /// Resolves sandbox profiles for this workspace, including a concrete,
+    /// installed Rust toolchain and private offline resources. This never
+    /// provisions a toolchain or dependencies. Log [`Self::diagnostics`] at
+    /// startup, including the explicit absence note for unavailable Auto Rust.
+    /// Interactive host opt-out must use [`Self::resolve`] instead: these paths
+    /// and authority descriptions belong only to the sandbox namespace.
+    pub fn resolve_for_workspace(
+        policy: ToolPolicy,
+        settings: &BTreeMap<ToolProfile, ProfileSetting>,
+        probe: &dyn ToolchainProbe,
+        forced: Option<ToolProfile>,
+        workdir: &std::path::Path,
+    ) -> crate::error::Result<Self> {
+        let setting = if forced == Some(ToolProfile::Rust) {
+            ProfileSetting::On
+        } else {
+            settings
+                .get(&ToolProfile::Rust)
+                .copied()
+                .unwrap_or(ProfileSetting::Auto)
+        };
+        let mut settings_without_rust = settings.clone();
+        settings_without_rust.insert(ToolProfile::Rust, ProfileSetting::Off);
+        let mut registry = Self::resolve(
+            policy,
+            &settings_without_rust,
+            probe,
+            forced.filter(|p| *p != ToolProfile::Rust),
+        )?;
+        if setting != ProfileSetting::Off {
+            match crate::toolchain::rust_environment::RustEnvironment::resolve(workdir) {
+                Ok(environment) => {
+                    registry.diagnostics.push(environment.diagnostic());
+                    registry.profiles.push(ToolProfile::Rust);
+                    registry.rust_environment = Some(environment);
+                }
+                Err(error) if setting == ProfileSetting::Auto => {
+                    registry
+                        .diagnostics
+                        .push(format!("Rust unavailable (auto; not advertised): {error}"));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(registry)
+    }
+
+    /// Startup diagnostics for exact Rust resource identities and absence.
+    pub fn diagnostics(&self) -> &[String] {
+        &self.diagnostics
+    }
+
+    pub(crate) fn rust_environment(
+        &self,
+    ) -> Option<&crate::toolchain::rust_environment::RustEnvironment> {
+        self.rust_environment.as_ref()
     }
 
     /// Overrides the resolved `bash` path (used by tests).
@@ -161,13 +225,20 @@ impl ToolRegistry {
             .map(|p| p.toolkit())
             .collect::<Vec<_>>()
             .join(", ");
+        let rust_scope = if self.rust_environment.is_some() {
+            " Rust uses an already installed read-only concrete toolchain; cargo is explicitly \
+              offline with a private read-only vendor snapshot, HOME/cache/target are scratch. \
+              Missing dependencies require host provisioning; sandbox builds never download."
+        } else {
+            ""
+        };
         let mut definitions = vec![ToolDefinition {
             name: "shell".to_owned(),
             description: format!(
                 "Run a shell command inside the sandbox. Use it to build, test, query, and \
                      manipulate the project. Available tooling: {toolkit}. Commands run under the \
                      working directory scope; sandbox mounts enforce write authority. \
-                     The command denylist is an advisory filter, not isolation."
+                     The command denylist is an advisory filter, not isolation.{rust_scope}"
             ),
             parameters: serde_json::json!({
                 "type": "object",
@@ -184,7 +255,7 @@ impl ToolRegistry {
         for (name, description, extra, required, read) in [
             (
                 "read_file",
-                "Read a UTF-8 byte page (default 4096, maximum 16384), with full-file sha256, total_bytes and next_offset. Complete files are bounded to 1 MiB. Pages dynamically shrink on UTF-8 boundaries so complete JSON and digest metadata fit within 7000 encoded bytes; resume at actual next_offset until null.",
+                "Read a UTF-8 byte page (default 4096, maximum 16384), with full-file sha256, total_bytes and next_offset. Omitting offset reads page zero; offsets are bytes, NOT lines. Complete files are bounded to 1 MiB. Pages dynamically shrink on UTF-8 boundaries so complete JSON and digest metadata fit within 7000 encoded bytes; resume at actual next_offset until null.",
                 None,
                 vec!["path"],
                 true,
@@ -205,7 +276,7 @@ impl ToolRegistry {
             ),
             (
                 "find_files",
-                "Find regular files under this directory using a literal substring of the scoped path. Sorted pages shrink to 7000 encoded bytes; use actual next_offset. Recursion/count/depth bounds fail explicitly; symlinks are skipped.",
+                "Find regular files under this directory using a literal substring of the scoped path. Generated directories are pruned by default; include_generated opts in. Coverage reports skipped_generated and complete. Sorted pages shrink to 7000 encoded bytes; use actual next_offset. Recursion/count/depth bounds fail explicitly; symlinks are skipped.",
                 Some((
                     "pattern",
                     "Literal substring, not a glob or regular expression; empty matches all.",
@@ -215,7 +286,7 @@ impl ToolRegistry {
             ),
             (
                 "search_files",
-                "Search UTF-8 files recursively under this directory for a nonempty literal substring. Sorted path/line pages shrink to 7000 encoded bytes; use actual next_offset. A single oversized entry fails explicitly. Binary files and symlinks are counted as skipped; scan bounds fail explicitly.",
+                "Search a directory or one regular UTF-8 file for a nonempty literal substring. file_pattern is a literal scoped-path filter, not a glob. Generated directories are pruned by default; include_generated opts in. Oversized, binary and linked files are counted as skipped; complete reports coverage. Sorted path/line pages shrink to 7000 encoded bytes; use actual next_offset. Resource/scan bounds fail explicitly.",
                 Some((
                     "query",
                     "Nonempty literal substring, not a regular expression.",
@@ -243,6 +314,18 @@ impl ToolRegistry {
             }
             if let Some((field, desc)) = extra {
                 properties[field] = serde_json::json!({"type":"string","description":desc,"maxLength":if field == "content" {65536} else {1024}});
+            }
+            if matches!(name, "find_files" | "search_files") {
+                properties["include_generated"] = serde_json::json!({
+                    "type":"boolean","default":false,
+                    "description":"Include generated directory trees otherwise excluded from discovery/search."
+                });
+            }
+            if name == "search_files" {
+                properties["file_pattern"] = serde_json::json!({
+                    "type":"string","maxLength":1024,
+                    "description":"Optional literal substring of the scope-relative path (basename for a file scope); not a glob."
+                });
             }
             if name == "edit_file" {
                 properties["old_text"] =

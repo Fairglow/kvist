@@ -119,7 +119,11 @@ rather than reinventing them.
 
 ## Quality requirements and constraints
 
-- Rust stable edition 2024 is required and unsafe Rust is forbidden.
+- Rust stable edition 2024 is required. Prefer safe Rust; necessary, minimally
+  scoped unsafe exceptions must satisfy the root contract's justification,
+  safety-invariant, targeted-verification, and independent-review rules.
+  Retain current compile-time unsafe guards unless deliberately approving
+  such an exception; this policy does not authorize their broad removal.
 - Executable support is Linux-only.
 - The component MUST NOT import Kvist engine implementation types.
 - Repository input and protocol input are untrusted and bounded before use.

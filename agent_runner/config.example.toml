@@ -14,6 +14,12 @@ id = "local"
 provider = "llama-server"
 base_url = "http://127.0.0.1:9931"
 model = "qwen2.5-14b"
+# By default discover the selected model's serving context (not training size).
+# Configure this if runtime metadata is absent. CLI overrides take precedence.
+# context_limit = 131072
+# Initial output bound; default min(8192, context_limit/4). Safe length retries
+# may increase it within the context/time/token limits. max_attempts=1 disables retries.
+# response_reserve = 8192
 # Per-turn generation budget. Long-context turns (large prefill plus thousands
 # of generated tokens) can take a couple of minutes; a stalled provider is still
 # caught by the slot/TTFT/cadence watchdogs, so this can be generous.
@@ -27,6 +33,9 @@ id = "ollama"
 provider = "ollama"
 base_url = "http://127.0.0.1:11434"
 model = "qwen2.5"
+# An unloaded Ollama model has no discoverable serving context. Set this to the
+# num_ctx actually configured for it, or load it before startup.
+# context_limit = 32768
 deadline_secs = 300
 cadence_timeout_secs = 30
 

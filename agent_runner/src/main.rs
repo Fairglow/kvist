@@ -71,6 +71,7 @@ fn run() -> agent_runner::Result<ExitCode> {
         profile,
         log_dir: cli.log_dir.clone(),
         context_limit: cli.context_limit,
+        response_reserve: cli.response_reserve,
         no_logs: cli.no_logs,
         config_path: Some(config_path.clone()),
         allow_host_execution: cli.allow_host_execution,
@@ -79,7 +80,7 @@ fn run() -> agent_runner::Result<ExitCode> {
         limits: RunLimits {
             wall_time: std::time::Duration::from_secs(cli.max_run_secs),
             max_tokens: cli.max_run_tokens,
-            response_reserve: cli.response_reserve,
+            response_reserve: cli.response_reserve.unwrap_or(1024),
         },
     };
     if cli.headless {

@@ -111,7 +111,6 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
         });
     }
     overrides.limits.validate()?;
-    crate::tui::validate_context_limit(overrides.context_limit, overrides.limits.response_reserve)?;
     let prompt = overrides.prompt.as_deref().ok_or_else(|| Error::Config {
         path: None,
         reason: "headless execution requires a prompt".into(),
@@ -140,13 +139,27 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
         requested: selected.into(),
         available: config.models.iter().map(|model| model.id.clone()).collect(),
     })?;
+    let budgets = model.resolve_budgets(
+        overrides.context_limit,
+        overrides.response_reserve,
+        overrides.limits,
+    )?;
+    let budget_note = format!(
+        "model budget: {} context tokens ({}), {} output tokens ({})",
+        budgets.context_limit,
+        budgets.context_source,
+        budgets.limits.response_reserve,
+        budgets.response_source
+    );
     let transport = model.transport()?;
-    let registry = ToolRegistry::resolve(
+    let registry = ToolRegistry::resolve_for_workspace(
         config.tool_policy.clone(),
         &config.tool_profiles,
         &crate::toolchain::HostProbe,
         overrides.profile,
+        &workdir,
     )?;
+    let resource_notes = registry.diagnostics().to_vec();
     let definitions = registry.tool_definitions();
     let executor = SandboxExecutor::new(registry, config.sandbox.clone(), workdir.clone());
     let mut log = SessionLog::open(&logs, format!("agent-runner-{}", model.id))
@@ -162,10 +175,10 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
             working_directory: workdir.clone(),
             write_root: config.tool_policy.write_root.clone(),
             policy_identity: config.tool_policy.identity(),
-            context_limit: overrides
-                .context_limit
-                .unwrap_or(crate::context::DEFAULT_CONTEXT_TOKENS),
-            response_reserve: overrides.limits.response_reserve,
+            context_limit: budgets.context_limit,
+            context_source: budgets.context_source.into(),
+            response_reserve: budgets.limits.response_reserve,
+            response_source: budgets.response_source.into(),
             max_run_tokens: overrides.limits.max_tokens,
             max_run_secs: overrides.limits.wall_time.as_secs(),
         });
@@ -175,13 +188,12 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
         definitions,
         crate::run::system_prompt(&config.tool_policy.write_root),
     );
+    for note in &resource_notes {
+        crate::session::Recorder::notice(&mut log, note)?;
+        eprintln!("{}", crate::error::terminal_text(note));
+    }
     session.push_user(prompt);
-    let mut context = crate::context::ContextManager::new(
-        overrides
-            .context_limit
-            .unwrap_or(crate::context::DEFAULT_CONTEXT_TOKENS),
-        6,
-    );
+    let mut context = crate::context::ContextManager::for_model(budgets.context_limit);
     let sink = OutputSink {
         output: Mutex::new(Output {
             writer: std::io::stdout(),
@@ -194,14 +206,22 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
             "execution_scope":"sandboxed_workspace", "canonical_evidence":false,
             "working_directory":workdir, "policy_identity":config.tool_policy.identity(),
             "model":model.id, "context_limit":context.limit_tokens(),
-            "response_reserve":overrides.limits.response_reserve,
+            "context_source":budgets.context_source,
+            "response_reserve":budgets.limits.response_reserve,
+            "response_source":budgets.response_source,
             "max_run_tokens":overrides.limits.max_tokens,
             "max_run_secs":overrides.limits.wall_time.as_secs(),
         }}))?;
     }
+    sink.send(Event::Note(budget_note))?;
+    for note in resource_notes {
+        if json_output {
+            sink.send(Event::Note(note))?;
+        }
+    }
     agent_runtime::install_handler();
     let result = AgentRunner::with_retry(crate::session::MAX_TURNS, model.retry_policy())
-        .with_limits(overrides.limits)?
+        .with_limits(budgets.limits)?
         .run(
             &mut session,
             &transport,

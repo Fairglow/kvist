@@ -92,6 +92,8 @@ fn model() -> Model {
         model: std::env::var("KVIST_LIVE_LLAMA_MODEL")
             .unwrap_or_else(|_| "Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL".into()),
         deadline_secs: 120,
+        context_limit: None,
+        response_reserve: None,
         max_attempts: 2,
         retry_base_delay_secs: 1,
         retry_max_delay_secs: 2,

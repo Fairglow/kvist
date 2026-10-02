@@ -30,7 +30,12 @@ complete, commented example. Key points:
 
 - `schema_version` must be `1`.
 - `models` declares the selectable models and their provider (`llama-server` or
-  `ollama`), base URL, provider model name, and a per-turn deadline.
+  `ollama`), base URL, provider model name, and a per-turn deadline. Serving
+  context is discovered for the selected model, not assumed to be 8192 tokens.
+  Set per-model `context_limit` when the server cannot report its actual window
+  (including an unloaded Ollama model). `response_reserve` controls the initial
+  generation budget; by default it is up to 8192 tokens or a quarter of a small
+  window. CLI budget overrides take precedence.
 - `sandbox.runner` and `sandbox.backend` point at the `kvist-sandbox-runner`
   executable and the Bubblewrap backend; they default to resolved system paths.
 - `tool_policy` exposes the shell denylist and the sandbox write root; the safe
@@ -44,17 +49,52 @@ complete, commented example. Key points:
 ## Tools
 
 The agent is offered a small, robust tool set that maps to sandbox-executed
-commands: `shell`, `read_file`, `write_file`, and `list_dir`. Writes are confined
+commands: `shell`, `read_file`, `write_file`, `list_dir`, `find_files`,
+`search_files`, and `edit_file`. Writes are confined
 to the working directory (the sandbox write root); reading is lenient within the
 sandbox view. The shell enforces a safe-by-default denylist over destructive
 commands, and advertises only the language tool-chains (`python`, `rust`,
 `javascript`, `go`, `c`) that actually reach the sandbox.
+
+Reads use **byte offsets**, not line numbers: pass the returned `next_offset`
+to continue. Omitting `offset` deliberately rereads page zero. Search accepts
+one regular file or a directory and an optional literal `file_pattern`.
+Search/discovery skip generated trees by default; `include_generated=true`
+opts in, and coverage fields report skipped/excluded material. Binary process
+output is represented by its size and digest rather than injected as escaped
+executable bytes into the next prompt.
+
+Compaction begins near 75% of the selected window and retains history according
+to available capacity, preserving outstanding user goals and complete tool
+groups. A length-limited generation can be regenerated with a larger bound
+before any tools execute. Attempts share the prompt's time/token limits; a
+truncated proposal or unknown-effect tool call is never replayed.
+Summaries are bounded and lossy; older file references may be dropped when
+fitting them to the available context. Context estimates are heuristic rather
+than a guarantee of exact provider-token accounting.
+
+For Rust, startup resolves an already installed standard rustup toolchain from
+the workspace's `rust-toolchain.toml`/`rust-toolchain` pin or the user's default.
+The concrete installation and trusted Cargo wrappers are mounted read-only,
+without mounting the home directory, rustup configuration, Cargo credentials,
+or host caches. Missing tools/components must be provisioned separately.
+Workspace `.kvist/vendored` dependencies are copied into a bounded private
+read-only snapshot; normal PATH Cargo forces `--offline --locked`, uses
+sandbox-local source paths and private scratch. Provision a matching
+`Cargo.lock` before building; a missing or stale lock fails without changing it.
+Explicit alternate Cargo paths are not rewritten, and the standalone workspace
+remains writable. Changes to the pin require restarting the session; changes to
+vendored dependencies require reprovisioning on the host and restarting.
 
 ## Authority and safety
 
 - No per-action prompts: authority is established once in configuration.
 - Fail closed: a missing or unverified sandbox runner never triggers host
   execution.
+- Unsafe Rust is permitted only where necessary and minimally scoped, with
+  documented invariants, targeted verification, and independent review. The
+  runtime's two signal-handler installation calls use unsafe; this is not a
+  promise that every component is unsafe-free.
 - The Authoring phase denies network; package managers are present for offline
   and local use. Networked acquisition is a planned, separate phase.
 

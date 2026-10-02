@@ -45,8 +45,10 @@ pub struct Overrides {
     /// Directory for the session journal + transcript. `None` means the
     /// default (`.agent-runner/runs` under the working directory).
     pub log_dir: Option<PathBuf>,
-    /// Model context window in tokens. `None` uses the default (8192).
+    /// Serving context override. `None` uses model configuration or discovery.
     pub context_limit: Option<usize>,
+    /// Generation reserve override; absence uses model configuration/default.
+    pub response_reserve: Option<u32>,
     /// Disable durable session logging entirely.
     pub no_logs: bool,
     /// The resolved configuration path, shown in the help overlay.
@@ -126,9 +128,7 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
     };
 
     let app_model_label = app_model_id(&config, &model);
-    if let Err(error) = overrides.limits.validate().and_then(|_| {
-        validate_context_limit(overrides.context_limit, overrides.limits.response_reserve)
-    }) {
+    if let Err(error) = overrides.limits.validate() {
         eprintln!("{}", error.describe());
         return ExitCode::from(error.exit_code());
     }
@@ -180,18 +180,30 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
                 .join(", ")
         );
     }
-    let registry = match ToolRegistry::resolve(
-        config.tool_policy.clone(),
-        &config.tool_profiles,
-        &probe,
-        forced,
-    ) {
+    let resolved = if overrides.allow_host_execution {
+        ToolRegistry::resolve(
+            config.tool_policy.clone(),
+            &config.tool_profiles,
+            &probe,
+            forced,
+        )
+    } else {
+        ToolRegistry::resolve_for_workspace(
+            config.tool_policy.clone(),
+            &config.tool_profiles,
+            &probe,
+            forced,
+            &working_directory,
+        )
+    };
+    let registry = match resolved {
         Ok(registry) => registry,
         Err(error) => {
             eprintln!("{}", error.describe());
             return ExitCode::from(error.exit_code());
         }
     };
+    let resource_notes = registry.diagnostics().to_vec();
     let tool_defs = registry.tool_definitions();
 
     // Resolve the autonomous turn cap for this session, validating the host cap.
@@ -222,14 +234,14 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         config: config.clone(),
         executor,
         tool_defs,
-        context_limit: overrides
-            .context_limit
-            .unwrap_or(crate::context::DEFAULT_CONTEXT_TOKENS),
+        context_limit: overrides.context_limit,
+        response_reserve: overrides.response_reserve,
         log_dir: overrides.log_dir.clone(),
         no_logs: overrides.no_logs,
         working_directory,
         max_turns,
         limits: overrides.limits,
+        resource_notes,
         allow_host_execution: overrides.allow_host_execution,
     };
 
@@ -251,6 +263,10 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         width,
         height,
     );
+    app.push_event(crate::session::Event::Note(initial.budget_note.clone()));
+    for note in &builder.resource_notes {
+        app.push_event(crate::session::Event::Note(note.clone()));
+    }
     // Point the history overlay at the same directory the worker logs to, so
     // "Session history" lists the transcripts this run contributes to.
     app.set_log_dir(log_dir);
@@ -280,10 +296,12 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
 /// model or the effort starts a fresh worker (the model's conversation context
 /// restarts, which the UI announces).
 struct SessionBuilder {
+    resource_notes: Vec<String>,
     config: Config,
     executor: Arc<dyn ToolExecutor>,
     tool_defs: Vec<agent_runtime::ToolDefinition>,
-    context_limit: usize,
+    context_limit: Option<usize>,
+    response_reserve: Option<u32>,
     log_dir: Option<PathBuf>,
     no_logs: bool,
     working_directory: PathBuf,
@@ -300,11 +318,14 @@ struct Worker {
     handle: run::SessionHandle,
     model_id: String,
     effort: ReasoningEffort,
+    budget_note: String,
 }
 
 impl SessionBuilder {
     /// Starts a session worker for `model` with `effort`.
     fn start(&self, model: &Model, effort: ReasoningEffort) -> Result<Worker> {
+        let budgets =
+            model.resolve_budgets(self.context_limit, self.response_reserve, self.limits)?;
         let transport = model.transport()?;
         // Derive the retry policy from the model's own settings so a turn that
         // is generation-bound recovers from transient failures with back-off.
@@ -322,8 +343,8 @@ impl SessionBuilder {
                 run::system_prompt(&self.config.tool_policy.write_root)
             },
         );
-        let context = ContextManager::new(self.context_limit, 6);
-        let recorder = if self.no_logs {
+        let context = ContextManager::for_model(budgets.context_limit);
+        let mut recorder = if self.no_logs {
             None
         } else {
             let dir = self.log_dir.clone().unwrap_or_else(|| {
@@ -348,13 +369,20 @@ impl SessionBuilder {
                         working_directory: self.working_directory.clone(),
                         write_root: self.config.tool_policy.write_root.clone(),
                         policy_identity: self.config.tool_policy.identity(),
-                        context_limit: self.context_limit,
-                        response_reserve: self.limits.response_reserve,
+                        context_limit: budgets.context_limit,
+                        context_source: budgets.context_source.into(),
+                        response_reserve: budgets.limits.response_reserve,
+                        response_source: budgets.response_source.into(),
                         max_run_tokens: self.limits.max_tokens,
                         max_run_secs: self.limits.wall_time.as_secs(),
                     }),
             ) as Box<dyn Recorder>)
         };
+        if let Some(log) = recorder.as_mut() {
+            for note in &self.resource_notes {
+                log.notice(note)?;
+            }
+        }
         let (handle, rx, prompt_tx) = start(
             session,
             transport,
@@ -363,7 +391,7 @@ impl SessionBuilder {
             recorder,
             retry,
             self.max_turns,
-            self.limits,
+            budgets.limits,
         )?;
         Ok(Worker {
             handle,
@@ -371,6 +399,13 @@ impl SessionBuilder {
             prompt_tx,
             model_id: model.id.clone(),
             effort,
+            budget_note: format!(
+                "model budget: {} context tokens ({}), {} output tokens ({}); context/usage accounting is estimated unless provider usage is available",
+                budgets.context_limit,
+                budgets.context_source,
+                budgets.limits.response_reserve,
+                budgets.response_source,
+            ),
         })
     }
 }
@@ -382,17 +417,6 @@ fn app_model_id(config: &Config, model: &Model) -> String {
         .find(|candidate| candidate.id == model.id)
         .map(|candidate| candidate.id.clone())
         .unwrap_or_else(|| model.id.clone())
-}
-
-pub(crate) fn validate_context_limit(limit: Option<usize>, reserve: u32) -> Result<()> {
-    let limit = limit.unwrap_or(crate::context::DEFAULT_CONTEXT_TOKENS);
-    if limit <= reserve as usize || limit > 1_048_576 {
-        return Err(Error::Config {
-            path: None,
-            reason: "--context-limit must exceed --response-reserve and be at most 1048576".into(),
-        });
-    }
-    Ok(())
 }
 
 fn ui_loop(mut app: App, builder: &SessionBuilder, mut worker: Option<Worker>) -> Result<()> {
@@ -474,7 +498,11 @@ fn run_ui<M: std::io::Write>(
                                             .collect(),
                                     }
                                 })?;
-                                *worker = Some(builder.start(model, app.effort)?);
+                                let replacement = builder.start(model, app.effort)?;
+                                app.push_event(crate::session::Event::Note(
+                                    replacement.budget_note.clone(),
+                                ));
+                                *worker = Some(replacement);
                             }
                             if let (Some(text), Some(current)) = (text, worker.as_ref()) {
                                 let _ = current.prompt_tx.send(text);

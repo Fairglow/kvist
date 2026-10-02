@@ -2,6 +2,44 @@
 
 # Agent Runner — Contract
 
+## Run reliability extension
+
+Models may declare `context_limit` and `response_reserve`. CLI values take
+precedence; otherwise context is discovered for the selected provider/model,
+and generation reserves up to 8192 tokens, at most one quarter of a small
+window. Unknown serving capacity fails explicitly rather than assuming 8192.
+Capacity discovery is local model transport, not sandbox tool networking.
+Startup reports the resolved context/reserve and their provenance; model
+switching resolves them again.
+
+Before effects, a `length` generation may be regenerated up to the configured
+attempt budget with a doubled reserve when the complete request still fits.
+Partial output is provisional and never executable. All attempts share prompt
+wall/token limits. Final answers require an ordinary complete stop.
+
+Compaction preserves outstanding user requests verbatim until a successful
+answer ends that task, uses a 75% trigger and capacity-based retention target,
+and labels summaries as lossy history. Tool previews bound serialized cost and
+mark binary/truncated content. Native reads may repeat; opaque/effectful
+actions retain a finite repeat breaker with consecutive-stall reset on a
+successful distinct action.
+
+Native search/discovery default to excluding generated dependency/build/VCS
+and runner-log directories, expose `include_generated` to include them, and
+accept bounded literal `file_pattern` filtering. Search additionally accepts
+a regular-file scope. Results identify excluded and oversized coverage; direct
+reads remain bounded and mutation link restrictions are unchanged.
+
+Rust resource selection occurs on the host before tools and consumes only
+installed resources. The effect sandbox receives a validated concrete
+toolchain and vendored resolver read-only, with private scratch and denied
+network. It never receives the user's home, rustup settings or credentials.
+These resources are not engine task approval or compliance evidence.
+
+Journals retain bounded notices and request estimates, nullable provider usage,
+capacity provenance and terminal failures. Readable terminal records use
+per-prompt turns/time, identify unavailable usage and include the failure.
+
 ## Runtime hardening extension
 
 The pre-release API has no compatibility or migration promise.
@@ -15,11 +53,12 @@ Neither interface authorizes engine tasks or creates canonical evidence.
 The workspace remains fully writable; protected task execution must use the
 engine's narrow broker, never this workspace shell.
 
-`--response-reserve TOKENS` defaults to 1024; `--max-run-secs SECONDS` defaults
+`--response-reserve TOKENS` sets the initial generation reserve; absent values
+use per-model configuration or a window-aware default. `--max-run-secs SECONDS` defaults
 to 1800; `--max-run-tokens TOKENS` defaults to 1,000,000 estimated tokens.
 The context limit must be greater than the reserve. Every model request
 is preflighted using complete canonical serialization and byte-aware heuristic
-accounting, and carries a provider output bound equal to the reserve.
+accounting, and carries the current attempt's explicit provider output bound.
 Oversized immutable/current context is a typed failure before I/O. Compaction
 preserves system instructions, the current user goal, and complete
 assistant/tool-result groups; summaries are explicitly lossy and nonbinding.
@@ -43,7 +82,7 @@ call without a result is an unknown effect; there is no automatic replay/resume.
 
 `RunSummary` exposes answer, turns, executed tools, cancelled/exhausted flags
 and an optional failure diagnostic. Only a normal `stop` with no tools supplies
-a final answer; length, filtering, unknown finishes, duplicate call IDs and
+a final answer; exhausted/unexpandable length, filtering, unknown finishes, duplicate call IDs and
 invalid finish/tool combinations fail without tool execution. Rejected tools
 are nonterminal notices with paired error results. Cancellation/budget limits
 close every pending call with an explicit not-executed result. Retries receive
@@ -100,6 +139,7 @@ struct Config {
 ```
 
 - `Model { id: String, provider: ModelProvider, base_url: String, model: String,
+context_limit: Option<usize>, response_reserve: Option<u32>,
 deadline_secs: u64, max_attempts: u32, retry_base_delay_secs: u64,
 retry_max_delay_secs: u64, cadence_timeout_secs: u64 }` — `provider` is one of
   `llama-server`, `ollama`. The `id` is the user-facing selector; `model` is the
@@ -185,11 +225,11 @@ except `/`. Digests are `sha256:` plus 64 lowercase hexadecimal digits.
 | `read_file` | `path` | `offset=0` (0..=1048576 bytes), `limit=4096` (1..=16384 bytes) |
 | `write_file` | `path`, `content` | `expected_sha256` |
 | `list_dir` | `path` | `offset=0` (0..=4096 entries), `limit=100` (1..=256 entries) |
-| `find_files` | `path`, `pattern` (literal substring, empty matches all) | Same pagination as listing |
-| `search_files` | `path`, `query` (nonempty literal substring) | Same pagination as listing |
+| `find_files` | `path`, `pattern` (literal substring, empty matches all) | Same pagination as listing; `include_generated=false` |
+| `search_files` | `path`, `query` (nonempty literal substring) | Same pagination as listing; `include_generated=false`, optional literal `file_pattern` |
 | `edit_file` | `path`, nonempty `old_text`, `new_text`, `expected_sha256` | None |
 
-Content/old/new text each fit 65536 bytes; pattern/query fit 1024 bytes and
+Content/old/new text each fit 65536 bytes; pattern/query/file_pattern fit 1024 bytes and
 reject NUL. Explicit null is not omission. Native request JSON fits 262144
 bytes. Complete reads, mutation preimages, scanned files and resulting edits
 fit 1048576 bytes/file. Complete native stdout, including LF, fits 7000 bytes.
@@ -203,8 +243,8 @@ Result objects:
 | Read | `content`, `sha256`, `offset`, `next_offset`, `total_bytes` |
 | Write/edit | `path`, `sha256`, `total_bytes` |
 | List | `entries:[{name,kind}]`, `offset`, `next_offset`, `total` |
-| Find | `files:[absolute_path]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `visited_entries` |
-| Search | `matches:[{path,line,match_byte_offset,content,truncated}]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_binary`, `visited_entries`, `scanned_bytes` |
+| Find | `files:[absolute_path]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_generated`, `visited_entries`, `complete` |
+| Search | `matches:[{path,line,match_byte_offset,content,truncated}]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_binary`, `skipped_generated`, `skipped_oversized`, `excluded_files`, `visited_entries`, `scanned_bytes`, `complete`, `scope` (`file` or `directory`) |
 
 `next_offset` is the actual continuation offset or null. Beyond-end offsets
 fail; exactly-at-end offsets return an empty terminal page. Read digests cover
@@ -220,6 +260,15 @@ Listing caps 4096 entries/directory. Recursive operations cap 4096 visited
 descendants and depth 32. Search caps 8388608 scanned bytes and 4096 matching
 lines; binary files are counted and skipped. Discovery does not inspect file
 contents. Unreadable/unsupported ordinary entries fail explicitly.
+
+Generated directory basenames `.git`, `target`, `node_modules`, `vendor`,
+`vendored` and `.agent-runner` are pruned unless `include_generated=true`;
+an explicitly selected generated scope remains accessible. `skipped_generated`
+counts pruned directory roots, not hidden descendants. Search accepts a regular
+file as well as a directory. `file_pattern` matches a literal substring of the
+scope-relative path, or the basename for a file scope. Oversized scanned files
+are metadata-skipped before allocation; direct reads still fail their bound.
+`complete` is false when coverage is skipped/filtered, independent of pagination.
 
 Write/edit parents must exist. New files use mode 0644; replacements preserve
 mode bits, not ownership, ACLs, xattrs or hard-link alias updates. Whole-file
@@ -256,6 +305,23 @@ arbitrary external writers are not locked transactionally.
   to advertise. `On` requires availability (else `Error::ToolchainUnavailable`),
   `Auto` advertises only when available, `Off` never does. `ToolRegistry::resolve`
   always prepends `Generic`.
+
+- `ToolRegistry::resolve_for_workspace(policy, settings, probe, forced, workdir)`
+  supplements the System probe with a bounded, already-installed Rust selection.
+  `diagnostics()` returns operational preparation notes; callers record/display
+  them. Explicit Rust `off` skips preparation; forced Rust overrides settings.
+  Root `rust-toolchain.toml`/`rust-toolchain` selects an installed channel,
+  otherwise the standard host rustup default is used. No installation, user
+  home/config/credential mount or network is authorized. Concrete resources
+  are read-only under `/rust`, with private Cargo scratch. Normal PATH Cargo
+  prepends `--offline --locked`; commands requiring resolution need an existing,
+  matching `Cargo.lock` and fail without updating it when it is missing or
+  stale. Provision locks and vendors separately. This wrapper is not a promise
+  to rewrite explicit alternate Cargo paths or prevent authorized workspace
+  edits to lockfiles.
+  A bounded `.kvist/vendored` snapshot uses sandbox-native paths rather than
+  trusting host-absolute paths in project configuration. Pin drift fails closed;
+  restart after legitimate pin/vendor changes. Old `resolve` remains System-only.
 
 ### `ToolPolicy`
 
@@ -425,6 +491,7 @@ enum Event {
     Note(String),
     PromptEnd { exhausted: bool, cancelled: bool },
     Progress {
+        token_accounting: TokenAccounting, // provider, estimated, unavailable
         input_tokens: u64,
         output_tokens: u64,
         context_tokens: usize,
@@ -486,8 +553,9 @@ recording and event-delivery errors return `Err`, never a successful default.
 Repeated identical argument hashes are rejected and eventually circuit-break;
 the detector does not observe or prove unchanged filesystem state.
 
-`RunLimits` defaults to a 1800-second prompt wall budget, 1,000,000
-conservatively estimated request/reserve tokens, and 1024 response tokens.
+Injected-library `RunLimits` defaults to a 1800-second prompt wall budget,
+1,000,000 conservatively estimated request/reserve tokens, and 1024 response
+tokens. Production startup resolves the selected model's reserve separately.
 Allowed maxima are 24 hours, 1,000,000,000 estimated tokens, and 1,048,576
 response tokens; each must be positive. Every attempt, including retries,
 charges its complete estimated input plus reserve before I/O. Turn limits are
@@ -520,6 +588,10 @@ request (`estimate_request`), reports when it crosses a warm-up threshold
 (75% of the window by default), and compacts the oldest completed turns into a
 rolling summary while the most recent turns stay in full.
 
+- `ContextManager::for_model(limit_tokens)` — production capacity-based retention
+  targeting 65% once the 75% trigger is reached, preserving outstanding user
+  messages after the last accepted text-only final answer, systems and newest
+  complete tool group. Protected context may exceed the target but not hard limit.
 - `ContextManager::new(limit_tokens, keep_full_turns)` — compaction starts at
   75% of the window; recent complete groups are retained when they fit.
 - `ContextManager::prepare(&mut self, &mut ModelRequest, response_reserve) ->
@@ -628,8 +700,8 @@ Options:
   -p, --profile <NAME>        Select a language tool profile
                               (generic, python, rust, javascript, go, c)
   --log-dir <PATH>            Directory for the session journal and transcript
-  --context-limit <TOKENS>    Model context window in tokens (default 8192)
-  --response-reserve <TOKENS> Provider output cap (default 1024)
+  --context-limit <TOKENS>    Serving window override (model config/discovery otherwise)
+  --response-reserve <TOKENS> Initial output reserve (model config/window-aware otherwise)
   --max-run-secs <SECONDS>    Whole-prompt wall budget (default 1800)
   --max-run-tokens <TOKENS>   Estimated attempt budget (default 1000000)
   --headless <PROMPT>         Terminal-free, sandbox-only, required recording

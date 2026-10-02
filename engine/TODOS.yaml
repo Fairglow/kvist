@@ -5,10 +5,14 @@ component:
   design_revision: "sha256:fd70d407e48fdb960c2ef8f433f39930fdb7dd7fb5bf1ac6dda35058efc9aafd"
   parent_contract: null
   revalidation:
-    state: current
-    checked_at: "2026-10-01T06:26:28Z"
-    stale_since: null
-    causes: []
+    state: stale
+    checked_at: "2026-10-02T10:27:11Z"
+    stale_since: "2026-10-02T10:27:11Z"
+    causes:
+      - kind: component-requirements-revision-changed
+        path: REQUIREMENTS.md
+        expected_revision: "sha256:3d971935e8b59ab1d977550b5c2146caff46dc7af0dc6c15c7b18d414d0ccae5"
+        observed_revision: "sha256:e27ae1c3224da961bd30030a6a838b9da2c0f52f58524f5a59fe273fde2445f5"
 tasks:
   - id: "p2-01-write-tests"
     title: "Define TODO queue schema tests"

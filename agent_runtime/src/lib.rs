@@ -4,10 +4,10 @@
 //! This crate does not provide a sandbox. Callers must explicitly distinguish
 //! host execution from future isolated execution backends.
 //!
-//! The single `unsafe` block in this crate installs the shared SIGINT/SIGTERM
-//! handler in [`interrupt::install_handler`]; its safety contract (an
-//! async-signal-safe handler installed exactly once per process) is documented
-//! and covered by the `interrupt` module's tests. Everything else is safe.
+//! Unsafe is currently limited to two signal-handler installation calls in
+//! [`interrupt::install_handler`]. Their necessity and safety invariants are
+//! documented there; native tests exercise installation and forwarding but
+//! are not a general proof of signal safety.
 
 #[cfg(not(target_os = "linux"))]
 compile_error!("agent-runtime currently supports Linux only");

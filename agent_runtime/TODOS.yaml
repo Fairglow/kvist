@@ -5,11 +5,75 @@ component:
   design_revision: "sha256:b629358ac60133fe3b5ed12150e4f6f6bfbd47a78d1a3db5ddbe7c44c0321943"
   parent_contract: null
   revalidation:
-    state: current
-    checked_at: "2026-09-18T13:29:08Z"
-    stale_since: null
-    causes: []
+    state: stale
+    checked_at: "2026-10-02T10:27:11Z"
+    stale_since: "2026-10-02T09:17:04Z"
+    causes:
+      - kind: component-requirements-revision-changed
+        path: REQUIREMENTS.md
+        expected_revision: "sha256:b79d7e4e17a002cba6c8bbf4bffd9231c7d294375bb9a452b1a038c8a40d2780"
+        observed_revision: "sha256:5a099f5183965f301596596051835250024952cf1450201884093f4638f5db2a"
+      - kind: component-contract-revision-changed
+        path: CONTRACT.md
+        expected_revision: "sha256:66a80725990f8f19a074ef3088bf512041bba4fd90d43aca57dae0d04b908532"
+        observed_revision: "sha256:cf5301d2b165e86a2f337fdc5c73acba2e0d0c0d321b95b61377f60218047133"
+      - kind: component-design-revision-changed
+        path: DESIGN.md
+        expected_revision: "sha256:b629358ac60133fe3b5ed12150e4f6f6bfbd47a78d1a3db5ddbe7c44c0321943"
+        observed_revision: "sha256:fbdbd8bea631741dc443154617e3d940346059b2a3492164eb4fe17749f21167"
 tasks:
+  - id: model-capacity-write-tests
+    title: "Pin serving capacity and streaming usage"
+    description: "Test model-qualified capacity, absent/malformed values, bounded discovery and requested streaming usage before code."
+    context: "Human requested remediation of the artificial 8192 runner limit and misleading zero usage."
+    purpose: "Fix transport support without broadening endpoint authority."
+    expected_outcome: "Regressions fail before implementation."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-02T09:17:04Z", updated_at: "2026-10-02T10:27:11Z", completed_at: "2026-10-02T10:27:11Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: model-capacity-implement-code
+    title: "Expose bounded serving capacity and usage"
+    description: "Add local-only selected-model discovery and include_usage without changing tool authority."
+    context: "Transport regressions precede code."
+    purpose: "Support honest full-context runner budgets."
+    expected_outcome: "Provider fixtures pass."
+    kind: implementation
+    status: completed
+    depends_on: [model-capacity-write-tests]
+    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-02T09:17:04Z", updated_at: "2026-10-02T10:27:11Z", completed_at: "2026-10-02T10:27:11Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: model-capacity-security-audit
+    title: "Audit capacity metadata boundaries"
+    description: "Independently inspect endpoint restrictions, query escaping, bounds and nullable usage; review the narrow signal-installation documentation and diagnostic correction after human unsafe-policy arbitration."
+    context: "Audit follows transport implementation."
+    purpose: "Preserve strict provider input boundaries."
+    expected_outcome: "Scoped independent review recorded."
+    kind: security-audit
+    status: completed
+    depends_on: [model-capacity-implement-code]
+    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT", "REQUIREMENTS.md#quality-requirements-and-constraints"]
+    timestamps: {created_at: "2026-10-02T09:17:04Z", updated_at: "2026-10-02T10:27:11Z", completed_at: "2026-10-02T10:27:11Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: model-capacity-compliance-review
+    title: "Compare capacity observations with intent"
+    description: "Source-only IMPL derivation and separate source-blind intent comparison. Human arbitration permits necessary, minimally scoped unsafe with documented invariants, verification and independent review; reassess the signal-installation policy clarification."
+    context: "Source-only observer 81ad5b9f-d2f0-42f6-8bb7-06a95490397c refreshed IMPL; source-blind comparator 1a13da35-ba48-43ba-a3d1-d39911423c5f supports the scoped capacity remediation and resolves the unsafe-policy contradiction after explicit human arbitration. Audit a3a9fdf7-68f4-4190-9853-feb581f736af found no vulnerabilities. Two native signal tests exercise installation and forwarding, not general signal-safety proof. Comparison completed without formal component acceptance or renewed engine approval; revisions remain stale."
+    purpose: "Avoid implementer self-certification."
+    expected_outcome: "Discrepancies retained for human arbitration."
+    kind: compliance-review
+    status: completed
+    depends_on: [model-capacity-security-audit]
+    requirements: ["REQUIREMENTS.md#AR-REQ-MODEL-TRANSPORT"]
+    timestamps: {created_at: "2026-10-02T09:17:04Z", updated_at: "2026-10-02T10:27:11Z", completed_at: "2026-10-02T10:27:11Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: model-stream-integrity-write-tests
     title: "Pin finish and semantic cadence boundaries"
     description: "Reproduce inconsistent/missing/malformed finishes and heartbeat-delayed stalls; exercise meaningful tool-fragment progress."

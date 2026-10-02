@@ -149,6 +149,11 @@ pub struct ContextManager {
 }
 
 impl ContextManager {
+    /// Uses window-based retention instead of a fixed recent-group ceiling.
+    pub fn for_model(limit_tokens: usize) -> Self {
+        Self::new(limit_tokens, usize::MAX)
+    }
+
     /// Builds a manager for a model context window of `limit_tokens`.
     ///
     /// Compaction begins near 75% of the window and prefers retaining the last
@@ -262,6 +267,12 @@ impl ContextManager {
                 .position(|message| message == &prior_envelope)
         };
         let groups = complete_groups(&request.messages, prior_summary_index)?;
+        let completed_goal = request.messages.iter().rposition(|message| {
+            matches!(
+                message, ModelMessage::Assistant { text, tool_intents }
+                    if tool_intents.is_empty() && !text.trim().is_empty()
+            )
+        });
         let active_goal = request
             .messages
             .iter()
@@ -276,8 +287,15 @@ impl ContextManager {
             .iter()
             .enumerate()
             .filter_map(|(index, group)| {
-                (Some(index) != newest && !active_goal.is_some_and(|goal| group.contains(&goal)))
-                    .then_some(index)
+                let outstanding_goal = group.iter().any(|&message| {
+                    Some(message) != prior_summary_index
+                        && matches!(request.messages[message], ModelMessage::User(_))
+                        && completed_goal.is_none_or(|done| message > done)
+                });
+                (Some(index) != newest
+                    && !outstanding_goal
+                    && !active_goal.is_some_and(|goal| group.contains(&goal)))
+                .then_some(index)
             })
             .collect();
         let mut candidate = request.clone();
@@ -288,6 +306,12 @@ impl ContextManager {
             return Ok(None);
         }
 
+        let capacity_retention = self.keep_full_turns == usize::MAX;
+        let target = if capacity_retention {
+            self.limit_tokens.saturating_mul(65) / 100
+        } else {
+            self.limit_tokens
+        };
         let preferred_start = groups.len().saturating_sub(self.keep_full_turns);
         let mut compacted = eligible.partition_point(|index| *index < preferred_start);
         let mut rolled = self.summary.clone();
@@ -313,12 +337,24 @@ impl ContextManager {
                 .map(|(_, message)| message.clone())
                 .collect();
             let irreducible_used = estimate_request(&candidate).saturating_add(reserve);
-            if irreducible_used <= self.limit_tokens {
+            let can_remove_more = eligible.get(compacted).is_some();
+            if irreducible_used <= self.limit_tokens
+                && (!capacity_retention || irreducible_used <= target || !can_remove_more)
+            {
                 if compacted == 0 && prior_summary_index.is_none() {
                     *request = candidate;
                     return Ok(None);
                 }
-                rolled = fit_summary(&mut candidate, &rolled, reserve, self.limit_tokens);
+                rolled = fit_summary(
+                    &mut candidate,
+                    &rolled,
+                    reserve,
+                    if capacity_retention {
+                        target.max(irreducible_used)
+                    } else {
+                        self.limit_tokens
+                    },
+                );
                 let changed = compacted > 0 || rolled != self.summary;
                 let compaction = changed.then_some(Compaction {
                     compacted_turns: compacted,
@@ -652,6 +688,16 @@ fn turn_summary(segment: &[&ModelMessage]) -> String {
                 }
                 for intent in tool_intents {
                     line.push_str(&format!(" ran {}(=)", intent.name));
+                    if let Some(path) = intent
+                        .arguments
+                        .get("path")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        line.push_str(&format!(
+                            " path={}",
+                            serde_json::Value::String(truncate(path, 4096))
+                        ));
+                    }
                     match serde_json::to_string(&intent.arguments) {
                         Ok(json) => line.push_str(&truncate(&json, 100)),
                         Err(_) => line.push_str(" [arguments could not be serialized]"),
@@ -659,7 +705,20 @@ fn turn_summary(segment: &[&ModelMessage]) -> String {
                 }
             }
             ModelMessage::ToolResult { content, .. } => {
-                let preview = truncate(content, 120);
+                let reference = serde_json::from_str::<serde_json::Value>(
+                    content
+                        .split_once('\n')
+                        .map_or(content.as_str(), |(_, body)| body),
+                )
+                .ok();
+                if let Some(reference) = &reference {
+                    for field in ["path", "offset", "next_offset", "total_bytes", "sha256"] {
+                        if let Some(value) = reference.get(field) {
+                            line.push_str(&format!(" {field}={value}"));
+                        }
+                    }
+                }
+                let preview = truncate(content, 160);
                 if preview.is_empty() {
                     line.push_str(" ->");
                 } else {

@@ -2,6 +2,17 @@
 
 # Agent Runtime Design
 
+## Selected-model capacity and usage
+
+Direct transport reuses bounded loopback GET for llama-server model-qualified
+properties and Ollama loaded-model metadata. Encode the model query as percent
+escaped UTF-8, validate positive integer capacity within 1048576 tokens, and
+return absent capacity distinctly. Limit discovery to 1 MiB and 5 seconds.
+Streaming OpenAI-compatible requests ask for include_usage, preserving nullable
+usage and finish classification. Raise only the complete request byte ceiling
+to 8 MiB so larger validated context is not constrained by the old 2-MiB wire
+limit; per-field, message/tool count and response bounds remain independent.
+
 ## Design overview
 
 The crate separates command rendering, prompt acquisition, profile storage and
@@ -173,7 +184,17 @@ host responsibilities and remain deferred from this reusable component.
 
 ## Security and resource design
 
-Unsafe Rust is forbidden. Commands never use a shell. Final input paths are
+Unsafe Rust is limited to necessary, minimally scoped operations with documented
+safety invariants, targeted verification, and independent review. The current
+interrupt module uses two unsafe `nix::sigaction` calls because that chosen API
+requires the caller to establish signal-handler safety. The handler has static
+lifetime, performs atomic operations and signal forwarding without allocation
+or locks, and installation is attempted once through `Once`. Errors are logged;
+successful installation is not guaranteed. Native tests cover idempotence,
+interrupt-flag handling, and forwarding to an active process group, not a
+general proof of signal safety.
+
+Commands never use a shell. Final input paths are
 checked as regular non-link files and all parsed data has explicit size/count
 bounds. Provider children receive null standard input where interaction would
 conflict with the controlling setup process.

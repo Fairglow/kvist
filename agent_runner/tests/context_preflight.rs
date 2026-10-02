@@ -92,6 +92,40 @@ fn serialized_estimate_accounts_for_every_canonical_field_and_framing() {
 }
 
 #[test]
+fn reliability_compacted_native_references_precede_lossy_body_prefixes() {
+    let path = format!("/workspace/{}/file.rs", "long-directory/".repeat(12));
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let mut old = assistant(&["old"], "");
+    let ModelMessage::Assistant { tool_intents, .. } = &mut old else {
+        panic!("assistant");
+    };
+    tool_intents[0].arguments = json!({"extra":"x".repeat(200),"path":path});
+    let payload = format!(
+        "[process: exited=true, status=Some(0)]\n{}",
+        json!({"content":"x".repeat(8000),"offset":4096,"next_offset":8192,
+            "total_bytes":16384,"sha256":digest})
+    );
+    let mut request = request(vec![
+        user("retain the task"),
+        old,
+        result("old", &payload),
+        assistant(&["new"], "recent"),
+        result("new", "latest"),
+    ]);
+    let mut context = ContextManager::with_bounds(3000, 1, 1);
+    context
+        .prepare(&mut request, 64)
+        .unwrap()
+        .expect("compaction");
+    let summary = context.summary();
+    assert!(summary.contains(&path), "{summary}");
+    assert!(summary.contains("offset=4096"), "{summary}");
+    assert!(summary.contains("next_offset=8192"), "{summary}");
+    assert!(summary.contains(&digest), "{summary}");
+    assert!(summary.contains("status=Some(0)"), "{summary}");
+}
+
+#[test]
 fn utf8_is_estimated_by_bytes_not_unicode_scalar_count() {
     assert_eq!(estimate_tokens("abcdefgh"), 2);
     assert_eq!(estimate_tokens("éééé"), 2);
@@ -457,4 +491,48 @@ fn an_error_after_a_success_does_not_change_the_rolling_summary() {
     ));
     assert_eq!(request, original);
     assert_eq!(manager.summary(), summary);
+}
+
+#[test]
+fn reliability_continuation_retains_the_complete_outstanding_original_goal() {
+    let original = user(&format!(
+        "{}\nAlso fix pager exit.",
+        "original task ".repeat(40)
+    ));
+    let continuation = user("Please continue");
+    let mut request = request(vec![
+        original.clone(),
+        assistant(&["a"], "work"),
+        result("a", &"history".repeat(3000)),
+        continuation.clone(),
+        assistant(&["b"], "current"),
+        result("b", "current page"),
+    ]);
+    let mut manager = ContextManager::new(2000, 1);
+    manager.prepare(&mut request, 32).unwrap();
+    assert!(request.messages.contains(&original));
+    assert!(request.messages.contains(&continuation));
+}
+
+#[test]
+fn reliability_large_window_retains_history_according_to_capacity() {
+    let mut request = request(vec![user("goal")]);
+    for index in 0..30 {
+        let id = format!("read-{index}");
+        request.messages.push(assistant(&[&id], "read"));
+        request.messages.push(result(&id, &"x".repeat(1000)));
+    }
+    let full = bounded_estimate(&request, 64);
+    let mut manager = ContextManager::for_model(full + full / 5);
+    manager.prepare(&mut request, 64).unwrap();
+    let retained = request
+        .messages
+        .iter()
+        .filter(|message| matches!(message, ModelMessage::ToolResult { .. }))
+        .count();
+    assert!(
+        retained > 6,
+        "a large window must not discard all but six groups"
+    );
+    assert!(bounded_estimate(&request, 64) <= manager.warmup());
 }

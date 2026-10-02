@@ -68,6 +68,7 @@ fn emit_live_progress<S: EventSink>(
         .max(1e-9);
     let total_tokens = progress.cumulative_total.saturating_add(output_tokens);
     sink.send(Event::Progress {
+        token_accounting: TokenAccounting::Estimated,
         input_tokens: progress.cumulative_total,
         output_tokens,
         context_tokens: progress.session.estimate_context_tokens(progress.tool_defs),
@@ -82,6 +83,19 @@ fn emit_live_progress<S: EventSink>(
         total_tokens,
         elapsed_secs: elapsed,
     })
+}
+
+/// Provenance of reported token counts, separate from context estimates.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TokenAccounting {
+    /// Complete provider usage for accepted turns.
+    Provider,
+    /// Provisional streamed-output estimate, not provider usage.
+    Estimated,
+    #[default]
+    /// One or more accepted turns did not report provider usage.
+    Unavailable,
 }
 
 /// A progress event emitted while a session runs.
@@ -123,6 +137,8 @@ pub enum Event {
     /// Periodic context/token accounting, emitted after each turn, feeding the
     /// live speed stat, the context bargraph, and the compaction progress bar.
     Progress {
+        /// Provider-reported, running estimate, or unavailable usage.
+        token_accounting: TokenAccounting,
         /// Cumulative input tokens so far.
         input_tokens: u64,
         /// Cumulative output tokens so far.
@@ -250,8 +266,8 @@ impl AgentSession {
         const TRUNCATION_NOTICE: &str = "\n[output truncated; use a smaller read/search page]\n";
         let available = MAX_TOOL_RESULT_BYTES.saturating_sub(body.len() + TRUNCATION_NOTICE.len());
         let stderr_budget = available.min(outcome.stderr.len()).min(available / 2);
-        let stdout = outcome.output_text(available.saturating_sub(stderr_budget));
-        let stderr = outcome.error_text(stderr_budget);
+        let stdout = model_output(&outcome.stdout, available.saturating_sub(stderr_budget));
+        let stderr = model_output(&outcome.stderr, stderr_budget);
         let truncated = stdout.len() < outcome.stdout.len() || stderr.len() < outcome.stderr.len();
         body.push_str(&stdout);
         if !stderr.is_empty() {
@@ -259,15 +275,45 @@ impl AgentSession {
             body.push_str(&stderr);
         }
         // Lossy UTF-8 decoding may expand bytes; bound the final encoded preview.
-        let cap = MAX_TOOL_RESULT_BYTES.saturating_sub(TRUNCATION_NOTICE.len());
-        let mut end = body.len().min(cap);
-        while !body.is_char_boundary(end) {
-            end -= 1;
+        let cap = MAX_TOOL_RESULT_BYTES.saturating_sub(TRUNCATION_NOTICE.len() + 2);
+        let mut encoded = 2usize;
+        let mut end = 0;
+        for (index, character) in body.char_indices() {
+            let cost = match character {
+                '"' | '\\' => 2,
+                '\n' | '\r' | '\t' => 2,
+                character if character.is_control() && character <= '\u{1f}' => 6,
+                _ => character.len_utf8(),
+            };
+            if encoded.saturating_add(cost) > cap {
+                break;
+            }
+            encoded += cost;
+            end = index + character.len_utf8();
         }
         let expanded = end < body.len();
         body.truncate(end);
         if truncated || expanded || outcome.output_limit_exceeded {
             body.push_str(TRUNCATION_NOTICE);
+        }
+
+        fn model_output(bytes: &[u8], limit: usize) -> String {
+            if limit == 0 {
+                return String::new();
+            }
+            if bytes.contains(&0) || std::str::from_utf8(bytes).is_err() {
+                use sha2::{Digest, Sha256};
+                return format!(
+                    "[binary output omitted: {} bytes; sha256:{}]",
+                    bytes.len(),
+                    hex::encode(Sha256::digest(bytes))
+                );
+            }
+            let mut end = bytes.len().min(limit);
+            while std::str::from_utf8(&bytes[..end]).is_err() {
+                end -= 1;
+            }
+            String::from_utf8_lossy(&bytes[..end]).into_owned()
         }
         self.messages.push(ModelMessage::ToolResult {
             call_id: call_id.to_owned(),
@@ -330,6 +376,10 @@ pub trait ToolExecutor: Send + Sync {
 /// full reasoning trace here is what keeps thinking inspectable even after
 /// compaction removes it from the model context.
 pub trait Recorder: Send {
+    /// Records a bounded operational notice; never authorizes an effect.
+    fn notice(&mut self, _message: &str) -> Result<()> {
+        Ok(())
+    }
     /// Writes the session-start event. Called once, before the first turn.
     fn session_start(&mut self) -> Result<()>;
     /// Records a model attempt, without granting execution authority.
@@ -490,6 +540,17 @@ fn validate_turn(turn: &ModelTurn) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn record_notice<S: EventSink>(
+    sink: &S,
+    recorder: &mut Option<&mut dyn Recorder>,
+    message: String,
+) -> Result<()> {
+    if let Some(recorder) = recorder.as_mut() {
+        recorder.notice(&message)?;
+    }
+    sink.send(Event::Note(message))
 }
 
 fn fold_outcome<S: EventSink>(
@@ -729,8 +790,10 @@ impl AgentRunner {
         let mut input = 0_u64;
         let mut output = 0_u64;
         let mut total = 0_u64;
+        let mut usage_complete = true;
         let mut tokens_remaining = self.limits.max_tokens;
         let mut actions = agent_runtime::ActionHashRing::new();
+        let mut read_pages = HashSet::new();
         while summary.turns < self.max_turns {
             if cancellation.is_cancelled() || budget.remaining().is_zero() {
                 break;
@@ -741,10 +804,14 @@ impl AgentRunner {
             if let Some(compaction) = context.prepare(&mut request, self.limits.response_reserve)?
                 && compaction.compacted_turns > 0
             {
-                sink.send(Event::Note(format!(
-                    "context compacted: {} complete groups in a lossy, non-authoritative summary",
-                    compaction.compacted_turns,
-                )))?;
+                record_notice(
+                    sink,
+                    recorder,
+                    format!(
+                        "context compacted: {} complete groups in a lossy, non-authoritative summary",
+                        compaction.compacted_turns,
+                    ),
+                )?;
             }
             session.messages = request
                 .messages
@@ -773,6 +840,14 @@ impl AgentRunner {
                 recorder,
             ) {
                 Ok(value) => value,
+                Err(error)
+                    if !matches!(
+                        &error,
+                        Error::ModelTransport { .. } | Error::RunBudget { .. }
+                    ) =>
+                {
+                    return Err(error);
+                }
                 Err(error) => {
                     if matches!(error, Error::RunBudget { .. }) {
                         summary.budget_exhausted = true;
@@ -798,6 +873,8 @@ impl AgentRunner {
                 input = input.saturating_add(usage.input_tokens);
                 output = output.saturating_add(usage.output_tokens);
                 total = total.saturating_add(usage.total_tokens);
+            } else {
+                usage_complete = false;
             }
             if let Err(error) = validate_turn(&turn_value) {
                 summary.failure = Some(error.describe());
@@ -820,7 +897,22 @@ impl AgentRunner {
                     break;
                 }
                 let hash = agent_runtime::compute_action_hash(&intent.name, &intent.arguments);
-                let decision = actions.check_proposed_action(&hash);
+                let native_read = matches!(
+                    intent.name.as_str(),
+                    "read_file" | "list_dir" | "find_files" | "search_files"
+                );
+                if intent.name == "read_file"
+                    && !read_pages.insert(hash.clone())
+                    && intent.arguments.get("offset").is_none()
+                {
+                    record_notice(sink, recorder,
+                        "Repeated read_file omitted offset, so it requests byte page 0 again. To continue, supply the previous result's actual next_offset; offsets are bytes, not lines.".into())?;
+                }
+                let decision = if native_read {
+                    agent_runtime::LoopDecision::Proceed
+                } else {
+                    actions.check_proposed_action(&hash)
+                };
                 if decision.is_loop_break() {
                     let reason = "Repeated identical tool arguments are blocked. Inspect the current state or choose a different action; filesystem change was not observed by this detector.";
                     fold_outcome(
@@ -831,7 +923,7 @@ impl AgentRunner {
                         intent,
                         &ToolOutcome::rejected_with(reason),
                     )?;
-                    sink.send(Event::Note(reason.into()))?;
+                    record_notice(sink, recorder, reason.into())?;
                     if matches!(decision, agent_runtime::LoopDecision::CircuitBreaker { .. }) {
                         summary.failure = Some(
                             "Repeated-action circuit breaker: too many identical tool proposals"
@@ -846,12 +938,17 @@ impl AgentRunner {
                 let outcome = match executor.execute(intent, cancellation) {
                     Ok(outcome) => {
                         summary.tools_executed += 1;
-                        actions.record_action(hash, intent.name.clone());
+                        if !native_read {
+                            actions.record_action(hash, intent.name.clone());
+                        }
+                        if !outcome.failed() {
+                            actions.reset_stalls();
+                        }
                         outcome
                     }
                     Err(error) => {
                         if matches!(error, Error::ToolPolicy { .. } | Error::ToolRender { .. }) {
-                            sink.send(Event::Note(error.describe()))?;
+                            record_notice(sink, recorder, error.describe())?;
                         } else {
                             summary.failure = Some(error.describe());
                         }
@@ -863,7 +960,20 @@ impl AgentRunner {
                 }
                 fold_outcome(session, recorder, sink, turn_index, intent, &outcome)?;
             }
-            self.emit_progress(sink, session, context, input, output, total, started_at)?;
+            self.emit_progress(
+                sink,
+                session,
+                context,
+                input,
+                output,
+                total,
+                if usage_complete {
+                    TokenAccounting::Provider
+                } else {
+                    TokenAccounting::Unavailable
+                },
+                started_at,
+            )?;
             if terminal || summary.failure.is_some() || cancellation.is_cancelled() {
                 break;
             }
@@ -920,6 +1030,7 @@ impl AgentRunner {
         // the first attempt uses the transport's configured deadline unchanged.
         let base = transport.deadline();
         let mut attempt = 1u32;
+        let mut attempt_request = request.clone();
         loop {
             if cancellation.is_cancelled() {
                 return Err(agent_runtime::Error::ModelTransportCancelled.into());
@@ -929,8 +1040,11 @@ impl AgentRunner {
                     reason: "wall time".into(),
                 });
             }
-            let charge = (crate::context::estimate_request(request) as u64)
-                .saturating_add(u64::from(self.limits.response_reserve));
+            let reserve = attempt_request
+                .max_output_tokens
+                .unwrap_or(self.limits.response_reserve);
+            let charge = (crate::context::estimate_request(&attempt_request) as u64)
+                .saturating_add(u64::from(reserve));
             if charge > *tokens_remaining {
                 return Err(Error::RunBudget {
                     reason: "estimated input/output tokens".into(),
@@ -943,7 +1057,7 @@ impl AgentRunner {
                 .min(budget.remaining());
             sink.send(Event::AttemptStart { attempt })?;
             if let Some(recorder) = recorder.as_mut() {
-                recorder.request(request, attempt)?;
+                recorder.request(&attempt_request, attempt)?;
             }
             // Running output estimate and last live-update time for this attempt,
             // so the stats bar refreshes at a bounded rate while the model streams
@@ -952,7 +1066,7 @@ impl AgentRunner {
             let mut last_emit = Instant::now();
             let mut sink_error = None;
             let result = transport.stream_with_deadline(
-                request,
+                &attempt_request,
                 cancellation,
                 &mut |event| {
                     if cancellation.is_cancelled() {
@@ -1003,6 +1117,38 @@ impl AgentRunner {
                 return Err(error);
             }
             match result {
+                Ok(turn)
+                    if matches!(turn.finish_reason, agent_runtime::FinishReason::Length)
+                        && attempt < self.retry.max_attempts
+                        && !cancellation.is_cancelled() =>
+                {
+                    let mut enlarged = attempt_request.clone();
+                    let next_reserve = reserve.saturating_mul(2).min(1_048_576);
+                    enlarged.max_output_tokens = Some(next_reserve);
+                    if next_reserve <= reserve
+                        || crate::context::estimate_request(&enlarged)
+                            .saturating_add(next_reserve as usize)
+                            > progress.context.limit_tokens()
+                    {
+                        return Ok(turn);
+                    }
+                    if let Some(recorder) = recorder.as_mut() {
+                        let index = recorder.turn_start(&turn)?;
+                        recorder.turn_finish(index, &turn.usage, "length")?;
+                    }
+                    record_notice(
+                        sink,
+                        recorder,
+                        format!(
+                            "model generation ended with length; regenerating {}/{}, reserving {} output tokens before any effects; earlier text is provisional",
+                            attempt + 1,
+                            self.retry.max_attempts,
+                            next_reserve,
+                        ),
+                    )?;
+                    attempt_request = enlarged;
+                    attempt += 1;
+                }
                 Ok(turn) => return Ok(turn),
                 // Retry only temporal, recoverable failures, and only while the
                 // attempt budget remains and the turn was not cancelled.
@@ -1019,10 +1165,14 @@ impl AgentRunner {
                         .as_secs_f64();
                     // Show the turn is recovering and that a longer budget is
                     // being granted, not just another identical try.
-                    sink.send(Event::Note(format!(
-                        "model request failed ({error}); retrying {next}/{max} in {delay_secs:.1}s with at most {next_budget_secs:.0}s; earlier streamed text is provisional",
-                        max = self.retry.max_attempts,
-                    )))?;
+                    record_notice(
+                        sink,
+                        recorder,
+                        format!(
+                            "model request failed ({error}); retrying {next}/{max} in {delay_secs:.1}s with at most {next_budget_secs:.0}s; earlier streamed text is provisional",
+                            max = self.retry.max_attempts,
+                        ),
+                    )?;
                     attempt = next;
                     let wake_at = Instant::now() + delay;
                     while Instant::now() < wake_at {
@@ -1057,12 +1207,14 @@ impl AgentRunner {
         input_tokens: u64,
         output_tokens: u64,
         total_tokens: u64,
+        token_accounting: TokenAccounting,
         started_at: Instant,
     ) -> Result<()> {
         let context_tokens = session.estimate_context_tokens(session.tool_definitions().len());
         let elapsed = started_at.elapsed().as_secs_f64().max(1e-9);
         let tokens_per_sec = total_tokens as f64 / elapsed;
         sink.send(Event::Progress {
+            token_accounting,
             input_tokens,
             output_tokens,
             context_tokens,
@@ -1089,6 +1241,8 @@ mod tests {
             provider: crate::config::ModelProvider::LlamaServer,
             base_url: "http://127.0.0.1:1".into(),
             model: "test".into(),
+            context_limit: None,
+            response_reserve: None,
             deadline_secs: 30,
             max_attempts: 1,
             retry_base_delay_secs: 1,

@@ -56,7 +56,9 @@ pub struct SessionMetadata {
     pub write_root: String,
     pub policy_identity: String,
     pub context_limit: usize,
+    pub context_source: String,
     pub response_reserve: u32,
+    pub response_source: String,
     pub max_run_tokens: u64,
     pub max_run_secs: u64,
 }
@@ -159,6 +161,10 @@ pub struct SessionLog {
     turn: usize,
     total_input_tokens: u64,
     total_output_tokens: u64,
+    usage_complete: bool,
+    pending_usage: bool,
+    estimated_tokens: u64,
+    prompt_started_at: Instant,
     metadata: Option<SessionMetadata>,
 }
 
@@ -197,6 +203,10 @@ impl SessionLog {
             turn: 0,
             total_input_tokens: 0,
             total_output_tokens: 0,
+            usage_complete: true,
+            pending_usage: false,
+            estimated_tokens: 0,
+            prompt_started_at: Instant::now(),
             metadata: None,
         })
     }
@@ -219,15 +229,15 @@ impl SessionLog {
     pub fn task_id(&self) -> &str {
         &self.task_id
     }
-    /// Cumulative provider input usage.
+    /// Current-prompt provider input usage (possibly incomplete).
     pub fn total_input_tokens(&self) -> u64 {
         self.total_input_tokens
     }
-    /// Cumulative provider output usage.
+    /// Current-prompt provider output usage (possibly incomplete).
     pub fn total_output_tokens(&self) -> u64 {
         self.total_output_tokens
     }
-    /// Cumulative provider total usage.
+    /// Current-prompt provider total usage (possibly incomplete).
     pub fn total_tokens(&self) -> u64 {
         self.total_input_tokens
             .saturating_add(self.total_output_tokens)
@@ -279,8 +289,19 @@ impl SessionLog {
 }
 
 impl Recorder for SessionLog {
+    fn notice(&mut self, message: &str) -> Result<()> {
+        self.record(json!({"type":"notice", "prompt":self.prompt, "message":bounded(message)}))?;
+        self.text("notice", message)
+    }
+
     fn session_start(&mut self) -> Result<()> {
         self.prompt += 1;
+        self.prompt_started_at = Instant::now();
+        self.total_input_tokens = 0;
+        self.total_output_tokens = 0;
+        self.usage_complete = true;
+        self.pending_usage = false;
+        self.estimated_tokens = 0;
         self.record(json!({"type":"session_start", "session_id":self.session_id,
             "prompt":self.prompt, "task_id":self.task_id, "canonical_evidence":false,
             "execution_scope":self.metadata.as_ref().map_or(ExecutionScope::Unspecified, |meta| meta.execution_scope),
@@ -291,18 +312,37 @@ impl Recorder for SessionLog {
             self.task_id,
             self.elapsed_secs().round()
         )?;
+        if let Some(metadata) = &self.metadata {
+            writeln!(
+                self.transcript,
+                "model budget: {} context tokens ({}), {} output tokens ({})",
+                metadata.context_limit,
+                metadata.context_source,
+                metadata.response_reserve,
+                metadata.response_source
+            )?;
+        }
         Ok(())
     }
 
     fn request(&mut self, request: &ModelRequest, attempt: u32) -> Result<()> {
+        if self.pending_usage {
+            self.usage_complete = false;
+        }
+        self.pending_usage = true;
         let bytes = serde_json::to_vec(request).map_err(|error| Error::Recording {
             reason: error.to_string(),
         })?;
+        let input_estimate = crate::context::estimate_request(request);
+        self.estimated_tokens = self
+            .estimated_tokens
+            .saturating_add(input_estimate as u64)
+            .saturating_add(u64::from(request.max_output_tokens.unwrap_or(0)));
         self.record(
             json!({"type":"model_request", "attempt":attempt, "request_hash":hash(&bytes),
             "model":request.model, "message_count":request.messages.len(),
             "tools":request.tools.iter().map(|tool| &tool.name).collect::<Vec<_>>(),
-            "max_output_tokens":request.max_output_tokens}),
+            "max_output_tokens":request.max_output_tokens, "estimated_input_tokens":input_estimate}),
         )?;
         if attempt == 1
             && let Some(agent_runtime::ModelMessage::User(text)) = request.messages.last()
@@ -332,9 +372,12 @@ impl Recorder for SessionLog {
         usage: &Option<ModelUsage>,
         finish_reason: &str,
     ) -> Result<()> {
+        self.pending_usage = false;
         if let Some(usage) = usage {
             self.total_input_tokens = self.total_input_tokens.saturating_add(usage.input_tokens);
             self.total_output_tokens = self.total_output_tokens.saturating_add(usage.output_tokens);
+        } else {
+            self.usage_complete = false;
         }
         self.record(json!({"type":"turn_finish", "turn":turn, "usage":usage, "finish_reason":finish_reason}))
     }
@@ -366,25 +409,35 @@ impl Recorder for SessionLog {
     }
 
     fn session_finish(&mut self, summary: &RunSummary) -> Result<()> {
+        self.usage_complete &= !self.pending_usage;
         self.record(
             json!({"type":"session_finish", "session_id":self.session_id,
             "prompt":self.prompt, "disposition":summary.disposition(), "turns":summary.turns,
             "tools_executed":summary.tools_executed, "success":summary.success(),
-            "failure":summary.failure, "total_tokens":self.total_tokens()}),
+            "failure":summary.failure, "total_tokens":self.usage_complete.then(||self.total_tokens()),
+            "usage_complete":self.usage_complete, "estimated_budget_tokens":self.estimated_tokens}),
         )?;
         writeln!(
             self.transcript,
-            "== session {} finished: {} turns, {} tokens, {}s, {} ==",
+            "== session {} finished: {} turns, {} tokens, {}s, prompt {}, {} ==",
             self.task_id,
-            self.turn,
-            self.total_tokens(),
-            self.elapsed_secs().round(),
+            summary.turns,
+            if self.usage_complete {
+                self.total_tokens().to_string()
+            } else {
+                "unknown provider usage".into()
+            },
+            self.prompt_started_at.elapsed().as_secs(),
+            self.prompt,
             if summary.success() {
                 "ok"
             } else {
                 summary.disposition()
             }
         )?;
+        if let Some(failure) = &summary.failure {
+            self.text("failure", failure)?;
+        }
         self.synchronize()
     }
 }
@@ -465,7 +518,9 @@ mod tests {
                     write_root: "/workspace".into(),
                     policy_identity: "sha256:test".into(),
                     context_limit: 8192,
+                    context_source: "test".into(),
                     response_reserve: 1024,
+                    response_source: "test".into(),
                     max_run_tokens: 10000,
                     max_run_secs: 30,
                 });
@@ -491,6 +546,90 @@ mod tests {
             .open("/dev/full")
             .unwrap();
         assert!(log.session_start().is_err());
+    }
+
+    #[test]
+    fn reliability_notices_failure_and_unknown_usage_are_persisted_honestly() {
+        let dir = private_tempdir();
+        let mut log = SessionLog::open(dir.path(), "test").unwrap();
+        log.session_start().unwrap();
+        log.notice("context compacted; retry remains bounded")
+            .unwrap();
+        log.turn_finish(1, &None, "length").unwrap();
+        log.session_finish(&RunSummary {
+            turns: 1,
+            failure: Some("actual failure".into()),
+            ..RunSummary::default()
+        })
+        .unwrap();
+        let journal: Vec<Value> = std::fs::read_to_string(log.journal_path())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(
+            journal.last().unwrap()["event"]["total_tokens"],
+            Value::Null
+        );
+        assert_eq!(journal.last().unwrap()["event"]["turns"], 1);
+        let text = std::fs::read_to_string(log.transcript_path()).unwrap();
+        assert!(text.contains("actual failure"));
+        assert!(text.contains("unknown provider usage"));
+        assert!(text.contains("context compacted"));
+    }
+
+    #[test]
+    fn reliability_incomplete_request_usage_is_unknown_and_prompt_metrics_reset() {
+        let dir = private_tempdir();
+        let mut log = SessionLog::open(dir.path(), "test").unwrap();
+        log.session_start().unwrap();
+        let request = ModelRequest {
+            model: "test".into(),
+            messages: vec![agent_runtime::ModelMessage::User("work".into())],
+            max_output_tokens: Some(8192),
+            tools: vec![],
+            tool_choice: agent_runtime::ToolChoice::Auto,
+            reasoning_effort: None,
+            output_schema: None,
+        };
+        log.request(&request, 1).unwrap();
+        log.session_finish(&RunSummary {
+            failure: Some("provider unavailable".into()),
+            ..RunSummary::default()
+        })
+        .unwrap();
+        log.session_start().unwrap();
+        log.turn_finish(
+            1,
+            &Some(ModelUsage {
+                input_tokens: 10,
+                output_tokens: 20,
+                total_tokens: 30,
+            }),
+            "stop",
+        )
+        .unwrap();
+        log.session_finish(&RunSummary {
+            turns: 1,
+            answer: Some("done".into()),
+            ..RunSummary::default()
+        })
+        .unwrap();
+        let journal: Vec<Value> = std::fs::read_to_string(log.journal_path())
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        let finishes: Vec<&Value> = journal
+            .iter()
+            .map(|record| &record["event"])
+            .filter(|record| record["type"] == "session_finish")
+            .collect();
+        assert_eq!(finishes[0]["total_tokens"], Value::Null);
+        assert!(finishes[0]["estimated_budget_tokens"].as_u64().unwrap() >= 8192);
+        assert_eq!(finishes[1]["total_tokens"], 30);
+        assert_eq!(finishes[1]["estimated_budget_tokens"], 0);
+        assert_eq!(finishes[1]["turns"], 1);
     }
 
     #[test]

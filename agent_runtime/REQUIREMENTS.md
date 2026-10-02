@@ -108,6 +108,17 @@ be forwarded as setup presentation.
 
 ### AR-REQ-MODEL-TRANSPORT
 
+The direct transport MUST expose bounded selected-model serving-context
+discovery without inference or tool execution, preserve local-only endpoint
+policy, distinguish unavailable capacity from a numeric limit, and reject
+malformed/nonpositive/out-of-bound metadata. llama-server requests MUST request
+streaming usage. Unknown usage MUST remain unknown. Capacity discovery and
+larger-context requests MUST retain explicit response/request byte ceilings.
+
+The October remediation has an explicit human-requested advisory-review
+exception because acceptance receipts are not implemented; separate post-code
+security and compliance review remain required.
+
 Direct local Ollama and llama-server transports MUST support bounded unary and
 streamed text and structured tool-intent translation without executing tools.
 Endpoints, requests, responses, deadlines, cancellation, identities, usage,
@@ -156,7 +167,10 @@ evidence, or public serialized state.
 
 ## Quality requirements and constraints
 
-- Rust 1.95 (MSRV) and edition 2024 are supported; unsafe Rust is forbidden.
+- Rust 1.95 (MSRV) and edition 2024 are supported. Safe Rust is preferred;
+  unsafe MAY be used only when necessary and minimally scoped, with documented
+  justification and safety invariants, targeted verification, and independent
+  review. This is not a promise of an unsafe-free implementation.
 - Linux is the only executable target.
 - Prompt input is nonblank UTF-8 at most 1 MiB.
 - Profile configuration is UTF-8 TOML at most 64 KiB with at most 128 unique

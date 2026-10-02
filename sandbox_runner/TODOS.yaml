@@ -5,10 +5,14 @@ component:
   design_revision: "sha256:8b7981bfee185f38dd611308f617e8c0640e70ebe2e7e434652a18b946ffcbee"
   parent_contract: null
   revalidation:
-    state: current
-    checked_at: "2026-09-18T07:06:55Z"
-    stale_since: null
-    causes: []
+    state: stale
+    checked_at: "2026-10-02T10:27:11Z"
+    stale_since: "2026-10-02T10:27:11Z"
+    causes:
+      - kind: component-requirements-revision-changed
+        path: REQUIREMENTS.md
+        expected_revision: "sha256:bfd660184d2c7b0fb9d0ccee84cb946cd2f69bf53a33efb40ee1503b0a70b6e1"
+        observed_revision: "sha256:1323af464fc004721bafc8fd3a0a524eaafb99fc078ea313570d7a04f46660e8"
 tasks:
   - id: "sandbox-runner-write-tests"
     title: "Define sandbox runner protocol tests"

@@ -173,6 +173,8 @@ fn from_parts_rejects_unknown_model() {
         provider: ModelProvider::LlamaServer,
         base_url: "http://127.0.0.1:9931".to_owned(),
         model: "m".to_owned(),
+        context_limit: None,
+        response_reserve: None,
         deadline_secs: 120,
         max_attempts: 3,
         retry_base_delay_secs: 2,

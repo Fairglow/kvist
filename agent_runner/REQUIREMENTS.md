@@ -2,6 +2,57 @@
 
 # Agent Runner — Requirements
 
+## RUN-REQ-RELIABILITY
+
+The October 2026 run remediation MUST resolve the selected model's effective
+serving context, never silently assuming an 8192-token window. Explicit CLI
+and per-model capacities MAY replace unavailable discovery; absent capacity
+MUST fail with an actionable diagnostic. Automatic generation reserve SHOULD
+allow reasoning and tool arguments (8192 tokens where the window permits).
+Length-truncated generations MAY be regenerated with a larger bounded reserve
+only before any effects, within the original prompt/attempt budgets.
+
+Compaction MUST preserve all outstanding human goals and amendments until an
+answer completes the task, including across continuation prompts. It MUST
+retain complete tool groups and bounded structured file/page/result
+references ahead of lossy content prefixes, compact before exhaustion, and
+retain history according to available capacity rather than an arbitrary
+six-group ceiling. Binary and
+escaped results MUST have bounded serialized model-facing previews.
+Summaries are lossy: aggregate fitting MAY discard older references and MUST
+NOT be represented as preserving every reference or the complete history.
+
+Repeated bounded native reads MUST remain usable for refreshing state.
+Effectful/opaque repeats MUST remain bounded; successful distinct actions MUST
+reset consecutive repeat stalls. Corrective notices MUST identify actual
+pagination arguments, not assert that the model supplied an omitted offset.
+Search MUST support bounded source filtering and regular-file scopes, report
+excluded/oversized coverage explicitly, and distinguish non-directory paths
+from forbidden symbolic links without weakening mutation protection.
+
+An installed Rust toolchain MUST be usable through validated read-only
+host-selected resources, without user-home/configuration/credential mounts,
+toolchain installation, network access, or an engine dependency. Offline
+vendored resolution MUST use sandbox-native paths and bounded private scratch.
+The normal sandbox Cargo entry point MUST force `--offline --locked`, including
+when callers omit those flags. Builds MUST fail actionably for a missing or
+outdated `Cargo.lock`, without creating or changing it. Lockfiles and vendored
+dependencies MUST be provisioned separately before locked builds.
+Missing requested resources MUST fail clearly; auto discovery MUST NOT
+advertise unusable tooling.
+
+Operational logs MUST retain retry and compaction notices, resolved capacity
+provenance, actual failure reasons, per-prompt counts and unknown usage rather
+than misleading zero usage. Provider usage and heuristic estimates MUST remain
+distinguishable. No recovery MAY replay unknown tool effects or widen authority.
+
+This exact remediation bundle has an explicit advisory-review exception:
+the human requested implementation of the investigated fixes and subsequently
+approved locked builds and necessary, minimally scoped unsafe; current Kvist
+acceptance does not enforce review receipts. This exception is not compliance
+evidence or an acceptance receipt. Separate security and compliance reviews
+remain required after implementation.
+
 ## Purpose and scope
 
 `agent-runner` is a first-class, interactive agent shell that lets a person talk
@@ -78,7 +129,7 @@ Successful use produces:
 - Command policy enforcement (an allow-by-default shell with a safe denylist and
   language profiles that surface the relevant package and build tools).
 - Language tool-chain detection, configuration, and gating: advertise profiles
-  only against what reaches the sandbox read-only `/usr` layout, let each
+  only against validated read-only resources that reach the sandbox, let each
   configurable profile be `on`/`auto`/`off`, detect the project language
   advisingly, and fail at startup when a requested or `on` profile is missing.
 - Construction and execution of a version-one Authoring-phase sandbox request
@@ -137,7 +188,8 @@ Successful use produces:
   configuration, reproducible output, and no hidden network or filesystem side
   effects.
 - The shell tool MUST advertise a language tool-chain only when its interpreter
-  reaches the sandbox's read-only `/usr` layout, never against the host `PATH`;
+  reaches the sandbox's read-only System or prepared Rust resources, never
+  merely against the host `PATH`;
   `rustup` stubs MUST NOT be advertised as buildable tool-chains. Each
   configurable profile is gated by its `on`/`auto`/`off` setting, an explicit
   forced profile, or the default; `auto` advertises only when available, `off`
@@ -226,7 +278,8 @@ Recording MUST be fallible. A required dispatch record
 
 One prompt deadline bounds model requests, retries, waits,
   and cooperative tool execution. Retry waits MUST be cancellable. Identical
-  repeated action arguments MUST receive correction and eventually stop without silently
+  repeated opaque/effectful action arguments MUST receive correction and
+  eventually stop without silently
   widening authority. Cancelled multi-call turns MUST retain valid paired
   results for subsequent prompts. Injected turn limits MUST be in 1..=50.
 ### RUN-REQ-TOOLS

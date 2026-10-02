@@ -264,9 +264,18 @@ struct FakeRecorder {
     session_finished: AtomicBool,
     terminal_calls: AtomicUsize,
     fail_dispatch: bool,
+    fail_notice: bool,
 }
 
 impl Recorder for FakeRecorder {
+    fn notice(&mut self, _message: &str) -> agent_runner::Result<()> {
+        if self.fail_notice {
+            return Err(Error::Recording {
+                reason: "injected notice failure".into(),
+            });
+        }
+        Ok(())
+    }
     fn session_start(&mut self) -> agent_runner::Result<()> {
         self.session_started.store(true, Ordering::SeqCst);
         Ok(())
@@ -337,6 +346,8 @@ fn make_session() -> AgentSession {
 
 fn make_session_with_tools(tool_defs: Vec<agent_runtime::ToolDefinition>) -> AgentSession {
     let model = Model {
+        context_limit: None,
+        response_reserve: None,
         id: "test".to_owned(),
         provider: ModelProvider::LlamaServer,
         base_url: "http://127.0.0.1:9931".to_owned(),
@@ -960,6 +971,8 @@ fn llama_wire_stop_or_missing_finish_with_tools_never_dispatches() {
             provider: ModelProvider::LlamaServer,
             base_url: endpoint,
             model: "test-model".into(),
+            context_limit: None,
+            response_reserve: None,
             deadline_secs: 5,
             max_attempts: 1,
             retry_base_delay_secs: 1,
@@ -1005,7 +1018,7 @@ fn hardening_truncated_or_filtered_turns_never_execute_tools_or_finish() {
     ] {
         let mut proposal = tool_turn("incomplete", "shell", json!({"command": "echo unsafe"}));
         proposal.finish_reason = reason;
-        let transport = ScriptedTransport::new(vec![proposal]);
+        let transport = ScriptedTransport::new(vec![proposal; 3]);
         let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
         let mut session = make_session();
         session.push_user("go");
@@ -1032,7 +1045,7 @@ fn hardening_truncated_or_filtered_turns_never_execute_tools_or_finish() {
 fn hardening_length_without_tools_is_not_a_final_answer() {
     let mut value = answer_turn("partial answer");
     value.finish_reason = FinishReason::Length;
-    let transport = ScriptedTransport::new(vec![value]);
+    let transport = ScriptedTransport::new(vec![value; 3]);
     let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
     let mut session = make_session();
     session.push_user("go");
@@ -1198,6 +1211,246 @@ fn hardening_unchanged_repeated_actions_are_not_executed_again() {
     assert_eq!(summary.tools_executed, 1);
     assert_eq!(summary.answer.as_deref(), Some("stopped"));
     assert!(sink.events().iter().any(|e| matches!(e, Event::Note(_))));
+}
+
+#[test]
+fn reliability_legitimate_native_rereads_do_not_trip_effect_breakers() {
+    let proposal = tool_turn("refresh", "read_file", json!({"path":"/workspace/file"}));
+    let transport = ScriptedTransport::new(vec![
+        proposal.clone(),
+        proposal.clone(),
+        proposal.clone(),
+        proposal.clone(),
+        proposal,
+        answer_turn("done"),
+    ]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("refresh state");
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let (summary, _) = run_collected(
+        &mut session,
+        &transport,
+        &executor,
+        &CancellationToken::new(),
+        &mut context,
+        &mut recorder,
+    );
+    assert!(summary.success(), "{summary:?}");
+    assert_eq!(summary.tools_executed, 5);
+}
+
+#[test]
+fn reliability_length_is_regenerated_before_any_tool_effects() {
+    let mut partial = tool_turn("partial", "shell", json!({"command":"echo unsafe-partial"}));
+    partial.finish_reason = FinishReason::Length;
+    let transport = CapturingTransport::new(vec![partial, answer_turn("complete")]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("work");
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let sink = Collector::default();
+    let summary = AgentRunner::default()
+        .run(
+            &mut session,
+            &transport,
+            &executor,
+            &sink,
+            &CancellationToken::new(),
+            &mut context,
+            Some(&mut recorder),
+        )
+        .unwrap();
+    assert!(summary.success(), "{summary:?}");
+    assert!(executor.executed().is_empty());
+    let requests = transport.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].max_output_tokens, Some(1024));
+    assert_eq!(requests[1].max_output_tokens, Some(2048));
+    assert_eq!(requests[0].messages, requests[1].messages);
+    assert!(
+        sink.events()
+            .iter()
+            .any(|e| matches!(e, Event::Note(text) if text.contains("length")))
+    );
+}
+
+#[test]
+fn reliability_binary_result_does_not_expand_into_an_oversized_json_prompt() {
+    let mut session = make_session();
+    session.push_user("inspect");
+    session.record_tool_result(
+        "binary",
+        "shell",
+        &ToolOutcome {
+            stdout: vec![0; 6000],
+            ..success_outcome("")
+        },
+    );
+    let request = session.next_request().unwrap();
+    let preview = match request.messages.last().unwrap() {
+        ModelMessage::ToolResult { content, .. } => content,
+        _ => panic!("tool result"),
+    };
+    assert!(preview.contains("binary"));
+    assert!(serde_json::to_vec(preview).unwrap().len() < 2048);
+    assert!(preview.contains("status=Some(0)"));
+}
+
+#[test]
+fn reliability_escaped_text_preview_fits_the_encoded_budget() {
+    let mut session = make_session();
+    session.record_tool_result(
+        "escaped",
+        "shell",
+        &success_outcome(&"\u{0001}".repeat(8192)),
+    );
+    let request = session.next_request().unwrap();
+    let ModelMessage::ToolResult { content, .. } = request.messages.last().unwrap() else {
+        panic!("tool result");
+    };
+    assert!(serde_json::to_vec(content).unwrap().len() <= 8192);
+    assert!(content.contains("truncated"));
+    assert!(content.contains("status=Some(0)"));
+}
+
+#[test]
+fn reliability_native_page_metadata_survives_outer_model_json_escaping() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("quoted.txt");
+    let text = "\"\\\n".repeat(4000);
+    std::fs::write(&path, &text).unwrap();
+    let request = agent_runner::file_tools::FileRequest::new(
+        dir.path().to_str().unwrap(),
+        "read_file",
+        json!({"path":path,"limit":16384}),
+    )
+    .unwrap();
+    let page = agent_runner::file_tools::execute_file_request(&request).unwrap();
+    let mut session = make_session();
+    session.record_tool_result(
+        "page",
+        "read_file",
+        &ToolOutcome {
+            stdout: serde_json::to_vec(&page).unwrap(),
+            ..success_outcome("")
+        },
+    );
+    let request = session.next_request().unwrap();
+    let ModelMessage::ToolResult { content, .. } = request.messages.last().unwrap() else {
+        panic!("tool result");
+    };
+    let payload = content.split_once('\n').unwrap().1;
+    let retained: serde_json::Value = serde_json::from_str(payload).expect("complete native JSON");
+    assert_eq!(retained["sha256"], page["sha256"]);
+    assert_eq!(
+        retained["next_offset"],
+        retained["content"].as_str().unwrap().len()
+    );
+    assert_eq!(retained["total_bytes"], text.len());
+    assert!(serde_json::to_vec(content).unwrap().len() <= 8192);
+}
+
+#[test]
+fn reliability_length_recovery_respects_window_and_shared_token_budgets() {
+    for limited_by_window in [false, true] {
+        let mut partial = tool_turn("partial", "shell", json!({"command":"echo never"}));
+        partial.finish_reason = FinishReason::Length;
+        let transport = CapturingTransport::new(vec![partial, answer_turn("not requested")]);
+        let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+        let mut session = make_session();
+        session.push_user("work");
+        let mut request = session.next_request().unwrap();
+        request.max_output_tokens = Some(1024);
+        let charge = agent_runner::context::estimate_request(&request) + 1024;
+        let mut context = ContextManager::for_model(if limited_by_window {
+            charge + 512
+        } else {
+            8192
+        });
+        let mut recorder = FakeRecorder::default();
+        let limits = agent_runner::session::RunLimits {
+            max_tokens: if limited_by_window {
+                1_000_000
+            } else {
+                charge as u64 + 64
+            },
+            ..agent_runner::session::RunLimits::default()
+        };
+        let result = AgentRunner::default().with_limits(limits).unwrap().run(
+            &mut session,
+            &transport,
+            &executor,
+            &Collector::default(),
+            &CancellationToken::new(),
+            &mut context,
+            Some(&mut recorder),
+        );
+        assert!(result.is_err() || result.is_ok_and(|summary| !summary.success()));
+        assert!(executor.executed().is_empty());
+        assert_eq!(transport.requests().len(), 1);
+    }
+}
+
+#[test]
+fn reliability_recovery_recording_failure_stops_before_effects() {
+    let mut partial = answer_turn("partial");
+    partial.finish_reason = FinishReason::Length;
+    let transport = CapturingTransport::new(vec![
+        partial,
+        tool_turn("effect", "shell", json!({"command":"echo must-not-run"})),
+    ]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("work");
+    let mut context = ContextManager::for_model(8192);
+    let mut recorder = FakeRecorder {
+        fail_notice: true,
+        ..FakeRecorder::default()
+    };
+    let result = AgentRunner::default().run(
+        &mut session,
+        &transport,
+        &executor,
+        &Collector::default(),
+        &CancellationToken::new(),
+        &mut context,
+        Some(&mut recorder),
+    );
+    assert!(result.is_err());
+    assert_eq!(transport.requests().len(), 1);
+    assert!(executor.executed().is_empty());
+}
+
+#[test]
+fn reliability_successful_distinct_effect_resets_repeat_stalls() {
+    let repeated = tool_turn("same", "shell", json!({"command":"echo a"}));
+    let transport = ScriptedTransport::new(vec![
+        repeated.clone(),
+        repeated.clone(),
+        repeated.clone(),
+        repeated.clone(),
+        tool_turn("distinct", "shell", json!({"command":"echo b"})),
+        repeated.clone(),
+        repeated,
+        answer_turn("recovered"),
+    ]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut session = make_session();
+    session.push_user("work");
+    let mut context = ContextManager::for_model(8192);
+    let (summary, _) = run_collected(
+        &mut session,
+        &transport,
+        &executor,
+        &CancellationToken::new(),
+        &mut context,
+        &mut FakeRecorder::default(),
+    );
+    assert!(summary.success(), "{summary:?}");
+    assert_eq!(executor.executed().len(), 3);
 }
 
 #[test]

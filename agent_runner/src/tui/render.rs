@@ -419,6 +419,7 @@ mod tests {
             30,
         );
         app.push_event(Event::Progress {
+            token_accounting: crate::session::TokenAccounting::Provider,
             input_tokens: 70000,
             output_tokens: 6350,
             context_tokens: 76350,

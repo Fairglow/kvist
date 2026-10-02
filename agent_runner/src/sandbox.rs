@@ -187,6 +187,15 @@ pub(crate) fn build_request_cancellable(
     request: &BuildRequest,
     cancellation: &CancellationToken,
 ) -> Result<SandboxRequest> {
+    build_request_with_rust(sandbox, request, None, cancellation)
+}
+
+pub(crate) fn build_request_with_rust(
+    sandbox: &SandboxPaths,
+    request: &BuildRequest,
+    rust: Option<&crate::toolchain::rust_environment::RustEnvironment>,
+    cancellation: &CancellationToken,
+) -> Result<SandboxRequest> {
     let preflight = Preflight {
         cancellation,
         started: Instant::now(),
@@ -237,6 +246,24 @@ pub(crate) fn build_request_cancellable(
     // is rejected up front per the sandbox request contract. Destinations stay
     // disjoint, so the runner's overlap check also passes.
     let mut wires = vec![authoring];
+    if let Some(rust) = rust {
+        rust.validate(&workdir, cancellation)?;
+        for resource in rust.grants() {
+            let source = Path::new(&resource.source);
+            if roots_overlap(source, &workdir) {
+                return Err(Error::SandboxBuild {
+                    reason: "Rust resources must be outside the writable workspace".into(),
+                });
+            }
+            wires.push(GrantWire {
+                source: resource.source,
+                destination: resource.destination,
+                access: resource.access,
+                purpose: resource.purpose,
+                identity: resource.identity,
+            });
+        }
+    }
     for (index, root) in request.read_roots.iter().enumerate() {
         preflight.check()?;
         let metadata = std::fs::symlink_metadata(root).map_err(|e| {
@@ -283,10 +310,15 @@ pub(crate) fn build_request_cancellable(
         .collect();
 
     let command_identity = digest(&digest_input(b"command", &join_argv(request.argv)));
-    let toolchain_identity = digest(&digest_input(b"toolchain", b"/usr"));
+    let toolchain_identity = rust
+        .map(|rust| rust.identity().to_owned())
+        .unwrap_or_else(|| digest(&digest_input(b"toolchain", b"/usr")));
     let mount_plan_identity = digest(&grant_plan_identity(&wires));
 
-    let environment = filter_environment(&request.environment);
+    let mut environment = filter_environment(&request.environment);
+    if let Some(rust) = rust {
+        environment.extend(rust.environment());
+    }
 
     let request = SandboxRequest {
         protocol: PROTOCOL_ID.to_owned(),

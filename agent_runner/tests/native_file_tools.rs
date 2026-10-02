@@ -199,6 +199,7 @@ fn deterministic_list_find_and_literal_search_are_paginated_and_scoped() {
     assert_eq!(matches["total"], 2);
     assert_eq!(matches["next_offset"], 1);
     assert_eq!(matches["skipped_symlinks"], 1);
+    assert_eq!(matches["complete"], false);
     let multiline = run(
         &root,
         "search_files",
@@ -347,15 +348,21 @@ fn traversal_depth_oversized_scan_and_long_lines_are_bounded_explicitly() {
     assert!(error.to_string().contains("depth bound"));
     fs::create_dir(root.join("scan")).unwrap();
     fs::write(root.join("scan/large"), vec![b'x'; MAX_FILE_BYTES + 1]).unwrap();
+    let skipped = run(
+        &root,
+        "search_files",
+        json!({"path":root.join("scan"),"query":"x"}),
+    )
+    .unwrap();
+    assert_eq!(skipped["skipped_oversized"], 1);
+    assert_eq!(skipped["scanned_bytes"], 0);
+    assert_eq!(skipped["total"], 0);
+    assert_eq!(skipped["complete"], false);
     assert!(
-        run(
-            &root,
-            "search_files",
-            json!({"path":root.join("scan"),"query":"x"})
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("byte bound")
+        run(&root, "read_file", json!({"path":root.join("scan/large")}))
+            .unwrap_err()
+            .to_string()
+            .contains("byte bound")
     );
     fs::write(
         root.join("scan/large"),
@@ -639,6 +646,7 @@ fn binary_skips_are_reported_and_ordinary_unsupported_entries_fail() {
     let result = run(&root, "search_files", json!({"path":root,"query":"needle"})).unwrap();
     assert_eq!(result["skipped_binary"], 2);
     assert_eq!(result["total"], 1);
+    assert_eq!(result["complete"], false);
     mkfifo(&root.join("pipe"), Mode::from_bits_truncate(0o600)).unwrap();
     assert!(
         run(&root, "search_files", json!({"path":root,"query":"needle"}))
@@ -647,6 +655,340 @@ fn binary_skips_are_reported_and_ordinary_unsupported_entries_fail() {
             .contains("unsupported ordinary")
     );
     assert!(run(&root, "read_file", json!({"path":root.join("pipe")})).is_err());
+}
+
+#[test]
+fn native_search_generated_sources_are_excluded_and_counted_by_default() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(root.join("src/main.rs"), "needle\n").unwrap();
+    for generated in [
+        ".git",
+        "target",
+        "node_modules",
+        "vendor",
+        "vendored",
+        ".agent-runner",
+    ] {
+        fs::create_dir(root.join(generated)).unwrap();
+        fs::write(
+            root.join(generated).join("large"),
+            vec![0; MAX_FILE_BYTES + 1],
+        )
+        .unwrap();
+        fs::write(root.join(generated).join("source.rs"), "needle\n").unwrap();
+    }
+    fs::create_dir(root.join("src/target")).unwrap();
+    fs::write(root.join("src/target/nested.rs"), "needle\n").unwrap();
+    let found = run(&root, "search_files", json!({"path":root,"query":"needle"})).unwrap();
+    assert_eq!(found["total"], 1);
+    assert_eq!(found["matches"][0]["path"], json!(root.join("src/main.rs")));
+    assert_eq!(found["skipped_generated"], 7);
+    assert_eq!(found["skipped_oversized"], 0);
+    assert_eq!(found["visited_entries"], 9);
+    assert_eq!(found["scanned_bytes"], 7);
+    assert_eq!(found["complete"], false);
+    let files = run(&root, "find_files", json!({"path":root,"pattern":".rs"})).unwrap();
+    assert_eq!(files["files"], json!([root.join("src/main.rs")]));
+    assert_eq!(files["skipped_generated"], 7);
+    assert_eq!(files["complete"], false);
+    let included = run(
+        &root,
+        "search_files",
+        json!({"path":root,"query":"needle","include_generated":true}),
+    )
+    .unwrap();
+    assert_eq!(included["total"], 8);
+    assert_eq!(included["skipped_generated"], 0);
+    assert_eq!(included["skipped_oversized"], 6);
+    assert_eq!(included["visited_entries"], 22);
+    assert_eq!(included["scanned_bytes"], 56);
+    assert_eq!(included["complete"], false);
+}
+
+#[test]
+fn native_search_generated_opt_in_and_explicit_scope_remain_available() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    let target = root.join("target");
+    fs::create_dir(&target).unwrap();
+    fs::write(target.join("source.rs"), "needle\n").unwrap();
+    for tool in ["search_files", "find_files"] {
+        let key = if tool == "search_files" {
+            "query"
+        } else {
+            "pattern"
+        };
+        let value = if tool == "search_files" {
+            "needle"
+        } else {
+            ".rs"
+        };
+        let mut args = json!({"path":root,"include_generated":true});
+        args[key] = json!(value);
+        let included = run(&root, tool, args).unwrap();
+        assert_eq!(included["total"], 1);
+        assert_eq!(included["skipped_generated"], 0);
+        assert_eq!(included["complete"], true);
+        let mut direct = json!({"path":target});
+        direct[key] = json!(value);
+        let explicit = run(&root, tool, direct).unwrap();
+        assert_eq!(explicit["total"], 1);
+        assert_eq!(explicit["skipped_generated"], 0);
+        assert_eq!(explicit["complete"], true);
+    }
+    let file = run(
+        &root,
+        "search_files",
+        json!({"path":target.join("source.rs"),"query":"needle"}),
+    )
+    .unwrap();
+    assert_eq!(file["total"], 1);
+    assert_eq!(file["scope"], "file");
+    assert_eq!(file["visited_entries"], 1);
+    assert_eq!(file["complete"], true);
+}
+
+#[test]
+fn native_search_literal_file_filter_is_bounded_closed_and_reports_exclusions() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    fs::create_dir(root.join("src")).unwrap();
+    fs::write(root.join("src/a.rs"), "needle\n").unwrap();
+    fs::write(root.join("src/not.rs.txt"), vec![b'x'; MAX_FILE_BYTES + 1]).unwrap();
+    fs::write(root.join("other.rs"), "needle\n").unwrap();
+    let found = run(
+        &root,
+        "search_files",
+        json!({"path":root,"query":"needle","file_pattern":"src/a.rs"}),
+    )
+    .unwrap();
+    assert_eq!(found["total"], 1);
+    assert_eq!(found["excluded_files"], 2);
+    assert_eq!(found["skipped_oversized"], 0);
+    assert_eq!(found["scanned_bytes"], 7);
+    assert_eq!(found["scope"], "directory");
+    assert_eq!(found["complete"], false);
+    let empty = run(
+        &root,
+        "search_files",
+        json!({"path":root,"query":"needle","file_pattern":""}),
+    )
+    .unwrap();
+    assert_eq!(empty["total"], 2);
+    assert_eq!(empty["excluded_files"], 0);
+    assert_eq!(empty["skipped_oversized"], 1);
+    let direct = run(
+        &root,
+        "search_files",
+        json!({"path":root.join("other.rs"),"query":"needle","file_pattern":"other"}),
+    )
+    .unwrap();
+    assert_eq!(direct["total"], 1);
+    let mismatch = run(
+        &root,
+        "search_files",
+        json!({"path":root.join("other.rs"),"query":"needle","file_pattern":"src/"}),
+    )
+    .unwrap();
+    assert_eq!(mismatch["total"], 0);
+    assert_eq!(mismatch["excluded_files"], 1);
+    assert_eq!(mismatch["complete"], false);
+    for extra in [
+        json!({"file_pattern":null}),
+        json!({"file_pattern":true}),
+        json!({"file_pattern":"x".repeat(1025)}),
+        json!({"file_pattern":"x\0"}),
+        json!({"include_generated":null}),
+        json!({"include_generated":"true"}),
+        json!({"exclude":[]}),
+    ] {
+        let mut args = json!({"path":root,"query":"needle"});
+        args.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        assert!(FileRequest::new(root.to_str().unwrap(), "search_files", args).is_err());
+    }
+    assert!(
+        FileRequest::new(
+            root.to_str().unwrap(),
+            "find_files",
+            json!({"path":root,"pattern":"","include_generated":null})
+        )
+        .is_err()
+    );
+    nix::unistd::mkfifo(
+        &root.join("unsupported"),
+        nix::sys::stat::Mode::from_bits_truncate(0o600),
+    )
+    .unwrap();
+    for tool in ["search_files", "find_files"] {
+        let args = if tool == "search_files" {
+            json!({"path":root,"query":"needle","file_pattern":"absent"})
+        } else {
+            json!({"path":root,"pattern":"absent"})
+        };
+        assert!(
+            run(&root, tool, args)
+                .unwrap_err()
+                .to_string()
+                .contains("unsupported ordinary")
+        );
+    }
+}
+
+#[test]
+fn native_search_regular_file_scope_preserves_literal_matching_and_link_denials() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    let path = root.join("source.rs");
+    fs::write(&path, "a.b a.b\r\nplain\nlast a.b").unwrap();
+    let first = run(
+        &root,
+        "search_files",
+        json!({"path":path,"query":"a.b","limit":1}),
+    )
+    .unwrap();
+    assert_eq!(first["total"], 2);
+    assert_eq!(first["matches"][0]["line"], 1);
+    assert_eq!(first["matches"][0]["match_byte_offset"], 0);
+    assert_eq!(first["matches"][0]["content"], "a.b a.b\r");
+    assert_eq!(first["next_offset"], 1);
+    assert_eq!(first["complete"], true);
+    let second = run(
+        &root,
+        "search_files",
+        json!({"path":path,"query":"a.b","offset":1}),
+    )
+    .unwrap();
+    assert_eq!(second["matches"][0]["line"], 3);
+    assert!(second["next_offset"].is_null());
+    assert!(run(&root, "find_files", json!({"path":path,"pattern":""})).is_err());
+    symlink(&path, root.join("file-link")).unwrap();
+    fs::create_dir(root.join("real")).unwrap();
+    fs::write(root.join("real/source.rs"), "a.b").unwrap();
+    symlink(root.join("real"), root.join("parent-link")).unwrap();
+    for linked in [root.join("file-link"), root.join("parent-link/source.rs")] {
+        assert!(run(&root, "search_files", json!({"path":linked,"query":"a.b"})).is_err());
+    }
+}
+
+#[test]
+fn native_search_not_a_directory_diagnostics_do_not_claim_symlink_parents() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    fs::write(root.join("file"), "text").unwrap();
+    symlink(root.join("file"), root.join("link")).unwrap();
+    for tool in ["list_dir", "find_files", "search_files"] {
+        let mut args = json!({"path":root.join("file/child")});
+        if tool == "find_files" {
+            args["pattern"] = json!("");
+        } else if tool == "search_files" {
+            args["query"] = json!("text");
+        }
+        let error = run(&root, tool, args.clone()).unwrap_err().to_string();
+        assert!(error.contains("not a directory"), "{error}");
+        assert!(!error.contains("symlink"), "{error}");
+        args["path"] = json!(root.join("link/child"));
+        let linked = run(&root, tool, args).unwrap_err().to_string();
+        assert!(linked.contains("symlink"), "{linked}");
+    }
+}
+
+#[test]
+fn native_search_skips_preserve_deterministic_pages_and_terminal_bounds() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    for name in ["z.rs", "a.rs", "m.rs"] {
+        fs::write(root.join(name), "needle\n").unwrap();
+    }
+
+    fs::write(root.join("oversized"), vec![b'x'; MAX_FILE_BYTES + 1]).unwrap();
+    fs::write(root.join("binary"), [0xff]).unwrap();
+    symlink(root.join("a.rs"), root.join("linked")).unwrap();
+    for (offset, name) in ["a.rs", "m.rs", "z.rs"].into_iter().enumerate() {
+        let args = json!({"path":root,"query":"needle","offset":offset,"limit":1});
+        let page = run(&root, "search_files", args.clone()).unwrap();
+        assert_eq!(page, run(&root, "search_files", args).unwrap());
+        assert_eq!(page["matches"][0]["path"], json!(root.join(name)));
+        assert_eq!(page["total"], 3);
+        assert_eq!(page["skipped_oversized"], 1);
+        assert_eq!(page["skipped_binary"], 1);
+        assert_eq!(page["skipped_symlinks"], 1);
+        assert_eq!(page["scanned_bytes"], 22);
+        assert_eq!(page["complete"], false);
+        assert!(serde_json::to_vec(&page).unwrap().len() < 7000);
+        assert_eq!(
+            page["next_offset"],
+            if offset < 2 {
+                json!(offset + 1)
+            } else {
+                Value::Null
+            }
+        );
+    }
+    let terminal = run(
+        &root,
+        "search_files",
+        json!({"path":root,"query":"needle","offset":3}),
+    )
+    .unwrap();
+    assert_eq!(terminal["matches"], json!([]));
+    assert!(terminal["next_offset"].is_null());
+    assert!(
+        run(
+            &root,
+            "search_files",
+            json!({"path":root,"query":"needle","offset":4})
+        )
+        .unwrap_err()
+        .to_string()
+        .contains("offset exceeds")
+    );
+}
+
+#[test]
+fn native_search_exclusions_are_directory_names_not_arbitrary_path_substrings() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    for name in [
+        "target-source",
+        "my_vendor",
+        "vendored-lib",
+        "node_modules-src",
+    ] {
+        fs::create_dir(root.join(name)).unwrap();
+        fs::write(root.join(name).join("code"), "needle").unwrap();
+    }
+    fs::write(root.join(".git"), "needle").unwrap();
+    let found = run(&root, "search_files", json!({"path":root,"query":"needle"})).unwrap();
+    assert_eq!(found["total"], 5);
+    assert_eq!(found["skipped_generated"], 0);
+    assert_eq!(found["complete"], true);
+}
+
+#[test]
+fn native_search_sparse_oversized_files_are_counted_without_reading_their_contents() {
+    let dir = fixture();
+    let root = dir.path().canonicalize().unwrap();
+    let huge = root.join("huge");
+    fs::File::create(&huge)
+        .unwrap()
+        .set_len(1024 * 1024 * 1024)
+        .unwrap();
+    fs::write(root.join("source"), "needle").unwrap();
+    let page = run(&root, "search_files", json!({"path":root,"query":"needle"})).unwrap();
+    assert_eq!(page["total"], 1);
+    assert_eq!(page["skipped_oversized"], 1);
+    assert_eq!(page["scanned_bytes"], 6);
+    assert_eq!(page["complete"], false);
+    let direct = run(&root, "search_files", json!({"path":huge,"query":"needle"})).unwrap();
+    assert_eq!(direct["total"], 0);
+    assert_eq!(direct["skipped_oversized"], 1);
+    assert_eq!(direct["scanned_bytes"], 0);
+    assert_eq!(direct["complete"], false);
+    assert!(run(&root, "read_file", json!({"path":huge})).is_err());
 }
 
 #[test]

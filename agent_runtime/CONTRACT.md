@@ -84,6 +84,16 @@ Accepted values are `1..=1_048_576`; invalid values fail before network I/O.
 llama-server receives `max_tokens`; Ollama receives `options.num_predict`.
 An absent bound leaves existing provider defaults unchanged.
 
+`DirectModelTransport::context_limit(model, cancellation)` discovers an
+optional effective serving capacity, bounded to 1..=1048576 tokens, without
+inference. llama-server uses model-qualified `/props`; Ollama uses matching
+loaded-model `/api/ps` metadata (an untagged name also matches its `:latest`
+form). Absent metadata is `None`, malformed advertised
+metadata is an error. Discovery retains numeric-loopback-only transport,
+bounded responses and a bounded deadline. llama-server streaming requests
+include `stream_options.include_usage`; providers may still omit usage, which
+remains `None`. Canonical/wire requests fit 8 MiB, retaining all other bounds.
+
 `{prompt}`, `{prompt_json}`, `{context_files}`, `{target_directory}`, and
 `{reasoning_effort}` are the documented command-template placeholders.
 `{prompt_json}` emits one complete JSON string value. A requested reasoning

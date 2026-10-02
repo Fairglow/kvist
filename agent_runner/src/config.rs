@@ -94,6 +94,12 @@ pub struct Model {
     pub base_url: String,
     /// The provider-facing model selector.
     pub model: String,
+    /// Explicit serving context when discovery is unavailable or overridden.
+    #[serde(default)]
+    pub context_limit: Option<usize>,
+    /// Explicit generation reserve; absence chooses a window-aware default.
+    #[serde(default)]
+    pub response_reserve: Option<u32>,
     /// The per-turn deadline in seconds.
     #[serde(default = "default_deadline")]
     pub deadline_secs: u64,
@@ -117,7 +123,68 @@ pub struct Model {
     pub cadence_timeout_secs: u64,
 }
 
+/// Resolved selected-model budgets and their operational provenance.
+#[derive(Debug, Clone, Copy)]
+pub struct ModelBudgets {
+    pub context_limit: usize,
+    pub context_source: &'static str,
+    pub response_source: &'static str,
+    pub limits: crate::session::RunLimits,
+}
+
 impl Model {
+    /// Resolves CLI/configured budgets or bounded selected-model discovery.
+    pub fn resolve_budgets(
+        &self,
+        context_override: Option<usize>,
+        response_override: Option<u32>,
+        mut limits: crate::session::RunLimits,
+    ) -> Result<ModelBudgets> {
+        let (context_limit, context_source) = if let Some(limit) = context_override {
+            (limit, "CLI")
+        } else if let Some(limit) = self.context_limit {
+            (limit, "configuration")
+        } else {
+            let discovery = self.transport()?.context_limit(
+                &self.model, &agent_runtime::CancellationToken::new(),
+            ).map_err(|error| Error::Config {
+                path: None,
+                reason: format!("could not discover serving capacity for `{}` ({error}); set models.context_limit or --context-limit to the server's actual capacity", self.id),
+            })?;
+            (discovery.ok_or_else(|| Error::Config {
+                path: None,
+                reason: format!("serving capacity for `{}` is unavailable; configure models.context_limit or --context-limit (no 8192-token default is assumed)", self.id),
+            })?, "provider")
+        };
+        if !(2..=1_048_576).contains(&context_limit) {
+            return Err(Error::Config {
+                path: None,
+                reason: "context_limit must be in 2..=1048576 tokens".into(),
+            });
+        }
+        let (reserve, response_source) = if let Some(reserve) = response_override {
+            (reserve, "CLI")
+        } else if let Some(reserve) = self.response_reserve {
+            (reserve, "configuration")
+        } else {
+            ((context_limit / 4).clamp(1, 8192) as u32, "automatic")
+        };
+        limits.response_reserve = reserve;
+        limits.validate()?;
+        if context_limit <= reserve as usize {
+            return Err(Error::Config {
+                path: None,
+                reason: "context_limit must exceed response_reserve".into(),
+            });
+        }
+        Ok(ModelBudgets {
+            context_limit,
+            context_source,
+            response_source,
+            limits,
+        })
+    }
+
     /// Builds the sole direct transport with this model's bounded watchdogs.
     pub fn transport(&self) -> Result<agent_runtime::DirectModelTransport> {
         let mut transport = agent_runtime::DirectModelTransport::new(
@@ -357,6 +424,10 @@ struct RawModel {
     #[serde(default)]
     base_url: String,
     model: String,
+    #[serde(default)]
+    context_limit: Option<usize>,
+    #[serde(default)]
+    response_reserve: Option<u32>,
     #[serde(default = "default_deadline")]
     deadline_secs: u64,
     #[serde(default = "default_max_attempts")]
@@ -471,6 +542,24 @@ impl Config {
                     ),
                 });
             }
+            if model
+                .context_limit
+                .is_some_and(|limit| !(2..=1_048_576).contains(&limit))
+                || model
+                    .response_reserve
+                    .is_some_and(|reserve| !(1..=1_048_576).contains(&reserve))
+                || model
+                    .context_limit
+                    .zip(model.response_reserve)
+                    .is_some_and(|(limit, reserve)| limit <= reserve as usize)
+            {
+                return Err(Error::Config {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    reason: format!(
+                        "models[{index}] needs bounded context_limit greater than response_reserve"
+                    ),
+                });
+            }
             if model.retry_base_delay_secs > model.retry_max_delay_secs {
                 return Err(Error::Config {
                     path: Some(path.to_string_lossy().into_owned()),
@@ -509,6 +598,8 @@ impl Config {
                 provider: model.provider,
                 base_url,
                 model: model.model.clone(),
+                context_limit: model.context_limit,
+                response_reserve: model.response_reserve,
                 deadline_secs: model.deadline_secs,
                 max_attempts: model.max_attempts,
                 retry_base_delay_secs: model.retry_base_delay_secs,

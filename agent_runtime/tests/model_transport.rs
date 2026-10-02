@@ -207,6 +207,37 @@ fn request_with_output_bound(bound: Option<u32>) -> ModelRequest {
     serde_json::from_value(value).expect("deserialize bounded request")
 }
 
+#[test]
+fn reliability_large_context_requests_are_not_limited_by_the_old_two_mib_ceiling() {
+    let (endpoint, captured) = serve_once(text_response(LocalModelProvider::LlamaServer, false));
+    let transport = DirectModelTransport::new(
+        LocalModelProvider::LlamaServer,
+        &endpoint,
+        Duration::from_secs(5),
+        1024 * 1024,
+    )
+    .unwrap();
+    let mut large = request(ToolChoice::None);
+    large.messages = vec![ModelMessage::User("x".repeat(3 * 1024 * 1024))];
+    assert!(
+        transport
+            .complete(&large, &CancellationToken::new())
+            .is_ok()
+    );
+    assert!(
+        captured.recv_timeout(Duration::from_secs(1)).unwrap().body["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .len()
+            > 2 * 1024 * 1024
+    );
+    large.messages = vec![ModelMessage::User("x".repeat(8 * 1024 * 1024))];
+    assert!(matches!(
+        transport.complete(&large, &CancellationToken::new()),
+        Err(Error::InvalidModelRequest { .. })
+    ));
+}
+
 fn text_response(provider: LocalModelProvider, streaming: bool) -> Vec<Vec<u8>> {
     match (provider, streaming) {
         (LocalModelProvider::Ollama, false) => json_response(
