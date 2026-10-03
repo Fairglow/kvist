@@ -41,6 +41,20 @@ dependencies MUST be provisioned separately before locked builds.
 Missing requested resources MUST fail clearly; auto discovery MUST NOT
 advertise unusable tooling.
 
+The full documented 16384-byte shell command bound MUST be executable: every
+legal command MUST produce a sandbox request whose argv entries respect the
+protocol's 4096-byte scalar bound, so multi-kilobyte commands (heredocs, inline
+scripts, long invocations) MUST NOT fail request construction. The command
+content MUST remain a read-only, host-staged context input outside the writable
+workspace, and the command denylist MUST apply to the full command text in both
+rendering forms.
+
+Sandbox preparation cost MUST stay comfortably within the documented 30-second
+bounds on representative hardware: per-invocation validation MUST NOT re-read
+or re-hash full toolchain binaries, and the startup vendor snapshot MUST copy
+bounded files concurrently without weakening its determinism, bounds, or
+per-file drift detection.
+
 Operational logs MUST retain retry and compaction notices, resolved capacity
 provenance, actual failure reasons, per-prompt counts and unknown usage rather
 than misleading zero usage. Provider usage and heuristic estimates MUST remain

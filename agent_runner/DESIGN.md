@@ -225,6 +225,21 @@ happens on our argv.
   the sandbox `PATH` we set (prepared `/rust/runtime/bin` first when available,
   then `/usr/bin:/bin:/usr/sbin:/sbin`). The `shell`
   command string is checked against the denylist before rendering.
+  Commands longer than one 4096-byte protocol argv entry render instead as
+  `["<bash>", "-c", "exec bash -c \"$(cat /context/0)\" agent-runner"]` with
+  `shell_script` carrying the text; the executor stages it as a mode-0600 file
+  in a mode-0700 private directory in the workspace's canonical parent (never
+  inside the writable mount) and the request mounts it read-only at
+  `/context/0`. The exec'd `bash` performs the quoted command substitution
+  (substitution results inside double quotes are not re-expanded, split, or
+  globbed, so the contents reach the interpreter verbatim) and then `exec`s
+  itself into the real interpreter, so the process tree, script text, exit
+  status and `$0` match the inline form exactly; trailing-newline stripping by
+  `$(...)` is semantically inert for shell scripts. The wrapper is required:
+  a bare `$(cat /context/0)` as the `-c` script would make the exec'd bash run
+  `cat` and word-split the output into a command. The content identity rides
+  on the context grant identity, while `identities.command` identifies the
+  argv.
 - Native file operations carry closed typed JSON, never shell snippets.
   The executor stages the payload mode 0600 in a mode-0700 host-owned temporary
   directory outside the workspace, with RAII cleanup on every exit. Provider
@@ -282,6 +297,24 @@ Preparation bounds are 30 seconds, 1 GiB vendor aggregate, 256 MiB/file,
 with the registry/executor and removed when the final owner drops. Pin/root
 substitution and tracked executable/library/shim drift fail before dispatch;
 the identity is not a complete toolchain-tree digest.
+
+The vendor snapshot is two-phase: a serial enumeration validates every entry,
+enforces the bounds, creates destination directories and schedules files in a
+deterministic order, then a bounded pool (minimum of 8 and host parallelism)
+copies and digests files concurrently. Each worker re-checks its own source
+fingerprint immediately after copying its files, so a concurrent host change
+fails that file without trusting a global recheck; the directory fingerprints
+are re-checked after all copies. The identity folds the per-file SHA-256
+digests (length-prefixed relative path, copied byte count, digest) in the
+deterministic enumeration order, so it is stable across runs and binds every
+path and byte without a serial re-read.
+
+Per-invocation validation compares each tracked executable/library/shim against
+the dev/ino/size/mtime/ctime fingerprint captured at resolve time; any
+modification, truncation or replacement updates at least one field, so strict
+drift detection no longer re-hashes hundreds of megabytes per tool call. The
+exact byte identities remain captured once at resolve time and bound into the
+environment and grant identities.
 Explicit host execution keeps the System-only registry. The System gate
 combines three inputs:
 

@@ -199,10 +199,16 @@ Result<RenderedTool>` — maps a model tool intent to an argv to execute inside
   the sandbox, or `Err` when the tool is unknown, the arguments are malformed, or
   the call violates policy.
 - `RenderedTool { argv: Vec<String>, summary: String, file_request: Option<FileRequest>,
-file_helper: Option<PathBuf> }` —
+file_helper: Option<PathBuf>, shell_script: Option<String> }` —
   `argv[0]` is an absolute canonical path; `summary` is a short human description
   shown in the UI and logs. Native operations carry a typed payload and helper
-  path, not files already written to the workspace.
+  path, not files already written to the workspace. `shell_script` is `Some`
+  only for shell commands longer than one 4096-byte argv entry: the executor
+  stages the exact command text as a private regular file, which the request
+  mounts read-only at `/context/0`, and `argv` reads it via the wrapper
+  `exec bash -c "$(cat /context/0)" agent-runner`; it is never set together
+  with `file_request`, and the semantics (script text, exit status, `$0`)
+  match the inline form exactly.
 - `ExecContext { workdir: PathBuf, call_id: String }` supplies the renderer the
   host working directory and a descriptive per-call id. IDs never select
   staging paths.
@@ -221,15 +227,15 @@ All argument objects are closed. Paths are canonical absolute UTF-8, at most
 4096 bytes, without NUL, traversal, duplicate separators or trailing separators
 except `/`. Digests are `sha256:` plus 64 lowercase hexadecimal digits.
 
-| Tool           | Required arguments                                         | Optional arguments                                                                     |
-| -------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `shell`        | `command`: nonblank, NUL-free, at most 16384 bytes         | None                                                                                   |
-| `read_file`    | `path`                                                     | `offset=0` (0..=1048576 bytes), `limit=4096` (1..=16384 bytes)                         |
-| `write_file`   | `path`, `content`                                          | `expected_sha256`                                                                      |
-| `list_dir`     | `path`                                                     | `offset=0` (0..=4096 entries), `limit=100` (1..=256 entries)                           |
-| `find_files`   | `path`, `pattern` (literal substring, empty matches all)   | Same pagination as listing; `include_generated=false`                                  |
-| `search_files` | `path`, `query` (nonempty literal substring)               | Same pagination as listing; `include_generated=false`, optional literal `file_pattern` |
-| `edit_file`    | `path`, nonempty `old_text`, `new_text`, `expected_sha256` | None                                                                                   |
+| Tool           | Required arguments                                         | Optional arguments                                                                                                  |
+| -------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `shell`        | `command`: nonblank, NUL-free, at most 16384 bytes         | None. Commands over 4096 bytes execute as a staged `/context/0` script file, so the full bound is always executable |
+| `read_file`    | `path`                                                     | `offset=0` (0..=1048576 bytes), `limit=4096` (1..=16384 bytes)                                                      |
+| `write_file`   | `path`, `content`                                          | `expected_sha256`                                                                                                   |
+| `list_dir`     | `path`                                                     | `offset=0` (0..=4096 entries), `limit=100` (1..=256 entries)                                                        |
+| `find_files`   | `path`, `pattern` (literal substring, empty matches all)   | Same pagination as listing; `include_generated=false`                                                               |
+| `search_files` | `path`, `query` (nonempty literal substring)               | Same pagination as listing; `include_generated=false`, optional literal `file_pattern`                              |
+| `edit_file`    | `path`, nonempty `old_text`, `new_text`, `expected_sha256` | None                                                                                                                |
 
 Content/old/new text each fit 65536 bytes; pattern/query/file_pattern fit 1024 bytes and
 reject NUL. Explicit null is not omission. Native request JSON fits 262144
@@ -364,8 +370,11 @@ argv and passes it here. It:
 - builds one read-write `authoring` grant mapping the working directory to the
   sandbox write root, and one read-only `context` grant per exact regular
   non-link context file (missing/directory sources fail)
-  (destinations disjoint from the write root); no scratch grant is declared —
-  the sandbox's private `/tmp` tmpfs serves as scratch and `HOME` points there,
+  (destinations disjoint from the write root). A staged shell script is one such
+  context file at `/context/0`; its content identity is the grant identity, while
+  `identities.command` identifies the (small) argv wrapper; no scratch grant is
+  declared — the sandbox's private `/tmp` tmpfs serves as scratch and `HOME`
+  points there,
 - sets `Network::Deny`, bounded `Resources`, and a `System` toolchain whose
   identity equals `identities.toolchain`,
 - computes `identities.{runner,policy,toolchain,command,mount_plan}` as

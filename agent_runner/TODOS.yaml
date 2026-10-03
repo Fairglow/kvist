@@ -32,7 +32,12 @@ tasks:
     status: completed
     depends_on: []
     requirements: ["REQUIREMENTS.md#RUN-REQ-RELIABILITY"]
-    timestamps: {created_at: "2026-10-02T09:17:04Z", updated_at: "2026-10-02T10:27:11Z", completed_at: "2026-10-02T10:27:11Z"}
+    timestamps:
+      {
+        created_at: "2026-10-02T09:17:04Z",
+        updated_at: "2026-10-02T10:27:11Z",
+        completed_at: "2026-10-02T10:27:11Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-reliability-implement-code
@@ -45,7 +50,12 @@ tasks:
     status: completed
     depends_on: [runner-reliability-write-tests]
     requirements: ["REQUIREMENTS.md#RUN-REQ-RELIABILITY"]
-    timestamps: {created_at: "2026-10-02T09:17:04Z", updated_at: "2026-10-02T10:27:11Z", completed_at: "2026-10-02T10:27:11Z"}
+    timestamps:
+      {
+        created_at: "2026-10-02T09:17:04Z",
+        updated_at: "2026-10-02T10:27:11Z",
+        completed_at: "2026-10-02T10:27:11Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-reliability-security-audit
@@ -58,7 +68,12 @@ tasks:
     status: completed
     depends_on: [runner-reliability-implement-code]
     requirements: ["REQUIREMENTS.md#RUN-REQ-RELIABILITY"]
-    timestamps: {created_at: "2026-10-02T09:17:04Z", updated_at: "2026-10-02T10:27:11Z", completed_at: "2026-10-02T10:27:11Z"}
+    timestamps:
+      {
+        created_at: "2026-10-02T09:17:04Z",
+        updated_at: "2026-10-02T10:27:11Z",
+        completed_at: "2026-10-02T10:27:11Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-reliability-compliance-review
@@ -71,7 +86,12 @@ tasks:
     status: completed
     depends_on: [runner-reliability-security-audit]
     requirements: ["REQUIREMENTS.md#RUN-REQ-RELIABILITY"]
-    timestamps: {created_at: "2026-10-02T09:17:04Z", updated_at: "2026-10-02T10:27:11Z", completed_at: "2026-10-02T10:27:11Z"}
+    timestamps:
+      {
+        created_at: "2026-10-02T09:17:04Z",
+        updated_at: "2026-10-02T10:27:11Z",
+        completed_at: "2026-10-02T10:27:11Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-content-write-tests
@@ -83,8 +103,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["CONTRACT.md#Behavioral-guarantees", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T01:47:16Z", updated_at: "2026-10-02T02:29:45Z", completed_at: "2026-10-02T02:29:45Z"}
+    requirements:
+      ["CONTRACT.md#Behavioral-guarantees", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T01:47:16Z",
+        updated_at: "2026-10-02T02:29:45Z",
+        completed_at: "2026-10-02T02:29:45Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-content-implement-code
@@ -96,8 +122,14 @@ tasks:
     kind: implementation
     status: completed
     depends_on: [runner-content-write-tests]
-    requirements: ["CONTRACT.md#Behavioral-guarantees", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T01:47:16Z", updated_at: "2026-10-02T02:29:45Z", completed_at: "2026-10-02T02:29:45Z"}
+    requirements:
+      ["CONTRACT.md#Behavioral-guarantees", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T01:47:16Z",
+        updated_at: "2026-10-02T02:29:45Z",
+        completed_at: "2026-10-02T02:29:45Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-content-security-audit
@@ -109,8 +141,14 @@ tasks:
     kind: security-audit
     status: completed
     depends_on: [runner-content-implement-code]
-    requirements: ["CONTRACT.md#Behavioral-guarantees", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T01:47:16Z", updated_at: "2026-10-02T02:29:45Z", completed_at: "2026-10-02T02:29:45Z"}
+    requirements:
+      ["CONTRACT.md#Behavioral-guarantees", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T01:47:16Z",
+        updated_at: "2026-10-02T02:29:45Z",
+        completed_at: "2026-10-02T02:29:45Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-content-compliance-review
@@ -122,8 +160,14 @@ tasks:
     kind: compliance-review
     status: completed
     depends_on: [runner-content-security-audit]
-    requirements: ["CONTRACT.md#Behavioral-guarantees", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T01:47:16Z", updated_at: "2026-10-02T02:29:45Z", completed_at: "2026-10-02T02:29:45Z"}
+    requirements:
+      ["CONTRACT.md#Behavioral-guarantees", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T01:47:16Z",
+        updated_at: "2026-10-02T02:29:45Z",
+        completed_at: "2026-10-02T02:29:45Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-final-ui-write-tests
@@ -135,8 +179,17 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["CONTRACT.md#Command-line-interface", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T01:25:37Z", updated_at: "2026-10-02T01:33:13Z", completed_at: "2026-10-02T01:33:13Z"}
+    requirements:
+      [
+        "CONTRACT.md#Command-line-interface",
+        "REQUIREMENTS.md#RUN-REQ-LIFECYCLE",
+      ]
+    timestamps:
+      {
+        created_at: "2026-10-02T01:25:37Z",
+        updated_at: "2026-10-02T01:33:13Z",
+        completed_at: "2026-10-02T01:33:13Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-final-ui-implement-code
@@ -148,8 +201,17 @@ tasks:
     kind: implementation
     status: completed
     depends_on: [runner-final-ui-write-tests]
-    requirements: ["CONTRACT.md#Command-line-interface", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T01:25:37Z", updated_at: "2026-10-02T01:33:13Z", completed_at: "2026-10-02T01:33:13Z"}
+    requirements:
+      [
+        "CONTRACT.md#Command-line-interface",
+        "REQUIREMENTS.md#RUN-REQ-LIFECYCLE",
+      ]
+    timestamps:
+      {
+        created_at: "2026-10-02T01:25:37Z",
+        updated_at: "2026-10-02T01:33:13Z",
+        completed_at: "2026-10-02T01:33:13Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-final-ui-security-audit
@@ -161,8 +223,17 @@ tasks:
     kind: security-audit
     status: completed
     depends_on: [runner-final-ui-implement-code]
-    requirements: ["CONTRACT.md#Command-line-interface", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T01:25:37Z", updated_at: "2026-10-02T01:33:13Z", completed_at: "2026-10-02T01:33:13Z"}
+    requirements:
+      [
+        "CONTRACT.md#Command-line-interface",
+        "REQUIREMENTS.md#RUN-REQ-LIFECYCLE",
+      ]
+    timestamps:
+      {
+        created_at: "2026-10-02T01:25:37Z",
+        updated_at: "2026-10-02T01:33:13Z",
+        completed_at: "2026-10-02T01:33:13Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-final-ui-compliance-review
@@ -174,8 +245,17 @@ tasks:
     kind: compliance-review
     status: completed
     depends_on: [runner-final-ui-security-audit]
-    requirements: ["CONTRACT.md#Command-line-interface", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T01:25:37Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    requirements:
+      [
+        "CONTRACT.md#Command-line-interface",
+        "REQUIREMENTS.md#RUN-REQ-LIFECYCLE",
+      ]
+    timestamps:
+      {
+        created_at: "2026-10-02T01:25:37Z",
+        updated_at: "2026-10-02T02:11:34Z",
+        completed_at: "2026-10-02T02:11:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-preflight-write-tests
@@ -187,8 +267,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T01:03:33Z", updated_at: "2026-10-02T01:03:33Z", completed_at: "2026-10-02T01:03:33Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T01:03:33Z",
+        updated_at: "2026-10-02T01:03:33Z",
+        completed_at: "2026-10-02T01:03:33Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-preflight-implement-code
@@ -200,8 +286,14 @@ tasks:
     kind: implementation
     status: completed
     depends_on: [runner-preflight-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T01:03:33Z", updated_at: "2026-10-02T01:03:33Z", completed_at: "2026-10-02T01:03:33Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T01:03:33Z",
+        updated_at: "2026-10-02T01:03:33Z",
+        completed_at: "2026-10-02T01:03:33Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-preflight-security-audit
@@ -213,8 +305,14 @@ tasks:
     kind: security-audit
     status: completed
     depends_on: [runner-preflight-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T01:03:33Z", updated_at: "2026-10-02T01:09:24Z", completed_at: "2026-10-02T01:09:24Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T01:03:33Z",
+        updated_at: "2026-10-02T01:09:24Z",
+        completed_at: "2026-10-02T01:09:24Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-preflight-compliance-review
@@ -226,8 +324,14 @@ tasks:
     kind: compliance-review
     status: completed
     depends_on: [runner-preflight-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T01:03:33Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T01:03:33Z",
+        updated_at: "2026-10-02T02:11:34Z",
+        completed_at: "2026-10-02T02:11:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-display-write-tests
@@ -239,8 +343,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T00:45:16Z", updated_at: "2026-10-02T01:03:33Z", completed_at: "2026-10-02T01:03:33Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T00:45:16Z",
+        updated_at: "2026-10-02T01:03:33Z",
+        completed_at: "2026-10-02T01:03:33Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-display-implement-code
@@ -252,8 +362,14 @@ tasks:
     kind: implementation
     status: completed
     depends_on: [runner-display-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T00:45:16Z", updated_at: "2026-10-02T01:03:33Z", completed_at: "2026-10-02T01:03:33Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T00:45:16Z",
+        updated_at: "2026-10-02T01:03:33Z",
+        completed_at: "2026-10-02T01:03:33Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-display-security-audit
@@ -265,8 +381,14 @@ tasks:
     kind: security-audit
     status: completed
     depends_on: [runner-display-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T00:45:16Z", updated_at: "2026-10-02T01:09:24Z", completed_at: "2026-10-02T01:09:24Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T00:45:16Z",
+        updated_at: "2026-10-02T01:09:24Z",
+        completed_at: "2026-10-02T01:09:24Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-display-compliance-review
@@ -278,8 +400,14 @@ tasks:
     kind: compliance-review
     status: completed
     depends_on: [runner-display-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T00:45:16Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T00:45:16Z",
+        updated_at: "2026-10-02T02:11:34Z",
+        completed_at: "2026-10-02T02:11:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-process-write-tests
@@ -291,8 +419,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:08:15Z", completed_at: "2026-10-02T00:08:15Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T00:08:15Z",
+        updated_at: "2026-10-02T00:08:15Z",
+        completed_at: "2026-10-02T00:08:15Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-process-implement-code
@@ -304,8 +438,14 @@ tasks:
     kind: implementation
     status: completed
     depends_on: [runner-process-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:08:15Z", completed_at: "2026-10-02T00:08:15Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T00:08:15Z",
+        updated_at: "2026-10-02T00:08:15Z",
+        completed_at: "2026-10-02T00:08:15Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-process-security-audit
@@ -317,8 +457,14 @@ tasks:
     kind: security-audit
     status: completed
     depends_on: [runner-process-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:27:08Z", completed_at: "2026-10-02T00:27:08Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T00:08:15Z",
+        updated_at: "2026-10-02T00:27:08Z",
+        completed_at: "2026-10-02T00:27:08Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-process-compliance-review
@@ -330,8 +476,14 @@ tasks:
     kind: compliance-review
     status: completed
     depends_on: [runner-process-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-02T00:08:15Z",
+        updated_at: "2026-10-02T02:11:34Z",
+        completed_at: "2026-10-02T02:11:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-input-write-tests
@@ -344,7 +496,12 @@ tasks:
     status: completed
     depends_on: []
     requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY"]
-    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:08:15Z", completed_at: "2026-10-02T00:08:15Z"}
+    timestamps:
+      {
+        created_at: "2026-10-02T00:08:15Z",
+        updated_at: "2026-10-02T00:08:15Z",
+        completed_at: "2026-10-02T00:08:15Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-input-implement-code
@@ -357,7 +514,12 @@ tasks:
     status: completed
     depends_on: [runner-input-write-tests]
     requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY"]
-    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:08:15Z", completed_at: "2026-10-02T00:08:15Z"}
+    timestamps:
+      {
+        created_at: "2026-10-02T00:08:15Z",
+        updated_at: "2026-10-02T00:08:15Z",
+        completed_at: "2026-10-02T00:08:15Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-input-security-audit
@@ -370,7 +532,12 @@ tasks:
     status: completed
     depends_on: [runner-input-implement-code]
     requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY"]
-    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T00:27:08Z", completed_at: "2026-10-02T00:27:08Z"}
+    timestamps:
+      {
+        created_at: "2026-10-02T00:08:15Z",
+        updated_at: "2026-10-02T00:27:08Z",
+        completed_at: "2026-10-02T00:27:08Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-input-compliance-review
@@ -383,7 +550,12 @@ tasks:
     status: completed
     depends_on: [runner-input-security-audit]
     requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY"]
-    timestamps: {created_at: "2026-10-02T00:08:15Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    timestamps:
+      {
+        created_at: "2026-10-02T00:08:15Z",
+        updated_at: "2026-10-02T02:11:34Z",
+        completed_at: "2026-10-02T02:11:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-context-write-tests
@@ -395,8 +567,14 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-CONTEXT"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-CONTEXT"]
+    timestamps:
+      {
+        created_at: "2026-10-01T22:43:19Z",
+        updated_at: "2026-10-01T23:37:34Z",
+        completed_at: "2026-10-01T23:37:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-context-implement-code
@@ -408,8 +586,14 @@ tasks:
     kind: implementation
     status: completed
     depends_on: [runner-context-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-CONTEXT"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-BUDGET", "REQUIREMENTS.md#RUN-REQ-CONTEXT"]
+    timestamps:
+      {
+        created_at: "2026-10-01T22:43:19Z",
+        updated_at: "2026-10-01T23:37:34Z",
+        completed_at: "2026-10-01T23:37:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-context-security-audit
@@ -422,7 +606,12 @@ tasks:
     status: completed
     depends_on: [runner-context-implement-code]
     requirements: ["CONTRACT.md#Runtime-hardening-extension"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    timestamps:
+      {
+        created_at: "2026-10-01T22:43:19Z",
+        updated_at: "2026-10-01T23:37:34Z",
+        completed_at: "2026-10-01T23:37:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-context-compliance-review
@@ -435,7 +624,12 @@ tasks:
     status: completed
     depends_on: [runner-context-security-audit]
     requirements: ["CONTRACT.md#Runtime-hardening-extension"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    timestamps:
+      {
+        created_at: "2026-10-01T22:43:19Z",
+        updated_at: "2026-10-02T02:11:34Z",
+        completed_at: "2026-10-02T02:11:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-tools-write-tests
@@ -448,7 +642,12 @@ tasks:
     status: completed
     depends_on: []
     requirements: ["REQUIREMENTS.md#RUN-REQ-TOOLS"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    timestamps:
+      {
+        created_at: "2026-10-01T22:43:19Z",
+        updated_at: "2026-10-01T23:37:34Z",
+        completed_at: "2026-10-01T23:37:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-tools-implement-code
@@ -461,7 +660,12 @@ tasks:
     status: completed
     depends_on: [runner-tools-write-tests]
     requirements: ["REQUIREMENTS.md#RUN-REQ-TOOLS"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    timestamps:
+      {
+        created_at: "2026-10-01T22:43:19Z",
+        updated_at: "2026-10-01T23:37:34Z",
+        completed_at: "2026-10-01T23:37:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-tools-security-audit
@@ -474,7 +678,12 @@ tasks:
     status: completed
     depends_on: [runner-tools-implement-code]
     requirements: ["CONTRACT.md#Runtime-hardening-extension"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    timestamps:
+      {
+        created_at: "2026-10-01T22:43:19Z",
+        updated_at: "2026-10-01T23:37:34Z",
+        completed_at: "2026-10-01T23:37:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-tools-compliance-review
@@ -487,7 +696,12 @@ tasks:
     status: completed
     depends_on: [runner-tools-security-audit]
     requirements: ["CONTRACT.md#Runtime-hardening-extension"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    timestamps:
+      {
+        created_at: "2026-10-01T22:43:19Z",
+        updated_at: "2026-10-02T02:11:34Z",
+        completed_at: "2026-10-02T02:11:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-lifecycle-write-tests
@@ -499,8 +713,18 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-AUTHORITY", "REQUIREMENTS.md#RUN-REQ-HEADLESS", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    requirements:
+      [
+        "REQUIREMENTS.md#RUN-REQ-AUTHORITY",
+        "REQUIREMENTS.md#RUN-REQ-HEADLESS",
+        "REQUIREMENTS.md#RUN-REQ-LIFECYCLE",
+      ]
+    timestamps:
+      {
+        created_at: "2026-10-01T22:43:19Z",
+        updated_at: "2026-10-01T23:37:34Z",
+        completed_at: "2026-10-01T23:37:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-lifecycle-implement-code
@@ -512,8 +736,14 @@ tasks:
     kind: implementation
     status: completed
     depends_on: [runner-lifecycle-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-HEADLESS", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    requirements:
+      ["REQUIREMENTS.md#RUN-REQ-HEADLESS", "REQUIREMENTS.md#RUN-REQ-LIFECYCLE"]
+    timestamps:
+      {
+        created_at: "2026-10-01T22:43:19Z",
+        updated_at: "2026-10-01T23:37:34Z",
+        completed_at: "2026-10-01T23:37:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-lifecycle-security-audit
@@ -526,7 +756,12 @@ tasks:
     status: completed
     depends_on: [runner-lifecycle-implement-code]
     requirements: ["CONTRACT.md#Runtime-hardening-extension"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-01T23:37:34Z", completed_at: "2026-10-01T23:37:34Z"}
+    timestamps:
+      {
+        created_at: "2026-10-01T22:43:19Z",
+        updated_at: "2026-10-01T23:37:34Z",
+        completed_at: "2026-10-01T23:37:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: runner-lifecycle-compliance-review
@@ -539,7 +774,12 @@ tasks:
     status: completed
     depends_on: [runner-lifecycle-security-audit]
     requirements: ["CONTRACT.md#Runtime-hardening-extension"]
-    timestamps: {created_at: "2026-10-01T22:43:19Z", updated_at: "2026-10-02T02:11:34Z", completed_at: "2026-10-02T02:11:34Z"}
+    timestamps:
+      {
+        created_at: "2026-10-01T22:43:19Z",
+        updated_at: "2026-10-02T02:11:34Z",
+        completed_at: "2026-10-02T02:11:34Z",
+      }
     blocked_reason: null
     recovery_state: null
   - id: "agent-runner-foundation-write-tests"
@@ -817,7 +1057,7 @@ tasks:
   - id: "agent-runner-tui-progress-eta"
     title: "Add a compaction progress bar with ETA"
     description: "Provide a bounded ETA for the compaction progress bar: forecast how long until the live context reaches the hard limit from the observed context growth rate, and show it when the estimate is meaningful (never fabricate a number when the growth is flat or unknown). Keep the existing compaction progress bar as the source of truth and surface the ETA only when it can be estimated reliably."
-    context: "The user explicitly requested \"Progress bar, at least for compaction, with ETA (when possible)\"; only the progress fraction exists today."
+    context: 'The user explicitly requested "Progress bar, at least for compaction, with ETA (when possible)"; only the progress fraction exists today.'
     purpose: "Let the user anticipate an upcoming compaction and steer accordingly."
     expected_outcome: "The UI shows a compaction ETA when estimable and hides it otherwise, with no speculative or misleading numbers."
     kind: implementation
@@ -1124,6 +1364,162 @@ tasks:
     timestamps:
       created_at: "2026-09-30T07:00:00Z"
       updated_at: "2026-09-30T07:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-shell-command-bounds-write-tests"
+    title: "Define shell command bound tests"
+    description: 'Write failing tests that a shell command exactly at the 4096-byte protocol argv bound renders inline, one byte above renders as `exec bash -c "$(cat /context/0)" agent-runner` with the full text in `RenderedTool.shell_script`, the full 16384-byte contract bound renders (with 16385 rejected), the denylist still rejects oversized denied commands, and a staged-script request builds and validates with every argv entry within the 4096-byte bound.'
+    context: "Frequent agent sessions stopped with `invalid version-one sandbox request: argv entry 2 exceeds the 4096-byte limit` whenever a command exceeded 4 KiB (heredocs, inline scripts), because the entire command travelled as one argv entry although the shell contract admits 16384 bytes."
+    purpose: "Pin the full documented command bound as executable before implementation."
+    expected_outcome: "The new tests fail on the current inline-only renderer and pass once staged-script rendering exists."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-03T16:35:00Z"
+      updated_at: "2026-10-03T16:35:00Z"
+      completed_at: "2026-10-03T16:35:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-shell-command-bounds-implement-code"
+    title: "Implement staged-script shell rendering"
+    description: 'Render shell commands above the 4096-byte argv bound with `exec bash -c "$(cat /context/0)" agent-runner` and `shell_script` carrying the text (the exec''d bash performs the quoted substitution and execs the real interpreter, preserving the inline form''s process tree, exit status, and $0; a bare `$(cat /context/0)` script would run `cat` and word-split the output); keep commands at or below the bound inline; add `shell_script: Option<String>` to `RenderedTool`; refactor executor staging into `stage_bytes` and stage the script as a mode-0600 file in a mode-0700 private directory in the workspace canonical parent, exposed as the `/context/0` read root; keep the denylist check on the full command before both forms. Verified end-to-end through the real bwrap runner with a 5 KiB python heredoc.'
+    context: "The failing tests from agent-runner-shell-command-bounds-write-tests define the behavior; the 4096-byte scalar bound is the sandbox protocol's MAX_VALUE_BYTES, and the existing read-root context grant mechanism carries the script without widening any authority."
+    purpose: "Make every legal shell command executable inside the sandbox."
+    expected_outcome: "All shell-command-bounds tests pass and the full agent-runner suite stays green."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-shell-command-bounds-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-03T16:35:00Z"
+      updated_at: "2026-10-03T16:35:00Z"
+      completed_at: "2026-10-03T16:35:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-shell-command-bounds-security-audit"
+    title: "Audit staged-script shell boundaries"
+    description: "Independently inspect the staged-script path for untrusted-input handling (model command text through staging and the outer bash substitution), authority (read-only context grant outside the writable mount, RAII cleanup, no model-selected paths), and denylist completeness across both rendering forms."
+    context: "Internal/implementer review of the new rendering and staging paths; this is not the source-blind certification. Findings: the script file is staged in the workspace canonical parent (cannot overlap the writable mount) with 0600/0700 modes and RAII drop on every exit; the wrapper's double-quoted command substitution is literal (results are not re-expanded, split, or globbed), so model text is not executed twice or altered, and `exec` replaces the wrapper so the supervisor sees one process with the script's exact exit status; the denylist sees the full text before the form branch; `shell_script` and `file_request` are mutually exclusive by construction in the two render branches; the 4096-byte bound equals the protocol MAX_VALUE_BYTES the runner independently re-validates. A defect was found and corrected during review: the first wrapper draft (`$(cat /context/0)` as the -c script) made the exec'd bash run `cat` and word-split the output into a command, so the wrapper now performs the substitution itself and `exec`s the interpreter. Real-bwrap end-to-end verification passed."
+    purpose: "Preserve independent confirmation that the new path introduces no disclosure, authority, or double-execution defect."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "agent-runner-shell-command-bounds-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-03T16:35:00Z"
+      updated_at: "2026-10-03T16:35:00Z"
+      completed_at: "2026-10-03T16:35:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-shell-command-bounds-compliance-review"
+    title: "Review shell command bound compliance"
+    description: "Derive observed behavior from source and tests in a clean-slate context, then compare the implementation record with the requirements, contract, and design in a source-blind context, retaining discrepancies for human arbitration."
+    context: "Per the project's current enforcement note, component accept only structurally validates and records revisions; this gate awaits the separate source-blind reviewer and must never be self-certified. A clean-slate IMPL.md update for the staged-script change is outstanding for that reviewer."
+    purpose: "Retain an independent disposition for the full-bound shell rendering."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "agent-runner-shell-command-bounds-security-audit"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-03T16:35:00Z"
+      updated_at: "2026-10-03T16:35:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-preparation-performance-write-tests"
+    title: "Define preparation performance tests"
+    description: "Write failing tests that per-call Rust validation rejects a same-size executable modification (fingerprint, not size or re-hash, is the detector) while accepting an unchanged tree, and that the vendor snapshot of a 120-file tree is byte-complete, produces a deterministic identity across runs, and moves the identity on a same-size byte change."
+    context: "Agent preparation approached the 30-second bounds because every tool call re-hashed the full toolchain (hundreds of MiB) and the startup vendor snapshot copied plus hashed the whole tree serially; on non-reflink filesystems a 360 MiB vendor copy kept preparation near the budget."
+    purpose: "Pin fingerprint-based drift detection and parallel snapshot integrity before implementation."
+    expected_outcome: "The new tests fail on the re-hashing validator where applicable and pass once fingerprint validation and the two-phase snapshot exist."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-03T16:35:00Z"
+      updated_at: "2026-10-03T16:35:00Z"
+      completed_at: "2026-10-03T16:35:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-preparation-performance-implement-code"
+    title: "Implement fingerprint validation and parallel snapshot"
+    description: "Replace the per-call full re-hash in `RustEnvironment::validate` with a dev/ino/size/mtime/ctime fingerprint comparison against resolve-time fingerprints (exact byte identities remain bound once at resolve time into the environment and grant identities); make `snapshot_vendor` two-phase (serial enumeration plus bounded parallel copy of up to min(8, host parallelism) workers with per-file worker-local fingerprint rechecks) and fold the identity from per-file SHA-256 digests in deterministic enumeration order."
+    context: "The failing tests from agent-runner-preparation-performance-write-tests define the behavior; any modification, truncation, or replacement updates at least one fingerprint field, and the 30-second bounds, entry/size/path limits, and rejection of links and special entries are unchanged."
+    purpose: "Keep preparation comfortably within its documented 30-second bounds on representative hardware."
+    expected_outcome: "All preparation-performance tests pass, existing drift/snapshot tests stay green, and the full agent-runner suite passes."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "agent-runner-preparation-performance-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-03T16:35:00Z"
+      updated_at: "2026-10-03T16:35:00Z"
+      completed_at: "2026-10-03T16:35:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-preparation-performance-security-audit"
+    title: "Audit preparation performance boundaries"
+    description: "Independently inspect the fingerprint validator and parallel snapshot for weakened drift detection, shared mutable state across threads, unbounded memory, lost cancellation, and identity determinism."
+    context: "Internal/implementer review of the changed paths; this is not the source-blind certification. Findings: workers communicate only through owned result vectors (no shared mutable state), each worker re-checks its own source fingerprint after its copies (a concurrent host change fails the file), directory fingerprints are re-checked after all copies, `Preparation` cancellation and the 30-second budget are checked per 64 KiB read chunk and per folded file, memory is bounded to one 64 KiB buffer per worker plus 32-byte digests per file (about 7 MiB at the 100,000-entry bound), the fold order is the deterministic enumeration order, and staged partial copies vanish with the RAII staging directory. No code corrections were required."
+    purpose: "Preserve independent confirmation that the performance change weakens no detection or bound."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "agent-runner-preparation-performance-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-03T16:35:00Z"
+      updated_at: "2026-10-03T16:35:00Z"
+      completed_at: "2026-10-03T16:35:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-preparation-performance-compliance-review"
+    title: "Review preparation performance compliance"
+    description: "Derive observed behavior from source and tests in a clean-slate context, then compare the implementation record with the requirements, contract, and design in a source-blind context, retaining discrepancies for human arbitration."
+    context: "Per the project's current enforcement note, component accept only structurally validates and records revisions; this gate awaits the separate source-blind reviewer and must never be self-certified. A clean-slate IMPL.md update for the fingerprint validator and two-phase snapshot is outstanding for that reviewer."
+    purpose: "Retain an independent disposition for the preparation performance change."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "agent-runner-preparation-performance-security-audit"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#RUN-REQ-RELIABILITY"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-03T16:35:00Z"
+      updated_at: "2026-10-03T16:35:00Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

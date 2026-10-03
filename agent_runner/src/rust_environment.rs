@@ -48,13 +48,31 @@ pub struct RustEnvironment {
     resources: Arc<Resources>,
 }
 
+/// An installed executable bound at resolve time to its exact bytes.
+///
+/// `identity` is the authoritative SHA-256 of the file contents captured once,
+/// and it rides on the sandbox grant identity for every call. Per-call
+/// validation compares the cheap `fingerprint` (dev/ino/size/mtime/ctime) only;
+/// any modification, truncation or replacement updates at least one of those
+/// fields, so re-reading and re-hashing hundreds of megabytes per tool call is
+/// unnecessary to keep drift detection strict.
+#[derive(Debug)]
+struct TrackedExecutable {
+    path: PathBuf,
+    /// Read only through the environment identity's `Debug` projection, which
+    /// binds every executable's exact bytes into the grant identity.
+    #[allow(dead_code)]
+    identity: String,
+    fingerprint: Fingerprint,
+}
+
 #[derive(Debug)]
 struct Resources {
     workspace: PathBuf,
     root: PathBuf,
     channel: String,
     identity: String,
-    executables: Vec<(PathBuf, String)>,
+    executables: Vec<TrackedExecutable>,
     directories: Vec<(PathBuf, (u64, u64))>,
     staging: tempfile::TempDir,
     vendor_identity: String,
@@ -79,6 +97,15 @@ struct PinToolchain {
     targets: Vec<String>,
     profile: Option<String>,
 }
+
+/// The strict per-inode identity fields that detect any modification, truncation
+/// or replacement of a file.
+type Fingerprint = (u64, u64, u64, i64, i64, i64, i64);
+
+/// One copied vendor file's SHA-256 digest bytes and copied byte count.
+type FileDigest = (Vec<u8>, u64);
+/// The copy-and-digest outcome of one scheduled vendor file.
+type CopyOutcome = Result<FileDigest>;
 
 struct Preparation<'a> {
     started: Instant,
@@ -170,7 +197,7 @@ fn bounded_bytes(path: &Path, maximum: u64) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn fingerprint(metadata: &fs::Metadata) -> (u64, u64, u64, i64, i64, i64, i64) {
+fn fingerprint(metadata: &fs::Metadata) -> Fingerprint {
     (
         metadata.dev(),
         metadata.ino(),
@@ -182,7 +209,7 @@ fn fingerprint(metadata: &fs::Metadata) -> (u64, u64, u64, i64, i64, i64, i64) {
     )
 }
 
-fn hash_file(path: &Path, preparation: &Preparation<'_>) -> Result<String> {
+fn hash_file(path: &Path, preparation: &Preparation<'_>) -> Result<(String, Fingerprint)> {
     let mut opened = file(path, MAX_FILE_BYTES)?;
     let before = opened
         .metadata()
@@ -210,7 +237,10 @@ fn hash_file(path: &Path, preparation: &Preparation<'_>) -> Result<String> {
     if fingerprint(&before) != fingerprint(&after) {
         return Err(failure("Rust executable changed while hashing"));
     }
-    Ok(format!("sha256:{}", hex::encode(hash.finalize())))
+    Ok((
+        format!("sha256:{}", hex::encode(hash.finalize())),
+        fingerprint(&before),
+    ))
 }
 
 fn token(value: &str) -> bool {
@@ -532,10 +562,20 @@ impl RustEnvironment {
                     "installed Rust `{name}` is not executable"
                 )));
             }
-            executables.push((path.clone(), hash_file(&path, &preparation)?));
+            let (file_identity, file_fingerprint) = hash_file(&path, &preparation)?;
+            executables.push(TrackedExecutable {
+                path: path.clone(),
+                identity: file_identity,
+                fingerprint: file_fingerprint,
+            });
         }
         for path in native_library_layout(&root)? {
-            executables.push((path.clone(), hash_file(&path, &preparation)?));
+            let (file_identity, file_fingerprint) = hash_file(&path, &preparation)?;
+            executables.push(TrackedExecutable {
+                path: path.clone(),
+                identity: file_identity,
+                fingerprint: file_fingerprint,
+            });
         }
         for name in ["cc", "ar", "as"] {
             let path = Path::new("/usr/bin")
@@ -550,7 +590,12 @@ impl RustEnvironment {
                     "Rust requires executable system cc/ar/as outside the writable workspace",
                 ));
             }
-            executables.push((path.clone(), hash_file(&path, &preparation)?));
+            let (file_identity, file_fingerprint) = hash_file(&path, &preparation)?;
+            executables.push(TrackedExecutable {
+                path: path.clone(),
+                identity: file_identity,
+                fingerprint: file_fingerprint,
+            });
         }
         let identity = label(
             format!(
@@ -608,7 +653,12 @@ impl RustEnvironment {
             .map_err(|e| io_error("write fixed offline locked Cargo shim", None, e))?;
         file.sync_all()
             .map_err(|e| io_error("synchronize Cargo shim", None, e))?;
-        executables.push((wrapper.clone(), hash_file(&wrapper, &preparation)?));
+        let (file_identity, file_fingerprint) = hash_file(&wrapper, &preparation)?;
+        executables.push(TrackedExecutable {
+            path: wrapper.clone(),
+            identity: file_identity,
+            fingerprint: file_fingerprint,
+        });
         Ok(Self {
             resources: Arc::new(Resources {
                 workspace,
@@ -676,8 +726,10 @@ impl RustEnvironment {
                 ));
             }
         }
-        for (path, expected) in &self.resources.executables {
-            if hash_file(path, &preparation)? != *expected {
+        for tracked in &self.resources.executables {
+            preparation.check()?;
+            let metadata = inspect_path(&tracked.path)?;
+            if fingerprint(&metadata) != tracked.fingerprint {
                 return Err(failure(
                     "installed Rust executable or trusted shim drifted since startup; restart after host provisioning",
                 ));
@@ -738,6 +790,77 @@ impl RustEnvironment {
     }
 }
 
+/// One bounded vendor file scheduled for the parallel copy phase.
+struct SnapshotFile {
+    source: PathBuf,
+    destination: PathBuf,
+    /// The source-root-relative path as encoded bytes, used by the identity.
+    relative: Vec<u8>,
+}
+
+/// The number of copy workers; bounded so a large registry neither oversubscribes
+/// the host nor stays serial.
+fn copy_worker_count() -> usize {
+    std::thread::available_parallelism()
+        .map(|parallelism| parallelism.get())
+        .unwrap_or(1)
+        .min(8)
+}
+
+/// Copies and digests one vendor file, re-checking its own source fingerprint
+/// immediately after the copy so a concurrent host change fails this file
+/// without any worker trusting a stale global recheck.
+fn copy_vendor_file(entry: &SnapshotFile, preparation: &Preparation<'_>) -> CopyOutcome {
+    let mut input = file(&entry.source, MAX_FILE_BYTES)?;
+    let before = input
+        .metadata()
+        .map_err(|e| io_error("inspect vendor snapshot input", None, e))?;
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o400)
+        .open(&entry.destination)
+        .map_err(|e| io_error("create private vendor snapshot file", None, e))?;
+    let mut hash = Sha256::new();
+    let mut bytes = [0; 65536];
+    let mut file_bytes = 0_u64;
+    loop {
+        preparation.check()?;
+        let n = input
+            .read(&mut bytes)
+            .map_err(|e| io_error("read local vendor snapshot", None, e))?;
+        if n == 0 {
+            break;
+        }
+        file_bytes += n as u64;
+        if file_bytes > MAX_FILE_BYTES {
+            return Err(failure(
+                "vendor snapshot exceeds 256 MiB/file or 1 GiB aggregate",
+            ));
+        }
+        output
+            .write_all(&bytes[..n])
+            .map_err(|e| io_error("write private vendor snapshot", None, e))?;
+        hash.update(&bytes[..n]);
+    }
+    if fingerprint(&before) != fingerprint(&inspect_path(&entry.source)?) {
+        return Err(failure(
+            "vendored file changed while snapshotting; refresh on the host and restart",
+        ));
+    }
+    Ok((hash.finalize().to_vec(), file_bytes))
+}
+
+/// Snapshots the local vendored registry into a private, read-only-bounded
+/// destination and returns its content identity.
+///
+/// Two phases: a serial enumeration that validates every entry, bounds the
+/// tree, creates the destination directories, and schedules files in a
+/// deterministic order, followed by a bounded parallel copy where each worker
+/// re-checks its own file fingerprint right after copying. The identity folds
+/// the per-file SHA-256 digests in that deterministic order, so it is stable
+/// across runs and binds every relative path and byte without re-reading the
+/// tree serially.
 fn snapshot_vendor(
     source: &Path,
     destination: &Path,
@@ -747,8 +870,8 @@ fn snapshot_vendor(
     let mut stack = vec![(source.to_owned(), destination.to_owned(), 0_usize)];
     let mut count = 0_usize;
     let mut total = 0_u64;
-    let mut identity = Sha256::new();
     let mut directories = Vec::new();
+    let mut files: Vec<SnapshotFile> = Vec::new();
     let mut path_bytes = 0_usize;
     while let Some((source, destination, depth)) = stack.pop() {
         preparation.check()?;
@@ -796,51 +919,66 @@ fn snapshot_vendor(
                     "vendored registry must contain only regular single-link files/directories, not links or special entries",
                 ));
             }
-            let mut input = file(&src, MAX_FILE_BYTES)?;
-            let before = input
-                .metadata()
-                .map_err(|e| io_error("inspect vendor snapshot input", None, e))?;
-            let mut output = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o400)
-                .open(&dst)
-                .map_err(|e| io_error("create private vendor snapshot file", None, e))?;
+            if metadata.len() > MAX_FILE_BYTES {
+                return Err(failure(
+                    "vendor snapshot exceeds 256 MiB/file or 1 GiB aggregate",
+                ));
+            }
+            total += metadata.len();
+            if total > MAX_VENDOR_BYTES {
+                return Err(failure(
+                    "vendor snapshot exceeds 256 MiB/file or 1 GiB aggregate",
+                ));
+            }
             let relative = src
                 .strip_prefix(&source_root)
                 .map_err(|_| failure("invalid vendor entry"))?
                 .as_os_str()
-                .as_encoded_bytes();
-            identity.update((relative.len() as u64).to_be_bytes());
-            identity.update(relative);
-            identity.update(before.len().to_be_bytes());
-            let mut bytes = [0; 65536];
-            let mut file_bytes = 0_u64;
-            loop {
-                preparation.check()?;
-                let n = input
-                    .read(&mut bytes)
-                    .map_err(|e| io_error("read local vendor snapshot", None, e))?;
-                if n == 0 {
-                    break;
-                }
-                file_bytes += n as u64;
-                total += n as u64;
-                if file_bytes > MAX_FILE_BYTES || total > MAX_VENDOR_BYTES {
-                    return Err(failure(
-                        "vendor snapshot exceeds 256 MiB/file or 1 GiB aggregate",
-                    ));
-                }
-                output
-                    .write_all(&bytes[..n])
-                    .map_err(|e| io_error("write private vendor snapshot", None, e))?;
-                identity.update(&bytes[..n]);
+                .as_encoded_bytes()
+                .to_vec();
+            files.push(SnapshotFile {
+                source: src,
+                destination: dst,
+                relative,
+            });
+        }
+    }
+    // Parallel copy phase: contiguous index ranges keep scheduling simple and
+    // deterministic; a single worker handles small trees without thread setup.
+    let workers = copy_worker_count().min(files.len());
+    let mut results: Vec<Option<CopyOutcome>> = (0..files.len()).map(|_| None).collect();
+    if files.len() > 1 && workers > 1 {
+        let files = &files;
+        std::thread::scope(|scope| -> Result<()> {
+            let mut handles = Vec::new();
+            let mut start = 0_usize;
+            for worker in 0..workers {
+                let base = files.len() / workers;
+                let rem = files.len() % workers;
+                let extra = if worker < rem { 1 } else { 0 };
+                let range = start..start + base + extra;
+                start = range.end;
+                handles.push(scope.spawn(move || {
+                    let mut copied: Vec<(usize, CopyOutcome)> = Vec::with_capacity(range.len());
+                    for index in range {
+                        copied.push((index, copy_vendor_file(&files[index], preparation)));
+                    }
+                    copied
+                }));
             }
-            if fingerprint(&before) != fingerprint(&inspect_path(&src)?) {
-                return Err(failure(
-                    "vendored file changed while snapshotting; refresh on the host and restart",
-                ));
+            for handle in handles {
+                let copied = handle
+                    .join()
+                    .map_err(|_| failure("vendor snapshot worker terminated abnormally"))?;
+                for (index, result) in copied {
+                    results[index] = Some(result);
+                }
             }
+            Ok(())
+        })?;
+    } else {
+        for index in 0..files.len() {
+            results[index] = Some(copy_vendor_file(&files[index], preparation));
         }
     }
     for (path, before) in directories {
@@ -850,6 +988,18 @@ fn snapshot_vendor(
                 "vendor directory changed while snapshotting; refresh on the host and restart",
             ));
         }
+    }
+    let mut identity = Sha256::new();
+    for (index, entry) in files.iter().enumerate() {
+        preparation.check()?;
+        let result = results[index]
+            .take()
+            .ok_or_else(|| failure("vendor snapshot worker did not report a result"))?;
+        let (digest, bytes) = result?;
+        identity.update((entry.relative.len() as u64).to_be_bytes());
+        identity.update(&entry.relative);
+        identity.update(bytes.to_be_bytes());
+        identity.update(digest);
     }
     Ok(format!("sha256:{}", hex::encode(identity.finalize())))
 }
@@ -887,10 +1037,14 @@ mod tests {
                 root: root.clone(),
                 channel: "stable".into(),
                 identity: label(b"synthetic"),
-                executables: vec![(
-                    executable.clone(),
-                    hash_file(&executable, &preparation).unwrap(),
-                )],
+                executables: vec![{
+                    let (identity, fingerprint) = hash_file(&executable, &preparation).unwrap();
+                    TrackedExecutable {
+                        path: executable.clone(),
+                        identity,
+                        fingerprint,
+                    }
+                }],
                 directories: vec![(root, (metadata.dev(), metadata.ino()))],
                 staging: tempfile::Builder::new()
                     .prefix(".rust-staging-")
@@ -1037,6 +1191,80 @@ mod tests {
             fs::read(directory.path().join("copy1/crate-a/file")).unwrap(),
             b"initial"
         );
+    }
+
+    #[test]
+    fn same_size_executable_drift_is_rejected_by_fingerprint() {
+        let directory = fixture();
+        let environment = synthetic_environment(directory.path());
+        let workspace = &environment.resources.workspace;
+        let cancellation = CancellationToken::new();
+        environment.validate(workspace, &cancellation).unwrap();
+        // Same length, different bytes: a size-only check would pass, so the
+        // per-call drift detection must rely on the full fingerprint.
+        fs::write(
+            environment.resources.root.join("cargo"),
+            b"hijacked executable!",
+        )
+        .unwrap();
+        assert!(environment.validate(workspace, &cancellation).is_err());
+    }
+
+    #[test]
+    fn parallel_snapshot_is_complete_and_identity_is_deterministic() {
+        let directory = fixture();
+        let source = directory.path().join("vendor");
+        let crates = source.join("registry/src");
+        fs::create_dir_all(&crates).unwrap();
+        for index in 0..120 {
+            let name = format!("crate-{index:03}");
+            fs::create_dir(crates.join(&name)).unwrap();
+            fs::write(
+                crates.join(&name).join("lib.rs"),
+                format!("// crate {index}\n{}", "x".repeat(7000)),
+            )
+            .unwrap();
+        }
+        fs::write(source.join("registry/CACHEDIR.TAG"), b"some\n").unwrap();
+        let source = source.canonicalize().unwrap();
+        let cancellation = CancellationToken::new();
+        let preparation = Preparation {
+            started: Instant::now(),
+            cancellation: &cancellation,
+        };
+        let first =
+            snapshot_vendor(&source, &directory.path().join("copy-a"), &preparation).unwrap();
+        let second =
+            snapshot_vendor(&source, &directory.path().join("copy-b"), &preparation).unwrap();
+        assert_eq!(
+            first, second,
+            "the identity must be deterministic across runs"
+        );
+        for index in 0..120 {
+            let name = format!("crate-{index:03}");
+            let src = fs::read(source.join("registry/src").join(&name).join("lib.rs")).unwrap();
+            let dst = fs::read(
+                directory
+                    .path()
+                    .join("copy-a/registry/src")
+                    .join(&name)
+                    .join("lib.rs"),
+            )
+            .unwrap();
+            assert_eq!(src, dst, "snapshot copy must be byte-identical");
+        }
+        assert_eq!(
+            fs::read(source.join("registry/CACHEDIR.TAG")).unwrap(),
+            fs::read(directory.path().join("copy-a/registry/CACHEDIR.TAG")).unwrap()
+        );
+        // A same-size byte change must move the identity.
+        let target = source.join("registry/src/crate-000/lib.rs");
+        let mut bytes = fs::read(&target).unwrap();
+        bytes[3] = b'Y';
+        fs::write(&target, &bytes).unwrap();
+        let third =
+            snapshot_vendor(&source, &directory.path().join("copy-c"), &preparation).unwrap();
+        assert_ne!(first, third);
     }
 
     #[test]

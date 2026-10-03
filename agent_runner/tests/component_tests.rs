@@ -433,6 +433,138 @@ fn denylisted_shell_command_is_rejected() {
 }
 
 #[test]
+fn shell_command_within_argv_bound_stays_inline_and_beyond_stages_script() {
+    let reg = registry();
+    let context = ExecContext::new("/tmp/work", "c");
+    // Exactly at the 4096-byte protocol scalar bound the command still fits one
+    // argv entry and stays inline.
+    let at_bound = format!("echo {}", "a".repeat(4096 - 5));
+    assert_eq!(at_bound.len(), 4096);
+    let inline = reg
+        .render(
+            &tool_intent("shell", json!({ "command": at_bound.clone() })),
+            &context,
+        )
+        .expect("a command at the argv bound renders");
+    assert_eq!(
+        inline.argv,
+        vec![
+            "/usr/bin/bash".to_owned(),
+            "-c".to_owned(),
+            at_bound.clone(),
+            "agent-runner".to_owned(),
+        ]
+    );
+    assert!(inline.shell_script.is_none());
+    // One byte over the bound the command must be staged as the /context/0
+    // read-only script file, keeping every argv entry within the bound.
+    let over = format!("echo {}", "a".repeat(4097 - 5));
+    assert_eq!(over.len(), 4097);
+    let staged = reg
+        .render(
+            &tool_intent("shell", json!({ "command": over.clone() })),
+            &context,
+        )
+        .expect("a command above the argv bound renders");
+    assert_eq!(
+        staged.argv,
+        vec![
+            "/usr/bin/bash".to_owned(),
+            "-c".to_owned(),
+            "exec bash -c \"$(cat /context/0)\" agent-runner".to_owned(),
+        ]
+    );
+    assert_eq!(staged.shell_script.as_deref(), Some(over.as_str()));
+}
+
+#[test]
+fn full_length_shell_command_is_executable_not_rejected() {
+    let reg = registry();
+    let context = ExecContext::new("/tmp/work", "c");
+    let command = format!(
+        "python3 - <<'PYEOF'\n{}\nPYEOF",
+        "print('ok')\n".repeat(1000)
+    );
+    assert!(command.len() > 4096);
+    let staged = reg
+        .render(
+            &tool_intent("shell", json!({ "command": command.clone() })),
+            &context,
+        )
+        .expect("a heredoc-class command renders");
+    assert_eq!(staged.shell_script.as_deref(), Some(command.as_str()));
+    assert!(staged.argv.iter().all(|entry| entry.len() <= 4096));
+    // The documented 16384-byte maximum is reachable and stays executable.
+    let full = format!("printf %s {}\n", "x".repeat(16384 - 11));
+    assert_eq!(full.len(), 16384);
+    let full_staged = reg
+        .render(
+            &tool_intent("shell", json!({ "command": full.clone() })),
+            &context,
+        )
+        .expect("the full 16384-byte command bound renders");
+    assert_eq!(full_staged.shell_script.as_deref(), Some(full.as_str()));
+    // One byte beyond the contract bound is still rejected.
+    let too_long = "x".repeat(16385);
+    assert!(
+        reg.render(
+            &tool_intent("shell", json!({ "command": too_long })),
+            &context
+        )
+        .is_err()
+    );
+}
+
+#[test]
+fn denylisted_long_command_is_still_rejected() {
+    let reg = registry();
+    let context = ExecContext::new("/tmp/work", "c");
+    let padding = "a".repeat(4097);
+    let command = format!("{} && rm -rf /", padding);
+    let err = reg
+        .render(
+            &tool_intent("shell", json!({ "command": command })),
+            &context,
+        )
+        .expect_err("denylisted long command is rejected before staging");
+    assert!(matches!(err, Error::ToolPolicy { .. }));
+}
+
+#[test]
+fn staged_shell_command_request_has_bounded_argv_and_validates() {
+    let scope = tempdir().expect("temp scope");
+    let sb = fake_sandbox(&scope);
+    let workdir = tempdir().expect("temp workdir");
+    let command = format!(
+        "python3 - <<'PYEOF'\n{}\nPYEOF",
+        "print('ok')\n".repeat(1000)
+    );
+    assert!(command.len() > 4096);
+    let reg = registry();
+    let rendered = reg
+        .render(
+            &tool_intent("shell", json!({ "command": command.clone() })),
+            &ExecContext::new("/tmp/work", "c"),
+        )
+        .expect("long shell command renders");
+    // Stage the script the way the executor does: a private regular file
+    // outside the writable workdir.
+    let staging = tempdir().expect("staging dir");
+    let script = staging.path().join("script.sh");
+    std::fs::write(&script, command.as_bytes()).expect("write script");
+    let argv = rendered.argv.clone();
+    let read_roots: Vec<PathBuf> = vec![script];
+    let environment: BTreeMap<String, String> = BTreeMap::new();
+    let policy = ToolPolicy::minimum();
+    let req = sandbox::build_request(
+        &sb,
+        &build(&argv, workdir.path(), &read_roots, environment, &policy),
+    )
+    .expect("a request for a multi-kilobyte command builds and validates");
+    assert!(req.argv.iter().all(|entry| entry.len() <= 4096));
+}
+
+#[test]
 fn profile_ids_are_sorted_and_unique() {
     let reg = registry().with_profiles(vec![
         ToolProfile::Python,

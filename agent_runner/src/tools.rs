@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use agent_runtime::{ToolDefinition, ToolIntent};
+use kvist_sandbox_runner::protocol::MAX_VALUE_BYTES;
 use serde_json::Value;
 
 use crate::file_tools::FileRequest;
@@ -24,6 +25,18 @@ pub use crate::toolchain::{ProfileSetting, ToolProfile, ToolchainProbe};
 const MAX_SUMMARY_BYTES: usize = 120;
 /// The number of leading characters kept in a path summary.
 const MAX_PATH_SUMMARY_CHARS: usize = 60;
+/// The largest shell command that fits one sandbox argv entry. Commands above
+/// this bound travel as a private read-only `/context/0` script file instead, so
+/// every legal command (up to the 16384-byte tool bound) produces a valid,
+/// protocol-bounded sandbox request.
+const MAX_INLINE_SHELL_COMMAND_BYTES: usize = MAX_VALUE_BYTES;
+/// The sandbox script that stages a long shell command: the exec'd bash first
+/// performs the quoted command substitution (results inside double quotes are
+/// not re-expanded, split, or globbed), then `exec`s itself into the real
+/// interpreter so the process tree, exit status, and `$0` are identical to the
+/// inline form. A bare `$(cat /context/0)` as the `-c` script would be wrong:
+/// the exec'd bash would run `cat` and word-split its output into a command.
+const STAGED_SCRIPT_WRAPPER: &str = "exec bash -c \"$(cat /context/0)\" agent-runner";
 
 pub(crate) fn default_file_helper_path() -> crate::error::Result<PathBuf> {
     std::env::current_exe()
@@ -66,6 +79,11 @@ pub struct RenderedTool {
     /// An explicit configured helper override; absence selects the executable
     /// next to the running agent-runner binary at execution time.
     pub file_helper: Option<PathBuf>,
+    /// The complete shell command text that must be staged as the `/context/0`
+    /// read-only script file before execution; `argv` references it. `None`
+    /// for every non-shell tool and for shell commands that fit one argv entry.
+    /// Never set together with `file_request`.
+    pub shell_script: Option<String>,
 }
 
 /// The registry of model-facing tools and their sandbox rendering.
@@ -363,6 +381,7 @@ impl ToolRegistry {
                     summary: describe_tool_call(intent),
                     file_request: Some(request),
                     file_helper: self.file_helper.clone(),
+                    shell_script: None,
                 })
             }
             other => Err(crate::error::Error::ToolRender {
@@ -395,7 +414,7 @@ impl ToolRegistry {
                 tool: "shell".to_owned(),
                 reason: "command matches the forbidden-command policy".to_owned(),
             })
-        } else {
+        } else if command.len() <= MAX_INLINE_SHELL_COMMAND_BYTES {
             Ok(RenderedTool {
                 argv: vec![
                     self.bash.to_string_lossy().into_owned(),
@@ -406,6 +425,25 @@ impl ToolRegistry {
                 summary: describe_tool_call(intent),
                 file_request: None,
                 file_helper: None,
+                shell_script: None,
+            })
+        } else {
+            // The command no longer fits one 4096-byte argv entry. The executor
+            // stages it as a private regular file outside the workspace, which
+            // the request mounts read-only at /context/0; the wrapper reads the
+            // file contents verbatim (quoted command substitution is not
+            // re-expanded) and `exec`s the real interpreter, so semantics,
+            // exit status and `$0` match the inline form exactly.
+            Ok(RenderedTool {
+                argv: vec![
+                    self.bash.to_string_lossy().into_owned(),
+                    "-c".to_owned(),
+                    STAGED_SCRIPT_WRAPPER.to_owned(),
+                ],
+                summary: describe_tool_call(intent),
+                file_request: None,
+                file_helper: None,
+                shell_script: Some(command.clone()),
             })
         }
     }

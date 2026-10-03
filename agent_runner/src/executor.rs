@@ -78,17 +78,28 @@ impl ToolExecutor for SandboxExecutor {
             None
         };
         check_cancelled(cancellation)?;
-        // This RAII owner survives building/spawning and drops on every error.
-        // Neither the model's path nor its call ID chooses the staging name.
+        // These RAII owners survive building/spawning and drop on every error.
+        // Neither the model's path nor its call ID chooses a staging name.
         let payload = rendered
             .file_request
             .as_ref()
             .map(|request| stage_file_request(request, &self.working_directory, cancellation))
             .transpose()?;
-        let read_roots = match (&payload, &helper) {
-            (Some(payload), Some(helper)) => vec![payload.path().to_owned(), helper.clone()],
-            _ => Vec::new(),
-        };
+        // A shell command too large for one argv entry travels as the /context/0
+        // read-only script file its argv references; the render contract keeps
+        // it mutually exclusive with the native file payload.
+        let script = rendered
+            .shell_script
+            .as_deref()
+            .map(|script| stage_bytes(script.as_bytes(), &self.working_directory, cancellation))
+            .transpose()?;
+        let mut read_roots: Vec<PathBuf> = Vec::new();
+        if let (Some(payload), Some(helper)) = (&payload, &helper) {
+            read_roots.push(payload.path().to_owned());
+            read_roots.push(helper.clone());
+        } else if let Some(script) = &script {
+            read_roots.push(script.path().to_owned());
+        }
         let argv = rendered.argv.clone();
         let build = BuildRequest {
             argv: &argv,
@@ -187,8 +198,20 @@ pub(crate) fn stage_file_request(
     workdir: &Path,
     cancellation: &CancellationToken,
 ) -> Result<StagedFileRequest> {
-    check_cancelled(cancellation)?;
     let bytes = request.to_bytes()?;
+    stage_bytes(&bytes, workdir, cancellation)
+}
+
+/// Privately stages bounded bytes outside the writable workspace as a
+/// mode-0600 regular file inside a mode-0700 directory, with RAII cleanup.
+/// The directory is the workspace's canonical parent, so the staged file can
+/// never overlap the writable mount.
+pub(crate) fn stage_bytes(
+    bytes: &[u8],
+    workdir: &Path,
+    cancellation: &CancellationToken,
+) -> Result<StagedFileRequest> {
+    check_cancelled(cancellation)?;
     let workdir = workdir
         .canonicalize()
         .map_err(|e| io_error("resolve payload staging scope", None, e))?;
@@ -220,7 +243,7 @@ pub(crate) fn stage_file_request(
     file.as_file()
         .set_permissions(std::fs::Permissions::from_mode(0o600))
         .map_err(|e| io_error("set private native payload file permissions", None, e))?;
-    file.write_all(&bytes)
+    file.write_all(bytes)
         .map_err(|e| io_error("stage bounded native file payload", None, e))?;
     file.as_file()
         .sync_all()
@@ -229,4 +252,33 @@ pub(crate) fn stage_file_request(
         file,
         _directory: directory,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stage_bytes_creates_private_payload_outside_workspace() {
+        let parent = tempfile::tempdir().unwrap();
+        let workdir = parent.path().join("work");
+        std::fs::create_dir(&workdir).unwrap();
+        let cancellation = CancellationToken::new();
+        let staged = stage_bytes(b"payload-bytes", &workdir, &cancellation).unwrap();
+        let path = staged.path().to_owned();
+        assert_eq!(std::fs::read(&path).unwrap(), b"payload-bytes");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            std::fs::metadata(path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o700
+        );
+        assert!(!path.starts_with(&workdir));
+    }
 }
