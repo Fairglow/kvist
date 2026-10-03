@@ -155,21 +155,16 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
             .join(crate::session_log::DEFAULT_LOG_DIR)
     });
 
-    // Advertise only tool-chains that genuinely reach the sandbox, gated on the
-    // per-language profile settings. Detection is advisory logging; the gate is
-    // the sole authority for what is advertised. An explicit/forced profile or a
-    // profile set to `on` that is missing fails here rather than lying.
     let probe = crate::toolchain::HostProbe;
     let forced = overrides.profile;
-    let entry_names: Vec<String> = std::fs::read_dir(&working_directory)
-        .map(|dir| {
-            dir.flatten()
-                .map(|entry| entry.file_name().to_string_lossy().into_owned())
-                .collect()
-        })
-        .unwrap_or_default();
-    let names: Vec<&str> = entry_names.iter().map(String::as_str).collect();
-    let detected = crate::toolchain::detect_languages(&names);
+    // Detect which languages the project *uses* from its root manifests,
+    // excluding any entry the project's `.gitignore` declares as not part of
+    // itself. This is advisory: it informs logging and recommendations but never
+    // gates use. The capability gate (`resolve_profiles` + `HostProbe`) is
+    // independent — manifest-free and gitignore-blind — and is the sole authority
+    // for what is advertised. An explicit/forced profile or a
+    // profile set to `on` that is missing fails here rather than lying.
+    let detected = crate::toolchain::detect_project_languages(&working_directory);
     if !detected.is_empty() {
         eprintln!(
             "detected project language(s): {}",

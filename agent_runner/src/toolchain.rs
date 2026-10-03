@@ -281,6 +281,113 @@ pub fn detect_languages(entries: &[&str]) -> BTreeSet<ToolProfile> {
     found
 }
 
+/// A minimal, hand-rolled matcher for a subset of `.gitignore` semantics, used
+/// only by the advisory language detection so that the project's own declaration
+/// of what it does *not* use is respected.
+///
+/// It is intentionally small: it parses lines, honors last-match-wins (including
+/// `!` negation), and matches a single top-level entry name against anchored,
+/// basename, and directory-only patterns. It never consults git state and does
+/// not model `git check-ignore --cached` (a file that is ignored *and* tracked
+/// with `git add -f` is still part of the project despite the pattern). That is
+/// a deliberate trade-off for an offline, dependency-free advisory: the
+/// `.gitignore` is the project's authoritative statement of "not part of me."
+#[derive(Default)]
+pub struct GitIgnore {
+    /// Each rule is `(negated, pattern)`, in file order. The last matching rule
+    /// determines whether an entry is ignored, matching git semantics.
+    rules: Vec<(bool, String)>,
+}
+
+impl GitIgnore {
+    /// Parse a `.gitignore` document from its text. Empty or whitespace-only
+    /// content yields a matcher that ignores nothing.
+    pub fn parse(content: &str) -> Self {
+        let mut rules = Vec::new();
+        for raw in content.lines() {
+            let line = raw.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let (negated, pattern) = match line.strip_prefix('!') {
+                Some(rest) => (true, rest.trim().to_owned()),
+                None => (false, line.to_owned()),
+            };
+            rules.push((negated, pattern));
+        }
+        Self { rules }
+    }
+
+    /// Whether a single top-level entry (`name`) — a file or a directory — is
+    /// ignored by this file.
+    pub fn matches(&self, name: &str) -> bool {
+        let mut ignored = false;
+        for (negated, pattern) in &self.rules {
+            if pattern_matches(pattern, name) {
+                ignored = !*negated;
+            }
+        }
+        ignored
+    }
+}
+
+/// Match one top-level entry name against a single `.gitignore` pattern.
+fn pattern_matches(pattern: &str, name: &str) -> bool {
+    // A trailing slash marks a directory-only pattern; for our top-level entry
+    // filter, dropping the slash is sufficient because it also drops the
+    // directory entry itself from the listing.
+    let pattern = pattern.strip_suffix('/').unwrap_or(pattern);
+    // A leading slash anchors the pattern to the project root; a slash elsewhere
+    // anchors it to the .gitignore's directory, which for a root .gitignore is
+    // likewise the project root. In both cases a top-level entry is compared by
+    // basename, so the distinction collapses here.
+    let anchored = pattern.starts_with('/');
+    let pattern = pattern.strip_prefix('/').unwrap_or(pattern);
+    let core = pattern.strip_prefix("**/").unwrap_or(pattern);
+    if anchored {
+        core == name
+    } else {
+        core == name || name.ends_with(&format!("/{}", core))
+    }
+}
+
+/// Detects which configurable profiles a project *uses*: its root manifests,
+/// excluding any entry the project's `.gitignore` declares as not part of
+/// itself.
+///
+/// This is the advisory counterpart to [`resolve_profiles`]. Unlike the
+/// capability gate (which is manifest-free, gitignore-blind, and judges the
+/// sandbox against what its interpreters actually reach), this intentionally
+/// honors `.gitignore`. Dev-only tooling — an installed editor CLI, vendored
+/// build output, and the like — is read from the filesystem but is not what the
+/// project uses, so it must not define the project's language. When no
+/// `.gitignore` is present, or it cannot be read, detection falls back to the
+/// raw manifest scan so a missing ignore file never hides a real language.
+pub fn detect_project_languages(dir: &Path) -> BTreeSet<ToolProfile> {
+    let entries: Vec<String> = match std::fs::read_dir(dir) {
+        Ok(read) => read
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect(),
+        Err(_) => return BTreeSet::new(),
+    };
+    let gitignore = match std::fs::read_to_string(dir.join(".gitignore")) {
+        Ok(content) => GitIgnore::parse(&content),
+        // No readable `.gitignore` present, or it cannot be read: fall back to a
+        // raw manifest scan so a missing ignore file never hides a real language.
+        Err(_) => {
+            let names: Vec<&str> = entries.iter().map(String::as_str).collect();
+            return detect_languages(&names);
+        }
+    };
+    let names: Vec<&str> = entries
+        .iter()
+        .map(String::as_str)
+        .filter(|name| !gitignore.matches(name))
+        .collect();
+    detect_languages(&names)
+}
+
 /// Resolves which configurable profiles to advertise from the configured
 /// settings, a probe, and an optional forced profile. The caller always adds the
 /// `Generic` base.
@@ -434,6 +541,69 @@ mod tests {
             BTreeSet::from([ToolProfile::C])
         );
         assert!(detect_languages(&["README.md"]).is_empty());
+    }
+
+    #[test]
+    fn gitignore_parsing_last_match_wins_and_negates() {
+        let ignore = GitIgnore::parse("# comment\n\npackage.json\n!package.json\n");
+        // Negated last: package.json is *not* ignored.
+        assert!(!ignore.matches("package.json"));
+        let ignore = GitIgnore::parse("package.json\n");
+        assert!(ignore.matches("package.json"));
+    }
+
+    #[test]
+    fn gitignore_matches_top_level_entries() {
+        let ignore = GitIgnore::parse("node_modules\n");
+        assert!(ignore.matches("node_modules"));
+        assert!(!ignore.matches("src"));
+        // Anchored patterns match the same top-level name.
+        let ignore = GitIgnore::parse("/node_modules");
+        assert!(ignore.matches("node_modules"));
+        // Directory-only patterns drop their trailing slash.
+        let ignore = GitIgnore::parse("node_modules/\n");
+        assert!(ignore.matches("node_modules"));
+    }
+
+    #[test]
+    fn detect_project_languages_respects_gitignore() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path();
+
+        // Dev tooling present but ignored: Rust is the only real language.
+        std::fs::write(dir.join("package.json"), "{}").unwrap();
+        std::fs::write(dir.join("package-lock.json"), "{}").unwrap();
+        std::fs::create_dir_all(dir.join("node_modules")).unwrap();
+        std::fs::write(dir.join("Cargo.toml"), "[package]\n").unwrap();
+        std::fs::write(dir.join(".gitignore"), "/package.json\n/package-lock.json\n/node_modules\n").unwrap();
+
+        let used = detect_project_languages(dir);
+        assert_eq!(used, BTreeSet::from([ToolProfile::Rust]));
+
+        // Removing the gitignore surfaces the dev tooling again.
+        std::fs::remove_file(dir.join(".gitignore")).unwrap();
+        let used = detect_project_languages(dir);
+        assert_eq!(
+            used,
+            BTreeSet::from([ToolProfile::Rust, ToolProfile::JavaScript])
+        );
+    }
+
+    #[test]
+    fn detect_project_languages_falls_back_without_gitignore() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path();
+        std::fs::write(dir.join("package.json"), "{}").unwrap();
+        // No .gitignore present: detection falls back to a raw manifest scan and
+        // reports the manifest, so a missing ignore file never hides a language.
+        let used = detect_project_languages(dir);
+        assert_eq!(used, BTreeSet::from([ToolProfile::JavaScript]));
+    }
+
+    #[test]
+    fn detect_project_languages_handles_missing_directory() {
+        let used = detect_project_languages(Path::new("/does/not/exist"));
+        assert!(used.is_empty());
     }
 
     #[test]
