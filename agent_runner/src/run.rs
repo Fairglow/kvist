@@ -124,6 +124,16 @@ where
             // record lifecycle itself. Cancellation re-arms the token after each
             // turn so a cancelled turn does not end the session.
             while let Some(text) = wait_for_prompt(&prompt_rx, &worker_shutdown) {
+                // Label the durable record with the prompt before any turn so
+                // the transcript is findable by its content, then record it.
+                if let Some(recorder) = recorder.as_mut()
+                    && let Err(error) = recorder.on_prompt(&text)
+                {
+                    if let Err(send_error) = sink.send(Event::Failed(error.describe())) {
+                        tracing::debug!(%send_error, "session event receiver closed");
+                    }
+                    break;
+                }
                 session.push_user(text);
                 let runner = AgentRunner::with_retry(max_turns, retry);
                 // Borrow the recorder only for this run; the borrow ends before the
@@ -224,12 +234,12 @@ mod tests {
     use std::time::Duration;
 
     use crate::{
-        ContextManager, DEFAULT_CONTEXT_TOKENS, Model, ModelProvider, RetryPolicy, ToolExecutor,
-        ToolOutcome, ToolPolicy, ToolRegistry,
+        ContextManager, DEFAULT_CONTEXT_TOKENS, Model, ModelProvider, RetryPolicy, RunSummary,
+        ToolExecutor, ToolOutcome, ToolPolicy, ToolRegistry,
     };
     use agent_runtime::{
         CancellationToken, Error as AgentError, ModelRequest, ModelStreamEvent, ModelTransport,
-        ModelTurn, ReasoningEffort, ToolIntent,
+        ModelTurn, ModelUsage, ReasoningEffort, ToolIntent,
     };
 
     /// A transport the worker never calls in these tests (no prompt is sent),
@@ -333,6 +343,88 @@ mod tests {
                 panic!("worker did not exit after the prompt channel closed: join hung")
             }
         }
+    }
+
+    struct PromptFailingRecorder;
+
+    impl Recorder for PromptFailingRecorder {
+        fn on_prompt(&mut self, _prompt: &str) -> Result<()> {
+            Err(Error::Recording {
+                reason: "injected prompt recording failure".into(),
+            })
+        }
+        fn session_start(&mut self) -> Result<()> {
+            Ok(())
+        }
+        fn request(&mut self, _request: &ModelRequest, _attempt: u32) -> Result<()> {
+            Ok(())
+        }
+        fn turn_start(&mut self, _turn: &ModelTurn) -> Result<usize> {
+            Ok(1)
+        }
+        fn turn_finish(
+            &mut self,
+            _turn: usize,
+            _usage: &Option<ModelUsage>,
+            _finish_reason: &str,
+        ) -> Result<()> {
+            Ok(())
+        }
+        fn tool_dispatch(&mut self, _turn: usize, _intent: &ToolIntent) -> Result<()> {
+            Ok(())
+        }
+        fn tool_result(
+            &mut self,
+            _turn: usize,
+            _call_id: &str,
+            _tool: &str,
+            _args: &serde_json::Value,
+            _outcome: &ToolOutcome,
+        ) -> Result<()> {
+            Ok(())
+        }
+        fn session_finish(&mut self, _summary: &RunSummary) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn worker_prompt_recording_failure_fails_before_any_turn() {
+        let context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+        let (handle, rx, prompt_tx) = start(
+            test_session(),
+            NoopTransport,
+            NoopExecutor,
+            context,
+            Some(Box::new(PromptFailingRecorder)),
+            RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
+            1,
+            RunLimits::default(),
+        )
+        .expect("start worker");
+        prompt_tx.send("fix the bug".into()).unwrap();
+        let mut failed = None;
+        while let Ok(event) = rx.recv() {
+            if let Event::Failed(message) = &event {
+                failed = Some(message.clone());
+            }
+        }
+        assert!(
+            failed
+                .as_deref()
+                .is_some_and(|message| message.contains("injected prompt recording failure")),
+            "the recording failure surfaces as Failed: {failed:?}"
+        );
+        // The worker exited after the failure; the join must be prompt.
+        let (done_tx, done_rx) = mpsc::channel();
+        thread::spawn(move || {
+            drop(handle);
+            let _ = done_tx.send(());
+        });
+        assert!(
+            done_rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+            "join hung after the prompt recording failure"
+        );
     }
 
     #[test]

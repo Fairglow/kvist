@@ -40,6 +40,9 @@ pub struct ScreenLine {
     pub line: Line<'static>,
     pub kind: LineKind,
     pub md: Option<MarkdownRow>,
+    /// The block background the render layer extends across the transcript's
+    /// full inner width, so each large block reads as an encapsulated box.
+    pub bg: Color,
 }
 
 #[derive(Debug, Clone)]
@@ -50,47 +53,30 @@ pub enum MarkdownRow {
 
 impl ScreenLine {
     /// A plain, single-span row styled uniformly.
-    fn plain(text: impl Into<String>, style: Style, kind: LineKind) -> Self {
+    fn plain(text: impl Into<String>, style: Style, kind: LineKind, bg: Color) -> Self {
         ScreenLine {
             line: Line::from(vec![Span::styled(text.into(), style)]),
             kind,
             md: None,
+            bg,
         }
     }
 }
 
-/// A transcript content section, used to give each kind a distinct, subtle
-/// background so the live transcript reads as clearly separated blocks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Section {
-    /// The user's prompt as echoed into the transcript (`You: …`).
-    Prompt,
-    /// Model reasoning / thinking, already rendered dim.
-    Reasoning,
-    /// A proposed tool call (`→ tool: …`).
-    ToolCall,
-    /// A tool's finished result (success).
-    ToolResult,
-    /// A failed tool result.
-    ToolResultFailure,
-}
-
-/// A subtle, low-intensity background for one [`Section`], tuned for a dark
-/// terminal. Each section gets a distinct tint so the sections read apart, but
-/// every tint is intentionally dark so it complements (rather than competes
-/// with) the existing foreground color coding. Callers combine it with the
-/// section's existing foreground via [`Style::patch`], which keeps the foreground
-/// color and modifiers while filling in only the background.
-fn section_background(section: Section) -> Style {
-    let tint = match section {
-        Section::Prompt => Color::Rgb(46, 50, 64),
-        Section::Reasoning => Color::Rgb(34, 34, 38),
-        Section::ToolCall => Color::Rgb(36, 42, 58),
-        Section::ToolResult => Color::Rgb(38, 50, 44),
-        Section::ToolResultFailure => Color::Rgb(58, 38, 36),
-    };
-    Style::default().bg(tint)
-}
+/// Subtle, low-intensity transcript backgrounds. Large text blocks read as
+/// encapsulated boxes that fill the transcript's full inner width (the box's
+/// own borders excluded); the tints are deliberately quiet — close to a dark
+/// terminal background — so they frame text without competing with it. Every
+/// foreground used on these backgrounds keeps a comfortable contrast ratio.
+///
+/// The user's prompt is the lightest tint; model reasoning a muted warm gray;
+/// everything the agent produces — answers, tool calls and their results, and
+/// operational notices — shares one cool blue-gray, so a tool call and its
+/// result group with the surrounding answer text. Success and failure are read
+/// from the text colour, never from the background.
+pub const PROMPT_BG: Color = Color::Rgb(44, 50, 70);
+pub const REASONING_BG: Color = Color::Rgb(38, 36, 44);
+pub const AGENT_BG: Color = Color::Rgb(30, 34, 46);
 
 /// Maximum number of transcript lines retained before dropping the oldest.
 const MAX_LINES: usize = 5000;
@@ -100,7 +86,10 @@ const SPINNER_FRAMES: [&str; 8] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "�
 /// visible spin rate.
 const SPINNER_FRAME_MS: u128 = 100;
 /// Maximum total characters of a single prompt before it is rejected.
-const MAX_PROMPT_CHARS: usize = 16_384;
+/// Generous on purpose: very long prompts must run uninterrupted. The bound
+/// stays far below the transport's per-message byte ceiling (8 MiB), and the
+/// real limit for long work is the model's context window, not this cap.
+const MAX_PROMPT_CHARS: usize = 1_048_576;
 /// The selectable thinking effort levels, in ascending order; the UI can only
 /// present these valid choices.
 const EFFORTS: [ReasoningEffort; 7] = [
@@ -149,6 +138,9 @@ pub enum KeyAction {
     Cancel,
     /// Quit the application.
     Quit,
+    /// Start a fresh session: the transcript is cleared and the runner
+    /// restarts the model conversation for the selected model and effort.
+    NewSession,
 }
 
 /// A modal overlay that takes over the transcript box. While any overlay other
@@ -320,6 +312,7 @@ impl App {
         app.note(
             Style::default().fg(Color::Cyan),
             "agent-runner ready. Type a prompt and press Ctrl+Enter. Ctrl-Q quits; Esc opens the menu; Ctrl+H helps.",
+            AGENT_BG,
         );
         app
     }
@@ -340,14 +333,16 @@ impl App {
                 Style::default()
                     .fg(Color::White)
                     .bold()
-                    .patch(section_background(Section::Prompt)),
+                    .patch(Style::default().bg(PROMPT_BG)),
                 &format!("You: {text} (too long; shown but not started)"),
+                PROMPT_BG,
             );
             self.note(
                 Style::default().fg(Color::Yellow),
                 &format!(
                     "prompt is longer than {MAX_PROMPT_CHARS} characters; shorten it before sending"
                 ),
+                AGENT_BG,
             );
             return;
         }
@@ -356,8 +351,9 @@ impl App {
             Style::default()
                 .fg(Color::White)
                 .bold()
-                .patch(section_background(Section::Prompt)),
+                .patch(Style::default().bg(PROMPT_BG)),
             &format!("You: {text} (auto-started)"),
+            PROMPT_BG,
         );
         self.pending_prompt = Some(text);
         self.status = "queued".to_owned();
@@ -372,6 +368,7 @@ impl App {
                     self.note(
                         Style::default().fg(Color::Yellow),
                         &format!("attempt {attempt}: prior streamed text was provisional"),
+                        AGENT_BG,
                     );
                 }
             }
@@ -383,6 +380,7 @@ impl App {
                 self.note(
                     Style::default().fg(Color::Magenta),
                     &format!("▍ {model} is working…"),
+                    AGENT_BG,
                 );
             }
             Event::Reasoning(text) => self.stream_reasoning(&text),
@@ -403,10 +401,9 @@ impl App {
             Event::ToolCall { description, .. } => {
                 self.flush_pending();
                 self.note(
-                    Style::default()
-                        .fg(Color::Blue)
-                        .patch(section_background(Section::ToolCall)),
+                    Style::default().fg(Color::Blue),
                     &format!("→ tool: {description}"),
+                    AGENT_BG,
                 );
             }
             Event::ToolResult {
@@ -416,25 +413,20 @@ impl App {
             } => {
                 self.flush_pending();
                 let style = if failed {
-                    Style::default()
-                        .fg(Color::Red)
-                        .patch(section_background(Section::ToolResultFailure))
+                    Style::default().fg(Color::Red)
                 } else {
-                    Style::default()
-                        .fg(Color::Green)
-                        .patch(section_background(Section::ToolResult))
+                    Style::default().fg(Color::Green)
                 };
-                self.note(style, &format!("✓ tool {description} finished"));
+                self.note(style, &format!("✓ tool {description} finished"), AGENT_BG);
             }
             Event::Finished { message } => {
                 self.flush_pending();
                 self.quit_running();
                 self.status = "done".to_owned();
                 self.note(
-                    Style::default()
-                        .fg(Color::Green)
-                        .patch(section_background(Section::ToolResult)),
+                    Style::default().fg(Color::Green),
                     &format!("✓ {message}"),
+                    AGENT_BG,
                 );
             }
             // The prompt loop exited with no answer. Without this the UI would
@@ -451,18 +443,21 @@ impl App {
                     self.note(
                         Style::default().fg(Color::Yellow),
                         "cancelled — type a prompt to continue",
+                        AGENT_BG,
                     );
                 } else if exhausted {
                     self.status = "exhausted".to_owned();
                     self.note(
                         Style::default().fg(Color::Yellow),
                         "prompt limit reached with no answer — send a follow-up to continue",
+                        AGENT_BG,
                     );
                 } else {
                     self.status = "awaiting".to_owned();
                     self.note(
                         Style::default().fg(Color::Yellow),
                         "no answer this turn — send a follow-up to continue",
+                        AGENT_BG,
                     );
                 }
             }
@@ -470,11 +465,11 @@ impl App {
                 self.flush_pending();
                 self.quit_running();
                 self.status = "error".to_owned();
-                self.note(Style::default().fg(Color::Red), &text);
+                self.note(Style::default().fg(Color::Red), &text, AGENT_BG);
             }
             Event::Note(text) => {
                 self.flush_pending();
-                self.note(Style::default().fg(Color::DarkGray), &text);
+                self.note(Style::default().fg(Color::DarkGray), &text, AGENT_BG);
             }
             Event::Progress {
                 token_accounting,
@@ -548,10 +543,14 @@ impl App {
         let style = Style::default()
             .fg(Color::Gray)
             .add_modifier(ratatui::style::Modifier::DIM)
-            .patch(section_background(Section::Reasoning));
+            .patch(Style::default().bg(REASONING_BG));
         for line in wrap(text, self.content_width()) {
-            self.lines
-                .push(ScreenLine::plain(line, style, LineKind::Reasoning));
+            self.lines.push(ScreenLine::plain(
+                line,
+                style,
+                LineKind::Reasoning,
+                REASONING_BG,
+            ));
         }
         self.maybe_truncate();
         self.follow();
@@ -599,7 +598,7 @@ impl App {
                             next.extend(
                                 wrap(&row.line.to_string(), self.content_width())
                                     .into_iter()
-                                    .map(|text| ScreenLine::plain(text, style, row.kind)),
+                                    .map(|text| ScreenLine::plain(text, style, row.kind, row.bg)),
                             );
                         }
                     }
@@ -744,9 +743,12 @@ impl App {
                 self.history_prev();
                 KeyAction::Idle
             }
+            // Ctrl+N starts a fresh session: the transcript clears and the
+            // runner restarts the model conversation (a running turn is
+            // replaced, so its effect is a clean slate).
             (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                self.history_next();
-                KeyAction::Idle
+                self.new_session();
+                KeyAction::NewSession
             }
             (KeyCode::Esc, _) => {
                 // Esc closes the help overlay, otherwise it opens the action menu.
@@ -894,6 +896,7 @@ impl App {
                 &format!(
                     "prompt is longer than {MAX_PROMPT_CHARS} characters; shorten it before sending"
                 ),
+                AGENT_BG,
             );
             return;
         }
@@ -903,8 +906,9 @@ impl App {
             Style::default()
                 .fg(Color::White)
                 .bold()
-                .patch(section_background(Section::Prompt)),
+                .patch(Style::default().bg(PROMPT_BG)),
             &format!("You: {text}"),
+            PROMPT_BG,
         );
         self.editor.clear();
         if self.running {
@@ -963,6 +967,7 @@ impl App {
                 "model → {} (applies to the next prompt; the session restarts)",
                 self.model
             ),
+            AGENT_BG,
         );
     }
 
@@ -988,6 +993,7 @@ impl App {
                 "thinking effort → {} (applies to the next prompt; the session restarts)",
                 self.effort.as_str()
             ),
+            AGENT_BG,
         );
     }
 
@@ -1034,6 +1040,7 @@ impl App {
                 } else {
                     MarkdownRow::Continuation
                 }),
+                bg: AGENT_BG,
             });
         }
         self.maybe_truncate();
@@ -1083,8 +1090,8 @@ impl App {
         self.scroll = 0;
     }
 
-    fn note(&mut self, style: Style, text: &str) {
-        self.push_wrapped(style, text);
+    fn note(&mut self, style: Style, text: &str, bg: Color) {
+        self.push_wrapped(style, text, bg);
     }
 
     /// Leaves the "working" state: clears the running flag and its spinner
@@ -1106,10 +1113,10 @@ impl App {
         Some(SPINNER_FRAMES[index])
     }
 
-    fn push_wrapped(&mut self, style: Style, text: &str) {
+    fn push_wrapped(&mut self, style: Style, text: &str, bg: Color) {
         for line in wrap(text, self.content_width()) {
             self.lines
-                .push(ScreenLine::plain(line, style, LineKind::Normal));
+                .push(ScreenLine::plain(line, style, LineKind::Normal, bg));
         }
         self.maybe_truncate();
         self.follow();
@@ -1220,21 +1227,6 @@ impl App {
         }
     }
 
-    fn history_next(&mut self) {
-        match self.history_index {
-            Some(i) if i + 1 < self.history.len() => {
-                self.history_index = Some(i + 1);
-                if let Some(text) = self.history.get(i + 1).cloned() {
-                    self.restore_editor(&text);
-                }
-            }
-            _ => {
-                self.history_index = None;
-                self.editor.clear();
-            }
-        }
-    }
-
     /// Replaces the editor contents with a history entry, preserving the
     /// multiline shape.
     fn restore_editor(&mut self, text: &str) {
@@ -1261,6 +1253,7 @@ impl App {
             self.note(
                 Style::default().fg(Color::Yellow),
                 "no past sessions found in the log directory",
+                AGENT_BG,
             );
         }
         self.overlay = Overlay::History;
@@ -1280,29 +1273,44 @@ impl App {
                 self.note(
                     Style::default().fg(Color::Red),
                     &format!("could not load transcript: {error}"),
+                    AGENT_BG,
                 );
             }
         }
     }
 
     /// Starts a fresh slate: clears the transcript and returns to idle while
-    /// keeping the selected model and effort.
+    /// keeping the selected model and effort. The runner restarts the model
+    /// conversation for the new session (reported as [`KeyAction::NewSession`]).
     fn new_session(&mut self) {
         self.clear_screen();
         self.following = true;
         self.status = "idle".to_owned();
         self.note(
             Style::default().fg(Color::Cyan),
-            "new session — transcript cleared; type a prompt below",
+            "new session — transcript cleared, model conversation restarted; type a prompt below",
+            AGENT_BG,
         );
     }
 
-    /// Runs the action chosen by the highlighted menu item.
-    fn dispatch_menu(&mut self) {
+    /// Runs the action chosen by the highlighted menu item. Selecting an item
+    /// always leaves the menu: a new session returns to the prompt, the history
+    /// overlay takes over, and quit ends the application.
+    fn dispatch_menu(&mut self) -> KeyAction {
         match self.menu_selection {
-            0 => self.new_session(),
-            1 => self.open_history(),
-            _ => self.should_quit = true,
+            0 => {
+                self.new_session();
+                self.overlay = Overlay::None;
+                KeyAction::NewSession
+            }
+            1 => {
+                self.open_history();
+                KeyAction::Idle
+            }
+            _ => {
+                self.should_quit = true;
+                KeyAction::Quit
+            }
         }
     }
 
@@ -1319,7 +1327,8 @@ impl App {
             }
             KeyCode::Char('n') => {
                 self.new_session();
-                KeyAction::Idle
+                self.overlay = Overlay::None;
+                KeyAction::NewSession
             }
             KeyCode::Char('h') => {
                 self.open_history();
@@ -1336,10 +1345,7 @@ impl App {
                 self.menu_selection = self.menu_selection.saturating_sub(1);
                 KeyAction::Idle
             }
-            KeyCode::Enter => {
-                self.dispatch_menu();
-                KeyAction::Idle
-            }
+            KeyCode::Enter => self.dispatch_menu(),
             _ => KeyAction::Idle,
         }
     }
@@ -1559,6 +1565,7 @@ impl App {
                         } else {
                             MarkdownRow::Continuation
                         }),
+                        bg: AGENT_BG,
                     });
                 }
                 index = next;
@@ -1576,7 +1583,7 @@ impl App {
                         LineKind::Placeholder if offset > 0 => LineKind::PlaceholderContinuation,
                         kind => kind,
                     };
-                    wrapped.push(ScreenLine::plain(line, style, kind));
+                    wrapped.push(ScreenLine::plain(line, style, kind, self.lines[index].bg));
                 }
                 index += 1;
             }
@@ -1763,6 +1770,7 @@ fn collapse_placeholder_rows(width: usize) -> Vec<ScreenLine> {
                 } else {
                     LineKind::PlaceholderContinuation
                 },
+                REASONING_BG,
             )
         })
         .collect()
@@ -1773,6 +1781,7 @@ fn collapse_placeholder() -> ScreenLine {
         "▸ thinking hidden — press T to reveal",
         Style::default().fg(Color::DarkGray),
         LineKind::Placeholder,
+        REASONING_BG,
     )
 }
 
@@ -1860,8 +1869,8 @@ fn bargraph(fraction: f64, width: u16) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        App, Color, KeyAction, LineKind, MAX_LINES, MENU_ITEMS, Overlay, ScreenLine, Style,
-        next_block_end, wrap,
+        AGENT_BG, App, Color, KeyAction, LineKind, MAX_LINES, MENU_ITEMS, Overlay, PROMPT_BG,
+        REASONING_BG, ScreenLine, Style, next_block_end, wrap,
     };
     use crate::session::Event;
     use agent_runtime::ReasoningEffort;
@@ -1962,7 +1971,7 @@ mod tests {
             app.lines
                 .iter()
                 .find(|line| line.line.to_string().contains(needle))
-                .and_then(|line| line.line.spans.first().and_then(|span| span.style.bg))
+                .map(|line| line.bg)
         };
         let foreground_for = |needle: &str| -> Option<Color> {
             app.lines
@@ -1971,42 +1980,32 @@ mod tests {
                 .and_then(|line| line.line.spans.first().and_then(|span| span.style.fg))
         };
 
-        // A subtle background is applied to each section, with the existing
-        // foreground color left intact.
-        assert_eq!(
-            background_for("You: hello world"),
-            Some(Color::Rgb(46, 50, 64))
-        );
+        // Large blocks carry a distinct, intentionally dark background, with the
+        // existing foreground colour left intact.
+        assert_eq!(background_for("You: hello world"), Some(PROMPT_BG));
         assert_eq!(foreground_for("You: hello world"), Some(Color::White));
-        assert_eq!(background_for("a reason"), Some(Color::Rgb(34, 34, 38)));
+        assert_eq!(background_for("a reason"), Some(REASONING_BG));
         assert_eq!(foreground_for("a reason"), Some(Color::Gray));
-        assert_eq!(background_for("→ tool: ls"), Some(Color::Rgb(36, 42, 58)));
+
+        // Everything the agent produces — tool calls, results, and the final
+        // answer line — shares one agent-result background, so a call and its
+        // result group with the surrounding answer text; success and failure
+        // are carried by the text colour.
+        assert_eq!(background_for("→ tool: ls"), Some(AGENT_BG));
         assert_eq!(foreground_for("→ tool: ls"), Some(Color::Blue));
-        assert_eq!(
-            background_for("✓ tool ls finished"),
-            Some(Color::Rgb(38, 50, 44))
-        );
+        assert_eq!(background_for("✓ tool ls finished"), Some(AGENT_BG));
         assert_eq!(foreground_for("✓ tool ls finished"), Some(Color::Green));
-        assert_eq!(
-            background_for("✓ tool cat finished"),
-            Some(Color::Rgb(58, 38, 36))
-        );
+        assert_eq!(background_for("✓ tool cat finished"), Some(AGENT_BG));
         assert_eq!(foreground_for("✓ tool cat finished"), Some(Color::Red));
-        assert_eq!(background_for("✓ done"), Some(Color::Rgb(38, 50, 44)));
+        assert_eq!(background_for("✓ done"), Some(AGENT_BG));
         assert_eq!(foreground_for("✓ done"), Some(Color::Green));
 
-        // The five section backgrounds are pairwise distinct, which is the whole
-        // point of giving each section its own tint.
-        let backgrounds = [
-            background_for("You: hello world").unwrap(),
-            background_for("a reason").unwrap(),
-            background_for("→ tool: ls").unwrap(),
-            background_for("✓ tool ls finished").unwrap(),
-            background_for("✓ tool cat finished").unwrap(),
-        ];
+        // Large blocks are each distinct from one another and from the shared
+        // agent-result background.
+        let backgrounds = [PROMPT_BG, REASONING_BG, AGENT_BG];
         for (index, a) in backgrounds.iter().enumerate() {
             for b in backgrounds.iter().skip(index + 1) {
-                assert_ne!(a, b, "section backgrounds must be distinct");
+                assert_ne!(a, b, "large-block backgrounds must be distinct");
             }
         }
     }
@@ -2183,7 +2182,7 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_p_and_ctrl_n_navigate_prompt_history() {
+    fn ctrl_p_navigates_prompt_history() {
         let mut app = app();
         for prompt in ["alpha", "beta\ngamma", "delta"] {
             app.editor.insert_str(prompt);
@@ -2196,12 +2195,22 @@ mod tests {
         assert_eq!(editor_text(&app), "beta\ngamma");
         app.on_key(ctrl(KeyCode::Char('p')));
         assert_eq!(editor_text(&app), "alpha");
-        app.on_key(ctrl(KeyCode::Char('n')));
-        assert_eq!(editor_text(&app), "beta\ngamma");
-        app.on_key(ctrl(KeyCode::Char('n')));
-        assert_eq!(editor_text(&app), "delta");
-        app.on_key(ctrl(KeyCode::Char('n')));
-        assert_eq!(editor_text(&app), "");
+    }
+
+    #[test]
+    fn ctrl_n_starts_a_new_session() {
+        let mut app = app();
+        app.note(Style::default(), "earlier output", AGENT_BG);
+        assert!(!app.lines.is_empty());
+        assert_eq!(app.on_key(ctrl(KeyCode::Char('n'))), KeyAction::NewSession);
+        assert!(
+            !app.lines
+                .iter()
+                .any(|l| l.line.to_string().contains("earlier output")),
+            "old transcript is cleared"
+        );
+        assert_eq!(app.status, "idle");
+        assert_eq!(app.overlay, Overlay::None);
     }
 
     #[test]
@@ -2669,11 +2678,11 @@ mod tests {
         // `push_wrapped` appends one pre-wrapped row per line, so each argument
         // line becomes a distinct transcript row without depending on markdown
         // (where a single `\n` is a soft break, i.e. a space).
-        app.push_wrapped(Style::default(), "alpha");
-        app.push_wrapped(Style::default(), "beta");
+        app.push_wrapped(Style::default(), "alpha", AGENT_BG);
+        app.push_wrapped(Style::default(), "beta", AGENT_BG);
         // A final row that ends with genuine trailing spaces, to prove copy
         // trims the padding that sits between the content and the box border.
-        app.push_wrapped(Style::default(), "trailing spaces   ");
+        app.push_wrapped(Style::default(), "trailing spaces   ", AGENT_BG);
         app.copy_to_clipboard();
         let escape = app
             .take_pending_osc_52()
@@ -2796,11 +2805,13 @@ mod tests {
             "notice sentinel",
             Style::default(),
             LineKind::Normal,
+            AGENT_BG,
         ));
         app.lines.push(ScreenLine::plain(
             "reasoning sentinel",
             Style::default(),
             LineKind::Reasoning,
+            REASONING_BG,
         ));
         for width in [30, 60, 22, 50] {
             app.resize(width, 24);
@@ -2825,6 +2836,7 @@ mod tests {
                 "abcdefghijklmnopqrst",
                 Style::default(),
                 LineKind::Normal,
+                AGENT_BG,
             ));
         }
         app.resize(4, 24);
@@ -2839,6 +2851,7 @@ mod tests {
             "abcdefghijklmnopqrst",
             Style::default(),
             LineKind::Reasoning,
+            REASONING_BG,
         ));
         app.set_collapse_reasoning(true);
         app.resize(8, 24);
@@ -2854,18 +2867,21 @@ mod tests {
             "discarded",
             Style::default(),
             LineKind::Reasoning,
+            REASONING_BG,
         ));
         for _ in 0..MAX_LINES {
             app.lines.push(ScreenLine::plain(
                 "filler",
                 Style::default(),
                 LineKind::Normal,
+                AGENT_BG,
             ));
         }
         app.lines.push(ScreenLine::plain(
             "kept",
             Style::default(),
             LineKind::Reasoning,
+            REASONING_BG,
         ));
         app.set_collapse_reasoning(true);
         app.maybe_truncate();
@@ -2883,16 +2899,19 @@ mod tests {
             "first",
             Style::default(),
             LineKind::Reasoning,
+            REASONING_BG,
         ));
         app.lines.push(ScreenLine::plain(
             "between",
             Style::default(),
             LineKind::Normal,
+            AGENT_BG,
         ));
         app.lines.push(ScreenLine::plain(
             "second",
             Style::default(),
             LineKind::Reasoning,
+            REASONING_BG,
         ));
         app.set_collapse_reasoning(true);
         app.resize(8, 24);
@@ -2910,13 +2929,19 @@ mod tests {
             "first",
             Style::default(),
             LineKind::Reasoning,
+            REASONING_BG,
         ));
-        app.lines
-            .push(ScreenLine::plain("mid", Style::default(), LineKind::Normal));
+        app.lines.push(ScreenLine::plain(
+            "mid",
+            Style::default(),
+            LineKind::Normal,
+            AGENT_BG,
+        ));
         app.lines.push(ScreenLine::plain(
             "second",
             Style::default(),
             LineKind::Reasoning,
+            REASONING_BG,
         ));
         app.set_collapse_reasoning(true);
         assert!(app.lines.iter().all(|row| row.line.width() <= 6));
@@ -3078,12 +3103,16 @@ mod tests {
     }
 
     #[test]
-    fn menu_n_hotkey_starts_a_new_session() {
+    fn menu_n_hotkey_starts_a_new_session_and_leaves_the_menu() {
         let mut app = app();
-        app.note(Style::default(), "earlier output that should vanish");
+        app.note(
+            Style::default(),
+            "earlier output that should vanish",
+            AGENT_BG,
+        );
         assert!(!app.lines.is_empty());
         app.open_menu();
-        app.on_key(ch(KeyCode::Char('n')));
+        assert_eq!(app.on_key(ch(KeyCode::Char('n'))), KeyAction::NewSession);
         assert!(
             !app.lines
                 .iter()
@@ -3091,6 +3120,28 @@ mod tests {
             "old transcript is cleared"
         );
         assert_eq!(app.status, "idle");
+        // Selecting an item leaves the menu: the user is back at the prompt.
+        assert_eq!(app.overlay, Overlay::None);
+    }
+
+    #[test]
+    fn menu_enter_on_new_session_leaves_the_menu() {
+        let mut app = app();
+        app.note(
+            Style::default(),
+            "earlier output that should vanish",
+            AGENT_BG,
+        );
+        app.open_menu();
+        assert_eq!(app.menu_selection, 0);
+        assert_eq!(app.on_key(ch(KeyCode::Enter)), KeyAction::NewSession);
+        assert!(
+            !app.lines
+                .iter()
+                .any(|l| l.line.to_string().contains("earlier output")),
+            "old transcript is cleared"
+        );
+        assert_eq!(app.overlay, Overlay::None);
     }
 
     #[test]

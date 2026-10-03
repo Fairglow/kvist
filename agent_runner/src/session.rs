@@ -29,7 +29,13 @@ use crate::retry::RetryPolicy;
 use crate::sandbox::ToolOutcome;
 
 /// The maximum number of model turns in one session before the loop stops.
-pub const MAX_TURNS: u32 = 50;
+///
+/// Large enough that a long task runs uninterrupted to a result: the loop keeps
+/// turning while the model has not answered, and stops only on an answer, a
+/// detected loop/hang (repeated-action breaker, cadence watchdog), a real
+/// failure, or one of the prompt budgets. Five hundred turns is a safety bound,
+/// not an expected duration.
+pub const MAX_TURNS: u32 = 500;
 /// The maximum bytes of a tool result folded back to the model.
 pub const MAX_TOOL_RESULT_BYTES: usize = 8 * 1024;
 
@@ -380,6 +386,12 @@ pub trait Recorder: Send {
     fn notice(&mut self, _message: &str) -> Result<()> {
         Ok(())
     }
+    /// Called once per prompt as it is received by the worker, before any turn.
+    /// The durable session log uses it to label the transcript after the first
+    /// prompt; other recorders ignore it.
+    fn on_prompt(&mut self, _prompt: &str) -> Result<()> {
+        Ok(())
+    }
     /// Writes the session-start event. Called once, before the first turn.
     fn session_start(&mut self) -> Result<()>;
     /// Records a model attempt, without granting execution authority.
@@ -469,9 +481,13 @@ pub struct RunLimits {
 
 impl Default for RunLimits {
     fn default() -> Self {
+        // The defaults are safety bounds, not expected runtimes: a prompt runs
+        // uninterrupted until it reaches a result, is detected as hung or
+        // looping, or genuinely fails. Operators bound individual runs with
+        // --max-run-secs / --max-run-tokens.
         Self {
-            wall_time: Duration::from_secs(1800),
-            max_tokens: 1_000_000,
+            wall_time: Duration::from_secs(86_400),
+            max_tokens: 100_000_000,
             response_reserve: 1024,
         }
     }

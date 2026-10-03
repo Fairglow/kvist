@@ -221,6 +221,15 @@ Successful use produces:
   is available or the profile is explicitly enabled.
 - Given interactive input, the UI renders a transcript, the status bar reflects
   the model and effort, and Ctrl+C cancels a running turn cleanly.
+- Given interactive input while the model is still starting, the UI is usable
+  and a submitted prompt is dispatched when the model is ready; a model/effort
+  change re-starts the model with the per-turn deadline applied to the switch.
+- Given an ESC-menu selection, the menu closes: a history item opens the
+  replay overlay, and "New session" starts a fresh session; Ctrl+N starts a new
+  session from anywhere.
+- Given a long prompt, the terminal UI accepts it without the previous
+  16,384-character bound, and the session record is named by date, time, and
+  the first words of the first prompt.
 - Every behavior above is covered by an automated test with an injected
   transport or a captured sandbox request.
 - A turn that fails a temporal model-transport error at least once is retried
@@ -239,71 +248,84 @@ implemented and no acceptance receipt is claimed.
 ### RUN-REQ-AUTHORITY
 
 This is an interactive workspace agent, not the engine's
-  protected-task broker. Sandboxed effects remain network-denied; host execution
-  remains an explicit interactive opt-out. Headless execution MUST reject host
-  opt-out and disabled recording. It MUST NOT authorize tasks, write engine
-  evidence, accept intent, or promote results.
-  The UI and model instructions MUST identify the actual execution scope.
-  Operational records MUST identify the scope, workspace, policy and limits
-  without claiming engine authorization.
-  Plain answers and human diagnostics MUST visibly escape terminal controls
-  other than LF/tab; JSON and private transcripts retain the original text.
+protected-task broker. Sandboxed effects remain network-denied; host execution
+remains an explicit interactive opt-out. Headless execution MUST reject host
+opt-out and disabled recording. It MUST NOT authorize tasks, write engine
+evidence, accept intent, or promote results.
+The UI and model instructions MUST identify the actual execution scope.
+Operational records MUST identify the scope, workspace, policy and limits
+without claiming engine authorization.
+Plain answers and human diagnostics MUST visibly escape terminal controls
+other than LF/tab; JSON and private transcripts retain the original text.
+
 ### RUN-REQ-CONTEXT
 
 Before every provider request, account for the complete
-  serialized canonical request, including system instructions and tool schemas,
-  with an explicit output-token reserve enforced at the provider. Estimates are
-  not tokenizer guarantees. Compact only complete tool-call/result groups;
-  preserve active user goals and system instructions. An irreducibly oversized
-  request MUST fail before provider I/O. Summaries are explicitly lossy,
-  non-authoritative history. Combined model-facing tool output MUST be bounded.
+serialized canonical request, including system instructions and tool schemas,
+with an explicit output-token reserve enforced at the provider. Estimates are
+not tokenizer guarantees. Compact only complete tool-call/result groups;
+preserve active user goals and system instructions. An irreducibly oversized
+request MUST fail before provider I/O. Summaries are explicitly lossy,
+non-authoritative history. Combined model-facing tool output MUST be bounded.
+
 ### RUN-REQ-LIFECYCLE
 
 Recording MUST be fallible. A required dispatch record
-  MUST be synchronized before invoking an executor. Recording failure MUST stop
-  further effects. Final answer, failed, cancelled, exhausted, and budget-limited
-  runs MUST be distinguishable; a previous prompt's answer MUST NOT become a new
-  prompt's result. Interrupted dispatches have unknown effects, never replayable
-  effects. Journals are local operational records, not compliance certification.
-  Worker teardown MUST join even with retained prompt senders or a full event
-  queue. Collapsing reasoning MUST preserve all non-reasoning transcript rows.
-  History reads MUST reject links/nonregular files and bound bytes before
-  allocation, including growth after opening; unusable entries are logged.
-  Built-in tool executors MUST bound combined captured bytes and intermediate
-  buffering on every exit path. Stdin writes and post-exit drains MUST be
-  cancellation/deadline-aware. Reader ownership and process-group cleanup MUST
-  be explicit; retained output descriptors MUST fail instead of hanging or
-  returning success.
+MUST be synchronized before invoking an executor. Recording failure MUST stop
+further effects. Final answer, failed, cancelled, exhausted, and budget-limited
+runs MUST be distinguishable; a previous prompt's answer MUST NOT become a new
+prompt's result. Interrupted dispatches have unknown effects, never replayable
+effects. Journals are local operational records, not compliance certification.
+Worker teardown MUST join even with retained prompt senders or a full event
+queue. Collapsing reasoning MUST preserve all non-reasoning transcript rows.
+History reads MUST reject links/nonregular files and bound bytes before
+allocation, including growth after opening; unusable entries are logged.
+Built-in tool executors MUST bound combined captured bytes and intermediate
+buffering on every exit path. Stdin writes and post-exit drains MUST be
+cancellation/deadline-aware. Reader ownership and process-group cleanup MUST
+be explicit; retained output descriptors MUST fail instead of hanging or
+returning success.
+
 ### RUN-REQ-BUDGET
 
 One prompt deadline bounds model requests, retries, waits,
-  and cooperative tool execution. Retry waits MUST be cancellable. Identical
-  repeated opaque/effectful action arguments MUST receive correction and
-  eventually stop without silently
-  widening authority. Cancelled multi-call turns MUST retain valid paired
-  results for subsequent prompts. Injected turn limits MUST be in 1..=50.
+and cooperative tool execution. Retry waits MUST be cancellable. Identical
+repeated opaque/effectful action arguments MUST receive correction and
+eventually stop without silently
+widening authority. Cancelled multi-call turns MUST retain valid paired
+results for subsequent prompts. Injected turn limits MUST be in 1..=500.
+Default prompt budgets MUST be safety bounds (24-hour wall, 100,000,000
+estimated tokens), so a prompt runs uninterrupted to a result, a detected
+hang/loop, or a real failure. The provider accepting a request — including a
+model load/switch — and the first-token wait MUST be bounded by the turn's
+own deadline, not a short fixed probe, so a slow switch completes within the
+turn. The terminal UI MUST appear without waiting for the model, and a
+failed startup MUST NOT quit the app.
+
 ### RUN-REQ-TOOLS
 
 Provide bounded/paginated text reads, directory listing,
-  literal search and scoped file discovery, plus exact-single-occurrence edits
-  bound to an expected SHA-256 preimage. Preserve unrelated bytes, CRLF and
-  missing final newlines. Reject stale/ambiguous matches, malformed/unknown
-  arguments, traversal, and symbolic-link mutation paths. File effects run in a
-  small Rust helper through the same sandbox executor. Payload staging MUST be
-  host-owned, private, outside the writable workspace, unrelated to provider
-  call IDs, and cleaned on every return path.
+literal search and scoped file discovery, plus exact-single-occurrence edits
+bound to an expected SHA-256 preimage. Preserve unrelated bytes, CRLF and
+missing final newlines. Reject stale/ambiguous matches, malformed/unknown
+arguments, traversal, and symbolic-link mutation paths. File effects run in a
+small Rust helper through the same sandbox executor. Payload staging MUST be
+host-owned, private, outside the writable workspace, unrelated to provider
+call IDs, and cleaned on every return path.
+
 ### RUN-REQ-HEADLESS
 
 Provide terminal-free execution over the same loop with
-  versioned NDJSON events, ordered sequence IDs, diagnostics on stderr, an
-  explicit final disposition and nonzero unsuccessful status. Required journal
-  files MUST be private, no-clobber and outside the sandbox writable scope.
+versioned NDJSON events, ordered sequence IDs, diagnostics on stderr, an
+explicit final disposition and nonzero unsuccessful status. Required journal
+files MUST be private, no-clobber and outside the sandbox writable scope.
+
 ### RUN-REQ-PROVIDERS
 
 Preserve llama-server and Ollama. Honor output bounds in
-  both wire protocols. Test fragmented streaming tools, finish classification,
-  transport/cancellation failures, context rejection, and retry boundaries
-  deterministically. Keep live llama-server qualification explicit and opt-in.
+both wire protocols. Test fragmented streaming tools, finish classification,
+transport/cancellation failures, context rejection, and retry boundaries
+deterministically. Keep live llama-server qualification explicit and opt-in.
 
 Acceptance requires tests before production changes, targeted formatting and
 lint/build gates, native isolated file-tool trials, opt-in llama-server trials,

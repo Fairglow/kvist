@@ -78,11 +78,16 @@ pub struct Cli {
     pub response_reserve: Option<u32>,
 
     /// Whole-prompt wall time, including requests, retry waits and tools.
-    #[arg(long, default_value_t = 1800, value_parser = clap::value_parser!(u64).range(1..=86_400))]
+    /// Defaults to the 24-hour safety bound so a long task runs uninterrupted
+    /// to a result; pass a smaller value to bound individual runs.
+    #[arg(long, default_value_t = 86_400, value_parser = clap::value_parser!(u64).range(1..=86_400))]
     pub max_run_secs: u64,
 
     /// Estimated input plus reserved output tokens across all model attempts.
-    #[arg(long, default_value_t = 1_000_000, value_parser = clap::value_parser!(u64).range(1..=1_000_000_000))]
+    /// Defaults to a 100-million-token safety bound so long multi-turn tasks
+    /// are not cut off by the estimate budget; pass a smaller value to bound
+    /// individual runs.
+    #[arg(long, default_value_t = 100_000_000, value_parser = clap::value_parser!(u64).range(1..=1_000_000_000))]
     pub max_run_tokens: u64,
 
     /// An initial prompt to submit (optional).

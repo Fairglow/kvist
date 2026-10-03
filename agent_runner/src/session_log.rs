@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use agent_runtime::{ModelRequest, ModelTurn, ModelUsage, ToolIntent};
-use nix::fcntl::{OFlag, openat};
+use nix::fcntl::{OFlag, openat, renameat};
 use nix::sys::stat::{Mode, mkdirat};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -65,6 +65,57 @@ pub struct SessionMetadata {
 
 fn hash(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
+}
+
+/// Formats epoch nanoseconds as a human-readable UTC stamp for session ids,
+/// e.g. `2026-10-03T14-22-05Z`, so a transcript is findable by its date and
+/// time. Second precision: the pid and per-process counter in the id already
+/// disambiguate sessions started within the same second, and lexicographic
+/// order of the stamp matches chronological order.
+fn format_utc(epoch_nanos: u128) -> String {
+    let secs = (epoch_nanos / 1_000_000_000) as i64;
+    let days = secs.div_euclid(86_400);
+    let rem = secs.rem_euclid(86_400);
+    let (hour, minute, second) = (rem / 3_600, (rem % 3_600) / 60, rem % 60);
+    // Proleptic Gregorian civil-from-days conversion.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if month <= 2 { y + 1 } else { y };
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}-{minute:02}-{second:02}Z")
+}
+
+/// Derives a bounded, filesystem-safe slug from the first few words of a
+/// prompt, so a session transcript is recognisable by its content. Punctuation
+/// becomes hyphens, case is lowered, and the result is capped so it can never
+/// dominate the file name.
+fn prompt_slug(prompt: &str) -> String {
+    let mut slug = String::new();
+    for (index, word) in prompt.split_whitespace().take(6).enumerate() {
+        if index > 0 && !slug.ends_with('-') {
+            slug.push('-');
+        }
+        for ch in word.chars() {
+            if slug.len() >= 40 {
+                break;
+            }
+            if ch.is_alphanumeric() {
+                slug.push_str(&ch.to_lowercase().to_string());
+            } else if !slug.ends_with('-') {
+                slug.push('-');
+            }
+        }
+    }
+    // Lowercasing can widen a single character, so re-apply the bound on a
+    // char boundary.
+    slug.truncate(40);
+    slug.trim_end_matches('-').to_owned()
 }
 
 fn bounded(text: &str) -> &str {
@@ -154,6 +205,9 @@ pub struct SessionLog {
     journal_path: PathBuf,
     transcript_path: PathBuf,
     session_id: String,
+    /// True once the first prompt has been folded into the session id, so a
+    /// later prompt in the same session never renames the record again.
+    slug_applied: bool,
     task_id: String,
     started_at: Instant,
     sequence: u64,
@@ -170,6 +224,11 @@ pub struct SessionLog {
 
 impl SessionLog {
     /// Creates no-clobber mode-0600 files under a non-link mode-0700 directory.
+    ///
+    /// The session id is human-readable: a UTC date-time stamp plus a pid and
+    /// per-process counter for uniqueness. The first prompt received later
+    /// appends a slug of its first words (see [`Self::annotate_prompt`]), so a
+    /// transcript reads as `session-2026-10-03T14-22-05Z-4242-1-fix-the-bug.log`.
     pub fn open(log_dir: &Path, task_id: impl Into<String>) -> io::Result<Self> {
         let (log_dir, directory) = private_directory(log_dir)?;
         let stamp = SystemTime::now()
@@ -177,7 +236,8 @@ impl SessionLog {
             .map_err(io::Error::other)?
             .as_nanos();
         let session_id = format!(
-            "{stamp:032}-{}-{}",
+            "{}-{}-{}",
+            format_utc(stamp),
             std::process::id(),
             NEXT_FILE.fetch_add(1, Ordering::Relaxed)
         );
@@ -196,6 +256,7 @@ impl SessionLog {
             journal_path: log_dir.join(journal_name),
             transcript_path: log_dir.join(transcript_name),
             session_id,
+            slug_applied: false,
             task_id: task_id.into(),
             started_at: Instant::now(),
             sequence: 0,
@@ -228,6 +289,54 @@ impl SessionLog {
     /// Caller-supplied descriptive label; not an engine approval identity.
     pub fn task_id(&self) -> &str {
         &self.task_id
+    }
+
+    /// Folds the first few words of a prompt into the session id and renames
+    /// both record files to match. Only the first prompt renames; later prompts
+    /// in the same session leave the name untouched. Renaming uses the held
+    /// directory descriptor, so path substitution cannot redirect the record,
+    /// and the open file handles follow their inodes across the rename.
+    pub fn annotate_prompt(&mut self, prompt: &str) -> io::Result<()> {
+        if self.slug_applied {
+            return Ok(());
+        }
+        self.slug_applied = true;
+        let slug = prompt_slug(prompt);
+        if slug.is_empty() {
+            return Ok(());
+        }
+        let dir = self
+            .journal_path
+            .parent()
+            .ok_or_else(|| io::Error::other("session log directory is missing"))?
+            .to_owned();
+        let old_journal = self
+            .journal_path
+            .file_name()
+            .ok_or_else(|| io::Error::other("session journal name is missing"))?;
+        let old_transcript = self
+            .transcript_path
+            .file_name()
+            .ok_or_else(|| io::Error::other("session transcript name is missing"))?;
+        let journal_name = format!("session-{}-{slug}.jsonl", self.session_id);
+        let transcript_name = format!("session-{}-{slug}.log", self.session_id);
+        renameat(
+            &self.directory,
+            old_journal,
+            &self.directory,
+            journal_name.as_str(),
+        )?;
+        renameat(
+            &self.directory,
+            old_transcript,
+            &self.directory,
+            transcript_name.as_str(),
+        )?;
+        self.session_id = format!("{}-{slug}", self.session_id);
+        self.journal_path = dir.join(journal_name);
+        self.transcript_path = dir.join(transcript_name);
+        self.directory.sync_all()?;
+        Ok(())
     }
     /// Current-prompt provider input usage (possibly incomplete).
     pub fn total_input_tokens(&self) -> u64 {
@@ -292,6 +401,11 @@ impl Recorder for SessionLog {
     fn notice(&mut self, message: &str) -> Result<()> {
         self.record(json!({"type":"notice", "prompt":self.prompt, "message":bounded(message)}))?;
         self.text("notice", message)
+    }
+
+    fn on_prompt(&mut self, prompt: &str) -> Result<()> {
+        self.annotate_prompt(prompt)
+            .map_err(|source| io_error("rename session record with prompt slug", None, source))
     }
 
     fn session_start(&mut self) -> Result<()> {
@@ -642,5 +756,58 @@ mod tests {
         std::fs::create_dir(&public).unwrap();
         std::fs::set_permissions(&public, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(SessionLog::open(&public, "test").is_err());
+    }
+
+    #[test]
+    fn prompt_slug_is_bounded_lowercase_and_filesystem_safe() {
+        assert_eq!(prompt_slug("Fix the bug, please!"), "fix-the-bug-please");
+        assert_eq!(
+            prompt_slug("Hello, world -- this is a long prompt"),
+            "hello-world-this-is-a"
+        );
+        assert_eq!(prompt_slug("  spaced   out  "), "spaced-out");
+        assert_eq!(prompt_slug("!!!"), "");
+        assert_eq!(prompt_slug("   "), "");
+        assert_eq!(prompt_slug(""), "");
+        let long = "abcdefghijklm ".repeat(6);
+        let slug = prompt_slug(long.trim_end());
+        assert!(slug.len() <= 40, "slug is bounded: {slug:?}");
+        assert!(!slug.ends_with('-'));
+        assert!(
+            slug.chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '-'),
+            "only alphanumerics and hyphens: {slug:?}"
+        );
+    }
+
+    #[test]
+    fn first_prompt_renames_journal_and_transcript_once() {
+        let dir = private_tempdir();
+        let mut log = SessionLog::open(dir.path(), "test").unwrap();
+        let before = log.journal_path().to_owned();
+        Recorder::on_prompt(&mut log, "Fix the bug, please!").unwrap();
+        let after = log.journal_path().to_owned();
+        assert_ne!(before, after);
+        assert!(
+            after
+                .to_string_lossy()
+                .ends_with("fix-the-bug-please.jsonl"),
+            "{after:?}"
+        );
+        assert!(
+            log.transcript_path()
+                .to_string_lossy()
+                .ends_with("fix-the-bug-please.log"),
+            "{}",
+            log.transcript_path().display()
+        );
+        assert!(!before.exists(), "the old journal name is gone");
+        // A later prompt in the same session never renames the record again.
+        Recorder::on_prompt(&mut log, "A completely different prompt").unwrap();
+        assert_eq!(log.journal_path(), after);
+        // Records keep working through the renamed files.
+        log.notice("still writing").unwrap();
+        let text = std::fs::read_to_string(log.transcript_path()).unwrap();
+        assert!(text.contains("still writing"));
     }
 }

@@ -12,6 +12,26 @@ use super::app::{App, MENU_HOTKEYS, MENU_ITEMS, Overlay, wrap};
 /// Rows reserved for the multiline prompt editor around the transcript.
 const INPUT_ROWS: u16 = 4;
 
+/// Extends one transcript row to the box's full inner width so its block
+/// background reads as an encapsulated box (borders excluded). The row's own
+/// line style carries the background under every span, and a trailing space
+/// span pads past the last content span: ratatui styles cells only up to the
+/// last span, so without the pad a short row would show only a short patch of
+/// background. Spans with their own background (for example highlighted code)
+/// keep it, so code blocks stay distinct inside the block background.
+fn full_width_line(line: &Line<'static>, bg: Color, width: usize) -> Line<'static> {
+    let mut line = line.clone();
+    line.style = line.style.patch(Style::default().bg(bg));
+    let current = line.width();
+    if current < width {
+        line.spans.push(Span::styled(
+            " ".repeat(width - current),
+            Style::default().bg(bg),
+        ));
+    }
+    line
+}
+
 /// Renders one frame of the application.
 pub fn render(f: &mut ratatui::Frame, app: &App) {
     let area = f.area();
@@ -82,10 +102,13 @@ fn render_header(f: &mut ratatui::Frame, app: &App, area: Rect) {
 }
 
 fn render_transcript(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    // The box's two borders consume 2 columns; the remainder is the inner
+    // width every transcript row's block background must fill.
+    let inner_width = usize::from(area.width.saturating_sub(2).max(1));
     let lines: Vec<Line> = app
         .lines
         .iter()
-        .map(|screen_line| screen_line.line.clone())
+        .map(|screen_line| full_width_line(&screen_line.line, screen_line.bg, inner_width))
         .collect();
     let block = Block::default().borders(Borders::ALL).title(Span::styled(
         format!(" transcript [{}] ", app.lines.len()),
@@ -151,7 +174,8 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from("  Enter            submit on a blank line, else a newline"),
         Line::from("  Shift+Enter      always insert a blank line"),
         Line::from("  Tab / Shift+Tab  next model / next thinking effort (per prompt)"),
-        Line::from("  Ctrl+P / Ctrl+N  previous / next prompt history"),
+        Line::from("  Ctrl+P           previous prompt history"),
+        Line::from("  Ctrl+N           start a new session (fresh model conversation)"),
         Line::from("  Ctrl+C           cancel a running turn, or quit when idle"),
         Line::from("  Ctrl+D           quit when the prompt is empty"),
         Line::from("  PageUp / PageDown scroll the transcript"),

@@ -575,7 +575,11 @@ mod tests {
         std::fs::write(dir.join("package-lock.json"), "{}").unwrap();
         std::fs::create_dir_all(dir.join("node_modules")).unwrap();
         std::fs::write(dir.join("Cargo.toml"), "[package]\n").unwrap();
-        std::fs::write(dir.join(".gitignore"), "/package.json\n/package-lock.json\n/node_modules\n").unwrap();
+        std::fs::write(
+            dir.join(".gitignore"),
+            "/package.json\n/package-lock.json\n/node_modules\n",
+        )
+        .unwrap();
 
         let used = detect_project_languages(dir);
         assert_eq!(used, BTreeSet::from([ToolProfile::Rust]));

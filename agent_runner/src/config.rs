@@ -186,12 +186,25 @@ impl Model {
     }
 
     /// Builds the sole direct transport with this model's bounded watchdogs.
+    ///
+    /// The provider may have to load (or switch to) this model and prefill the
+    /// complete prompt before it accepts a request or streams its first token,
+    /// and that switch legitimately takes much longer than an ordinary request.
+    /// The slot-allocation phase (waiting for the provider to accept) and the
+    /// time-to-first-token watchdog are therefore each granted the turn's own
+    /// `deadline_secs` budget: a slow model switch is waited for to completion
+    /// instead of being retried into failure. A genuinely hung provider is
+    /// still bounded by the per-attempt deadline, and a stall after the first
+    /// token is still caught by the inter-token cadence watchdog.
     pub fn transport(&self) -> Result<agent_runtime::DirectModelTransport> {
-        let mut transport = agent_runtime::DirectModelTransport::new(
+        let deadline = std::time::Duration::from_secs(self.deadline_secs);
+        let mut transport = agent_runtime::DirectModelTransport::with_watchdogs(
             self.provider.to_agent_provider(),
             &self.base_url,
-            std::time::Duration::from_secs(self.deadline_secs),
+            deadline,
             8 * 1024 * 1024,
+            deadline,
+            deadline,
         )
         .map_err(|error| Error::ModelTransport {
             model: Some(self.id.clone()),

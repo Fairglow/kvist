@@ -192,6 +192,7 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
         crate::session::Recorder::notice(&mut log, note)?;
         eprintln!("{}", crate::error::terminal_text(note));
     }
+    crate::session::Recorder::on_prompt(&mut log, prompt)?;
     session.push_user(prompt);
     let mut context = crate::context::ContextManager::for_model(budgets.context_limit);
     let sink = OutputSink {

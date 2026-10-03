@@ -172,6 +172,23 @@ then joins. Event sends and prompt waits poll shutdown; retained prompt senders
 and full event queues cannot prevent teardown. UI worker field order closes both
 channels before joining on quit, errors and model switches.
 
+Startup is lazy so the terminal UI appears immediately instead of waiting on
+the provider: `run` hands the UI loop a receiver from `spawn_bootstrap`, which
+runs `SessionBuilder::start` (transport construction, provider connection,
+model load) on a dedicated `agent-bootstrap` thread. The transcript shows a
+`starting model…` status in the meantime; a held initial prompt (for example
+one supplied positionally) is dispatched to the worker as soon as it is
+installed. A failed bootstrap is reported as a failure notice, not fatal: the
+UI stays usable and the next submission or new session starts a fresh
+bootstrap. Submitting with a changed model or effort cancels the old worker,
+discards a stale in-flight bootstrap, starts a new one, and holds the prompt
+for it. The transport watchdogs are part of the turn budget: the
+slot-allocation phase (provider acceptance, including model load/switch) and
+the time-to-first-token phase (long-prompt prefill) are each granted the full
+per-turn `deadline_secs`, so a slow model switch completes within the turn
+instead of failing on a short fixed probe; the inter-token cadence watchdog
+(default 30 s, configurable) still catches a stall after the first token.
+
 ## Algorithms and decisions
 
 `ContextManager::prepare` runs before every request. Complete canonical JSON
@@ -404,6 +421,17 @@ labels actual sandboxed or HOST UNCONFINED scope; model instructions use the
 same selected scope. Reasoning collapse retains other rows and restores hidden
 reasoning in order.
 
+Every transcript row is filled to the box's inner width (the border excluded),
+so each block reads as an enclosed textbox without extra border characters:
+ratatui's `set_line` only styles cells up to the last span, so the renderer
+appends a trailing space span carrying the row's background on top of the
+line-level style. Three subtle, low-contrast backgrounds separate blocks —
+prompt echo, reasoning/placeholders, and everything agent-produced (markdown,
+tool calls/results, notices, terminal status) — and single-line tool rows share
+the agent-produced background. Foregrounds are chosen for comfortable contrast
+against each background, and the differences between blocks are kept subtle so
+the text stays dominant. Resized rows keep their background.
+
 Transcript text is pre-wrapped to the box's inner width (the full terminal
 width minus the two vertical borders) so no line extends past the visible
 area, and tool-call events carry a short description of what applied where
@@ -418,8 +446,18 @@ truncated, and their scroll clamps use the paragraph's rendered line count for
 the panel width so all wrapped content stays reachable. Events from `run::start`
 are folded into `App` each frame. Ctrl+Enter submits; Enter submits on a blank
 line and otherwise inserts a newline. Ctrl+C cancels (or quits when idle),
-Esc opens the action menu, Ctrl+H opens help, PageUp/PageDown scroll, and
-Ctrl+P/Ctrl+N navigate prompt history.
+Esc opens the action menu, Ctrl+H opens help, PageUp/PageDown scroll,
+Ctrl+P steps backward through prompt history, and Ctrl+N starts a new session
+from anywhere. The ESC menu closes on selection: a history item transitions to
+the replay overlay, and "New session" (Enter or `n`) starts a fresh session.
+Terminal prompt submissions are bounded at 1,048,576 characters so long briefs
+run without interruption.
+Session records are named `session-{UTC date-time}-{pid}-{n}` in the log
+directory; `Recorder::on_prompt` renames both the journal and the transcript
+(via `renameat` against the held directory descriptor, so path substitution
+cannot redirect the record) to append a bounded slug of the first prompt's
+first words, e.g. `session-2026-10-03T14-22-05Z-4242-1-fix-the-bug.log`, making
+transcripts recognisable by their content.
 The status bar shows `model | effort | status` and a cancel hint; the prompt line
 shows the input with autocomplete-free editing to keep the dependency surface
 small.

@@ -203,8 +203,9 @@ pub fn list_sessions(log_dir: &Path) -> Vec<SessionEntry> {
             sessions.push(session);
         }
     }
-    // Sort newest first; the filename embeds a fixed-width nanosecond stamp, so
-    // a reverse string sort matches reverse chronological order.
+    // Sort newest first; the filename embeds a fixed-width UTC date-time stamp
+    // followed by a pid/counter tie-breaker, so a reverse string sort matches
+    // reverse chronological order (the prompt slug sorts only within a second).
     sessions.sort_by(|a, b| {
         b.path
             .file_name()

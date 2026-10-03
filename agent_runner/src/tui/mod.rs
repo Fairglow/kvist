@@ -226,6 +226,7 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
     };
 
     let builder = SessionBuilder {
+        resource_notes,
         config: config.clone(),
         executor,
         tool_defs,
@@ -236,12 +237,16 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         working_directory,
         max_turns,
         limits: overrides.limits,
-        resource_notes,
         allow_host_execution: overrides.allow_host_execution,
     };
 
-    let initial = match builder.start(&model, effort) {
-        Ok(worker) => worker,
+    // Session setup — budget discovery (a provider round trip), the durable
+    // record, and the worker thread — runs in the background so the terminal
+    // UI appears immediately instead of waiting on the model. The worker is
+    // installed by the UI loop when the bootstrap reports; prompts submitted in
+    // the meantime are held and dispatched when it is ready.
+    let bootstrap = match spawn_bootstrap(&builder, &model, effort) {
+        Ok(receiver) => receiver,
         Err(error) => {
             eprintln!("{}", error.describe());
             return ExitCode::from(error.exit_code());
@@ -258,7 +263,6 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         width,
         height,
     );
-    app.push_event(crate::session::Event::Note(initial.budget_note.clone()));
     for note in &builder.resource_notes {
         app.push_event(crate::session::Event::Note(note.clone()));
     }
@@ -277,7 +281,7 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         app.stage_initial_prompt(prompt);
     }
 
-    match ui_loop(app, &builder, Some(initial)) {
+    match ui_loop(app, &builder, bootstrap) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{}", error.describe());
@@ -286,10 +290,32 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
     }
 }
 
+/// Starts a session worker for `model` with `effort` on a background bootstrap
+/// thread and returns the receiver the UI loop polls for its result. The
+/// thread outlives the call: the UI installs the worker when the result
+/// arrives, and a dropped receiver (a replaced session) simply discards it.
+fn spawn_bootstrap(
+    builder: &SessionBuilder,
+    model: &Model,
+    effort: ReasoningEffort,
+) -> Result<mpsc::Receiver<Result<Worker>>> {
+    let (tx, rx) = mpsc::channel();
+    let builder = builder.clone();
+    let model = model.clone();
+    std::thread::Builder::new()
+        .name("agent-bootstrap".into())
+        .spawn(move || {
+            let _ = tx.send(builder.start(&model, effort));
+        })
+        .map_err(|source| crate::error::io_error("spawn session bootstrap", None, source))?;
+    Ok(rx)
+}
+
 /// Builds session workers for the selected model and effort. Each worker owns
 /// its transport, conversation, context window, and durable log; switching the
 /// model or the effort starts a fresh worker (the model's conversation context
-/// restarts, which the UI announces).
+/// restarts, which the UI announces). Cloned wholesale into the bootstrap
+/// thread that starts the worker off the UI critical path.
 struct SessionBuilder {
     resource_notes: Vec<String>,
     config: Config,
@@ -303,6 +329,25 @@ struct SessionBuilder {
     max_turns: u32,
     limits: crate::session::RunLimits,
     allow_host_execution: bool,
+}
+
+impl Clone for SessionBuilder {
+    fn clone(&self) -> Self {
+        Self {
+            resource_notes: self.resource_notes.clone(),
+            config: self.config.clone(),
+            executor: Arc::clone(&self.executor),
+            tool_defs: self.tool_defs.clone(),
+            context_limit: self.context_limit,
+            response_reserve: self.response_reserve,
+            log_dir: self.log_dir.clone(),
+            no_logs: self.no_logs,
+            working_directory: self.working_directory.clone(),
+            max_turns: self.max_turns,
+            limits: self.limits,
+            allow_host_execution: self.allow_host_execution,
+        }
+    }
 }
 
 /// One live session worker: the model loop thread plus its channels.
@@ -414,14 +459,26 @@ fn app_model_id(config: &Config, model: &Model) -> String {
         .unwrap_or_else(|| model.id.clone())
 }
 
-fn ui_loop(mut app: App, builder: &SessionBuilder, mut worker: Option<Worker>) -> Result<()> {
+fn ui_loop(
+    mut app: App,
+    builder: &SessionBuilder,
+    bootstrap: mpsc::Receiver<Result<Worker>>,
+) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+    let mut worker: Option<Worker> = None;
+    let mut bootstrap = Some(bootstrap);
 
-    let result = run_ui(&mut terminal, &mut app, builder, &mut worker);
+    let result = run_ui(
+        &mut terminal,
+        &mut app,
+        builder,
+        &mut worker,
+        &mut bootstrap,
+    );
 
     disable_raw_mode()?;
     execute!(
@@ -438,15 +495,19 @@ fn run_ui<M: std::io::Write>(
     app: &mut App,
     builder: &SessionBuilder,
     worker: &mut Option<Worker>,
+    bootstrap: &mut Option<mpsc::Receiver<Result<Worker>>>,
 ) -> Result<()> {
+    // A prompt held while the session worker is starting (or being replaced
+    // after a model/effort change or a new session); dispatched to the worker
+    // as soon as it is installed, so a prompt never waits on the UI.
+    let mut pending_submit: Option<String> = None;
+
     // Dispatch any prefilled, auto-started prompt (for example one supplied by
-    // `kvist prompt`) before the interactive loop, and clear the input so the
-    // same text cannot be submitted again.
+    // `kvist prompt`) through the same hold/send path, and clear the input so
+    // the same text cannot be submitted again.
     if let Some(text) = app.take_pending_prompt() {
         app.editor.clear();
-        if let Some(current) = worker.as_ref() {
-            let _ = current.prompt_tx.send(text);
-        }
+        pending_submit = Some(text);
     }
 
     loop {
@@ -465,6 +526,37 @@ fn run_ui<M: std::io::Write>(
             app.pump(&current.rx)?;
         }
 
+        // Install a finished session worker (initial start, a model/effort
+        // change, or a new session) and dispatch any prompt held for it. A
+        // failed bootstrap is reported, not fatal: the app stays usable, and the
+        // next submit or new session starts a fresh bootstrap.
+        if worker.is_none()
+            && let Some(receiver) = bootstrap.as_ref()
+        {
+            match receiver.try_recv() {
+                Ok(Ok(new_worker)) => {
+                    *bootstrap = None;
+                    app.push_event(crate::session::Event::Note(new_worker.budget_note.clone()));
+                    *worker = Some(new_worker);
+                    if let Some(text) = pending_submit.take()
+                        && let Some(current) = worker.as_ref()
+                    {
+                        let _ = current.prompt_tx.send(text);
+                    }
+                }
+                Ok(Err(error)) => {
+                    *bootstrap = None;
+                    app.push_event(crate::session::Event::Failed(error.describe()));
+                }
+                Err(mpsc::TryRecvError::Empty) => {
+                    app.status = "starting model…".to_owned();
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    *bootstrap = None;
+                }
+            }
+        }
+
         if event::poll(Duration::from_millis(150))? {
             match event::read()? {
                 CrosstermEvent::Resize(width, height) => app.resize(width, height),
@@ -472,41 +564,77 @@ fn run_ui<M: std::io::Write>(
                     match app.on_key(key) {
                         KeyAction::Submit => {
                             let text = app.take_pending_prompt();
-                            let changed = match worker.as_ref() {
-                                Some(current) => {
-                                    current.model_id != app.model || current.effort != app.effort
-                                }
-                                None => true,
-                            };
-                            if text.is_some() && changed {
-                                // A model or effort change applies to the next
-                                // prompt: the old worker is cancelled and
-                                // joined (dropped), then a fresh session starts.
-                                let model = builder.config.model(&app.model).ok_or_else(|| {
-                                    Error::ModelNotFound {
-                                        requested: app.model.clone(),
-                                        available: builder
-                                            .config
-                                            .models
-                                            .iter()
-                                            .map(|model| model.id.clone())
-                                            .collect(),
+                            if let Some(text) = text {
+                                let restart = match worker.as_ref() {
+                                    // A model or effort change applies to the
+                                    // next prompt: the old worker is cancelled
+                                    // and joined (dropped), then a fresh
+                                    // session starts for the new selection.
+                                    Some(current) => {
+                                        current.model_id != app.model
+                                            || current.effort != app.effort
                                     }
-                                })?;
-                                let replacement = builder.start(model, app.effort)?;
-                                app.push_event(crate::session::Event::Note(
-                                    replacement.budget_note.clone(),
-                                ));
-                                *worker = Some(replacement);
-                            }
-                            if let (Some(text), Some(current)) = (text, worker.as_ref()) {
-                                let _ = current.prompt_tx.send(text);
+                                    None => bootstrap.is_none(),
+                                };
+                                if restart {
+                                    if let Some(old) = worker.take() {
+                                        old.handle.cancel();
+                                        drop(old.prompt_tx);
+                                    }
+                                    // An in-flight bootstrap may target a stale
+                                    // selection; discard it and start fresh.
+                                    *bootstrap = None;
+                                    let model =
+                                        builder.config.model(&app.model).ok_or_else(|| {
+                                            Error::ModelNotFound {
+                                                requested: app.model.clone(),
+                                                available: builder
+                                                    .config
+                                                    .models
+                                                    .iter()
+                                                    .map(|model| model.id.clone())
+                                                    .collect(),
+                                            }
+                                        })?;
+                                    *bootstrap = Some(spawn_bootstrap(builder, model, app.effort)?);
+                                    app.status = "starting model…".to_owned();
+                                    pending_submit = Some(text);
+                                } else if let Some(current) = worker.as_ref() {
+                                    let _ = current.prompt_tx.send(text);
+                                } else {
+                                    // The worker is still starting; the prompt
+                                    // is dispatched when it is installed.
+                                    pending_submit = Some(text);
+                                }
                             }
                         }
                         KeyAction::Cancel => {
                             if let Some(current) = worker.as_ref() {
                                 current.handle.cancel();
                             }
+                        }
+                        KeyAction::NewSession => {
+                            // Replace whatever is live (a running turn is
+                            // cancelled with the old worker) and start a fresh
+                            // session for the selected model and effort.
+                            if let Some(old) = worker.take() {
+                                old.handle.cancel();
+                                drop(old.prompt_tx);
+                            }
+                            *bootstrap = None;
+                            let model = builder.config.model(&app.model).ok_or_else(|| {
+                                Error::ModelNotFound {
+                                    requested: app.model.clone(),
+                                    available: builder
+                                        .config
+                                        .models
+                                        .iter()
+                                        .map(|model| model.id.clone())
+                                        .collect(),
+                                }
+                            })?;
+                            *bootstrap = Some(spawn_bootstrap(builder, model, app.effort)?);
+                            app.status = "starting model…".to_owned();
                         }
                         KeyAction::Quit => {
                             app.should_quit = true;
@@ -533,7 +661,8 @@ fn run_ui<M: std::io::Write>(
             // sender lives in the worker we are dropping. That ordering made
             // the TUI hang after it closed and forced Ctrl-C. So cancel the
             // running turn, then drop the sender to unblock recv(), and let the
-            // handle (which joins) drop last.
+            // handle (which joins) drop last. An in-flight bootstrap is simply
+            // discarded: its thread finishes and drops the worker it built.
             if let Some(worker) = worker.take() {
                 worker.handle.cancel();
                 drop(worker.prompt_tx);

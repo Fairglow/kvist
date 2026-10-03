@@ -54,8 +54,10 @@ The workspace remains fully writable; protected task execution must use the
 engine's narrow broker, never this workspace shell.
 
 `--response-reserve TOKENS` sets the initial generation reserve; absent values
-use per-model configuration or a window-aware default. `--max-run-secs SECONDS` defaults
-to 1800; `--max-run-tokens TOKENS` defaults to 1,000,000 estimated tokens.
+use per-model configuration or a window-aware default. `--max-run-secs SECONDS`
+defaults to 86,400 (24 hours) and `--max-run-tokens TOKENS` defaults to
+100,000,000 estimated tokens, so a long task runs uninterrupted to a result;
+pass smaller values to bound individual runs.
 The context limit must be greater than the reserve. Every model request
 is preflighted using complete canonical serialization and byte-aware heuristic
 accounting, and carries the current attempt's explicit provider output bound.
@@ -206,7 +208,7 @@ file_helper: Option<PathBuf> }` —
   staging paths.
 - `ToolRegistry::with_file_helper(path)` explicitly selects the installed helper.
   Production resolution defaults to `agent-runner-file-tool` adjacent to the
-  calling executable.   The executor rejects absent, nonregular, linked or
+  calling executable. The executor rejects absent, nonregular, linked or
   workspace-contained helpers; it never falls back to host execution.
 - `ToolProfile` (ids `generic`, `python`, `rust`, `javascript`, `go`, `c`)
   surfaces the relevant package and build tools for each language; `Generic` is
@@ -219,15 +221,15 @@ All argument objects are closed. Paths are canonical absolute UTF-8, at most
 4096 bytes, without NUL, traversal, duplicate separators or trailing separators
 except `/`. Digests are `sha256:` plus 64 lowercase hexadecimal digits.
 
-| Tool | Required arguments | Optional arguments |
-| --- | --- | --- |
-| `shell` | `command`: nonblank, NUL-free, at most 16384 bytes | None |
-| `read_file` | `path` | `offset=0` (0..=1048576 bytes), `limit=4096` (1..=16384 bytes) |
-| `write_file` | `path`, `content` | `expected_sha256` |
-| `list_dir` | `path` | `offset=0` (0..=4096 entries), `limit=100` (1..=256 entries) |
-| `find_files` | `path`, `pattern` (literal substring, empty matches all) | Same pagination as listing; `include_generated=false` |
-| `search_files` | `path`, `query` (nonempty literal substring) | Same pagination as listing; `include_generated=false`, optional literal `file_pattern` |
-| `edit_file` | `path`, nonempty `old_text`, `new_text`, `expected_sha256` | None |
+| Tool           | Required arguments                                         | Optional arguments                                                                     |
+| -------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `shell`        | `command`: nonblank, NUL-free, at most 16384 bytes         | None                                                                                   |
+| `read_file`    | `path`                                                     | `offset=0` (0..=1048576 bytes), `limit=4096` (1..=16384 bytes)                         |
+| `write_file`   | `path`, `content`                                          | `expected_sha256`                                                                      |
+| `list_dir`     | `path`                                                     | `offset=0` (0..=4096 entries), `limit=100` (1..=256 entries)                           |
+| `find_files`   | `path`, `pattern` (literal substring, empty matches all)   | Same pagination as listing; `include_generated=false`                                  |
+| `search_files` | `path`, `query` (nonempty literal substring)               | Same pagination as listing; `include_generated=false`, optional literal `file_pattern` |
+| `edit_file`    | `path`, nonempty `old_text`, `new_text`, `expected_sha256` | None                                                                                   |
 
 Content/old/new text each fit 65536 bytes; pattern/query/file_pattern fit 1024 bytes and
 reject NUL. Explicit null is not omission. Native request JSON fits 262144
@@ -238,13 +240,13 @@ an irreducibly oversized entry is an explicit error.
 
 Result objects:
 
-| Operation | JSON fields |
-| --- | --- |
-| Read | `content`, `sha256`, `offset`, `next_offset`, `total_bytes` |
-| Write/edit | `path`, `sha256`, `total_bytes` |
-| List | `entries:[{name,kind}]`, `offset`, `next_offset`, `total` |
-| Find | `files:[absolute_path]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_generated`, `visited_entries`, `complete` |
-| Search | `matches:[{path,line,match_byte_offset,content,truncated}]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_binary`, `skipped_generated`, `skipped_oversized`, `excluded_files`, `visited_entries`, `scanned_bytes`, `complete`, `scope` (`file` or `directory`) |
+| Operation  | JSON fields                                                                                                                                                                                                                                                                      |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Read       | `content`, `sha256`, `offset`, `next_offset`, `total_bytes`                                                                                                                                                                                                                      |
+| Write/edit | `path`, `sha256`, `total_bytes`                                                                                                                                                                                                                                                  |
+| List       | `entries:[{name,kind}]`, `offset`, `next_offset`, `total`                                                                                                                                                                                                                        |
+| Find       | `files:[absolute_path]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_generated`, `visited_entries`, `complete`                                                                                                                                                |
+| Search     | `matches:[{path,line,match_byte_offset,content,truncated}]`, `offset`, `next_offset`, `total`, `skipped_symlinks`, `skipped_binary`, `skipped_generated`, `skipped_oversized`, `excluded_files`, `visited_entries`, `scanned_bytes`, `complete`, `scope` (`file` or `directory`) |
 
 `next_offset` is the actual continuation offset or null. Beyond-end offsets
 fail; exactly-at-end offsets return an empty terminal page. Read digests cover
@@ -466,12 +468,16 @@ transport- and environment-independent and unit-testable.
   transport- and environment-independent because it hands argv to this trait
   rather than spawning processes directly.
 - `Recorder` is a fallible pluggable operational sink: `session_start`,
-  `request`, `turn_start`, `turn_finish`, `tool_dispatch`, `tool_result` and
-  `session_finish` return `Result`. Dispatch must be acknowledged before invoking
-  the executor. Recording errors terminate further effects. `SessionLog`
-  synchronizes dispatch/result and terminal records. Its private diagnostic
-  transcript bounds each text item to 64 KiB; it is neither a complete replay
-  checkpoint nor guaranteed secret-free.
+  `on_prompt`, `request`, `turn_start`, `turn_finish`, `tool_dispatch`,
+  `tool_result` and `session_finish` return `Result`. Dispatch must be
+  acknowledged before invoking the executor. Recording errors terminate further
+  effects. `SessionLog` synchronizes dispatch/result and terminal records. Its
+  private diagnostic transcript bounds each text item to 64 KiB; it is neither
+  a complete replay checkpoint nor guaranteed secret-free.
+- `Recorder::on_prompt` is called once per prompt as it is received by the
+  worker, before any turn, and defaults to a no-op. The durable session log
+  uses it to fold the first prompt's leading words into the record name (see
+  Data and schemas); other recorders may ignore it.
 
 ### `Event`
 
@@ -553,13 +559,15 @@ recording and event-delivery errors return `Err`, never a successful default.
 Repeated identical argument hashes are rejected and eventually circuit-break;
 the detector does not observe or prove unchanged filesystem state.
 
-Injected-library `RunLimits` defaults to a 1800-second prompt wall budget,
-1,000,000 conservatively estimated request/reserve tokens, and 1024 response
-tokens. Production startup resolves the selected model's reserve separately.
+Injected-library `RunLimits` defaults to a 24-hour (86,400-second) prompt wall
+budget, 100,000,000 conservatively estimated request/reserve tokens, and 1024
+response tokens, so a prompt runs uninterrupted to a result, a detected
+hang/loop, or a real failure. Production startup resolves the selected
+model's reserve separately.
 Allowed maxima are 24 hours, 1,000,000,000 estimated tokens, and 1,048,576
 response tokens; each must be positive. Every attempt, including retries,
 charges its complete estimated input plus reserve before I/O. Turn limits are
-1..=50. Provider attempt deadlines and backoff are clipped to the prompt
+1..=500. Provider attempt deadlines and backoff are clipped to the prompt
 deadline; cancellation is cooperative for injected transports/executors.
 
 ### `RunSummary`
@@ -678,7 +686,12 @@ c = "auto"
 `schema_version` must be `1`. Unknown top-level fields fail. Each `[[models]]`
 needs a unique `id`, a known `provider`, a non-empty `base_url` and `model`, and
 a bounded `deadline_secs` (1..=600) and `cadence_timeout_secs` (0..=600; `0`
-disables the inter-token cadence watchdog). `sandbox.runner` and `sandbox.backend`
+disables the inter-token cadence watchdog). The slot-allocation watchdog (the
+provider accepting a request, including model load or switch) and the
+time-to-first-token watchdog (long-prompt prefill) are each granted the full
+per-turn `deadline_secs`, so a slow model switch completes within the turn
+budget instead of failing; a stall after the first token is still caught by
+the independent cadence watchdog. `sandbox.runner` and `sandbox.backend`
 default to resolved system locations when omitted. `[tool_profiles]` accepts the
 ids `python`, `rust`, `javascript`, `go`, and `c` (any other key fails); each
 value is `on`, `auto`, or `off`. Unknown profile keys and unrecognized settings
@@ -702,8 +715,8 @@ Options:
   --log-dir <PATH>            Directory for the session journal and transcript
   --context-limit <TOKENS>    Serving window override (model config/discovery otherwise)
   --response-reserve <TOKENS> Initial output reserve (model config/window-aware otherwise)
-  --max-run-secs <SECONDS>    Whole-prompt wall budget (default 1800)
-  --max-run-tokens <TOKENS>   Estimated attempt budget (default 1000000)
+  --max-run-secs <SECONDS>    Whole-prompt wall budget (default 86400)
+  --max-run-tokens <TOKENS>   Estimated attempt budget (default 100000000)
   --headless <PROMPT>         Terminal-free, sandbox-only, required recording
   --json                     Version-one ordered NDJSON (headless only)
   --no-logs                   Skip the durable session journal and transcript
@@ -716,7 +729,7 @@ Options:
                               runs multi-turn.
       --host-turns <N>        Maximum autonomous turns a single prompt may
                               drive, only when --allow-host-execution is set
-                              (default 1, range 1..=50).
+                              (default 1, range 1..=500).
   -h, --help                  Print help
   -V, --version               Print version
 ```
@@ -725,11 +738,11 @@ Options:
 - A positional `PROMPT` starts the session and submits the first prompt; the
   session can continue with further input in the UI.
 - `--list-models` is non-interactive and exits zero.
-- The sandbox is the default execution scope and is multi-turn (`50` turns). The
+- The sandbox is the default execution scope and is multi-turn (`500` turns). The
   `--allow-host-execution` flag opts out of the sandbox: the agent runs with host
   privileges, so it is single-turn by default to prevent a single prompt from
   driving an unbounded autonomous loop under those privileges. `--host-turns`
-  raises that cap (restricted to `1..=50`) and is only meaningful with
+  raises that cap (restricted to `1..=500`) and is only meaningful with
   `--allow-host-execution`; a cap outside the range is rejected before the UI
   starts. `--host-turns` requires `--allow-host-execution`.
 - `--config`, `--model`, `--effort`, `--cwd`, `--profile` override configuration
@@ -775,6 +788,29 @@ Options:
   keeps its borders on narrow terminals; wrapped text keeps the source line's
   leading indentation on continuation lines, and scroll extents account for the
   wrapped line count so all content stays reachable.
+- Transcript rows are filled to the full inner width (the border excluded), so
+  each block reads as an enclosed textbox: the prompt echo, reasoning,
+  placeholders, and agent-produced content (markdown, tool calls/results,
+  notices, terminal status) each carry their own subtle, low-contrast
+  background, and single-line tool rows share the agent-content background.
+- The terminal UI starts immediately: model transport setup and the provider
+  connection/load run on a background worker while the transcript is shown in a
+  starting state, and the first prompt is held and submitted when the worker is
+  ready. A bootstrap failure is a non-fatal notice; the next submission
+  starts a fresh bootstrap. Changing the model or effort and submitting
+  cancels the old worker, discards its stale bootstrap, and starts a new one
+  with the held prompt. The per-turn deadline bounds the whole turn, including
+  the model load/switch (see Data and schemas), not a short fixed probe.
+- The ESC menu closes on selection: choosing a history item transitions to the
+  replay overlay, and choosing "New session" (Enter or `n`) starts a fresh
+  session. `Ctrl+N` starts a new session from anywhere; `Ctrl+P` steps
+  backward through prompt history.
+- Terminal prompt submissions are bounded at 1,048,576 characters; headless
+  prompts remain bounded at 64 KiB by the command line.
+- Session records are named `session-{UTC date-time}-{pid}-{n}` plus, after the
+  first prompt, a slug of its first words (punctuation collapsed, at most 40
+  characters), e.g. `session-2026-10-03T14-22-05Z-4242-1-fix-the-bug.log`;
+  journal and transcript are renamed together before further writes.
 
 ## Errors and failure semantics
 
