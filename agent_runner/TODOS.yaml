@@ -1602,3 +1602,83 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "agent-runner-review-write-tests"
+    title: "Write tests for the independent headless review phase"
+    description: "Pin the review phase behavior before production code using configuration fixtures, injected transports, and the headless CLI: review triggers exactly once on a completed headless run when enabled and is skipped with a diagnostic on failed/cancelled/exhausted/budget-limited runs; the review session is fresh (no implementation transcript, new journal with the -review- marker and implementation/reviewer model metadata); reviewer model resolution honors --review-model over [review] model over the implementation model and rejects unknown ids before provider I/O; the review prompt embeds the original task prompt and implementation answer as untrusted data and omits the transcript; assess-only mode advertises no write_file/edit_file while apply_fixes advertises the full set; the bounded JSON report parses into review_summary (verdict, findings, fixes_applied, tests_passing) and an unparseable report degrades to report_parsed false without failing the run; on_failure warn preserves the implementation disposition and exit status on review failure while fail exits unsuccessfully after the report; plain output prints the implementation answer then the assessment; max_turns bounds (1..=500), unknown [review] keys, and review budgets are validated at load."
+    context: "RUN-REQ-REVIEW and the CONTRACT 'Independent review extension' define the behavior; the phase reuses the existing headless run, AgentSession, AgentRunner, SessionLog, and NDJSON machinery."
+    purpose: "Define every review-phase behavior as a failing test before implementation."
+    expected_outcome: "The new tests fail on the current code (no review phase exists) and pass once the phase, policy, prompts, and report parsing exist."
+    kind: test
+    status: pending
+    depends_on:
+      - "agent-runner-model-selection-compliance-review"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REVIEW"
+      - "CONTRACT.md#Independent-review-extension"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-04T21:43:13Z"
+      updated_at: "2026-10-04T21:43:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-review-implement-code"
+    title: "Implement the independent headless review phase"
+    description: "Add the [review] policy (RawReview parsing and validation in config.rs), the --review/--no-review/--review-model/--review-apply-fixes flags in cli.rs, and review.rs owning policy resolution, reviewer model selection, pure prompt construction (review system prompt with the fixed rubric, verification and honesty duties, untrusted-data instruction, and fenced-JSON report format; review user prompt embedding the original prompt and implementation answer), assess-only tool-definition filtering, report parsing with bounded shapes and report_parsed degradation, and review_start/review_summary NDJSON events plus plain output. Sequence the phase from headless.rs after a completed implementation run with a fresh AgentSession, ContextManager, transport, executor, and -review- journal, using the reviewer model's resolved budgets and the policy max_turns, with on_failure warn/fail exit semantics. Keep the phase advisory, sandbox-authority-neutral, and free of persistent state."
+    context: "The failing tests from agent-runner-review-write-tests define the behavior; the implementation must not reuse implementation-session state and must not widen sandbox grants."
+    purpose: "Make an automatic fresh-context second-pass review with advisory assessment, and an opt-in reviewer fix pass, available in headless runs."
+    expected_outcome: "All review-phase tests pass, the existing headless/TUI suites stay green, and the workspace build plus strict clippy are clean."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "agent-runner-review-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REVIEW"
+      - "CONTRACT.md#Independent-review-extension"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-04T21:43:13Z"
+      updated_at: "2026-10-04T21:43:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-review-security-audit"
+    title: "Audit the review phase boundaries"
+    description: "Independently inspect the review phase for authority widening (new grants, network, host paths, configuration writes), implementation-transcript leakage into the reviewer context, untrusted-data handling of the embedded implementation answer, report-parsing bounds (finding and string caps, unknown enum values), assess-only write-tool withholding, journal privacy/no-clobber/outside-workspace rules, budget and max_turns enforcement, on_failure exit semantics, and any path that could turn an advisory report into compliance evidence, engine authorization, or acceptance."
+    context: "Internal/implementer review of the changed headless, config, CLI, and review paths; this is not the source-blind certification."
+    purpose: "Preserve independent confirmation that the review phase weakens no bound and grants no new authority."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "agent-runner-review-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#RUN-REQ-REVIEW"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-04T21:43:13Z"
+      updated_at: "2026-10-04T21:43:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-review-compliance-review"
+    title: "Review review-phase compliance"
+    description: "Derive observed behavior from source and tests in a clean-slate context, then compare the implementation record with the requirements, contract, and design in a source-blind context, retaining discrepancies for human arbitration."
+    context: "Per the project's current enforcement note, component accept only structurally validates and records revisions; this gate awaits the separate source-blind reviewer and must never be self-certified. A clean-slate IMPL.md update for the independent review phase is outstanding for that reviewer."
+    purpose: "Retain an independent disposition for the review-phase change."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "agent-runner-review-security-audit"
+    requirements:
+      - "CONTRACT.md#Independent-review-extension"
+      - "REQUIREMENTS.md#RUN-REQ-REVIEW"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-04T21:43:13Z"
+      updated_at: "2026-10-04T21:43:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

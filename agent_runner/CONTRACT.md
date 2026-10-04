@@ -106,6 +106,61 @@ writers are not participants in a transactional lock; preimage checks detect
 stale content but do not promise atomic compare-and-swap against arbitrary
 external writers.
 
+## Independent review extension
+
+`agent-runner --headless PROMPT --review` appends a single independent review
+phase to a successful run. The review is a second, completely fresh session —
+new conversation, new model context, new private journal — that receives only
+the review system prompt, the original task prompt, the implementation run's
+final answer, and the workspace. It receives no implementation transcript,
+summary, or compaction history. A run whose disposition is not `completed`
+skips the review with a diagnostic note.
+
+The `[review]` table configures the phase (all keys optional; the phase is off
+unless `enabled = true` or `--review` is passed):
+
+```toml
+[review]
+enabled = true                 # phase off by default
+model = "reviewer"             # reviewer model id; defaults to the implementation model
+thinking_effort = "high"       # reviewer thinking effort; defaults to the session default
+apply_fixes = false            # allow the reviewer to edit files after assessing
+max_turns = 200                # review turn cap (1..=500)
+on_failure = "warn"            # "warn" | "fail" when the review run itself fails
+```
+
+`model` MUST name a configured `[[models]]` id and MUST NOT be written to the
+configuration file. `--review-model <ID>` and `--review-apply-fixes` override
+the configuration for one run; `--no-review` disables the phase for one run
+regardless of configuration.
+
+The review executes under the identical sandbox request shape, grants, and
+network denial as the implementation run. In the default assess-only mode the
+native write tools (`write_file`, `edit_file`) are not advertised to the
+reviewer; the shell remains available so the reviewer can build and test, and
+any shell write in assess-only mode is a reportable deviation, not a granted
+capability. With `apply_fixes = true` the full tool set is advertised and the
+reviewer MUST assess first, fix, re-run builds and tests, and report both
+states.
+
+NDJSON adds two ordered events around the phase: `review_start` (reviewer
+model, implementation model, mode, budgets) and `review_summary` (`disposition`,
+`verdict`, `findings` as bounded `{severity, category, file, summary}` entries,
+`fixes_applied`, `tests_passing`, `assessment`, `report_parsed`). Plain output
+prints the implementation answer and then the assessment text. A review
+failure under `on_failure = "warn"` (the default) leaves the implementation
+disposition and exit status unchanged; under `on_failure = "fail"` the process
+exits unsuccessfully after reporting it.
+
+Review journals are named with a `-review-` marker in the record stem, are
+private and no-clobber, live outside the writable workspace, and their
+metadata records the implementation model, the reviewer model, and the mode.
+The review is advisory: it authorizes no engine task, mints no canonical
+evidence, determines no compliance, and its report is not an acceptance
+receipt. The implementation answer embedded in the review prompt is untrusted
+data. The phase adds no persistent state beyond the journal; reruns review the
+current workspace and are never resumed or cached.
+
 ## Boundary and ownership
 
 This document defines what `agent-runner` exposes to consumers: the library
@@ -182,6 +237,7 @@ struct Config {
     tool_policy: ToolPolicy,                   // required
     tool_profiles: BTreeMap<ToolProfile, ProfileSetting>,  // per-language gating
     sandbox: SandboxPaths,                     // required
+    review: ReviewPolicy,                      // optional independent review phase; off by default
 }
 ```
 
@@ -198,6 +254,13 @@ retry_max_delay_secs: u64, cadence_timeout_secs: u64 }` — `provider` is one of
   after the first token is treated as stalled and retried, so a generous
   `deadline_secs` cannot become a silent multi-minute hang; `0` disables the
   watchdog (default 30s).
+- `ReviewPolicy { enabled: bool, model: Option<String>, thinking_effort:
+Option<ReasoningEffort>, apply_fixes: bool, max_turns: u32, on_failure:
+ReviewFailurePolicy }` — every field is optional in the file; an absent table
+  means the phase is disabled. `model` names a configured model id; `max_turns`
+  is bounded 1..=500; `on_failure` is `warn` (default) or `fail`. Unknown
+  `[review]` keys fail at load like other unknown keys. See "Independent review
+  extension".
 - `SandboxPaths { runner: PathBuf, backend: PathBuf }` — absolute paths to the
   `kvist-sandbox-runner` executable and the Bubblewrap backend. Either may point
   at a binary on disk; both are hashed at request construction and the backend
@@ -737,6 +800,15 @@ rust = "auto"
 javascript = "auto"
 go = "auto"
 c = "auto"
+
+# Optional independent review phase for headless runs; off unless enabled.
+[review]
+enabled = true
+model = "reviewer"
+thinking_effort = "high"
+apply_fixes = false
+max_turns = 200
+on_failure = "warn"
 ```
 
 `schema_version` must be `1`. Unknown top-level fields fail. Each `[[models]]`
@@ -751,7 +823,10 @@ the independent cadence watchdog. `sandbox.runner` and `sandbox.backend`
 default to resolved system locations when omitted. `[tool_profiles]` accepts the
 ids `python`, `rust`, `javascript`, `go`, and `c` (any other key fails); each
 value is `on`, `auto`, or `off`. Unknown profile keys and unrecognized settings
-fail at load.
+fail at load. An optional `[review]` table configures the independent review
+phase (see "Independent review extension"): `model` must name a configured
+model id, `thinking_effort` a known effort, `max_turns` 1..=500,
+`on_failure` `warn` or `fail`; unknown keys fail at load.
 
 ## Command-line interface
 
@@ -786,6 +861,12 @@ Options:
       --host-turns <N>        Maximum autonomous turns a single prompt may
                               drive, only when --allow-host-execution is set
                               (default 1, range 1..=500).
+      --review                Run the independent review phase after a
+                              completed headless run (config `[review]`
+                              otherwise; off by default)
+      --no-review             Skip the review phase for this run
+      --review-model <ID>     Reviewer model for this run
+      --review-apply-fixes    Let the reviewer apply fixes after assessing
   -h, --help                  Print help
   -V, --version               Print version
 ```
@@ -807,9 +888,15 @@ Options:
   profile (via `-p` or a setting of `on`) fails startup rather than advertising a
   tool the sandbox cannot run. `--log-dir`, `--context-limit`, and `--no-logs`
   configure the durable session record and the compaction window.
-- Headless mode rejects host/no-log flags and conflicting list/import modes.
+- `--review`, `--no-review`, `--review-model`, and `--review-apply-fixes`
+  apply to headless runs. `--review-model` must name a configured model id and
+  is validated before the UI starts, as with `--model`; `--review-apply-fixes`
+  only has an effect when the review phase runs.
+  Headless mode rejects host/no-log flags and conflicting list/import modes.
   Prompts must be nonblank and at most 64 KiB. Plain stdout contains only the
-  successful final answer; NDJSON ends with a run-summary disposition.
+  successful final answer (and, when the review phase runs, the review
+  assessment after it); NDJSON ends with a run-summary disposition and, when
+  the review phase runs, a review-summary disposition.
   Interactive logs default to `.agent-runner/runs`; headless logs default to
   `$XDG_STATE_HOME/agent-runner/runs` or `$HOME/.local/state/agent-runner/runs`.
   Required logs must be private, non-linked and outside the writable workspace.
@@ -875,9 +962,17 @@ Options:
 - Terminal prompt submissions are bounded at 1,048,576 characters; headless
   prompts remain bounded at 64 KiB by the command line.
 - Session records are named `session-{UTC date-time}-{pid}-{n}` plus, after the
-  first prompt, a slug of its first words (punctuation collapsed, at most 40
+  the first prompt, a slug of its first words (punctuation collapsed, at most 40
   characters), e.g. `session-2026-10-03T14-22-05Z-4242-1-fix-the-bug.log`;
   journal and transcript are renamed together before further writes.
+- A headless run whose disposition is `completed` and whose review is enabled
+  appends exactly one review phase: a fresh session with the resolved reviewer
+  model, the review system prompt, and the review prompt (original task prompt
+  plus implementation answer), its own bounded budgets, and its own private
+  journal with the `-review-` stem marker. The phase never sees the
+  implementation transcript, never widens sandbox authority, and its failure
+  does not change the implementation disposition under the default
+  `on_failure = "warn"`.
 
 ## Errors and failure semantics
 
@@ -911,8 +1006,12 @@ and the runner's closed version-one protocol. Guarantees:
   resolved target escapes the scope is rejected, not declared); the environment
   sets `HOME=/tmp`, the runner's private tmpfs scratch area.
 - `resources` are nonzero and within the runner's safe maxima.
-- Every identity is a `sha256:` digest; `identities.toolchain` equals the
+  Every identity is a `sha256:` digest; `identities.toolchain` equals the
   toolchain block identity.
+- The review phase reuses the closed version-one sandbox request shape and
+  grants; the default assess-only mode withholds `write_file` and `edit_file`
+  from the reviewer, and review reports are advisory model output — not
+  canonical evidence, compliance decisions, or acceptance receipts.
 
 Any deviation is reported as an `Err` before spawning the runner.
 

@@ -189,6 +189,81 @@ per-turn `deadline_secs`, so a slow model switch completes within the turn
 instead of failing on a short fixed probe; the inter-token cadence watchdog
 (default 30 s, configurable) still catches a stall after the first token.
 
+## Independent review phase
+
+The review phase is a second sequential execution of the existing headless
+machinery, not a new loop. `headless::run` keeps its current flow; when the
+implementation `RunSummary` reports `completed` and the resolved review policy
+is enabled, it invokes a new `review::run_phase` with the implementation
+summary, the original prompt, the working directory, the resolved policy, and
+the shared output sink. Nothing from the implementation session is reused: the
+phase builds its own `AgentSession`, `ContextManager`, transport, executor, and
+`SessionLog`, so the reviewer context is empty by construction.
+
+`review.rs` owns the phase: policy resolution, reviewer model selection,
+prompt construction, registry shaping, report parsing, and event emission.
+`headless.rs` only sequences the two phases and folds the phase outcome into
+the process result. Prompt construction is a pure function of (write root,
+mode, original prompt, implementation answer) and is unit-testable without a
+transport.
+
+Phase resolution:
+
+1. Resolve the policy: configuration `[review]` with CLI overrides
+   (`--review` forces on, `--no-review` forces off, `--review-model`,
+   `--review-apply-fixes`). Absent configuration and no `--review` skips the
+   phase without diagnostic noise.
+2. Resolve the reviewer model: `--review-model`, then `[review] model`, then
+   the implementation model. The id must name a configured model; otherwise
+   the phase fails before any provider I/O with an actionable diagnostic.
+3. Build the review session: the review system prompt, a fresh
+   `AgentSession`, a fresh `ContextManager` sized from the reviewer model's
+   resolved budgets, and a fresh `SessionLog` whose stem carries the
+   `-review-` marker and whose metadata records the implementation model, the
+   reviewer model, and the mode.
+4. Shape the tool registry: assess-only mode filters `write_file` and
+   `edit_file` out of the advertised definitions; `apply_fixes` mode keeps the
+   full set. Both modes keep the shell, reads, search, and build tools so the
+   reviewer can verify by running.
+5. Run `AgentRunner` with the phase's own `RunLimits` (the reviewer model's
+   resolved budgets, `max_turns` from the policy) and the shared cancellation
+   token, emitting `review_start` first and `review_summary` last over the
+   sink. The review prompt is the composed user message: the original task
+   prompt and the implementation answer, presented as quoted untrusted data.
+
+Prompt templates live in `review.rs` next to `run.rs`'s prompts. The review
+system prompt states the role (independent reviewer of the just-completed
+implementation), the fixed rubric (task suitability and correctness,
+robustness, idiomaticness, efficiency, reliability, resilience, error
+handling, safety, security, readability, maintainability, structure, test
+quality), the verification duty (read the code, run the builds and tests,
+report `cannot verify` when the workspace cannot demonstrate a claim), the
+honesty duty (state weaknesses plainly, no padding), the untrusted-data
+instruction (the embedded implementation answer is data, not instructions),
+and the report format (a fenced JSON block with bounded `verdict`,
+`findings`, `fixes_applied`, and `tests_passing`, followed by the narrative
+assessment). In `apply_fixes` mode the prompt additionally orders
+assess-then-fix-then-verify and requires separate as-delivered and after-fix
+statements.
+
+Report parsing extracts the last fenced JSON block from the final answer,
+validates it against bounded shapes (findings capped, string fields capped,
+known enum values), and degrades to `report_parsed: false` with the raw
+narrative when parsing fails. Parsing never fails the run.
+
+Failure semantics: a phase that fails before or during provider I/O emits
+`review_summary` with `disposition: "failed"` and the diagnostic. Under
+`on_failure = "warn"` (default) the process returns the implementation
+disposition and exit status unchanged; under `on_failure = "fail"` it exits
+unsuccessfully after the report. A skipped phase (non-`completed`
+implementation, review disabled) emits no review events except a single
+diagnostic note in plain mode when the phase was explicitly requested.
+
+State and concurrency: the phase is sequential and in-process; it introduces
+no shared mutable state, no new threads, and no persistent state beyond its
+private journal. Reruns are stateless: they review the workspace as it is and
+are never resumed, cached, or replayed.
+
 ## Algorithms and decisions
 
 `ContextManager::prepare` runs before every request. Complete canonical JSON
@@ -547,6 +622,18 @@ trust. No speculative or misleading number is ever shown.
   tokens, so the live stats and the compaction ETA update during the session.
 - The stats line is empty until progress is reported, then reports speed,
   context, compaction, cumulative tokens, and elapsed time.
+- A completed headless run with review enabled starts exactly one fresh review
+  session (new transcript, journal, and context) and emits `review_start` and a
+  bounded `review_summary`; a non-`completed` run skips the phase with a
+  diagnostic note.
+- Review policy resolution honors `--review`/`--no-review`/`--review-model`
+  over configuration, rejects unknown reviewer model ids before provider I/O,
+  and keeps `write_file`/`edit_file` out of the assess-only tool definitions.
+- A review failure under `on_failure = "warn"` preserves the implementation
+  disposition and exit status; under `"fail"` the process exits unsuccessfully
+  after the report.
+- An unparseable reviewer report degrades to `report_parsed: false` with the
+  raw narrative and never fails the run.
 
 ## Security posture
 
@@ -563,3 +650,6 @@ trust. No speculative or misleading number is ever shown.
   disabled in interactive mode, never headless. Neither file is engine evidence.
 - The denylist and write-root enforcement are tested so a regression cannot
   silently widen authority.
+- The review phase is advisory and reuses the closed sandbox request; assess-only
+  mode withholds the native write tools, and review reports are never canonical
+  evidence, compliance decisions, or acceptance receipts.

@@ -109,6 +109,65 @@ configure it by printing a ready-to-paste `[[models]]` entry (provider,
 base_url, provider model name, and sane defaults), derived as with
 `--import-kvist`, and MUST NOT modify the configuration file automatically.
 
+## RUN-REQ-REVIEW
+
+When enabled, a completed headless implementation run MUST be followed by a
+single automatic independent review run before the process returns. The review
+runs only on a successful implementation disposition (`completed`); failed,
+cancelled, exhausted, and budget-limited runs skip review with a visible
+diagnostic note.
+
+The review run MUST be a completely fresh session: a new conversation, a new
+model context, a new operational journal, and no message, summary, transcript
+or compaction history from the implementation run. Its inputs are limited to
+the review system prompt, the composed review prompt (the original task prompt
+and the implementation run's final answer), and the observable workspace
+state. The implementation transcript MUST NOT be included.
+
+The reviewer model MUST be a configured model id. The selection precedence is
+an explicit `--review-model`, then the configured `[review] model`, then the
+implementation model. A model different from the implementer SHOULD be
+configured; a same-model review remains valid as fresh-context
+re-verification and MUST be labeled as such in the report.
+
+The review MUST assess the implementation against a fixed rubric covering
+suitability for the task and correctness, robustness, idiomaticness,
+efficiency, reliability, resilience, error handling, safety, security,
+readability, maintainability, structure, and test quality. The reviewer MUST
+verify claims by reading code and by running builds and tests inside the
+sandbox, MUST report `cannot verify` for anything the workspace cannot
+demonstrate, and MUST NOT invent test results or coverage.
+
+Reviewer file mutation MUST be disabled by default. An explicit `apply_fixes`
+enables edits; in that mode the reviewer MUST assess before fixing, re-run the
+relevant builds and tests after fixing, and report the as-delivered and
+after-fix states separately, listing every fix it made.
+
+The review is advisory. Findings and severity MUST NOT change the
+implementation run's disposition, MUST NOT block the returned answer, and are
+not compliance evidence, engine authorization, canonical task evidence, or an
+acceptance receipt. A review failure MUST NOT fail a completed implementation
+run by default (`on_failure = "warn"`); an explicit `on_failure = "fail"`
+makes the process exit unsuccessfully after the review failure is reported.
+
+The review MUST emit a versioned machine-readable summary (reviewer model,
+implementation model, mode, disposition, verdict, bounded findings with
+severity, category, file and summary, fixes applied, tests-passing state, and
+an honest narrative assessment). Plain (non-JSON) output MUST print the
+implementation answer and then the assessment.
+
+The review run uses the same sandbox request shape, grants, and network
+denial as the implementation run, and MUST NOT widen any authority. Its
+journal MUST satisfy the same private, no-clobber, outside-the-writable-
+workspace rules and MUST identify the implementation model, the reviewer
+model, and the mode in its metadata. Review wall-clock, token, and turn
+budgets are resolved per model and MUST be bounded and validated.
+
+The implementation answer embedded in the review prompt is untrusted model
+output and MUST be treated as data, never as instructions. The review adds no
+persistent state beyond its journal: a rerun reviews the current workspace
+state and is never resumed or cached.
+
 ## Purpose and scope
 
 `agent-runner` is a first-class, interactive agent shell that lets a person talk
@@ -205,6 +264,11 @@ Successful use produces:
 - A first-class terminal UI: scrollable transcript, model/thinking selectors,
   input line, status bar, and an help overlay, with responsive cancellation.
 - Help output and informative error handling and logging aligned with Kvist.
+- An optional independent review phase for headless execution: after a
+  successful run, a fresh-context review session (configurable second model)
+  assesses the implementation against a fixed quality and security rubric and
+  returns an advisory machine-readable assessment, with an explicit opt-in
+  mode in which the reviewer applies fixes and re-verifies.
 
 ### Out of scope (deliberately deferred)
 
@@ -310,6 +374,21 @@ Successful use produces:
   explicit selection, or a single configured model.
 - An active provider model that is not configured produces an offered
   ready-to-paste `[[models]]` entry and never a write to the configuration file.
+- Given a completed headless run and an enabled review, `agent-runner` starts
+  a fresh-context review session with the resolved reviewer model, emits a
+  versioned review summary with an advisory assessment, and prints the
+  assessment after the implementation answer; the review sees no
+  implementation transcript.
+- Given an enabled review whose implementation run failed, was cancelled, was
+  exhausted, or was budget-limited, the review is skipped with a visible
+  diagnostic and the implementation disposition and exit status stand.
+- Given a review that fails under the default `on_failure = "warn"`, the
+  completed implementation run still succeeds and its answer is returned;
+  under `on_failure = "fail"` the process exits unsuccessfully after the
+  review failure is reported.
+- Given `apply_fixes`, the reviewer's assessment distinguishes as-delivered
+  findings from after-fix state, lists the fixes applied, and reports the
+  result of the re-run builds and tests.
 - Every behavior above is covered by an automated test with an injected
   transport or a captured sandbox request.
 - A turn that fails a temporal model-transport error at least once is retried
