@@ -61,12 +61,13 @@ pub fn render(f: &mut ratatui::Frame, app: &App) {
     render_input(f, app, input_area);
 }
 
-/// The live stats bar: working speed, context utilization, and compaction
-/// progress. Shown even before the first turn so the overview is always present.
+/// The live stats bar: working speed, average throughput, and context
+/// utilization, with compaction shown only while it is in play. Shown even
+/// before the first turn so the overview is always present.
 fn render_stats(f: &mut ratatui::Frame, app: &App, area: Rect) {
     let stats_text = app.stats_line();
     let text = if stats_text.is_empty() {
-        " ⚡ — tok/s   context —    ·   compaction — ".to_owned()
+        " ⚡      — t/s   ·   avg    — t/s   ·   ctx ░░░░░░░░   0%    —/—   ".to_owned()
     } else {
         stats_text
     };
@@ -193,12 +194,15 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from("    agent-runner --import-kvist  (prints [[models]] to paste)."),
         Line::from(config_hint),
         Line::from(""),
-        Line::from("  The stats bar shows: working speed (tok/s), context"),
-        Line::from("  utilization of the model window, and how close we are to"),
-        Line::from("  an automatic compaction. A compaction 'in ...' ETA is"),
-        Line::from("  shown while the live context steadily climbs toward the"),
-        Line::from("  limit; it is suppressed when the context is flat or was"),
-        Line::from("  just rolled back by a compaction, so the number is honest"),
+        Line::from("  The stats bar shows: generation speed (t/s, output-only, like"),
+        Line::from("  llama-server's), avg (session throughput incl. prompt and"),
+        Line::from("  tool time), ctx (context utilization of the model window),"),
+        Line::from("  cumulative processed tokens, and elapsed time. The"),
+        Line::from("  compaction field appears only while the live context is"),
+        Line::from("  past the warm-up threshold, with an 'in ...' ETA while the"),
+        Line::from("  context steadily climbs toward the limit; it is suppressed"),
+        Line::from("  when the context is flat or was just rolled back by a"),
+        Line::from("  compaction, so the number is honest"),
         Line::from(""),
         Line::from("  Compaction keeps the model's context bounded by rolling"),
         Line::from("  complete tool groups into a lossy, nonbinding summary."),
@@ -444,13 +448,14 @@ mod tests {
         );
         app.push_event(Event::Progress {
             token_accounting: crate::session::TokenAccounting::Provider,
-            input_tokens: 70000,
-            output_tokens: 6350,
-            context_tokens: 76350,
+            input_tokens: 25000,
+            output_tokens: 2000,
+            context_tokens: 30000,
             context_limit: 81920,
-            context_utilization: 0.93,
-            compaction_progress: 0.88,
-            tokens_per_sec: 62.0,
+            context_utilization: 0.366,
+            compaction_progress: 0.0,
+            generation_tokens_per_sec: 62.0,
+            average_tokens_per_sec: 214.0,
             total_tokens: 45200,
             elapsed_secs: 332.5,
         });
@@ -459,16 +464,19 @@ mod tests {
         // Row 0 is the header, row 1 is the stats bar.
         let stats_row = text.lines().nth(1).expect("stats row");
         assert!(
-            stats_row.contains("tok/s")
-                && stats_row.contains("81920")
-                && stats_row.contains("45200 tok"),
+            stats_row.contains("62 t/s")
+                && stats_row.contains("214 t/s")
+                && stats_row.contains("81.92k")
+                && stats_row.contains("45.2k tok"),
             "stats content must be visible, got: {stats_row:?}"
         );
     }
 
     #[test]
     fn stats_row_is_placeholder_when_idle() {
-        // Before any progress the stats bar shows a static placeholder hint.
+        // Before any progress the stats bar shows a static placeholder hint,
+        // and it names no field (compaction in particular) that a live row
+        // would hide.
         let app = App::new(
             &["local".to_owned()],
             "local",
@@ -481,7 +489,10 @@ mod tests {
         let text = buffer_text(&backend);
         let stats_row = text.lines().nth(1).expect("stats row");
         assert!(
-            stats_row.contains("tok/s") && stats_row.contains("compaction"),
+            stats_row.contains("t/s")
+                && stats_row.contains("avg")
+                && stats_row.contains("ctx")
+                && !stats_row.contains("compaction"),
             "placeholder:\n{stats_row:?}"
         );
     }

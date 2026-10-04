@@ -562,13 +562,15 @@ up to 5000 visible transcript rows, buffers streamed paragraphs/reasoning,
 shows provisional retry notices, completion/failure/cancellation/cap status,
 spinner, estimated context/ETA, provenance-specific speed, scrolling and
 collapse/reveal reasoning.
-The subsequently observed `App::stats_line` rendering distinguishes reported
-provider speed (`tok/s`) from provisional estimated speed (`~tok/s`), and
-renders `? tok/s` when usage is unavailable rather than presenting zero as an
-estimate. Total usage similarly says `(reported)`, `(estimated)`, or
-`provider usage unavailable`; context figures retain estimate markers.
-This rendering refinement was observed by reading only that function after
-the test executions recorded below; those executions are not claimed as
+The subsequently observed `App::stats_line` rendering shows the output-only
+generation speed (`N t/s`) alongside the session-wide average (`avg N t/s`),
+marks a provisional streamed speed with a `~` prefix, and renders `? t/s` when
+usage is unavailable rather than presenting zero as an estimate. Cumulative
+processed tokens use short human-readable units (`123.4k tok`); the compaction
+field is shown only while the live context is past the warm-up threshold; and
+every field is padded to a fixed width so the columns stay put as magnitudes
+change. This rendering refinement was observed by reading only that function
+after the test executions recorded below; those executions are not claimed as
 verification of this subsequent rendering change.
 Ctrl+Enter submits; Enter inserts a newline except on a blank line after the
 first; Shift+Enter inserts; Tab/Shift+Tab select model/effort; Ctrl+C cancels

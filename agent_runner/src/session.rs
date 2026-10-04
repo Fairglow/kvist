@@ -61,10 +61,16 @@ struct LiveProgress<'a> {
 /// than only after the turn completes. Best-effort: a closed sink only means the
 /// UI is gone. The running output is estimated from streamed characters because
 /// the provider reports usage only when the turn ends.
+///
+/// The output speed is the estimated tokens divided by the wall time spent
+/// generating this turn (prompt processing excluded), which is what the user
+/// expects `tok/s` to mean and what `llama-server` measures. The cumulative
+/// rate since the prompt started is reported separately as the average.
 fn emit_live_progress<S: EventSink>(
     sink: &S,
     progress: &LiveProgress,
     output_chars: u64,
+    attempt_started: Instant,
     at: Instant,
 ) -> Result<()> {
     let output_tokens = output_chars.div_ceil(4);
@@ -73,6 +79,10 @@ fn emit_live_progress<S: EventSink>(
         .as_secs_f64()
         .max(1e-9);
     let total_tokens = progress.cumulative_total.saturating_add(output_tokens);
+    let generation_secs = at
+        .saturating_duration_since(attempt_started)
+        .as_secs_f64()
+        .max(1e-9);
     sink.send(Event::Progress {
         token_accounting: TokenAccounting::Estimated,
         input_tokens: progress.cumulative_total,
@@ -85,7 +95,8 @@ fn emit_live_progress<S: EventSink>(
         compaction_progress: progress
             .session
             .compaction_progress(progress.context, progress.tool_defs),
-        tokens_per_sec: total_tokens as f64 / elapsed,
+        generation_tokens_per_sec: output_tokens as f64 / generation_secs,
+        average_tokens_per_sec: total_tokens as f64 / elapsed,
         total_tokens,
         elapsed_secs: elapsed,
     })
@@ -157,8 +168,16 @@ pub enum Event {
         context_utilization: f64,
         /// How close compaction is to the hard limit (`0.0..=1.0`).
         compaction_progress: f64,
-        /// Session-wide tokens per second.
-        tokens_per_sec: f64,
+        /// Output tokens per second of wall time spent generating (prompt
+        /// processing and tool execution excluded): the speed the user expects
+        /// `tok/s` to mean, comparable to what `llama-server` reports. While a
+        /// turn streams this is derived from the streamed output estimate;
+        /// afterwards it is the provider's turn output over its generation time.
+        generation_tokens_per_sec: f64,
+        /// Average tokens per second since the prompt started: cumulative
+        /// provider tokens over wall clock, the throughput figure a whole
+        /// session (with its tool and think gaps) actually sustained.
+        average_tokens_per_sec: f64,
         /// Cumulative provider tokens observed across the session.
         total_tokens: u64,
         /// Wall-clock seconds since the run started.
@@ -806,6 +825,7 @@ impl AgentRunner {
         let mut input = 0_u64;
         let mut output = 0_u64;
         let mut total = 0_u64;
+        let mut generation_seconds = 0.0_f64;
         let mut usage_complete = true;
         let mut tokens_remaining = self.limits.max_tokens;
         let mut actions = agent_runtime::ActionHashRing::new();
@@ -855,7 +875,10 @@ impl AgentRunner {
                 &mut tokens_remaining,
                 recorder,
             ) {
-                Ok(value) => value,
+                Ok((value, seconds)) => {
+                    generation_seconds += seconds;
+                    value
+                }
                 Err(error)
                     if !matches!(
                         &error,
@@ -989,6 +1012,7 @@ impl AgentRunner {
                     TokenAccounting::Unavailable
                 },
                 started_at,
+                generation_seconds,
             )?;
             if terminal || summary.failure.is_some() || cancellation.is_cancelled() {
                 break;
@@ -1033,7 +1057,7 @@ impl AgentRunner {
         budget: &PromptBudget,
         tokens_remaining: &mut u64,
         recorder: &mut Option<&mut dyn Recorder>,
-    ) -> Result<ModelTurn>
+    ) -> Result<(ModelTurn, f64)>
     where
         M: ModelTransport,
         S: EventSink,
@@ -1075,6 +1099,11 @@ impl AgentRunner {
             if let Some(recorder) = recorder.as_mut() {
                 recorder.request(&attempt_request, attempt)?;
             }
+            // Wall time the model spends generating, accumulated across this
+            // turn's attempts: the generation speed is output tokens over this,
+            // which excludes prompt processing and any backoff between attempts.
+            let attempt_started = Instant::now();
+            let mut generation_secs = 0.0_f64;
             // Running output estimate and last live-update time for this attempt,
             // so the stats bar refreshes at a bounded rate while the model streams
             // rather than only after the turn completes.
@@ -1117,9 +1146,13 @@ impl AgentRunner {
                     let now = Instant::now();
                     if now.saturating_duration_since(last_emit) >= LIVE_PROGRESS_INTERVAL {
                         last_emit = now;
-                        if let Err(error) =
-                            emit_live_progress(sink, progress, attempt_output_chars, now)
-                        {
+                        if let Err(error) = emit_live_progress(
+                            sink,
+                            progress,
+                            attempt_output_chars,
+                            attempt_started,
+                            now,
+                        ) {
                             sink_error = Some(error);
                             cancellation.cancel();
                             return Err(agent_runtime::Error::ModelTransportCancelled);
@@ -1129,6 +1162,7 @@ impl AgentRunner {
                 },
                 attempt_deadline,
             );
+            generation_secs += attempt_started.elapsed().as_secs_f64();
             if let Some(error) = sink_error {
                 return Err(error);
             }
@@ -1146,7 +1180,7 @@ impl AgentRunner {
                             .saturating_add(next_reserve as usize)
                             > progress.context.limit_tokens()
                     {
-                        return Ok(turn);
+                        return Ok((turn, generation_secs));
                     }
                     if let Some(recorder) = recorder.as_mut() {
                         let index = recorder.turn_start(&turn)?;
@@ -1165,7 +1199,7 @@ impl AgentRunner {
                     attempt_request = enlarged;
                     attempt += 1;
                 }
-                Ok(turn) => return Ok(turn),
+                Ok(turn) => return Ok((turn, generation_secs)),
                 // Retry only temporal, recoverable failures, and only while the
                 // attempt budget remains and the turn was not cancelled.
                 Err(error) if error.is_retryable() => {
@@ -1225,10 +1259,10 @@ impl AgentRunner {
         total_tokens: u64,
         token_accounting: TokenAccounting,
         started_at: Instant,
+        generation_seconds: f64,
     ) -> Result<()> {
         let context_tokens = session.estimate_context_tokens(session.tool_definitions().len());
         let elapsed = started_at.elapsed().as_secs_f64().max(1e-9);
-        let tokens_per_sec = total_tokens as f64 / elapsed;
         sink.send(Event::Progress {
             token_accounting,
             input_tokens,
@@ -1238,7 +1272,12 @@ impl AgentRunner {
             context_utilization: session.utilization(context, session.tool_definitions().len()),
             compaction_progress: session
                 .compaction_progress(context, session.tool_definitions().len()),
-            tokens_per_sec,
+            // Output-only decode speed: the provider's output tokens for the
+            // turns so far over the wall time spent generating them. Prompt
+            // tokens and the gaps between turns are excluded, so this is
+            // comparable to `llama-server`'s tokens/sec.
+            generation_tokens_per_sec: output_tokens as f64 / generation_seconds.max(1e-9),
+            average_tokens_per_sec: total_tokens as f64 / elapsed,
             total_tokens,
             elapsed_secs: elapsed,
         })

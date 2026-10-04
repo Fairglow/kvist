@@ -495,11 +495,17 @@ The status bar shows `model | effort | status` and a cancel hint; the prompt lin
 shows the input with autocomplete-free editing to keep the dependency surface
 small.
 
-A live stats bar reports progress without cluttering the transcript: working
-speed (`⚡ N tok/s`), context utilization (`▁▃▅▇ +P% cur/limit`), a compaction
-progress bar (`compaction ▁▃▅▇ P%`), and cumulative `total_tokens` with elapsed
-time (`m:ss` or `h:mm:ss`). Each stat is derived from `Event::Progress`, and the
-stats line is unit-tested without a terminal so the presentation model stays
+A live stats bar reports progress without cluttering the transcript. It shows
+the output-only generation speed (`⚡ N t/s`, prompt processing and tool time
+excluded — the figure comparable to `llama-server`'s per-prompt tokens/sec),
+the session-wide average throughput (`avg N t/s`, cumulative provider tokens
+over wall clock), context utilization (`ctx ▇▇▇▇▇▇▇░ +P% cur/limit`), cumulative
+processed tokens in short units (`123.4k tok`), and elapsed time (`m:ss` or
+`h:mm:ss`). The compaction field (`compaction ▁▃▅▇ P%`) appears only while the
+live context is past the warm-up threshold, i.e. only when compaction is in
+play. Every field is padded to a fixed width so values hold their columns while
+magnitudes change. Each stat is derived from `Event::Progress`, and the stats
+line is unit-tested without a terminal so the presentation model stays
 verifiable.
 
 The compaction bar also carries an ETA (`compaction ...% (in 2m12s)`), forecast

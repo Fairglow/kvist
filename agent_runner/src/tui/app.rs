@@ -106,8 +106,15 @@ const EFFORTS: [ReasoningEffort; 7] = [
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Stats {
     pub token_accounting: crate::session::TokenAccounting,
-    /// Session-wide tokens per second.
-    pub tokens_per_sec: f64,
+    /// Output tokens per second of wall time spent generating: the speed the
+    /// user expects `tok/s` to mean, comparable to what `llama-server`
+    /// reports. `None` before the first report carrying a measurement (a
+    /// provider-usage turn can complete without any observable generation).
+    pub generation_tokens_per_sec: Option<f64>,
+    /// Session-wide average tokens per second: cumulative provider tokens over
+    /// wall clock since the prompt started, the throughput a whole session
+    /// (with its tool and think gaps) actually sustained.
+    pub average_tokens_per_sec: f64,
     /// Tokens the model currently holds in context.
     pub context_tokens: usize,
     /// The model context limit, in tokens.
@@ -473,7 +480,8 @@ impl App {
             }
             Event::Progress {
                 token_accounting,
-                tokens_per_sec,
+                generation_tokens_per_sec,
+                average_tokens_per_sec,
                 context_tokens,
                 context_limit,
                 context_utilization,
@@ -489,9 +497,20 @@ impl App {
                     context_limit,
                 );
                 self.last_growth = Some((elapsed_secs, context_tokens));
+                // A provider-usage turn can complete in less time than the
+                // clock resolves (a tiny scripted response); that reports zero
+                // generated tokens and would read as a meaningless "0 tok/s",
+                // so the previously measured speed is kept.
+                let previous_speed = self.stats.and_then(|stats| stats.generation_tokens_per_sec);
+                let generation_tokens_per_sec = if generation_tokens_per_sec > 0.0 {
+                    Some(generation_tokens_per_sec)
+                } else {
+                    previous_speed
+                };
                 self.stats = Some(Stats {
                     token_accounting,
-                    tokens_per_sec,
+                    generation_tokens_per_sec,
+                    average_tokens_per_sec,
                     context_tokens,
                     context_limit,
                     utilization: context_utilization,
@@ -619,50 +638,84 @@ impl App {
         self.collapse_reasoning && !self.hidden_reasoning.is_empty()
     }
 
-    /// The compact stats footer, or an empty string when no stats exist yet.
+    /// Renders the live stats bar, or an empty string before any progress.
+    ///
+    /// Every field is padded to a fixed width so the values hold their columns
+    /// while magnitudes change: the bar re-renders many times a second, and
+    /// shifting text reads as flicker. The layout follows the conventions of
+    /// `llama-server`'s per-prompt metrics:
+    ///
+    /// `⚡      52 t/s · avg   1.02k t/s · ctx ▇▇▇▇▇▇▇░ +87% 14.2k/16.4k · 123.4k tok · 3:46`
+    ///
+    /// `t/s` is the output-only generation speed (prompt processing, tool
+    /// execution, and think time excluded) — the figure comparable to what
+    /// `llama-server` reports; `avg` is the session-wide throughput (cumulative
+    /// provider tokens over wall clock); `ctx` is the live context utilization;
+    /// the `tok` figure is cumulative provider processing (input + output)
+    /// since the prompt started; the trailing figure is elapsed time. The
+    /// compaction field appears only while the live context is past the
+    /// warm-up threshold, i.e. only when compaction is actually in play.
     pub fn stats_line(&self) -> String {
         let Some(stats) = self.stats else {
             return String::new();
         };
-        let speed = match stats.token_accounting {
-            crate::session::TokenAccounting::Provider => {
-                format!("⚡ {:.0} tok/s  ·  ", stats.tokens_per_sec)
+        // The generation speed, with a `~` marker while it is the streamed
+        // output estimate and a `?` when the provider reports no usage at all.
+        // Both the estimate and the provider figure pad to the same width so the
+        // "t/s" label stays in one column across the transition.
+        let speed = match (stats.token_accounting, stats.generation_tokens_per_sec) {
+            (crate::session::TokenAccounting::Unavailable, _) => "      ?".to_owned(),
+            (crate::session::TokenAccounting::Estimated, Some(rate)) => {
+                format!("{:>6}", format!("~{}", format_number(rate)))
             }
-            crate::session::TokenAccounting::Estimated => {
-                format!("⚡ ~{:.0} tok/s  ·  ", stats.tokens_per_sec)
+            (crate::session::TokenAccounting::Provider, Some(rate)) => {
+                format!("{:>6}", format_number(rate))
             }
-            crate::session::TokenAccounting::Unavailable => "⚡ ? tok/s  ·  ".into(),
+            (_, None) => "      —".to_owned(),
         };
+        let average = format!("{:>5}", format_number(stats.average_tokens_per_sec));
+        let limit = format_number(stats.context_limit as f64);
+        let current = format_number(stats.context_tokens as f64);
         let context = format!(
-            "▁▃▅▇{} ~{:+.0}% ~{}/{}  ·  ",
+            "ctx {}{:>5.0}% {current:>width$}/{limit}",
             bargraph(stats.utilization, 8),
             stats.utilization.clamp(0.0, 1.0) * 100.0,
-            stats.context_tokens,
-            stats.context_limit
+            width = limit.len()
         );
-        let eta_suffix = match stats.eta_secs {
-            Some(secs) if stats.compaction_progress > 0.0 => {
-                format!(" (in {})", format_eta(secs))
-            }
-            _ => String::new(),
-        };
-        let compaction = format!(
-            "compaction {}{:.0}%{}",
-            bargraph(stats.compaction_progress, 8),
-            stats.compaction_progress.clamp(0.0, 1.0) * 100.0,
-            eta_suffix
-        );
-        let usage = match stats.token_accounting {
+        let mut parts = vec![
+            format!("⚡ {speed} t/s"),
+            format!("avg {average} t/s"),
+            context,
+        ];
+        if stats.compaction_progress > 0.0 {
+            let eta_suffix = match stats.eta_secs {
+                Some(secs) => format!(" (in {})", format_eta(secs)),
+                None => String::new(),
+            };
+            parts.push(format!(
+                "compaction {}{:.0}%{}",
+                bargraph(stats.compaction_progress, 8),
+                stats.compaction_progress.clamp(0.0, 1.0) * 100.0,
+                eta_suffix
+            ));
+        }
+        let usage_part = match stats.token_accounting {
             crate::session::TokenAccounting::Provider => {
-                format!("{} tok (reported)", stats.total_tokens)
+                format!("{:>9} tok", format_number(stats.total_tokens as f64))
             }
             crate::session::TokenAccounting::Estimated => {
-                format!("~{} tok (estimated)", stats.total_tokens)
+                format!(
+                    "{:>10} tok",
+                    format!("~{}", format_number(stats.total_tokens as f64))
+                )
             }
             crate::session::TokenAccounting::Unavailable => "provider usage unavailable".into(),
         };
-        let progress = format!(" · {usage} · {}", format_elapsed(stats.elapsed_secs));
-        format!("{speed}{context}{compaction}{progress}")
+        parts.push(format!(
+            "{usage_part} · {:>7}",
+            format_elapsed(stats.elapsed_secs)
+        ));
+        parts.join("  ·  ")
     }
 
     /// Processes one key event and reports what the runner should do.
@@ -1830,6 +1883,30 @@ fn format_eta(secs: f64) -> String {
     }
 }
 
+/// Formats a token count with short human-readable units, matching the
+/// conventions of model-serving tools: `874`, `12.3k`, `1.42M`, `1.05G`.
+/// Values below 1000 print as exact integers so small counts stay exact.
+fn format_number(n: f64) -> String {
+    if !n.is_finite() || n < 1000.0 {
+        return format!("{:.0}", n.max(0.0));
+    }
+    for (divisor, suffix) in [(1_000_000_000.0, "G"), (1_000_000.0, "M"), (1_000.0, "k")] {
+        if n >= divisor {
+            let value = n / divisor;
+            let text = if value < 100.0 {
+                format!("{value:.2}")
+            } else {
+                format!("{value:.1}")
+            };
+            // Trim trailing zeros so "45.20k" reads "45.2k" and "9.00k" reads
+            // "9k", matching the convention of model-serving tools.
+            let text = text.trim_end_matches('0').trim_end_matches('.');
+            return format!("{text}{suffix}");
+        }
+    }
+    unreachable!("a finite value of 1000+ matches a divisor")
+}
+
 /// Formats elapsed session time as `m:ss`, or `h:mm:ss` past an hour.
 fn format_elapsed(secs: f64) -> String {
     let secs = secs.round().clamp(0.0, f64::MAX) as u64;
@@ -1870,7 +1947,7 @@ fn bargraph(fraction: f64, width: u16) -> String {
 mod tests {
     use super::{
         AGENT_BG, App, Color, KeyAction, LineKind, MAX_LINES, MENU_ITEMS, Overlay, PROMPT_BG,
-        REASONING_BG, ScreenLine, Style, next_block_end, wrap,
+        REASONING_BG, ScreenLine, Style, format_number, next_block_end, wrap,
     };
     use crate::session::Event;
     use agent_runtime::ReasoningEffort;
@@ -2388,24 +2465,114 @@ mod tests {
             output_tokens: 0,
             context_tokens: 100,
             context_limit: 8192,
-            context_utilization: 0.5,
-            compaction_progress: 0.2,
-            tokens_per_sec: 42.0,
+            context_utilization: 0.02,
+            compaction_progress: 0.0,
+            generation_tokens_per_sec: 42.0,
+            average_tokens_per_sec: 95.0,
             total_tokens: 512,
             elapsed_secs: 225.5,
         });
         let line = app.stats_line();
-        assert!(line.contains("tok/s"));
-        assert!(line.contains("8192"));
+        assert!(line.contains("42 t/s"));
+        assert!(line.contains("95 t/s"));
+        assert!(line.contains("8.19k"));
         assert!(line.contains("512 tok"));
         assert!(line.contains("3:46"));
+        // Below the warm-up threshold the compaction field stays hidden.
+        assert!(!line.contains("compaction"));
         app.stats.as_mut().unwrap().token_accounting = crate::session::TokenAccounting::Unavailable;
         let line = app.stats_line();
         assert!(line.contains("provider usage unavailable"));
         assert!(!line.contains("512 tok"));
-        assert!(line.contains("? tok/s"));
+        assert!(line.contains("? t/s"));
         app.stats.as_mut().unwrap().token_accounting = crate::session::TokenAccounting::Estimated;
-        assert!(app.stats_line().contains("~512 tok (estimated)"));
+        assert!(app.stats_line().contains("~512 tok"));
+    }
+
+    #[test]
+    fn stats_line_shows_compaction_only_when_in_play() {
+        // Past the warm-up threshold (progress > 0) the compaction field
+        // appears with its bar, percent, and ETA.
+        let mut active = app();
+        active.push_event(Event::Progress {
+            token_accounting: crate::session::TokenAccounting::Provider,
+            input_tokens: 0,
+            output_tokens: 0,
+            context_tokens: 6300,
+            context_limit: 8192,
+            context_utilization: 0.77,
+            compaction_progress: 0.08,
+            generation_tokens_per_sec: 40.0,
+            average_tokens_per_sec: 90.0,
+            total_tokens: 4096,
+            elapsed_secs: 45.0,
+        });
+        active.push_event(Event::Progress {
+            token_accounting: crate::session::TokenAccounting::Provider,
+            input_tokens: 0,
+            output_tokens: 0,
+            context_tokens: 7300,
+            context_limit: 8192,
+            context_utilization: 0.89,
+            compaction_progress: 0.33,
+            generation_tokens_per_sec: 40.0,
+            average_tokens_per_sec: 90.0,
+            total_tokens: 4700,
+            elapsed_secs: 95.0,
+        });
+        assert!(active.stats_line().contains("compaction"));
+        // A flat session that never crossed warm-up shows no compaction field.
+        let mut idle = app();
+        idle.push_event(Event::Progress {
+            token_accounting: crate::session::TokenAccounting::Provider,
+            input_tokens: 0,
+            output_tokens: 0,
+            context_tokens: 2000,
+            context_limit: 8192,
+            context_utilization: 0.24,
+            compaction_progress: 0.0,
+            generation_tokens_per_sec: 40.0,
+            average_tokens_per_sec: 90.0,
+            total_tokens: 512,
+            elapsed_secs: 10.0,
+        });
+        assert!(!idle.stats_line().contains("compaction"));
+    }
+
+    #[test]
+    fn stats_line_fields_hold_fixed_width_columns() {
+        // The bar re-renders constantly; magnitudes must not shift columns.
+        let push = |app: &mut App, ctx: usize, rate: f64, avg: f64, total: u64| {
+            app.push_event(Event::Progress {
+                token_accounting: crate::session::TokenAccounting::Provider,
+                input_tokens: 0,
+                output_tokens: 0,
+                context_tokens: ctx,
+                context_limit: 32768,
+                context_utilization: 0.3,
+                compaction_progress: 0.0,
+                generation_tokens_per_sec: rate,
+                average_tokens_per_sec: avg,
+                total_tokens: total,
+                elapsed_secs: 10.0,
+            });
+        };
+        let mut app = app();
+        push(&mut app, 3000, 12.0, 95.0, 512);
+        let first = app.stats_line();
+        push(&mut app, 9000, 350.0, 1500.0, 123456);
+        let second = app.stats_line();
+        // Each field keeps its position: the offset of the "ctx" column is
+        // identical in both frames (the speed and avg fields are fixed-width),
+        // and the row is a single line.
+        let cut = |line: &str| line.find("ctx").expect("ctx field");
+        assert_eq!(cut(&first), cut(&second));
+        assert_eq!(first.lines().count(), 1);
+        assert_eq!(second.lines().count(), 1);
+        // Human-readable units appear for large counts (trailing zeros trimmed).
+        assert!(second.contains("123.5k tok"));
+        assert!(second.contains("1.5k t/s"));
+        assert!(second.contains("9k/32.77k"));
     }
 
     #[test]
@@ -2419,7 +2586,8 @@ mod tests {
             context_limit: 8192,
             context_utilization: 0.5,
             compaction_progress: 0.4,
-            tokens_per_sec: 50.0,
+            generation_tokens_per_sec: 50.0,
+            average_tokens_per_sec: 50.0,
             total_tokens: 1024,
             elapsed_secs: 20.0,
         });
@@ -2438,7 +2606,8 @@ mod tests {
             context_limit: 8192,
             context_utilization: 0.4,
             compaction_progress: 0.3,
-            tokens_per_sec: 50.0,
+            generation_tokens_per_sec: 50.0,
+            average_tokens_per_sec: 50.0,
             total_tokens: 1024,
             elapsed_secs: 10.0,
         });
@@ -2451,7 +2620,8 @@ mod tests {
             context_limit: 8192,
             context_utilization: 0.5,
             compaction_progress: 0.45,
-            tokens_per_sec: 50.0,
+            generation_tokens_per_sec: 50.0,
+            average_tokens_per_sec: 50.0,
             total_tokens: 2048,
             elapsed_secs: 20.0,
         });
@@ -2473,7 +2643,8 @@ mod tests {
                 context_limit: 8192,
                 context_utilization: 0.5,
                 compaction_progress: 0.4,
-                tokens_per_sec: 50.0,
+                generation_tokens_per_sec: 50.0,
+                average_tokens_per_sec: 50.0,
                 total_tokens: 1024,
                 elapsed_secs: elapsed,
             });
@@ -2495,7 +2666,8 @@ mod tests {
                 context_limit: 8192,
                 context_utilization: 0.5,
                 compaction_progress: 0.4,
-                tokens_per_sec: 50.0,
+                generation_tokens_per_sec: 50.0,
+                average_tokens_per_sec: 50.0,
                 total_tokens: 1024,
                 elapsed_secs: elapsed,
             });
@@ -2518,7 +2690,8 @@ mod tests {
                 context_limit: 8192,
                 context_utilization: 0.5,
                 compaction_progress: 0.4,
-                tokens_per_sec: 50.0,
+                generation_tokens_per_sec: 50.0,
+                average_tokens_per_sec: 50.0,
                 total_tokens: 1024,
                 elapsed_secs: elapsed,
             });
@@ -2528,6 +2701,20 @@ mod tests {
         // 100s later: 1000 tokens added => 10 tok/s; 900 remain => 90s ETA.
         push(&mut app, 7292, 110.0);
         assert!(app.stats_line().contains("(in 1m30s"));
+    }
+
+    #[test]
+    fn format_number_uses_short_units_and_trims_trailing_zeros() {
+        assert_eq!(format_number(0.0), "0");
+        assert_eq!(format_number(42.4), "42");
+        assert_eq!(format_number(999.9), "1000");
+        assert_eq!(format_number(1_000.0), "1k");
+        assert_eq!(format_number(1_500.0), "1.5k");
+        assert_eq!(format_number(123_456.0), "123.5k");
+        assert_eq!(format_number(1_000_000.0), "1M");
+        assert_eq!(format_number(452_000.0), "452k");
+        assert_eq!(format_number(1_050_000.0), "1.05M");
+        assert_eq!(format_number(1_500_000_000.0), "1.5G");
     }
 
     #[test]

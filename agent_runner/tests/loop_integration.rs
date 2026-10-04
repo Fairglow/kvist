@@ -718,14 +718,17 @@ fn progress_events_report_speed_utilization_and_compaction_progress() {
     for event in sink.events() {
         if let Event::Progress {
             context_limit,
-            tokens_per_sec,
+            generation_tokens_per_sec,
+            average_tokens_per_sec,
             context_utilization,
             compaction_progress,
             ..
         } = event
         {
             assert!(context_limit > 0);
-            assert!(tokens_per_sec >= 0.0);
+            assert!(generation_tokens_per_sec.is_finite());
+            assert!(generation_tokens_per_sec >= 0.0);
+            assert!(average_tokens_per_sec >= 0.0);
             assert!(context_utilization >= 0.0);
             assert!((0.0..=1.0).contains(&compaction_progress));
         }
