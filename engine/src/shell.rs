@@ -45,19 +45,23 @@ mod locks;
 mod pager;
 mod prompt_editor;
 mod runs;
+mod scroll_pager;
 mod state;
 mod status;
 mod stream;
 mod style;
+mod theme;
 mod tree;
 
+use std::borrow::Cow;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::{Component as PathComponent, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use reedline::{
-    DefaultHinter, DefaultPrompt, DefaultPromptSegment, Emacs, IdeMenu, KeyCode, KeyModifiers,
-    MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, default_emacs_keybindings,
+    DefaultHinter, Emacs, Hinter, IdeMenu, KeyCode, KeyModifiers, MenuBuilder, Prompt,
+    PromptEditMode, PromptHistorySearch, Reedline, ReedlineEvent, ReedlineMenu, Signal,
+    default_emacs_keybindings,
 };
 
 use clap::Parser;
@@ -76,13 +80,123 @@ pub use prompt_editor::{
 };
 pub use runs::RecentRun;
 pub use state::DynamicState;
-pub use status::{StatusContext, print_welcome_banner, short_prompt, status_bar_label};
+pub use status::{StatusContext, key_hints, print_welcome_banner, short_prompt, status_bar_label};
 pub use stream::{AgentFeedback, ProgressSpinner, StreamManager};
-pub use style::{Theme, report_error};
+pub use style::{Theme, report_error, separator_rule};
+pub use theme::Preference;
 use tree::build_root;
 
 /// Name of the completion menu registered with the line editor.
 const COMPLETION_MENU: &str = "kvist_completion";
+
+/// The visible columns reserved for the short prompt when sizing the
+/// key-hint ghost text: covers `kvist <component>/ (<branch>) ✘ ❯ ` with a
+/// long branch and component. The current status badge's width is subtracted
+/// on top, so the hint ends before the badge and the badge is never hidden.
+const KEY_HINT_PROMPT_RESERVE: usize = 30;
+
+/// The shell prompt: a single separator rule between the output and the
+/// input, then the status prompt; the key hints ride the input line as ghost
+/// text (reedline renders nothing below the input, so the hints use the
+/// standard placeholder position) and the status badge sits on the input
+/// line's right edge.
+struct KvistPrompt {
+    theme: Theme,
+    branch: Option<String>,
+    component: Option<String>,
+    failed: bool,
+    status_label: String,
+}
+
+impl Prompt for KvistPrompt {
+    fn render_prompt_left(&self) -> Cow<'_, str> {
+        let width = style::terminal_size().map(|(width, _)| width).unwrap_or(80);
+        Cow::Owned(format!(
+            "{}\n{}",
+            separator_rule(self.theme, width),
+            short_prompt(
+                self.theme,
+                self.branch.as_deref(),
+                self.component.as_deref(),
+                self.failed,
+            )
+        ))
+    }
+
+    fn render_prompt_right(&self) -> Cow<'_, str> {
+        Cow::Owned(self.status_label.clone())
+    }
+
+    fn render_prompt_indicator(&self, _mode: PromptEditMode) -> Cow<'_, str> {
+        Cow::Borrowed("")
+    }
+
+    fn render_prompt_multiline_indicator(&self) -> Cow<'_, str> {
+        Cow::Borrowed("")
+    }
+
+    fn render_prompt_history_search_indicator(
+        &self,
+        _history_search: PromptHistorySearch,
+    ) -> Cow<'_, str> {
+        Cow::Borrowed("")
+    }
+
+    /// The status badge belongs on the input line, not the separator rule.
+    fn right_prompt_on_last_line(&self) -> bool {
+        true
+    }
+}
+
+/// The line editor's hint source: the default completion ghost, and — on an
+/// empty buffer — the most important key hints, sized so they end before the
+/// right-hand status badge (reedline drops the badge whenever it would
+/// overlap the hint line), and always fit the line without truncation.
+struct KvistHinter {
+    theme: Theme,
+    inner: DefaultHinter,
+    badge_width: Arc<Mutex<usize>>,
+}
+
+impl Hinter for KvistHinter {
+    fn handle(
+        &mut self,
+        line: &str,
+        pos: usize,
+        history: &dyn reedline::History,
+        use_ansi_coloring: bool,
+        cwd: &str,
+    ) -> String {
+        let hint = self
+            .inner
+            .handle(line, pos, history, use_ansi_coloring, cwd);
+        if !hint.is_empty() {
+            return hint;
+        }
+        if line.is_empty() {
+            let width = style::terminal_size().map(|(width, _)| width).unwrap_or(80);
+            let badge = *self
+                .badge_width
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            return key_hints(
+                self.theme,
+                width
+                    .saturating_sub(KEY_HINT_PROMPT_RESERVE)
+                    .saturating_sub(badge),
+            );
+        }
+        String::new()
+    }
+
+    fn complete_hint(&self) -> String {
+        self.inner.complete_hint()
+    }
+
+    fn next_hint_token(&self) -> String {
+        self.inner.next_hint_token()
+    }
+}
 
 /// Truncates text to a maximum character count, adding an ellipsis if needed.
 pub(crate) fn truncate(text: &str, max_chars: usize) -> String {
@@ -231,6 +345,30 @@ impl Shell {
                 self.journal.append(journal_entry(line, "usage hint"));
                 self.note(true);
             }
+            "theme" => {
+                let args: Vec<&str> = arguments.iter().map(String::as_str).collect();
+                match args.as_slice() {
+                    [] | ["list"] => {
+                        let width = style::terminal_size()
+                            .map(|(width, _)| width)
+                            .unwrap_or(100);
+                        display_output(&theme::render_theme_overview(self.theme, width));
+                        self.journal.append(journal_entry(line, "shown"));
+                        self.note(false);
+                    }
+                    ["set", name] => {
+                        self.handle_theme_set(name, line);
+                    }
+                    _ => {
+                        report_error(
+                            self.theme,
+                            "usage: theme | theme list | theme set <NAME|PATH> — previews all themes",
+                        );
+                        self.journal.append(journal_entry(line, "usage hint"));
+                        self.note(true);
+                    }
+                }
+            }
             // In the interactive shell REPL, bare 'status' and 'overview'
             // display the human-friendly project overview; anything with
             // arguments is the real CLI command.
@@ -288,6 +426,52 @@ impl Shell {
                 self.note(true);
             }
         }
+    }
+
+    /// `theme set <NAME|PATH>`: switch the session theme and persist the
+    /// preference to `.kvist/theme`. A path loads that spec file; a name
+    /// resolves against the built-ins and the user theme file.
+    fn handle_theme_set(&mut self, value: &str, line: &str) -> LoopAction {
+        let matched = theme::match_preference(value);
+        let resolved = match matched {
+            Preference::Dark => Some(Theme::dark()),
+            Preference::Light => Some(Theme::light()),
+            Preference::Named(id) => Some(Theme::by_id(id)),
+            Preference::Path(path) => match theme::load_theme_file(&path) {
+                Ok(id) => Some(Theme::by_id(id)),
+                Err(error) => {
+                    report_error(self.theme, &error.to_string());
+                    self.journal
+                        .append(journal_entry(line, "theme load failed"));
+                    self.note(true);
+                    return LoopAction::Continue;
+                }
+            },
+        };
+        let Some(new_theme) = resolved else {
+            unreachable!("match_preference always resolves to a theme");
+        };
+        if let Err(error) = theme::save_preference(&self.project_dir, value) {
+            report_error(self.theme, &error.to_string());
+            self.journal
+                .append(journal_entry(line, "theme persist failed"));
+            self.note(true);
+            return LoopAction::Continue;
+        }
+        self.theme = new_theme;
+        self.stream_manager.set_theme(new_theme);
+        println!(
+            "{}",
+            new_theme.bold(&format!("Theme set to: {}", new_theme.name()))
+        );
+        println!(
+            "{}",
+            new_theme.dim("(persisted to .kvist/theme; `theme` previews all themes)")
+        );
+        self.journal
+            .append(journal_entry(line, &format!("theme={}", new_theme.name())));
+        self.note(false);
+        LoopAction::Continue
     }
 
     /// `cd [COMPONENT_DIR]`: remember the current component for the builtins,
@@ -1172,6 +1356,9 @@ fn render_help(theme: Theme) -> String {
     text.push_str("  locks [clean]                  inspect live/stale task locks; clean removes stale ones\n");
     text.push_str("  prompt TASK                    author a prompt in your editor for a task\n");
     text.push_str(
+        "  theme | theme set NAME         preview themes; switch (dark, light, user spec)\n",
+    );
+    text.push_str(
         "  status                       human-friendly project overview and next steps\n",
     );
     text.push_str(
@@ -1296,11 +1483,13 @@ fn is_streaming_command(command: &cli::Command) -> bool {
     }
 }
 
-/// Builds the line editor with the Kvist completer, inline hinter, IDE
-/// completion menu, and file-backed history at `.kvist/history`.
+/// Builds the line editor with the Kvist completer, the key-hint hinter, the
+/// IDE completion menu, and file-backed history at `.kvist/history`.
 fn build_editor(
     completer: Box<KvistCompleter>,
     project_dir: &Path,
+    theme: Theme,
+    badge_width: Arc<Mutex<usize>>,
 ) -> std::result::Result<Reedline, KvistError> {
     let completion_menu = Box::new(
         IdeMenu::default()
@@ -1405,7 +1594,11 @@ fn build_editor(
     let editor = Reedline::create()
         .with_completer(completer)
         .with_history(history)
-        .with_hinter(Box::new(DefaultHinter::default()))
+        .with_hinter(Box::new(KvistHinter {
+            theme,
+            inner: DefaultHinter::default(),
+            badge_width,
+        }))
         .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
         .with_edit_mode(edit_mode)
         .with_quick_completions(true);
@@ -1428,10 +1621,11 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
     // Install the shared SIGINT/SIGTERM handler once for the process.
     agent_runtime::install_handler();
 
-    // Resolve the theme once for the session: NO_COLOR, CLICOLOR,
-    // CLICOLOR_FORCE, TERM=dumb, and terminal detection are all honored, and
-    // the result degrades to plain text.
-    let theme = Theme::detect();
+    // Resolve the session theme: NO_COLOR, CLICOLOR, CLICOLOR_FORCE,
+    // TERM=dumb, and terminal detection degrade to plain text; the palette
+    // comes from KVIST_THEME, .kvist/theme, ~/.config/kvist/theme, an OSC 11
+    // background probe, or the dark default (see `theme` for switching).
+    let theme = Theme::resolve(project_dir);
 
     let root = build_root();
     let state = Arc::new(Mutex::new(DynamicState::load(project_dir)));
@@ -1440,7 +1634,12 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
     let completer = Box::new(KvistCompleter::new(root, state.clone(), focus));
     let status = StatusContext::load(project_dir);
 
-    let mut editor = build_editor(completer, project_dir)?;
+    // The visible width of the current status badge; the empty-buffer key
+    // hints are sized to end before it (reedline hides the badge when the
+    // hint line would overlap it).
+    let badge_width = Arc::new(Mutex::new(0));
+
+    let mut editor = build_editor(completer, project_dir, theme, badge_width.clone())?;
 
     let initial_branch = state
         .lock()
@@ -1465,14 +1664,16 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
             .lock()
             .ok()
             .and_then(|guard| guard.branch().map(str::to_owned));
-        let prompt = DefaultPrompt {
-            left_prompt: DefaultPromptSegment::Basic(short_prompt(
-                theme,
-                branch.as_deref(),
-                shell.current_component().as_deref(),
-                shell.last_failed,
-            )),
-            right_prompt: DefaultPromptSegment::Basic(status_bar_label(theme, &current_status)),
+        let status_label = status_bar_label(theme, &current_status);
+        *badge_width
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = style::visible_len(&status_label);
+        let prompt = KvistPrompt {
+            theme,
+            branch,
+            component: shell.current_component(),
+            failed: shell.last_failed,
+            status_label,
         };
 
         let signal = match editor.read_line(&prompt) {

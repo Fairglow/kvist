@@ -1,110 +1,23 @@
 //! Terminal theming and layout helpers for the workspace shell.
 //!
 //! Color is a presentation layer that degrades to plain text:
-//! [`Theme::detect`] honors `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`,
+//! [`Theme::resolve`] honors `NO_COLOR`, `CLICOLOR`, `CLICOLOR_FORCE`,
 //! `TERM=dumb`, and terminal detection, so captured, piped, or dumb-terminal
-//! output never contains escape sequences. All renderers are pure functions
-//! of their inputs (including the theme), so they are testable without a
-//! terminal.
+//! output never contains escape sequences. The active palette comes from the
+//! theme registry (built-in `dark`/`light` plus user TOML specs; see the
+//! `theme` module). All renderers are pure functions of their inputs
+//! (including the theme), so they are testable without a terminal.
 //!
 //! Layouts adapt to the terminal width: boxes are sized to their content,
 //! capped by the probed terminal width, and fall back to 80 columns when the
 //! size cannot be determined.
 
-use std::io::IsTerminal;
+pub use super::theme::Theme;
 
-/// A resolved terminal theme: ANSI-styled or plain text.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct Theme {
-    /// Whether ANSI styling is emitted.
-    enabled: bool,
-}
-
-impl Theme {
-    /// A plain-text theme: every style helper returns its input unchanged.
-    pub const fn plain() -> Self {
-        Self { enabled: false }
-    }
-
-    /// A styling theme: every style helper emits ANSI SGR sequences.
-    pub const fn enabled() -> Self {
-        Self { enabled: true }
-    }
-
-    /// Detects the theme from the environment and terminal state.
-    ///
-    /// `NO_COLOR` (present with any value) disables styling, as do
-    /// `CLICOLOR=0` and `TERM=dumb`; `CLICOLOR_FORCE` (anything but `0`)
-    /// enables styling even when stdout is not a terminal; otherwise styling
-    /// requires a terminal stdout.
-    pub fn detect() -> Self {
-        if std::env::var_os("NO_COLOR").is_some()
-            || std::env::var_os("CLICOLOR").is_some_and(|value| value == "0")
-            || std::env::var_os("TERM").is_some_and(|value| value == "dumb")
-        {
-            return Self::plain();
-        }
-        if std::env::var_os("CLICOLOR_FORCE").is_some_and(|value| value != "0") {
-            return Self { enabled: true };
-        }
-        Self {
-            enabled: std::io::stdout().is_terminal(),
-        }
-    }
-
-    /// Whether ANSI styling is emitted.
-    pub const fn is_enabled(self) -> bool {
-        self.enabled
-    }
-
-    /// Applies one SGR code, or returns the text unchanged when styling is
-    /// disabled.
-    pub fn style(self, code: &str, text: &str) -> String {
-        if !self.enabled {
-            return text.to_owned();
-        }
-        format!("\x1b[{code}m{text}\x1b[0m")
-    }
-
-    /// Bold text.
-    pub fn bold(self, text: &str) -> String {
-        self.style("1", text)
-    }
-
-    /// Faint (dimmed) text.
-    pub fn dim(self, text: &str) -> String {
-        self.style("2", text)
-    }
-
-    /// Red text (errors, failures, stale state).
-    pub fn red(self, text: &str) -> String {
-        self.style("31", text)
-    }
-
-    /// Green text (success, live state, the prompt marker).
-    pub fn green(self, text: &str) -> String {
-        self.style("32", text)
-    }
-
-    /// Yellow text (caution, the next-ready marker).
-    pub fn yellow(self, text: &str) -> String {
-        self.style("33", text)
-    }
-
-    /// Blue text (the prompt verb).
-    pub fn blue(self, text: &str) -> String {
-        self.style("34", text)
-    }
-
-    /// Magenta text (component context).
-    pub fn magenta(self, text: &str) -> String {
-        self.style("35", text)
-    }
-
-    /// Cyan text (in-progress state).
-    pub fn cyan(self, text: &str) -> String {
-        self.style("36", text)
-    }
+/// The prompt separator rule: a single `├──…` line that divides the shell
+/// output from the prompt input. One visible column per terminal column.
+pub fn separator_rule(theme: Theme, width: usize) -> String {
+    theme.dim(&format!("├{}", "─".repeat(width.saturating_sub(1))))
 }
 
 /// Removes ANSI SGR escape sequences so widths can be computed on visible
@@ -518,12 +431,10 @@ pub struct TitledBox {
 /// width minus a margin, or 100 columns, whichever is smaller. Content wider
 /// than the cap (e.g. a very long command on a narrow terminal) wraps to the
 /// box's inner width, so the border stays intact on every physical line.
-pub fn titled_box(
-    theme: Theme,
-    title: &str,
-    rows: &[String],
-    terminal_width: Option<usize>,
-) -> TitledBox {
+/// The visible width `titled_box` will use for these arguments, exposed so
+/// callers that frame their own rows (the streaming stages) can match the
+/// box exactly.
+pub fn titled_box_width(title: &str, rows: &[String], terminal_width: Option<usize>) -> usize {
     let content_width = rows.iter().map(|row| visible_len(row)).max().unwrap_or(0);
     let min_width = content_width.max(visible_len(title)).saturating_add(4);
     let cap = terminal_width
@@ -532,7 +443,16 @@ pub fn titled_box(
         .min(100);
     // The box grows with its content up to the terminal cap (and never below
     // the 40-column floor); wider rows wrap to the inner width below.
-    let width = min_width.clamp(40, cap.max(40));
+    min_width.clamp(40, cap.max(40))
+}
+
+pub fn titled_box(
+    theme: Theme,
+    title: &str,
+    rows: &[String],
+    terminal_width: Option<usize>,
+) -> TitledBox {
+    let width = titled_box_width(title, rows, terminal_width);
 
     let title_len = visible_len(title);
     // The top rule is `╭── <title> ──╮`; when the title nearly fills the box
@@ -605,9 +525,20 @@ mod tests {
 
     #[test]
     fn enabled_theme_wraps_in_sgr_and_resets() {
-        let theme = Theme { enabled: true };
+        let theme = Theme::enabled();
         assert_eq!(theme.bold("x"), "\x1b[1mx\x1b[0m");
         assert_eq!(theme.style("1;31", "err"), "\x1b[1;31merr\x1b[0m");
+    }
+
+    #[test]
+    fn separator_rule_is_one_row_of_the_given_width() {
+        let rule = separator_rule(Theme::plain(), 40);
+        assert_eq!(rule, format!("├{}", "─".repeat(39)));
+        assert_eq!(visible_len(&rule), 40);
+        // A zero width degenerates to just the corner.
+        assert_eq!(separator_rule(Theme::plain(), 0), "├");
+        // A one-column terminal yields corner only.
+        assert_eq!(separator_rule(Theme::plain(), 1), "├");
     }
 
     #[test]

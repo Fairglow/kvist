@@ -5,6 +5,40 @@ use crate::config;
 use super::locks;
 use super::style::{self, Theme};
 
+/// The most important editor keys, in priority order; the hint line keeps
+/// only as many groups as fit the available width (dropped from the tail),
+/// so it never truncates mid-group.
+pub const KEY_HINT_GROUPS: [(&str, &str); 5] = [
+    ("TAB", "complete"),
+    ("↑↓", "pick"),
+    ("ESC", "close"),
+    ("Ctrl+C", "cancel"),
+    ("Ctrl+D", "exit"),
+];
+
+/// Separator between hint groups.
+pub const KEY_HINT_SEPARATOR: &str = " · ";
+
+/// Builds the key-hint line from the most important keys, keeping whole
+/// `KEY <action>` groups and dropping from the tail until it fits
+/// `available` visible columns (an identity when nothing fits).
+pub fn key_hints(theme: Theme, available: usize) -> String {
+    let mut hint = String::new();
+    for (key, action) in KEY_HINT_GROUPS {
+        let group = format!("{key} {action}");
+        let next = if hint.is_empty() {
+            group.clone()
+        } else {
+            format!("{hint}{KEY_HINT_SEPARATOR}{group}")
+        };
+        if style::visible_len(&next) > available {
+            break;
+        }
+        hint = next;
+    }
+    theme.dim(&hint)
+}
+
 /// Stable context shown in the status bar that does not change per prompt.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct StatusContext {
@@ -77,15 +111,15 @@ pub fn short_prompt(
     component: Option<&str>,
     failed: bool,
 ) -> String {
-    let mut prompt = theme.style("1;34", "kvist");
+    let mut prompt = theme.prompt("kvist");
     let component = component
         .filter(|c| !c.is_empty() && *c != ".")
-        .map(|c| theme.style("1;35", &format!("{c}/")));
+        .map(|c| theme.component(&format!("{c}/")));
     let branch = branch
         .filter(|b| !b.is_empty() && *b != "no-vcs")
         .map(|b| theme.dim(&format!("({b})")));
     let marker = if failed {
-        Some(theme.style("1;31", "✘"))
+        Some(theme.failure("✘"))
     } else {
         None
     };
@@ -93,7 +127,7 @@ pub fn short_prompt(
         prompt.push(' ');
         prompt.push_str(&part);
     }
-    prompt.push_str(&format!(" {}", theme.style("1;32", "❯")));
+    prompt.push_str(&format!(" {}", theme.indicator("❯")));
     prompt.push(' ');
     prompt
 }
@@ -135,10 +169,11 @@ pub fn format_welcome_banner(
         };
         rows.push(format!("Locks:     {} active{stale}", status.live_locks));
     }
-    rows.push("Commands: overview, status, task run, help".to_owned());
-    rows.push(
-        "Keys: TAB / Ctrl+Space complete · ↑↓ pick · ESC close menu · Ctrl+C cancel · Ctrl+L clear · Ctrl+D exit".to_owned(),
-    );
+    rows.push(format!(
+        "Theme:     {} (run `theme` to preview, `theme set NAME` to switch)",
+        theme.name()
+    ));
+    rows.push("Commands: overview, status, task run, help (Ctrl+L clear screen)".to_owned());
     let titled = style::titled_box(
         theme,
         "Kvist Interactive Workspace Shell",
@@ -281,7 +316,8 @@ mod tests {
         assert!(banner.contains("Sandbox:   bubblewrap"));
         assert!(banner.contains("Model:     ollama-long-model-name"));
         assert!(banner.contains("Locks:     1 active, 2 stale (run `locks clean`)"));
-        assert!(banner.contains("Ctrl+L clear"));
+        assert!(banner.contains("Theme:     dark"));
+        assert!(!banner.contains("Keys:"));
         // Every banner line shares one visible width.
         let widths: std::collections::BTreeSet<usize> =
             banner.lines().map(style::visible_len).collect();
@@ -294,5 +330,31 @@ mod tests {
         let banner = format_welcome_banner(Theme::plain(), &status, None, None);
         assert!(!banner.contains("Locks:"));
         assert!(banner.contains("Component:  . (root)"));
+    }
+
+    #[test]
+    fn key_hints_fit_the_width_and_drop_from_the_tail() {
+        let theme = Theme::plain();
+        // Wide enough for every group (the full hint is 64 columns).
+        assert_eq!(
+            key_hints(theme, 100),
+            "TAB complete · ↑↓ pick · ESC close · Ctrl+C cancel · Ctrl+D exit"
+        );
+        // Exactly the full hint: nothing dropped.
+        assert_eq!(
+            key_hints(theme, 64),
+            "TAB complete · ↑↓ pick · ESC close · Ctrl+C cancel · Ctrl+D exit"
+        );
+        // One group too narrow: the tail group is dropped whole, never split
+        // (the first four groups are exactly 50 columns).
+        let narrow = key_hints(theme, 50);
+        assert_eq!(narrow, "TAB complete · ↑↓ pick · ESC close · Ctrl+C cancel");
+        assert!(!narrow.contains("Ctrl+D"));
+        // Two groups too narrow.
+        assert_eq!(key_hints(theme, 40), "TAB complete · ↑↓ pick · ESC close");
+        // A width smaller than the first group yields an empty hint.
+        assert_eq!(key_hints(theme, 11), "");
+        // A zero width yields an empty hint.
+        assert_eq!(key_hints(theme, 0), "");
     }
 }

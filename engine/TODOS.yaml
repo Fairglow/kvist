@@ -1,8 +1,8 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:3d971935e8b59ab1d977550b5c2146caff46dc7af0dc6c15c7b18d414d0ccae5"
-  contract_revision: "sha256:b696d5e646a0e5a8067b9460b35e2fe0cbca39a04f4fc6b7ca2deded0d8dd973"
-  design_revision: "sha256:fd70d407e48fdb960c2ef8f433f39930fdb7dd7fb5bf1ac6dda35058efc9aafd"
+  requirements_revision: "sha256:1157287fa263058e1ad2b53254ffa6b412fab26f1886281591c0c510f99f7f0a"
+  contract_revision: "sha256:daf09c4a7be26dd5bcabc9377f23d92df216ef09f5b08bf4c8b6df39543a1fa6"
+  design_revision: "sha256:0993018c7c6c08fb9be59e60c53559a59cb7a4e47f84917729cc1d4e052a6d33"
   parent_contract: null
   revalidation:
     state: stale
@@ -2976,6 +2976,88 @@ tasks:
     timestamps:
       created_at: "2026-09-30T07:00:00Z"
       updated_at: "2026-09-30T07:00:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "shell-theme-write-tests"
+    title: "Define shell theme and scroll-pager tests"
+    description: "Write failing unit tests for the theme model (built-in dark/light palettes, plain-theme identity, semantic-role styling, preference classification of names and paths, TOML spec parsing with the name rules, mode validation, unknown-role rejection, and #rgb/#rrggbb/named/0-255 colors, the luminance surface classification, and the 8 KiB size bound), the prompt presentation (full-width separator rule, key hints that keep whole groups and drop them from the tail, the short prompt layout), the streaming stage (one Agent Working box with result rows on the theme's result surface), and the scroll pager (scrollbar geometry proportionality, the two-row thumb floor, fit-fills-the-track, and the page policy)."
+    context: "The shell has no light/dark theming, no preview mechanism for selecting a theme, no user theme customization, and its paged output gave no sense of the output's size or position, so the requested presentation behavior had no executable evidence."
+    purpose: "Establish executable evidence for the theme contract and the scrollbar pager before their implementation."
+    expected_outcome: "Tests fail on the current surfaces and pin the palette model, the resolution precedence, spec validation, preview rendering, the prompt layout, the merged stage box, and the scrollbar geometry."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-SHELL-THEME"
+      - "REQUIREMENTS.md#REQ-SCROLL-PAGER"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-04T03:35:18Z"
+      updated_at: "2026-10-04T03:35:18Z"
+      completed_at: "2026-10-04T03:35:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shell-theme-implement-code"
+    title: "Implement shell theming and scrollbar pager"
+    description: "Add shell/theme.rs (semantic Palette roles, built-in dark/light palettes, the process theme registry, the KVIST_THEME/.kvist/theme/~/.config/kvist/theme preference chain with the OSC 11 background probe and dark fallback, the bounded TOML user spec at ~/.config/kvist/theme.toml, atomic .kvist/theme persistence, and the live theme preview rendering), the theme builtin (preview all themes; theme set NAME|PATH switches the session and persists), the prompt presentation (one full-width separator rule above the status line, the status badge on the input line, dim ghost key hints on the input line with whole groups dropped from the tail), the merged Agent Working streaming box with result rows on the true-black result surface, and shell/scroll_pager.rs (crossterm full-screen pager with a proportional right-hand scrollbar, key and wheel navigation, less-style reprint on exit, and direct-print fallback); remove the minus dependency."
+    context: "REQ-SHELL-THEME and REQ-SCROLL-PAGER are accepted; the failing tests from shell-theme-write-tests define the expected behavior."
+    purpose: "Deliver light/dark theming with live preview and user customization, the single-border prompt with prioritized key hints, the high-contrast agent result surface, and the scrollbar pager."
+    expected_outcome: "All shell-theme-write-tests pass; the theme builtin previews and switches themes persistently, the agent result renders on a true black background in the dark theme, and paged output shows a proportional scrollbar."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "shell-theme-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-SHELL-THEME"
+      - "REQUIREMENTS.md#REQ-SCROLL-PAGER"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-04T03:35:18Z"
+      updated_at: "2026-10-04T03:35:18Z"
+      completed_at: "2026-10-04T03:35:18Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "shell-theme-security-audit"
+    title: "Audit shell theming and scroll pager"
+    description: "Independently review the theme and pager paths for untrusted-input handling (TOML spec, preference files, OSC 11 response bytes, and terminal input treated as inert bounded data; no escape-sequence injection or path escape), determinism (stable resolution order, stable preview and hint rendering for a given width), boundedness (8 KiB spec cap, 150 ms probe timeout, bounded OSC response read), and no new authority (preference writes stay inside .kvist, no network, no daemon)."
+    context: "Theme specs, preference files, and terminal probe responses are new untrusted inputs to the shell, and the pager takes raw-mode and alternate-screen control of the terminal; an independent pass must confirm these introduce no disclosure, injection, or nondeterminism. This gate awaits the separate reviewer and is not self-certified."
+    purpose: "Preserve independent confirmation that the new presentation paths introduce no disclosure, corruption, injection, or nondeterminism."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "shell-theme-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#REQ-SHELL-THEME"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-04T03:35:18Z"
+      updated_at: "2026-10-04T03:35:18Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "shell-theme-compliance-review"
+    title: "Review shell theme and scroll-pager compliance"
+    description: "Derive observed behavior from source and tests in a clean-slate context, then compare the implementation record with REQ-SHELL-THEME, REQ-SCROLL-PAGER, the contract, and the design in a source-blind context, retaining discrepancies for human arbitration."
+    context: "Per the project's current enforcement note, component accept only structurally validates and records revisions; this gate awaits the separate source-blind reviewer and must never be self-certified."
+    purpose: "Retain an independent disposition for the theming and scroll-pager surfaces."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "shell-theme-security-audit"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-SHELL-THEME"
+      - "REQUIREMENTS.md#REQ-SCROLL-PAGER"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-04T03:35:18Z"
+      updated_at: "2026-10-04T03:35:18Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

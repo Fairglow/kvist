@@ -3,13 +3,12 @@
 //! [`pager_policy`] is a pure function of the text and the environment/
 //! terminal state, so the decision can be unit-tested without a terminal.
 //! [`display_output`] applies it and falls back to `println!` whenever the
-//! pager is unavailable or fails.
+//! pager is unavailable or fails. Interactive paging runs the built-in
+//! full-screen pager with a right-hand scrollbar (see `super::scroll_pager`),
+//! so the reader always sees how large the output is and where they are.
 
 #[cfg(not(test))]
 use std::io::IsTerminal;
-
-#[cfg(not(test))]
-use minus::Pager;
 
 /// Fallback line threshold when the terminal height cannot be determined.
 pub const DEFAULT_PAGER_THRESHOLD: usize = 15;
@@ -57,12 +56,12 @@ pub fn prepare_display(text: &str, width: usize) -> String {
 /// Displays output text to the user.
 ///
 /// If stdout is an interactive terminal and the output would scroll past the
-/// terminal height, the output is paginated cleanly using the `minus` pager;
-/// otherwise (and whenever the pager is unavailable or fails) it is printed
-/// directly, so output is never lost. For an interactive terminal of known
-/// width the text is soft-wrapped first (see [`prepare_display`]), so framed
-/// reports keep their borders; piped, captured, and width-unknown output is
-/// printed byte-identical.
+/// terminal height, the output is paginated full-screen by the built-in
+/// scrollbar pager; otherwise (and whenever the pager is unavailable or
+/// fails) it is printed directly, so output is never lost. For an interactive
+/// terminal of known width the text is soft-wrapped first (see
+/// [`prepare_display`]), so framed reports keep their borders; piped,
+/// captured, and width-unknown output is printed byte-identical.
 pub fn display_output(text: &str) {
     let trimmed = text.trim();
     if trimmed.is_empty() {
@@ -81,15 +80,17 @@ pub fn display_output(text: &str) {
         let is_terminal = std::io::stdout().is_terminal();
         let size = super::style::terminal_size();
         let rows = size.map(|(_, rows)| u16::try_from(rows).unwrap_or(u16::MAX));
-        let prepared = size
-            .map(|(width, _)| prepare_display(text, width))
+        let width = size.map(|(width, _)| width);
+        let prepared = width
+            .map(|width| prepare_display(text, width))
             .unwrap_or_else(|| text.to_owned());
         if pager_policy(&prepared, no_pager, is_terminal, rows) {
-            let pager = Pager::new();
-            if pager.push_str(&prepared).is_ok() && minus::page_all(pager).is_ok() {
+            // The pager re-wraps at its own content width (terminal width
+            // minus the scrollbar gutter), so pass the raw text.
+            if super::scroll_pager::page(text) {
                 return;
             }
-            // A pager that cannot start or page must not swallow output.
+            // A pager that cannot start must not swallow output.
         }
         println!("{prepared}");
     }

@@ -125,6 +125,11 @@ pub struct StreamManager {
     theme: Theme,
 }
 
+/// The streaming stage box title: one box holds both the working phase and
+/// the result, so the stage never closes and reopens with two stacked
+/// borders between them.
+pub(crate) const STAGE_TITLE: &str = "Agent Working";
+
 impl StreamManager {
     /// Creates a new stream manager for the given project root.
     pub fn new(project_root: &Path, theme: Theme) -> Self {
@@ -134,16 +139,31 @@ impl StreamManager {
         }
     }
 
+    /// Switches the active theme for subsequent stage rendering (a `theme
+    /// set` in the shell applies to the running session).
+    pub fn set_theme(&mut self, theme: Theme) {
+        self.theme = theme;
+    }
+
     /// The probed terminal width, when known, for fitting stage boxes.
     fn width(&self) -> Option<usize> {
         style::terminal_size().map(|(width, _)| width)
     }
 
-    /// The maximum visible columns for one stage row at the current width.
-    fn row_limit(&self) -> usize {
+    /// The box cap at the current width: terminal width minus margin, capped
+    /// at 100 columns, 80 when the size is unknown — the same cap
+    /// `titled_box` applies.
+    fn box_cap(&self) -> usize {
         self.width()
-            .map(|width| width.saturating_sub(4))
-            .unwrap_or(160)
+            .map(|width| width.saturating_sub(2))
+            .unwrap_or(80)
+            .min(100)
+    }
+
+    /// The maximum visible columns for one stage row at the current width:
+    /// the box inner width at the cap, so a row can never exceed the box.
+    fn row_limit(&self) -> usize {
+        self.box_cap().saturating_sub(4)
     }
 
     /// Starts a non-blocking progress spinner for a long-running command.
@@ -169,9 +189,10 @@ impl StreamManager {
     }
 
     /// Prints the Agent Working stage header (the box stays open until the
-    /// result stage closes it at the same width).
+    /// result stage closes it at the same width; the result rows are framed
+    /// into this same box, so the stage never draws two stacked borders).
     pub fn print_working_stage(&self) {
-        let titled = style::titled_box(self.theme, "Agent Working", &[], self.width());
+        let titled = style::titled_box(self.theme, STAGE_TITLE, &[], self.width());
         println!("{}", titled.top);
     }
 
@@ -265,8 +286,10 @@ impl StreamManager {
         })
     }
 
-    /// Builds the content rows of the Agent Result stage (pure, so the
-    /// output can be asserted without a terminal).
+    /// Builds the content rows of the result stage (pure, so the output can
+    /// be asserted without a terminal). Agent output rows are rendered on the
+    /// theme's agent surface (true black by default in the dark theme) and
+    /// padded to the box's inner width so the surface is a full-width bar.
     pub fn result_stage_rows(
         &self,
         result: &std::result::Result<cli::CommandOutput, crate::KvistError>,
@@ -279,7 +302,9 @@ impl StreamManager {
                 let text = output.to_string();
                 let trimmed = text.trim();
                 for line in trimmed.lines() {
-                    rows.push(crate::shell::truncate(line, limit));
+                    let truncated = crate::shell::truncate(line, limit);
+                    let padded = super::style::pad_right(&truncated, limit);
+                    rows.push(self.theme.agent_result(&padded));
                 }
                 if let Some(feedback) = self.find_latest_agent_feedback(target) {
                     rows.push(String::new());
@@ -323,18 +348,27 @@ impl StreamManager {
         rows
     }
 
-    /// Closes the Agent Working box and prints the Agent Result and Feedback
-    /// stage as a closed box that fits the terminal width.
+    /// Prints the result stage inside the open Agent Working box: each row is
+    /// framed to the box's inner width and the box is closed once, so the
+    /// output and the prompt are separated by a single rule. The box width is
+    /// derived from the rows themselves, exactly as `titled_box` would.
     pub fn print_result_stage(
         &self,
         result: &std::result::Result<cli::CommandOutput, crate::KvistError>,
         target: &FeedbackTarget<'_>,
     ) {
-        let close = style::titled_box(self.theme, "Agent Working", &[], self.width()).bottom;
         let rows = self.result_stage_rows(result, target);
-        let titled = style::titled_box(self.theme, "Agent Result", &rows, self.width());
-        println!("{}\n{}\n{}", close, titled.top, titled.rows.join("\n"));
-        println!("{}", titled.bottom);
+        let inner = style::titled_box_width(STAGE_TITLE, &rows, self.width()).saturating_sub(4);
+        let bottom = style::titled_box(self.theme, STAGE_TITLE, &rows, self.width()).bottom;
+        for row in &rows {
+            println!(
+                "{}{}{}",
+                self.theme.dim("│  "),
+                super::style::pad_right(row, inner),
+                self.theme.dim("│")
+            );
+        }
+        println!("{bottom}");
     }
 }
 
@@ -395,7 +429,16 @@ mod tests {
             &Ok(cli::CommandOutput::message("line one\nline two")),
             &FeedbackTarget::None,
         );
-        assert_eq!(rows, vec!["line one".to_owned(), "line two".to_owned()]);
+        // Agent rows are padded to the box inner width so the themed surface
+        // is a full-width bar; compare the visible content.
+        assert_eq!(
+            rows.iter().map(|r| r.trim()).collect::<Vec<_>>(),
+            vec!["line one", "line two"]
+        );
+        let inner = manager.row_limit();
+        for row in &rows {
+            assert_eq!(style::visible_len(row), inner);
+        }
     }
 
     #[test]

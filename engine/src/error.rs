@@ -94,6 +94,28 @@ pub enum KvistError {
         /// Actionable explanation of the terminal condition.
         reason: String,
     },
+    /// A theme spec file failed validation.
+    #[error("theme spec is invalid: {reason}")]
+    ThemeSpecInvalid {
+        /// Actionable validation diagnostic.
+        reason: String,
+    },
+    /// A theme spec file exceeds the accepted size bound.
+    #[error("theme spec `{path}` exceeds the maximum size of {max_bytes} bytes")]
+    ThemeSpecTooLarge {
+        /// Theme spec path that is too large.
+        path: PathBuf,
+        /// Maximum accepted size in bytes.
+        max_bytes: u64,
+    },
+    /// A theme preference value is not usable (unknown name, relative path).
+    #[error(
+        "invalid theme preference `{value}`; use `dark`, `light`, a registered theme name, or an absolute path to a theme.toml"
+    )]
+    ThemePreferenceInvalid {
+        /// The rejected preference value.
+        value: String,
+    },
     /// The reusable agent runtime rejected or failed an operation.
     #[error(transparent)]
     AgentRuntime(#[from] agent_runtime::Error),

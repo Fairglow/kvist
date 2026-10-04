@@ -680,24 +680,88 @@ as untrusted bounded input, and classifies each lock live or stale by process
 liveness; the prompt, banner, and status line report the two counts
 separately.
 
-Presentation lives in `shell/style.rs`: a `Theme` resolves once per session
-from `NO_COLOR` (any value), `CLICOLOR`, `CLICOLOR_FORCE`, `TERM=dumb`, and
-terminal detection, and every renderer is a pure function of its inputs plus
-the theme, so styled and plain output are unit-testable without a terminal.
-Styled table cells are padded on visible (ANSI-stripped) width so columns
-stay aligned. `titled_box` sizes its box to the content, applies the
-40-column floor and the terminal-width cap, and extends the box when content
-is wider than the cap so nothing is ever truncated. The prompt shows the
-branch, the component focus (set by `cd`), a failure marker after a failed
-command (cleared by the next success; cooperative cancellations are not
-failures), and the green `❯` indicator; a dimmed status badge on the right
-reports the sandbox backend, lock counts, and default model. The welcome
-banner is a titled box with aligned labels and a key-hint line. Ctrl+L is
-bound to the editor's clear-and-redraw event. Long non-streaming output is
-paged through `minus` only when the pure `pager_policy` (terminal height
-minus the prompt row, 15-line fallback, `KVIST_NO_PAGER` override) says it
-would scroll; a pager that cannot start falls back to direct printing so
-output is never lost. Completion attaches rich descriptions to dynamic
+Presentation lives in `shell/style.rs` and `shell/theme.rs`. A `Theme` is a
+copyable handle `{enabled, id}` into a process-wide theme registry (an
+`OnceLock` of theme definitions): the built-in `dark` (id 0, the default) and
+`light` (id 1) are always present, and a user theme registers when the user
+spec file is loaded (once per process). A `Palette` is 14 semantic SGR roles
+(prompt, component, failure, indicator, border, dim, the six status hues, and
+the agent result foreground/background); the dark palette renders bright text
+on the terminal's background with the agent result on a true black surface
+(`37;40`), and the light palette darkens the text with a white agent surface.
+Every renderer is a pure function of its inputs plus the theme, so styled and
+plain output are unit-testable without a terminal, and the plain theme (the
+`NO_COLOR`/`CLICOLOR=0`/`TERM=dumb`/non-terminal degradation, with
+`CLICOLOR_FORCE` forcing styling) is the identity. Styled table cells are
+padded on visible (ANSI-stripped) width so columns stay aligned. `titled_box`
+sizes its box to the content, applies the 40-column floor and the
+terminal-width cap, and extends the box when content is wider than the cap so
+nothing is ever truncated.
+
+Theme resolution (`Theme::resolve`) prefers, in order: the `KVIST_THEME`
+environment variable, the project-local `.kvist/theme` preference, the user
+preference at `~/.config/kvist/theme` (honoring `XDG_CONFIG_HOME`), an OSC 11
+terminal-background probe, and the dark default. A preference value is
+classified as a built-in name, a registered user-theme name, or a path (a
+path separator or a `.toml` suffix), and an unresolvable value reports a
+warning and falls back to detection. The OSC 11 probe writes the query in raw
+mode on `/dev/tty` (via `nix::cfmakeraw` on an `File` handle, so no `unsafe`
+is needed), reads a bounded response with a 150 ms timeout, and classifies
+the surface by relative luminance (threshold 128); a non-responding terminal
+yields the dark default. A user theme is a TOML spec at
+`~/.config/kvist/theme.toml`: a `name` (1-32 characters of `[a-z0-9-]`), an
+optional `mode` (`dark` or `light`), and a `[colors]` table mapping known
+roles to a `#rgb`/`#rrggbb` hex, a named ANSI color, or a 0-255 index;
+specs are size-bounded (8 KiB), unknown roles are rejected, and the parsed
+overrides are layered onto the mode's base palette. `theme set` persists the
+preference to `.kvist/theme` with an atomic tmp-file-plus-rename write.
+The `theme` builtin previews every available theme as a live titled box drawn
+in the theme itself (prompt line, separator rule, agent result bar, status
+badge), and the completion menu shows the same preview as the description of
+`theme set` candidates.
+
+The prompt renders a single full-width separator rule (`├─…─`) above the
+status line — the one border between the output and the input — then the
+short prompt (`kvist <component>/ (<branch>) ✘ ❯ `): the component focus is
+set by `cd`, the failure marker (`✘`) appears after a failed command (cleared
+by the next success; cooperative cancellations are not failures), and the
+`❯` indicator leads. The dimmed status badge (sandbox backend, live/stale
+lock counts, default model) sits on the input line's right edge
+(`right_prompt_on_last_line`). The most important key hints (`TAB complete ·
+↑↓ pick · ESC close · Ctrl+C cancel · Ctrl+D exit`) ride the input line as
+dim ghost text when the buffer is empty (reedline renders nothing below the
+input line, so the placeholder position is the standard spot): whole groups
+are dropped from the tail until the hint fits the width left over for the
+short prompt and the current badge, so it never truncates and the badge is
+never hidden by the hint. The welcome banner is a titled box with aligned labels including
+the active theme; the key hints live on the input line, not in the banner.
+Ctrl+L is bound to the editor's clear-and-redraw event.
+
+Streaming task execution renders one `Agent Working` titled box that stays
+open across the live output and the result: the result rows are padded to the
+box's inner width and styled with the theme's agent-result role (the black
+bar in the dark theme), and the box closes once, so the output and the prompt
+are separated by the single separator rule. The stream manager's theme is
+updated in place on `theme set`, so a running session switches over live.
+
+Long non-streaming output is paged only when the pure `pager_policy`
+(terminal height minus the prompt row, 15-line fallback, `KVIST_NO_PAGER`
+override) says it would scroll. Interactive paging runs the built-in
+full-screen pager in `shell/scroll_pager.rs` (crossterm raw mode, alternate
+screen, mouse capture): it re-wraps the text at the content width (terminal
+width minus a two-column gutter) and draws a one-column scrollbar on the
+right. The thumb geometry is a pure, testable function
+`scrollbar_geometry(total, visible, offset)` returning `(thumb_top,
+thumb_height)`: a document that fits fills the track, a thumb is never
+shorter than two rows, and both size and position are proportional, so the
+reader always sees how large the output is and where they are. Keys: `q`/
+`Esc`/`Ctrl+C` quit, arrows and `j`/`k` one line, `PageUp`/`PageDown` a
+page, `g`/`G` and Home/End the ends, `d`/`u` a half page, and the mouse wheel
+three lines. On exit the pager reprints the last visible line (like `less`) so
+the shell's next prompt follows the content; a pager that cannot take the
+terminal (no size, too small, raw-mode failure) returns `false` and the
+caller prints the output directly, so output is never lost. The `minus`
+dependency was removed. Completion attaches rich descriptions to dynamic
 values (task status and title, a next-ready star in run contexts, the
 current component), and the walker treats a complete `--` token as the end
 of flag parsing, so Tab after `--` completes positionals only. Editor launch

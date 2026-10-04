@@ -216,7 +216,7 @@ every executed command and each source degrades independently without aborting
 the session. The shell builtins are `cd [COMPONENT_DIR]`,
 `tasks [COMPONENT_DIR] [--status STATUS]`, `run [COMPONENT_DIR] [TASK_ID]`,
 `help [TOPIC]`, `last [COUNT]`, `history [COUNT]`, `journal`, `locks
-[clean]`, and `exit`/`quit`. `help` with no topic lists the builtins and the
+[clean]`, `theme [set <NAME|PATH>]`, and `exit`/`quit`. `help` with no topic lists the builtins and the
 available help topics; with a topic it renders that topic, exactly as
 `kvist help [TOPIC]` does. The `tasks` table lists each blocked and
 awaiting-decision task with its truncated reason first line and the exact next
@@ -228,12 +228,32 @@ unchanged. `run` without a task ID suggests the first ready task of the
 selected component and runs it only after an explicit confirmation (a bare
 ENTER accepts; a refusal changes no state). `prompt TASK_ID` opens the external
 editor seeded with
-the task context and submits only after explicit confirmation.
+the task context and submits only after explicit confirmation. `theme`
+previews every available theme (the current one first, then built-ins and
+user specs) as a live box drawn in the theme itself, and `theme set
+<NAME|PATH>` resolves a built-in name (`dark`, `light`), a registered
+user-theme name, or a spec file path, applies the theme to the session
+immediately, and persists the preference to `.kvist/theme` with an atomic
+write; a preference that cannot be resolved is reported and leaves the
+session theme unchanged.
 
 Shell presentation degrades to plain text when `NO_COLOR` is set (any value),
 `CLICOLOR=0`, `TERM=dumb`, or stdout is not a terminal; `CLICOLOR_FORCE` (any
 value but `0`) forces styling even when stdout is not a terminal. Styled
-rendering keeps table columns aligned on visible width. When stdout is a
+rendering is driven by a semantic palette of named roles (prompt, component,
+failure, indicator, border, dim, the six status hues, and the agent result
+surface) resolved once per session: the `dark` theme (default) and the
+`light` theme are built in, and a user theme is a TOML spec at
+`~/.config/kvist/theme.toml` (or `XDG_CONFIG_HOME/kvist/theme.toml`) with a
+`name`, an optional `mode` (`dark` or `light`), and a `[colors]` table
+overriding any palette role with a `#rgb`/`#rrggbb` hex, a named ANSI color,
+or a 0-255 index. Resolution prefers, in order, the `KVIST_THEME`
+environment variable, the project-local `.kvist/theme` preference, the user
+preference at `~/.config/kvist/theme`, an OSC 11 terminal-background probe
+(light when the probed surface is light), and the `dark` default; an
+unresolvable preference reports a warning and falls back to detection. The
+`dark` theme renders the agent result surface on a true black background.
+Styled rendering keeps table columns aligned on visible width. When stdout is a
 terminal with a known width, the shell soft-wraps output at word boundaries so
 no line overflows: titled boxes (welcome banner, streaming stages, the
 `Prompt` stage) wrap their rows to the box's inner width — at least 40
@@ -242,12 +262,21 @@ whichever is smaller — and the border is drawn on every physical line; bordere
 status-report lines (`│…│`) wrap their inner content with the border and
 padding re-drawn per line; plain lines wrap with each continuation line
 prefixed by the line's leading whitespace so text blocks keep their
-indentation. Unbreakable words longer than the available width are hard-split.
-Wrapping is a presentation-only transformation: piped, captured, or
+indentation. Wrapping is a presentation-only transformation: piped, captured, or
 width-unknown output is byte-identical to the unwrapped form. Output is paged
 only when it would scroll past the terminal height
 minus the prompt row (a 15-line fallback when the height is unknown), and
-`KVIST_NO_PAGER` disables paging. The prompt reports the last command's exit
+`KVIST_NO_PAGER` disables paging; paging runs the built-in full-screen pager
+with a one-column right-hand scrollbar whose proportional thumb shows the
+output's size and the current position (keys: `q`/`Esc` quit, arrows/
+`j`/`k` one line, `PageUp`/`PageDown` a page, `g`/`G` the ends, `d`/`u` a
+half page, mouse wheel), and a pager that cannot take the terminal falls
+back to direct printing. The prompt draws a single full-width separator rule
+above the status line, with the most important key hints as dim ghost text
+on the input line (whole hint groups dropped from the tail so they never
+truncate, and sized to end before the status badge so the badge on the input
+line's right edge is never hidden by them). The prompt
+reports the last command's exit
 state with a failure marker until a command succeeds; Ctrl+L clears the screen
 and redraws the prompt. Completion describes dynamic values (task status and
 title, a next-ready marker in run contexts, the current component), and a

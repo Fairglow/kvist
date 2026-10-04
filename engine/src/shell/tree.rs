@@ -227,6 +227,22 @@ pub fn inject_shell_builtins(root: &mut CommandNode) {
             positionals: vec![positional("COUNT", "How many lines to show (default 20).")],
         },
         CommandNode {
+            name: "theme".to_owned(),
+            help: Some("Preview themes, or switch the session theme".to_owned()),
+            subcommands: vec![CommandNode {
+                name: "set".to_owned(),
+                help: Some("Switch the session theme and persist the preference".to_owned()),
+                subcommands: Vec::new(),
+                flags: Vec::new(),
+                positionals: vec![positional(
+                    "THEME",
+                    "Theme name (dark, light, user spec name) or a path to a theme.toml.",
+                )],
+            }],
+            flags: Vec::new(),
+            positionals: Vec::new(),
+        },
+        CommandNode {
             name: "journal".to_owned(),
             help: Some("Show the append-only session journal".to_owned()),
             subcommands: Vec::new(),
@@ -472,14 +488,15 @@ mod tests {
         ] {
             assert!(root.find_subcommand(name).is_some(), "missing {name}");
         }
-        assert_eq!(root.subcommands.len(), 15 + 10);
+        assert_eq!(root.subcommands.len(), 15 + 11);
     }
 
     #[test]
     fn root_includes_the_shell_builtins() {
         let root = root();
         for name in [
-            "cd", "tasks", "run", "help", "last", "history", "journal", "locks", "exit", "quit",
+            "cd", "tasks", "run", "help", "last", "history", "theme", "journal", "locks", "exit",
+            "quit",
         ] {
             assert!(
                 root.find_subcommand(name).is_some(),

@@ -329,6 +329,7 @@ fn domain_description(domain: ValueDomain) -> &'static str {
         ValueDomain::Model => "Model profile",
         ValueDomain::Role => "Agent role",
         ValueDomain::Branch => "VCS branch",
+        ValueDomain::Theme => "Theme name",
     }
 }
 
@@ -464,6 +465,7 @@ fn positional_domain(value_name: &str) -> Option<ValueDomain> {
         "ATTEMPT_ID" => Some(ValueDomain::Attempt),
         "MODEL_NAME" | "MODEL" => Some(ValueDomain::Model),
         "ROLE" => Some(ValueDomain::Role),
+        "THEME" => Some(ValueDomain::Theme),
         _ => None,
     }
 }
@@ -564,6 +566,25 @@ fn dynamic_values(
             .map(|role| ValueCandidate {
                 value: role.to_owned(),
                 description: None,
+            })
+            .collect(),
+        ValueDomain::Theme => super::theme::registered()
+            .into_iter()
+            .filter(|(name, _, _)| name.starts_with(prefix))
+            .map(|(name, id, builtin)| {
+                let theme = super::theme::Theme::by_id(id);
+                // A one-line live preview rendered in the theme itself: the
+                // menu shows it so the picker doubles as the theme preview.
+                let sample = format!("{} {}", theme.prompt("kvist"), theme.indicator("❯"));
+                let description = if builtin {
+                    format!("{sample} · built-in")
+                } else {
+                    format!("{sample} · user")
+                };
+                ValueCandidate {
+                    value: name,
+                    description: Some(description),
+                }
             })
             .collect(),
         ValueDomain::Branch => state
@@ -815,6 +836,7 @@ mod tests {
             "help",
             "last",
             "history",
+            "theme",
             "journal",
             "locks",
             "exit",
@@ -822,7 +844,7 @@ mod tests {
         ] {
             assert!(got.contains(&name), "missing {name} in {got:?}");
         }
-        assert_eq!(got.len(), 15 + 10);
+        assert_eq!(got.len(), 15 + 11);
     }
 
     #[test]

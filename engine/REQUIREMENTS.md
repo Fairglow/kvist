@@ -571,6 +571,44 @@ without a known width MUST be byte-identical to the unwrapped form so scripts
 and stable report consumers are unaffected. Unbreakable words longer than the
 available width MUST be hard-split at the width rather than dropped.
 
+### REQ-SHELL-THEME
+
+The interactive shell MUST render all presentation through a semantic color
+palette of named roles (prompt, component, failure, indicator, border, dim,
+six status hues, and the agent result surface) so no renderer hard-codes a
+color, and MUST provide the built-in `dark` (default) and `light` themes.
+The `theme` builtin MUST show a live in-terminal preview of every available
+theme, and `theme set <NAME|PATH>` MUST switch the session theme immediately
+for all subsequent rendering and persist the preference to `.kvist/theme`.
+Session theme resolution MUST prefer, in order: the `KVIST_THEME`
+environment variable, the project-local `.kvist/theme` preference, the user
+preference at `~/.config/kvist/theme` (honoring `XDG_CONFIG_HOME`), an OSC 11
+terminal-background probe (light when the probed surface is light), and MUST
+fall back to `dark`; an unresolvable preference MUST warn and fall back
+to detection, and a preference that names a spec file MUST load that file.
+A user theme MUST be a TOML spec with a `name` (1-32 characters of
+`[a-z0-9-]`), an optional `mode` (`dark` or `light`, default `dark`), and a
+`[colors]` table mapping palette roles to a `#rgb`/`#rrggbb` hex color, a
+named ANSI color, or a 0-255 index; a spec MUST NOT exceed 8 KiB, MUST
+reject unknown roles, and an invalid, over-size, or unreadable spec MUST
+fail with an actionable diagnostic without changing the session. The
+plain-text degradation contract of `REQ-INTERACTIVE-SHELL` MUST apply to
+every theme. In the `dark` theme, the agent result surface MUST use a true
+black background for maximum contrast.
+
+### REQ-SCROLL-PAGER
+
+Output that scrolls past the pager threshold MUST be paged in a built-in
+full-screen pager that renders a one-column scrollbar on the right whose
+thumb is sized proportionally to the output (never shorter than two rows)
+and whose position reflects the current scroll offset, so the reader always
+sees how large the output is and where they are inside it. The pager MUST
+support at least: quit (`q`/`Esc`), one-line scrolling (arrows, `j`/`k`),
+page scrolling (`PageUp`/`PageDown`), top/bottom jumps (`g`/`G`), and
+mouse-wheel scrolling, and MUST fall back to direct printing when it cannot
+take the terminal so no output is lost. Piped, captured, and width-unknown
+output MUST never be paged.
+
 ### REQ-CONTRACT-VERIFICATION
 
 Kvist MUST plan stable contract-clause locators, initially using existing

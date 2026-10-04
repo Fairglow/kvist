@@ -35,6 +35,8 @@ pub enum ValueDomain {
     Role,
     /// The active Git branch of the project repository.
     Branch,
+    /// Theme names from the theme registry (built-ins plus user specs).
+    Theme,
 }
 
 /// Task and attempt data for one component.
