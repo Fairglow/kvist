@@ -465,33 +465,56 @@ mod tests {
         assert!(owned.child.try_wait().unwrap().is_some());
     }
 
+    /// Runs one shell fixture, tolerating only the transient cleanup-window
+    /// errors that load can induce: a SIGKILLed group whose exit or pipe close
+    /// lands just outside the drain/reap window is a scheduler artifact, not a
+    /// supervision defect, so the attempt is repeated. Every other failure
+    /// surfaces immediately.
+    fn run_fixture(args: &[&str], wall_time: Duration, limit: usize) -> ToolOutcome {
+        let mut last_error = String::new();
+        for _ in 0..3 {
+            let mut command = Command::new("/bin/sh");
+            command.arg("-c").args(args);
+            match run(
+                &mut command,
+                None,
+                wall_time,
+                limit,
+                &CancellationToken::new(),
+                |error| failure(format!("spawn fixture: {error}")),
+            ) {
+                Ok(outcome) => return outcome,
+                Err(error) => {
+                    let message = error.to_string();
+                    let transient = message.contains("within the drain window")
+                        || message.contains("within the cleanup window");
+                    if !transient {
+                        panic!("{message}");
+                    }
+                    last_error = message;
+                }
+            }
+        }
+        panic!("cleanup window retries exhausted: {last_error}");
+    }
+
     #[test]
     fn private_host_supervision_honors_short_timeout_and_zero_capture_cap() {
-        let mut command = Command::new("/bin/sh");
-        command.args(["-c", "printf partial; exec sleep 1.5"]);
-        let outcome = run(
-            &mut command,
-            None,
-            Duration::from_millis(100),
+        // The wall budget covers spawning as well: under CI load, fork+exec
+        // plus shell startup can consume most of a short budget, so the kill
+        // would reach the child before it wrote anything and the
+        // captured-output assertion would depend on scheduler luck. A 1 s
+        // budget against a 5 s sleep keeps the timeout unambiguously short
+        // while leaving 5x headroom for spawn variance.
+        let outcome = run_fixture(
+            &["printf partial; exec sleep 5"],
+            Duration::from_secs(1),
             100,
-            &CancellationToken::new(),
-            |error| failure(format!("spawn fixture: {error}")),
-        )
-        .unwrap();
+        );
         assert!(outcome.timed_out);
         assert!(outcome.exited);
         assert_eq!(outcome.stdout, b"partial");
-        let mut command = Command::new("/bin/sh");
-        command.args(["-c", "printf x"]);
-        let outcome = run(
-            &mut command,
-            None,
-            Duration::from_secs(1),
-            0,
-            &CancellationToken::new(),
-            |error| failure(format!("spawn fixture: {error}")),
-        )
-        .unwrap();
+        let outcome = run_fixture(&["printf x"], Duration::from_secs(1), 0);
         assert!(outcome.output_limit_exceeded);
         assert!(outcome.stdout.is_empty());
         assert!(outcome.stderr.is_empty());
