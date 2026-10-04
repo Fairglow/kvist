@@ -327,22 +327,28 @@ evidence work remain pending.
 - Ensure all signature validation, approval-policy checks, and serialization structures include the new profile's digests.
 - Write unit/integration tests to verify correct role routing and approval-signature validation when the security reviewer is configured.
 
-### [PARTIAL] TODO AGN-02 — Supervised Custom Prompt Execution with Loop Detection
+### [DONE] TODO AGN-02 — Custom Prompt Execution via the agent-runner shell
 
-**Context:** Local LLMs (including `llama-cli`) can hang or get stuck in infinite repetitive cycles. We need a supervised prompt execution command that monitors live output streams, implements configurable idle watchdogs, and analyzes streams for repetition loops.
-
-The runtime behavior exists, but its shared prompt-input and model-setup
-security audit and compliance review remain pending.
+**Context:** `kvist prompt` runs the standalone `agent-runner` shell in every
+case: interactively (sandboxed, multi-turn) at a terminal, and headless
+(`agent-runner --headless --json`, sandbox-only) without one. The earlier
+engine-side one-shot host path — with its `--idle-timeout`, `--detect-loops`,
+and `--max-restarts` supervision flags — has been retired in favor of
+delegating to the shared agent-runner loop. The underlying idle-timeout,
+loop-detection, and bounded-retry supervision remain available in the reusable
+`agent-runtime` library (used by `agent-runner` and the `agent-run` binary) but
+are no longer surfaced on `kvist prompt`.
 
 **Acceptance criteria:**
 
-- Implement `kvist prompt [PROMPT]` command supporting options: `--role`, `--idle-timeout`, `--detect-loops`, and `--max-restarts`.
-- Accept bounded nonblank UTF-8 prompts from positional text, `--file`, redirected
-  standard input, or an explicitly or interactively selected editor.
-- Real-time streaming: Read stdout/stderr chunk-by-chunk and print to the console immediately.
-- Idle watchdogs: Terminate and restart the subprocess if no new bytes are written within `idle_timeout` seconds (default 15 minutes).
-- Loop detection: Analyze a rolling suffix buffer for consecutive matching cycle patterns (consecutive identical substrings of length 10-512 repeating >= 3 times, or consecutive line patterns). Terminate and restart the process upon detection.
-- Max automatic restarts limits (default 3) to prevent infinite restart loops.
+- `kvist prompt [PROMPT]` supports `--role`, `--model`, `--reasoning-effort`,
+  `--allow-host-execution` (interactive only), and `--multi-turn`.
+- Accepts bounded nonblank UTF-8 prompts from positional text, `--file`,
+  redirected standard input, or an explicitly or interactively selected editor.
+- With a terminal, delegates to the interactive agent-runner shell; without a
+  terminal, runs the same shell headless (`--headless --json`) and inherits its
+  NDJSON event stream on standard output.
+- Headless execution is sandbox-only and rejects `--allow-host-execution`.
 
 ### [PARTIAL] TODO AGN-03 — Model Setup Wizard with Wrapper Script Support
 

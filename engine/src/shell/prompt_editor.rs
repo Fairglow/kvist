@@ -27,9 +27,6 @@ pub fn prompt_editor_command(project_dir: &Path, task_id: &str) -> Result<Option
         role: "developer".to_owned(),
         model: None,
         reasoning_effort: None,
-        idle_timeout: 900,
-        detect_loops: false,
-        max_restarts: 3,
         allow_host_execution: false,
         multi_turn: false,
     }))

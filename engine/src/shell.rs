@@ -1474,11 +1474,7 @@ fn is_streaming_command(command: &cli::Command) -> bool {
             command,
             cli::TaskCommand::Run { .. } | cli::TaskCommand::Recover { .. }
         ),
-        cli::Command::Prompt {
-            detect_loops,
-            max_restarts,
-            ..
-        } => *detect_loops || *max_restarts > 0,
+        cli::Command::Prompt { .. } => true,
         _ => false,
     }
 }

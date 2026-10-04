@@ -136,21 +136,22 @@ Commands are non-interactive unless their contract explicitly obtains terminal
 input; `prompt` (with a terminal), `shell`, the agent setup/configuration flows,
 and `task run` without TASK_ID (which confirms the suggested task) are the
 interactive exceptions. `prompt` obtains a terminal to open the standalone
-`agent-runner` shell; with no interactive terminal it falls back to the one-shot
-host path, which still requires `--allow-host-execution`.
+`agent-runner` shell; with no interactive terminal it runs the same shell
+headless (`agent-runner --headless --json`), which is sandbox-only and rejects
+`--allow-host-execution`.
 Success is written to standard output. Domain failures are actionable, written
 to standard error, and return a nonzero status. Parser help returns success and
 parser input errors use the parser's nonzero status.
 
-Plain `prompt` output is the bounded provider content and has no synthetic
-completion trailer. Global `--json` suppresses live provider streams and emits
-exactly one JSON object with `content`; invalid UTF-8 byte sequences in captured
-output are replaced with U+FFFD. Model selection is limited to the configured
-models for the selected role. Reasoning effort is a typed
-per-invocation value and fails if the selected command lacks an explicit
-`{reasoning_effort}` placeholder.
-On an interactive terminal, the initial prompt and response label are written
-only to standard error; standard output remains provider content.
+`prompt` runs the standalone `agent-runner` shell in every case: on an
+interactive terminal the shell is interactive (sandboxed and multi-turn by
+default, with an interactive `--allow-host-execution` opt-out); without a
+terminal it runs headless, inheriting the child's standard output. Global
+`--json` selects the headless NDJSON event stream, which ends with a
+run-summary disposition; plain mode inherits the child's answer text.
+`--allow-host-execution` is rejected for headless execution. Model selection
+is limited to the configured models for the selected role. Reasoning effort
+is a typed per-invocation value and is passed through to the shell.
 
 `agent setup` always runs the generated provider command with the fixed prompt
 `Reply with exactly: OK` before role configuration is persisted. The explicit

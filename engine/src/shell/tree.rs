@@ -686,8 +686,12 @@ mod tests {
             prompt.flags[effort].possible_values,
             vec!["none", "minimal", "low", "medium", "high", "xhigh", "max"]
         );
-        assert!(prompt.find_flag_by_long("detect-loops").is_some());
-        assert!(!prompt.flags[prompt.find_flag_by_long("detect-loops").unwrap()].takes_value);
+        let host = prompt
+            .find_flag_by_long("allow-host-execution")
+            .expect("host execution flag");
+        assert!(!prompt.flags[host].takes_value);
+        let multi = prompt.find_flag_by_long("multi-turn").expect("multi-turn flag");
+        assert!(!prompt.flags[multi].takes_value);
     }
 
     #[test]

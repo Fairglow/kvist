@@ -147,24 +147,15 @@ pub enum Command {
         /// Apply a supported reasoning effort through the selected command template.
         #[arg(long, value_enum)]
         reasoning_effort: Option<ReasoningEffortArgument>,
-        /// Idle timeout in seconds before restarting the command if no new output.
-        #[arg(long, default_value_t = 900)]
-        idle_timeout: u64,
-        /// Enable repetitive loop detection in the streaming output.
-        #[arg(long)]
-        detect_loops: bool,
-        /// Maximum number of automatic restarts allowed.
-        #[arg(long, default_value_t = 3)]
-        max_restarts: u32,
-        /// Run the agent on the host, bypassing the Bubblewrap sandbox. Interactive
-        /// work is sandboxed (protected) by default; with this flag agent-runner
-        /// runs with host privileges and is single-turn unless --multi-turn allows
-        /// more turns. Never the default.
+        /// Run the agent on the host, bypassing the Bubblewrap sandbox. Meaningful
+        /// only for interactive execution (the terminal shell shows the
+        /// host-execution warning); non-interactive headless execution is
+        /// sandbox-only and rejects this flag. Never the default.
         #[arg(long)]
         allow_host_execution: bool,
         /// Allow the agent to work across multiple model turns. Meaningful only with
-        /// --allow-host-execution (host execution is single-turn by default);
-        /// sandboxed interactive work is multi-turn by default.
+        /// --allow-host-execution, where host execution is single-turn by default;
+        /// sandboxed work is multi-turn by default.
         #[arg(long)]
         multi_turn: bool,
     },
@@ -721,53 +712,21 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 role,
                 model,
                 reasoning_effort,
-                idle_timeout,
-                detect_loops,
-                max_restarts,
                 allow_host_execution,
-                multi_turn,
+                ..
             } => {
                 let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
-
-                // Interactive custom prompt work runs in the standalone
-                // agent-runner shell. Kvist authors the prompt and preselects the
-                // model/effort; agent-runner owns the interactive transcript and the
-                // execution scope, and its stdio is inherited so the shell is the
-                // view. By default the sandbox confines and multiplies the work; the
-                // one-shot host path below only applies when there is no interactive
-                // terminal or host execution was not acknowledged.
-                if delegate_interactive_prompt(
+                // `--json` runs the standalone agent-runner in headless mode; the
+                // NDJSON event stream is the complete machine-readable output of
+                // the run.
+                run_headless_prompt(
                     &resolved_prompt,
                     &role,
                     model.as_deref(),
                     reasoning_effort.map(Into::into),
                     allow_host_execution,
-                    multi_turn,
-                )? {
-                    return Ok(CommandOutput::none());
-                }
-
-                if !allow_host_execution {
-                    return Err(agent_runtime::Error::HostExecutionNotAcknowledged.into());
-                }
-                let content = execute_prompt(
-                    &resolved_prompt,
-                    PromptExecutionOptions {
-                        role: &role,
-                        model: model.as_deref(),
-                        reasoning_effort: reasoning_effort.map(Into::into),
-                        idle_timeout,
-                        detect_loops,
-                        max_restarts,
-                        capture: true,
-                    },
-                )?
-                .unwrap_or_default();
-                let mut content_json = String::new();
-                json_string_escape(&mut content_json, &content);
-                Ok(CommandOutput::message(format!(
-                    r#"{{"content":{content_json}}}"#
-                )))
+                )?;
+                Ok(CommandOutput::none())
             },
             Command::Agent {
                 command: AgentCommand::Role { command },
@@ -1288,20 +1247,15 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 role,
                 model,
                 reasoning_effort,
-                idle_timeout,
-                detect_loops,
-                max_restarts,
                 allow_host_execution,
                 multi_turn,
             } => {
                 let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
-
-                // `kvist shell` is itself interactive, so prompt work runs in the
-                // standalone agent-runner shell. By default the sandbox confines and
-                // multiplies the work; the one-shot host path below only applies when
-                // there is no interactive terminal or host execution was not
-                // acknowledged.
-                if delegate_interactive_prompt(
+                // With a terminal, the standalone agent-runner shell runs the prompt
+                // in the sandbox by default (multi-turn); --allow-host-execution opts
+                // into the interactive host escape. Without a terminal the same shell
+                // runs headless and sandbox-only, inheriting stdout.
+                if !delegate_interactive_prompt(
                     &resolved_prompt,
                     &role,
                     model.as_deref(),
@@ -1309,24 +1263,14 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     allow_host_execution,
                     multi_turn,
                 )? {
-                    return Ok(CommandOutput::none());
+                    run_headless_prompt(
+                        &resolved_prompt,
+                        &role,
+                        model.as_deref(),
+                        reasoning_effort.map(Into::into),
+                        allow_host_execution,
+                    )?;
                 }
-
-                if !allow_host_execution {
-                    return Err(agent_runtime::Error::HostExecutionNotAcknowledged.into());
-                }
-                execute_prompt(
-                    &resolved_prompt,
-                    PromptExecutionOptions {
-                        role: &role,
-                        model: model.as_deref(),
-                        reasoning_effort: reasoning_effort.map(Into::into),
-                        idle_timeout,
-                        detect_loops,
-                        max_restarts,
-                        capture: false,
-                    },
-                )?;
                 Ok(CommandOutput::none())
             }
             Command::Agent {
@@ -1884,77 +1828,6 @@ fn json_string_escape(output: &mut String, value: &str) {
     output.push('"');
 }
 
-struct PromptExecutionOptions<'a> {
-    role: &'a str,
-    model: Option<&'a str>,
-    reasoning_effort: Option<agent_runtime::ReasoningEffort>,
-    idle_timeout: u64,
-    detect_loops: bool,
-    max_restarts: u32,
-    capture: bool,
-}
-
-fn execute_prompt(prompt: &str, options: PromptExecutionOptions<'_>) -> Result<Option<String>> {
-    let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
-        operation: "determine current project directory",
-        path: PathBuf::from("."),
-        source,
-    })?;
-    let config = crate::config::load(&current_dir)?;
-
-    let (profile, role) = match options.role {
-        "developer" => (&config.agent.developer, crate::config::Role::Developer),
-        "architect" => (&config.agent.architect, crate::config::Role::Architect),
-        "security-reviewer" | "security_reviewer" => (
-            &config.agent.security_reviewer,
-            crate::config::Role::SecurityReviewer,
-        ),
-        _ => {
-            return Err(KvistError::ImportFailed {
-                reason: format!("unknown role profile: {}", options.role),
-            });
-        }
-    };
-
-    let policy = agent_runtime::SupervisionPolicy {
-        idle_timeout: std::time::Duration::from_secs(options.idle_timeout),
-        attempt_timeout: None,
-        detect_loops: options.detect_loops,
-        max_retries: options.max_restarts,
-        max_output_bytes: profile.max_output_bytes,
-    };
-    let command_for_attempt = |context: &agent_runtime::AttemptContext| {
-        let prompt = match context.retry_notice() {
-            Some(notice) => format!("{prompt}\n\n{notice}"),
-            None => prompt.to_owned(),
-        };
-        let (program, arguments) = crate::agent::get_effective_command_with_options(
-            profile,
-            role,
-            options.model,
-            options.reasoning_effort,
-            &prompt,
-            &[],
-            &current_dir,
-        )
-        .map_err(|error| agent_runtime::Error::InvalidCommandTemplate {
-            reason: error.to_string(),
-        })?;
-        Ok(agent_runtime::CommandSpec::new(program, arguments).in_directory(current_dir.clone()))
-    };
-
-    if options.capture {
-        let report = agent_runtime::run_supervised_capture(&policy, command_for_attempt)?;
-        Ok(Some(String::from_utf8_lossy(&report.stdout).into_owned()))
-    } else {
-        if std::io::stderr().is_terminal() {
-            eprintln!("Prompt:\n{prompt}\n\nResponse:");
-        }
-        agent_runtime::run_supervised(&policy, command_for_attempt)?;
-        Ok(None)
-    }
-}
-
 /// Resolve the standalone `agent-runner` executable: an explicit path via the
 /// `KVIST_AGENT_RUNNER` environment variable, otherwise the first `agent-runner`
 /// found on `PATH`. Returns an actionable message when it is not installed, so a
@@ -2002,7 +1875,7 @@ fn resolve_agent_runner_from(
 }
 
 /// Resolve a role-name argument to its configured role profile, mirroring the
-/// selection the one-shot host path performs.
+/// selection the interactive and headless agent-runner paths perform.
 fn resolve_role_config<'a>(
     config: &'a crate::config::ProjectConfig,
     role_name: &str,
@@ -2032,7 +1905,7 @@ const HOST_AUTONOMOUS_CAP: u32 = 50;
 /// transcript; the child's exit status is surfaced.
 ///
 /// Returns `Ok(true)` when delegation happened, `Ok(false)` when there is no
-/// interactive terminal (so the caller can fall back to the one-shot host path),
+/// interactive terminal (so the caller can run the prompt headless instead),
 /// and `Err` on a recoverable failure.
 fn delegate_interactive_prompt(
     prompt: &str,
@@ -2099,6 +1972,79 @@ fn delegate_interactive_prompt(
         });
     }
     Ok(true)
+}
+
+/// Run a custom prompt headless through the standalone `agent-runner` shell.
+/// The same sandboxed, multi-turn loop the interactive shell uses runs without
+/// a terminal: stdout (plain answer, or NDJSON events with `--json`) is
+/// inherited by the caller, stderr carries diagnostics, and the child's exit
+/// status is surfaced.
+///
+/// Headless execution is sandbox-only by agent-runner contract, so
+/// `--allow-host-execution` is rejected here; the host-execution opt-out
+/// remains an interactive escape hatch only.
+fn run_headless_prompt(
+    prompt: &str,
+    role_name: &str,
+    model: Option<&str>,
+    effort: Option<agent_runtime::ReasoningEffort>,
+    allow_host_execution: bool,
+) -> Result<()> {
+    if allow_host_execution {
+        return Err(KvistError::AgentSetupFailed {
+            reason: "--allow-host-execution is not available for headless prompt \
+             execution; the host-execution opt-out is interactive only. \
+             Run `kvist prompt` at a terminal to acknowledge host execution, \
+             or drop the flag for sandboxed headless work."
+                .to_owned(),
+        });
+    }
+
+    let binary = resolve_agent_runner().map_err(|reason| KvistError::AgentSetupFailed {
+        reason: format!("could not start agent-runner: {reason}"),
+    })?;
+
+    let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
+        operation: "determine current project directory",
+        path: PathBuf::from("."),
+        source,
+    })?;
+    let config = crate::config::load(&current_dir)?;
+    let role_config = resolve_role_config(&config, role_name)?;
+    // Preselect the model the role is configured to use; an explicit `--model`
+    // override wins. The id must exist in agent-runner's own configuration.
+    let model = model.or(Some(role_config.profile.as_str()));
+    let effort = effort.or(role_config.thinking_effort);
+
+    let mut command = std::process::Command::new(&binary);
+    command
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .current_dir(&current_dir)
+        .arg("--headless")
+        .arg("--json");
+    if let Some(model) = model {
+        command.arg("--model").arg(model);
+    }
+    if let Some(effort) = effort {
+        command.arg("--effort").arg(effort.as_str());
+    }
+    // The prompt is positional; agent-runner submits it and exits after the
+    // run, reporting the final disposition through the NDJSON stream.
+    command.arg(prompt);
+
+    let status = command.status().map_err(|source| KvistError::Io {
+        operation: "run agent-runner",
+        path: binary,
+        source,
+    })?;
+    if !status.success() {
+        return Err(KvistError::AgentSetupFailed {
+            reason: format!("agent-runner exited with status {status}"),
+        });
+    }
+    Ok(())
 }
 
 /// Resolves the configuration scope for an agent command.

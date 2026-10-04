@@ -74,7 +74,7 @@ design lives in [`docs/command-set.md`](docs/command-set.md).
 | `kvist task run [COMPONENT_DIR] [TASK_ID]`                   | Run the configured external agent for one ready task; see the execution boundary below.                                                                                                                                 |
 | `kvist task log [COMPONENT_DIR] TASK_ID`                     | Print the most recent bounded, redacted agent log for a task.                                                                                                                                                           |
 | `kvist task approve-policy [PROJECT_DIR]`                    | Record approval of the complete effective execution policy.                                                                                                                                                             |
-| `kvist prompt [PROMPT] [--allow-host-execution]`             | Run a prompt in the interactive agent-runner shell (sandboxed and multi-turn by default); non-interactive use runs a one-shot host command.                                                                             |
+| `kvist prompt [PROMPT] [--allow-host-execution]`             | Run a prompt in the interactive agent-runner shell (sandboxed and multi-turn by default); without a terminal it runs the same shell headless (`--headless --json`), sandbox-only.                                                                             |
 | `kvist agent setup [--force]`                                | Collect, qualify, and register a new model profile without assigning roles.                                                                                                                                             |
 | `kvist agent list`                                           | List all configured and standalone model profiles with their active role assignments.                                                                                                                                   |
 | `kvist agent remove <MODEL_NAME> [--all]`                    | Remove configured model profile(s) or clear all agent configuration.                                                                                                                                                    |
@@ -160,32 +160,27 @@ list, command, or prompt requires a fresh approval before `task run`.
 UTF-8 file with `--file PATH`, or from standard input:
 
 ```bash
-kvist prompt --allow-host-execution "Review this component contract"
-kvist prompt --allow-host-execution --file review-prompt.md
-printf '%s\n' "Review this component contract" |
-  kvist prompt --allow-host-execution
+kvist prompt "Review this component contract"
+kvist prompt --file review-prompt.md
+printf '%s\n' "Review this component contract" | kvist prompt
 ```
 
-At an interactive terminal Kvist opens the standalone `agent-runner` shell and
-prefills the model, thinking effort, and prompt; the agent does real work under
-Kvist's supervision. Work is sandboxed (Bubblewrap-protected) and multi-turn by
-default; `--allow-host-execution` opts out of the sandbox so the agent runs with
-the invoking user's host privileges, and is then single-turn unless
-`--multi-turn` allows more turns. With no interactive terminal, only the
-one-shot host path below applies, which is why the acknowledgement is mandatory
-there. `--multi-turn` has no effect outside host execution, since sandboxed work
-is already multi-turn.
+`kvist prompt` always runs the standalone `agent-runner` shell: at an
+interactive terminal Kvist opens the shell and prefills the model, thinking
+effort, and prompt; the agent does real work under Kvist's supervision. Without
+a terminal the same shell runs headless (`agent-runner --headless --json`),
+inheriting the NDJSON event stream on standard output. Work is sandboxed
+(Bubblewrap-protected) and multi-turn by default; `--allow-host-execution`
+opts out of the sandbox so the agent runs with the invoking user's host
+privileges, and is then single-turn unless `--multi-turn` allows more turns.
+The host-execution opt-out is interactive only: headless execution is
+sandbox-only and rejects the flag.
 
 Use `--file -` to select standard input explicitly. Use `--editor` to author a
-multiline prompt with `$VISUAL`, `$EDITOR`, or `vi`. If
-no source is supplied, redirected standard input is read automatically; at an
-interactive terminal Kvist offers to open the editor. These input modes are
-mutually exclusive, limited to 1 MiB, and must produce nonblank UTF-8 text.
-When the one-shot host path applies (no interactive terminal), the
-acknowledgement is mandatory because that path runs the configured provider
-with the invoking user's host permissions. Idle and loop retries append a
-warning that an earlier attempt may already have changed files or external
-systems; the warning does not roll those effects back.
+multiline prompt with `$VISUAL`, `$EDITOR`, or `vi`. If no source is supplied,
+redirected standard input is read automatically; at an interactive terminal
+Kvist offers to open the editor. These input modes are mutually exclusive,
+limited to 1 MiB, and must produce nonblank UTF-8 text.
 
 Prompt acquisition, command rendering, and host-process supervision are
 provided by the independently usable `agent-runtime` workspace package:
