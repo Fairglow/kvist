@@ -690,7 +690,9 @@ mod tests {
             .find_flag_by_long("allow-host-execution")
             .expect("host execution flag");
         assert!(!prompt.flags[host].takes_value);
-        let multi = prompt.find_flag_by_long("multi-turn").expect("multi-turn flag");
+        let multi = prompt
+            .find_flag_by_long("multi-turn")
+            .expect("multi-turn flag");
         assert!(!prompt.flags[multi].takes_value);
     }
 

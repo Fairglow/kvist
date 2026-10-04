@@ -84,7 +84,13 @@ fn prompt_headless_delegates_to_agent_runner() {
     let lines: Vec<&str> = recorded.lines().collect();
     assert_eq!(
         lines,
-        vec!["--headless", "--json", "--model", "capture", "Prompt loaded from a file"]
+        vec![
+            "--headless",
+            "--json",
+            "--model",
+            "capture",
+            "Prompt loaded from a file"
+        ]
     );
     assert!(
         String::from_utf8(output.stdout)
@@ -101,7 +107,14 @@ fn prompt_headless_uses_explicit_model_and_effort() {
 
     let output = run_kvist_in(
         project.path(),
-        &["prompt", "--model", "capture", "--reasoning-effort", "high", "a prompt"],
+        &[
+            "prompt",
+            "--model",
+            "capture",
+            "--reasoning-effort",
+            "high",
+            "a prompt",
+        ],
         Some(&stub),
     );
 
@@ -114,7 +127,15 @@ fn prompt_headless_uses_explicit_model_and_effort() {
     let lines: Vec<&str> = recorded.lines().collect();
     assert_eq!(
         lines,
-        vec!["--headless", "--json", "--model", "capture", "--effort", "high", "a prompt"]
+        vec![
+            "--headless",
+            "--json",
+            "--model",
+            "capture",
+            "--effort",
+            "high",
+            "a prompt"
+        ]
     );
 }
 
@@ -160,7 +181,8 @@ fn prompt_headless_can_be_authored_with_an_editor() {
         "#!/bin/sh\nprintf 'Prompt authored in editor' > \"$1\"\n",
     )
     .expect("write editor");
-    fs::set_permissions(&editor, fs::Permissions::from_mode(0o700)).expect("make editor executable");
+    fs::set_permissions(&editor, fs::Permissions::from_mode(0o700))
+        .expect("make editor executable");
 
     let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
         .current_dir(project.path())
