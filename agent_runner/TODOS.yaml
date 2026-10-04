@@ -6,21 +6,21 @@ component:
   parent_contract: null
   revalidation:
     state: stale
-    checked_at: "2026-10-02T10:27:11Z"
+    checked_at: "2026-10-04T12:30:02Z"
     stale_since: "2026-10-02T09:17:04Z"
     causes:
       - kind: component-requirements-revision-changed
         path: REQUIREMENTS.md
         expected_revision: "sha256:a6c103fbf5e1f44aabaf62cde0ea7c4c9ec2f98ddeaf6dd991ecb3e847b99ace"
-        observed_revision: "sha256:d6c091d30eb309af25d67ab22f183d33259269cde5dd594c7400c23dfb755a41"
+        observed_revision: "sha256:009541607d5ff26fcfc904e5de2591c50c70e21ebe580fae7b6874ff11ab1c1c"
       - kind: component-contract-revision-changed
         path: CONTRACT.md
         expected_revision: "sha256:c9757675fbaf8fccdbda725d011cf06ad645a71f647a14bc87af269b15b63355"
-        observed_revision: "sha256:ded1e16d8d2a5d29da6013067eaeb0a2eacb1b3e6db2c810fd6db43334d1a7bf"
+        observed_revision: "sha256:eb017218bd78557561ea33802a0aaec476ea6d5d251a55c5c3d9fb5138490d50"
       - kind: component-design-revision-changed
         path: DESIGN.md
         expected_revision: "sha256:767161aa34a323a01168ba03b99dcdd8319bc3bd10fac0de0c1699a014b2a1f9"
-        observed_revision: "sha256:03218b1ae1e8e5561d3f65acc41220a0f308ec93cedac99befa88778ef9b8cba"
+        observed_revision: "sha256:ae89b5a50a189bba4822b6aab43e0025e04b418f7515bea93731b6f2d56d5e37"
 tasks:
   - id: runner-reliability-write-tests
     title: "Reproduce model budget, recovery and offline environment failures"
@@ -1520,6 +1520,85 @@ tasks:
     timestamps:
       created_at: "2026-10-03T16:35:00Z"
       updated_at: "2026-10-03T16:35:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-model-selection-write-tests"
+    title: "Write tests for active-model-first model selection"
+    description: "Pin the selection precedence with injected/mock providers before changing production code: explicit --model and Tab selection are never overridden; a loaded provider model matching a configured entry's provider model name is selected without a load/switch and announced; exactly one configured model auto-selects; several configured models with no active match defer (TUI) or fail fast with an actionable diagnostic (headless); default_model never overrides an active model, explicit selection, or single model; an unconfigured active model offers a ready-to-paste [[models]] entry and never writes the config file; the probe is read-only, loopback-only, bounded, and a down provider falls through without failing startup."
+    context: "RUN-REQ-MODEL-SELECTION and the CONTRACT 'Model selection and activation' section define the behavior; the current code always starts from default_model and pays a model load/switch even when the provider already has a configured model loaded."
+    purpose: "Define every active-model-first behavior as a failing test before implementation."
+    expected_outcome: "The new tests fail on the current default_model-first selection and pass once the active-model-first precedence and deferred-load path exist."
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-MODEL-SELECTION"
+      - "CONTRACT.md#Model-selection-and-activation"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-04T12:30:02Z"
+      updated_at: "2026-10-04T12:30:02Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-model-selection-implement-code"
+    title: "Implement active-model-first model selection and activation"
+    description: "Add a bounded, read-only, loopback-only active-provider probe (Ollama /api/ps, llama-server /props?model=...) and select the session model by the documented precedence: explicit selection, then an active-provider match by provider model name, then a single configured model, then defer (TUI: no model selected, no bootstrap/model load until the user selects and submits) or fail fast (headless: actionable diagnostic listing configured ids and the active model). Keep default_model as a required last-resort fallback that never overrides an active model, explicit selection, or single model. Offer a ready-to-paste [[models]] entry (never a config write) when the active provider model is not configured. Reuse existing 5s/1MiB discovery bounds and the existing prompt-hold machinery; keep the probe from sending inference, modifying the provider, or widening endpoint authority."
+    context: "The failing tests from agent-runner-model-selection-write-tests define the behavior; headless mock-server tests that pin the request sequence and the log-before-model-I/O ordering constrain where the probe may run."
+    purpose: "Make the zero-switch-cost, already-active model the default starting point without expanding authority."
+    expected_outcome: "All model-selection tests pass, the existing headless/TUI suites stay green, and the workspace build plus strict clippy are clean."
+    kind: implementation
+    status: pending
+    depends_on:
+      - "agent-runner-model-selection-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-MODEL-SELECTION"
+      - "CONTRACT.md#Model-selection-and-activation"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-04T12:30:02Z"
+      updated_at: "2026-10-04T12:30:02Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-model-selection-security-audit"
+    title: "Audit the active-provider probe and selection boundaries"
+    description: "Independently inspect the probe and selection path for endpoint-authority widening (non-loopback reach), leaked inference, unbounded or unbounded-timeout discovery, shared mutable state, missing fall-through on provider failure, and any path that writes the configuration file or auto-configures an unconfigured active model. Confirm the explicit-selection, active-match, single-model, and defer/fail precedence is enforced exactly and that the probe respects the 5s/1MiB loopback bounds."
+    context: "Internal/implementer review of the changed selection and probe paths; this is not the source-blind certification."
+    purpose: "Preserve independent confirmation that active-model-first selection weakens no authority or bound."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "agent-runner-model-selection-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#RUN-REQ-MODEL-SELECTION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-04T12:30:02Z"
+      updated_at: "2026-10-04T12:30:02Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "agent-runner-model-selection-compliance-review"
+    title: "Review model-selection compliance"
+    description: "Derive observed behavior from source and tests in a clean-slate context, then compare the implementation record with the requirements, contract, and design in a source-blind context, retaining discrepancies for human arbitration."
+    context: "Per the project's current enforcement note, component accept only structurally validates and records revisions; this gate awaits the separate source-blind reviewer and must never be self-certified. A clean-slate IMPL.md update for the active-model-first selection is outstanding for that reviewer."
+    purpose: "Retain an independent disposition for the model-selection change."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "agent-runner-model-selection-security-audit"
+    requirements:
+      - "CONTRACT.md#Model-selection-and-activation"
+      - "REQUIREMENTS.md#RUN-REQ-MODEL-SELECTION"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-04T12:30:02Z"
+      updated_at: "2026-10-04T12:30:02Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

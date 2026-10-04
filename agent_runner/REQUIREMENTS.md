@@ -67,6 +67,48 @@ acceptance does not enforce review receipts. This exception is not compliance
 evidence or an acceptance receipt. Separate security and compliance reviews
 remain required after implementation.
 
+## RUN-REQ-MODEL-SELECTION
+
+Model selection and activation MUST prefer a model the provider already has
+loaded over a statically configured one, when the user has not explicitly
+selected a model, so an already-active model starts with no load/switch cost.
+The active model MUST be discovered by a bounded, read-only, loopback-only
+provider probe (Ollama `GET /api/ps` for the loaded model and serving context;
+llama-server model-qualified `GET /props?model=…`), reusing the existing
+discovery bounds (5 s, 1 MiB). The probe MUST NOT send inference, modify the
+provider, or widen endpoint authority, and a probe failure (provider down,
+malformed, or no model loaded) MUST NOT fail startup and MUST fall through to
+the next rule.
+
+The selection precedence MUST be:
+
+- An explicit selection wins and is never overridden by provider state: the
+  `--model` flag (which `kvist prompt` passes for the role's profile) and the
+  in-TUI Tab model selector.
+- Otherwise, a loaded model whose provider-facing name matches a configured
+  entry's `model` field (matched by provider model name, not the user-facing
+  `id`) MUST be selected, and the session MUST announce that it uses the
+  already-active model with no switch. If more than one configured provider
+  reports a loaded match, the result is ambiguous and MUST fall to the
+  deferral/fail rule below.
+- Otherwise, if exactly one model is configured, it MUST be auto-selected as a
+  convenience.
+- Otherwise (no active match and several configured models), the session MUST
+  not silently guess: the interactive TUI MUST start with no model selected and
+  defer loading until the user selects and submits (no bootstrap and no model
+  load before then), and headless execution MUST fail fast before provider
+  inference with an actionable diagnostic that lists the configured ids, names
+  any active provider model found, and suggests `--model` and the `[[models]]`
+  entry to add.
+
+`default_model` is a required, last-resort configuration field. It MUST be used
+only when the rules above resolve nothing, and MUST NOT override an active
+model, an explicit selection, or a single configured model. When the provider
+has an active model not present in `[[models]]`, the tool SHOULD offer to
+configure it by printing a ready-to-paste `[[models]]` entry (provider,
+base_url, provider model name, and sane defaults), derived as with
+`--import-kvist`, and MUST NOT modify the configuration file automatically.
+
 ## Purpose and scope
 
 `agent-runner` is a first-class, interactive agent shell that lets a person talk
@@ -107,6 +149,9 @@ Successful use produces:
   current directory;
 - the ability to choose an configured model and a thinking effort before or
   during the session, with the current choice always visible;
+- a model that the provider already has loaded is preferred over a statically
+  configured one when the user has not explicitly selected a model, so an
+  already-active model starts with no load/switch cost;
 - a live transcript that shows the agent's reasoning, every tool call it makes,
   and the result of each call, without exposing raw transport noise;
 - output that fits the terminal width: the transcript, help, menu, session
@@ -132,9 +177,17 @@ Successful use produces:
 
 ### In scope
 
-- Loading and validating a TOML configuration that declares models, a default
-  model, a default thinking effort, the tool policy, the working directory, and
-  the sandbox runner and backend paths.
+- Loading and validating a TOML configuration that declares models, a
+  last-resort default model, a default thinking effort, the tool policy, the
+  working directory, and the sandbox runner and backend paths.
+- Model selection and activation: resolving the session's model by preferring an
+  explicit selection, then an already-loaded provider model (discovered by a
+  bounded, read-only, loopback-only probe), then a single configured model, and
+  deferring to the user (TUI) or failing fast (headless) only when none of those
+  resolve; `default_model` is a required last-resort fallback that never
+  overrides an active model, an explicit selection, or a single configured
+  model. An active provider model that is not configured MAY be offered as a
+  ready-to-paste `[[models]]` entry, never written to the configuration file.
 - A model-agnostic agent loop that performs streaming turns and executes the
   tool intents the model proposes, feeding results back.
 - A small, robust set of sandbox-executed tools: shell, bounded/paginated file
@@ -244,6 +297,19 @@ Successful use produces:
 - Given a long prompt, the terminal UI accepts it without the previous
   16,384-character bound, and the session record is named by date, time, and
   the first words of the first prompt.
+- Given no explicit model selection and a provider that already has a configured
+  model loaded, `agent-runner` selects that model without a load/switch and
+  announces it; the probe is read-only and a down provider falls through rather
+  than failing startup.
+- Given no explicit selection, no active match, and exactly one configured
+  model, `agent-runner` auto-selects it; given several configured models and no
+  active match, the TUI starts with no model selected and headless fails fast
+  with an actionable diagnostic.
+- An explicit `--model` or Tab selection is never overridden by an active
+  provider model, and `default_model` never overrides an active model, an
+  explicit selection, or a single configured model.
+- An active provider model that is not configured produces an offered
+  ready-to-paste `[[models]]` entry and never a write to the configuration file.
 - Every behavior above is covered by an automated test with an injected
   transport or a captured sandbox request.
 - A turn that fails a temporal model-transport error at least once is retried
