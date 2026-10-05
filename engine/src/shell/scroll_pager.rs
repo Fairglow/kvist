@@ -170,32 +170,32 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
 }
 
 /// Draws one full screen: content lines, the gutter, and the scrollbar.
-fn render(
-    stdout: &mut std::io::Stdout,
-    width: usize,
-    height: usize,
-    lines: &[String],
-    offset: usize,
-) {
+///
+/// Every content line is drawn at column 0 of its own terminal row (crossterm's
+/// `MoveTo` takes the column first), so the full terminal height carries
+/// content and scrolling reveals it line by line; the scrollbar symbols ride
+/// the last column. The pass writes to any `Write`, so the emitted cursor
+/// geometry is unit-testable without a terminal.
+fn render(writer: &mut impl Write, width: usize, height: usize, lines: &[String], offset: usize) {
     let (thumb_top, thumb_height) = scrollbar_geometry(lines.len(), height, offset);
     for row in 0..height {
         let line = lines.get(offset + row).map(String::as_str).unwrap_or("");
         let _ = execute!(
-            stdout,
-            crossterm::cursor::MoveTo(row as u16, 0),
+            writer,
+            crossterm::cursor::MoveTo(0, row as u16),
             Clear(ClearType::CurrentLine),
             Print(line),
             Print(" "),
         );
         if row >= thumb_top && row < thumb_top + thumb_height {
             let _ = execute!(
-                stdout,
+                writer,
                 crossterm::cursor::MoveTo(width as u16 - 1, row as u16),
                 Print("█"),
             );
         } else {
             let _ = execute!(
-                stdout,
+                writer,
                 crossterm::cursor::MoveTo(width as u16 - 1, row as u16),
                 SetAttribute(Attribute::Dim),
                 Print("·"),
@@ -203,12 +203,79 @@ fn render(
             );
         }
     }
-    let _ = execute!(stdout, crossterm::cursor::Hide);
+    let _ = execute!(writer, crossterm::cursor::Hide);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The visible content of one rendered row: the cursor move to column 0
+    /// of the row, the line clear, and the row's text.
+    fn row_prefix(row: usize) -> String {
+        format!("\x1b[{row};1H\x1b[2K")
+    }
+
+    #[test]
+    fn render_places_each_content_line_at_column_zero_of_its_row() {
+        let lines: Vec<String> = (0..4).map(|i| format!("line {i}")).collect();
+        let mut out: Vec<u8> = Vec::new();
+        render(&mut out, 40, 6, &lines, 0);
+        let text = String::from_utf8(out).unwrap();
+        for (row, line) in lines.iter().enumerate() {
+            let prefix = row_prefix(row + 1);
+            let idx = text
+                .find(&prefix)
+                .unwrap_or_else(|| panic!("missing cursor move to row {} column 0", row + 1));
+            let after = &text[idx + prefix.len()..];
+            assert!(
+                after.starts_with(line.as_str()),
+                "row {} must carry its own content, got {after:?}",
+                row + 1
+            );
+        }
+    }
+
+    #[test]
+    fn render_uses_the_full_terminal_height() {
+        let lines: Vec<String> = vec!["first".to_owned(), "second".to_owned()];
+        let mut out: Vec<u8> = Vec::new();
+        render(&mut out, 30, 10, &lines, 0);
+        let text = String::from_utf8(out).unwrap();
+        // Every row of the view gets its own cursor move, content row or
+        // blank row alike: the pager owns the full screen height.
+        for row in 1..=10 {
+            assert!(
+                text.contains(&row_prefix(row)),
+                "row {row} was never addressed"
+            );
+        }
+        assert!(text.contains(&format!("{}first", row_prefix(1))));
+        assert!(text.contains(&format!("{}second", row_prefix(2))));
+    }
+
+    #[test]
+    fn render_scrolling_shifts_the_visible_window() {
+        let lines: Vec<String> = (0..6).map(|i| format!("line {i}")).collect();
+        let mut out: Vec<u8> = Vec::new();
+        render(&mut out, 20, 3, &lines, 2);
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains(&format!("{}line 2", row_prefix(1))));
+        assert!(text.contains(&format!("{}line 3", row_prefix(2))));
+        assert!(text.contains(&format!("{}line 4", row_prefix(3))));
+    }
+
+    #[test]
+    fn render_keeps_the_scrollbar_in_the_last_column() {
+        let lines: Vec<String> = (0..6).map(|i| format!("line {i}")).collect();
+        let mut out: Vec<u8> = Vec::new();
+        render(&mut out, 12, 4, &lines, 0);
+        let text = String::from_utf8(out).unwrap();
+        for row in 1..=4 {
+            let prefix = format!("\x1b[{row};12H");
+            assert!(text.contains(&prefix), "scrollbar missing on row {row}");
+        }
+    }
 
     #[test]
     fn scrollbar_fills_the_track_when_the_document_fits() {

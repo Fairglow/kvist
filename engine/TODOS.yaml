@@ -3102,3 +3102,90 @@ tasks:
       completed_at: "2026-10-05T05:45:00Z"
     blocked_reason: null
     recovery_state: null
+  - id: "pager-status-write-tests"
+    title: "Define scroll-pager rendering and status alignment tests"
+    description: "Write failing tests pinning (1) the pager render pass placing every content line at column 0 of its own terminal row (cursor geometry emitted per row, scrollbar in the last column, full terminal height used), (2) the soft wrap aligning `key: value` continuation lines under the value's start column while plain lines keep their leading-whitespace indent, and (3) the overview report carrying the left border on the `expected`/`observed`/git-diff detail lines under a changed document and showing a blocked task's `blocked_reason` first line in full without ellipsis truncation."
+    context: "The pager drew every content line on the top row (crossterm MoveTo column/row arguments swapped), so output occupied at most two rows; overview change details floated outside the report's left border; and the blocked reason was truncated to 96 characters with an ellipsis instead of being soft-wrapped."
+    purpose: "Establish executable evidence for full-screen pager rendering, aligned wrapped status fields, and the bordered, untruncated overview details before the fix."
+    expected_outcome: "The new tests fail against the current render/wrap/truncation behavior and pass after the fix."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
+      - "REQUIREMENTS.md#REQ-SCROLL-PAGER"
+      - "REQUIREMENTS.md#REQ-SOFT-WRAP"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-05T08:30:00Z"
+      updated_at: "2026-10-05T08:55:00Z"
+      completed_at: "2026-10-05T08:55:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "pager-status-implement-code"
+    title: "Fix pager row rendering and align wrapped status fields"
+    description: "Fix the scroll_pager render pass to move the cursor to column 0 of each terminal row before printing that row's content (MoveTo takes the column first), making the render pass generic over Write for testable cursor geometry; add the `key: value` hanging indent to the shared wrap_line primitive so continuation lines align under the value; give the overview's per-document `expected`/`observed`/git-diff lines the report's left border aligned under the changed document's name; and drop the 96-character ellipsis truncation of `blocked_reason` in the status guidance so the queue-bound first line is shown in full and soft-wrapped to the display width."
+    context: "The requirements now require full-height pager rendering, value-aligned continuations, bordered change details, and untruncated reasons; the failing tests from pager-status-write-tests define the expected behavior."
+    purpose: "Deliver a pager that uses the full screen and a status report whose wrapped fields stay aligned and untruncated."
+    expected_outcome: "All pager-status-write-tests pass; paged output fills the terminal height, and the overview's changed-document details and blocked reasons are bordered, aligned, and complete."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "pager-status-write-tests"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
+      - "REQUIREMENTS.md#REQ-SCROLL-PAGER"
+      - "REQUIREMENTS.md#REQ-SOFT-WRAP"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-05T08:30:00Z"
+      updated_at: "2026-10-05T09:10:00Z"
+      completed_at: "2026-10-05T09:10:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "pager-status-security-audit"
+    title: "Audit pager rendering and status alignment"
+    description: "Independently review the changed paths for untrusted-input handling (wrap prefixes and key detection over queue- and report-derived text, cursor geometry derived from bounded terminal sizes, no escape-sequence injection through re-emission), determinism (stable wrap and render for a given input), and no behavior change beyond presentation (piped/captured output byte-identical, no new I/O or authority)."
+    context: "The changed paths transform untrusted reason and path text and emit cursor geometry from terminal sizes; internal/implementer review — the independent gate is the compliance-review task."
+    purpose: "Preserve independent confirmation that the presentation fixes introduce no disclosure, corruption, or nondeterminism."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "pager-status-implement-code"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
+      - "REQUIREMENTS.md#REQ-SCROLL-PAGER"
+      - "REQUIREMENTS.md#REQ-SOFT-WRAP"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-05T08:30:00Z"
+      updated_at: "2026-10-05T09:20:00Z"
+      completed_at: "2026-10-05T09:20:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "pager-status-compliance-review"
+    title: "Compliance-review the pager and status fixes"
+    description: "In a clean-slate, source-blind context, derive IMPL.md from the changed source and test evidence, then compare REQ-SCROLL-PAGER, REQ-SOFT-WRAP, and REQ-DISCOVERY-STATUS against the contract clauses, IMPL.md, and test evidence, reporting any discrepancy for explicit human arbitration."
+    context: "The implementer must not certify its own work; this task is the independent gate for the pager rendering and status alignment changes."
+    purpose: "Independently verify that the implemented behavior satisfies the updated requirements and contract before acceptance."
+    expected_outcome: "A compliance review record with the compared artifacts, observed evidence, and any discrepancies for arbitration."
+    kind: compliance-review
+    status: in-progress
+    depends_on:
+      - "pager-status-security-audit"
+    requirements:
+      - "CONTRACT.md#Provided-interfaces"
+      - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
+      - "REQUIREMENTS.md#REQ-SCROLL-PAGER"
+      - "REQUIREMENTS.md#REQ-SOFT-WRAP"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-05T08:30:00Z"
+      updated_at: "2026-10-05T09:20:00Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null

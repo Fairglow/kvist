@@ -138,16 +138,19 @@ mod tests {
         let wrapped = prepare_display(text, 16);
         let lines: Vec<&str> = wrapped.lines().collect();
         // The bordered line wraps with the frame re-drawn on every physical
-        // line; the plain line keeps its two-space indent; nothing overflows.
+        // line; nothing overflows the width.
         for line in &lines {
             assert!(visible_len(line) <= 16, "line overflows: {line:?}");
         }
         assert!(lines.iter().all(|line| {
             !line.starts_with('│') || (line.ends_with('│') && visible_len(line) == 16)
         }));
+        // The `blocked: value` line keeps the key on the first line and
+        // aligns every continuation under the value's column (11 spaces).
         assert!(lines.contains(&"  blocked: a"));
-        assert!(lines.contains(&"  very long"));
-        assert!(lines.contains(&"  reason text"));
+        assert!(lines.contains(&"           very"));
+        assert!(lines.contains(&"           long"));
+        assert!(lines.contains(&"           text"));
         assert!(lines.contains(&"plain"));
     }
 

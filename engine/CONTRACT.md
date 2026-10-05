@@ -101,8 +101,11 @@ with a `kvist doctor` pointer otherwise. `status` (overview and text)
 renders, per component, state, document validity, task progress, the next
 ready task, an Action line for every non-current state, and — for stale
 components — each changed document with its expected and observed revision
-plus a `git diff HEAD -- <path>` review hint. For blocked components, the status output lists
-each blocked task with its truncated `blocked_reason` first line and the exact
+plus a `git diff HEAD -- <path>` review hint; those per-document lines carry
+the same left border as the rest of the report, aligned under the changed
+document's name. For blocked components, the status output lists
+each blocked task with its `blocked_reason` first line in full (soft-wrapped
+to the display width, never truncated) and the exact
 next command (`task run <COMPONENT_DIR> <TASK_ID>` when the task's dependency
 chain is completed, else `task transition <COMPONENT_DIR> <TASK_ID> pending`
 with the incomplete-dependency count); awaiting-decision tasks are listed with
@@ -280,8 +283,10 @@ whichever is smaller — and the border is drawn on every physical line; bordere
 status-report lines (`│…│`) wrap their inner content with the border and
 padding re-drawn per line; plain lines wrap with each continuation line
 prefixed by the line's leading whitespace so text blocks keep their
-indentation. Wrapping is a presentation-only transformation: piped, captured, or
-width-unknown output is byte-identical to the unwrapped form. Output is paged
+indentation, and a `key: value` line wraps with its continuation lines
+aligned under the start of the value. Wrapping is a presentation-only
+transformation: piped, captured, or width-unknown output is byte-identical to
+the unwrapped form. Output is paged
 only when it would scroll past the terminal height
 minus the prompt row (a 15-line fallback when the height is unknown), and
 `KVIST_NO_PAGER` disables paging; paging runs the built-in full-screen pager

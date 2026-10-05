@@ -258,11 +258,33 @@ fn render_tokens(indent: &str, tokens: &[Token]) -> String {
     out
 }
 
+/// The `key:` prefix of a `key: value` line, when one is present: a word of
+/// letters, digits, `_`, `-`, then a colon followed by at least one space.
+/// The prefix includes the colon. A colon without a following space (the
+/// `sha256:` of a revision) is not a key.
+fn key_prefix(text: &str) -> Option<&str> {
+    let mut word_end = 0usize;
+    for (index, c) in text.char_indices() {
+        if c.is_ascii_alphabetic() || (word_end > 0 && (c.is_ascii_digit() || c == '_' || c == '-'))
+        {
+            word_end = index + c.len_utf8();
+        } else if word_end > 0 && c == ':' && text[index + 1..].starts_with(' ') {
+            return Some(&text[..index + 1]);
+        } else {
+            return None;
+        }
+    }
+    None
+}
+
 /// Wraps one line to a visible `width`, splitting at word boundaries and
 /// hard-splitting unbreakable words. Every physical line keeps the source
 /// line's leading whitespace and the styling of its spans, so text blocks
-/// keep their indentation and ANSI styling survives wrapping. A line that
-/// already fits (or a width of zero) is returned unchanged.
+/// keep their indentation and ANSI styling survives wrapping. A `key: value`
+/// line (see [`key_prefix`]) keeps the key on the first physical line and
+/// indents every continuation line to the value's column (the key plus its
+/// separator space), so a wrapped field reads as one aligned block. A line
+/// that already fits (or a width of zero) is returned unchanged.
 /// Places `token` onto the current physical line, starting a new line (or
 /// hard-splitting an over-long token) as needed. `used` tracks the current
 /// line's visible width; `physical` is appended in place.
@@ -368,8 +390,23 @@ pub fn wrap_line(line: &str, width: usize) -> Vec<String> {
     }
     let indent_len = line.len() - line.trim_start().len();
     let indent = &line[..indent_len];
-    let avail = width.saturating_sub(indent.chars().count()).max(1);
-    let tokens = tokenize(&parse_spans(line));
+    let rest = &line[indent_len..];
+    // A `key: value` line continues under the value: the first physical line
+    // carries the key, every later line is indented to the value's column.
+    // The continuation prefix is one column wider than the head (the
+    // separator space), so the available width is measured against it.
+    let (head, tail, body) = match key_prefix(rest) {
+        Some(key) => {
+            // The head carries the key and its separator space; the tail is
+            // the spaces-only prefix of the same width for continuations.
+            let head = format!("{indent}{key} ");
+            let tail = " ".repeat(head.chars().count());
+            (head, tail, rest[key.len()..].trim_start())
+        }
+        None => (indent.to_owned(), indent.to_owned(), rest),
+    };
+    let avail = width.saturating_sub(tail.chars().count()).max(1);
+    let tokens = tokenize(&parse_spans(body));
     let mut physical: Vec<Vec<Token>> = vec![Vec::new()];
     let mut used = 0usize;
     for token in tokens {
@@ -377,7 +414,10 @@ pub fn wrap_line(line: &str, width: usize) -> Vec<String> {
     }
     physical
         .iter()
-        .map(|tokens| render_tokens(indent, tokens))
+        .enumerate()
+        .map(|(i, tokens)| {
+            render_tokens(if i == 0 { head.as_str() } else { tail.as_str() }, tokens)
+        })
         .collect()
 }
 
@@ -635,6 +675,50 @@ mod tests {
         assert_eq!(
             wrap_line("    alpha beta gamma", 12),
             vec!["    alpha", "    beta", "    gamma"]
+        );
+    }
+
+    #[test]
+    fn wrap_line_aligns_key_value_continuations_under_the_value() {
+        // The value starts after `reason:` and its separator space, so every
+        // continuation line is indented to that column (11 spaces).
+        let line = "   reason: agent execution exceeded the combined output limit while contacting the local model gateway.";
+        let wrapped = wrap_line(line, 30);
+        assert_eq!(
+            wrapped,
+            vec![
+                "   reason: agent execution",
+                "           exceeded the",
+                "           combined output",
+                "           limit while",
+                "           contacting the",
+                "           local model",
+                "           gateway.",
+            ]
+        );
+    }
+
+    #[test]
+    fn wrap_line_key_value_never_overflows_the_width() {
+        // A key longer than half the width: the key takes the first line by
+        // itself and the value fills the remaining lines at its column.
+        let wrapped = wrap_line("  blocked: a very long reason text", 16);
+        for line in &wrapped {
+            assert!(visible_len(line) <= 16, "line overflows: {line:?}");
+        }
+        assert_eq!(wrapped[0], "  blocked: a");
+        assert_eq!(wrapped[1], "           very");
+        assert_eq!(wrapped[2], "           long");
+    }
+
+    #[test]
+    fn wrap_line_without_a_key_keeps_the_plain_indent() {
+        // No `key:` prefix: the `sha256:` token (no space after the colon)
+        // is not a key, so continuations keep the plain leading indent.
+        let wrapped = wrap_line("  sha256:abcdef0123456789 extra words here", 20);
+        assert_eq!(
+            wrapped,
+            vec!["  sha256:abcdef01234", "  56789 extra words", "  here"]
         );
     }
 

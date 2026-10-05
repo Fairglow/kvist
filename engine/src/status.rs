@@ -241,7 +241,7 @@ fn guidance_entries(
         };
         blocked.push(GuidanceEntry {
             id: task.id.clone(),
-            reason: truncate_reason(task.blocked_reason.as_deref().unwrap_or(""), 96),
+            reason: first_line(task.blocked_reason.as_deref().unwrap_or("")),
             next,
         });
     }
@@ -253,7 +253,7 @@ fn guidance_entries(
     {
         decisions.push(GuidanceEntry {
             id: task.id.clone(),
-            reason: truncate_reason(task.blocked_reason.as_deref().unwrap_or(""), 96),
+            reason: first_line(task.blocked_reason.as_deref().unwrap_or("")),
             next: "human decision needed; 'kvist help task-states' explains resuming".to_owned(),
         });
     }
@@ -303,16 +303,11 @@ fn render_overview_entries(
     Some(text)
 }
 
-/// Truncates a recorded reason to its first line, bounded to `max` characters
-/// at a word boundary, marked with an ellipsis when cut.
-fn truncate_reason(value: &str, max: usize) -> String {
-    let first_line = value.lines().next().unwrap_or("").trim();
-    if first_line.chars().count() <= max {
-        return first_line.to_owned();
-    }
-    let cut: String = first_line.chars().take(max).collect();
-    let end = cut.rfind(char::is_whitespace).unwrap_or(cut.len());
-    format!("{}…", cut[..end].trim_end())
+/// Reduces a recorded reason to its first line, shown in full: the queue
+/// parser bounds the reason to a single bounded line, and soft wrapping bounds
+/// the display width, so no renderer-side truncation is needed.
+fn first_line(value: &str) -> String {
+    value.lines().next().unwrap_or("").trim().to_owned()
 }
 
 fn render_json(
@@ -641,12 +636,14 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
                 let mut lines = Vec::new();
                 for cause in &component.revalidation_causes {
                     lines.push(format!("│    Changed:   {}\n", cause.path));
+                    // The per-document details keep the report's left border
+                    // and align under the changed document's name.
                     lines.push(format!(
-                        "              expected  {}\n",
+                        "│               expected  {}\n",
                         short_revision(&cause.expected_revision)
                     ));
                     lines.push(format!(
-                        "              observed  {}\n",
+                        "│               observed  {}\n",
                         short_revision(&cause.observed_revision)
                     ));
                     let diff_path = normalize_relative_path(&{
@@ -659,7 +656,7 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
                     .to_string_lossy()
                     .into_owned();
                     lines.push(format!(
-                        "              (under Git: git diff HEAD -- {})\n",
+                        "│               (under Git: git diff HEAD -- {})\n",
                         diff_path
                     ));
                 }
@@ -812,6 +809,129 @@ fn normalize_relative_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::project_state::{ComponentArtifactInspection, ComponentArtifactState};
+    use crate::vcs::VcsInspection;
+
+    fn inspection_with_component(dir: &Path, component: ComponentInspection) -> ProjectInspection {
+        ProjectInspection {
+            project_dir: dir.to_owned(),
+            state: ProjectState::Invalid,
+            artifacts: Vec::new(),
+            root_diagnostic: None,
+            vcs: VcsInspection {
+                vcs: None,
+                repository_root: None,
+                artifacts: Vec::new(),
+                summary: String::new(),
+                diagnostic: None,
+            },
+            guidance: String::new(),
+            component_root: None,
+            components: vec![component],
+            discovery_error: None,
+        }
+    }
+
+    fn stale_component() -> ComponentInspection {
+        ComponentInspection {
+            path: PathBuf::from("comp"),
+            state: ComponentState::Stale,
+            artifacts: vec![ComponentArtifactInspection {
+                path: "REQUIREMENTS.md",
+                state: ComponentArtifactState::Valid,
+            }],
+            revalidation_causes: vec![RevalidationCause {
+                kind: StalenessCauseKind::ComponentRequirementsRevisionChanged,
+                path: "REQUIREMENTS.md".to_owned(),
+                expected_revision: format!("sha256:{}", "a".repeat(64)),
+                observed_revision: format!("sha256:{}", "b".repeat(64)),
+            }],
+        }
+    }
+
+    #[test]
+    fn overview_change_details_are_bordered_and_aligned() {
+        let inspection = inspection_with_component(Path::new("/proj"), stale_component());
+        let text = render_overview(&inspection);
+        let lines: Vec<&str> = text.lines().collect();
+        // No line of the overview floats outside the report's left border.
+        for line in &lines {
+            assert!(
+                line.starts_with('│') || line.starts_with('╭') || line.starts_with('╰'),
+                "unbordered line: {line:?}"
+            );
+        }
+        // The per-document details align under the changed document's name
+        // (`Changed:` value column: 15 spaces after the border).
+        assert!(lines.contains(&"│    Changed:   REQUIREMENTS.md"));
+        assert!(lines.contains(&"│               expected  sha256:aaaaaaaaaaaa…"));
+        assert!(lines.contains(&"│               observed  sha256:bbbbbbbbbbbb…"));
+        assert!(
+            lines.contains(&"│               (under Git: git diff HEAD -- comp/REQUIREMENTS.md)")
+        );
+    }
+
+    fn queue_with_blocked_reason(reason: &str) -> String {
+        format!(
+            r#"schema_version: 1
+component:
+  requirements_revision: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  contract_revision: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  design_revision: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  parent_contract: null
+  revalidation:
+    state: current
+    checked_at: 2026-08-16T12:19:23Z
+    stale_since: null
+    causes: []
+tasks:
+  - id: a
+    title: A
+    description: A
+    context: A
+    purpose: A
+    expected_outcome: A
+    kind: test
+    status: blocked
+    depends_on: []
+    requirements: []
+    timestamps:
+      created_at: 2026-08-16T12:19:23Z
+      updated_at: 2026-08-16T12:19:23Z
+      completed_at: null
+    blocked_reason: "{reason}"
+    recovery_state: null
+"#
+        )
+    }
+
+    #[test]
+    fn overview_blocked_reason_is_shown_in_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let component = dir.path().join("comp");
+        fs::create_dir_all(&component).unwrap();
+        let reason = "agent execution exceeded the combined output limit while contacting the local model gateway.";
+        fs::write(
+            component.join("TODOS.yaml"),
+            queue_with_blocked_reason(reason),
+        )
+        .unwrap();
+        let blocked = ComponentInspection {
+            path: PathBuf::from("comp"),
+            state: ComponentState::Blocked,
+            artifacts: stale_component().artifacts,
+            revalidation_causes: Vec::new(),
+        };
+        let inspection = inspection_with_component(dir.path(), blocked);
+        let text = render_overview(&inspection);
+        // The reason is shown in full: no ellipsis truncation anywhere.
+        assert!(!text.contains('…'), "reason was truncated: {text}");
+        assert!(
+            text.contains(&format!("│               reason: {reason}")),
+            "full reason missing: {text}"
+        );
+        assert!(text.contains("│               next:   kvist task run comp a"));
+    }
 
     #[test]
     fn short_revision_truncates_long_sha256_revisions() {

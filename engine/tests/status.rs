@@ -619,8 +619,9 @@ fn status_blocked_details_list_reasons_and_exact_next_commands() {
         "Next Step: 2 blocked task(s) need resolution; 'kvist help task-states' explains states and transitions."
     ));
     assert!(stdout.contains("blocked: blocked-ready"));
+    // The reason is shown in full: no ellipsis truncation.
     assert!(stdout.contains(
-        "reason: missing test-command policy for component `x`. Please define a command for it in `kvist.toml`\u{2026}"
+        "reason: missing test-command policy for component `x`. Please define a command for it in `kvist.toml` under `[test_policy]` and approve it"
     ));
     assert!(stdout.contains("next: kvist task run . blocked-ready"));
     assert!(stdout.contains("blocked: blocked-waiting"));
@@ -647,8 +648,9 @@ fn status_blocked_details_list_reasons_and_exact_next_commands() {
         "Action:    Resolve the blocked tasks below; 'kvist help task-states' explains each state and its resolution."
     ));
     assert!(stdout.contains("Blocked:   blocked-ready"));
+    // The reason is shown in full: no ellipsis truncation.
     assert!(stdout.contains(
-        "reason: missing test-command policy for component `x`. Please define a command for it in `kvist.toml`\u{2026}"
+        "reason: missing test-command policy for component `x`. Please define a command for it in `kvist.toml` under `[test_policy]` and approve it"
     ));
     assert!(stdout.contains("next:   kvist task run . blocked-ready"));
     assert!(stdout.contains("Blocked:   blocked-waiting"));

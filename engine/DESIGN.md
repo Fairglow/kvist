@@ -750,7 +750,12 @@ override) says it would scroll. Interactive paging runs the built-in
 full-screen pager in `shell/scroll_pager.rs` (crossterm raw mode, alternate
 screen, mouse capture): it re-wraps the text at the content width (terminal
 width minus a two-column gutter) and draws a one-column scrollbar on the
-right. The thumb geometry is a pure, testable function
+right. The render pass draws each content line at column 0 of its own terminal
+row (crossterm's `MoveTo(x, y)` takes the column first — the one historical
+source of the all-content-on-row-one bug) and the scrollbar symbols in the
+last column, so the full terminal height carries content and scrolling
+reveals it line by line. The render pass writes to any `Write`, so the
+emitted cursor geometry is unit-testable without a terminal. The thumb geometry is a pure, testable function
 `scrollbar_geometry(total, visible, offset)` returning `(thumb_top,
 thumb_height)`: a document that fits fills the track, a thumb is never
 shorter than two rows, and both size and position are proportional, so the
@@ -783,10 +788,10 @@ documentation (`GUIDE.md`, `docs/command-set.md`, or a component's
 
 Status guidance in `status.rs` reuses the `TODOS.yaml` parse it already
 performs for task progress. For a blocked component it lists each blocked
-task with its `blocked_reason` first line truncated to a bounded 96
-characters (the queue parser bounds task IDs to kebab-case, and the renderer
-bounds the untrusted reason text, so queue content cannot break the report
-layout) and derives the exact next command from
+task with its `blocked_reason` first line in full (the queue parser bounds the
+reason to a single 4096-character line, and soft wrapping bounds the display
+width, so queue content cannot break the report layout) and derives the exact
+next command from
 `task_queue::dependencies_completed(task, tasks)`: when the dependency chain
 is completed the command is `kvist task run <COMPONENT_DIR> <TASK_ID>`
 (blocked → in-progress is legal); otherwise it is `kvist task transition
@@ -795,6 +800,10 @@ Awaiting-decision tasks are listed with a pointer to `kvist help
 task-states` because resuming them is a human decision. The details render as
 separate indented lines under the overview Action line and as `blocked:` /
 `decision:` entries in the stable text report; the JSON report is unchanged.
+The overview's per-document change details (`expected`, `observed`, and the
+`git diff HEAD` hint) carry the report's left border and align under the
+changed document's name, so the block reads as part of the framed report
+instead of floating outside it.
 The shell's `tasks` table reuses the same `dependencies_completed` /
 `incomplete_dependency_count` selection in `next_command_for` and renders one
 bounded single-line reason plus one `next:` line per blocked or
@@ -849,7 +858,11 @@ splits at word boundaries by _visible_ width, and re-emits each physical line
 with the piece styles, so ANSI styling survives wrapping. Continuation lines
 are prefixed with the original line's leading whitespace, which keeps text
 block indentation; an unbreakable word longer than the remaining width is
-hard-split at the width. `prepare_display` in `pager.rs` applies the right
+hard-split at the width. When the leading whitespace is followed by a `key:`
+prefix (a word of letters, digits, `_`, `-`, then a colon and at least one
+space), the first physical line keeps the key and every continuation line is
+indented to the value's column (key plus separator), so a wrapped `reason:`
+field reads as one aligned block. `prepare_display` in `pager.rs` applies the right
 primitive per line (bordered for `│`-framed rows, plain otherwise) and is the
 identity when the width is zero or unknown. `wrap_bordered_line` handles the
 `│content│` lines of the bordered status report: it strips the frame, wraps

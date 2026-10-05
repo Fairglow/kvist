@@ -69,6 +69,13 @@ concrete next action that names the unblocking command (`kvist init` for
 uninitialized projects, `kvist repair` when the only defect is an unsorted or
 duplicated TODO-queue set list).
 
+The overview report MUST keep its layout aligned: the per-document
+`expected`/`observed` revision lines under a changed document MUST carry the
+same left border as the surrounding overview lines, aligned under the changed
+document's name. A blocked task's `blocked_reason` first line MUST be shown
+in full — the queue's own text bound and soft wrapping bound the display,
+never a renderer-side truncation with ellipsis.
+
 ### REQ-PROJECT-REPAIR
 
 Kvist MUST provide an explicit, bounded repair command that applies the only
@@ -581,9 +588,11 @@ wrapped at word boundaries before rendering, so that (1) boxed surfaces — the
 welcome banner, the prompt/working/result stages, and bordered status reports —
 keep their borders intact on every physical line, and (2) text blocks keep
 their indentation, with continuation lines prefixed by the line's leading
-whitespace. Wrapping MUST be a pure function of the text and the probed
-terminal width, and ANSI styling MUST survive wrapping (a styled span re-emits
-on every physical line it touches). Output that is piped, captured, or rendered
+whitespace. A `key: value` line (a word, a colon, and at least one space after
+the leading whitespace) MUST wrap with its continuation lines aligned under the
+start of the value, not the key. Wrapping MUST be a pure function of the text
+and the probed terminal width, and ANSI styling MUST survive wrapping (a styled
+span re-emits on every physical line it touches). Output that is piped, captured, or rendered
 without a known width MUST be byte-identical to the unwrapped form so scripts
 and stable report consumers are unaffected. Unbreakable words longer than the
 available width MUST be hard-split at the width rather than dropped.
@@ -619,7 +628,10 @@ Output that scrolls past the pager threshold MUST be paged in a built-in
 full-screen pager that renders a one-column scrollbar on the right whose
 thumb is sized proportionally to the output (never shorter than two rows)
 and whose position reflects the current scroll offset, so the reader always
-sees how large the output is and where they are inside it. The pager MUST
+sees how large the output is and where they are inside it. The pager MUST use
+the full terminal height: every content line occupies its own terminal row,
+drawn at the left edge of that row, with the gutter and scrollbar reserved on
+the right. The pager MUST
 support at least: quit (`q`/`Esc`), one-line scrolling (arrows, `j`/`k`),
 page scrolling (`PageUp`/`PageDown`), top/bottom jumps (`g`/`G`), and
 mouse-wheel scrolling, and MUST fall back to direct printing when it cannot

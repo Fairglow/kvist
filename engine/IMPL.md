@@ -136,10 +136,26 @@ workspace also names the opaque `agent-runtime` package as a path dependency.
 - Supports `--only-documents`, `--only-impls`, and `--unfinished`.
 - Text output escapes control characters in paths and includes next-step
   guidance for stale, blocked, invalid, and missing components.
+- The blocked-task guidance lists each task's `blocked_reason` first line in
+  full; the queue parser bounds the reason to a single bounded line, and no
+  renderer-side ellipsis truncation remains.
+- The overview's per-document change details (`expected`, `observed`, and the
+  `git diff HEAD -- <path>` hint) carry the report's left border, aligned
+  under the changed document's name.
 - JSON includes project state, component root, components, filtered artifact
   states, revalidation causes, and any discovery error.
 - Rendering itself performs no filesystem I/O; command dispatch first obtains
   a `ProjectInspection`.
+
+In the interactive shell, output that scrolls past the terminal height is
+paged by the built-in full-screen pager (`shell/scroll_pager.rs`): the render
+pass draws every content line at column 0 of its own terminal row (crossterm
+`MoveTo` takes the column first) with the scrollbar in the last column, so the
+full screen height carries content; the pass writes to any `Write`, and tests
+assert the emitted cursor geometry. The shared wrap primitive
+(`shell/style.rs::wrap_line`) aligns the continuation lines of a `key: value`
+line under the value's column, keeps the plain leading-whitespace indent
+otherwise, and hard-splits only words longer than the available width.
 
 ### `component new COMPONENT_DIR`
 
