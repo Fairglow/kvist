@@ -821,6 +821,7 @@ mod tests {
             "import",
             "tree",
             "doctor",
+            "repair",
             "reverse-discover",
             "prompt",
             "status",
@@ -844,7 +845,7 @@ mod tests {
         ] {
             assert!(got.contains(&name), "missing {name} in {got:?}");
         }
-        assert_eq!(got.len(), 15 + 11);
+        assert_eq!(got.len(), 16 + 11);
     }
 
     #[test]

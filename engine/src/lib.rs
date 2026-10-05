@@ -31,6 +31,7 @@ pub mod language_verification;
 pub mod logging;
 pub mod project_state;
 pub mod prompt_input;
+pub mod repair;
 pub mod reverse_discovery;
 pub mod sandbox;
 pub mod shell;

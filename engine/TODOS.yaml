@@ -10,7 +10,7 @@ component:
     stale_since: "2026-10-02T10:27:11Z"
     causes:
       - kind: component-requirements-revision-changed
-        path: REQUIREMENTS.md
+        path: "REQUIREMENTS.md"
         expected_revision: "sha256:3d971935e8b59ab1d977550b5c2146caff46dc7af0dc6c15c7b18d414d0ccae5"
         observed_revision: "sha256:e27ae1c3224da961bd30030a6a838b9da2c0f52f58524f5a59fe273fde2445f5"
 tasks:
@@ -2990,8 +2990,8 @@ tasks:
     depends_on: []
     requirements:
       - "CONTRACT.md#Provided-interfaces"
-      - "REQUIREMENTS.md#REQ-SHELL-THEME"
       - "REQUIREMENTS.md#REQ-SCROLL-PAGER"
+      - "REQUIREMENTS.md#REQ-SHELL-THEME"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-04T03:35:18Z"
@@ -3011,8 +3011,8 @@ tasks:
       - "shell-theme-write-tests"
     requirements:
       - "CONTRACT.md#Provided-interfaces"
-      - "REQUIREMENTS.md#REQ-SHELL-THEME"
       - "REQUIREMENTS.md#REQ-SCROLL-PAGER"
+      - "REQUIREMENTS.md#REQ-SHELL-THEME"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-04T03:35:18Z"
@@ -3052,12 +3052,53 @@ tasks:
       - "shell-theme-security-audit"
     requirements:
       - "CONTRACT.md#Behavioral-guarantees"
-      - "REQUIREMENTS.md#REQ-SHELL-THEME"
       - "REQUIREMENTS.md#REQ-SCROLL-PAGER"
+      - "REQUIREMENTS.md#REQ-SHELL-THEME"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-04T03:35:18Z"
       updated_at: "2026-10-04T03:35:18Z"
       completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "status-repair-write-tests"
+    title: "Define status diagnostics and bounded repair tests"
+    description: "Pin the three status formats explaining a non-current project state (per-artifact reasons, project action) and the repair command: canonicalization of unsorted or duplicated queue set lists, dry-run without writes, untouched parseable and fenced queues, unparseable reporting, and nonzero exit while defects remain."
+    context: "kvist status showed (invalid) without a reason or next step when a TODO queue violated the sorted, duplicate-free set-list rule."
+    purpose: "Every status report and the new repair command need executable evidence before production code."
+    expected_outcome: "The new tests fail before the implementation and pass after it."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-05T05:30:00Z"
+      updated_at: "2026-10-05T05:45:00Z"
+      completed_at: "2026-10-05T05:45:00Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "status-repair-implement-code"
+    title: "Implement project-level status diagnostics and kvist repair"
+    description: "Surface every non-valid root artifact with its reason and a concrete action in all three status formats, add the parse_repairable and normalize_set_lists queue paths, and add the kvist repair command with dry-run, atomic canonical writes, fenced-queue refusal, and nonzero exit while non-valid artifacts remain."
+    context: "The inspection already computed per-artifact reasons that only kvist doctor rendered; the recurring unsorted requirement references needed a defined, bounded recovery path."
+    purpose: "Kvist must explain every project state it reports and offer the exact unblocking step, including an explicit repair where the rewrite is fully defined."
+    expected_outcome: "status names the defect and action for every non-current project state, and kvist repair recovers a queue with an unsorted set list without touching anything else."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "status-repair-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#REQ-DISCOVERY-STATUS"
+      - "REQUIREMENTS.md#REQ-PROJECT-REPAIR"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-05T05:30:00Z"
+      updated_at: "2026-10-05T05:45:00Z"
+      completed_at: "2026-10-05T05:45:00Z"
     blocked_reason: null
     recovery_state: null

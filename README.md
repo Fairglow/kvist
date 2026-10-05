@@ -64,6 +64,7 @@ design lives in [`docs/command-set.md`](docs/command-set.md).
 | `kvist init [PROJECT_DIR]`                                   | Initialize the Kvist root artifacts in `PROJECT_DIR`, defaulting to the current directory.                                                                                                                              |
 | `kvist convert <PROJECT_DIR>`                                | Generate no-clobber draft onboarding artifacts for an existing Rust project.                                                                                                                                            |
 | `kvist doctor [PROJECT_DIR]`                                 | Read-only inspection of the root artifact state and recovery guidance.                                                                                                                                                  |
+| `kvist repair [PROJECT_DIR] [--dry-run]`                     | Apply the only defined rewrite — sorting and deduplicating TODO-queue set lists and writing the canonical queue — and report every artifact it does not define a rewrite for.                                           |
 | `kvist tree [PROJECT_DIR]`                                   | Render the component hierarchy rooted at the resolved project.                                                                                                                                                          |
 | `kvist component new <COMPONENT_DIR>`                        | Create no-clobber `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` templates.                                                                                                                                          |
 | `kvist component validate [COMPONENT_DIR]`                   | Validate all three component intent documents without rewriting them.                                                                                                                                                   |
@@ -74,7 +75,7 @@ design lives in [`docs/command-set.md`](docs/command-set.md).
 | `kvist task run [COMPONENT_DIR] [TASK_ID]`                   | Run the configured external agent for one ready task; see the execution boundary below.                                                                                                                                 |
 | `kvist task log [COMPONENT_DIR] TASK_ID`                     | Print the most recent bounded, redacted agent log for a task.                                                                                                                                                           |
 | `kvist task approve-policy [PROJECT_DIR]`                    | Record approval of the complete effective execution policy.                                                                                                                                                             |
-| `kvist prompt [PROMPT] [--allow-host-execution]`             | Run a prompt in the interactive agent-runner shell (sandboxed and multi-turn by default); without a terminal it runs the same shell headless (`--headless --json`), sandbox-only.                                                                             |
+| `kvist prompt [PROMPT] [--allow-host-execution]`             | Run a prompt in the interactive agent-runner shell (sandboxed and multi-turn by default); without a terminal it runs the same shell headless (`--headless --json`), sandbox-only.                                       |
 | `kvist agent setup [--force]`                                | Collect, qualify, and register a new model profile without assigning roles.                                                                                                                                             |
 | `kvist agent list`                                           | List all configured and standalone model profiles with their active role assignments.                                                                                                                                   |
 | `kvist agent remove <MODEL_NAME> [--all]`                    | Remove configured model profile(s) or clear all agent configuration.                                                                                                                                                    |
@@ -668,8 +669,12 @@ present. `invalid` covers malformed content, incorrect filesystem types, and
 symbolic links; `unsupported-version` has precedence when any artifact has a
 well-formed version this binary does not support. Kvist has no automatic
 repair, backward-compatibility interpretation, or migration for the retired
-artifact model. Preserve user content, use `doctor` to inspect it, and update
-the project explicitly to the current model.
+artifact model, and `kvist repair [PROJECT_DIR] [--dry-run]` is the single
+explicit exception: it sorts and deduplicates TODO-queue dependency and
+requirement lists and writes the canonical queue atomically, touches nothing
+else, and reports — without guessing — unparseable, fenced, and non-queue
+defects. Preserve user content, use `doctor` (or the `status` diagnostics) to
+inspect it, and update the project explicitly to the current model.
 
 ## Project status reports
 
@@ -683,15 +688,23 @@ of local `REQUIREMENTS.md`, `CONTRACT.md`, and `DESIGN.md` and, for a child,
 its immediate parent `CONTRACT.md`; each mismatch is attributable and is never
 persisted by inspection.
 
-Text output begins with `status-format-version: 1`; JSON output is a compact
-object with `format_version`, `project_path`, `project_state`,
-`component_root`, `components`, and `discovery_error`. Both are deterministic
-and report the same configured component root, ordered components, and
-adjacent `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, and
-`IMPL.md` states. Dynamic text fields escape ASCII control characters. JSON
-path strings are lossy display text and are not persistent file identifiers.
-A completed inspection exits successfully regardless of reported project
-state; I/O failures exit nonzero.
+A non-current project state is never shown bare: every format lists each
+non-valid root artifact with its exact reason, any project-root diagnostic and
+discovery error, and the concrete next action (`kvist init` for uninitialized
+projects, `kvist repair` when the only defect is an unsorted or duplicated
+TODO-queue set list).
+
+Text output begins with `status-format-version: 1`, followed by
+`root-artifact:` and, when present, `root-diagnostic:` and `Next Step:`
+lines; JSON output is a compact object with `format_version`,
+`project_path`, `project_state`, `component_root`, `root_artifacts`,
+`root_diagnostic`, `guidance`, `components`, and `discovery_error`. Both are
+deterministic and report the same configured component root, ordered
+components, and adjacent `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`,
+`TODOS.yaml`, and `IMPL.md` states. Dynamic text fields escape ASCII control
+characters. JSON path strings are lossy display text and are not persistent
+file identifiers. A completed inspection exits successfully regardless of
+reported project state; I/O failures exit nonzero.
 
 ## Version-control policy
 

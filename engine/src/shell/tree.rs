@@ -476,6 +476,7 @@ mod tests {
             "import",
             "tree",
             "doctor",
+            "repair",
             "reverse-discover",
             "prompt",
             "status",
@@ -488,7 +489,7 @@ mod tests {
         ] {
             assert!(root.find_subcommand(name).is_some(), "missing {name}");
         }
-        assert_eq!(root.subcommands.len(), 15 + 11);
+        assert_eq!(root.subcommands.len(), 16 + 11);
     }
 
     #[test]

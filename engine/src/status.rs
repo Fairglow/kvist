@@ -8,7 +8,9 @@ use std::{
 use clap::ValueEnum;
 
 use crate::{
-    project_state::{ComponentInspection, ComponentState, ProjectInspection, RevalidationCause},
+    project_state::{
+        ComponentInspection, ComponentState, ProjectInspection, ProjectState, RevalidationCause,
+    },
     task_queue::StalenessCauseKind,
 };
 
@@ -59,6 +61,20 @@ fn render_text(
     if let Some(error) = &inspection.discovery_error {
         output.push_str("\ndiscovery-error: ");
         output.push_str(&escape_text(error));
+    }
+    for artifact in &inspection.artifacts {
+        output.push_str("\nroot-artifact: ");
+        output.push_str(&escape_text(&artifact.path));
+        output.push_str(": ");
+        output.push_str(&escape_text(&artifact.status));
+    }
+    if let Some(diagnostic) = &inspection.root_diagnostic {
+        output.push_str("\nroot-diagnostic: ");
+        output.push_str(&escape_text(diagnostic));
+    }
+    if inspection.state != ProjectState::Current {
+        output.push_str("\nNext Step: ");
+        output.push_str(&project_action_line(inspection));
     }
     for component in &inspection.components {
         if unfinished && component.state == ComponentState::Current {
@@ -118,10 +134,9 @@ fn render_text(
                 output.push_str(&details);
             }
         } else if component.state == ComponentState::Invalid {
-            output.push_str(&format!(
-                "\n  Next Step: The component contains invalid or malformed artifacts. Run 'kvist component validate {}' and check the reported Markdown or YAML document.",
-                escape_text(&component.path.to_string_lossy())
-            ));
+            output.push_str(
+                "\n  Next Step: The component contains invalid or malformed artifacts. Run 'kvist repair' to canonicalize a parseable queue, 'kvist doctor' for artifact-level detail, then re-run 'kvist status'.",
+            );
         } else if component.state == ComponentState::Missing {
             output.push_str(&format!(
                 "\n  Next Step: The component is missing required adjacent Kvist artifacts. Run 'kvist component new {}' to create its intent-document templates.",
@@ -134,6 +149,34 @@ fn render_text(
         }
     }
     output
+}
+
+/// The concrete next action for a non-current project state, naming the
+/// repair command when the only defect is a canonicalizable TODO queue.
+fn project_action_line(inspection: &ProjectInspection) -> String {
+    match inspection.state {
+        ProjectState::Uninitialized => {
+            "Run 'kvist init' to create the Phase 1 root artifacts.".to_owned()
+        }
+        ProjectState::Partial => "Create the missing root artifacts listed above, then re-run 'kvist doctor' to verify them.".to_owned(),
+        ProjectState::Invalid => {
+            let repairable = inspection.artifacts.iter().any(|artifact| {
+                artifact.path.ends_with("TODOS.yaml")
+                    && artifact
+                        .status
+                        .contains("must be lexically sorted and duplicate-free")
+            });
+            if repairable {
+                "Run 'kvist repair' to canonicalize the affected TODO queues (it sorts and deduplicates their set-like lists), then re-run 'kvist status'.".to_owned()
+            } else {
+                "Repair the artifacts listed above; 'kvist doctor' shows the full inspection.".to_owned()
+            }
+        }
+        ProjectState::UnsupportedVersion => {
+            "Upgrade or migrate the artifacts listed above to the supported versions, then re-run 'kvist status'.".to_owned()
+        }
+        ProjectState::Current => String::new(),
+    }
 }
 
 /// A blocked or awaiting-decision task rendered for status guidance.
@@ -287,6 +330,26 @@ fn render_json(
         Some(component_root) => json_string(&mut output, &component_root.to_string_lossy()),
         None => output.push_str("null"),
     }
+    output.push_str(",\"root_artifacts\":[");
+    let mut rendered_any_root_artifact = false;
+    for artifact in &inspection.artifacts {
+        if rendered_any_root_artifact {
+            output.push(',');
+        }
+        output.push_str("{\"path\":");
+        json_string(&mut output, &artifact.path);
+        output.push_str(",\"status\":");
+        json_string(&mut output, &artifact.status);
+        output.push('}');
+        rendered_any_root_artifact = true;
+    }
+    output.push_str("],\"root_diagnostic\":");
+    match &inspection.root_diagnostic {
+        Some(diagnostic) => json_string(&mut output, diagnostic),
+        None => output.push_str("null"),
+    }
+    output.push_str(",\"guidance\":");
+    json_string(&mut output, &inspection.guidance);
     output.push_str(",\"components\":[");
     let mut rendered_any = false;
     for component in &inspection.components {
@@ -613,7 +676,7 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
                     .to_owned(),
             ),
             ComponentState::Invalid => Some(format!(
-                "Run 'kvist component validate {comp_path_str}' to inspect invalid artifacts."
+                "Run 'kvist repair' to canonicalize a parseable queue; 'kvist doctor' shows artifact-level detail for {comp_path_str}."
             )),
             ComponentState::Missing => Some(format!(
                 "Run 'kvist component new {comp_path_str}' to create missing templates."
@@ -667,6 +730,30 @@ pub fn render_overview(inspection: &ProjectInspection) -> String {
         overall_pct,
         details_suffix
     ));
+
+    // A non-current project state is never shown bare: name the offending
+    // artifacts with their reasons and the concrete unblocking action.
+    if inspection.state != ProjectState::Current {
+        output.push_str("│\n");
+        output.push_str("│  Project issues:\n");
+        if let Some(diagnostic) = &inspection.root_diagnostic {
+            output.push_str(&format!("│    diagnostic: {}\n", diagnostic));
+        }
+        for artifact in inspection
+            .artifacts
+            .iter()
+            .filter(|artifact| !artifact.is_valid())
+        {
+            output.push_str(&format!("│    {}: {}\n", artifact.path, artifact.status));
+        }
+        if let Some(error) = &inspection.discovery_error {
+            output.push_str(&format!("│    discovery-error: {}\n", error));
+        }
+        output.push_str(&format!(
+            "│    Action:    {}\n",
+            project_action_line(inspection)
+        ));
+    }
 
     for comp in comp_summaries {
         output.push_str("│\n");

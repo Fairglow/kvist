@@ -376,8 +376,37 @@ pub fn parse(contents: &str) -> std::result::Result<TaskQueue, TaskQueueError> {
     Ok(queue)
 }
 
+/// Parses a version-1 queue without enforcing lexical sort and duplicate-free
+/// order on task dependency and requirement lists. `kvist repair` uses it to
+/// canonicalize a queue whose only defect is set ordering; every other
+/// invariant is enforced exactly as by [`parse`].
+pub fn parse_repairable(contents: &str) -> std::result::Result<TaskQueue, TaskQueueError> {
+    let version: VersionProbe = serde_yaml::from_str(contents)?;
+    if version.schema_version != TODO_QUEUE_VERSION {
+        return Err(TaskQueueError::UnsupportedVersion {
+            found: version.schema_version,
+            supported: TODO_QUEUE_VERSION,
+        });
+    }
+    let queue: TaskQueue = serde_yaml::from_str(contents)?;
+    validate_repairable(&queue)?;
+    Ok(queue)
+}
+
 /// Validates a parsed queue's schema-independent semantic invariants.
 pub fn validate(queue: &TaskQueue) -> std::result::Result<(), TaskQueueError> {
+    validate_with(queue, true)
+}
+
+/// Validates a parsed queue without enforcing set-list ordering, for repair.
+pub fn validate_repairable(queue: &TaskQueue) -> std::result::Result<(), TaskQueueError> {
+    validate_with(queue, false)
+}
+
+fn validate_with(
+    queue: &TaskQueue,
+    validate_set_order: bool,
+) -> std::result::Result<(), TaskQueueError> {
     if queue.schema_version != TODO_QUEUE_VERSION {
         return Err(TaskQueueError::UnsupportedVersion {
             found: queue.schema_version,
@@ -386,7 +415,20 @@ pub fn validate(queue: &TaskQueue) -> std::result::Result<(), TaskQueueError> {
     }
 
     validate_component(&queue.component)?;
-    validate_tasks(&queue.tasks)
+    validate_tasks(&queue.tasks, validate_set_order)
+}
+
+/// Sorts and deduplicates every task's dependency and requirement lists in
+/// place. This is the only content rewrite `kvist repair` defines: the schema
+/// already forces both lists to be lexically sorted and duplicate-free, so
+/// the rewrite is meaning-preserving.
+pub fn normalize_set_lists(queue: &mut TaskQueue) {
+    for task in &mut queue.tasks {
+        task.depends_on.sort();
+        task.depends_on.dedup();
+        task.requirements.sort();
+        task.requirements.dedup();
+    }
 }
 
 /// Serializes a validated queue in its deterministic canonical YAML form.
@@ -780,10 +822,13 @@ fn is_parent_contract_path(value: &str) -> bool {
         && components.next().is_none()
 }
 
-fn validate_tasks(tasks: &[Task]) -> std::result::Result<(), TaskQueueError> {
+fn validate_tasks(
+    tasks: &[Task],
+    validate_set_order: bool,
+) -> std::result::Result<(), TaskQueueError> {
     let mut positions = BTreeMap::new();
     for (index, task) in tasks.iter().enumerate() {
-        validate_task(task)?;
+        validate_task(task, validate_set_order)?;
         if positions.insert(task.id.as_str(), index).is_some() {
             return Err(TaskQueueError::invalid(format!(
                 "duplicate task ID `{}`",
@@ -824,7 +869,7 @@ fn validate_tasks(tasks: &[Task]) -> std::result::Result<(), TaskQueueError> {
     Ok(())
 }
 
-fn validate_task(task: &Task) -> std::result::Result<(), TaskQueueError> {
+fn validate_task(task: &Task, validate_set_order: bool) -> std::result::Result<(), TaskQueueError> {
     if !valid_task_id(&task.id) {
         return Err(TaskQueueError::invalid(format!(
             "task ID `{}` must be 1-{MAX_TASK_ID_CHARS} lowercase kebab-case characters",
@@ -840,8 +885,10 @@ fn validate_task(task: &Task) -> std::result::Result<(), TaskQueueError> {
     ] {
         validate_text(value, name, MAX_DETAIL_CHARS, false)?;
     }
-    validate_sorted_unique(&task.depends_on, "depends_on")?;
-    validate_sorted_unique(&task.requirements, "requirements")?;
+    if validate_set_order {
+        validate_sorted_unique(&task.depends_on, "depends_on")?;
+        validate_sorted_unique(&task.requirements, "requirements")?;
+    }
     for requirement in &task.requirements {
         let Some((source, locator)) = requirement.split_once('#') else {
             return Err(TaskQueueError::invalid(format!(
@@ -1337,14 +1384,23 @@ mod tests {
     #[test]
     fn awaiting_decision_requires_a_nonblank_reason() {
         // Without a reason the pause is not actionable and is invalid.
-        assert!(validate_task(&task_with_status("a", TaskStatus::AwaitingDecision, None)).is_err());
+        assert!(
+            validate_task(
+                &task_with_status("a", TaskStatus::AwaitingDecision, None),
+                true
+            )
+            .is_err()
+        );
         // With a reason it is a valid controlled pause.
         assert!(
-            validate_task(&task_with_status(
-                "a",
-                TaskStatus::AwaitingDecision,
-                Some("awaiting decision on X")
-            ))
+            validate_task(
+                &task_with_status(
+                    "a",
+                    TaskStatus::AwaitingDecision,
+                    Some("awaiting decision on X")
+                ),
+                true
+            )
             .is_ok()
         );
     }
@@ -1354,8 +1410,100 @@ mod tests {
         // A non-completed task may not carry a completed_at.
         let mut task = task_with_status("a", TaskStatus::AwaitingDecision, Some("reason"));
         task.timestamps.completed_at = Some(Timestamp("2020-01-01T00:00:00Z".to_owned()));
-        assert!(validate_task(&task).is_err());
+        assert!(validate_task(&task, true).is_err());
         task.timestamps.completed_at = None;
-        assert!(validate_task(&task).is_ok());
+        assert!(validate_task(&task, true).is_ok());
+    }
+
+    const REPAIRABLE_QUEUE: &str = r#"
+schema_version: 1
+component:
+  requirements_revision: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  contract_revision: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  design_revision: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  parent_contract: null
+  revalidation:
+    state: current
+    checked_at: 2026-08-16T12:19:23Z
+    stale_since: null
+    causes: []
+tasks:
+  - id: a
+    title: A
+    description: A
+    context: A
+    purpose: A
+    expected_outcome: A
+    kind: test
+    status: pending
+    depends_on: []
+    requirements: []
+    timestamps:
+      created_at: 2026-08-16T12:19:23Z
+      updated_at: 2026-08-16T12:19:23Z
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: b
+    title: B
+    description: B
+    context: B
+    purpose: B
+    expected_outcome: B
+    kind: implementation
+    status: pending
+    depends_on: [a]
+    requirements:
+      - REQUIREMENTS.md#B
+      - REQUIREMENTS.md#A
+      - REQUIREMENTS.md#A
+    timestamps:
+      created_at: 2026-08-16T12:19:23Z
+      updated_at: 2026-08-16T12:19:23Z
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+"#;
+
+    #[test]
+    fn repairable_parse_skips_only_set_list_ordering() {
+        // The strict parser rejects the unsorted, duplicated requirements.
+        assert!(parse(REPAIRABLE_QUEUE).is_err());
+        // The repairable parser accepts them and enforces everything else.
+        let mut queue = parse_repairable(REPAIRABLE_QUEUE).expect("repairable parse");
+        normalize_set_lists(&mut queue);
+        validate(&queue).expect("normalized queue validates");
+        let task = &queue.tasks[1];
+        assert_eq!(task.depends_on, vec!["a".to_owned()]);
+        assert_eq!(
+            task.requirements,
+            vec![
+                "REQUIREMENTS.md#A".to_owned(),
+                "REQUIREMENTS.md#B".to_owned()
+            ]
+        );
+        // The normalized queue serializes canonically and re-parses strictly.
+        let canonical = serialize(&queue).expect("serialize");
+        parse(&canonical).expect("canonical round-trip");
+    }
+
+    #[test]
+    fn repairable_parse_still_rejects_every_other_defect() {
+        let broken = REPAIRABLE_QUEUE.replace("title: B", "title: [B]");
+        assert!(
+            parse_repairable(&broken).is_err(),
+            "a non-scalar title must fail"
+        );
+        let unsupported = REPAIRABLE_QUEUE.replace("schema_version: 1", "schema_version: 99");
+        assert!(matches!(
+            parse_repairable(&unsupported),
+            Err(TaskQueueError::UnsupportedVersion { .. })
+        ));
+        let unknown_dependency =
+            REPAIRABLE_QUEUE.replace("depends_on: [a]", "depends_on: [missing]");
+        assert!(
+            parse_repairable(&unknown_dependency).is_err(),
+            "unknown dependencies must fail"
+        );
     }
 }

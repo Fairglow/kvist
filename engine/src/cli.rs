@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::{
     KvistError, Result, component_documents, config, context, convert, discovery, help::HelpTopic,
-    import, init, project_state, prompt_input, reverse_discovery, status, task_commands,
+    import, init, project_state, prompt_input, repair, reverse_discovery, status, task_commands,
     task_queue::TaskStatus, toolchain, tree, vendor_command, wizard,
 };
 
@@ -120,6 +120,18 @@ pub enum Command {
         /// above the current directory.
         #[arg(value_name = "PROJECT_DIR")]
         path: Option<PathBuf>,
+    },
+    /// Repair a project with the only defined rewrite: canonical TODO queue
+    /// serialization (sorted, duplicate-free set-like lists). Fenced and
+    /// unparseable queues are reported, never guessed at.
+    Repair {
+        /// Project directory; defaults to the nearest Kvist project at or
+        /// above the current directory.
+        #[arg(value_name = "PROJECT_DIR")]
+        path: Option<PathBuf>,
+        /// Report the queues that would be rewritten without writing anything.
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Reverse-discover and generate Kvist artifacts from an existing implementation.
     ReverseDiscover {
@@ -897,6 +909,47 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                     "{{\"status\":\"success\",\"command\":\"doctor\",\"inspection\":{status_json}}}"
                 )))
             }
+            Command::Repair { path, dry_run } => {
+                let project = context::ProjectContext::resolve(path.as_deref())?;
+                let report = repair::repair(&project.project_dir, dry_run)?;
+                let queues_json = report
+                    .queues
+                    .iter()
+                    .map(|queue| {
+                        serde_json::json!({
+                            "path": queue.path,
+                            "outcome": queue.outcome,
+                            "detail": queue.detail,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let remaining_json = report
+                    .remaining
+                    .iter()
+                    .map(|(path, status)| {
+                        serde_json::json!({
+                            "path": path,
+                            "status": status,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                let response = serde_json::json!({
+                    "status": if report.complete() { "success" } else { "error" },
+                    "command": "repair",
+                    "project_dir": project.project_dir,
+                    "dry_run": dry_run,
+                    "state_before": report.state_before.name(),
+                    "state_after": report.state_after.name(),
+                    "queues": queues_json,
+                    "remaining": remaining_json,
+                })
+                .to_string();
+                if report.complete() {
+                    Ok(CommandOutput::message(response))
+                } else {
+                    Err(KvistError::JsonCommandFailure { output: response })
+                }
+            }
             Command::Status {
                 path,
                 format: _,
@@ -1395,6 +1448,17 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 let project = context::ProjectContext::resolve(path.as_deref())?;
                 project_state::inspect(&project.project_dir)
                     .map(|inspection| CommandOutput::message(inspection.to_string()))
+            }
+            Command::Repair { path, dry_run } => {
+                let project = context::ProjectContext::resolve(path.as_deref())?;
+                let report = repair::repair(&project.project_dir, dry_run)?;
+                if report.complete() {
+                    Ok(CommandOutput::message(report.to_string()))
+                } else {
+                    Err(KvistError::JsonCommandFailure {
+                        output: report.to_string(),
+                    })
+                }
             }
             Command::Status {
                 path,

@@ -20,7 +20,7 @@ evidence.
 | ----------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
 | CLI boundary      | `cli`, `main`, `error`, `help`                                                                                     | Typed grammar, dispatch, JSON/text output, domain errors, guided help tour and concept topics                                       |
 | Durable artifacts | `artifacts`, `component_documents`, `file_io`, `filesystem`                                                        | Templates, Markdown validation, bounded safe reads, atomic writes                                                                   |
-| Project model     | `config`, `discovery`, `project_state`, `tree`, `status`, `vcs`                                                    | Configuration, recursive layout, state classification, deterministic reports                                                        |
+| Project model     | `config`, `discovery`, `project_state`, `tree`, `status`, `repair`, `vcs`                                          | Configuration, recursive layout, state classification, deterministic reports, bounded repair                                        |
 | Workflow          | `task_queue`, `task_commands`, `sandbox`                                                                           | Queue schema, lifecycle, locks, policy approval, runner protocol, evidence                                                          |
 | Agent integration | `agent`, `prompt_input`, `wizard`                                                                                  | Role selection, prompt sources, standalone runtime integration                                                                      |
 | Interactive shell | `shell` (`completion`, `journal`, `locks`, `pager`, `prompt_editor`, `runs`, `state`, `status`, `stream`, `style`) | Reedline host, clap-derived completion tree, dynamic state snapshot, builtins, journal, lock inspection, paging, streaming, theming |
@@ -805,6 +805,40 @@ statuses from `TaskStatus::can_transition_to` — the closed five-state set in
 deterministic declaration order — followed by a pointer to
 `kvist help task-states`, so an illegal move is always paired with the legal
 moves.
+
+### Project-level diagnostics and bounded repair
+
+`project_state::inspect` already computes a per-artifact verdict for every
+root artifact (`ArtifactStatus`, with a class and a human reason); only the
+renderers were discarding it. All three status formats now surface it for any
+non-current project state: the overview adds a `Project issues` block (each
+non-valid artifact with its reason, the project-root diagnostic, the
+discovery error, and an `Action` line), the stable text report adds
+`root-artifact:` / `root-diagnostic:` lines plus a `Next Step:` line, and the
+JSON report adds `root_artifacts`, `root_diagnostic`, and `guidance` fields.
+The action is derived from the inspection alone (`project_action_line`):
+`kvist init` for uninitialized, the missing artifacts for partial, `kvist
+repair` when a TODO queue's only defect is the sorted/unique set-list
+violation (detected from the parser's own message), and a manual-repair plus
+`kvist doctor` pointer otherwise. No new I/O and no new state.
+
+`repair.rs` owns the single defined rewrite. For each queue enumerated by
+`project_state::todo_queue_paths` it first tries the strict
+`task_queue::parse`; a parseable queue is never written (it is reported
+`unchanged` or `non-canonical`). Only when strict parsing fails does it try
+`task_queue::parse_repairable` — the same pipeline with the one
+`validate_sorted_unique` check suppressed, so every other invariant is
+enforced identically. A repairable parse proves the sole defect is set-list
+ordering; `normalize_set_lists` then sorts and deduplicates each task's
+dependency and requirement lists (meaning-preserving: the schema already
+forces both to be sorted and duplicate-free), and the canonical
+`task_queue::serialize` output is written with `file_io::replace_file_
+atomically`. Fenced queues (any `recovery_state`) are reported with a pointer
+to `kvist task recover` and left untouched, keeping recovery authority
+exclusive to the task commands. The report re-inspects the project and lists
+whatever non-valid artifacts remain; the command exits nonzero while any
+remain, so `repair` doubles as a dry-run check (`--dry-run` previews with the
+same exit-code semantics).
 
 ### Soft wrapping
 

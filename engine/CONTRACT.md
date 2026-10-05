@@ -33,6 +33,7 @@ The `kvist` executable provides (the authoritative design is
 - `import REPO_URL [--branch BRANCH] [--component PATH] [DEST_DIR]`
 - `reverse-discover PATH`
 - `doctor [PROJECT_DIR]`
+- `repair [PROJECT_DIR] [--dry-run]`
 - `status [PROJECT_DIR] [--format overview|text|json] [--only-documents]
 [--only-impls] [--unfinished]`; the default format is the human-friendly
   overview, and `text`/`json` are the stable report forms for scripts
@@ -90,11 +91,17 @@ reported when `component accept --commit` records the acceptance but cannot
 create the Git commit).
 
 **Guidance.** Project-state domain failures end with a `hint:` line naming the
-concrete unblocking command. `status` (overview and text) renders, per
-component, state, document validity, task progress, the next ready task, an
-Action line for every non-current state, and — for stale components — each
-changed document with its expected and observed revision plus a `git diff
-HEAD -- <path>` review hint. For blocked components, the status output lists
+concrete unblocking command. A non-current project state is never shown bare:
+`status` (all three formats) lists every non-valid root artifact with its
+exact reason, plus the project-root diagnostic and discovery error when
+present, and a concrete action per state — `kvist init` for uninitialized,
+the missing artifacts to create for partial, `kvist repair` when the only
+defect is an unsorted or duplicated TODO-queue set list, and manual repair
+with a `kvist doctor` pointer otherwise. `status` (overview and text)
+renders, per component, state, document validity, task progress, the next
+ready task, an Action line for every non-current state, and — for stale
+components — each changed document with its expected and observed revision
+plus a `git diff HEAD -- <path>` review hint. For blocked components, the status output lists
 each blocked task with its truncated `blocked_reason` first line and the exact
 next command (`task run <COMPONENT_DIR> <TASK_ID>` when the task's dependency
 chain is completed, else `task transition <COMPONENT_DIR> <TASK_ID> pending`
@@ -109,6 +116,16 @@ points at `task next`; `task run` points at `task log`; `task approve-policy`
 points at `task run`). Agent configuration commands operate on the project
 configuration inside a project and on the global user configuration outside one
 (as if `--global` were passed).
+
+`repair` applies the only artifact rewrite Kvist defines, and only to queues
+invalid because of it: it sorts and deduplicates each task's dependency and
+requirement lists and writes the canonical queue serialization atomically. It
+never touches a queue that parses (canonical or not), a fenced queue (the
+report names `kvist task recover`), an unparseable queue, or any non-queue
+artifact; all of those are reported with their reasons. `--dry-run` reports
+without writing. The command exits nonzero while any non-valid artifact
+remains, and its JSON response carries `state_before`, `state_after`, per
+queue outcomes, and the remaining artifacts.
 
 `vendor` is a host-authorized provisioning step (ADR-0011, ADR-0013): it
 detects the project's language strategy and performs that language's
@@ -329,7 +346,11 @@ All current formats are version 1 and independently versioned:
 - `TODOS.yaml`: strict YAML schema implemented by typed Rust parsing with
   unknown fields rejected;
 - `IMPL.md`: version marker and required heading;
-- status JSON: `format_version: 1`;
+- status JSON: `format_version: 1`, with `root_artifacts` (path + status
+  pairs in stable artifact order), `root_diagnostic`, and `guidance`
+  alongside `project_state`; the stable text report carries the same data as
+  `root-artifact:` and `root-diagnostic:` lines plus a `Next Step:` line for
+  every non-current project state;
 - attempt logs: bounded JSON Lines evidence;
 - sandbox request: `protocol_version: 1`;
 - vendoring manifest (`.kvist/vendoring-v1.json`): `schema_version: 1` with

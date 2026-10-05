@@ -64,6 +64,7 @@ cross-cutting concern. No aliases, no overlapping subgroups:
 | ------------------- | -------------------------------------------------------- |
 | interactive work    | `kvist shell`                                            |
 | inspect state       | `kvist status` (default view), `tree`, `doctor`          |
+| recover a project   | `kvist repair`                                           |
 | create component    | `kvist component new`                                    |
 | check intent docs   | `kvist component validate`                               |
 | accept intent       | `kvist component accept`                                 |
@@ -173,26 +174,27 @@ script: no confirmation, no pager, no terminal.
 
 ### 4.1 Top level
 
-| Command                                                                                                       | Form                                                                         | Purpose (when to use)                                               |
-| ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------- |
-| `kvist`                                                                                                       | _(no args)_                                                                  | Inside a project: overview + what to do next. Outside: guided help. |
-| `kvist shell [PROJECT_DIR]`                                                                                   | start the interactive workspace shell (recommended entry point)              |
-| `kvist status [PROJECT_DIR] [--format overview\|text\|json] [--only-documents] [--only-impls] [--unfinished]` | "where do I stand?" — overview by default; stable text/json for scripts      |
-| `kvist tree [PROJECT_DIR]`                                                                                    | browse the component hierarchy                                               |
-| `kvist doctor [PROJECT_DIR]`                                                                                  | verify root artifacts, VCS, versions (read-only health check)                |
-| `kvist init [PROJECT_DIR]`                                                                                    | start a new project here                                                     |
-| `kvist convert PROJECT_DIR`                                                                                   | onboard an existing Rust crate (drafts in `.kvist/`)                         |
-| `kvist reverse-discover PATH`                                                                                 | draft intent + queue from an existing codebase                               |
-| `kvist import REPO_URL [--branch BR] [--component PATH] [DEST_DIR]`                                           | import a Kvist component from Git                                            |
-| `kvist vendor [PROJECT_DIR] [--vendored-dir PATH]`                                                            | populate offline vendored dependencies (ADR-0011)                            |
-| `kvist toolchain [PROJECT_DIR]`                                                                               | provision the pinned Rust toolchain on the host (ADR-0012)                   |
-| `kvist task <...>`                                                                                            | work the queue (below)                                                       |
-| `kvist component <...>`                                                                                       | manage intent (below)                                                        |
-| `kvist agent <...>`                                                                                           | configure models/roles (below)                                               |
-| `kvist prompt [PROMPT] [options]`                                                                             | run a free-form supervised prompt                                            |
-| `kvist help [TOPIC]`                                                                                          | guided tour; TOPIC: `concepts`, `lifecycle`, `task-states` (tab-completable) |
-| `kvist completions SHELL`                                                                                     | shell completion scripts                                                     |
-| `kvist authoring-apply`                                                                                       | _(hidden)_ internal effect-applier entry point                               |
+| Command                                                                                                       | Form                                                                                                               | Purpose (when to use)                                               |
+| ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| `kvist`                                                                                                       | _(no args)_                                                                                                        | Inside a project: overview + what to do next. Outside: guided help. |
+| `kvist shell [PROJECT_DIR]`                                                                                   | start the interactive workspace shell (recommended entry point)                                                    |
+| `kvist status [PROJECT_DIR] [--format overview\|text\|json] [--only-documents] [--only-impls] [--unfinished]` | "where do I stand?" — overview by default; stable text/json for scripts                                            |
+| `kvist tree [PROJECT_DIR]`                                                                                    | browse the component hierarchy                                                                                     |
+| `kvist doctor [PROJECT_DIR]`                                                                                  | verify root artifacts, VCS, versions (read-only health check)                                                      |
+| `kvist repair [PROJECT_DIR] [--dry-run]`                                                                      | apply the only defined rewrite: canonical TODO-queue set lists; report everything it does not define a rewrite for |
+| `kvist init [PROJECT_DIR]`                                                                                    | start a new project here                                                                                           |
+| `kvist convert PROJECT_DIR`                                                                                   | onboard an existing Rust crate (drafts in `.kvist/`)                                                               |
+| `kvist reverse-discover PATH`                                                                                 | draft intent + queue from an existing codebase                                                                     |
+| `kvist import REPO_URL [--branch BR] [--component PATH] [DEST_DIR]`                                           | import a Kvist component from Git                                                                                  |
+| `kvist vendor [PROJECT_DIR] [--vendored-dir PATH]`                                                            | populate offline vendored dependencies (ADR-0011)                                                                  |
+| `kvist toolchain [PROJECT_DIR]`                                                                               | provision the pinned Rust toolchain on the host (ADR-0012)                                                         |
+| `kvist task <...>`                                                                                            | work the queue (below)                                                                                             |
+| `kvist component <...>`                                                                                       | manage intent (below)                                                                                              |
+| `kvist agent <...>`                                                                                           | configure models/roles (below)                                                                                     |
+| `kvist prompt [PROMPT] [options]`                                                                             | run a free-form supervised prompt                                                                                  |
+| `kvist help [TOPIC]`                                                                                          | guided tour; TOPIC: `concepts`, `lifecycle`, `task-states` (tab-completable)                                       |
+| `kvist completions SHELL`                                                                                     | shell completion scripts                                                                                           |
+| `kvist authoring-apply`                                                                                       | _(hidden)_ internal effect-applier entry point                                                                     |
 
 ### 4.2 `kvist task`
 
@@ -273,9 +275,13 @@ all commands`. Failure (not in a project) → print the top-level help
    the exact component path involved. An invalid `task transition` reports
    the legal transitions from the current state plus a pointer to
    `kvist help task-states`.
-2. `kvist status` (overview and text) shows, per component: state, document
-   validity summary, task progress, next ready task, and an **Action**
-   line for every non-current state. Stale components additionally list
+2. `kvist status` never shows a non-current project state bare: all three
+   formats list every non-valid root artifact with its exact reason and a
+   concrete action (`kvist init` for uninitialized projects, `kvist repair`
+   when the only defect is an unsorted or duplicated TODO-queue set list).
+   Per component, the overview and text forms show state, document validity
+   summary, task progress, next ready task, and an **Action** line for every
+   non-current state. Stale components additionally list
    each changed document (expected vs observed revision) and a diff hint.
    Blocked components list each blocked task with its truncated
    `blocked_reason` and the exact next command (`task run` when the

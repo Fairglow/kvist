@@ -76,7 +76,7 @@ fn status_reports_a_current_initialized_project_in_stable_text_and_json() {
     assert_eq!(
         String::from_utf8(text.stdout).expect("UTF-8 text output"),
         format!(
-            "status-format-version: 1\nproject: {project_path_escaped}\nproject-state: current\ncomponent-root: src\ncomponent: . state: current\n  REQUIREMENTS.md: valid\n  CONTRACT.md: valid\n  DESIGN.md: valid\n  TODOS.yaml: valid\n  IMPL.md: valid\n  revalidation-causes: []\n"
+            "status-format-version: 1\nproject: {project_path_escaped}\nproject-state: current\ncomponent-root: src\nroot-artifact: kvist.toml: valid (configuration version 1)\nroot-artifact: VISION.md: valid (version 1)\nroot-artifact: ARCHITECTURE.md: valid (version 1)\nroot-artifact: ROOT_CONTRACT.md: valid (version 1)\nroot-artifact: src/REQUIREMENTS.md: valid (REQUIREMENTS.md version 1)\nroot-artifact: src/CONTRACT.md: valid (CONTRACT.md version 1)\nroot-artifact: src/DESIGN.md: valid (DESIGN.md version 1)\nroot-artifact: src/TODOS.yaml: valid (TODO queue version 1)\nroot-artifact: src/IMPL.md: valid (version 1)\ncomponent: . state: current\n  REQUIREMENTS.md: valid\n  CONTRACT.md: valid\n  DESIGN.md: valid\n  TODOS.yaml: valid\n  IMPL.md: valid\n  revalidation-causes: []\n"
         )
     );
 
@@ -91,7 +91,7 @@ fn status_reports_a_current_initialized_project_in_stable_text_and_json() {
     let output = String::from_utf8(json.stdout).expect("UTF-8 JSON output");
     assert!(output.starts_with("{\"format_version\":1,\"project_path\":"));
     assert!(output.contains(
-        "\"project_state\":\"current\",\"component_root\":\"src\",\"components\":[{\"path\":\".\",\"state\":\"current\",\"artifacts\":[{\"path\":\"REQUIREMENTS.md\",\"state\":\"valid\"},{\"path\":\"CONTRACT.md\",\"state\":\"valid\"},{\"path\":\"DESIGN.md\",\"state\":\"valid\"},{\"path\":\"TODOS.yaml\",\"state\":\"valid\"},{\"path\":\"IMPL.md\",\"state\":\"valid\"}],\"revalidation_causes\":[]}],\"discovery_error\":null}"
+        "\"project_state\":\"current\",\"component_root\":\"src\",\"root_artifacts\":[{\"path\":\"kvist.toml\",\"status\":\"valid (configuration version 1)\"},{\"path\":\"VISION.md\",\"status\":\"valid (version 1)\"},{\"path\":\"ARCHITECTURE.md\",\"status\":\"valid (version 1)\"},{\"path\":\"ROOT_CONTRACT.md\",\"status\":\"valid (version 1)\"},{\"path\":\"src/REQUIREMENTS.md\",\"status\":\"valid (REQUIREMENTS.md version 1)\"},{\"path\":\"src/CONTRACT.md\",\"status\":\"valid (CONTRACT.md version 1)\"},{\"path\":\"src/DESIGN.md\",\"status\":\"valid (DESIGN.md version 1)\"},{\"path\":\"src/TODOS.yaml\",\"status\":\"valid (TODO queue version 1)\"},{\"path\":\"src/IMPL.md\",\"status\":\"valid (version 1)\"}],\"root_diagnostic\":null,\"guidance\":\"project is ready for Phase 1 read-only commands\",\"components\":[{\"path\":\".\",\"state\":\"current\",\"artifacts\":[{\"path\":\"REQUIREMENTS.md\",\"state\":\"valid\"},{\"path\":\"CONTRACT.md\",\"state\":\"valid\"},{\"path\":\"DESIGN.md\",\"state\":\"valid\"},{\"path\":\"TODOS.yaml\",\"state\":\"valid\"},{\"path\":\"IMPL.md\",\"state\":\"valid\"}],\"revalidation_causes\":[]}],\"discovery_error\":null}"
     ));
 }
 
@@ -686,4 +686,140 @@ fn status_text_reports_next_step_for_unsupported_version() {
     assert!(stdout.contains("component: unsupported state: unsupported-version"));
     assert!(stdout.contains("Next Step: "));
     assert!(stdout.contains("'kvist help concepts'"));
+}
+
+/// An invalid project state is never shown bare: the overview names the
+/// offending artifact with its reason and the concrete unblocking action.
+#[test]
+fn status_overview_names_invalid_queue_defect_and_repair_action() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+
+    fs::write(
+        project.path().join("src/TODOS.yaml"),
+        valid_queue(
+            GENERATED_REQUIREMENTS_REVISION,
+            None,
+            r#"
+  - id: investigate
+    title: Investigate status fixture
+    description: Preserve an unsorted requirement list for status testing.
+    context: Status must name the defect and the repair command.
+    purpose: Verify that the project-level invalid state is explained.
+    expected_outcome: The overview names the queue defect and offers kvist repair.
+    kind: test
+    status: pending
+    depends_on: []
+    requirements:
+      - REQUIREMENTS.md#Project-status-inspection
+      - CONTRACT.md#Provided-interfaces
+    timestamps:
+      created_at: 2026-08-16T12:19:23Z
+      updated_at: 2026-08-16T12:19:23Z
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+"#,
+        ),
+    )
+    .expect("write unsorted queue");
+
+    let output = run_kvist(&[
+        "status",
+        "--format",
+        "overview",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 overview");
+    assert!(stdout.contains("(invalid)"));
+    assert!(stdout.contains("Project issues:"));
+    assert!(stdout.contains(
+        "src/TODOS.yaml: invalid (invalid TODO queue: `requirements` must be lexically sorted and duplicate-free)"
+    ));
+    assert!(stdout.contains("Action:    Run 'kvist repair'"));
+}
+
+/// An uninitialized project tells the user to initialize, with the missing
+/// artifacts listed in every report format.
+#[test]
+fn status_reports_uninitialized_project_action() {
+    let project = TempDir::new().expect("project");
+
+    let overview = run_kvist(&[
+        "status",
+        "--format",
+        "overview",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(overview.status.success());
+    let stdout = String::from_utf8(overview.stdout).expect("UTF-8 overview");
+    assert!(stdout.contains("(uninitialized)"));
+    assert!(stdout.contains("Project issues:"));
+    assert!(stdout.contains("kvist.toml: missing"));
+    assert!(stdout.contains("Action:    Run 'kvist init' to create the Phase 1 root artifacts."));
+
+    let text = run_kvist(&[
+        "status",
+        "--format",
+        "text",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(text.status.success());
+    let stdout = String::from_utf8(text.stdout).expect("UTF-8 text output");
+    assert!(stdout.contains("project-state: uninitialized"));
+    assert!(stdout.contains("root-artifact: kvist.toml: missing"));
+    assert!(stdout.contains("Next Step: Run 'kvist init' to create the Phase 1 root artifacts."));
+
+    let json = run_kvist(&[
+        "status",
+        "--format",
+        "json",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(json.status.success());
+    let stdout = String::from_utf8(json.stdout).expect("UTF-8 JSON output");
+    assert!(stdout.contains("\"project_state\":\"uninitialized\""));
+    assert!(stdout.contains("{\"path\":\"kvist.toml\",\"status\":\"missing\"}"));
+    assert!(
+        stdout.contains("\"guidance\":\"run `kvist init` to create the Phase 1 root artifacts\"")
+    );
+}
+
+/// A non-queue invalid artifact is explained in the stable text and JSON
+/// reports with its exact reason and the generic repair action.
+#[test]
+fn status_text_and_json_report_root_artifact_diagnostics() {
+    let project = TempDir::new().expect("project");
+    initialize(project.path()).expect("initialize");
+    fs::write(project.path().join("VISION.md"), "# Not a Kvist vision\n").expect("corrupt vision");
+
+    let text = run_kvist(&[
+        "status",
+        "--format",
+        "text",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(text.status.success());
+    let stdout = String::from_utf8(text.stdout).expect("UTF-8 text output");
+    assert!(stdout.contains("project-state: invalid"));
+    assert!(stdout.contains(
+        "root-artifact: VISION.md: invalid (line 1 must be `<!-- kvist-vision-version: <positive integer> -->`)"
+    ));
+    assert!(stdout.contains(
+        "Next Step: Repair the artifacts listed above; 'kvist doctor' shows the full inspection."
+    ));
+
+    let json = run_kvist(&[
+        "status",
+        "--format",
+        "json",
+        project.path().to_str().expect("UTF-8 project path"),
+    ]);
+    assert!(json.status.success());
+    let stdout = String::from_utf8(json.stdout).expect("UTF-8 JSON output");
+    assert!(stdout.contains("\"root_diagnostic\":null"));
+    assert!(stdout.contains(
+        "{\"path\":\"VISION.md\",\"status\":\"invalid (line 1 must be `<!-- kvist-vision-version: <positive integer> -->`)\"}"
+    ));
 }

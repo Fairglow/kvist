@@ -54,7 +54,7 @@ struct Artifact {
     kind: ArtifactKind,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArtifactKind {
     Configuration,
     Vision,
@@ -117,6 +117,13 @@ enum ArtifactClass {
     Valid,
     Invalid,
     UnsupportedVersion,
+}
+
+impl ArtifactStatus {
+    /// Whether the artifact is a valid, supported regular file.
+    pub fn is_valid(&self) -> bool {
+        self.class == ArtifactClass::Valid
+    }
 }
 
 /// A complete, read-only project inspection.
@@ -395,6 +402,17 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         components,
         discovery_error,
     })
+}
+
+/// Relative paths of every TODO queue the inspection validates: the
+/// configured root component's queue plus each discovered component queue,
+/// in stable artifact order.
+pub fn todo_queue_paths(project_dir: &Path) -> Vec<String> {
+    artifacts_for_project(project_dir)
+        .into_iter()
+        .filter(|artifact| artifact.kind == ArtifactKind::TodoQueue)
+        .map(|artifact| artifact.path)
+        .collect()
 }
 
 fn artifacts_for_project(project_dir: &Path) -> Vec<Artifact> {

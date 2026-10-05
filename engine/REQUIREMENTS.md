@@ -62,7 +62,24 @@ return line-aware diagnostics without rewriting user content.
 Kvist MUST discover the configured recursive component hierarchy
 deterministically within configured hard bounds. Status MUST validate all
 adjacent artifacts and report missing, invalid, unsupported, stale, blocked, or
-current state without modifying project files.
+current state without modifying project files. Every status report format
+MUST explain a non-current project state: each non-valid root artifact with
+its exact reason, any project-root diagnostic and discovery error, and a
+concrete next action that names the unblocking command (`kvist init` for
+uninitialized projects, `kvist repair` when the only defect is an unsorted or
+duplicated TODO-queue set list).
+
+### REQ-PROJECT-REPAIR
+
+Kvist MUST provide an explicit, bounded repair command that applies the only
+defined artifact rewrite: sorting and deduplicating TODO-queue dependency and
+requirement lists followed by the canonical queue serialization, written
+atomically. It MUST repair a queue only when the queue fails strict parsing
+solely because of that defect; it MUST NOT modify parseable queues, fenced
+queues, unparseable queues, or non-queue artifacts, and MUST report each of
+them with its reason. A dry-run mode MUST report the planned rewrites without
+writing. The command MUST exit nonzero while any non-valid artifact remains
+after the repair.
 
 ### REQ-REVISION-PROVENANCE
 
