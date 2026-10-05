@@ -1731,8 +1731,11 @@ pub(crate) fn cargo_toolchain_from_path(
 /// closed with a non-secret, actionable message when `rustup` or the toolchain is
 /// absent. This never falls back to building on the host.
 pub fn resolve_cargo_toolchain(runner: &str) -> Result<ResolvedCargoToolchain> {
-    let output = std::process::Command::new("rustup")
-        .args(["which", "cargo"])
+    let mut command = std::process::Command::new("rustup");
+    command.args(["which", "cargo"]);
+    command.env("RUSTUP_TOOLCHAIN", "/rust/toolchain");
+    command.env("RUSTUP_OFFLINE", "true");
+    let output = command
         .output()
         .map_err(|source| KvistError::SandboxUnavailable {
             runner: runner.to_owned(),
