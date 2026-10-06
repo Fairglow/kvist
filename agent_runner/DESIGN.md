@@ -287,6 +287,41 @@ effects. The legacy `compact` helper is diagnostic only, not the send path.
 When a compaction happens the loop emits `Event::Note`. The UI surfaces
 context utilization and a compaction progress bar via `Event::Progress`.
 
+### Model selection and activation
+
+The session model is resolved by active-model-first precedence before any
+model load: an explicit `--model` (or the Tab selection) wins and is never
+overridden; then a model the provider already has loaded is selected with no
+switch, matched by provider model name (not the user-facing id) against the
+configured entries; then a single configured model auto-selects; otherwise the
+session defers (interactive) or uses the last-resort `default_model`
+(headless). `default_model` is a required field that is used only when the
+rules above resolve nothing, and never overrides an active model, an explicit
+selection, or a single configured model.
+
+The active provider model is discovered by `config::probe_active_models`, a
+bounded, read-only, loopback-only probe of each distinct configured endpoint
+(llama-server `GET /props`, Ollama `GET /api/ps`). It builds a dedicated
+short-deadline transport per endpoint and reuses the transport's numeric-loopback
+authority; it sends no inference and requests no model switch, so a loaded model
+is read without triggering a load. A down, timed-out, malformed, or empty
+provider yields no entry for that endpoint, and selection falls through to the
+next rule rather than failing startup. When at most one model is configured the
+probe is skipped entirely (rule 3 is independent of active state), so a
+single-model startup performs no provider I/O and keeps its pinned request
+sequence.
+
+`config::select_active_model` returns `Explicit`, `Active` (with an announcement
+reason and the loaded name), `Single`, or `NeedsSelection`. The interactive TUI
+turns `NeedsSelection` into a deferred start: no model is selected, no bootstrap
+starts, and the first submit (after the user picks a model with Tab) starts the
+session, so no model load is paid before the user chooses. Headless resolves
+`NeedsSelection` to the last-resort `default_model`, keeping the single-model and
+common multi-model cases working while an unconfigured active model is surfaced
+for the user to add via a ready-to-paste `[[models]]` entry (never written to the
+config file automatically). An already-active selection is announced so the user
+knows no switch occurred.
+
 ### Tool rendering
 
 The registry exposes seven tools, in stable order: `shell`, `read_file`,
@@ -531,7 +566,12 @@ reasoning in order.
 
 The transcript and prompt areas are panels with a single top edge (no left,
 right, or bottom borders) so each gains a row and a column of content over a
-fully boxed panel. Every transcript row is filled to the panel's full inner
+fully boxed panel. Each top edge opens with a two-cell `──` lead before its
+title, so the edge reads as a border line; the renderer overlays the full edge
+(the lead and the trailing line in the border colour, the title in its own
+per-panel style) because ratatui draws a left-aligned title over the border's
+opening cells.
+Every transcript row is filled to the panel's full inner
 width: ratatui's `set_line` only styles cells up to the last span, so the
 renderer appends a trailing space span carrying the row's background. All
 output defaults to the standard panel background — black in the default `dark`

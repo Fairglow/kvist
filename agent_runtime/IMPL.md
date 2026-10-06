@@ -337,7 +337,7 @@ Executed stream evidence in `agent_runtime/tests/model_transport.rs` includes
 
 `DirectModelTransport::context_limit` is selected-model runtime-capacity
 discovery, not training-window inference: bounded to min(configured deadline,
-5 seconds) and 1 MiB. Llama GETs percent-encoded `/props?model=<id>` and reads
+60 seconds) and 1 MiB. Llama GETs percent-encoded `/props?model=<id>` and reads
 default_generation_settings.n_ctx. Ollama GETs `/api/ps` and selects matching
 name/model, permitting implicit :latest for an untagged selector, then reads
 context_length. Missing/null capacity is None; advertised values must be integer

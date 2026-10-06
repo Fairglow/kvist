@@ -134,9 +134,26 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
         },
         &workdir,
     )?;
-    let selected = overrides.model.as_deref().unwrap_or(&config.default_model);
-    let model = config.model(selected).ok_or_else(|| Error::ModelNotFound {
-        requested: selected.into(),
+    // Active-model-first selection (headless): an explicit --model wins, then the
+    // provider's already-loaded model (no switch), then a single configured model,
+    // then the last-resort default_model. The active probe is bounded, read-only,
+    // and loopback-only; a down provider yields no entry and falls through.
+    let active = crate::config::probe_active_models(&config);
+    let selection = crate::config::select_active_model(&config, overrides.model.as_deref(), &active);
+    let model_id = match &selection {
+        crate::config::Select::Explicit(id) => id.clone(),
+        crate::config::Select::Active { model_id, reason, .. } => {
+            eprintln!("{}", crate::error::terminal_text(reason));
+            model_id.clone()
+        }
+        crate::config::Select::Single { model_id } => model_id.clone(),
+        // Several configured models and no unambiguous active match: the
+        // last-resort default_model keeps headless working (it is required and
+        // validated to name a configured model).
+        crate::config::Select::NeedsSelection => config.default_model.clone(),
+    };
+    let model = config.model(&model_id).ok_or_else(|| Error::ModelNotFound {
+        requested: model_id,
         available: config.models.iter().map(|model| model.id.clone()).collect(),
     })?;
     let budgets = model.resolve_budgets(

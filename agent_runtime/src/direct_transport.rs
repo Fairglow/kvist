@@ -33,6 +33,13 @@ pub const DEFAULT_SLOT_ALLOCATION_TIMEOUT: Duration = Duration::from_secs(15);
 /// Default Time-To-First-Token watchdog timeout for streaming local model requests (45 seconds).
 pub const DEFAULT_TTFT_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(45);
 
+/// Serving-capacity discovery is a lightweight metadata read, not a turn. It
+/// is capped well below a full turn deadline so a wedged provider cannot stall
+/// startup, but generously enough for the provider to load or switch to the
+/// selected model first: a large local model can take minutes to load and
+/// prefill before it answers even a bare metadata probe.
+pub const MAX_CAPACITY_DISCOVERY: Duration = Duration::from_secs(60);
+
 /// Direct bounded HTTP transport for local Ollama and llama-server endpoints.
 #[derive(Debug, Clone)]
 pub struct DirectModelTransport {
@@ -202,7 +209,10 @@ impl DirectModelTransport {
     /// Reads selected-model serving capacity without inference or tool execution.
     ///
     /// Missing capacity is distinct from invalid advertised metadata. Discovery
-    /// retains the loopback endpoint restriction and a 5-second/1-MiB bound.
+    /// retains the loopback endpoint restriction and a 1-MiB bound, and it is
+    /// capped by the transport's turn deadline (bounded to 60 seconds): the
+    /// provider may have to load, or switch to, the selected model before it
+    /// answers a bare metadata probe, and a large local model can take minutes.
     pub fn context_limit(
         &self,
         model: &str,
@@ -218,7 +228,7 @@ impl DirectModelTransport {
         let bytes = get_bounded(
             &format!("http://{}", self.endpoint.authority),
             &path,
-            self.deadline.min(Duration::from_secs(5)),
+            self.deadline.min(MAX_CAPACITY_DISCOVERY),
             1024 * 1024,
             cancellation,
         )?;
@@ -255,6 +265,70 @@ impl DirectModelTransport {
                     })
                 });
                 parse_context_limit(selected.and_then(|entry| entry.get("context_length")))
+            }
+        }
+    }
+
+    /// Reports the provider's currently-loaded model without inference, without
+    /// switching, and without widening endpoint authority.
+    ///
+    /// This is a read-only probe used for active-model-first selection: it reuses
+    /// the loopback restriction and the capacity-discovery bounds, and it never
+    /// requests a model load or switch. llama-server's unqualified `/props`
+    /// describes the model that is already served (no `model` query, so no
+    /// switch is requested); Ollama `/api/ps` lists the loaded model(s). A down,
+    /// malformed, or empty provider yields `Ok(None)`, so callers fall through
+    /// to the next selection rule rather than failing startup.
+    pub fn loaded_model(&self, cancellation: &CancellationToken) -> Result<Option<String>> {
+        let bytes = get_bounded(
+            &format!("http://{}", self.endpoint.authority),
+            match self.provider {
+                LocalModelProvider::LlamaServer => "/props",
+                LocalModelProvider::Ollama => "/api/ps",
+            },
+            self.deadline.min(MAX_CAPACITY_DISCOVERY),
+            1024 * 1024,
+            cancellation,
+        )?;
+        let value = parse_json(&bytes)?;
+        if !value.is_object() {
+            return malformed("active model metadata must be an object");
+        }
+        match self.provider {
+            LocalModelProvider::LlamaServer => Ok(
+                value
+                    .get("model")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            ),
+            LocalModelProvider::Ollama => {
+                let models = value
+                    .get("models")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| Error::MalformedModelResponse {
+                        reason: "loaded model metadata must contain a models array".into(),
+                    })?;
+                if models.len() > 128 {
+                    return malformed("loaded model metadata exceeds 128 models");
+                }
+                Ok(models
+                    .iter()
+                    .find_map(|entry| {
+                        entry
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .or_else(|| {
+                        models
+                            .iter()
+                            .find_map(|entry| {
+                                entry
+                                    .get("model")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_owned)
+                            })
+                    }))
             }
         }
     }

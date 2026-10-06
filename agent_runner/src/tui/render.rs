@@ -2,7 +2,9 @@
 //!
 //! The layout is deliberately quiet: the transcript and prompt areas are
 //! panels with a single top edge (no left, right, or bottom borders), so they
-//! gain a row and a column of content compared to a fully boxed panel. The
+//! gain a row and a column of content compared to a fully boxed panel. Each
+//! top edge leads with a two-cell `──` run before its title, so the edge reads
+//! as a border line. The
 //! theme's panel background fills everything, the standard black (or white in
 //! the light theme) is the default for all output, and only thinking (a left
 //! edge plus a muted tint) and highlighted code (an indentation plus a patch)
@@ -38,6 +40,22 @@ fn full_width_line(line: &Line<'static>, bg: ratatui::style::Color, width: usize
         ));
     }
     line
+}
+
+/// The full top edge of a top-only panel, so it reads as a border line: a
+/// two-cell horizontal-line lead, then the title in its own style, then the
+/// rest of the edge in the border style. It is overlaid on the panel because
+/// ratatui draws a left-aligned title over the border's opening cells, erasing
+/// the edge's start; keeping the title span in its native style preserves the
+/// per-panel title styling (muted transcript title, bold overlay titles).
+fn panel_top_edge(title: String, title_style: Style, border_style: Style, width: usize) -> Line<'static> {
+    let lead = "──";
+    let rest = width.saturating_sub(lead.chars().count() + title.len());
+    Line::from(vec![
+        Span::styled(lead, border_style),
+        Span::styled(title, title_style),
+        Span::styled("─".repeat(rest), border_style),
+    ])
 }
 
 /// Renders one frame of the application.
@@ -101,13 +119,17 @@ fn render_header(f: &mut ratatui::Frame, app: &App, area: Rect) {
     } else {
         app.theme.model
     };
+    let model_label = app
+        .model
+        .clone()
+        .unwrap_or_else(|| "(none — press Tab)".to_owned());
     let title = Line::from(vec![
         Span::styled(
             format!("{} [{}] model: ", spinner, app.execution_scope.label()),
             app.theme.title,
         ),
         Span::styled(
-            app.model.clone(),
+            model_label,
             app.theme.title.patch(Style::default().fg(model)),
         ),
         Span::styled(
@@ -142,6 +164,17 @@ fn render_transcript(f: &mut ratatui::Frame, app: &App, area: Rect) {
         .block(block)
         .scroll((app.scroll, 0));
     f.render_widget(paragraph, area);
+    // Ratatui draws the left-aligned title over the border's opening cells,
+    // erasing the edge's start. Overlay the full edge so it reads as a border
+    // line: a two-cell horizontal-line lead, the (muted) title, and the rest.
+    let border = Style::default().fg(app.theme.panel_border);
+    let edge = panel_top_edge(
+        format!(" transcript [{}] ", app.lines.len()),
+        Style::default().fg(app.theme.dim),
+        border,
+        inner_width,
+    );
+    f.render_widget(&edge, Rect::new(area.left(), area.top(), inner_width as u16, 1));
     // The scrollbar is always present and adaptive: its track spans the
     // panel's inner height, and its thumb encodes the current window into the
     // full transcript (content length, viewport, and offset), so its size and
@@ -265,6 +298,13 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         .help_scroll
         .min(content_height.saturating_sub(inner_height));
     f.render_widget(paragraph.scroll((scroll, 0)), area);
+    let edge = panel_top_edge(
+        " help".to_owned(),
+        theme.title,
+        Style::default().fg(theme.panel_border),
+        usize::from(inner_width),
+    );
+    f.render_widget(&edge, Rect::new(area.left(), area.top(), inner_width, 1));
 }
 
 /// The action overlay menu, reached with Esc. Items are navigated with the
@@ -301,6 +341,13 @@ fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
         .alignment(Alignment::Left)
         .wrap(Wrap { trim: false });
     f.render_widget(paragraph, area);
+    let edge = panel_top_edge(
+        " menu".to_owned(),
+        theme.title,
+        Style::default().fg(theme.panel_border),
+        usize::from(area.width.max(1)),
+    );
+    f.render_widget(&edge, Rect::new(area.left(), area.top(), area.width.max(1), 1));
 }
 
 /// The session-history overlay: a scrollable list of past transcripts. Enter
@@ -351,6 +398,13 @@ fn render_history(f: &mut ratatui::Frame, app: &App, area: Rect) {
         .block(block)
         .alignment(Alignment::Left);
     f.render_widget(paragraph, area);
+    let edge = panel_top_edge(
+        " sessions".to_owned(),
+        theme.title,
+        Style::default().fg(theme.panel_border),
+        usize::from(inner_width),
+    );
+    f.render_widget(&edge, Rect::new(area.left(), area.top(), inner_width, 1));
 }
 
 /// A read-only replay of one past session's transcript. Esc returns to the
@@ -389,6 +443,13 @@ fn render_replay(f: &mut ratatui::Frame, app: &App, area: Rect) {
         .block(block)
         .alignment(Alignment::Left);
     f.render_widget(paragraph, area);
+    let edge = panel_top_edge(
+        format!(" replay {} ", app.replay_title),
+        theme.title,
+        Style::default().fg(theme.panel_border),
+        usize::from(inner_width),
+    );
+    f.render_widget(&edge, Rect::new(area.left(), area.top(), inner_width, 1));
 }
 
 fn visible_overlay_rows<'a>(
@@ -457,7 +518,7 @@ mod tests {
     fn new_app(width: u16, height: u16) -> App {
         App::new(
             &["local".to_owned()],
-            "local",
+            Some("local"),
             ReasoningEffort::Medium,
             None,
             width,
@@ -568,6 +629,12 @@ mod tests {
             transcript_top.contains("────"),
             "transcript top edge:\n{text}"
         );
+        // The edge opens with a run of horizontal-line cells before the title,
+        // so it reads as a border line rather than starting with the title.
+        assert!(
+            transcript_top.starts_with("──"),
+            "top edge must lead with horizontal-line cells:\n{text}"
+        );
         assert!(
             !transcript_top.contains('┌')
                 && !transcript_top.contains('┐')
@@ -660,7 +727,7 @@ mod tests {
     fn frame_shows_header_editor_text_and_parked_cursor() {
         let mut app = App::new(
             &["local".to_owned(), "ollama".to_owned()],
-            "local",
+            Some("local"),
             ReasoningEffort::Medium,
             None,
             60,
@@ -695,7 +762,7 @@ mod tests {
     fn help_overlay_documents_configuration_and_import() {
         let mut app = App::new(
             &["local".to_owned()],
-            "local",
+            Some("local"),
             ReasoningEffort::Medium,
             Some(std::path::PathBuf::from("/cfg/agent-runner.toml")),
             60,
@@ -730,7 +797,7 @@ mod tests {
         // reaches content that is not visible at scroll zero.
         let mut app = App::new(
             &["local".to_owned()],
-            "local",
+            Some("local"),
             ReasoningEffort::Medium,
             Some(std::path::PathBuf::from("/cfg/agent-runner.toml")),
             60,

@@ -203,8 +203,10 @@ pub struct App {
     pub history_index: Option<usize>,
     /// The model ids selectable in this session, in configuration order.
     pub models: Vec<String>,
-    /// The currently selected model id.
-    pub model: String,
+    /// The currently selected model id, or `None` when no model is selected and
+    /// the session defers loading until the user picks one (several configured
+    /// models, no active match).
+    pub model: Option<String>,
     /// The currently selected thinking effort (a valid enum value).
     pub effort: ReasoningEffort,
     pub running: bool,
@@ -272,9 +274,11 @@ pub struct App {
 
 impl App {
     /// Creates a new application for a selected model and thinking effort.
+    /// `model_id` is `None` when the session starts with no model selected
+    /// (several configured models and no active match), deferring the load.
     pub fn new(
         models: &[String],
-        model_id: &str,
+        model_id: Option<&str>,
         effort: ReasoningEffort,
         config_path: Option<PathBuf>,
         width: u16,
@@ -297,7 +301,7 @@ impl App {
             history: Vec::new(),
             history_index: None,
             models: models.to_vec(),
-            model: model_id.to_owned(),
+            model: model_id.map(str::to_owned),
             effort,
             running: false,
             execution_scope: crate::session_log::ExecutionScope::SandboxedWorkspace,
@@ -953,6 +957,15 @@ impl App {
         if text.trim().is_empty() {
             return;
         }
+        // Several configured models and no active match: the session defers the
+        // load until the user picks a model (Tab), so an unsent prompt is held.
+        if self.model.is_none() {
+            self.note(
+                self.theme.warn,
+                "no model selected — press Tab to choose one (the prompt is kept)",
+            );
+            return;
+        }
         if text.chars().count() > MAX_PROMPT_CHARS {
             self.note(
                 self.theme.warn,
@@ -1005,9 +1018,9 @@ impl App {
             return;
         }
         let current = self
-            .models
-            .iter()
-            .position(|id| id == &self.model)
+            .model
+            .as_ref()
+            .and_then(|model| self.models.iter().position(|id| id == model))
             .unwrap_or(0);
         let next = if forward {
             (current + 1) % self.models.len()
@@ -1018,12 +1031,12 @@ impl App {
                 current - 1
             }
         };
-        self.model = self.models[next].clone();
+        self.model = Some(self.models[next].clone());
         self.note(
             self.theme.dim,
             &format!(
                 "model → {} (applies to the next prompt; the session restarts)",
-                self.model
+                self.model.as_deref().unwrap_or("?")
             ),
         );
     }
@@ -1900,7 +1913,7 @@ fn fence_split(line: &str) -> Option<(char, usize, &str)> {
 
 /// The dim placeholder lines shown where thinking has been collapsed.
 fn collapse_placeholder_rows(width: usize, theme: &Theme) -> Vec<ScreenLine> {
-    wrap(&collapse_placeholder_text(), width)
+    wrap(collapse_placeholder_text(), width)
         .into_iter()
         .enumerate()
         .map(|(index, text)| {
@@ -2046,7 +2059,7 @@ mod tests {
     fn app() -> App {
         App::new(
             &models(),
-            "local",
+            Some("local"),
             ReasoningEffort::Medium,
             None,
             40,
@@ -2066,7 +2079,7 @@ mod tests {
     fn app_at(width: u16) -> App {
         App::new(
             &models(),
-            "local",
+            Some("local"),
             ReasoningEffort::Medium,
             None,
             width,
@@ -2376,14 +2389,14 @@ mod tests {
     #[test]
     fn tab_cycles_models_and_shift_tab_cycles_effort() {
         let mut app = app();
-        assert_eq!(app.model, "local");
+        assert_eq!(app.model.as_deref(), Some("local"));
         assert_eq!(app.effort, ReasoningEffort::Medium);
 
         // Tab wraps forward through the configured models.
         app.on_key(ch(KeyCode::Tab));
-        assert_eq!(app.model, "ollama");
+        assert_eq!(app.model.as_deref(), Some("ollama"));
         app.on_key(ch(KeyCode::Tab));
-        assert_eq!(app.model, "local");
+        assert_eq!(app.model.as_deref(), Some("local"));
 
         // Shift+Tab (reported as BackTab on most terminals) walks the effort
         // enum in order; only valid enum values are ever selectable.

@@ -113,28 +113,56 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         return ExitCode::from(2);
     }
 
-    let model_id = overrides.model.as_deref().unwrap_or(&config.default_model);
-    let model = match config.model(model_id) {
-        Some(model) => model.clone(),
-        None => {
-            let available = config
-                .models
-                .iter()
-                .map(|model| model.id.clone())
-                .collect::<Vec<_>>();
-            eprintln!(
-                "{}",
-                Error::ModelNotFound {
-                    requested: model_id.to_owned(),
-                    available,
-                }
-                .describe()
-            );
-            return ExitCode::from(2);
-        }
+    // Active-model-first selection: an explicit --model wins, then the provider's
+    // already-loaded model (matched by provider model name) so no load/switch is
+    // paid, then a single configured model, then defer (no model selected — the
+    // user picks one with Tab). The default_model is the headless last resort and
+    // never overrides an active model or an explicit selection. The active probe
+    // is bounded, read-only, and loopback-only; a down provider yields no entry
+    // and falls through.
+    let active = crate::config::probe_active_models(&config);
+    let selection = crate::config::select_active_model(&config, overrides.model.as_deref(), &active);
+    let selected_model_id = match &selection {
+        crate::config::Select::Explicit(id) => Some(id.as_str()),
+        crate::config::Select::Active { model_id, .. } => Some(model_id.as_str()),
+        crate::config::Select::Single { model_id } => Some(model_id.as_str()),
+        crate::config::Select::NeedsSelection => None,
+    };
+    let selected_model: Option<Model> = match selected_model_id {
+        Some(id) => match config.model(id) {
+            Some(model) => Some(model.clone()),
+            None => {
+                // A selected id that is not a configured model is a hard
+                // configuration error (an active/single id always comes from the
+                // config, so this is reachable only for an explicit --model).
+                let available = config
+                    .models
+                    .iter()
+                    .map(|model| model.id.clone())
+                    .collect::<Vec<_>>();
+                eprintln!(
+                    "{}",
+                    Error::ModelNotFound {
+                        requested: id.to_owned(),
+                        available,
+                    }
+                    .describe()
+                );
+                return ExitCode::from(2);
+            }
+        },
+        None => None,
     };
 
-    let app_model_label = app_model_id(&config, &model);
+    if selected_model.is_some() {
+        // Announce an already-active model so the user knows no switch was paid.
+        if let crate::config::Select::Active { reason, .. } = &selection {
+            eprintln!("{}", crate::error::terminal_text(reason));
+        }
+    }
+    let app_model_label = selected_model
+        .as_ref()
+        .map(|model| app_model_id(&config, model));
     if let Err(error) = overrides.limits.validate() {
         eprintln!("{}", error.describe());
         return ExitCode::from(error.exit_code());
@@ -251,13 +279,18 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
     // record, and the worker thread — runs in the background so the terminal
     // UI appears immediately instead of waiting on the model. The worker is
     // installed by the UI loop when the bootstrap reports; prompts submitted in
-    // the meantime are held and dispatched when it is ready.
-    let bootstrap = match spawn_bootstrap(&builder, &model, effort) {
-        Ok(receiver) => receiver,
-        Err(error) => {
-            eprintln!("{}", error.describe());
-            return ExitCode::from(error.exit_code());
-        }
+    // the meantime are held and dispatched when it is ready. When no model is
+    // selected (deferred), no bootstrap starts: the user picks a model first and
+    // the first submit (or a new session) starts it, so no model load is paid.
+    let bootstrap = match &selected_model {
+        Some(model) => match spawn_bootstrap(&builder, model, effort) {
+            Ok(receiver) => Some(receiver),
+            Err(error) => {
+                eprintln!("{}", error.describe());
+                return ExitCode::from(error.exit_code());
+            }
+        },
+        None => None,
     };
 
     let (width, height) = size().unwrap_or((100, 30));
@@ -268,7 +301,7 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         .unwrap_or_else(|| config.theme.clone());
     let mut app = App::new(
         &model_ids,
-        &app_model_label,
+        app_model_label.as_deref(),
         effort,
         overrides.config_path,
         width,
@@ -474,7 +507,7 @@ fn app_model_id(config: &Config, model: &Model) -> String {
 fn ui_loop(
     mut app: App,
     builder: &SessionBuilder,
-    bootstrap: mpsc::Receiver<Result<Worker>>,
+    bootstrap: Option<mpsc::Receiver<Result<Worker>>>,
 ) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
@@ -482,7 +515,7 @@ fn ui_loop(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let mut worker: Option<Worker> = None;
-    let mut bootstrap = Some(bootstrap);
+    let mut bootstrap = bootstrap;
 
     let result = run_ui(
         &mut terminal,
@@ -583,7 +616,7 @@ fn run_ui<M: std::io::Write>(
                                     // and joined (dropped), then a fresh
                                     // session starts for the new selection.
                                     Some(current) => {
-                                        current.model_id != app.model
+                                        current.model_id != app.model.clone().unwrap_or_default()
                                             || current.effort != app.effort
                                     }
                                     None => bootstrap.is_none(),
@@ -596,19 +629,22 @@ fn run_ui<M: std::io::Write>(
                                     // An in-flight bootstrap may target a stale
                                     // selection; discard it and start fresh.
                                     *bootstrap = None;
-                                    let model =
-                                        builder.config.model(&app.model).ok_or_else(|| {
+                                    let model = builder
+                                        .config
+                                        .model(app.model.as_deref().expect("submit requires a selected model"))
+                                        .ok_or_else(|| {
+                                            let available = builder
+                                                .config
+                                                .models
+                                                .iter()
+                                                .map(|model| model.id.clone())
+                                                .collect();
                                             Error::ModelNotFound {
-                                                requested: app.model.clone(),
-                                                available: builder
-                                                    .config
-                                                    .models
-                                                    .iter()
-                                                    .map(|model| model.id.clone())
-                                                    .collect(),
+                                                requested: app.model.clone().unwrap_or_default(),
+                                                available,
                                             }
                                         })?;
-                                    *bootstrap = Some(spawn_bootstrap(builder, model, app.effort)?);
+                                    *bootstrap = Some(spawn_bootstrap(builder, &model, app.effort)?);
                                     app.status = "starting model…".to_owned();
                                     pending_submit = Some(text);
                                 } else if let Some(current) = worker.as_ref() {
@@ -626,6 +662,19 @@ fn run_ui<M: std::io::Write>(
                             }
                         }
                         KeyAction::NewSession => {
+                            // A new session needs a selected model; deferred
+                            // (no model) sessions just note that.
+                            let selected = match &app.model {
+                                Some(model) => model.clone(),
+                                None => {
+                                    app.push_event(crate::session::Event::Note(
+                                        "no model selected — press Tab to choose one before \
+                                         starting a new session"
+                                            .to_owned(),
+                                    ));
+                                    continue;
+                                }
+                            };
                             // Replace whatever is live (a running turn is
                             // cancelled with the old worker) and start a fresh
                             // session for the selected model and effort.
@@ -634,18 +683,19 @@ fn run_ui<M: std::io::Write>(
                                 drop(old.prompt_tx);
                             }
                             *bootstrap = None;
-                            let model = builder.config.model(&app.model).ok_or_else(|| {
+                            let model = builder.config.model(&selected).ok_or_else(|| {
+                                let available = builder
+                                    .config
+                                    .models
+                                    .iter()
+                                    .map(|model| model.id.clone())
+                                    .collect();
                                 Error::ModelNotFound {
-                                    requested: app.model.clone(),
-                                    available: builder
-                                        .config
-                                        .models
-                                        .iter()
-                                        .map(|model| model.id.clone())
-                                        .collect(),
+                                    requested: selected.clone(),
+                                    available,
                                 }
                             })?;
-                            *bootstrap = Some(spawn_bootstrap(builder, model, app.effort)?);
+                            *bootstrap = Some(spawn_bootstrap(builder, &model, app.effort)?);
                             app.status = "starting model…".to_owned();
                         }
                         KeyAction::Quit => {

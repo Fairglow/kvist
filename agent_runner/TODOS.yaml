@@ -1505,7 +1505,7 @@ tasks:
     purpose: "Define every active-model-first behavior as a failing test before implementation."
     expected_outcome: "The new tests fail on the current default_model-first selection and pass once the active-model-first precedence and deferred-load path exist."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements:
       - "CONTRACT.md#Model-selection-and-activation"
@@ -1513,8 +1513,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-04T12:30:02Z"
-      updated_at: "2026-10-04T12:30:02Z"
-      completed_at: null
+      updated_at: "2026-10-04T14:12:00Z"
+      completed_at: "2026-10-04T14:12:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "agent-runner-model-selection-implement-code"
@@ -1524,7 +1524,7 @@ tasks:
     purpose: "Make the zero-switch-cost, already-active model the default starting point without expanding authority."
     expected_outcome: "All model-selection tests pass, the existing headless/TUI suites stay green, and the workspace build plus strict clippy are clean."
     kind: implementation
-    status: pending
+    status: completed
     depends_on:
       - "agent-runner-model-selection-write-tests"
     requirements:
@@ -1533,8 +1533,8 @@ tasks:
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-04T12:30:02Z"
-      updated_at: "2026-10-04T12:30:02Z"
-      completed_at: null
+      updated_at: "2026-10-04T14:12:00Z"
+      completed_at: "2026-10-04T14:12:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "agent-runner-model-selection-security-audit"

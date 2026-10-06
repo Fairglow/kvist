@@ -7,7 +7,9 @@
 Direct transport reuses bounded loopback GET for llama-server model-qualified
 properties and Ollama loaded-model metadata. Encode the model query as percent
 escaped UTF-8, validate positive integer capacity within 1048576 tokens, and
-return absent capacity distinctly. Limit discovery to 1 MiB and 5 seconds.
+return absent capacity distinctly. Limit discovery to 1 MiB and 60 seconds:
+the provider may have to load, or switch to, the selected model before it
+answers a bare metadata probe, and a large local model can take minutes.
 Streaming OpenAI-compatible requests ask for include_usage, preserving nullable
 usage and finish classification. Raise only the complete request byte ceiling
 to 8 MiB so larger validated context is not constrained by the old 2-MiB wire

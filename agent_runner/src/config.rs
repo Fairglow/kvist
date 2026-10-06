@@ -739,6 +739,158 @@ impl Config {
     }
 }
 
+/// The outcome of active-model-first selection for a session.
+///
+/// The precedence is: an explicit selection (rule 1), a loaded provider model
+/// matching a configured entry (rule 2), a single configured model (rule 3), and
+/// otherwise a deferred/failed choice (rule 4). `default_model` is never the
+/// outcome of this resolution — it is the CLI's last-resort fallback when no
+/// explicit selection is given and the provider reports no usable active model,
+/// so it is a distinct path the caller owns.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Select {
+    /// The user explicitly chose this model; it is used exactly as selected.
+    Explicit(String),
+    /// A configured entry whose provider model name matches the provider's
+    /// already-loaded model: selected with no load/switch, announced via
+    /// `reason` and `loaded`.
+    Active {
+        model_id: String,
+        reason: String,
+        loaded: String,
+    },
+    /// Exactly one model is configured: auto-selected as a convenience.
+    Single { model_id: String },
+    /// Several configured models and no unambiguous active match: the session
+    /// must defer (interactive) or fail (headless) rather than guess.
+    NeedsSelection,
+}
+
+/// Probes each distinct configured provider endpoint for its already-loaded
+/// model, returning `base_url -> loaded provider model name`.
+///
+/// The probe is bounded, read-only, and loopback-only: it reuses the transport's
+/// endpoint authority (numeric loopback only) and a short probe deadline, and it
+/// sends no inference and requests no model switch. A down, timed-out, malformed,
+/// or empty provider yields no entry for that endpoint, so the caller falls
+/// through to the next selection rule rather than failing startup.
+pub fn probe_active_models(config: &Config) -> std::collections::BTreeMap<String, String> {
+    // A single configured model auto-selects (rule 3) identically whether or not
+    // it is active, so no active probe is needed — and skipping it keeps a
+    // single-model startup free of provider I/O (and its pinned request
+    // sequence). Several configured models need the probe to find an active one.
+    if config.models.len() <= 1 {
+        return std::collections::BTreeMap::new();
+    }
+    const PROBE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+    const PROBE_RESPONSE_BYTES: usize = 64 * 1024;
+    let mut active = std::collections::BTreeMap::new();
+    for model in config.models.iter() {
+        if active.contains_key(&model.base_url) {
+            continue;
+        }
+        // A dedicated, short-deadline transport bounds the probe so a wedged
+        // provider cannot stall startup; it carries no watchdogs and is used
+        // only for this single read-only metadata GET.
+        let probe = match agent_runtime::DirectModelTransport::new(
+            model.provider.to_agent_provider(),
+            &model.base_url,
+            PROBE_DEADLINE,
+            PROBE_RESPONSE_BYTES,
+        ) {
+            Ok(transport) => transport,
+            Err(_) => continue,
+        };
+        if let Ok(Some(loaded)) = probe.loaded_model(&agent_runtime::CancellationToken::new()) {
+            active.insert(model.base_url.clone(), loaded);
+        }
+    }
+    active
+}
+
+/// Resolves the session model by the documented precedence from
+/// `Config::models` and the active provider models.
+///
+/// `active` maps `base_url -> loaded provider model name` (see
+/// [`probe_active_models`]). An explicit selection is returned unchanged; a
+/// single configured model is returned as [`Select::Single`]; a unique active
+/// match by provider model name is returned as [`Select::Active`]; and several
+/// configured models with no unambiguous active match return
+/// [`Select::NeedsSelection`].
+pub fn select_active_model(
+    config: &Config,
+    explicit: Option<&str>,
+    active: &std::collections::BTreeMap<String, String>,
+) -> Select {
+    if let Some(id) = explicit {
+        return Select::Explicit(id.to_owned());
+    }
+    if config.models.len() == 1 {
+        return Select::Single {
+            model_id: config.models[0].id.clone(),
+        };
+    }
+    // Collect configured entries that match a loaded provider model, grouped by
+    // the (base_url, provider model name) they matched. A unique match selects
+    // that entry; more than one candidate is ambiguous and defers.
+    let mut matched: Vec<&Model> = Vec::new();
+    let mut ambiguous = false;
+    for model in config.models.iter() {
+        if let Some(loaded) = active.get(&model.base_url) {
+            if loaded == &model.model {
+                matched.push(model);
+            }
+        }
+    }
+    if matched.is_empty() {
+        return Select::NeedsSelection;
+    }
+    // Two distinct entries can match the same loaded model (e.g. duplicated
+    // provider model name on one server); that is ambiguous.
+    {
+        let mut seen = std::collections::BTreeSet::new();
+        for model in &matched {
+            if !seen.insert((model.base_url.as_str(), model.model.as_str())) {
+                ambiguous = true;
+            }
+        }
+    }
+    if ambiguous {
+        return Select::NeedsSelection;
+    }
+    // A single unique match: select it. (matched.len() > 1 with the same
+    // base_url+model is impossible after the dedupe check above, so the first
+    // entry is the one to use.)
+    let model = matched[0];
+    Select::Active {
+        model_id: model.id.clone(),
+        reason: format!(
+            "using already-loaded model `{}` (no switch)",
+            active.get(&model.base_url).expect("matched entry has an active model")
+        ),
+        loaded: model.model.clone(),
+    }
+}
+
+/// Reports configured provider models that are loaded but not present in
+/// `[[models]]`, so the caller can offer a ready-to-paste `[[models]]` entry.
+pub fn unconfigured_active_models(
+    config: &Config,
+    active: &std::collections::BTreeMap<String, String>,
+) -> Vec<(String, String)> {
+    let mut unconfigured = Vec::new();
+    for (base_url, loaded) in active.iter() {
+        let configured = config
+            .models
+            .iter()
+            .any(|model| &model.base_url == base_url && &model.model == loaded);
+        if !configured {
+            unconfigured.push((loaded.clone(), base_url.clone()));
+        }
+    }
+    unconfigured
+}
+
 pub(crate) fn read_configuration(path: &Path) -> Result<String> {
     use std::os::unix::fs::OpenOptionsExt;
     let file = std::fs::OpenOptions::new()
