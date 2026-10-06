@@ -529,19 +529,35 @@ labels actual sandboxed or HOST UNCONFINED scope; model instructions use the
 same selected scope. Reasoning collapse retains other rows and restores hidden
 reasoning in order.
 
-Every transcript row is filled to the box's inner width (the border excluded),
-so each block reads as an enclosed textbox without extra border characters:
-ratatui's `set_line` only styles cells up to the last span, so the renderer
-appends a trailing space span carrying the row's background on top of the
-line-level style. Three subtle, low-contrast backgrounds separate blocks —
-prompt echo, reasoning/placeholders, and everything agent-produced (markdown,
-tool calls/results, notices, terminal status) — and single-line tool rows share
-the agent-produced background. Foregrounds are chosen for comfortable contrast
-against each background, and the differences between blocks are kept subtle so
-the text stays dominant. Resized rows keep their background.
+The transcript and prompt areas are panels with a single top edge (no left,
+right, or bottom borders) so each gains a row and a column of content over a
+fully boxed panel. Every transcript row is filled to the panel's full inner
+width: ratatui's `set_line` only styles cells up to the last span, so the
+renderer appends a trailing space span carrying the row's background. All
+output defaults to the standard panel background — black in the default `dark`
+theme, white in `light` — so the transcript reads as one quiet surface. Two
+cues set content apart from it: model reasoning carries a left edge (▌ first
+row, │ continuations) plus a muted tint, and highlighted code keeps its
+gutter/indentation plus the theme's code patch. The prompt echo is distinct by
+its bold prompt foreground alone. A scrollbar rides the transcript's right
+inner column at all times, sized to the panel's inner height, with a thumb that
+encodes the current window (content length, viewport, offset) into the full
+transcript, so it adapts to both scrolling and terminal resizes. Resized rows
+keep their kind and background.
 
-Transcript text is pre-wrapped to the box's inner width (the full terminal
-width minus the two vertical borders) so no line extends past the visible
+Theming lives in `tui::theme`: one `Theme` table per built-in theme supplies
+every colour the render layer and each transcript row reads (panels, edges,
+reasoning, prompt, notes, stats, scrollbar, menu, and the full
+`MarkdownStyles` table, including the code patch). The configuration's
+`theme` key selects `dark` (default) or `light` — unknown names fail at load —
+the CLI `--theme` flag overrides it per run, and Ctrl+S cycles the live theme:
+existing rows are restyled in place (prompt rows take the prompt style,
+reasoning rows are rebuilt with the edge and tint, everything else gains the
+panel background) while text, Markdown spans, and code highlights are left
+untouched.
+
+Transcript text is pre-wrapped to the panel's inner width (the full terminal
+width minus the top edge's column) so no line extends past the visible
 area, and tool-call events carry a short description of what applied where
 (file, directory, or command). The `wrap` helper splits each source line at
 word boundaries and prefixes every continuation line with that line's leading

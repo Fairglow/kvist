@@ -48,6 +48,11 @@ pub struct Cli {
     #[arg(short, long, value_name = "NAME")]
     pub profile: Option<String>,
 
+    /// Select the UI theme (dark, light). Overrides the configuration's
+    /// `theme` key for this run.
+    #[arg(long, value_name = "NAME")]
+    pub theme: Option<String>,
+
     /// Print the configured models and exit.
     #[arg(long)]
     pub list_models: bool,

@@ -22,9 +22,11 @@ pub struct RenderedLine {
     pub is_code: bool,
 }
 
-/// Styling for each Markdown construct. Defaults suit a dark terminal; the
-/// code-block background is derived from the syntect theme.
-#[derive(Debug, Clone)]
+/// Styling for each Markdown construct. The defaults suit the dark theme; the
+/// light theme supplies its own table (see `tui::theme`). The code-block
+/// background and the inline-code highlight come from `code_bg`/`code_inline`
+/// so a theme controls both without touching the syntax highlighter.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MarkdownStyles {
     pub paragraph: RStyle,
     pub heading: [RStyle; 6],
@@ -57,8 +59,10 @@ impl Default for MarkdownStyles {
                 RStyle::default().fg(Color::Blue),
                 RStyle::default().fg(Color::Magenta),
             ],
-            code_inline: RStyle::default().bg(Color::DarkGray),
-            code_bg: RStyle::default().bg(Color::DarkGray),
+            code_inline: RStyle::default()
+                .fg(Color::Rgb(222, 214, 208))
+                .bg(Color::Rgb(20, 20, 28)),
+            code_bg: RStyle::default().bg(Color::Rgb(20, 20, 28)),
             code_label: RStyle::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
@@ -601,12 +605,8 @@ impl<'a> Render<'a> {
 
     fn finish_code(&mut self) {
         let mut code = self.code.take().expect("code block open on close");
-        let bg = self
-            .theme
-            .settings
-            .background
-            .map(srgb)
-            .unwrap_or(Color::Gray);
+        let code_bg = self.styles.code_bg;
+        let bg = code_bg.bg.unwrap_or(Color::Gray);
         let lang = parse_language(&code.info);
         if let Some(lang) = &lang {
             let label = Line::from(vec![
@@ -1127,7 +1127,7 @@ mod tests {
                 .line
                 .spans
                 .iter()
-                .any(|s| s.style.bg == Some(Color::DarkGray))
+                .any(|s| s.style.bg == Some(Color::Rgb(20, 20, 28)))
         );
     }
 

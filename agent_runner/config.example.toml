@@ -8,6 +8,12 @@ working_directory = "/absolute/path/to/your/project"
 default_model = "local"
 default_thinking_effort = "medium"
 
+# UI theme: `dark` (default) keeps the classic black panels; `light` is the
+# built-in alternative for light terminals. Both give reasoning a left edge and
+# tint, and highlighted code an indentation plus a patch. The --theme flag
+# overrides this per run, and Ctrl+S cycles themes live.
+theme = "dark"
+
 # Models selectable in the UI with -m/--model.
 [[models]]
 id = "local"

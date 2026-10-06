@@ -64,6 +64,24 @@ fn run() -> agent_runner::Result<ExitCode> {
         None => None,
     };
 
+    // The UI theme: the `--theme` flag overrides the configuration's `theme`
+    // key. Unknown names fail here with the accepted list, so a typo in the
+    // flag is caught before the terminal takes over.
+    let theme = match &cli.theme {
+        Some(name) => {
+            Some(
+                agent_runner::tui::Theme::by_name(name).ok_or_else(|| Error::Config {
+                    path: None,
+                    reason: format!(
+                        "unknown theme `{name}`; expected one of: {}",
+                        agent_runner::tui::THEME_NAMES.join(", ")
+                    ),
+                })?,
+            )
+        }
+        None => None,
+    };
+
     let overrides = Overrides {
         model: cli.model.clone(),
         effort,
@@ -82,6 +100,7 @@ fn run() -> agent_runner::Result<ExitCode> {
             max_tokens: cli.max_run_tokens,
             response_reserve: cli.response_reserve.unwrap_or(1024),
         },
+        theme,
     };
     if cli.headless {
         let summary = agent_runner::headless::run(config, overrides, cli.json)?;

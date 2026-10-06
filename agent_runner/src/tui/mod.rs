@@ -2,6 +2,9 @@
 
 mod app;
 mod render;
+mod theme;
+
+pub use theme::{THEME_NAMES, Theme};
 
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -64,6 +67,10 @@ pub struct Overrides {
     pub prompt: Option<String>,
     /// Shared prompt and provider response limits.
     pub limits: crate::session::RunLimits,
+    /// The UI theme, resolved from the `--theme` flag over the configuration's
+    /// `theme` key. `None` falls back to the configured (or default dark)
+    /// theme.
+    pub theme: Option<Theme>,
 }
 
 /// Resolves the autonomous turn cap for a session and validates it.
@@ -255,6 +262,10 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
 
     let (width, height) = size().unwrap_or((100, 30));
     let model_ids: Vec<String> = config.models.iter().map(|model| model.id.clone()).collect();
+    let theme = overrides
+        .theme
+        .clone()
+        .unwrap_or_else(|| config.theme.clone());
     let mut app = App::new(
         &model_ids,
         &app_model_label,
@@ -262,6 +273,7 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         overrides.config_path,
         width,
         height,
+        theme,
     );
     for note in &builder.resource_notes {
         app.push_event(crate::session::Event::Note(note.clone()));

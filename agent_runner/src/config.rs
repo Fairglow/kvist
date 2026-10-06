@@ -405,6 +405,9 @@ pub struct Config {
     pub tool_profiles: BTreeMap<ToolProfile, ProfileSetting>,
     /// The sandbox boundary paths.
     pub sandbox: SandboxPaths,
+    /// The UI theme for the terminal shell. Defaults to `dark`; `light` is
+    /// the built-in alternative for light terminals.
+    pub theme: crate::tui::Theme,
 }
 
 /// The intermediate TOML shape; validated into [`Config`] by [`Config::validate`].
@@ -427,6 +430,9 @@ struct RawConfig {
     // is always on and never configured. Unknown names are rejected in `validate`.
     #[serde(default)]
     tool_profiles: BTreeMap<String, ProfileSetting>,
+    /// The UI theme name (`dark` by default, `light` for a light terminal).
+    #[serde(default)]
+    theme: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -661,6 +667,17 @@ impl Config {
             }
         }
 
+        let theme = match raw.theme.as_deref() {
+            None => crate::tui::Theme::default(),
+            Some(name) => crate::tui::Theme::by_name(name).ok_or_else(|| Error::Config {
+                path: Some(path.to_string_lossy().into_owned()),
+                reason: format!(
+                    "theme `{name}` is not recognized; expected one of: {}",
+                    crate::tui::THEME_NAMES.join(", ")
+                ),
+            })?,
+        };
+
         Ok(Config {
             schema_version: SCHEMA_VERSION,
             working_directory,
@@ -668,6 +685,7 @@ impl Config {
             default_thinking_effort,
             models,
             tool_policy,
+            theme,
             sandbox: SandboxPaths {
                 runner: raw
                     .sandbox
@@ -711,6 +729,7 @@ impl Config {
             tool_policy,
             tool_profiles,
             sandbox: SandboxPaths::default(),
+            theme: crate::tui::Theme::default(),
         })
     }
 

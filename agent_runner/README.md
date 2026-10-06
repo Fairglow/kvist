@@ -46,6 +46,33 @@ complete, commented example. Key points:
   fails startup if it is not; `off` never advertises. The `Generic` base is
   always present.
 
+## Theming
+
+The terminal UI is themed by a single colour table (`tui::theme`): one `Theme`
+per palette supplies every surface the shell draws — panels, edges, notes,
+stats, scrollbar, menus, and the Markdown style table (headings, inline code,
+code blocks, tables). Two built-in themes ship:
+
+- **`dark`** (default): black panels with the standard terminal background for
+  all output, a muted warm-gray tint for reasoning, and a dark patch under
+  highlighted code.
+- **`light`**: white panels with the same structural cues recoloured for a
+  light terminal, keeping the same contrast structure.
+
+Select a theme in the configuration with `theme = "dark"` or
+`theme = "light"` (unknown names fail at load with the accepted list). The
+`--theme` flag overrides the configuration for one run, and **Ctrl+S** cycles
+the theme live: existing transcript rows are restyled in place while text and
+Markdown highlighting are left untouched.
+
+Layout cues are theme-independent and keep content scannable: the transcript
+and prompt panels carry a single top edge (no side or bottom borders), the
+transcript always shows an adaptive right-edge scrollbar whose thumb encodes
+the current window into the full transcript, model reasoning is set apart by a
+left edge (`▌`/`│`) plus its tint, and highlighted code keeps its indentation
+plus the theme's code patch. The echoed prompt is distinct by its bold prompt
+foreground alone.
+
 ## Tools
 
 The agent is offered a small, robust tool set that maps to sandbox-executed

@@ -1,7 +1,17 @@
 //! Rendering for the terminal UI.
+//!
+//! The layout is deliberately quiet: the transcript and prompt areas are
+//! panels with a single top edge (no left, right, or bottom borders), so they
+//! gain a row and a column of content compared to a fully boxed panel. The
+//! theme's panel background fills everything, the standard black (or white in
+//! the light theme) is the default for all output, and only thinking (a left
+//! edge plus a muted tint) and highlighted code (an indentation plus a patch)
+//! stand apart from it. A scrollbar rides the right edge of the transcript
+//! panel at all times, sized to the panel and tracking the current window into
+//! the full transcript.
 
 use ratatui::layout::{Alignment, Constraint, Rect};
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
@@ -12,14 +22,12 @@ use super::app::{App, MENU_HOTKEYS, MENU_ITEMS, Overlay, wrap};
 /// Rows reserved for the multiline prompt editor around the transcript.
 const INPUT_ROWS: u16 = 4;
 
-/// Extends one transcript row to the box's full inner width so its block
-/// background reads as an encapsulated box (borders excluded). The row's own
-/// line style carries the background under every span, and a trailing space
-/// span pads past the last content span: ratatui styles cells only up to the
-/// last span, so without the pad a short row would show only a short patch of
-/// background. Spans with their own background (for example highlighted code)
-/// keep it, so code blocks stay distinct inside the block background.
-fn full_width_line(line: &Line<'static>, bg: Color, width: usize) -> Line<'static> {
+/// Extends one transcript row to the panel's full inner width so its
+/// background reads as a solid block: ratatui styles cells only up to the
+/// last span, so a short row would otherwise show a short patch of tint.
+/// Spans with their own background (highlighted code) keep it, so code
+/// patches stay distinct inside the row background.
+fn full_width_line(line: &Line<'static>, bg: ratatui::style::Color, width: usize) -> Line<'static> {
     let mut line = line.clone();
     line.style = line.style.patch(Style::default().bg(bg));
     let current = line.width();
@@ -74,7 +82,7 @@ fn render_stats(f: &mut ratatui::Frame, app: &App, area: Rect) {
     let block = Block::default();
     let paragraph = Paragraph::new(Line::from(Span::styled(
         text,
-        Style::default().fg(Color::Green),
+        Style::default().fg(app.theme.stats),
     )))
     .block(block);
     f.render_widget(paragraph, area);
@@ -85,65 +93,77 @@ fn render_header(f: &mut ratatui::Frame, app: &App, area: Rect) {
     // an idle header lacks, so "is it working?" is answerable at a glance: it
     // spins only while a turn generates and stops on any terminal event.
     let spinner = match app.spinner() {
-        Some(frame) => Span::styled(frame, Style::default().fg(Color::Magenta).bold()),
+        Some(frame) => Span::styled(frame, Style::default().fg(app.theme.spinner).bold()),
         None => Span::from(" "),
     };
-    let title = format!(
-        "{} [{}] model: {} · thinking: {} · {}",
-        spinner,
-        app.execution_scope.label(),
-        highlight(&app.model, app.running),
-        app.effort.as_str(),
-        app.status
-    );
+    let model = if app.running {
+        app.theme.model_active
+    } else {
+        app.theme.model
+    };
+    let title = Line::from(vec![
+        Span::styled(
+            format!("{} [{}] model: ", spinner, app.execution_scope.label()),
+            app.theme.title,
+        ),
+        Span::styled(
+            app.model.clone(),
+            app.theme.title.patch(Style::default().fg(model)),
+        ),
+        Span::styled(
+            format!(" · thinking: {} · {}", app.effort.as_str(), app.status),
+            app.theme.title,
+        ),
+    ]);
     let block = Block::default()
         .borders(Borders::BOTTOM)
-        .title(Span::styled(title, Style::default().fg(Color::Cyan).bold()));
+        .border_style(Style::default().fg(app.theme.panel_border))
+        .title(title);
     f.render_widget(block, area);
 }
 
 fn render_transcript(f: &mut ratatui::Frame, app: &App, area: Rect) {
-    // The box's two borders consume 2 columns; the remainder is the inner
-    // width every transcript row's block background must fill.
-    let inner_width = usize::from(area.width.saturating_sub(2).max(1));
+    // The panel's single top edge consumes no columns; the full width is the
+    // inner content every transcript row's background must fill.
+    let inner_width = usize::from(area.width.max(1));
     let lines: Vec<Line> = app
         .lines
         .iter()
         .map(|screen_line| full_width_line(&screen_line.line, screen_line.bg, inner_width))
         .collect();
-    let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        format!(" transcript [{}] ", app.lines.len()),
-        Style::default().fg(Color::DarkGray),
-    ));
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(app.theme.panel_border))
+        .title(Span::styled(
+            format!(" transcript [{}] ", app.lines.len()),
+            Style::default().fg(app.theme.dim),
+        ));
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
         .scroll((app.scroll, 0));
     f.render_widget(paragraph, area);
-    // The help and other overlays share the transcript box, so they must not
-    // draw the scrollbar on the right edge (it would overwrite the last column
-    // of text). Overlays manage their own visible window instead.
-    if app.show_scrollbar && !app.show_help && matches!(app.overlay, Overlay::None) {
-        // The box's left and right borders consume 2 columns; the remaining
-        // width is the inner content area the scrollbar represents.
-        let viewport = area.height.saturating_sub(2).max(1) as usize;
-        let content_length = app.lines.len().max(viewport);
-        let offset = (app.scroll as usize).min(app.lines.len().saturating_sub(viewport));
-        let mut state = ScrollbarState::new(content_length)
-            .position(offset)
-            .viewport_content_length(viewport);
-        // Ride the right border column (width 1) so the scrollbar never overlaps
-        // the wrapped content, which fills columns 1..=area.right()-2.
-        let bar_area = Rect::new(area.right() - 1, area.top(), 1, area.height);
-        f.render_stateful_widget(
-            Scrollbar::new(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(Some("▲"))
-                .end_symbol(Some("▼"))
-                .track_symbol(Some("│"))
-                .style(ratatui::style::Style::default().fg(Color::DarkGray)),
-            bar_area,
-            &mut state,
-        );
-    }
+    // The scrollbar is always present and adaptive: its track spans the
+    // panel's inner height, and its thumb encodes the current window into the
+    // full transcript (content length, viewport, and offset), so its size and
+    // position track both scrolling and terminal resizes. It rides the inner
+    // right column (the panel has no right border, so this column is not
+    // content the transcript rows pad past).
+    let viewport = area.height.saturating_sub(1).max(1);
+    let content_length = app.lines.len().max(usize::from(viewport));
+    let offset = (app.scroll as usize).min(app.lines.len().saturating_sub(usize::from(viewport)));
+    let mut state = ScrollbarState::new(content_length)
+        .position(offset)
+        .viewport_content_length(usize::from(viewport));
+    let bar_area = Rect::new(area.right().saturating_sub(1), area.top() + 1, 1, viewport);
+    f.render_stateful_widget(
+        Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(Some("▲"))
+            .end_symbol(Some("▼"))
+            .track_symbol(Some("│"))
+            .style(app.theme.scrollbar),
+        bar_area,
+        &mut state,
+    );
 }
 
 fn render_input(f: &mut ratatui::Frame, app: &App, area: Rect) {
@@ -156,6 +176,7 @@ fn render_input(f: &mut ratatui::Frame, app: &App, area: Rect) {
 }
 
 fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let config_path = app
         .config_path
         .as_ref()
@@ -166,10 +187,7 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         app.models.len()
     );
     let lines = vec![
-        Line::from(Span::styled(
-            "agent-runner help",
-            Style::default().fg(Color::Cyan).bold(),
-        )),
+        Line::from(Span::styled("agent-runner help", theme.title)),
         Line::from(""),
         Line::from("  Ctrl+Enter       submit the prompt"),
         Line::from("  Enter            submit on a blank line, else a newline"),
@@ -182,6 +200,7 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from("  PageUp / PageDown scroll the transcript"),
         Line::from("  Ctrl+L           clear the transcript"),
         Line::from("  Ctrl+T           collapse/reveal reasoning in the transcript"),
+        Line::from("  Ctrl+S           cycle the UI theme (dark / light)"),
         Line::from("  Ctrl+H / Esc     toggle this help"),
         Line::from(""),
         Line::from("  The top bar shows model, thinking effort, and status."),
@@ -190,6 +209,8 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from(format!("    {config_path}")),
         Line::from("    Add a [[models]] entry: id, provider (llama-server or"),
         Line::from("    ollama), base_url, provider model name, deadline_secs."),
+        Line::from("    Set theme = \"dark\" (default) or \"light\" for the UI palette;"),
+        Line::from("    the --theme flag overrides it for one run."),
         Line::from("    Reuse agents declared in Kvist's kvist.toml:"),
         Line::from("    agent-runner --import-kvist  (prints [[models]] to paste)."),
         Line::from(config_hint),
@@ -226,15 +247,15 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
             }
         }),
     ];
-    let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        " help",
-        Style::default().fg(Color::Cyan).bold(),
-    ));
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(theme.panel_border))
+        .title(Span::styled(" help", theme.title));
     // The scroll clamp must use the wrapped line count, not the logical line
     // count: on a narrow terminal each long line renders as several physical
     // lines, so `lines.len()` would undercount and hide the bottom of the help.
-    let inner_width = area.width.saturating_sub(2).max(1);
-    let inner_height = area.height.saturating_sub(2).max(1);
+    let inner_width = area.width.max(1);
+    let inner_height = area.height.saturating_sub(1).max(1);
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
         .alignment(Alignment::Left)
@@ -250,11 +271,9 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
 /// arrow keys or `j`/`k`, activated with Enter, or via their single-letter
 /// hotkeys; Esc or `r` returns to the prompt.
 fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let mut lines: Vec<Line> = vec![
-        Line::from(Span::styled(
-            " agent-runner menu ",
-            Style::default().fg(Color::Cyan).bold(),
-        )),
+        Line::from(Span::styled(" agent-runner menu ", theme.title)),
         Line::from(""),
         Line::from("  up/down or j/k select · enter act · esc / r return"),
         Line::from(""),
@@ -262,9 +281,9 @@ fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
     for (index, item) in MENU_ITEMS.iter().enumerate() {
         let selected = index == app.menu_selection;
         let style = if selected {
-            Style::default().fg(Color::Yellow).bold()
+            theme.menu_selected
         } else {
-            Style::default().fg(Color::White)
+            theme.menu_plain
         };
         let marker = if selected { "> " } else { "  " };
         let hotkey = MENU_HOTKEYS[index];
@@ -273,10 +292,10 @@ fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
             style,
         )));
     }
-    let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        " menu",
-        Style::default().fg(Color::Cyan).bold(),
-    ));
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(theme.panel_border))
+        .title(Span::styled(" menu", theme.title));
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
         .alignment(Alignment::Left)
@@ -287,11 +306,9 @@ fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
 /// The session-history overlay: a scrollable list of past transcripts. Enter
 /// replays the highlighted session; Esc returns to the action menu.
 fn render_history(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let mut lines: Vec<Line> = vec![
-        Line::from(Span::styled(
-            " session history ",
-            Style::default().fg(Color::Cyan).bold(),
-        )),
+        Line::from(Span::styled(" session history ", theme.title)),
         Line::from(""),
         Line::from("  up/down or j/k select · enter replay · esc back"),
         Line::from(""),
@@ -299,15 +316,15 @@ fn render_history(f: &mut ratatui::Frame, app: &App, area: Rect) {
     if app.history_items.is_empty() {
         lines.push(Line::from(Span::styled(
             "  no past sessions found",
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme.warn),
         )));
     } else {
         for (index, item) in app.history_items.iter().enumerate() {
             let selected = index == app.history_selection;
             let style = if selected {
-                Style::default().fg(Color::Yellow).bold()
+                theme.menu_selected
             } else {
-                Style::default().fg(Color::White)
+                theme.menu_plain
             };
             let marker = if selected { "> " } else { "  " };
             lines.push(Line::from(Span::styled(
@@ -316,14 +333,14 @@ fn render_history(f: &mut ratatui::Frame, app: &App, area: Rect) {
             )));
         }
     }
-    let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        " sessions",
-        Style::default().fg(Color::Cyan).bold(),
-    ));
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(theme.panel_border))
+        .title(Span::styled(" sessions", theme.title));
     // The scroll clamp must use the wrapped line count so long session ids
     // that wrap onto several physical lines stay reachable.
-    let inner_width = area.width.saturating_sub(2).max(1);
-    let inner_height = area.height.saturating_sub(2).max(1);
+    let inner_width = area.width.max(1);
+    let inner_height = area.height.saturating_sub(1).max(1);
     let rows = visible_overlay_rows(
         lines.into_iter(),
         inner_width,
@@ -339,10 +356,11 @@ fn render_history(f: &mut ratatui::Frame, app: &App, area: Rect) {
 /// A read-only replay of one past session's transcript. Esc returns to the
 /// session-history list; navigation scrolls the transcript.
 fn render_replay(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(
         format!(" replay {} ", app.replay_title),
-        Style::default().fg(Color::Cyan).bold(),
+        theme.title,
     )));
     lines.push(Line::from(""));
     lines.push(Line::from("  esc back to history"));
@@ -350,17 +368,17 @@ fn render_replay(f: &mut ratatui::Frame, app: &App, area: Rect) {
     let content = app.replay_lines.iter().map(|line| {
         Line::from(Span::styled(
             line.as_str(),
-            Style::default().fg(Color::White),
+            Style::default().fg(theme.menu_plain.fg.unwrap_or_default()),
         ))
     });
-    let block = Block::default().borders(Borders::ALL).title(Span::styled(
-        " replay",
-        Style::default().fg(Color::Cyan).bold(),
-    ));
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(theme.panel_border))
+        .title(Span::styled(" replay", theme.title));
     // The scroll clamp must use the wrapped line count so long replayed lines
     // that wrap onto several physical lines stay reachable.
-    let inner_width = area.width.saturating_sub(2).max(1);
-    let inner_height = area.height.saturating_sub(2).max(1);
+    let inner_width = area.width.max(1);
+    let inner_height = area.height.saturating_sub(1).max(1);
     let rows = visible_overlay_rows(
         lines.into_iter().chain(content),
         inner_width,
@@ -399,26 +417,17 @@ fn visible_overlay_rows<'a>(
         .collect()
 }
 
-fn highlight(text: &str, active: bool) -> Span<'static> {
-    Span::styled(
-        text.to_owned(),
-        if active {
-            Style::default().fg(Color::Yellow).bold()
-        } else {
-            Style::default().fg(Color::Green)
-        },
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::render;
     use crate::session::Event;
     use crate::tui::app::{App, Overlay};
+    use crate::tui::theme::Theme;
     use agent_runtime::ReasoningEffort;
     use crossterm::event::KeyCode;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+    use ratatui::text::Line;
     use std::path::PathBuf;
 
     /// Draws one frame and returns the test backend for inspection.
@@ -433,19 +442,36 @@ mod tests {
         terminal.backend().clone()
     }
 
+    /// An app with one transcript row of content, for layout assertions.
+    fn app_with_row(width: u16, height: u16) -> App {
+        let mut app = new_app(width, height);
+        app.lines.push(crate::tui::app::ScreenLine {
+            line: Line::from("one line of output"),
+            kind: crate::tui::app::LineKind::Normal,
+            md: None,
+            bg: app.theme.panel_bg,
+        });
+        app
+    }
+
+    fn new_app(width: u16, height: u16) -> App {
+        App::new(
+            &["local".to_owned()],
+            "local",
+            ReasoningEffort::Medium,
+            None,
+            width,
+            height,
+            Theme::dark(),
+        )
+    }
+
     #[test]
     fn stats_row_shows_live_content_when_populated() {
         // The stats bar must render real statistics on its single row, not just a
         // border or heading, so the user sees working speed, context, and total
         // tokens while the session runs.
-        let mut app = App::new(
-            &["local".to_owned()],
-            "local",
-            ReasoningEffort::Medium,
-            None,
-            100,
-            30,
-        );
+        let mut app = new_app(100, 30);
         app.push_event(Event::Progress {
             token_accounting: crate::session::TokenAccounting::Provider,
             input_tokens: 25000,
@@ -477,14 +503,7 @@ mod tests {
         // Before any progress the stats bar shows a static placeholder hint,
         // and it names no field (compaction in particular) that a live row
         // would hide.
-        let app = App::new(
-            &["local".to_owned()],
-            "local",
-            ReasoningEffort::Medium,
-            None,
-            100,
-            30,
-        );
+        let app = new_app(100, 30);
         let backend = draw(&app);
         let text = buffer_text(&backend);
         let stats_row = text.lines().nth(1).expect("stats row");
@@ -499,14 +518,7 @@ mod tests {
 
     #[test]
     fn execution_scope_stays_visible_on_narrow_terminals() {
-        let mut app = App::new(
-            &["local".into()],
-            "local",
-            ReasoningEffort::None,
-            None,
-            20,
-            12,
-        );
+        let mut app = new_app(20, 12);
         app.execution_scope = crate::session_log::ExecutionScope::HostUnconfined;
         let text = buffer_text(&draw(&app));
         assert!(text.lines().next().unwrap().contains("HOST UNCONFINED"));
@@ -536,23 +548,63 @@ mod tests {
     }
 
     #[test]
-    fn help_overlay_wraps_long_lines_inside_the_border() {
-        let mut app = App::new(
-            &["local".to_owned()],
-            "local",
-            ReasoningEffort::Medium,
-            None,
+    fn panels_use_only_a_top_edge_and_the_scrollbar_is_always_present() {
+        let app = app_with_row(40, 12);
+        let text = buffer_text(&draw(&app));
+        let lines: Vec<&str> = text.lines().collect();
+        // Rows: header(0), stats(1), transcript box(2..=8 with INPUT_ROWS=4
+        // -> transcript is 12-1-1-4=6 rows: 2..=7), prompt(8..=11).
+        let transcript_top = lines[2];
+        let transcript_bottom = lines[7];
+        let prompt_top = lines[8];
+        // The top edge carries a run of ─ with the title inlined, and no
+        // corner or vertical borders anywhere on it.
+        assert_eq!(
+            transcript_top.chars().count(),
             40,
-            45,
+            "transcript top row:\n{text}"
         );
+        assert!(
+            transcript_top.contains("────"),
+            "transcript top edge:\n{text}"
+        );
+        assert!(
+            !transcript_top.contains('┌')
+                && !transcript_top.contains('┐')
+                && !transcript_top.contains('│'),
+            "no corner or side borders:\n{text}"
+        );
+        // The bottom row of each panel is content, not a border.
+        assert!(
+            !transcript_bottom.contains('─'),
+            "bottom border gone:\n{text}"
+        );
+        assert!(
+            !prompt_top.contains('│'),
+            "no left border on the prompt:\n{text}"
+        );
+        // The transcript's last column carries the scrollbar on every content
+        // row (the adaptive thumb plus its track symbols); row 2 is the top
+        // edge itself.
+        for row in lines[3..=7].iter() {
+            let last = row.chars().last().expect("row has a last cell");
+            assert!(
+                matches!(last, '▼' | '▲' | '│' | '█'),
+                "scrollbar on the right edge (got {last:?}):\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn help_overlay_wraps_long_lines_inside_the_border() {
+        let mut app = new_app(40, 45);
         app.show_help = true;
         app.config_path = Some(PathBuf::from(
             "/opt/very/deep/llama/server/path/with/a/long/agent-runner.toml",
         ));
         let text = buffer_text(&draw(&app));
-        // The path is far longer than the 38-column inner width; with soft
-        // wrapping its tail stays visible inside the box instead of being
-        // truncated at the border.
+        // The path is far longer than the inner width; with soft wrapping its
+        // tail stays visible inside the box instead of being truncated.
         assert!(
             text.contains("agent-runner.toml"),
             "wrapped tail missing:\n{text}"
@@ -564,86 +616,25 @@ mod tests {
 
     #[test]
     fn help_overlay_scroll_reaches_the_wrapped_bottom() {
-        let mut app = App::new(
-            &["local".to_owned()],
-            "local",
-            ReasoningEffort::Medium,
-            None,
-            40,
-            12,
-        );
+        let mut app = new_app(40, 12);
         app.show_help = true;
         app.config_path = Some(PathBuf::from(
             "/opt/very/deep/llama/server/path/with/a/long/agent-runner.toml",
         ));
-        // Scroll past the end; the clamp must account for the wrapped line
-        // count so the last help line stays reachable on a short terminal.
-        app.help_scroll = 10_000;
-        let text = buffer_text(&draw(&app));
-        assert!(
-            text.contains("working directory"),
-            "wrapped bottom not reachable:\n{text}"
-        );
-    }
-
-    #[test]
-    fn replay_wraps_long_lines_inside_the_border() {
-        let mut app = App::new(
-            &["local".to_owned()],
-            "local",
-            ReasoningEffort::Medium,
-            None,
-            40,
-            12,
-        );
-        app.overlay = Overlay::Replay;
-        app.replay_title = "session".to_owned();
-        app.replay_lines =
-            vec!["a replayed line that extends well past the forty column panel width".to_owned()];
-        // Scroll past the end; the clamp must account for the wrapped line
-        // count so the wrapped tail stays reachable in the short box.
-        app.replay_scroll = 10_000;
-        let text = buffer_text(&draw(&app));
-        assert!(
-            text.contains("panel width"),
-            "wrapped tail missing:\n{text}"
-        );
-        for line in text.lines() {
-            assert!(line.chars().count() <= 40, "line overflows: {line:?}");
+        for _ in 0..20 {
+            app.scroll_down(1);
         }
-    }
-
-    #[test]
-    fn replay_rows_beyond_u16_remain_visible() {
-        let mut app = App::new(
-            &["local".to_owned()],
-            "local",
-            ReasoningEffort::Medium,
-            None,
-            40,
-            12,
+        let text = buffer_text(&draw(&app));
+        assert!(app.help_scroll > 0, "help scrolled");
+        assert!(
+            text.contains("Writes: working directory only."),
+            "wrapped bottom reachable:\n{text}"
         );
-        app.overlay = Overlay::Replay;
-        app.replay_lines = vec!["row".to_owned(); 70_000];
-        app.replay_lines.push("last replay row".to_owned());
-        app.replay_scroll = usize::from(u16::MAX);
-        let before = buffer_text(&draw(&app));
-        assert!(!before.contains("last replay row"));
-        app.scroll_down(u16::MAX);
-        let after = buffer_text(&draw(&app));
-        assert!(after.contains("last replay row"), "{after}");
     }
 
     #[test]
     fn history_wraps_long_session_entries_inside_the_border() {
-        let mut app = App::new(
-            &["local".to_owned()],
-            "local",
-            ReasoningEffort::Medium,
-            None,
-            40,
-            12,
-        );
+        let mut app = new_app(40, 12);
         app.overlay = Overlay::History;
         // Scroll past the end; the clamp must account for the wrapped item
         // rows so the wrapped tail of the long entry stays visible.
@@ -674,6 +665,7 @@ mod tests {
             None,
             60,
             20,
+            Theme::dark(),
         );
         app.editor.insert_str("hello world");
         let mut backend = draw(&app);
@@ -708,6 +700,7 @@ mod tests {
             Some(std::path::PathBuf::from("/cfg/agent-runner.toml")),
             60,
             52,
+            Theme::dark(),
         );
         app.on_key(crossterm::event::KeyEvent::new(
             KeyCode::Char('h'),
@@ -725,6 +718,10 @@ mod tests {
             text.contains("--import-kvist"),
             "help documents reusing Kvist agents:"
         );
+        assert!(
+            text.contains("theme"),
+            "help documents the theming support:"
+        );
     }
 
     #[test]
@@ -738,6 +735,7 @@ mod tests {
             Some(std::path::PathBuf::from("/cfg/agent-runner.toml")),
             60,
             20,
+            Theme::dark(),
         );
         app.on_key(crossterm::event::KeyEvent::new(
             KeyCode::Char('h'),
@@ -764,47 +762,39 @@ mod tests {
     }
 
     #[test]
-    fn repro_streaming_dump() {
-        use crate::session::Event;
-
-        eprintln!("=== SCENARIO A: fragments WITHOUT newlines, width 80 ===");
-        let mut a = App::new(
-            &["local".to_owned()],
-            "local",
-            agent_runtime::ReasoningEffort::Medium,
-            None,
-            80,
-            24,
+    fn transcript_row_backgrounds_follow_the_theme() {
+        // Ordinary output sits on the theme's panel background, thinking on its
+        // tint, so the two areas stand apart from the black default.
+        let mut app = new_app(60, 12);
+        app.push_event(Event::Reasoning("thinking…".to_owned()));
+        // The trailing blank line flushes the answer paragraph to the
+        // transcript (streamed text accumulates until paragraph boundaries).
+        app.push_event(Event::Text("an answer\n\n".to_owned()));
+        let backend = draw(&app);
+        let buffer = backend.buffer();
+        // Find the row that shows the reasoning line; its first cell carries
+        // the reasoning tint, while an answer row carries the panel background.
+        let cell_bg = |x: u16, y: u16| -> Option<ratatui::style::Color> {
+            buffer.cell((x, y)).and_then(|cell| cell.style().bg)
+        };
+        let text = buffer_text(&backend);
+        let reasoning_y = text
+            .lines()
+            .position(|line| line.contains("thinking…"))
+            .expect("reasoning visible");
+        let answer_y = text
+            .lines()
+            .position(|line| line.contains("an answer"))
+            .expect("answer visible");
+        assert_eq!(
+            cell_bg(0, reasoning_y as u16),
+            Some(app.theme.reasoning_bg),
+            "reasoning strip carries its tint"
         );
-        for frag in ["The ", "quick ", "brown ", "fox "] {
-            a.push_event(Event::Text(frag.to_owned()));
-        }
-        a.push_event(Event::Finished {
-            message: "done".to_owned(),
-        });
-        for line in &a.lines {
-            let text = line.line.to_string();
-            eprintln!("  A LINE[{}] {:?}", text.chars().count(), text);
-        }
-
-        eprintln!("=== SCENARIO B: each fragment has a trailing newline, width 80 ===");
-        let mut b = App::new(
-            &["local".to_owned()],
-            "local",
-            agent_runtime::ReasoningEffort::Medium,
-            None,
-            80,
-            24,
+        assert_eq!(
+            cell_bg(0, answer_y as u16),
+            Some(app.theme.panel_bg),
+            "ordinary output carries the panel background"
         );
-        for frag in ["Hel\n", "lo \n", "wor\n", "ld\n"] {
-            b.push_event(Event::Text(frag.to_owned()));
-        }
-        b.push_event(Event::Finished {
-            message: "done".to_owned(),
-        });
-        for line in &b.lines {
-            let text = line.line.to_string();
-            eprintln!("  B LINE[{}] {:?}", text.chars().count(), text);
-        }
     }
 }

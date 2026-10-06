@@ -13,15 +13,18 @@ use tui_textarea::TextArea;
 
 use crate::error::Result;
 use crate::history::{self, SessionEntry};
-use crate::markdown::{render_document, split_cell_chunks};
+use crate::markdown::{render_document_styles, split_cell_chunks};
 use crate::session::Event;
+
+use super::theme::Theme;
 
 /// Classifies a transcript line so it can be collapsed for a cleaner overview.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineKind {
     /// Ordinary content (answer text, tool results, notes).
     Normal,
-    /// A fragment of model reasoning / thinking, rendered dim.
+    /// A fragment of model reasoning / thinking, rendered with a left edge and
+    /// a distinct background so it stands apart from the answer.
     Reasoning,
     /// A collapsed placeholder standing in for hidden thinking.
     Placeholder,
@@ -40,8 +43,11 @@ pub struct ScreenLine {
     pub line: Line<'static>,
     pub kind: LineKind,
     pub md: Option<MarkdownRow>,
-    /// The block background the render layer extends across the transcript's
-    /// full inner width, so each large block reads as an encapsulated box.
+    /// The row's own background, extended across the transcript's full inner
+    /// width by the render layer. Ordinary rows use the panel background, so
+    /// the standard black (or white, in the light theme) output stays uniform;
+    /// thinking rows use the reasoning tint; highlighted code rows use the
+    /// code patch — the two cues that keep those areas distinct.
     pub bg: Color,
 }
 
@@ -61,22 +67,34 @@ impl ScreenLine {
             bg,
         }
     }
+
+    /// A reasoning row: a left-edge glyph plus the text, all carrying the
+    /// muted reasoning foreground on the reasoning tint, so the whole strip
+    /// reads as one distinct block. The tint is patched onto every span as
+    /// well as the line style: ratatui only paints a line's style onto cells a
+    /// span does not cover.
+    fn reasoning(edge: &str, text: impl Into<String>, theme: &Theme) -> Self {
+        let style = theme
+            .reasoning
+            .patch(Style::default().bg(theme.reasoning_bg));
+        let mut line = Line::from(vec![
+            Span::styled(edge.to_owned(), style),
+            Span::styled(text.into(), style),
+        ]);
+        line.style = Style::default().bg(theme.reasoning_bg);
+        ScreenLine {
+            line,
+            kind: LineKind::Reasoning,
+            md: None,
+            bg: theme.reasoning_bg,
+        }
+    }
 }
 
-/// Subtle, low-intensity transcript backgrounds. Large text blocks read as
-/// encapsulated boxes that fill the transcript's full inner width (the box's
-/// own borders excluded); the tints are deliberately quiet — close to a dark
-/// terminal background — so they frame text without competing with it. Every
-/// foreground used on these backgrounds keeps a comfortable contrast ratio.
-///
-/// The user's prompt is the lightest tint; model reasoning a muted warm gray;
-/// everything the agent produces — answers, tool calls and their results, and
-/// operational notices — shares one cool blue-gray, so a tool call and its
-/// result group with the surrounding answer text. Success and failure are read
-/// from the text colour, never from the background.
-pub const PROMPT_BG: Color = Color::Rgb(44, 50, 70);
-pub const REASONING_BG: Color = Color::Rgb(38, 36, 44);
-pub const AGENT_BG: Color = Color::Rgb(30, 34, 46);
+/// The left-edge glyphs for reasoning rows: a block on the first row of a
+/// run, a vertical bar on continuations — a quiet bar down the thinking strip.
+const REASONING_EDGE_FIRST: &str = "\u{258c} ";
+const REASONING_EDGE_CONT: &str = "\u{2502} ";
 
 /// Maximum number of transcript lines retained before dropping the oldest.
 const MAX_LINES: usize = 5000;
@@ -238,10 +256,10 @@ pub struct App {
     pub collapse_reasoning: bool,
     /// Reasoning lines removed by a collapse, restored on reveal, in order.
     hidden_reasoning: Vec<Vec<ScreenLine>>,
-    /// Whether the transcript shows a right-edge scrollbar. Toggled with
-    /// Ctrl+S. The scrollbar is purely on-screen: it never affects the transcript
-    /// content or what copy emits.
-    pub show_scrollbar: bool,
+    /// The active UI theme. Configuration and the `--theme` flag set it at
+    /// startup; Ctrl+S cycles it live. Every colour the render layer (and each
+    /// transcript row) reads comes from here, so one switch restyles the UI.
+    pub theme: Theme,
     /// The OSC 52 escape that copies the cleaned transcript to the terminal, if
     /// a copy is pending but the event loop has not emitted it yet. Kept here so
     /// a double copy cannot resend a stale sequence.
@@ -261,6 +279,7 @@ impl App {
         config_path: Option<PathBuf>,
         width: u16,
         height: u16,
+        theme: Theme,
     ) -> Self {
         let width = width.max(1);
         let mut editor = TextArea::new(vec![String::new()]);
@@ -268,14 +287,7 @@ impl App {
         // The cursor line is underlined by default; disable it because the
         // underline looks odd and is unnecessary in a short prompt box.
         editor.set_cursor_line_style(Style::default());
-        editor.set_block(
-            ratatui::widgets::Block::default()
-                .borders(ratatui::widgets::Borders::ALL)
-                .title(Span::styled(
-                    " prompt · Enter/Ctrl+Enter send · Shift+Enter · Tab model · Shift+Tab effort · Ctrl+Insert copy · Ctrl+S scroll · Ctrl-Q quit · Esc menu · Ctrl+H help ",
-                    Style::default().fg(Color::DarkGray),
-                )),
-        );
+        editor.set_block(prompt_block(&theme));
         let mut app = App {
             lines: Vec::new(),
             scroll: 0,
@@ -312,16 +324,30 @@ impl App {
             last_growth: None,
             collapse_reasoning: false,
             hidden_reasoning: Vec::new(),
-            show_scrollbar: false,
+            theme,
             pending_osc_52: None,
             last_copied_escape: None,
         };
         app.note(
-            Style::default().fg(Color::Cyan),
+            app.theme.accent,
             "agent-runner ready. Type a prompt and press Ctrl+Enter. Ctrl-Q quits; Esc opens the menu; Ctrl+H helps.",
-            AGENT_BG,
         );
         app
+    }
+
+    /// Switches the UI theme (Ctrl+S) and restyles the surfaces the theme owns:
+    /// the prompt block and every transcript row. Content is unchanged — the
+    /// same lines are simply recoloured, rewrapped reasoning keeps its edge,
+    /// and highlighted code keeps its indentation and patch.
+    pub fn cycle_theme(&mut self) {
+        let theme = self.theme.next();
+        self.editor.set_block(prompt_block(&theme));
+        for line in &mut self.lines {
+            let mut restyled = line.clone();
+            restyle_row(&mut restyled, &theme);
+            *line = restyled;
+        }
+        self.theme = theme;
     }
 
     /// Stages a prefilled, auto-started prompt for a caller (for example
@@ -337,30 +363,21 @@ impl App {
         }
         if text.chars().count() > MAX_PROMPT_CHARS {
             self.note(
-                Style::default()
-                    .fg(Color::White)
-                    .bold()
-                    .patch(Style::default().bg(PROMPT_BG)),
+                self.theme.prompt.fg.unwrap_or_default(),
                 &format!("You: {text} (too long; shown but not started)"),
-                PROMPT_BG,
             );
             self.note(
-                Style::default().fg(Color::Yellow),
+                self.theme.warn,
                 &format!(
                     "prompt is longer than {MAX_PROMPT_CHARS} characters; shorten it before sending"
                 ),
-                AGENT_BG,
             );
             return;
         }
         self.editor.set_lines(vec![text.clone()], (0, 0));
         self.note(
-            Style::default()
-                .fg(Color::White)
-                .bold()
-                .patch(Style::default().bg(PROMPT_BG)),
+            self.theme.prompt.fg.unwrap_or_default(),
             &format!("You: {text} (auto-started)"),
-            PROMPT_BG,
         );
         self.pending_prompt = Some(text);
         self.status = "queued".to_owned();
@@ -373,9 +390,8 @@ impl App {
                 if attempt > 1 {
                     self.flush_pending();
                     self.note(
-                        Style::default().fg(Color::Yellow),
+                        self.theme.warn,
                         &format!("attempt {attempt}: prior streamed text was provisional"),
-                        AGENT_BG,
                     );
                 }
             }
@@ -384,11 +400,7 @@ impl App {
                 self.running = true;
                 self.running_since = Some(Instant::now());
                 self.status = "thinking".to_owned();
-                self.note(
-                    Style::default().fg(Color::Magenta),
-                    &format!("▍ {model} is working…"),
-                    AGENT_BG,
-                );
+                self.note(self.theme.spinner, &format!("▍ {model} is working…"));
             }
             Event::Reasoning(text) => self.stream_reasoning(&text),
             // Streamed answer text arrives fragment-by-fragment. A model often
@@ -407,11 +419,7 @@ impl App {
             }
             Event::ToolCall { description, .. } => {
                 self.flush_pending();
-                self.note(
-                    Style::default().fg(Color::Blue),
-                    &format!("→ tool: {description}"),
-                    AGENT_BG,
-                );
+                self.note(self.theme.info, &format!("→ tool: {description}"));
             }
             Event::ToolResult {
                 description,
@@ -420,21 +428,17 @@ impl App {
             } => {
                 self.flush_pending();
                 let style = if failed {
-                    Style::default().fg(Color::Red)
+                    self.theme.err
                 } else {
-                    Style::default().fg(Color::Green)
+                    self.theme.ok
                 };
-                self.note(style, &format!("✓ tool {description} finished"), AGENT_BG);
+                self.note(style, &format!("✓ tool {description} finished"));
             }
             Event::Finished { message } => {
                 self.flush_pending();
                 self.quit_running();
                 self.status = "done".to_owned();
-                self.note(
-                    Style::default().fg(Color::Green),
-                    &format!("✓ {message}"),
-                    AGENT_BG,
-                );
+                self.note(self.theme.ok, &format!("✓ {message}"));
             }
             // The prompt loop exited with no answer. Without this the UI would
             // keep showing "working…" forever once the single-turn cap (or the
@@ -447,24 +451,18 @@ impl App {
                 self.quit_running();
                 if cancelled {
                     self.status = "cancelled".to_owned();
-                    self.note(
-                        Style::default().fg(Color::Yellow),
-                        "cancelled — type a prompt to continue",
-                        AGENT_BG,
-                    );
+                    self.note(self.theme.warn, "cancelled — type a prompt to continue");
                 } else if exhausted {
                     self.status = "exhausted".to_owned();
                     self.note(
-                        Style::default().fg(Color::Yellow),
+                        self.theme.warn,
                         "prompt limit reached with no answer — send a follow-up to continue",
-                        AGENT_BG,
                     );
                 } else {
                     self.status = "awaiting".to_owned();
                     self.note(
-                        Style::default().fg(Color::Yellow),
+                        self.theme.warn,
                         "no answer this turn — send a follow-up to continue",
-                        AGENT_BG,
                     );
                 }
             }
@@ -472,11 +470,11 @@ impl App {
                 self.flush_pending();
                 self.quit_running();
                 self.status = "error".to_owned();
-                self.note(Style::default().fg(Color::Red), &text, AGENT_BG);
+                self.note(self.theme.err, &text);
             }
             Event::Note(text) => {
                 self.flush_pending();
-                self.note(Style::default().fg(Color::DarkGray), &text, AGENT_BG);
+                self.note(self.theme.dim, &text);
             }
             Event::Progress {
                 token_accounting,
@@ -556,23 +554,37 @@ impl App {
         }
     }
 
-    /// Pushes wrapped reasoning lines, dimmed and tagged so they can be
-    /// collapsed later, then keeps the transcript bounded and followed.
+    /// Pushes wrapped reasoning lines, tagged so they can be collapsed later,
+    /// then keeps the transcript bounded and followed. The first row of a
+    /// run carries the thinking edge (▌), continuations the bar (│), and every
+    /// row the reasoning tint — the cues that keep thinking distinct from the
+    /// black output without a full box.
     fn push_reasoning_lines(&mut self, text: &str) {
-        let style = Style::default()
-            .fg(Color::Gray)
-            .add_modifier(ratatui::style::Modifier::DIM)
-            .patch(Style::default().bg(REASONING_BG));
-        for line in wrap(text, self.content_width()) {
-            self.lines.push(ScreenLine::plain(
-                line,
-                style,
-                LineKind::Reasoning,
-                REASONING_BG,
-            ));
-        }
+        self.lines
+            .extend(self.reasoning_rows(text, self.content_width()));
         self.maybe_truncate();
         self.follow();
+    }
+
+    /// Builds the reasoning rows for `text` at `width`: the first row of the
+    /// run carries the thinking edge (▌), continuations the bar (│), and every
+    /// row is wrapped to the width *minus* the edge so the strip never overruns
+    /// the panel. The tint and muted foreground come from the current theme.
+    fn reasoning_rows(&self, text: &str, width: usize) -> Vec<ScreenLine> {
+        let edge_width = Span::raw(REASONING_EDGE_FIRST).width();
+        let text_width = width.saturating_sub(edge_width).max(1);
+        wrap(text, text_width)
+            .into_iter()
+            .enumerate()
+            .map(|(index, line)| {
+                let edge = if index == 0 {
+                    REASONING_EDGE_FIRST
+                } else {
+                    REASONING_EDGE_CONT
+                };
+                ScreenLine::reasoning(edge, line, &self.theme)
+            })
+            .collect()
     }
 
     /// Collapses or reveals reasoning lines in the transcript for a cleaner
@@ -591,14 +603,14 @@ impl App {
                 } else {
                     if !current_run.is_empty() {
                         self.hidden_reasoning.push(std::mem::take(&mut current_run));
-                        next.extend(collapse_placeholder_rows(self.content_width()));
+                        next.extend(collapse_placeholder_rows(self.content_width(), &self.theme));
                     }
                     next.push(line);
                 }
             }
             if !current_run.is_empty() {
                 self.hidden_reasoning.push(std::mem::take(&mut current_run));
-                next.extend(collapse_placeholder_rows(self.content_width()));
+                next.extend(collapse_placeholder_rows(self.content_width(), &self.theme));
             }
             self.lines = next;
         } else {
@@ -608,17 +620,15 @@ impl App {
                 if line.kind == LineKind::Placeholder {
                     if let Some(run) = hidden.next() {
                         for row in run {
-                            let style = row
-                                .line
-                                .spans
-                                .first()
-                                .map(|span| span.style)
-                                .unwrap_or_default();
-                            next.extend(
-                                wrap(&row.line.to_string(), self.content_width())
-                                    .into_iter()
-                                    .map(|text| ScreenLine::plain(text, style, row.kind, row.bg)),
-                            );
+                            // Restore the hidden thinking as fresh reasoning
+                            // rows so the edge and tint follow the current
+                            // theme even if it changed while collapsed.
+                            let text = row.line.to_string();
+                            let text = text
+                                .strip_prefix(REASONING_EDGE_FIRST)
+                                .or_else(|| text.strip_prefix(REASONING_EDGE_CONT))
+                                .unwrap_or(&text);
+                            next.extend(self.reasoning_rows(text, self.content_width()));
                         }
                     }
                 } else if line.kind != LineKind::PlaceholderContinuation {
@@ -817,7 +827,7 @@ impl App {
                 KeyAction::Idle
             }
             (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
-                self.show_scrollbar = !self.show_scrollbar;
+                self.cycle_theme();
                 KeyAction::Idle
             }
             (KeyCode::PageUp, _) => {
@@ -945,23 +955,18 @@ impl App {
         }
         if text.chars().count() > MAX_PROMPT_CHARS {
             self.note(
-                Style::default().fg(Color::Yellow),
+                self.theme.warn,
                 &format!(
                     "prompt is longer than {MAX_PROMPT_CHARS} characters; shorten it before sending"
                 ),
-                AGENT_BG,
             );
             return;
         }
         self.history.push(text.clone());
         self.history_index = None;
         self.note(
-            Style::default()
-                .fg(Color::White)
-                .bold()
-                .patch(Style::default().bg(PROMPT_BG)),
+            self.theme.prompt.fg.unwrap_or_default(),
             &format!("You: {text}"),
-            PROMPT_BG,
         );
         self.editor.clear();
         if self.running {
@@ -1015,12 +1020,11 @@ impl App {
         };
         self.model = self.models[next].clone();
         self.note(
-            Style::default().fg(Color::DarkGray),
+            self.theme.dim,
             &format!(
                 "model → {} (applies to the next prompt; the session restarts)",
                 self.model
             ),
-            AGENT_BG,
         );
     }
 
@@ -1041,12 +1045,11 @@ impl App {
         };
         self.effort = EFFORTS[next];
         self.note(
-            Style::default().fg(Color::DarkGray),
+            self.theme.dim,
             &format!(
                 "thinking effort → {} (applies to the next prompt; the session restarts)",
                 self.effort.as_str()
             ),
-            AGENT_BG,
         );
     }
 
@@ -1083,8 +1086,20 @@ impl App {
         if md.trim().is_empty() {
             return;
         }
-        let rows = render_document(&md, self.content_width());
+        let rows = render_document_styles(&md, self.content_width(), &self.theme.markdown);
         for (index, row) in rows.into_iter().enumerate() {
+            // Highlighted code keeps its indentation and gets the theme's code
+            // patch; everything else sits on the plain panel background so the
+            // black output stays uniform.
+            let bg = if row.is_code {
+                self.theme
+                    .markdown
+                    .code_bg
+                    .bg
+                    .unwrap_or(self.theme.panel_bg)
+            } else {
+                self.theme.panel_bg
+            };
             self.lines.push(ScreenLine {
                 line: row.line,
                 kind: LineKind::Normal,
@@ -1093,7 +1108,7 @@ impl App {
                 } else {
                     MarkdownRow::Continuation
                 }),
-                bg: AGENT_BG,
+                bg,
             });
         }
         self.maybe_truncate();
@@ -1143,8 +1158,8 @@ impl App {
         self.scroll = 0;
     }
 
-    fn note(&mut self, style: Style, text: &str, bg: Color) {
-        self.push_wrapped(style, text, bg);
+    fn note(&mut self, color: Color, text: &str) {
+        self.push_wrapped(color, text);
     }
 
     /// Leaves the "working" state: clears the running flag and its spinner
@@ -1166,10 +1181,15 @@ impl App {
         Some(SPINNER_FRAMES[index])
     }
 
-    fn push_wrapped(&mut self, style: Style, text: &str, bg: Color) {
+    fn push_wrapped(&mut self, color: Color, text: &str) {
+        let style = Style::default().fg(color);
         for line in wrap(text, self.content_width()) {
-            self.lines
-                .push(ScreenLine::plain(line, style, LineKind::Normal, bg));
+            self.lines.push(ScreenLine::plain(
+                line,
+                style,
+                LineKind::Normal,
+                self.theme.panel_bg,
+            ));
         }
         self.maybe_truncate();
         self.follow();
@@ -1233,9 +1253,9 @@ impl App {
 
     /// The number of help rows visible inside the transcript box, used as the
     /// per-page help scroll step (full height minus the header, stats, input,
-    /// and the box's two borders).
+    /// and the box's top edge).
     fn help_visible_rows(&self) -> u16 {
-        self.height.saturating_sub(8).max(1)
+        self.height.saturating_sub(7).max(1)
     }
 
     fn scroll_back(&mut self, amount: u16) {
@@ -1246,17 +1266,18 @@ impl App {
         self.scroll += amount;
     }
 
-    /// The transcript's inner character width, subtracting the box's left and
-    /// right borders so pre-wrapped lines never extend past the visible area.
+    /// The transcript's inner character width, subtracting the box's top edge
+    /// (the single remaining border) so pre-wrapped lines never extend past the
+    /// visible area.
     fn content_width(&self) -> usize {
-        self.width.saturating_sub(2).max(1) as usize
+        self.width.saturating_sub(1).max(1) as usize
     }
 
     /// The number of content rows visible inside the transcript box, used for
     /// scroll bounds and page-scroll steps. Equal to the full height minus the
-    /// header, stats, input rows, and the box's two borders.
+    /// header, stats, input rows, and the box's top edge.
     fn visible_rows(&self) -> u16 {
-        self.height.saturating_sub(8).max(1)
+        self.height.saturating_sub(7).max(1)
     }
 
     fn clamp_scroll(&mut self) {
@@ -1304,9 +1325,8 @@ impl App {
         self.history_scroll = 0;
         if self.history_items.is_empty() {
             self.note(
-                Style::default().fg(Color::Yellow),
+                self.theme.warn,
                 "no past sessions found in the log directory",
-                AGENT_BG,
             );
         }
         self.overlay = Overlay::History;
@@ -1324,9 +1344,8 @@ impl App {
             }
             Err(error) => {
                 self.note(
-                    Style::default().fg(Color::Red),
+                    self.theme.err,
                     &format!("could not load transcript: {error}"),
-                    AGENT_BG,
                 );
             }
         }
@@ -1340,9 +1359,8 @@ impl App {
         self.following = true;
         self.status = "idle".to_owned();
         self.note(
-            Style::default().fg(Color::Cyan),
+            self.theme.accent,
             "new session — transcript cleared, model conversation restarted; type a prompt below",
-            AGENT_BG,
         );
     }
 
@@ -1602,7 +1620,7 @@ impl App {
             if let Some(MarkdownRow::Start(source)) = self.lines[index].md.clone() {
                 // Re-render a whole Markdown block at the new width, preserving
                 // its block marker on the first row for any later resize.
-                let rows = render_document(&source, target);
+                let rows = render_document_styles(&source, target, &self.theme.markdown);
                 let mut next = index + 1;
                 while next < self.lines.len()
                     && matches!(self.lines[next].md, Some(MarkdownRow::Continuation))
@@ -1610,6 +1628,15 @@ impl App {
                     next += 1;
                 }
                 for (offset, row) in rows.into_iter().enumerate() {
+                    let bg = if row.is_code {
+                        self.theme
+                            .markdown
+                            .code_bg
+                            .bg
+                            .unwrap_or(self.theme.panel_bg)
+                    } else {
+                        self.theme.panel_bg
+                    };
                     wrapped.push(ScreenLine {
                         line: row.line,
                         kind: LineKind::Normal,
@@ -1618,25 +1645,38 @@ impl App {
                         } else {
                             MarkdownRow::Continuation
                         }),
-                        bg: AGENT_BG,
+                        bg,
                     });
                 }
                 index = next;
             } else {
-                // A plain row reflows at the new width using its style and kind.
-                let style = self.lines[index]
-                    .line
-                    .spans
-                    .first()
-                    .map(|span| span.style)
-                    .unwrap_or_default();
-                let text = self.lines[index].line.to_string();
-                for (offset, line) in wrap(&text, target).into_iter().enumerate() {
-                    let kind = match self.lines[index].kind {
-                        LineKind::Placeholder if offset > 0 => LineKind::PlaceholderContinuation,
-                        kind => kind,
-                    };
-                    wrapped.push(ScreenLine::plain(line, style, kind, self.lines[index].bg));
+                // A plain row reflows at the new width; reasoning rows are
+                // rebuilt so the edge and tint follow the current theme, and
+                // everything else keeps its style with the panel background.
+                if self.lines[index].kind == LineKind::Reasoning {
+                    let text = self.lines[index].line.to_string();
+                    let text = text
+                        .strip_prefix(REASONING_EDGE_FIRST)
+                        .or_else(|| text.strip_prefix(REASONING_EDGE_CONT))
+                        .unwrap_or(&text);
+                    wrapped.extend(self.reasoning_rows(text, target));
+                } else {
+                    let style = self.lines[index]
+                        .line
+                        .spans
+                        .first()
+                        .map(|span| span.style)
+                        .unwrap_or_default();
+                    let text = self.lines[index].line.to_string();
+                    for (offset, line) in wrap(&text, target).into_iter().enumerate() {
+                        let kind = match self.lines[index].kind {
+                            LineKind::Placeholder if offset > 0 => {
+                                LineKind::PlaceholderContinuation
+                            }
+                            kind => kind,
+                        };
+                        wrapped.push(ScreenLine::plain(line, style, kind, self.theme.panel_bg));
+                    }
                 }
                 index += 1;
             }
@@ -1645,6 +1685,62 @@ impl App {
         self.maybe_truncate();
         self.clamp_scroll();
     }
+}
+
+/// Recolours one transcript row for `theme` in place, preserving its text,
+/// kind, and Markdown marker: prompt rows take the prompt style, reasoning
+/// rows are rebuilt with the theme's edge and tint, and every other row
+/// (agent output, notices) keeps its foreground but gains the panel background.
+fn restyle_row(line: &mut ScreenLine, theme: &Theme) {
+    match line.kind {
+        LineKind::Reasoning => {
+            let text = line.line.to_string();
+            let text = text
+                .strip_prefix(REASONING_EDGE_FIRST)
+                .or_else(|| text.strip_prefix(REASONING_EDGE_CONT))
+                .unwrap_or(&text);
+            let edge = if text.starts_with(' ') {
+                REASONING_EDGE_CONT
+            } else {
+                REASONING_EDGE_FIRST
+            };
+            *line = ScreenLine::reasoning(edge, text.to_owned(), theme);
+        }
+        _ => {
+            let is_prompt = line.line.to_string().starts_with("You: ");
+            let mut style = line
+                .line
+                .spans
+                .first()
+                .map(|span| span.style)
+                .unwrap_or_default();
+            if is_prompt {
+                style = theme.prompt;
+            }
+            for span in &mut line.line.spans {
+                // Spans with their own foreground (Markdown, code, notes)
+                // keep it; only the row-level foreground is replaced.
+                if span.style.fg.is_none() {
+                    span.style = span.style.patch(style);
+                }
+            }
+            line.line.style = Style::default().bg(theme.panel_bg);
+            line.bg = theme.panel_bg;
+        }
+    }
+}
+
+/// The prompt editor's block: a single top edge carrying the title (the left,
+/// right, and bottom borders are dropped, like the transcript, so the editor
+/// gains a line of height), with the theme's colours.
+fn prompt_block(theme: &Theme) -> ratatui::widgets::Block<'static> {
+    ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::TOP)
+        .border_style(ratatui::style::Style::default().fg(theme.panel_border))
+        .title(Span::styled(
+            " prompt · Enter/Ctrl+Enter send · Shift+Enter · Tab model · Shift+Tab effort · Ctrl+Insert copy · Ctrl+S theme · Ctrl-Q quit · Esc menu · Ctrl+H help ".to_owned(),
+            Style::default().fg(theme.dim),
+        ))
 }
 
 /// Writes the OSC 52 clipboard escape to stdout. Called by the event loop after
@@ -1802,40 +1898,28 @@ fn fence_split(line: &str) -> Option<(char, usize, &str)> {
     Some((ch, run, &trimmed[run..]))
 }
 
-/// The dim placeholder line shown where thinking has been collapsed.
-fn collapse_placeholder_rows(width: usize) -> Vec<ScreenLine> {
-    let placeholder = collapse_placeholder();
-    let style = placeholder
-        .line
-        .spans
-        .first()
-        .map(|span| span.style)
-        .unwrap_or_default();
-    wrap(&placeholder.line.to_string(), width)
+/// The dim placeholder lines shown where thinking has been collapsed.
+fn collapse_placeholder_rows(width: usize, theme: &Theme) -> Vec<ScreenLine> {
+    wrap(&collapse_placeholder_text(), width)
         .into_iter()
         .enumerate()
         .map(|(index, text)| {
             ScreenLine::plain(
                 text,
-                style,
+                theme.reasoning_placeholder,
                 if index == 0 {
                     LineKind::Placeholder
                 } else {
                     LineKind::PlaceholderContinuation
                 },
-                REASONING_BG,
+                theme.reasoning_bg,
             )
         })
         .collect()
 }
 
-fn collapse_placeholder() -> ScreenLine {
-    ScreenLine::plain(
-        "▸ thinking hidden — press T to reveal",
-        Style::default().fg(Color::DarkGray),
-        LineKind::Placeholder,
-        REASONING_BG,
-    )
+fn collapse_placeholder_text() -> &'static str {
+    "▸ thinking hidden — press T to reveal"
 }
 
 /// Estimates seconds until the live context reaches `context_limit`, forecast
@@ -1946,10 +2030,11 @@ fn bargraph(fraction: f64, width: u16) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        AGENT_BG, App, Color, KeyAction, LineKind, MAX_LINES, MENU_ITEMS, Overlay, PROMPT_BG,
-        REASONING_BG, ScreenLine, Style, format_number, next_block_end, wrap,
+        App, Color, KeyAction, LineKind, MAX_LINES, MENU_ITEMS, Overlay, REASONING_EDGE_CONT,
+        REASONING_EDGE_FIRST, ScreenLine, Style, format_number, next_block_end, wrap,
     };
     use crate::session::Event;
+    use crate::tui::theme::Theme;
     use agent_runtime::ReasoningEffort;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use ratatui::text::Span;
@@ -1959,7 +2044,15 @@ mod tests {
     }
 
     fn app() -> App {
-        App::new(&models(), "local", ReasoningEffort::Medium, None, 40, 24)
+        App::new(
+            &models(),
+            "local",
+            ReasoningEffort::Medium,
+            None,
+            40,
+            24,
+            Theme::dark(),
+        )
     }
 
     /// An app with the startup welcome note cleared, so markdown-rendering
@@ -1971,7 +2064,15 @@ mod tests {
     }
 
     fn app_at(width: u16) -> App {
-        App::new(&models(), "local", ReasoningEffort::Medium, None, width, 24)
+        App::new(
+            &models(),
+            "local",
+            ReasoningEffort::Medium,
+            None,
+            width,
+            24,
+            Theme::dark(),
+        )
     }
 
     fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
@@ -2020,7 +2121,7 @@ mod tests {
     }
 
     #[test]
-    fn section_lines_carry_distinct_backgrounds_and_kept_foregrounds() {
+    fn section_lines_carry_their_cues_and_kept_foregrounds() {
         let mut app = app();
         // Echoed user prompt.
         app.editor.set_lines(vec!["hello world".to_owned()], (0, 0));
@@ -2057,34 +2158,72 @@ mod tests {
                 .and_then(|line| line.line.spans.first().and_then(|span| span.style.fg))
         };
 
-        // Large blocks carry a distinct, intentionally dark background, with the
-        // existing foreground colour left intact.
-        assert_eq!(background_for("You: hello world"), Some(PROMPT_BG));
-        assert_eq!(foreground_for("You: hello world"), Some(Color::White));
-        assert_eq!(background_for("a reason"), Some(REASONING_BG));
-        assert_eq!(foreground_for("a reason"), Some(Color::Gray));
+        let theme = &app.theme;
 
-        // Everything the agent produces — tool calls, results, and the final
-        // answer line — shares one agent-result background, so a call and its
-        // result group with the surrounding answer text; success and failure
-        // are carried by the text colour.
-        assert_eq!(background_for("→ tool: ls"), Some(AGENT_BG));
-        assert_eq!(foreground_for("→ tool: ls"), Some(Color::Blue));
-        assert_eq!(background_for("✓ tool ls finished"), Some(AGENT_BG));
-        assert_eq!(foreground_for("✓ tool ls finished"), Some(Color::Green));
-        assert_eq!(background_for("✓ tool cat finished"), Some(AGENT_BG));
-        assert_eq!(foreground_for("✓ tool cat finished"), Some(Color::Red));
-        assert_eq!(background_for("✓ done"), Some(AGENT_BG));
-        assert_eq!(foreground_for("✓ done"), Some(Color::Green));
+        // Ordinary output sits on the standard panel background with its
+        // foreground colour left intact; the prompt echo keeps the prompt style.
+        assert_eq!(background_for("You: hello world"), Some(theme.panel_bg));
+        assert_eq!(foreground_for("You: hello world"), theme.prompt.fg);
+        assert_eq!(background_for("→ tool: ls"), Some(theme.panel_bg));
+        assert_eq!(foreground_for("→ tool: ls"), Some(theme.info));
+        assert_eq!(background_for("✓ tool ls finished"), Some(theme.panel_bg));
+        assert_eq!(foreground_for("✓ tool ls finished"), Some(theme.ok));
+        assert_eq!(background_for("✓ tool cat finished"), Some(theme.panel_bg));
+        assert_eq!(foreground_for("✓ tool cat finished"), Some(theme.err));
+        assert_eq!(background_for("✓ done"), Some(theme.panel_bg));
+        assert_eq!(foreground_for("✓ done"), Some(theme.ok));
 
-        // Large blocks are each distinct from one another and from the shared
-        // agent-result background.
-        let backgrounds = [PROMPT_BG, REASONING_BG, AGENT_BG];
-        for (index, a) in backgrounds.iter().enumerate() {
-            for b in backgrounds.iter().skip(index + 1) {
-                assert_ne!(a, b, "large-block backgrounds must be distinct");
-            }
-        }
+        // Thinking is set apart by its tint and its left edge; everything else
+        // stays on the panel background.
+        assert_eq!(background_for("a reason"), Some(theme.reasoning_bg));
+        assert_ne!(theme.reasoning_bg, theme.panel_bg);
+        let reasoning_row = app
+            .lines
+            .iter()
+            .find(|line| line.line.to_string().contains("a reason"))
+            .expect("reasoning row");
+        assert!(
+            reasoning_row
+                .line
+                .to_string()
+                .starts_with(REASONING_EDGE_FIRST)
+        );
+    }
+
+    #[test]
+    fn cycling_theme_restyles_rows_without_changing_text() {
+        let mut app = app();
+        app.push_event(Event::Reasoning("a reason".to_owned()));
+        app.push_event(Event::Text("answer here".to_owned()));
+        app.push_event(Event::ToolCall {
+            description: "ls".to_owned(),
+            name: "shell".to_owned(),
+        });
+        let before: Vec<String> = app.lines.iter().map(|line| line.line.to_string()).collect();
+        let dark_bg = app.theme.panel_bg;
+        let light = Theme::light();
+        app.cycle_theme();
+        assert_eq!(app.theme.name, "light");
+        let after: Vec<String> = app.lines.iter().map(|line| line.line.to_string()).collect();
+        assert_eq!(before, after, "text is unchanged by a theme switch");
+        assert_eq!(app.theme.panel_bg, light.panel_bg);
+        assert_eq!(dark_bg, Theme::dark().panel_bg);
+        // Ordinary rows now carry the light panel background; reasoning keeps
+        // its edge and the light tint.
+        assert!(
+            app.lines
+                .iter()
+                .filter(|line| line.kind != LineKind::Reasoning)
+                .all(|line| line.bg == app.theme.panel_bg)
+        );
+        assert!(
+            app.lines
+                .iter()
+                .all(|line| { line.bg == app.theme.panel_bg || line.bg == app.theme.reasoning_bg })
+        );
+        // A second cycle returns to the dark palette.
+        app.cycle_theme();
+        assert_eq!(app.theme.panel_bg, dark_bg);
     }
 
     #[test]
@@ -2277,7 +2416,7 @@ mod tests {
     #[test]
     fn ctrl_n_starts_a_new_session() {
         let mut app = app();
-        app.note(Style::default(), "earlier output", AGENT_BG);
+        app.note(app.theme.dim, "earlier output");
         assert!(!app.lines.is_empty());
         assert_eq!(app.on_key(ctrl(KeyCode::Char('n'))), KeyAction::NewSession);
         assert!(
@@ -2791,7 +2930,13 @@ mod tests {
             .lines
             .iter()
             .filter(|line| line.kind == LineKind::Reasoning)
-            .map(|line| line.line.to_string())
+            .map(|line| {
+                line.line
+                    .to_string()
+                    .strip_prefix(REASONING_EDGE_FIRST)
+                    .unwrap_or(line.line.to_string().as_str())
+                    .to_owned()
+            })
             .collect();
         assert!(
             reasoning.iter().any(|line| line == "The quick brown fox"),
@@ -2850,13 +2995,13 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_s_toggles_scrollbar() {
+    fn ctrl_s_cycles_the_theme() {
         let mut app = app();
-        assert!(!app.show_scrollbar);
+        assert_eq!(app.theme.name, "dark");
         app.on_key(ctrl(KeyCode::Char('s')));
-        assert!(app.show_scrollbar);
+        assert_eq!(app.theme.name, "light");
         app.on_key(ctrl(KeyCode::Char('s')));
-        assert!(!app.show_scrollbar);
+        assert_eq!(app.theme.name, "dark");
     }
 
     #[test]
@@ -2865,11 +3010,11 @@ mod tests {
         // `push_wrapped` appends one pre-wrapped row per line, so each argument
         // line becomes a distinct transcript row without depending on markdown
         // (where a single `\n` is a soft break, i.e. a space).
-        app.push_wrapped(Style::default(), "alpha", AGENT_BG);
-        app.push_wrapped(Style::default(), "beta", AGENT_BG);
+        app.push_wrapped(app.theme.dim, "alpha");
+        app.push_wrapped(app.theme.dim, "beta");
         // A final row that ends with genuine trailing spaces, to prove copy
         // trims the padding that sits between the content and the box border.
-        app.push_wrapped(Style::default(), "trailing spaces   ", AGENT_BG);
+        app.push_wrapped(app.theme.dim, "trailing spaces   ");
         app.copy_to_clipboard();
         let escape = app
             .take_pending_osc_52()
@@ -2907,6 +3052,23 @@ mod tests {
 
     fn rendered_text(app: &App) -> Vec<String> {
         app.lines.iter().map(|line| line.line.to_string()).collect()
+    }
+
+    /// The rendered text with the thinking-edge prefixes stripped, so text
+    /// assertions compare content rather than decoration.
+    fn text_without_edges(rows: &[String]) -> String {
+        rows.iter()
+            .map(|row| {
+                row.strip_prefix(REASONING_EDGE_FIRST)
+                    .or_else(|| row.strip_prefix(REASONING_EDGE_CONT))
+                    .unwrap_or(row)
+            })
+            .collect()
+    }
+
+    /// A reasoning row as the transcript builds it: edge plus tint.
+    fn reasoning(text: &str) -> ScreenLine {
+        ScreenLine::reasoning(REASONING_EDGE_FIRST, text, &Theme::dark())
     }
 
     #[test]
@@ -2992,14 +3154,9 @@ mod tests {
             "notice sentinel",
             Style::default(),
             LineKind::Normal,
-            AGENT_BG,
+            app.theme.panel_bg,
         ));
-        app.lines.push(ScreenLine::plain(
-            "reasoning sentinel",
-            Style::default(),
-            LineKind::Reasoning,
-            REASONING_BG,
-        ));
+        app.lines.push(reasoning("reasoning sentinel"));
         for width in [30, 60, 22, 50] {
             app.resize(width, 24);
             let rows = rendered_text(&app).join("\n");
@@ -3023,88 +3180,69 @@ mod tests {
                 "abcdefghijklmnopqrst",
                 Style::default(),
                 LineKind::Normal,
-                AGENT_BG,
+                app.theme.panel_bg,
             ));
         }
         app.resize(4, 24);
         assert!(app.lines.len() <= MAX_LINES);
-        assert!(app.lines.iter().all(|row| row.line.width() <= 2));
+        // The inner width is the full width minus the top-edge row's border
+        // column, so at width 4 rows wrap to at most 3 cells.
+        assert!(app.lines.iter().all(|row| row.line.width() <= 3));
     }
 
     #[test]
     fn revealed_reasoning_reflows_at_the_current_width() {
         let mut app = clean_app();
-        app.lines.push(ScreenLine::plain(
-            "abcdefghijklmnopqrst",
-            Style::default(),
-            LineKind::Reasoning,
-            REASONING_BG,
-        ));
+        app.lines.push(reasoning("abcdefghijklmnopqrst"));
         app.set_collapse_reasoning(true);
         app.resize(8, 24);
         app.set_collapse_reasoning(false);
-        assert!(app.lines.iter().all(|row| row.line.width() <= 6));
-        assert_eq!(rendered_text(&app).concat(), "abcdefghijklmnopqrst");
+        // Rows carry a two-cell edge plus at most five cells of text.
+        assert!(app.lines.iter().all(|row| row.line.width() <= 7));
+        assert_eq!(
+            text_without_edges(&rendered_text(&app)),
+            "abcdefghijklmnopqrst"
+        );
     }
 
     #[test]
     fn evicted_placeholders_do_not_restore_the_wrong_reasoning() {
         let mut app = clean_app();
-        app.lines.push(ScreenLine::plain(
-            "discarded",
-            Style::default(),
-            LineKind::Reasoning,
-            REASONING_BG,
-        ));
+        app.lines.push(reasoning("discarded"));
         for _ in 0..MAX_LINES {
             app.lines.push(ScreenLine::plain(
                 "filler",
                 Style::default(),
                 LineKind::Normal,
-                AGENT_BG,
+                app.theme.panel_bg,
             ));
         }
-        app.lines.push(ScreenLine::plain(
-            "kept",
-            Style::default(),
-            LineKind::Reasoning,
-            REASONING_BG,
-        ));
+        app.lines.push(reasoning("kept"));
         app.set_collapse_reasoning(true);
         app.maybe_truncate();
         app.set_collapse_reasoning(false);
         let rows = rendered_text(&app);
-        assert!(rows.iter().any(|row| row == "kept"));
-        assert!(!rows.iter().any(|row| row == "discarded"));
+        assert!(rows.iter().any(|row| row.contains("kept")));
+        assert!(!rows.iter().any(|row| row.contains("discarded")));
         assert!(app.lines.len() <= MAX_LINES);
     }
 
     #[test]
     fn wrapped_placeholders_keep_distinct_reasoning_runs_in_order() {
         let mut app = clean_app();
-        app.lines.push(ScreenLine::plain(
-            "first",
-            Style::default(),
-            LineKind::Reasoning,
-            REASONING_BG,
-        ));
+        app.lines.push(reasoning("first"));
         app.lines.push(ScreenLine::plain(
             "between",
             Style::default(),
             LineKind::Normal,
-            AGENT_BG,
+            app.theme.panel_bg,
         ));
-        app.lines.push(ScreenLine::plain(
-            "second",
-            Style::default(),
-            LineKind::Reasoning,
-            REASONING_BG,
-        ));
+        app.lines.push(reasoning("second"));
         app.set_collapse_reasoning(true);
         app.resize(8, 24);
         app.resize(10, 24);
         app.set_collapse_reasoning(false);
-        let text = rendered_text(&app).concat();
+        let text = text_without_edges(&rendered_text(&app));
         assert_eq!(text, "firstbetweensecond");
     }
 
@@ -3112,28 +3250,19 @@ mod tests {
     fn initial_collapsed_placeholders_fit_the_current_width() {
         let mut app = clean_app();
         app.resize(8, 24);
-        app.lines.push(ScreenLine::plain(
-            "first",
-            Style::default(),
-            LineKind::Reasoning,
-            REASONING_BG,
-        ));
+        app.lines.push(reasoning("first"));
         app.lines.push(ScreenLine::plain(
             "mid",
             Style::default(),
             LineKind::Normal,
-            AGENT_BG,
+            app.theme.panel_bg,
         ));
-        app.lines.push(ScreenLine::plain(
-            "second",
-            Style::default(),
-            LineKind::Reasoning,
-            REASONING_BG,
-        ));
+        app.lines.push(reasoning("second"));
         app.set_collapse_reasoning(true);
-        assert!(app.lines.iter().all(|row| row.line.width() <= 6));
+        // Reasoning rows carry the two-cell edge; the placeholder too.
+        assert!(app.lines.iter().all(|row| row.line.width() <= 7));
         app.set_collapse_reasoning(false);
-        assert_eq!(rendered_text(&app).concat(), "firstmidsecond");
+        assert_eq!(text_without_edges(&rendered_text(&app)), "firstmidsecond");
     }
 
     #[test]
@@ -3292,11 +3421,7 @@ mod tests {
     #[test]
     fn menu_n_hotkey_starts_a_new_session_and_leaves_the_menu() {
         let mut app = app();
-        app.note(
-            Style::default(),
-            "earlier output that should vanish",
-            AGENT_BG,
-        );
+        app.note(app.theme.dim, "earlier output that should vanish");
         assert!(!app.lines.is_empty());
         app.open_menu();
         assert_eq!(app.on_key(ch(KeyCode::Char('n'))), KeyAction::NewSession);
@@ -3314,11 +3439,7 @@ mod tests {
     #[test]
     fn menu_enter_on_new_session_leaves_the_menu() {
         let mut app = app();
-        app.note(
-            Style::default(),
-            "earlier output that should vanish",
-            AGENT_BG,
-        );
+        app.note(app.theme.dim, "earlier output that should vanish");
         app.open_menu();
         assert_eq!(app.menu_selection, 0);
         assert_eq!(app.on_key(ch(KeyCode::Enter)), KeyAction::NewSession);
