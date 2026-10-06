@@ -708,6 +708,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "expected to run inside sandbox"]
     fn ensure_toolchain_records_the_default_toolchain() {
         if !rustup_available() {
             eprintln!("skip: rustup not on PATH");

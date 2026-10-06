@@ -128,6 +128,7 @@ fn git_worktree_root() -> Option<PathBuf> {
 }
 
 #[test]
+#[ignore = "expected to run inside sandbox"]
 fn offline_cargo_verification_builds_tested_project_denied_network() {
     let Some(runner) = locate_runner() else {
         eprintln!("skip: no built sandbox runner; build it first");
