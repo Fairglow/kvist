@@ -19,7 +19,7 @@ fn trial_text(finish: &str, content: &str, json_output: bool) -> (std::process::
     std::fs::write(
         &config,
         format!(
-            "schema_version=1\nworking_directory={:?}\ndefault_model='test'\n\
+            "schema_version=1\nworking_directory={:?}\ndefault_provider='llama-server'\n\
          default_thinking_effort='none'\n[[models]]\nid='test'\n\
          provider='llama-server'\nbase_url='http://{endpoint}'\nmodel='test'\n\
          context_limit=8192\nresponse_reserve=1024\nmax_attempts=1\n",
@@ -164,7 +164,7 @@ fn headless_rejects_agent_writable_logs_before_model_io() {
     std::fs::write(
         &config,
         format!(
-            "schema_version=1\nworking_directory={:?}\ndefault_model='test'\n\
+            "schema_version=1\nworking_directory={:?}\ndefault_provider='llama-server'\n\
          default_thinking_effort='none'\n[[models]]\nid='test'\nprovider='llama-server'\n\
          base_url='http://127.0.0.1:1'\nmodel='test'\n",
             root.path().to_str().unwrap()
@@ -245,7 +245,7 @@ fn startup_uses_selected_serving_capacity_without_a_cli_override() {
     std::fs::write(
         &config,
         format!(
-            "schema_version=1\ndefault_model='test'\n[[models]]\nid='test'\n\
+            "schema_version=1\ndefault_provider='llama-server'\n[[models]]\nid='test'\n\
          provider='llama-server'\nbase_url='http://{endpoint}'\nmodel='test'\n"
         ),
     )

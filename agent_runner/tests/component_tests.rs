@@ -22,13 +22,14 @@ use agent_runner::{
 const VALID_CONFIG: &str = r#"
 schema_version = 1
 working_directory = "%WD%"
-default_model = "local"
+default_provider = "llama-server"
 default_thinking_effort = "medium"
 [[models]]
 id = "local"
 provider = "llama-server"
 base_url = "http://127.0.0.1:9931"
 model = "qwen2.5-14b"
+is_default = true
 deadline_secs = 120
 [[models]]
 id = "ollama"
@@ -67,7 +68,8 @@ fn loads_a_valid_configuration() {
     let cfg = Config::load(&path).expect("config loads");
     assert_eq!(cfg.schema_version, 1);
     assert_eq!(cfg.models.len(), 2);
-    assert_eq!(cfg.default_model, "local");
+    assert_eq!(cfg.default_provider, ModelProvider::LlamaServer);
+    assert_eq!(cfg.default_model().map(|m| m.id.as_str()), Some("local"));
     assert!(cfg.model("local").is_some());
     assert!(cfg.model("nope").is_none());
 }
@@ -84,13 +86,21 @@ fn rejects_wrong_schema_version() {
 }
 
 #[test]
-fn rejects_unknown_default_model() {
+fn rejects_default_provider_without_a_model() {
     let (dir, path) = valid_dir(None);
+    // The valid config has one llama-server model and one ollama model. Remove
+    // the ollama model and keep default_provider = "ollama": the default
+    // provider must name at least one configured model.
     let contents = std::fs::read_to_string(&path).unwrap();
-    let contents = contents.replace("default_model = \"local\"", "default_model = \"missing\"");
+    let contents = contents
+        .replace(
+            "id = \"ollama\"\nprovider = \"ollama\"\nbase_url = \"http://127.0.0.1:11434\"\nmodel = \"qwen2.5\"\ndeadline_secs = 120\n",
+            "",
+        )
+        .replace("default_provider = \"llama-server\"", "default_provider = \"ollama\"");
     write_config(&dir, &contents);
-    let err = Config::load(&path).expect_err("unknown default model");
-    assert!(matches!(err, Error::ModelNotFound { .. }));
+    let err = Config::load(&path).expect_err("default provider has no model");
+    assert!(matches!(err, Error::Config { .. }));
 }
 
 #[test]
@@ -167,12 +177,13 @@ fn rejects_unknown_top_level_fields() {
 }
 
 #[test]
-fn from_parts_rejects_unknown_model() {
+fn from_parts_rejects_default_provider_without_model() {
     let model = Model {
         id: "local".to_owned(),
         provider: ModelProvider::LlamaServer,
         base_url: "http://127.0.0.1:9931".to_owned(),
         model: "m".to_owned(),
+        is_default: false,
         context_limit: None,
         response_reserve: None,
         deadline_secs: 120,
@@ -181,14 +192,42 @@ fn from_parts_rejects_unknown_model() {
         retry_max_delay_secs: 30,
         cadence_timeout_secs: 30,
     };
+    // The only configured model is a llama-server one; defaulting to ollama
+    // (no ollama model) must be rejected.
     let err = Config::from_parts(
         tempdir().unwrap().path().to_path_buf(),
-        "missing",
+        ModelProvider::Ollama,
         vec![model],
         ToolPolicy::minimum(),
     )
-    .expect_err("unknown default model");
-    assert!(matches!(err, Error::ModelNotFound { .. }));
+    .expect_err("default provider has no model");
+    assert!(matches!(err, Error::Config { .. }));
+}
+
+#[test]
+fn from_parts_accepts_matching_default_provider() {
+    let model = Model {
+        id: "local".to_owned(),
+        provider: ModelProvider::LlamaServer,
+        base_url: "http://127.0.0.1:9931".to_owned(),
+        model: "m".to_owned(),
+        is_default: true,
+        context_limit: None,
+        response_reserve: None,
+        deadline_secs: 120,
+        max_attempts: 3,
+        retry_base_delay_secs: 2,
+        retry_max_delay_secs: 30,
+        cadence_timeout_secs: 30,
+    };
+    let cfg = Config::from_parts(
+        tempdir().unwrap().path().to_path_buf(),
+        ModelProvider::LlamaServer,
+        vec![model],
+        ToolPolicy::minimum(),
+    )
+    .expect("matching default provider is accepted");
+    assert_eq!(cfg.default_model().map(|m| m.id.as_str()), Some("local"));
 }
 
 fn registry() -> ToolRegistry {

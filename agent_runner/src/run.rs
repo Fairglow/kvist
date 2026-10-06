@@ -295,6 +295,7 @@ mod tests {
             provider: ModelProvider::LlamaServer,
             base_url: "http://127.0.0.1:1".to_owned(),
             model: "test-model".to_owned(),
+            is_default: false,
             context_limit: None,
             response_reserve: None,
             deadline_secs: 30,

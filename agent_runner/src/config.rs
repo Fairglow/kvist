@@ -82,6 +82,16 @@ impl FromStr for ModelProvider {
     }
 }
 
+impl std::fmt::Display for ModelProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            ModelProvider::LlamaServer => "llama-server",
+            ModelProvider::Ollama => "ollama",
+        };
+        f.write_str(name)
+    }
+}
+
 /// One selectable model.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Model {
@@ -94,6 +104,11 @@ pub struct Model {
     pub base_url: String,
     /// The provider-facing model selector.
     pub model: String,
+    /// Marks this entry as the default model for its provider. Used only as a
+    /// fall-back when the (default) provider reports no active model; at most
+    /// one entry per provider may be marked default.
+    #[serde(default)]
+    pub is_default: bool,
     /// Explicit serving context when discovery is unavailable or overridden.
     #[serde(default)]
     pub context_limit: Option<usize>,
@@ -392,8 +407,11 @@ pub struct Config {
     pub schema_version: u32,
     /// The working directory the agent operates in.
     pub working_directory: PathBuf,
-    /// The default model selector.
-    pub default_model: String,
+    /// The provider to fall back to when no model is active. Used to find a
+    /// default model for that provider when the provider reports no active
+    /// model; a fall-back only, never overriding an active model, an explicit
+    /// selection, or a single configured model.
+    pub default_provider: ModelProvider,
     /// The default thinking effort.
     pub default_thinking_effort: agent_runtime::ReasoningEffort,
     /// The selectable models.
@@ -417,7 +435,11 @@ struct RawConfig {
     schema_version: u32,
     #[serde(default)]
     working_directory: Option<String>,
-    default_model: String,
+    /// The provider to fall back to when no model is active. Required; the
+    /// fall-back is resolved to a model by querying that provider for its active
+    /// model and, when there is none, using the provider's configured default
+    /// model.
+    default_provider: ModelProvider,
     #[serde(default)]
     default_thinking_effort: Option<String>,
     #[serde(default)]
@@ -443,6 +465,8 @@ struct RawModel {
     #[serde(default)]
     base_url: String,
     model: String,
+    #[serde(default)]
+    is_default: bool,
     #[serde(default)]
     context_limit: Option<usize>,
     #[serde(default)]
@@ -617,6 +641,7 @@ impl Config {
                 provider: model.provider,
                 base_url,
                 model: model.model.clone(),
+                is_default: model.is_default,
                 context_limit: model.context_limit,
                 response_reserve: model.response_reserve,
                 deadline_secs: model.deadline_secs,
@@ -639,10 +664,37 @@ impl Config {
             None => agent_runtime::ReasoningEffort::Medium,
         };
 
-        if !models.iter().any(|model| model.id == raw.default_model) {
-            return Err(Error::ModelNotFound {
-                requested: raw.default_model.clone(),
-                available: models.iter().map(|model| model.id.clone()).collect(),
+        // At most one default model per provider: the per-provider default is a
+        // fall-back for that provider's endpoint, so two defaults for one
+        // provider would be ambiguous.
+        let mut default_seen = std::collections::BTreeSet::new();
+        for model in models.iter() {
+            if model.is_default {
+                if !default_seen.insert(model.provider.to_string()) {
+                    return Err(Error::Config {
+                        path: Some(path.to_string_lossy().into_owned()),
+                        reason: format!(
+                            "duplicate is_default model for provider `{}`; at most one \
+                             [[models]] entry per provider may be marked default",
+                            model.provider
+                        ),
+                    });
+                }
+            }
+        }
+        // The default provider must name at least one configured model, or the
+        // fall-back can never resolve to a model.
+        if !models
+            .iter()
+            .any(|model| model.provider == raw.default_provider)
+        {
+            return Err(Error::Config {
+                path: Some(path.to_string_lossy().into_owned()),
+                reason: format!(
+                    "default_provider `{}` has no [[models]] entry; configure a model for \
+                     it or set default_provider to a provider that has one",
+                    raw.default_provider
+                ),
             });
         }
 
@@ -681,7 +733,7 @@ impl Config {
         Ok(Config {
             schema_version: SCHEMA_VERSION,
             working_directory,
-            default_model: raw.default_model,
+            default_provider: raw.default_provider,
             default_thinking_effort,
             models,
             tool_policy,
@@ -705,14 +757,19 @@ impl Config {
     /// Builds an in-memory configuration, used by tests and by the CLI overrides.
     pub fn from_parts(
         working_directory: PathBuf,
-        default_model: &str,
+        default_provider: ModelProvider,
         models: Vec<Model>,
         tool_policy: crate::tools::ToolPolicy,
     ) -> Result<Config> {
-        if !models.iter().any(|model| model.id == default_model) {
-            return Err(Error::ModelNotFound {
-                requested: default_model.to_owned(),
-                available: models.iter().map(|model| model.id.clone()).collect(),
+        if !models
+            .iter()
+            .any(|model| model.provider == default_provider)
+        {
+            return Err(Error::Config {
+                path: None,
+                reason: format!(
+                    "default_provider `{default_provider}` has no [[models]] entry"
+                ),
             });
         }
         let tool_profiles = ToolProfile::CONFIGURABLE
@@ -723,7 +780,7 @@ impl Config {
         Ok(Config {
             schema_version: SCHEMA_VERSION,
             working_directory,
-            default_model: default_model.to_owned(),
+            default_provider,
             default_thinking_effort: agent_runtime::ReasoningEffort::Medium,
             models,
             tool_policy,
@@ -737,16 +794,34 @@ impl Config {
     pub fn model(&self, id: &str) -> Option<&Model> {
         self.models.iter().find(|model| model.id == id)
     }
+
+    /// The configured models for the default provider, in configuration order.
+    /// Used to resolve the per-provider default-model fall-back.
+    pub fn default_provider_models(&self) -> Vec<&Model> {
+        self.models
+            .iter()
+            .filter(|model| model.provider == self.default_provider)
+            .collect()
+    }
+
+    /// The default provider's default model, when exactly one entry for that
+    /// provider is marked `is_default`. `None` when there is none (several
+    /// models with no active one defer to the user).
+    pub fn default_model(&self) -> Option<&Model> {
+        self.models
+            .iter()
+            .find(|model| model.provider == self.default_provider && model.is_default)
+    }
 }
 
 /// The outcome of active-model-first selection for a session.
 ///
 /// The precedence is: an explicit selection (rule 1), a loaded provider model
 /// matching a configured entry (rule 2), a single configured model (rule 3), and
-/// otherwise a deferred/failed choice (rule 4). `default_model` is never the
-/// outcome of this resolution — it is the CLI's last-resort fallback when no
-/// explicit selection is given and the provider reports no usable active model,
-/// so it is a distinct path the caller owns.
+/// otherwise a fall-back (rule 4). A fall-back selects the default provider's
+/// default model when the provider has no active model; when the default
+/// provider has several configured models and no active one, the session must
+/// defer (interactive) or fail (headless) rather than guess.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Select {
     /// The user explicitly chose this model; it is used exactly as selected.
@@ -761,8 +836,18 @@ pub enum Select {
     },
     /// Exactly one model is configured: auto-selected as a convenience.
     Single { model_id: String },
-    /// Several configured models and no unambiguous active match: the session
-    /// must defer (interactive) or fail (headless) rather than guess.
+    /// The default provider reports no active model and its default model is
+    /// configured: selected as the fall-back, announcing that the default model
+    /// is loaded (the provider may need to load it; the session waits for it).
+    /// `reason` is the announcement; `loaded` is the provider-facing model name.
+    Default {
+        model_id: String,
+        reason: String,
+        loaded: String,
+    },
+    /// The default provider reports no active model and there is no single
+    /// default model to fall back to: the session must defer (interactive) or
+    /// fail (headless) rather than guess.
     NeedsSelection,
 }
 
@@ -775,10 +860,13 @@ pub enum Select {
 /// or empty provider yields no entry for that endpoint, so the caller falls
 /// through to the next selection rule rather than failing startup.
 pub fn probe_active_models(config: &Config) -> std::collections::BTreeMap<String, String> {
-    // A single configured model auto-selects (rule 3) identically whether or not
-    // it is active, so no active probe is needed — and skipping it keeps a
-    // single-model startup free of provider I/O (and its pinned request
-    // sequence). Several configured models need the probe to find an active one.
+    // A single configured model auto-selects (the default provider's only
+    // model) identically whether or not it is active, so no active probe is
+    // needed — and skipping it keeps a single-model startup free of provider I/O
+    // (and its pinned request sequence). When the single model is already
+    // loaded, the provider reuses it on the first request and pays no switch;
+    // the probe would only add up to its deadline to startup to announce that.
+    // Several configured models need the probe to find an active one to reuse.
     if config.models.len() <= 1 {
         return std::collections::BTreeMap::new();
     }
@@ -814,8 +902,10 @@ pub fn probe_active_models(config: &Config) -> std::collections::BTreeMap<String
 /// `active` maps `base_url -> loaded provider model name` (see
 /// [`probe_active_models`]). An explicit selection is returned unchanged; a
 /// single configured model is returned as [`Select::Single`]; a unique active
-/// match by provider model name is returned as [`Select::Active`]; and several
-/// configured models with no unambiguous active match return
+/// match by provider model name is returned as [`Select::Active`]; the default
+/// provider's default model (used only when the provider reports no active
+/// model) is returned as [`Select::Default`]; and several configured models for
+/// the default provider with no active match and no single default return
 /// [`Select::NeedsSelection`].
 pub fn select_active_model(
     config: &Config,
@@ -830,45 +920,77 @@ pub fn select_active_model(
             model_id: config.models[0].id.clone(),
         };
     }
-    // Collect configured entries that match a loaded provider model, grouped by
-    // the (base_url, provider model name) they matched. A unique match selects
-    // that entry; more than one candidate is ambiguous and defers.
+    // Only models configured for the default provider are ever auto-selected:
+    // the default provider is the provider the session falls back to, so its
+    // already-loaded model is the one reused (with no switch) and its default
+    // model is the one loaded as a fall-back. A model on any other provider is
+    // an explicit choice only.
+    let default_provider = config.default_provider;
+    let default_provider_models: Vec<&Model> = config
+        .models
+        .iter()
+        .filter(|model| model.provider == default_provider)
+        .collect();
+    if default_provider_models.len() == 1 {
+        // The default provider has exactly one model. It is selected whether or
+        // not it is active: when already loaded the provider reuses it with no
+        // switch, and when not it is the single model the session loads.
+        let model = &default_provider_models[0];
+        return Select::Single {
+            model_id: model.id.clone(),
+        };
+    }
+    // Collect default-provider entries that match a loaded provider model,
+    // grouped by the (base_url, provider model name) they matched. A unique
+    // match selects that entry with no switch; more than one candidate is
+    // ambiguous and falls to the default-model fall-back.
     let mut matched: Vec<&Model> = Vec::new();
     let mut ambiguous = false;
-    for model in config.models.iter() {
-        if let Some(loaded) = active.get(&model.base_url) {
-            if loaded == &model.model {
-                matched.push(model);
-            }
+    for model in default_provider_models.iter() {
+        if let Some(loaded) = active.get(&model.base_url)
+            && loaded == &model.model
+        {
+            matched.push(model);
         }
     }
-    if matched.is_empty() {
-        return Select::NeedsSelection;
-    }
-    // Two distinct entries can match the same loaded model (e.g. duplicated
-    // provider model name on one server); that is ambiguous.
-    {
-        let mut seen = std::collections::BTreeSet::new();
-        for model in &matched {
-            if !seen.insert((model.base_url.as_str(), model.model.as_str())) {
-                ambiguous = true;
+    if !matched.is_empty() {
+        // Two distinct entries can match the same loaded model (e.g. duplicated
+        // provider model name on one server); that is ambiguous.
+        {
+            let mut seen = std::collections::BTreeSet::new();
+            for model in &matched {
+                if !seen.insert((model.base_url.as_str(), model.model.as_str())) {
+                    ambiguous = true;
+                }
             }
         }
+        if !ambiguous {
+            // A single unique match: reuse it with no switch.
+            let model = matched[0];
+            return Select::Active {
+                model_id: model.id.clone(),
+                reason: format!(
+                    "using already-loaded model `{}` (no switch)",
+                    active
+                        .get(&model.base_url)
+                        .expect("matched entry has an active model")
+                ),
+                loaded: model.model.clone(),
+            };
+        }
     }
-    if ambiguous {
-        return Select::NeedsSelection;
-    }
-    // A single unique match: select it. (matched.len() > 1 with the same
-    // base_url+model is impossible after the dedupe check above, so the first
-    // entry is the one to use.)
-    let model = matched[0];
-    Select::Active {
-        model_id: model.id.clone(),
-        reason: format!(
-            "using already-loaded model `{}` (no switch)",
-            active.get(&model.base_url).expect("matched entry has an active model")
-        ),
-        loaded: model.model.clone(),
+    // No active model to reuse: fall back to the default provider's default
+    // model when it is configured, otherwise defer to the user.
+    match config.default_model() {
+        Some(default) => Select::Default {
+            model_id: default.id.clone(),
+            reason: format!(
+                "no active model detected; using default model `{}` for `{}`",
+                default.id, default_provider
+            ),
+            loaded: default.model.clone(),
+        },
+        None => Select::NeedsSelection,
     }
 }
 

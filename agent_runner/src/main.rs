@@ -140,9 +140,11 @@ fn list_models(config_path: &Path) -> std::result::Result<ExitCode, String> {
         println!("  (none)");
     } else {
         for model in &config.models {
+            let marker = if model.is_default { "*" } else { " " };
+            let id = format!("{marker}{}", agent_runner::error::terminal_text(&model.id));
             println!(
                 "  {:<12} {:<12} {}  {}  (deadline {}s)",
-                agent_runner::error::terminal_text(&model.id),
+                id,
                 match model.provider {
                     agent_runner::ModelProvider::LlamaServer => "llama-server",
                     agent_runner::ModelProvider::Ollama => "ollama",
@@ -153,9 +155,14 @@ fn list_models(config_path: &Path) -> std::result::Result<ExitCode, String> {
             );
         }
     }
+    let default_label = match config.default_model() {
+        Some(model) => format!("{} ({}'s default model)", model.id, config.default_provider),
+        None => format!("(none — {} has no is_default model)", config.default_provider),
+    };
     println!(
-        "\ndefault model: {}",
-        agent_runner::error::terminal_text(&config.default_model)
+        "\ndefault provider: {}\nfall-back model: {}",
+        config.default_provider,
+        agent_runner::error::terminal_text(&default_label)
     );
     Ok(ExitCode::SUCCESS)
 }

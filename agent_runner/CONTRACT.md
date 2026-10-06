@@ -169,48 +169,54 @@ sandbox request it produces. Private algorithm choices live in `DESIGN.md`.
 
 ## Model selection and activation
 
-`agent-runner` MUST prefer a model that the provider already has loaded over a
-statically configured one, so an already-active model is used without paying a
-model load/switch. When no explicit model is selected for the session, the
-active model (if any) MUST take precedence over `default_model`. The active
-model is discovered by a bounded, read-only, loopback-only probe of each
-configured provider (Ollama `GET /api/ps` for the loaded model and serving
-context; llama-server model-qualified `GET /props?model=…`), reusing the
-existing discovery bounds (5 s, 1 MiB) and MUST NOT send inference, modify the
-provider, or widen endpoint authority. A probe failure (provider down,
-malformed, or no model loaded) MUST NOT fail startup and MUST fall through to
-the next rule. The selection precedence MUST be:
+`agent-runner` MUST prefer a model that the default provider already has loaded
+over a statically configured one, so an already-active model is used without
+paying a model load/switch. The active model is discovered by a bounded,
+read-only, loopback-only probe of each configured provider endpoint (llama-server
+unqualified `GET /props` for the loaded model; Ollama `GET /api/ps` for the loaded
+model and serving context), reusing the existing discovery bounds (5 s, 1 MiB) and
+MUST NOT send inference, modify the provider, or widen endpoint authority. A probe
+failure (provider down, malformed, or no model loaded) MUST NOT fail startup and
+MUST fall through to the next rule. The selection precedence MUST be:
 
 1. An explicit selection wins and is never overridden by provider state: the
    `--model` CLI flag (which `kvist prompt` passes for the role's profile) and
    the in-TUI Tab model selector.
-2. Otherwise, if a probe finds a loaded model whose provider-facing name
-   matches a configured entry's `model` field (matched by provider model name,
-   not the user-facing `id`), that entry MUST be selected, and the session MUST
-   announce that it uses the already-active model with no switch. When several
-   providers are configured and more than one reports a loaded match, the
-   result is ambiguous and MUST fall to rule 4 (ask, or fail headless).
-3. Otherwise, if exactly one model is configured, it MUST be auto-selected as a
-   convenience. This is the only case where the session starts without an
-   explicit choice and without an active-provider match.
-4. Otherwise (no active match and several configured models), the session MUST
-   not silently guess:
+2. Otherwise, the default provider (`default_provider`) is the provider the
+   session resolves. If a probe finds a loaded model on a default-provider
+   endpoint whose provider-facing name matches a configured entry's `model` field
+   (matched by provider model name, not the user-facing `id`), that entry MUST be
+   selected, and the session MUST announce that it uses the already-active model
+   with no switch.
+3. Otherwise, if exactly one model is configured for the default provider, it
+   MUST be auto-selected (it is reused with no switch when already loaded, and
+   loaded when not).
+4. Otherwise, the default provider's default model (`is_default = true` on one of
+   its `[[models]]` entries) MUST be used as a fall-back. The session MUST
+   announce that the default model is loaded; the provider may have to load it,
+   and the session MUST wait for the (re)loaded model to become available without
+   treating the in-progress load/switch as a timeout error.
+5. Otherwise (no active match and several default-provider models with no single
+   `is_default` model), the session MUST not silently guess:
    - Interactive (TUI): start with no model selected; the Tab selector and the
-     existing prompt-hold machinery apply, so no bootstrap or model load occurs
-     until the user selects a model and submits.
+     prompt-hold machinery apply, so the user selects a model and the prompt is
+     dispatched when the (re)loaded model is ready. If a model load/switch fails
+     while a prompt is held, the prompt is replayed to a fresh bootstrap (a
+     bounded number of attempts) and is never lost.
    - Headless: fail fast before provider inference with an actionable diagnostic
-     that lists the configured ids, names any active provider model found, and
-     suggests `--model` and the `[[models]]` entry to add.
+     that lists the configured default-provider ids, names any active provider
+     model found, and suggests `--model` and marking one entry `is_default`.
 
-`default_model` is a required, last-resort configuration field. It is used only
-when rules 1–3 resolve nothing (for example, several configured models with no
-active-provider match in a mode that does not defer to the user), and MUST NOT
-override an active model, an explicit selection, or a single configured model.
-When the provider has an active model that is not present in `[[models]]`, the
-tool SHOULD offer to configure it: it MAY print a ready-to-paste `[[models]]`
-entry (provider, base_url, provider model name, and sane defaults) derived the
-same way as `--import-kvist`, and MUST NOT modify the configuration file
-automatically.
+`default_provider` is a required configuration field naming the provider the
+session falls back to; it MUST name at least one configured model. At most one
+`[[models]]` entry per provider may be marked `is_default`. The per-provider
+default model is used only when the default provider reports no active model, and
+MUST NOT override an active model, an explicit selection, or a single
+default-provider model. When the provider has an active model that is not present
+in `[[models]]`, the tool SHOULD offer to configure it: it MAY print a
+ready-to-paste `[[models]]` entry (provider, base_url, provider model name, and
+sane defaults) derived the same way as `--import-kvist`, and MUST NOT modify the
+configuration file automatically.
 
 ## Provided interfaces
 
@@ -231,7 +237,7 @@ underlying source when printing; formatting failures degrade gracefully.
 struct Config {
     schema_version: u32,                       // required, == 1
     working_directory: PathBuf,                // required, absolute, exists
-    default_model: String,                     // required, names a model in `models`; last-resort fallback, see "Model selection and activation"
+    default_provider: ModelProvider,           // required, names the provider the session falls back to; see "Model selection and activation"
     default_thinking_effort: ReasoningEffort,  // required
     models: Vec<Model>,                        // required, >= 1, unique ids
     tool_policy: ToolPolicy,                   // required
@@ -760,9 +766,10 @@ Result<Option<Compaction>>` is the authoritative pre-I/O path. It estimates
 ```toml
 schema_version = 1
 working_directory = "/abs/path/optional"
-# Last-resort model when no explicit selection, no active provider model, and no
-# single configured model resolve the session's model. See "Model selection and activation".
-default_model = "local"
+# Provider the session falls back to: its active model is reused with no switch;
+# when it has none, its default model (is_default = true) is loaded. See
+# "Model selection and activation".
+default_provider = "llama-server"
 default_thinking_effort = "medium"
 
 [[models]]
@@ -770,6 +777,7 @@ id = "local"
 provider = "llama-server"
 base_url = "http://127.0.0.1:9931"
 model = "qwen2.5-14b"
+is_default = true
 deadline_secs = 300
 cadence_timeout_secs = 30
 
@@ -945,16 +953,20 @@ Options:
   with the held prompt. The per-turn deadline bounds the whole turn, including
   the model load/switch (see Data and schemas), not a short fixed probe.
 - Model selection and activation (see "Model selection and activation") apply
-  before any bootstrap: an explicit `--model`/Tab selection and a
-  single-configured-model convenience always select their model; otherwise a
-  bounded read-only provider probe selects an already-loaded model when it
-  matches a configured entry; and only when neither resolves and several models
-  are configured does the TUI start with no model selected (no bootstrap and no
-  model load until the user selects and submits) and headless fails fast with an
-  actionable diagnostic. `default_model` is a last-resort fallback that MUST NOT
-  override an active model, an explicit selection, or a single configured
-  model. When a matched provider model is not configured, the tool offers a
-  ready-to-paste `[[models]]` entry and never writes the configuration file.
+  before any bootstrap: an explicit `--model`/Tab selection always selects its
+  model; the default provider's already-loaded model is reused with no switch;
+  a single default-provider model auto-selects; and the default provider's
+  default model is the fall-back when it reports no active model. Only when
+  none of those resolve (several default-provider models, no active match, no
+  single `is_default` model) does the TUI start with no model selected (no
+  bootstrap and no model load until the user selects and submits) and headless
+  fails fast with an actionable diagnostic. The per-provider default model is a
+  fall-back that MUST NOT override an active model, an explicit selection, or a
+  single default-provider model. When a matched provider model is not
+  configured, the tool offers a ready-to-paste `[[models]]` entry and never
+  writes the configuration file. A bootstrap failure is non-fatal and a prompt
+  held for it is replayed to a fresh bootstrap (a bounded number of attempts)
+  so the prompt is never lost.
 - The ESC menu closes on selection: choosing a history item transitions to the
   replay overlay, and choosing "New session" (Enter or `n`) starts a fresh
   session. `Ctrl+N` starts a new session from anywhere; `Ctrl+P` steps

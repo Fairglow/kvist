@@ -5,7 +5,12 @@ schema_version = 1
 # current directory when omitted. Must be absolute and exist.
 working_directory = "/absolute/path/to/your/project"
 
-default_model = "local"
+# The provider to query for the currently active model. When the provider has
+# an active model that is already loaded, it is reused with no switch. When it
+# has none, the provider's default model (is_default = true) is used as the
+# fall-back; if there is more than one model for that provider and no active
+# model, you are asked to pick one.
+default_provider = "llama-server"
 default_thinking_effort = "medium"
 
 # UI theme: `dark` (default) keeps the classic black panels; `light` is the
@@ -20,6 +25,9 @@ id = "local"
 provider = "llama-server"
 base_url = "http://127.0.0.1:9931"
 model = "qwen2.5-14b"
+# Fall-back model for the default provider, used only when no model is active.
+# At most one [[models]] entry per provider may be marked default.
+is_default = true
 # By default discover the selected model's serving context (not training size).
 # Configure this if runtime metadata is absent. CLI overrides take precedence.
 # context_limit = 131072

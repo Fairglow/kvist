@@ -113,19 +113,21 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         return ExitCode::from(2);
     }
 
-    // Active-model-first selection: an explicit --model wins, then the provider's
-    // already-loaded model (matched by provider model name) so no load/switch is
-    // paid, then a single configured model, then defer (no model selected — the
-    // user picks one with Tab). The default_model is the headless last resort and
-    // never overrides an active model or an explicit selection. The active probe
-    // is bounded, read-only, and loopback-only; a down provider yields no entry
-    // and falls through.
+    // Active-model-first selection: an explicit --model wins, then the default
+    // provider's already-loaded model (matched by provider model name) so no
+    // load/switch is paid, then a single default-provider model, then the
+    // default provider's default model as a fall-back, then defer (no model
+    // selected — the user picks one with Tab). The active probe is bounded,
+    // read-only, and loopback-only; a down provider yields no entry and falls
+    // through.
     let active = crate::config::probe_active_models(&config);
-    let selection = crate::config::select_active_model(&config, overrides.model.as_deref(), &active);
+    let selection =
+        crate::config::select_active_model(&config, overrides.model.as_deref(), &active);
     let selected_model_id = match &selection {
         crate::config::Select::Explicit(id) => Some(id.as_str()),
         crate::config::Select::Active { model_id, .. } => Some(model_id.as_str()),
         crate::config::Select::Single { model_id } => Some(model_id.as_str()),
+        crate::config::Select::Default { model_id, .. } => Some(model_id.as_str()),
         crate::config::Select::NeedsSelection => None,
     };
     let selected_model: Option<Model> = match selected_model_id {
@@ -133,8 +135,9 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
             Some(model) => Some(model.clone()),
             None => {
                 // A selected id that is not a configured model is a hard
-                // configuration error (an active/single id always comes from the
-                // config, so this is reachable only for an explicit --model).
+                // configuration error (an active/single/default id always comes
+                // from the config, so this is reachable only for an explicit
+                // --model).
                 let available = config
                     .models
                     .iter()
@@ -155,9 +158,14 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
     };
 
     if selected_model.is_some() {
-        // Announce an already-active model so the user knows no switch was paid.
-        if let crate::config::Select::Active { reason, .. } = &selection {
-            eprintln!("{}", crate::error::terminal_text(reason));
+        // Announce a resolved model so the user knows what will run and whether
+        // an already-active model was reused (no switch) or a default is loaded.
+        match &selection {
+            crate::config::Select::Active { reason, .. }
+            | crate::config::Select::Default { reason, .. } => {
+                eprintln!("{}", crate::error::terminal_text(reason))
+            }
+            _ => {}
         }
     }
     let app_model_label = selected_model
@@ -546,6 +554,13 @@ fn run_ui<M: std::io::Write>(
     // after a model/effort change or a new session); dispatched to the worker
     // as soon as it is installed, so a prompt never waits on the UI.
     let mut pending_submit: Option<String> = None;
+    // Automatic prompt replay: when a bootstrap (model load/switch) fails and a
+    // prompt is held for it, the bootstrap is retried (up to this many times) so
+    // the prompt is dispatched to a fresh worker once the model becomes ready —
+    // the prompt is NOT lost and needs no manual resubmit. The model selection
+    // is unchanged: a load/switch is retried, not a different model chosen.
+    let mut replay_attempts: u32 = 0;
+    const MAX_PROMPT_REPLAYS: u32 = 3;
 
     // Dispatch any prefilled, auto-started prompt (for example one supplied by
     // `kvist prompt`) through the same hold/send path, and clear the input so
@@ -590,8 +605,40 @@ fn run_ui<M: std::io::Write>(
                     }
                 }
                 Ok(Err(error)) => {
+                    // A failed bootstrap is reported, not fatal: the app stays
+                    // usable. When a prompt is held for the failed worker, the
+                    // bootstrap is replayed with backoff (up to a few attempts)
+                    // so the prompt is dispatched to a fresh worker once the
+                    // model becomes ready — the prompt is NOT lost and does not
+                    // need a manual resubmit. The model selection is unchanged
+                    // (a load/switch is retried, not a different model chosen).
                     *bootstrap = None;
                     app.push_event(crate::session::Event::Failed(error.describe()));
+                    if pending_submit.is_some() {
+                        if let Some(selected) = app.model.clone()
+                            && let Some(model) = builder.config.model(&selected)
+                            && replay_attempts < MAX_PROMPT_REPLAYS
+                        {
+                            replay_attempts += 1;
+                            app.push_event(crate::session::Event::Note(
+                                format!(
+                                    "the model did not become ready in time; replaying the prompt \
+                                     (attempt {replay_attempts}/{MAX_PROMPT_REPLAYS}) — the \
+                                     prompt is dispatched once the model is ready"
+                                ),
+                            ));
+                            if let Ok(receiver) = spawn_bootstrap(builder, model, app.effort) {
+                                *bootstrap = Some(receiver);
+                                app.status = "starting model…".to_owned();
+                            }
+                        } else {
+                            app.push_event(crate::session::Event::Note(
+                                "the model did not become ready in time; the prompt is kept — \
+                                 press Ctrl+Enter to replay it"
+                                    .to_owned(),
+                            ));
+                        }
+                    }
                 }
                 Err(mpsc::TryRecvError::Empty) => {
                     app.status = "starting model…".to_owned();
@@ -626,12 +673,18 @@ fn run_ui<M: std::io::Write>(
                                         old.handle.cancel();
                                         drop(old.prompt_tx);
                                     }
+                                    // A fresh submission gets a full replay budget.
+                                    replay_attempts = 0;
                                     // An in-flight bootstrap may target a stale
                                     // selection; discard it and start fresh.
                                     *bootstrap = None;
                                     let model = builder
                                         .config
-                                        .model(app.model.as_deref().expect("submit requires a selected model"))
+                                        .model(
+                                            app.model
+                                                .as_deref()
+                                                .expect("submit requires a selected model"),
+                                        )
                                         .ok_or_else(|| {
                                             let available = builder
                                                 .config
@@ -644,7 +697,7 @@ fn run_ui<M: std::io::Write>(
                                                 available,
                                             }
                                         })?;
-                                    *bootstrap = Some(spawn_bootstrap(builder, &model, app.effort)?);
+                                    *bootstrap = Some(spawn_bootstrap(builder, model, app.effort)?);
                                     app.status = "starting model…".to_owned();
                                     pending_submit = Some(text);
                                 } else if let Some(current) = worker.as_ref() {
@@ -695,7 +748,7 @@ fn run_ui<M: std::io::Write>(
                                     available,
                                 }
                             })?;
-                            *bootstrap = Some(spawn_bootstrap(builder, &model, app.effort)?);
+                            *bootstrap = Some(spawn_bootstrap(builder, model, app.effort)?);
                             app.status = "starting model…".to_owned();
                         }
                         KeyAction::Quit => {

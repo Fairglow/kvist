@@ -35,10 +35,14 @@ pub const DEFAULT_TTFT_WATCHDOG_TIMEOUT: Duration = Duration::from_secs(45);
 
 /// Serving-capacity discovery is a lightweight metadata read, not a turn. It
 /// is capped well below a full turn deadline so a wedged provider cannot stall
-/// startup, but generously enough for the provider to load or switch to the
-/// selected model first: a large local model can take minutes to load and
-/// prefill before it answers even a bare metadata probe.
-pub const MAX_CAPACITY_DISCOVERY: Duration = Duration::from_secs(60);
+/// startup indefinitely, and is otherwise granted the transport's turn deadline:
+/// the provider may have to load, or switch to, the selected model first, and a
+/// large local model can take several minutes to load and prefill before it
+/// answers even a bare metadata probe. A slow model switch is waited for to
+/// completion (like the slot-allocation and time-to-first-token phases) instead
+/// of timing out, because the model is not yet available rather than failed.
+/// A genuinely wedged provider is still bounded by the per-turn deadline.
+pub const MAX_CAPACITY_DISCOVERY: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Direct bounded HTTP transport for local Ollama and llama-server endpoints.
 #[derive(Debug, Clone)]
@@ -210,9 +214,11 @@ impl DirectModelTransport {
     ///
     /// Missing capacity is distinct from invalid advertised metadata. Discovery
     /// retains the loopback endpoint restriction and a 1-MiB bound, and it is
-    /// capped by the transport's turn deadline (bounded to 60 seconds): the
-    /// provider may have to load, or switch to, the selected model before it
-    /// answers a bare metadata probe, and a large local model can take minutes.
+    /// capped by the transport's turn deadline: the provider may have to load,
+    /// or switch to, the selected model before it answers a bare metadata probe,
+    /// and a large local model can take several minutes. A slow switch is waited
+    /// for to completion instead of timing out; a genuinely wedged provider is
+    /// still bounded by the per-turn deadline.
     pub fn context_limit(
         &self,
         model: &str,
@@ -295,12 +301,10 @@ impl DirectModelTransport {
             return malformed("active model metadata must be an object");
         }
         match self.provider {
-            LocalModelProvider::LlamaServer => Ok(
-                value
-                    .get("model")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned),
-            ),
+            LocalModelProvider::LlamaServer => Ok(value
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::to_owned)),
             LocalModelProvider::Ollama => {
                 let models = value
                     .get("models")
@@ -313,21 +317,14 @@ impl DirectModelTransport {
                 }
                 Ok(models
                     .iter()
-                    .find_map(|entry| {
-                        entry
-                            .get("name")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned)
-                    })
+                    .find_map(|entry| entry.get("name").and_then(Value::as_str).map(str::to_owned))
                     .or_else(|| {
-                        models
-                            .iter()
-                            .find_map(|entry| {
-                                entry
-                                    .get("model")
-                                    .and_then(Value::as_str)
-                                    .map(str::to_owned)
-                            })
+                        models.iter().find_map(|entry| {
+                            entry
+                                .get("model")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned)
+                        })
                     }))
             }
         }

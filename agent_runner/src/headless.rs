@@ -135,27 +135,67 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
         &workdir,
     )?;
     // Active-model-first selection (headless): an explicit --model wins, then the
-    // provider's already-loaded model (no switch), then a single configured model,
-    // then the last-resort default_model. The active probe is bounded, read-only,
-    // and loopback-only; a down provider yields no entry and falls through.
+    // default provider's already-loaded model (no switch), then a single
+    // default-provider model, then the default provider's default model. The
+    // active probe is bounded, read-only, and loopback-only; a down provider
+    // yields no entry and falls through.
     let active = crate::config::probe_active_models(&config);
-    let selection = crate::config::select_active_model(&config, overrides.model.as_deref(), &active);
+    let selection =
+        crate::config::select_active_model(&config, overrides.model.as_deref(), &active);
     let model_id = match &selection {
         crate::config::Select::Explicit(id) => id.clone(),
-        crate::config::Select::Active { model_id, reason, .. } => {
+        crate::config::Select::Active {
+            model_id, reason, ..
+        } => {
             eprintln!("{}", crate::error::terminal_text(reason));
             model_id.clone()
         }
         crate::config::Select::Single { model_id } => model_id.clone(),
-        // Several configured models and no unambiguous active match: the
-        // last-resort default_model keeps headless working (it is required and
-        // validated to name a configured model).
-        crate::config::Select::NeedsSelection => config.default_model.clone(),
+        crate::config::Select::Default {
+            model_id, reason, ..
+        } => {
+            eprintln!("{}", crate::error::terminal_text(reason));
+            model_id.clone()
+        }
+        // No active match and no single default model to fall back to: headless
+        // cannot ask the user, so it fails fast before provider inference with
+        // an actionable diagnostic.
+        crate::config::Select::NeedsSelection => {
+            let default_models: Vec<String> = config
+                .default_provider_models()
+                .iter()
+                .map(|model| model.id.clone())
+                .collect();
+            let active_note: Vec<String> = active
+                .iter()
+                .map(|(base_url, loaded)| format!("`{loaded}` at {base_url}"))
+                .collect();
+            let mut reason = format!(
+                "no active model and no unambiguous default to fall back to: {} configured \
+                 model(s) for provider `{}` ({})",
+                default_models.len(),
+                config.default_provider,
+                default_models.join(", ")
+            );
+            if !active_note.is_empty() {
+                reason.push_str(&format!(
+                    "; active provider model(s) found: {} — add a [[models]] entry for one",
+                    active_note.join(", ")
+                ));
+            }
+            reason.push_str(
+                "; pass --model <id> to choose one, or mark one of the default provider's \
+                 [[models]] with is_default = true",
+            );
+            return Err(Error::Config { path: None, reason });
+        }
     };
-    let model = config.model(&model_id).ok_or_else(|| Error::ModelNotFound {
-        requested: model_id,
-        available: config.models.iter().map(|model| model.id.clone()).collect(),
-    })?;
+    let model = config
+        .model(&model_id)
+        .ok_or_else(|| Error::ModelNotFound {
+            requested: model_id,
+            available: config.models.iter().map(|model| model.id.clone()).collect(),
+        })?;
     let budgets = model.resolve_budgets(
         overrides.context_limit,
         overrides.response_reserve,

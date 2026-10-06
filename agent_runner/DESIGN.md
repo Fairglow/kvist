@@ -290,14 +290,17 @@ context utilization and a compaction progress bar via `Event::Progress`.
 ### Model selection and activation
 
 The session model is resolved by active-model-first precedence before any
-model load: an explicit `--model` (or the Tab selection) wins and is never
-overridden; then a model the provider already has loaded is selected with no
-switch, matched by provider model name (not the user-facing id) against the
-configured entries; then a single configured model auto-selects; otherwise the
-session defers (interactive) or uses the last-resort `default_model`
-(headless). `default_model` is a required field that is used only when the
-rules above resolve nothing, and never overrides an active model, an explicit
-selection, or a single configured model.
+model load. An explicit `--model` (or the Tab selection) wins and is never
+overridden. The default provider (`default_provider`) is the provider the
+session resolves: its already-loaded model is selected with no switch, matched
+by provider model name (not the user-facing id) against that provider's
+configured entries; a single default-provider model auto-selects; and when the
+provider reports no active model, the provider's default model (the one
+`[[models]]` entry marked `is_default`) is used as a fall-back. When there are
+several default-provider models, no active match, and no single `is_default`
+model, the session defers (interactive: no model selected until the user picks
+one) or fails fast (headless). The per-provider default model never overrides an
+active model, an explicit selection, or a single default-provider model.
 
 The active provider model is discovered by `config::probe_active_models`, a
 bounded, read-only, loopback-only probe of each distinct configured endpoint
@@ -307,20 +310,33 @@ authority; it sends no inference and requests no model switch, so a loaded model
 is read without triggering a load. A down, timed-out, malformed, or empty
 provider yields no entry for that endpoint, and selection falls through to the
 next rule rather than failing startup. When at most one model is configured the
-probe is skipped entirely (rule 3 is independent of active state), so a
-single-model startup performs no provider I/O and keeps its pinned request
+probe is skipped entirely (the single model is independent of active state), so
+a single-model startup performs no provider I/O and keeps its pinned request
 sequence.
 
 `config::select_active_model` returns `Explicit`, `Active` (with an announcement
-reason and the loaded name), `Single`, or `NeedsSelection`. The interactive TUI
-turns `NeedsSelection` into a deferred start: no model is selected, no bootstrap
+reason and the loaded name), `Single`, `Default` (the per-provider fall-back,
+with an announcement), or `NeedsSelection`. The interactive TUI turns
+`NeedsSelection` into a deferred start: no model is selected, no bootstrap
 starts, and the first submit (after the user picks a model with Tab) starts the
-session, so no model load is paid before the user chooses. Headless resolves
-`NeedsSelection` to the last-resort `default_model`, keeping the single-model and
-common multi-model cases working while an unconfigured active model is surfaced
-for the user to add via a ready-to-paste `[[models]]` entry (never written to the
-config file automatically). An already-active selection is announced so the user
-knows no switch occurred.
+session, so no model load is paid before the user chooses. A selected model that
+is not already active is loaded in the background bootstrap; the prompt is held
+and dispatched once the model is ready. If the model load/switch fails while a
+prompt is held, the bootstrap is retried (a bounded number of attempts) and the
+prompt is replayed to the fresh worker, so it is never lost. Headless resolves
+`NeedsSelection` by failing fast before provider inference with an actionable
+diagnostic, while an unconfigured active model is surfaced for the user to add
+via a ready-to-paste `[[models]]` entry (never written to the config file
+automatically). An already-active selection is announced so the user knows no
+switch occurred, and a default-model fall-back is announced so the user knows a
+load is in progress.
+
+A model load/switch is not a timeout error: the bootstrap's serving-capacity
+discovery is granted the transport's full per-turn deadline (not a short probe
+bound), so a slow load is waited for to completion. A prompt submitted while the
+model is loading is held and dispatched when the model becomes ready, and the
+durable session record (journal + transcript) labels the session with the prompt
+before any turn, so a held prompt is not lost from the session log.
 
 ### Tool rendering
 

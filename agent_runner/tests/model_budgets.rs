@@ -6,7 +6,7 @@ fn model(extra: &str) -> (tempfile::TempDir, Config) {
     std::fs::write(
         &path,
         format!(
-            "schema_version=1\nworking_directory={:?}\ndefault_model='test'\n\
+            "schema_version=1\nworking_directory={:?}\ndefault_provider='llama-server'\n\
          [[models]]\nid='test'\nprovider='llama-server'\n\
          base_url='http://127.0.0.1:1'\nmodel='test'\n{extra}",
             dir.path().to_str().unwrap()

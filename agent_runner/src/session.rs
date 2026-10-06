@@ -1296,6 +1296,7 @@ mod tests {
             provider: crate::config::ModelProvider::LlamaServer,
             base_url: "http://127.0.0.1:1".into(),
             model: "test".into(),
+            is_default: false,
             context_limit: None,
             response_reserve: None,
             deadline_secs: 30,

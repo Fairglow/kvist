@@ -63,11 +63,13 @@ The accepted input shape is:
 - `schema_version = 1`;
 - optional `working_directory`, otherwise current directory; a configured
   value must be absolute and an existing directory;
-- `default_model`, matching one of the case-sensitive model IDs;
+- `default_provider` (llama-server or ollama), which MUST name at least one
+  `[[models]]` entry;
 - optional `default_thinking_effort`, default `medium`;
 - one or more `[[models]]` with `id`, `provider`, `model`, optional `base_url`,
-  `context_limit`, `response_reserve`, `deadline_secs`, `max_attempts`,
-  `retry_base_delay_secs`, `retry_max_delay_secs`, `cadence_timeout_secs`;
+  `is_default` (at most one per provider), `context_limit`, `response_reserve`,
+  `deadline_secs`, `max_attempts`, `retry_base_delay_secs`,
+  `retry_max_delay_secs`, `cadence_timeout_secs`;
 - optional `[sandbox]` with `runner` and `backend`;
 - optional `[tool_policy]` with `shell_deny_substrings`,
   `shell_deny_prefixes`, `write_root`;

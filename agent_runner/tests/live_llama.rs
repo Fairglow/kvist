@@ -91,6 +91,7 @@ fn model() -> Model {
             .unwrap_or_else(|_| "http://127.0.0.1:9931".into()),
         model: std::env::var("KVIST_LIVE_LLAMA_MODEL")
             .unwrap_or_else(|_| "Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL".into()),
+        is_default: false,
         deadline_secs: 120,
         context_limit: None,
         response_reserve: None,
