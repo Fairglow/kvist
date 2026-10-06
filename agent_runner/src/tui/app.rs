@@ -16,7 +16,7 @@ use crate::history::{self, SessionEntry};
 use crate::markdown::{render_document_styles, split_cell_chunks};
 use crate::session::Event;
 
-use super::theme::Theme;
+use super::theme::{self, Theme};
 
 pub(super) const REPLAY_HINT: &str = "  esc back · ctrl+home top · ctrl+end bottom";
 
@@ -183,11 +183,13 @@ pub enum Overlay {
     History,
     /// A read-only replay of one past session's transcript.
     Replay,
+    /// The list of available themes, reached from the menu's "Theme" item.
+    ThemePicker,
 }
 
 /// The `Esc` menu actions, in display order, with their single-letter hotkeys.
-pub const MENU_ITEMS: [&str; 3] = ["New session", "Session history", "Quit"];
-pub const MENU_HOTKEYS: [char; 3] = ['n', 'h', 'q'];
+pub const MENU_ITEMS: [&str; 4] = ["New session", "Session history", "Theme", "Quit"];
+pub const MENU_HOTKEYS: [char; 4] = ['n', 'h', 't', 'q'];
 
 /// The interactive application state driven by events and key input.
 pub struct App {
@@ -237,6 +239,15 @@ pub struct App {
     pub replay_title: String,
     /// The scroll offset of the replay transcript.
     pub replay_scroll: usize,
+    /// Every theme name available, the two built-ins plus any discovered in
+    /// `themes_dir`: the menu's theme picker and Ctrl+S cycle through these.
+    pub available_themes: Vec<String>,
+    /// The highlighted index into `available_themes` while the theme picker
+    /// overlay is open.
+    pub theme_selection: usize,
+    /// The themes directory to search for a theme file beyond the two
+    /// built-ins, set once at startup from the resolved configuration path.
+    themes_dir: Option<PathBuf>,
     /// Where to look for past-session transcripts, resolved from overrides.
     log_dir: Option<PathBuf>,
     pub width: u16,
@@ -319,6 +330,9 @@ impl App {
             replay_lines: Vec::new(),
             replay_title: String::new(),
             replay_scroll: 0,
+            available_themes: theme::file::discover(None),
+            theme_selection: 0,
+            themes_dir: None,
             log_dir: None,
             width,
             height,
@@ -341,12 +355,48 @@ impl App {
         app
     }
 
-    /// Switches the UI theme (Ctrl+S) and restyles the surfaces the theme owns:
-    /// the prompt block and every transcript row. Content is unchanged — the
-    /// same lines are simply recoloured, rewrapped reasoning keeps its edge,
-    /// and highlighted code keeps its indentation and patch.
+    /// Sets the themes directory and the full catalog of theme names
+    /// discovered there (plus the two built-ins), once at startup. The
+    /// catalog drives both the Ctrl+S cycle and the menu's theme picker.
+    pub fn set_theme_catalog(&mut self, themes_dir: Option<PathBuf>) {
+        self.available_themes = theme::file::discover(themes_dir.as_deref());
+        self.themes_dir = themes_dir;
+    }
+
+    /// Switches to the next theme in `available_themes` (Ctrl+S) and restyles
+    /// the surfaces the theme owns: the prompt block and every transcript
+    /// row. Content is unchanged — the same lines are simply recoloured,
+    /// rewrapped reasoning keeps its edge, and highlighted code keeps its
+    /// indentation and patch. A theme file that fails to load (edited by hand
+    /// since startup) is reported and left unapplied rather than crashing the
+    /// session.
     pub fn cycle_theme(&mut self) {
-        let theme = self.theme.next();
+        if self.available_themes.is_empty() {
+            return;
+        }
+        let current = self
+            .available_themes
+            .iter()
+            .position(|name| *name == self.theme.name)
+            .unwrap_or(0);
+        let next = (current + 1) % self.available_themes.len();
+        self.select_theme(next);
+    }
+
+    /// Loads and applies `available_themes[index]`, reporting a load failure
+    /// instead of applying a broken theme.
+    fn select_theme(&mut self, index: usize) {
+        let Some(name) = self.available_themes.get(index).cloned() else {
+            return;
+        };
+        match theme::file::load(&name, self.themes_dir.as_deref()) {
+            Ok(theme) => self.apply_theme(theme),
+            Err(reason) => self.note(self.theme.err, &format!("theme `{name}`: {reason}")),
+        }
+    }
+
+    /// Recolours the live UI for `theme`, without touching transcript text.
+    fn apply_theme(&mut self, theme: Theme) {
         self.editor.set_block(prompt_block(&theme));
         for line in &mut self.lines {
             let mut restyled = line.clone();
@@ -354,6 +404,43 @@ impl App {
             *line = restyled;
         }
         self.theme = theme;
+    }
+
+    /// Opens the theme-picker overlay, highlighting the current theme.
+    fn open_theme_picker(&mut self) {
+        self.theme_selection = self
+            .available_themes
+            .iter()
+            .position(|name| *name == self.theme.name)
+            .unwrap_or(0);
+        self.overlay = Overlay::ThemePicker;
+    }
+
+    /// Handles keys while the theme-picker overlay is open.
+    fn handle_theme_picker_key(&mut self, key: KeyEvent) -> KeyAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.overlay = Overlay::Menu;
+                KeyAction::Idle
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.theme_selection = self
+                    .theme_selection
+                    .saturating_add(1)
+                    .min(self.available_themes.len().saturating_sub(1));
+                KeyAction::Idle
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.theme_selection = self.theme_selection.saturating_sub(1);
+                KeyAction::Idle
+            }
+            KeyCode::Enter => {
+                self.select_theme(self.theme_selection);
+                self.overlay = Overlay::None;
+                KeyAction::Idle
+            }
+            _ => KeyAction::Idle,
+        }
     }
 
     /// Stages a prefilled, auto-started prompt for a caller (for example
@@ -745,6 +832,7 @@ impl App {
             Overlay::Menu => return self.handle_menu_key(key),
             Overlay::History => return self.handle_history_key(key),
             Overlay::Replay => return self.handle_replay_key(key),
+            Overlay::ThemePicker => return self.handle_theme_picker_key(key),
             Overlay::None => {}
         }
         if self.show_help {
@@ -1385,8 +1473,10 @@ impl App {
     }
 
     /// Runs the action chosen by the highlighted menu item. Selecting an item
-    /// always leaves the menu: a new session returns to the prompt, the history
-    /// overlay takes over, and quit ends the application.
+    /// always leaves the menu, except the theme picker, which replaces it:
+    /// a new session returns to the prompt, the history overlay takes over,
+    /// the theme picker lists every available theme, and quit ends the
+    /// application.
     fn dispatch_menu(&mut self) -> KeyAction {
         match self.menu_selection {
             0 => {
@@ -1396,6 +1486,10 @@ impl App {
             }
             1 => {
                 self.open_history();
+                KeyAction::Idle
+            }
+            2 => {
+                self.open_theme_picker();
                 KeyAction::Idle
             }
             _ => {
@@ -1423,6 +1517,10 @@ impl App {
             }
             KeyCode::Char('h') => {
                 self.open_history();
+                KeyAction::Idle
+            }
+            KeyCode::Char('t') => {
+                self.open_theme_picker();
                 KeyAction::Idle
             }
             KeyCode::Down | KeyCode::Char('j') => {
@@ -1770,6 +1868,9 @@ fn restyle_row(line: &mut ScreenLine, theme: &Theme) {
 /// gains a line of height), with the theme's colours.
 fn prompt_block(theme: &Theme) -> ratatui::widgets::Block<'static> {
     ratatui::widgets::Block::default()
+        .style(ratatui::style::Style::default().bg(theme.panel_bg).fg(
+            theme.prompt.fg.unwrap_or_default(),
+        ))
         .borders(ratatui::widgets::Borders::TOP)
         .border_style(ratatui::style::Style::default().fg(theme.panel_border))
         .title(Span::styled(
@@ -3576,11 +3677,11 @@ mod tests {
     fn menu_enter_on_quit_selection_quits() {
         let mut app = app();
         app.open_menu();
-        // Move to the Quit action (index 2) and activate with Enter.
-        for _ in 0..2 {
+        // Move to the Quit action (the last item) and activate with Enter.
+        for _ in 0..MENU_ITEMS.len() - 1 {
             app.on_key(ch(KeyCode::Down));
         }
-        assert_eq!(app.menu_selection, 2);
+        assert_eq!(app.menu_selection, MENU_ITEMS.len() - 1);
         app.on_key(ch(KeyCode::Enter));
         assert!(app.should_quit);
     }

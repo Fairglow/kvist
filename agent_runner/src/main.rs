@@ -66,19 +66,15 @@ fn run() -> agent_runner::Result<ExitCode> {
 
     // The UI theme: the `--theme` flag overrides the configuration's `theme`
     // key. Unknown names fail here with the accepted list, so a typo in the
-    // flag is caught before the terminal takes over.
+    // flag is caught before the terminal takes over. Looks in the themes
+    // directory next to the resolved configuration file first, so a custom
+    // theme there is selectable by name like a built-in.
+    let themes_dir = agent_runner::tui::theme_files::themes_dir_for_config(&config_path);
     let theme = match &cli.theme {
-        Some(name) => {
-            Some(
-                agent_runner::tui::Theme::by_name(name).ok_or_else(|| Error::Config {
-                    path: None,
-                    reason: format!(
-                        "unknown theme `{name}`; expected one of: {}",
-                        agent_runner::tui::THEME_NAMES.join(", ")
-                    ),
-                })?,
-            )
-        }
+        Some(name) => Some(
+            agent_runner::tui::theme_files::load(name, themes_dir.as_deref())
+                .map_err(|reason| Error::Config { path: None, reason })?,
+        ),
         None => None,
     };
 

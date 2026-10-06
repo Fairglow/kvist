@@ -16,7 +16,17 @@ default_thinking_effort = "medium"
 # UI theme: `dark` (default) keeps the classic black panels; `light` is the
 # built-in alternative for light terminals. Both give reasoning a left edge and
 # tint, and highlighted code an indentation plus a patch. The --theme flag
-# overrides this per run, and Ctrl+S cycles themes live.
+# overrides this per run, the menu's "Theme" item opens a picker of every
+# discovered theme, and Ctrl+S cycles through all of them live.
+#
+# Themes are plain TOML files, not compiled into the binary, so you can add or
+# edit one without rebuilding. Built-in `dark`/`light` are embedded as a
+# fallback; dropping a same-named file in a `themes/` directory next to this
+# config file overrides it, and any other `<name>.toml` there adds a new
+# selectable theme. Every colour may be written as a CSS Color Module Level 4
+# name (e.g. "midnightblue") or numeric RGB (e.g. "#1a1b26", "rgb(26,27,38)"),
+# interchangeably. See `themes/dark.toml` / `themes/light.toml` in the
+# agent-runner source for the full schema and inline documentation.
 theme = "dark"
 
 # Models selectable in the UI with -m/--model.

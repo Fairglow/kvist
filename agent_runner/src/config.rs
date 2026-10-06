@@ -717,16 +717,17 @@ impl Config {
             }
         }
 
-        let theme = match raw.theme.as_deref() {
-            None => crate::tui::Theme::default(),
-            Some(name) => crate::tui::Theme::by_name(name).ok_or_else(|| Error::Config {
-                path: Some(path.to_string_lossy().into_owned()),
-                reason: format!(
-                    "theme `{name}` is not recognized; expected one of: {}",
-                    crate::tui::THEME_NAMES.join(", ")
-                ),
-            })?,
-        };
+        let themes_dir = crate::tui::theme_files::themes_dir_for_config(path);
+        let theme =
+            match raw.theme.as_deref() {
+                None => crate::tui::Theme::default(),
+                Some(name) => crate::tui::theme_files::load(name, themes_dir.as_deref()).map_err(
+                    |reason| Error::Config {
+                        path: Some(path.to_string_lossy().into_owned()),
+                        reason,
+                    },
+                )?,
+            };
 
         Ok(Config {
             schema_version: SCHEMA_VERSION,

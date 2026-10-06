@@ -66,6 +66,22 @@ fn panel_top_edge(
 /// Renders one frame of the application.
 pub fn render(f: &mut ratatui::Frame, app: &App) {
     let area = f.area();
+    // Paint the whole frame with the theme's panel background and plain-text
+    // foreground before anything else draws. Without this, any cell no later
+    // widget happens to style (a short menu row, the gap below the last
+    // transcript line, the prompt box's own background) keeps ratatui's
+    // `Color::Reset`, which the terminal renders in *its own* default colors
+    // — commonly a dark gray, not the theme's black — rather than the
+    // theme's explicit background. One base fill guarantees every cell has an
+    // explicit, theme-chosen color.
+    f.render_widget(
+        Block::default().style(
+            Style::default()
+                .bg(app.theme.panel_bg)
+                .fg(app.theme.menu_plain.fg.unwrap_or_default()),
+        ),
+        area,
+    );
     let vertical = ratatui::layout::Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -87,6 +103,7 @@ pub fn render(f: &mut ratatui::Frame, app: &App) {
         (false, Overlay::History) => render_history(f, app, transcript_area),
         (false, Overlay::Replay) => render_replay(f, app, transcript_area),
         (false, Overlay::Menu) => render_menu(f, app, transcript_area),
+        (false, Overlay::ThemePicker) => render_theme_picker(f, app, transcript_area),
         (false, Overlay::None) => render_transcript(f, app, transcript_area),
     }
     render_input(f, app, input_area);
@@ -249,8 +266,9 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from("  Ctrl+Home / Ctrl+End jump to the beginning / end (also in replay)"),
         Line::from("  Ctrl+L           clear the transcript"),
         Line::from("  Ctrl+T           collapse/reveal reasoning in the transcript"),
-        Line::from("  Ctrl+S           cycle the UI theme (dark / light)"),
-        Line::from("  Ctrl+H / Esc     toggle this help"),
+        Line::from("  Ctrl+S           cycle through all available UI themes"),
+        Line::from("  Esc              open the menu (New session / History / Theme / Quit)"),
+        Line::from("  Ctrl+H           toggle this help"),
         Line::from(""),
         Line::from("  The top bar shows model, thinking effort, and status."),
         Line::from(""),
@@ -424,6 +442,57 @@ fn render_history(f: &mut ratatui::Frame, app: &App, area: Rect) {
         usize::from(inner_width),
     );
     f.render_widget(&edge, Rect::new(area.left(), area.top(), inner_width, 1));
+}
+
+/// The theme-picker overlay, reached from the menu's "Theme" item: every
+/// theme name the app discovered, highlighting the one in effect. Enter
+/// applies the highlighted theme and returns to the prompt; Esc backs out to
+/// the menu without changing anything.
+fn render_theme_picker(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(" themes ", theme.title)),
+        Line::from(""),
+        Line::from("  up/down or j/k select · enter apply · esc back"),
+        Line::from(""),
+    ];
+    for (index, name) in app.available_themes.iter().enumerate() {
+        let selected = index == app.theme_selection;
+        let style = if selected {
+            theme.menu_selected
+        } else {
+            theme.menu_plain
+        };
+        let marker = if selected { "> " } else { "  " };
+        let current = if *name == theme.name {
+            "  (current)"
+        } else {
+            ""
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  {marker}{name}{current}"),
+            style,
+        )));
+    }
+    let block = Block::default()
+        .borders(Borders::TOP)
+        .border_style(Style::default().fg(theme.panel_border))
+        .title(Span::styled(" themes", theme.title));
+    let paragraph = Paragraph::new(Text::from(lines))
+        .block(block)
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: false });
+    f.render_widget(paragraph, area);
+    let edge = panel_top_edge(
+        " themes".to_owned(),
+        theme.title,
+        Style::default().fg(theme.panel_border),
+        usize::from(area.width.max(1)),
+    );
+    f.render_widget(
+        &edge,
+        Rect::new(area.left(), area.top(), area.width.max(1), 1),
+    );
 }
 
 /// A read-only replay of one past session's transcript. Esc returns to the
@@ -965,5 +1034,40 @@ mod tests {
             Some(app.theme.panel_bg),
             "ordinary output carries the panel background"
         );
+    }
+
+    /// Regression test for the "hidden background" bug: every cell in every
+    /// view must carry an explicit theme background rather than falling
+    /// through to `Color::Reset`, which lets the terminal's own ambient
+    /// default color leak through. The full-frame base fill at the top of
+    /// `render()` is what guarantees this for panels that never set their
+    /// own `.bg(...)` (menu, help, history, replay, stats, header, prompt).
+    #[test]
+    fn every_cell_in_every_overlay_carries_an_explicit_background() {
+        for overlay in [
+            Overlay::None,
+            Overlay::Menu,
+            Overlay::History,
+            Overlay::Replay,
+            Overlay::ThemePicker,
+        ] {
+            let mut app = app_with_row(60, 20);
+            app.overlay = overlay;
+            if overlay == Overlay::ThemePicker {
+                app.set_theme_catalog(None);
+            }
+            let backend = draw(&app);
+            let buffer = backend.buffer();
+            for y in 0..app.height {
+                for x in 0..app.width {
+                    let bg = buffer.cell((x, y)).and_then(|cell| cell.style().bg);
+                    assert!(
+                        bg.is_some(),
+                        "cell ({x}, {y}) under overlay {overlay:?} has no explicit \
+                         background and would leak the terminal's default color"
+                    );
+                }
+            }
+        }
     }
 }

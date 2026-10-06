@@ -15,6 +15,7 @@ dependencies = [
  "agent-runtime",
  "clap",
  "crossterm",
+ "csscolorparser",
  "hex",
  "kvist-sandbox-runner",
  "nix 0.31.3",

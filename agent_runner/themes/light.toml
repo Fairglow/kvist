@@ -1,0 +1,76 @@
+# agent-runner UI theme: "light" (the built-in light alternative).
+#
+# See dark.toml for the full format description: colors are CSS Color
+# Module Level 4 named colors or RGB hex values, used interchangeably, and
+# every background-bearing surface sets `bg` explicitly.
+
+[title]
+fg = "#00468c"
+bold = true
+
+[colors]
+dim = "#6c707a"
+ok = "#006e00"
+warn = "#8c5a00"
+err = "#aa0000"
+info = "#0046a0"
+accent = "#005a6e"
+model = "#006e00"
+model_active = "#8c5a00"
+spinner = "#8c008c"
+stats = "#006e00"
+
+[panel]
+bg = "white"
+border = "darkgray"
+
+[reasoning]
+fg = "#5c5c68"
+bg = "#ece9f0"
+dim = true
+
+[reasoning_placeholder]
+fg = "#6c707a"
+
+[prompt]
+fg = "#141646"
+bold = true
+
+[scrollbar]
+fg = "#82848c"
+bg = "white"
+
+[menu.selected]
+fg = "#8c5a00"
+bg = "white"
+bold = true
+
+[menu.plain]
+fg = "#181a22"
+bg = "white"
+
+[markdown]
+paragraph = { fg = "#181a22" }
+heading = [
+    { fg = "#aa0000" },
+    { fg = "#8c5a00" },
+    { fg = "#006e00" },
+    { fg = "#005a6e" },
+    { fg = "#1414a0" },
+    { fg = "#780078" },
+]
+code_inline = { fg = "#82005a", bg = "#ececf4" }
+code_bg = { bg = "#ececf4" }
+code_label = { fg = "#6c707a" }
+code_gutter = { fg = "#82848c" }
+quote = { fg = "#5c606a" }
+quote_gutter = { fg = "#82848c" }
+link = { fg = "#003ca0", bold = true }
+link_url = { fg = "#6c707a" }
+html = { fg = "#6c707a" }
+rule = { fg = "#82848c" }
+list_bullet = { fg = "#6c707a" }
+task_open = { fg = "#5c606a" }
+task_closed = { fg = "#006e00" }
+table_header = { fg = "#003ca0", bold = true }
+table_sep = { fg = "#82848c" }

@@ -601,16 +601,50 @@ encodes the current window (content length, viewport, offset) into the full
 transcript, so it adapts to both scrolling and terminal resizes. Resized rows
 keep their kind and background.
 
-Theming lives in `tui::theme`: one `Theme` table per built-in theme supplies
-every colour the render layer and each transcript row reads (panels, edges,
-reasoning, prompt, notes, stats, scrollbar, menu, and the full
-`MarkdownStyles` table, including the code patch). The configuration's
-`theme` key selects `dark` (default) or `light` — unknown names fail at load —
-the CLI `--theme` flag overrides it per run, and Ctrl+S cycles the live theme:
-existing rows are restyled in place (prompt rows take the prompt style,
-reasoning rows are rebuilt with the edge and tint, everything else gains the
-panel background) while text, Markdown spans, and code highlights are left
-untouched.
+Theming lives in `tui::theme`: a `Theme` struct supplies every colour the
+render layer and each transcript row reads (panels, edges, reasoning, prompt,
+notes, stats, scrollbar, menu, and the full `MarkdownStyles` table, including
+the code patch). Themes are external, user-editable TOML files, not compiled
+Rust — no rebuild is needed to add or change one. `tui::theme::file` owns the
+schema (`ThemeSpec`): every colour is an explicit string parsed by
+`tui::theme::color` through the `csscolorparser` crate, so a value may be a
+CSS Color Module Level 4 name (e.g. `"midnightblue"`) or numeric RGB
+(`"#1a1b26"`, `rgb(26, 27, 38)`) interchangeably, and is always resolved to a
+fixed truecolor `Color::Rgb`, never a terminal-palette-dependent ANSI name.
+Loading validates that every colour is fully opaque and that each style's
+foreground differs from its background. Surfaces that paint their own
+widget-level background — `panel`, `reasoning`, `scrollbar`,
+`menu.selected`/`menu.plain`, and the Markdown code patch — *require* an
+explicit `bg` in the file; inline accents (dim, ok, warn, err, info, accent,
+model, spinner, stats, …) are foreground-only because they are always drawn
+over one of those already-explicit surfaces.
+
+The two built-ins, `dark` and `light`, live at `agent_runner/themes/*.toml`
+and are embedded into the binary (`include_str!`) as the fallback, loaded
+through the exact same parser as any user file. A `themes/` directory next to
+the resolved `config.toml` (see `tui::theme::file::themes_dir_for_config`) is
+discovered at startup; a file there named `dark.toml` or `light.toml`
+overrides the matching built-in, and any other `<name>.toml` adds a selectable
+theme — no rebuild required. The configuration's `theme` key selects the
+theme by name (default `dark`) — an unknown name fails at load — the CLI
+`--theme` flag overrides it per run, the menu's "Theme" item opens a picker
+listing every discovered theme, and Ctrl+S cycles through all of them in
+discovery order: existing rows are restyled in place (prompt rows take the
+prompt style, reasoning rows are rebuilt with the edge and tint, everything
+else gains the panel background) while text, Markdown spans, and code
+highlights are left untouched.
+
+Every rendered frame starts with a full-frame base fill — a borderless block
+styled with the theme's panel background and foreground, drawn before any
+panel or widget — so no cell can ever fall through to ratatui's
+`Color::Reset` and inherit the terminal's own ambient default colour. Earlier
+versions left several panels (menu, help, history, replay, stats, header,
+prompt, scrollbar) without an explicit background, which is why those surfaces
+could render as the terminal's default gray instead of the theme's actual
+black; the base fill plus fully-resolved truecolor values close that gap for
+good, and a regression test (`every_cell_in_every_overlay_carries_an_explicit_background`
+in `tui::render::tests`) asserts every cell in every overlay carries an
+explicit background.
 
 Transcript text is pre-wrapped to the panel's inner width (the full terminal
 width minus the top edge's column) so no line extends past the visible

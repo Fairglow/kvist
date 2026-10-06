@@ -4,6 +4,7 @@ mod app;
 mod render;
 mod theme;
 
+pub use theme::file as theme_files;
 pub use theme::{THEME_NAMES, Theme};
 
 use std::io::IsTerminal;
@@ -307,6 +308,10 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         .theme
         .clone()
         .unwrap_or_else(|| config.theme.clone());
+    let themes_dir = overrides
+        .config_path
+        .as_deref()
+        .and_then(theme_files::themes_dir_for_config);
     let mut app = App::new(
         &model_ids,
         app_model_label.as_deref(),
@@ -316,6 +321,7 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         height,
         theme,
     );
+    app.set_theme_catalog(themes_dir);
     for note in &builder.resource_notes {
         app.push_event(crate::session::Event::Note(note.clone()));
     }

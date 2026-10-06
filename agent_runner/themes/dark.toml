@@ -1,0 +1,90 @@
+# agent-runner UI theme: "dark" (the built-in default).
+#
+# Every color below is either a CSS Color Module Level 4 named color (see
+# https://www.w3.org/TR/css-color-4/#named-colors — e.g. "black", "tomato",
+# "rebeccapurple") or an RGB hex value ("#1a1a2e"), used interchangeably
+# anywhere a color is expected. Colors are always fully opaque truecolor
+# (24-bit) values: the loader resolves names to fixed RGB, so a color always
+# looks the same regardless of the terminal's own color palette.
+#
+# Every surface that paints a background (`panel`, `reasoning`, `scrollbar`,
+# `menu.selected`, `menu.plain`, and the markdown code patches) sets `bg`
+# explicitly here. Nothing is left to the terminal's default background, so
+# no "hidden" color can show through.
+#
+# A `[section]` with `fg`/`bg` may also set `bold`, `dim`, or `italic` (all
+# default to `false`). This file is data, not code: edit it and restart
+# agent-runner (no rebuild) to see the change, or copy it to add your own
+# theme — see the "themes" entry in `agent-runner --help` / the in-app help
+# overlay for where agent-runner looks for theme files.
+
+[title]
+fg = "cyan"
+bold = true
+
+[colors]
+dim = "dimgray"
+ok = "limegreen"
+warn = "yellow"
+err = "red"
+info = "dodgerblue"
+accent = "cyan"
+model = "limegreen"
+model_active = "yellow"
+spinner = "magenta"
+stats = "limegreen"
+
+[panel]
+bg = "black"
+border = "dimgray"
+
+[reasoning]
+fg = "gray"
+bg = "#14101e"
+dim = true
+
+[reasoning_placeholder]
+fg = "dimgray"
+
+[prompt]
+fg = "white"
+bold = true
+
+[scrollbar]
+fg = "dimgray"
+bg = "black"
+
+[menu.selected]
+fg = "yellow"
+bg = "black"
+bold = true
+
+[menu.plain]
+fg = "white"
+bg = "black"
+
+[markdown]
+paragraph = { fg = "white" }
+heading = [
+    { fg = "red" },
+    { fg = "yellow" },
+    { fg = "limegreen" },
+    { fg = "cyan" },
+    { fg = "dodgerblue" },
+    { fg = "magenta" },
+]
+code_inline = { fg = "#ded6d0", bg = "#14141c" }
+code_bg = { bg = "#14141c" }
+code_label = { fg = "dimgray", dim = true }
+code_gutter = { fg = "gray" }
+quote = { fg = "gray" }
+quote_gutter = { fg = "dimgray" }
+link = { fg = "cyan", bold = true }
+link_url = { fg = "dimgray" }
+html = { fg = "gray" }
+rule = { fg = "dimgray" }
+list_bullet = { fg = "dimgray" }
+task_open = { fg = "gray" }
+task_closed = { fg = "limegreen" }
+table_header = { fg = "cyan", bold = true }
+table_sep = { fg = "dimgray" }

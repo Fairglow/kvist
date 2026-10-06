@@ -48,10 +48,13 @@ complete, commented example. Key points:
 
 ## Theming
 
-The terminal UI is themed by a single colour table (`tui::theme`): one `Theme`
-per palette supplies every surface the shell draws — panels, edges, notes,
-stats, scrollbar, menus, and the Markdown style table (headings, inline code,
-code blocks, tables). Two built-in themes ship:
+The terminal UI is themed by a single colour table (`tui::theme`): a `Theme`
+supplies every surface the shell draws — panels, edges, notes, stats,
+scrollbar, menus, and the Markdown style table (headings, inline code, code
+blocks, tables).
+
+Themes are **plain TOML files, not compiled into the binary**, so you can add
+or edit one without rebuilding. Two built-ins ship, embedded as a fallback:
 
 - **`dark`** (default): black panels with the standard terminal background for
   all output, a muted warm-gray tint for reasoning, and a dark patch under
@@ -59,11 +62,24 @@ code blocks, tables). Two built-in themes ship:
 - **`light`**: white panels with the same structural cues recoloured for a
   light terminal, keeping the same contrast structure.
 
-Select a theme in the configuration with `theme = "dark"` or
-`theme = "light"` (unknown names fail at load with the accepted list). The
-`--theme` flag overrides the configuration for one run, and **Ctrl+S** cycles
-the theme live: existing transcript rows are restyled in place while text and
-Markdown highlighting are left untouched.
+Drop a `themes/` directory next to your `config.toml` to customize: a file
+named `dark.toml` or `light.toml` there overrides the matching built-in, and
+any other `<name>.toml` adds a new theme, selectable without a rebuild. See
+`agent_runner/themes/dark.toml` and `light.toml` for the full, documented
+schema — every item lists an explicit colour, and surfaces that paint their
+own background (panel, reasoning, scrollbar, menu, code blocks) require one.
+Colours may be written as a named colour or numeric RGB interchangeably
+(e.g. `"midnightblue"`, `"#1a1b26"`, `"rgb(26, 27, 38)"`), parsed against the
+full CSS Color Module Level 4 palette via the `csscolorparser` crate — never
+an invented or terminal-palette-dependent list.
+
+Select a theme in the configuration with `theme = "dark"`, `theme = "light"`,
+or the name of any file found in your `themes/` directory (unknown names fail
+at load with the accepted list). The `--theme` flag overrides the
+configuration for one run, the menu's **Theme** item opens a picker listing
+every discovered theme, and **Ctrl+S** cycles through all of them live:
+existing transcript rows are restyled in place while text and Markdown
+highlighting are left untouched.
 
 Layout cues are theme-independent and keep content scannable: the transcript
 and prompt panels carry a single top edge (no side or bottom borders), the
