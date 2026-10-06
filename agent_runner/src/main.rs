@@ -157,7 +157,10 @@ fn list_models(config_path: &Path) -> std::result::Result<ExitCode, String> {
     }
     let default_label = match config.default_model() {
         Some(model) => format!("{} ({}'s default model)", model.id, config.default_provider),
-        None => format!("(none — {} has no is_default model)", config.default_provider),
+        None => format!(
+            "(none — {} has no is_default model)",
+            config.default_provider
+        ),
     };
     println!(
         "\ndefault provider: {}\nfall-back model: {}",

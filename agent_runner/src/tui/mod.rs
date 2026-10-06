@@ -620,13 +620,11 @@ fn run_ui<M: std::io::Write>(
                             && replay_attempts < MAX_PROMPT_REPLAYS
                         {
                             replay_attempts += 1;
-                            app.push_event(crate::session::Event::Note(
-                                format!(
-                                    "the model did not become ready in time; replaying the prompt \
+                            app.push_event(crate::session::Event::Note(format!(
+                                "the model did not become ready in time; replaying the prompt \
                                      (attempt {replay_attempts}/{MAX_PROMPT_REPLAYS}) — the \
                                      prompt is dispatched once the model is ready"
-                                ),
-                            ));
+                            )));
                             if let Ok(receiver) = spawn_bootstrap(builder, model, app.effort) {
                                 *bootstrap = Some(receiver);
                                 app.status = "starting model…".to_owned();

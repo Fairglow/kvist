@@ -48,7 +48,12 @@ fn full_width_line(line: &Line<'static>, bg: ratatui::style::Color, width: usize
 /// ratatui draws a left-aligned title over the border's opening cells, erasing
 /// the edge's start; keeping the title span in its native style preserves the
 /// per-panel title styling (muted transcript title, bold overlay titles).
-fn panel_top_edge(title: String, title_style: Style, border_style: Style, width: usize) -> Line<'static> {
+fn panel_top_edge(
+    title: String,
+    title_style: Style,
+    border_style: Style,
+    width: usize,
+) -> Line<'static> {
     let lead = "──";
     let rest = width.saturating_sub(lead.chars().count() + title.len());
     Line::from(vec![
@@ -174,7 +179,10 @@ fn render_transcript(f: &mut ratatui::Frame, app: &App, area: Rect) {
         border,
         inner_width,
     );
-    f.render_widget(&edge, Rect::new(area.left(), area.top(), inner_width as u16, 1));
+    f.render_widget(
+        &edge,
+        Rect::new(area.left(), area.top(), inner_width as u16, 1),
+    );
     // The scrollbar is always present and adaptive: its track spans the
     // panel's inner height, and its thumb encodes the current window into the
     // full transcript (content length, viewport, and offset), so its size and
@@ -347,7 +355,10 @@ fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Style::default().fg(theme.panel_border),
         usize::from(area.width.max(1)),
     );
-    f.render_widget(&edge, Rect::new(area.left(), area.top(), area.width.max(1), 1));
+    f.render_widget(
+        &edge,
+        Rect::new(area.left(), area.top(), area.width.max(1), 1),
+    );
 }
 
 /// The session-history overlay: a scrollable list of past transcripts. Enter

@@ -8,17 +8,25 @@
 //! default-provider models with no active match and no single default defer
 //! (TUI) or fail fast (headless).
 
-use agent_runner::config::{Config, Model, probe_active_models, select_active_model, unconfigured_active_models};
-use agent_runner::config::Select;
-use agent_runner::tools::ToolPolicy;
 use agent_runner::ModelProvider;
+use agent_runner::config::Select;
+use agent_runner::config::{
+    Config, Model, probe_active_models, select_active_model, unconfigured_active_models,
+};
+use agent_runner::tools::ToolPolicy;
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
 
 fn model(id: &str, provider_model: &str, base_url: &str) -> Model {
-    model_on(id, provider_model, base_url, ModelProvider::LlamaServer, false)
+    model_on(
+        id,
+        provider_model,
+        base_url,
+        ModelProvider::LlamaServer,
+        false,
+    )
 }
 
 fn model_on(
@@ -45,7 +53,12 @@ fn model_on(
 }
 
 /// A model on the default provider marked as that provider's default.
-fn default_model_on(id: &str, provider_model: &str, base_url: &str, provider: ModelProvider) -> Model {
+fn default_model_on(
+    id: &str,
+    provider_model: &str,
+    base_url: &str,
+    provider: ModelProvider,
+) -> Model {
     model_on(id, provider_model, base_url, provider, true)
 }
 
@@ -153,12 +166,26 @@ fn active_model_on_other_provider_is_not_reused() {
     // The active model is on a non-default provider; the default provider has
     // no active model, so it falls to the default-provider default model.
     let llama = model("llama", "Model-LLa", "http://127.0.0.1:9931");
-    let ollama = model_on("ollama", "Model-Ollama", "http://127.0.0.1:11434", ModelProvider::Ollama, false);
+    let ollama = model_on(
+        "ollama",
+        "Model-Ollama",
+        "http://127.0.0.1:11434",
+        ModelProvider::Ollama,
+        false,
+    );
     let config = config_with(ModelProvider::LlamaServer, vec![llama, ollama]);
-    let active = BTreeMap::from([("http://127.0.0.1:11434".to_owned(), "Model-Ollama".to_owned())]);
+    let active = BTreeMap::from([(
+        "http://127.0.0.1:11434".to_owned(),
+        "Model-Ollama".to_owned(),
+    )]);
     // llama is the single default-provider model, so it auto-selects.
     let selection = select_active_model(&config, None, &active);
-    assert_eq!(selection, Select::Single { model_id: "llama".to_owned() });
+    assert_eq!(
+        selection,
+        Select::Single {
+            model_id: "llama".to_owned()
+        }
+    );
 }
 
 // --- Rule 3: exactly one default-provider model auto-selects. ---
@@ -182,7 +209,13 @@ fn single_default_provider_model_auto_selects_among_others() {
     // The default provider (llama-server) has exactly one model; an ollama
     // model is also configured. The default provider's single model is chosen.
     let llama = model("llama", "Model-LLa", "http://127.0.0.1:9931");
-    let ollama = model_on("ollama", "Model-Ollama", "http://127.0.0.1:11434", ModelProvider::Ollama, false);
+    let ollama = model_on(
+        "ollama",
+        "Model-Ollama",
+        "http://127.0.0.1:11434",
+        ModelProvider::Ollama,
+        false,
+    );
     let config = config_with(ModelProvider::LlamaServer, vec![llama, ollama]);
     let selection = select_active_model(&config, None, &none_active());
     assert_eq!(
@@ -198,7 +231,12 @@ fn single_default_provider_model_auto_selects_among_others() {
 #[test]
 fn several_models_no_active_match_uses_default_model() {
     let a = model("a", "Model-A", "http://127.0.0.1:9931");
-    let b = default_model_on("b", "Model-B", "http://127.0.0.1:9931", ModelProvider::LlamaServer);
+    let b = default_model_on(
+        "b",
+        "Model-B",
+        "http://127.0.0.1:9931",
+        ModelProvider::LlamaServer,
+    );
     let config = config_with(ModelProvider::LlamaServer, vec![a, b]);
     // Provider down: no active model to match. The default-provider default is
     // used as the fall-back (it may need to be loaded).
@@ -227,7 +265,12 @@ fn several_models_no_active_match_no_default_needs_selection() {
 #[test]
 fn several_models_active_model_not_configured_uses_default() {
     let a = model("a", "Model-A", "http://127.0.0.1:9931");
-    let b = default_model_on("b", "Model-B", "http://127.0.0.1:9931", ModelProvider::LlamaServer);
+    let b = default_model_on(
+        "b",
+        "Model-B",
+        "http://127.0.0.1:9931",
+        ModelProvider::LlamaServer,
+    );
     let config = config_with(ModelProvider::LlamaServer, vec![a, b]);
     // The provider has a model that is not in [[models]]: no active match, so
     // the default model is the fall-back.
@@ -254,7 +297,12 @@ fn active_model_is_used_not_default() {
     // This is the reported scenario: the default model is "a", but the
     // provider already has a *different* configured model loaded. The active
     // model must be used with no switch, not the default.
-    let a = default_model_on("a", "Model-A", "http://127.0.0.1:9931", ModelProvider::LlamaServer);
+    let a = default_model_on(
+        "a",
+        "Model-A",
+        "http://127.0.0.1:9931",
+        ModelProvider::LlamaServer,
+    );
     let b = model("b", "Model-B", "http://127.0.0.1:9931");
     let config = config_with(ModelProvider::LlamaServer, vec![a, b]);
     let active = BTreeMap::from([("http://127.0.0.1:9931".to_owned(), "Model-B".to_owned())]);
@@ -272,10 +320,20 @@ fn active_model_is_used_not_default() {
 #[test]
 fn default_model_is_never_used_when_single_model() {
     // A single configured model auto-selects regardless of is_default.
-    let a = default_model_on("a", "Model-A", "http://127.0.0.1:9931", ModelProvider::LlamaServer);
+    let a = default_model_on(
+        "a",
+        "Model-A",
+        "http://127.0.0.1:9931",
+        ModelProvider::LlamaServer,
+    );
     let config = config_with(ModelProvider::LlamaServer, vec![a]);
     let selection = select_active_model(&config, None, &none_active());
-    assert_eq!(selection, Select::Single { model_id: "a".to_owned() });
+    assert_eq!(
+        selection,
+        Select::Single {
+            model_id: "a".to_owned()
+        }
+    );
 }
 
 #[test]
@@ -374,5 +432,11 @@ fn unconfigured_active_model_is_reported() {
         "Model-Unknown".to_owned(),
     )]);
     let unconfigured = unconfigured_active_models(&config, &active);
-    assert_eq!(unconfigured, vec![("Model-Unknown".to_owned(), "http://127.0.0.1:9931".to_owned())]);
+    assert_eq!(
+        unconfigured,
+        vec![(
+            "Model-Unknown".to_owned(),
+            "http://127.0.0.1:9931".to_owned()
+        )]
+    );
 }

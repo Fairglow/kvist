@@ -669,17 +669,15 @@ impl Config {
         // provider would be ambiguous.
         let mut default_seen = std::collections::BTreeSet::new();
         for model in models.iter() {
-            if model.is_default {
-                if !default_seen.insert(model.provider.to_string()) {
-                    return Err(Error::Config {
-                        path: Some(path.to_string_lossy().into_owned()),
-                        reason: format!(
-                            "duplicate is_default model for provider `{}`; at most one \
-                             [[models]] entry per provider may be marked default",
-                            model.provider
-                        ),
-                    });
-                }
+            if model.is_default && !default_seen.insert(model.provider.to_string()) {
+                return Err(Error::Config {
+                    path: Some(path.to_string_lossy().into_owned()),
+                    reason: format!(
+                        "duplicate is_default model for provider `{}`; at most one \
+                         [[models]] entry per provider may be marked default",
+                        model.provider
+                    ),
+                });
             }
         }
         // The default provider must name at least one configured model, or the
@@ -767,9 +765,7 @@ impl Config {
         {
             return Err(Error::Config {
                 path: None,
-                reason: format!(
-                    "default_provider `{default_provider}` has no [[models]] entry"
-                ),
+                reason: format!("default_provider `{default_provider}` has no [[models]] entry"),
             });
         }
         let tool_profiles = ToolProfile::CONFIGURABLE
