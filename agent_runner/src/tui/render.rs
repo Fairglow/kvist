@@ -19,7 +19,7 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use super::app::{App, MENU_HOTKEYS, MENU_ITEMS, Overlay, wrap};
+use super::app::{App, MENU_HOTKEYS, MENU_ITEMS, Overlay, REPLAY_HINT, wrap};
 
 /// Rows reserved for the multiline prompt editor around the transcript.
 const INPUT_ROWS: u16 = 4;
@@ -183,15 +183,22 @@ fn render_transcript(f: &mut ratatui::Frame, app: &App, area: Rect) {
         &edge,
         Rect::new(area.left(), area.top(), inner_width as u16, 1),
     );
-    // The scrollbar is always present and adaptive: its track spans the
-    // panel's inner height, and its thumb encodes the current window into the
-    // full transcript (content length, viewport, and offset), so its size and
-    // position track both scrolling and terminal resizes. It rides the inner
-    // right column (the panel has no right border, so this column is not
-    // content the transcript rows pad past).
-    let viewport = area.height.saturating_sub(1).max(1);
-    let content_length = app.lines.len().max(usize::from(viewport));
-    let offset = (app.scroll as usize).min(app.lines.len().saturating_sub(usize::from(viewport)));
+    render_transcript_scrollbar(f, app, area, app.lines.len(), usize::from(app.scroll));
+}
+
+fn render_transcript_scrollbar(
+    f: &mut ratatui::Frame,
+    app: &App,
+    area: Rect,
+    rows: usize,
+    offset: usize,
+) {
+    let viewport = area.height.saturating_sub(1);
+    if area.width == 0 || viewport == 0 {
+        return;
+    }
+    let content_length = rows.max(usize::from(viewport));
+    let offset = offset.min(rows.saturating_sub(usize::from(viewport)));
     let mut state = ScrollbarState::new(content_length)
         .position(offset)
         .viewport_content_length(usize::from(viewport));
@@ -239,6 +246,7 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from("  Ctrl+C           cancel a running turn, or quit when idle"),
         Line::from("  Ctrl+D           quit when the prompt is empty"),
         Line::from("  PageUp / PageDown scroll the transcript"),
+        Line::from("  Ctrl+Home / Ctrl+End jump to the beginning / end (also in replay)"),
         Line::from("  Ctrl+L           clear the transcript"),
         Line::from("  Ctrl+T           collapse/reveal reasoning in the transcript"),
         Line::from("  Ctrl+S           cycle the UI theme (dark / light)"),
@@ -428,7 +436,7 @@ fn render_replay(f: &mut ratatui::Frame, app: &App, area: Rect) {
         theme.title,
     )));
     lines.push(Line::from(""));
-    lines.push(Line::from("  esc back to history"));
+    lines.push(Line::from(REPLAY_HINT));
     lines.push(Line::from(""));
     let content = app.replay_lines.iter().map(|line| {
         Line::from(Span::styled(
@@ -442,7 +450,7 @@ fn render_replay(f: &mut ratatui::Frame, app: &App, area: Rect) {
         .title(Span::styled(" replay", theme.title));
     // The scroll clamp must use the wrapped line count so long replayed lines
     // that wrap onto several physical lines stay reachable.
-    let inner_width = area.width.max(1);
+    let inner_width = area.width.saturating_sub(1).max(1);
     let inner_height = area.height.saturating_sub(1).max(1);
     let rows = visible_overlay_rows(
         lines.into_iter().chain(content),
@@ -450,17 +458,23 @@ fn render_replay(f: &mut ratatui::Frame, app: &App, area: Rect) {
         inner_height,
         app.replay_scroll,
     );
-    let paragraph = Paragraph::new(Text::from(rows))
-        .block(block)
-        .alignment(Alignment::Left);
-    f.render_widget(paragraph, area);
+    let paragraph = Paragraph::new(Text::from(rows)).alignment(Alignment::Left);
+    f.render_widget(block, area);
+    let content_area = Rect::new(
+        area.left(),
+        area.top().saturating_add(1),
+        area.width.saturating_sub(1),
+        area.height.saturating_sub(1),
+    );
+    f.render_widget(paragraph, content_area);
     let edge = panel_top_edge(
         format!(" replay {} ", app.replay_title),
         theme.title,
         Style::default().fg(theme.panel_border),
-        usize::from(inner_width),
+        usize::from(area.width),
     );
-    f.render_widget(&edge, Rect::new(area.left(), area.top(), inner_width, 1));
+    f.render_widget(&edge, Rect::new(area.left(), area.top(), area.width, 1));
+    render_transcript_scrollbar(f, app, area, app.replay_row_count(), app.replay_scroll);
 }
 
 fn visible_overlay_rows<'a>(
@@ -669,6 +683,83 @@ mod tests {
             assert!(
                 matches!(last, '▼' | '▲' | '│' | '█'),
                 "scrollbar on the right edge (got {last:?}):\n{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn replay_uses_themed_scrollbar_without_covering_the_wrapped_tail() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        for theme in [Theme::dark(), Theme::light()] {
+            let mut app = new_app(20, 14);
+            app.theme = theme;
+            app.overlay = Overlay::Replay;
+            app.replay_title = "a title that wraps over multiple rows".to_owned();
+            app.replay_lines = vec!["abcdefghijklmnopqrs".to_owned(); 40];
+            app.replay_lines.push("TAIL-12345678901234Z".to_owned());
+            app.on_key(KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL));
+            let backend = draw(&app);
+            let buffer = backend.buffer();
+            for y in 3..10 {
+                let cell = buffer.cell((19, y)).expect("scrollbar cell");
+                assert!(
+                    matches!(cell.symbol(), "▲" | "▼" | "│" | "█"),
+                    "replay scrollbar at row {y}:\n{}",
+                    buffer_text(&backend)
+                );
+                assert_eq!(cell.fg, app.theme.scrollbar.fg.unwrap());
+            }
+            let visible_content: String = (3..10)
+                .map(|y| {
+                    (0..19)
+                        .map(|x| buffer.cell((x, y)).unwrap().symbol())
+                        .collect::<String>()
+                        .trim_end()
+                        .to_owned()
+                })
+                .collect();
+            assert!(
+                visible_content.contains("TAIL-12345678901234Z"),
+                "the final source character must not be overwritten:\n{}",
+                buffer_text(&backend)
+            );
+            let bottom = buffer.clone();
+            app.on_key(KeyEvent::new(KeyCode::Home, KeyModifiers::CONTROL));
+            let top = draw(&app);
+            assert_ne!(top.buffer(), &bottom);
+            assert!(buffer_text(&top).contains("replay"));
+            app.on_key(KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL));
+            assert_eq!(draw(&app).buffer(), &bottom);
+        }
+    }
+
+    #[test]
+    fn replay_scrollbar_handles_empty_short_and_one_column_views() {
+        for width in [1, 2, 40] {
+            for lines in [Vec::new(), vec!["short".to_owned()]] {
+                let mut app = new_app(width, 14);
+                app.overlay = Overlay::Replay;
+                app.replay_lines = lines;
+                let backend = draw(&app);
+                assert_eq!(backend.buffer().cell((width - 1, 3)).unwrap().symbol(), "▲");
+            }
+        }
+    }
+
+    #[test]
+    fn replay_long_history_tail_remains_reachable_after_resize() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        let mut app = new_app(20, 14);
+        app.overlay = Overlay::Replay;
+        app.replay_lines = vec!["a row that wraps on narrow terminals".to_owned(); 35_000];
+        app.replay_lines.push("FINAL-TAIL".to_owned());
+        for (width, height) in [(20, 14), (100, 30), (12, 12)] {
+            app.resize(width, height);
+            app.on_key(KeyEvent::new(KeyCode::End, KeyModifiers::CONTROL));
+            let text = buffer_text(&draw(&app));
+            assert!(
+                text.contains("FINAL-TAIL"),
+                "tail at {width}x{height}:\n{text}"
             );
         }
     }

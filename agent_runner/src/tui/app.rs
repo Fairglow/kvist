@@ -18,6 +18,8 @@ use crate::session::Event;
 
 use super::theme::Theme;
 
+pub(super) const REPLAY_HINT: &str = "  esc back · ctrl+home top · ctrl+end bottom";
+
 /// Classifies a transcript line so it can be collapsed for a cleaner overview.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineKind {
@@ -849,6 +851,11 @@ impl App {
             }
             // Ctrl+End jumps to the newest output and resumes auto-follow;
             // plain End stays with the editor for cursor motions.
+            (KeyCode::Home, KeyModifiers::CONTROL) => {
+                self.scroll = 0;
+                self.following = false;
+                KeyAction::Idle
+            }
             (KeyCode::End, KeyModifiers::CONTROL) => {
                 self.scroll = self.bottom_offset();
                 self.following = true;
@@ -1475,6 +1482,14 @@ impl App {
     /// inert here: navigation scrolls the transcript, Esc returns to the list.
     fn handle_replay_key(&mut self, key: KeyEvent) -> KeyAction {
         match key.code {
+            KeyCode::Home if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.replay_scroll = 0;
+                KeyAction::Idle
+            }
+            KeyCode::End if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.replay_scroll = self.replay_bottom();
+                KeyAction::Idle
+            }
             KeyCode::Esc => {
                 self.overlay = Overlay::History;
                 KeyAction::Idle
@@ -1552,8 +1567,8 @@ impl App {
         (item_rows + header).saturating_sub(usize::from(self.visible_rows()))
     }
 
-    /// The largest scroll offset that still shows the last replay row.
-    fn replay_bottom(&self) -> usize {
+    /// Physical replay rows at the content width, excluding the scrollbar.
+    pub(super) fn replay_row_count(&self) -> usize {
         // Count physical rows, not logical lines: each replay line wraps at
         // the content width, and the fixed header rows can wrap too.
         let width = self.content_width();
@@ -1564,9 +1579,15 @@ impl App {
             .sum::<usize>();
         let fixed = wrap(&format!(" replay {} ", self.replay_title), width).len()
             + 1
-            + wrap("  esc back to history", width).len()
+            + wrap(REPLAY_HINT, width).len()
             + 1;
-        (rows + fixed).saturating_sub(usize::from(self.visible_rows()))
+        rows + fixed
+    }
+
+    /// The largest scroll offset that still shows the last replay row.
+    fn replay_bottom(&self) -> usize {
+        self.replay_row_count()
+            .saturating_sub(usize::from(self.visible_rows()))
     }
 
     /// Sets the directory the history overlay reads past transcripts from. The
@@ -1697,6 +1718,7 @@ impl App {
         self.lines = wrapped;
         self.maybe_truncate();
         self.clamp_scroll();
+        self.replay_scroll = self.replay_scroll.min(self.replay_bottom());
     }
 }
 
@@ -3008,6 +3030,25 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_home_unpins_live_output_without_moving_the_editor() {
+        let mut app = app();
+        app.editor.insert_str("keep this prompt");
+        let cursor = app.editor.cursor();
+        for i in 0..50 {
+            app.push_event(Event::Note(format!("line {i}")));
+        }
+        app.on_key(ctrl(KeyCode::Home));
+        assert_eq!(app.scroll, 0);
+        assert!(!app.following);
+        assert_eq!(app.editor.cursor(), cursor);
+        app.push_event(Event::Note("later output".to_owned()));
+        assert_eq!(app.scroll, 0);
+        app.on_key(ctrl(KeyCode::End));
+        assert_eq!(app.scroll, app.bottom_offset());
+        assert!(app.following);
+    }
+
+    #[test]
     fn ctrl_s_cycles_the_theme() {
         let mut app = app();
         assert_eq!(app.theme.name, "dark");
@@ -3288,6 +3329,72 @@ mod tests {
         app.on_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
         assert_eq!(app.replay_scroll, 1 + usize::from(app.visible_rows()));
         assert!(app.replay_bottom() > usize::from(u16::MAX));
+    }
+
+    #[test]
+    fn replay_boundary_keys_reach_large_wrapped_extents() {
+        let mut app = clean_app();
+        app.resize(20, 14);
+        app.overlay = Overlay::Replay;
+        app.replay_title = "a long session title that wraps".to_owned();
+        app.replay_lines = vec!["this source line wraps across several rows".to_owned(); 35_000];
+        app.on_key(ctrl(KeyCode::End));
+        assert!(app.replay_scroll > usize::from(u16::MAX));
+        assert_eq!(app.replay_scroll, app.replay_bottom());
+        app.on_key(ctrl(KeyCode::Home));
+        assert_eq!(app.replay_scroll, 0);
+        app.on_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+        assert_eq!(app.replay_scroll, 0);
+        app.on_key(ctrl(KeyCode::End));
+        app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.replay_scroll, app.replay_bottom());
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.overlay, Overlay::History);
+    }
+
+    #[test]
+    fn replay_resize_clamps_the_offset_and_short_histories_stay_at_zero() {
+        let mut app = clean_app();
+        app.resize(20, 14);
+        app.overlay = Overlay::Replay;
+        app.replay_lines = vec!["long source content wraps in a narrow viewport".to_owned(); 40];
+        app.on_key(ctrl(KeyCode::End));
+        let narrow_bottom = app.replay_scroll;
+        app.resize(100, 30);
+        assert!(narrow_bottom > app.replay_bottom());
+        assert_eq!(app.replay_scroll, app.replay_bottom());
+        for lines in [Vec::new(), vec!["short".to_owned()]] {
+            app.replay_lines = lines;
+            app.on_key(ctrl(KeyCode::End));
+            assert_eq!(app.replay_scroll, 0);
+            app.on_key(ctrl(KeyCode::Home));
+            assert_eq!(app.replay_scroll, 0);
+        }
+    }
+
+    #[test]
+    fn replay_arrow_page_and_mouse_scrolling_preserve_their_semantics() {
+        let mut app = clean_app();
+        app.overlay = Overlay::Replay;
+        app.replay_lines = vec!["row".to_owned(); 100];
+        let page = usize::from(app.visible_rows());
+        app.on_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(app.replay_scroll, 1);
+        app.on_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(app.replay_scroll, 0);
+        app.on_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::NONE));
+        assert_eq!(app.replay_scroll, page);
+        app.on_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::NONE));
+        assert_eq!(app.replay_scroll, 0);
+        app.scroll_down(3);
+        assert_eq!(app.replay_scroll, 3);
+        app.scroll_up(2);
+        assert_eq!(app.replay_scroll, 1);
+        app.on_key(ctrl(KeyCode::End));
+        app.scroll_down(3);
+        assert_eq!(app.replay_scroll, app.replay_bottom());
+        app.on_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.overlay, Overlay::History);
     }
 
     #[test]

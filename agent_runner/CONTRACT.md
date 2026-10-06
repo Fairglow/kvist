@@ -971,6 +971,17 @@ Options:
   replay overlay, and choosing "New session" (Enter or `n`) starts a fresh
   session. `Ctrl+N` starts a new session from anywhere; `Ctrl+P` steps
   backward through prompt history.
+- Read-only replay accepts `Ctrl+Home` / `Ctrl+End` to jump to the first / last
+  viewport, alongside existing arrow, page and mouse scrolling. It uses the
+  live transcript's themed adaptive scrollbar in a reserved rightmost column;
+  header and content wrapping determine its extent, without a 16-bit offset
+  limit. Resizing clamps the replay offset to the new extent. Live `Ctrl+Home`
+  jumps to the beginning and disables auto-follow; live `Ctrl+End` jumps to the
+  end and restores it. Plain Home/End retain live prompt-editor behavior.
+- Both sandboxed and host-unconfined system prompts explicitly permit Markdown
+  results, including tables, lists, links, references and language-tagged code
+  fences. Markdown content does not define trusted session boundaries, and
+  permission to emit an extension is not a renderer conformance claim.
 - Terminal prompt submissions are bounded at 1,048,576 characters; headless
   prompts remain bounded at 64 KiB by the command line.
 - Session records are named `session-{UTC date-time}-{pid}-{n}` plus, after the

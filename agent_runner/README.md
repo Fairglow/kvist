@@ -73,6 +73,27 @@ left edge (`▌`/`│`) plus its tint, and highlighted code keeps its indentatio
 plus the theme's code patch. The echoed prompt is distinct by its bold prompt
 foreground alone.
 
+## Session history
+
+Open **Esc -> Session history** and select a session for read-only replay.
+**Ctrl+Home / Ctrl+End** jump to the beginning / end; arrows, PageUp/PageDown
+and the mouse wheel scroll, and **Esc** returns to the history list. Replay
+uses the transcript's themed adaptive scrollbar, with its own reserved column
+so wrapped text remains reachable. These boundary keys also work in the live
+transcript: Ctrl+Home stops auto-follow, and Ctrl+End resumes it.
+
+History currently displays bounded diagnostic `.log` text, not a structured
+Markdown conversation or an executable checkpoint. Files above 5 MiB are not
+listed, and individual recorded text items may be truncated at 64 KiB.
+The [Markdown transcript proposal](../docs/proposals/agent-runner-markdown-transcripts.md)
+describes shared rendering, folding, full re-theming and safe continuation;
+those capabilities are proposed, not implemented.
+
+Both sandboxed and explicitly unconfined agents are instructed that results
+may use Markdown, including tables, lists, links, references and language-tagged
+code fences. Live rendering already supports many CommonMark/GFM constructs;
+this is not a claim of complete GitHub Markdown or every extension.
+
 ## Tools
 
 The agent is offered a small, robust tool set that maps to sandbox-executed

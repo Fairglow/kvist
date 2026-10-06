@@ -17,6 +17,47 @@ Source paths below are repository-relative. Claims about the external sandbox
 are limited to the requests constructed here and the native trials actually
 executed. Mock runners demonstrate construction and supervision, not isolation.
 
+## Scoped source-and-test observations — 2026-10-06
+
+This supplement was derived by clean-slate observer
+`history-observer`, restricted to current `src/run.rs`,
+`src/tui/app.rs` and `src/tui/render.rs`. The observer did not read intent,
+queues, this prior record, reviews or Git history and did not execute tests.
+The remaining sections retain their earlier observation basis. This supplement
+is not compliance certification or component acceptance.
+
+- **Live navigation:** Ctrl+Home sets transcript offset to zero and disables
+  following; Ctrl+End selects the bottom and resumes following. Plain Home/End
+  fall through to the editor. Live shortcuts require exactly CONTROL; replay
+  shortcuts accept modifiers containing CONTROL. Replay intercepts input before
+  the editor. (`agent_runner/src/tui/app.rs:742-755,852-862,887-892,1483-1523`)
+  Tests assert Ctrl+Home preserves the editor cursor and subsequent output does
+  not move the viewport, and Ctrl+End restores following. (`app.rs:3017-3049`)
+- **Replay extents:** `replay_scroll` is `usize`. Navigation uses saturating
+  arithmetic; downward motion clamps to the bottom. Extents count wrapped source
+  lines, wrapped title/hint and separator rows at width-minus-one, minimum one.
+  Bottom subtracts visible rows saturatingly. Resize clamps the existing offset
+  rather than automatically following a newly enlarged extent.
+  (`app.rs:234-239,1483-1523,1292-1301,1570-1591,1643-1650,1718-1721`)
+  Tests exercise offsets beyond `u16::MAX`, boundary navigation, Escape, resize
+  reduction and empty/short histories. (`app.rs:3323-3373`)
+- **Rendering/theme:** Live and replay views share the right-edge scrollbar,
+  styled from the current `app.theme.scrollbar`. Replay reserves its last column,
+  wraps and slices rows using a `usize` offset, and independently clamps the
+  rendered slice. (`agent_runner/src/tui/render.rs:152-214,431-505`)
+  Tests assert dark/light scrollbar colors, unobscured wrapped tail content,
+  reversible top/bottom rendering and scrollbar presence in empty, short and
+  one-column views. (`render.rs:691-751`)
+- **Prompt guidance:** Both execution-scope prompts interpolate one shared
+  instruction allowing Markdown, recommending CommonMark/GFM, and distinguishing
+  presentation from structured tool arguments and trusted metadata. The test
+  checks Markdown feature strings in both prompts.
+  (`agent_runner/src/run.rs:201-235,532-550`)
+
+Only those source/test ranges were inspected. Referenced wrapping/editor/theme
+implementations were not inspected. No concrete logic discrepancy was
+established within that scope.
+
 ## Package and public surface
 
 `agent_runner/Cargo.toml` defines package `agent-runner` 0.2.0, edition 2024,

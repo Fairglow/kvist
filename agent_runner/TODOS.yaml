@@ -22,6 +22,75 @@ component:
         expected_revision: "sha256:767161aa34a323a01168ba03b99dcdd8319bc3bd10fac0de0c1699a014b2a1f9"
         observed_revision: "sha256:ae89b5a50a189bba4822b6aab43e0025e04b418f7515bea93731b6f2d56d5e37"
 tasks:
+  - id: "runner-history-navigation-write-tests"
+    title: "Pin replay boundary keys and shared scrollbar behavior"
+    description: "Reproduce Ctrl+Home/Ctrl+End replay and live-start failures, wrapped tail reachability, empty and short replay, resize clamps, themed scrollbar geometry and Markdown instructions in both execution scopes."
+    context: "Human requested history navigation fixes and a Markdown viewer proposal."
+    purpose: "Define scoped regressions before production changes."
+    expected_outcome: "Targeted regressions fail before repair and pass afterward."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-HISTORY-NAVIGATION"
+    timestamps:
+      created_at: "2026-10-06T16:04:50Z"
+      updated_at: "2026-10-06T17:46:20Z"
+      completed_at: "2026-10-06T17:46:20Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runner-history-navigation-implement-code"
+    title: "Repair history navigation and reuse the themed scrollbar"
+    description: "Wire replay boundary keys, shared adaptive scrollbar rendering, matching wrapped extents and resize clamps; add shared Markdown result guidance without changing storage or continuation authority."
+    context: "Intent preceded the scoped fix. Final verification: 215 agent-runner library tests passed; strict all-target Clippy, changed-file rustfmt checks and git diff --check passed. Structured Markdown history remains a proposal, not implemented behavior or component acceptance."
+    purpose: "Make long read-only histories navigable without content loss."
+    expected_outcome: "History and live navigation meet the scoped intent."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "runner-history-navigation-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-HISTORY-NAVIGATION"
+    timestamps:
+      created_at: "2026-10-06T16:04:50Z"
+      updated_at: "2026-10-06T17:46:20Z"
+      completed_at: "2026-10-06T17:46:20Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runner-history-navigation-security-audit"
+    title: "Audit scoped read-only history changes"
+    description: "Independently inspect offset bounds, narrow/empty viewport rendering and unchanged terminal-control and non-link history safeguards."
+    context: "No storage parsing or executable continuation is introduced."
+    purpose: "Keep independent security work explicit."
+    expected_outcome: "Independent audit findings recorded before acceptance."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "runner-history-navigation-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-HISTORY-NAVIGATION"
+    timestamps:
+      created_at: "2026-10-06T16:04:50Z"
+      updated_at: "2026-10-06T16:04:50Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runner-history-navigation-compliance-review"
+    title: "Compare independently observed history behavior with intent"
+    description: "Use a clean-slate source/test observer and a separate source-blind comparator; retain discrepancies and do not equate a scoped comparison with component acceptance."
+    context: "Clean-slate observer history-observer supplied the scoped IMPL supplement; source-blind history-comparator found no concrete discrepancy but requested explicit navigation-preservation and resize-tail evidence. Additional regressions cover those gaps. Final comparison remains pending the independent security audit; existing component revisions remain stale."
+    purpose: "Avoid implementer certification."
+    expected_outcome: "Observed behavior and discrepancies recorded for human arbitration after audit."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "runner-history-navigation-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-HISTORY-NAVIGATION"
+    timestamps:
+      created_at: "2026-10-06T16:04:50Z"
+      updated_at: "2026-10-06T16:04:50Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "runner-reliability-write-tests"
     title: "Reproduce model budget, recovery and offline environment failures"
     description: "Pin selected-model capacity, adequate generation, continuation goals, bounded escaped output, legitimate rereads, filtered file search, honest diagnostics and isolated Rust/vendored use. Following human arbitration, reproduce unflagged Cargo missing/stale-lock mutation before forcing locked builds."

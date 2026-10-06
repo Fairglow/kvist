@@ -630,6 +630,13 @@ Esc opens the action menu, Ctrl+H opens help, PageUp/PageDown scroll,
 Ctrl+P steps backward through prompt history, and Ctrl+N starts a new session
 from anywhere. The ESC menu closes on selection: a history item transitions to
 the replay overlay, and "New session" (Enter or `n`) starts a fresh session.
+Replay Ctrl+Home/Ctrl+End set the usize offset to zero/the wrapped bottom.
+One shared scrollbar drawing helper serves live and replay panels. Replay
+reserves the rightmost column, and its row-count helper uses that same content
+width for both wrapped header and body. Resize clamps its offset. Live
+Ctrl+Home clears following and sets scroll to zero; plain Home remains an
+editor motion. Both execution-scope system prompts append the same Markdown
+output guidance, without changing authority or claiming universal extensions.
 Terminal prompt submissions are bounded at 1,048,576 characters so long briefs
 run without interruption.
 Session records are named `session-{UTC date-time}-{pid}-{n}` in the log

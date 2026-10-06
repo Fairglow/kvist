@@ -2,6 +2,22 @@
 
 # Agent Runner — Requirements
 
+## RUN-REQ-HISTORY-NAVIGATION
+
+Read-only session replay MUST support Ctrl+Home and Ctrl+End to reach the first
+and last viewport, including histories longer than 65,535 rendered rows.
+Replay MUST use the live transcript's themed, adaptive scrollbar without
+covering content. Its extent MUST include wrapped content and header rows;
+resize and narrow-terminal navigation MUST leave the final text reachable.
+Empty and short histories MUST remain usable. Existing arrow, page, mouse and
+Esc navigation MUST retain their semantics. Live Ctrl+Home MUST unpin
+auto-follow and reach the beginning; live Ctrl+End MUST restore auto-follow.
+
+Sandboxed and explicitly unconfined agent instructions MUST permit Markdown
+results, including tables, lists, links, references and language-tagged code
+fences. This does not authorize agent-authored session metadata or promise
+rendering support for every Markdown extension.
+
 ## RUN-REQ-RELIABILITY
 
 The October 2026 run remediation MUST resolve the selected model's effective

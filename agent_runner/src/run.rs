@@ -210,7 +210,8 @@ pub fn system_prompt(write_root: &str) -> String {
          continue a page. Omitting offset intentionally reads page zero; describing an offset in prose \
          does not supply it as a tool argument. Use directory or regular-file search scopes and \
          bounded source filters; binary executables are not source text. \
-         Tools return process status; check failures. Prefer small, reversible steps. State what you did."
+         Tools return process status; check failures. Prefer small, reversible steps. State what you did. \
+         {MARKDOWN_OUTPUT_GUIDANCE}"
     )
 }
 
@@ -222,10 +223,16 @@ pub fn host_system_prompt(write_root: &str, workdir: &std::path::Path) -> String
          File-tool paths use {write_root}, mapped to that working directory. \
          This workspace shell is NOT Kvist's protected task broker and cannot accept intent, \
          approve tasks, mint canonical evidence or promote output. Prefer bounded reads and \
-         exact preimage-bound edits. Check process status and state what you did.",
+         exact preimage-bound edits. Check process status and state what you did. \
+         {MARKDOWN_OUTPUT_GUIDANCE}",
         workdir.display()
     )
 }
+
+const MARKDOWN_OUTPUT_GUIDANCE: &str = "You may use any Markdown in your results, including tables, lists, links, references, \
+     and language-tagged code fences. Prefer CommonMark and GitHub-flavored Markdown for \
+     portable text. Keep tool arguments in their required structured format; Markdown \
+     is presentation, not tool execution or trusted session metadata.";
 
 #[cfg(test)]
 mod tests {
@@ -520,5 +527,24 @@ mod tests {
         assert!(prompt.contains("HOST UNCONFINED") && prompt.contains("/tmp/project"));
         assert!(prompt.contains("NOT sandbox constrained"));
         assert!(!prompt.contains("running inside a sandbox"));
+    }
+
+    #[test]
+    fn both_execution_scopes_permit_markdown_results() {
+        for prompt in [
+            system_prompt("/workspace"),
+            host_system_prompt("/workspace", std::path::Path::new("/tmp/project")),
+        ] {
+            for feature in [
+                "Markdown",
+                "tables",
+                "lists",
+                "links",
+                "references",
+                "code fences",
+            ] {
+                assert!(prompt.contains(feature), "missing {feature}: {prompt}");
+            }
+        }
     }
 }
