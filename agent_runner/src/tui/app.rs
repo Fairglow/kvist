@@ -2486,12 +2486,18 @@ table_sep = { fg = "gray" }
         // Editing the same file, then re-selecting it from the picker, picks
         // up the new content: the theme is re-read from disk, not cached.
         let old_panel_bg = app.theme.panel_bg;
-        std::fs::write(dir.join("custom.toml"), TEST_THEME_TOML.replace("#010203", "#010204"))
-            .expect("rewrite theme file");
+        std::fs::write(
+            dir.join("custom.toml"),
+            TEST_THEME_TOML.replace("#010203", "#010204"),
+        )
+        .expect("rewrite theme file");
         open_picker(&mut app);
         pick_theme(&mut app, "custom");
         assert_eq!(app.theme.name, "custom");
-        assert_ne!(app.theme.panel_bg, old_panel_bg, "reselecting must apply the edited file");
+        assert_ne!(
+            app.theme.panel_bg, old_panel_bg,
+            "reselecting must apply the edited file"
+        );
         assert_eq!(app.theme.panel_bg, Color::Rgb(1, 2, 4));
     }
 

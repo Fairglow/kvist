@@ -327,7 +327,9 @@ impl LanguageStrategy for RustStrategy {
     }
 
     fn mounts(&self, project_dir: &Path, lockfile_digest: &str) -> Result<Vec<VendoredMount>> {
-        let manifest = rust_vendoring::VendorManifest::load(project_dir)
+        // The manifest must exist (provisioning ran); its recorded absolute
+        // paths are ignored for resolution (see below).
+        let _manifest = rust_vendoring::VendorManifest::load(project_dir)
             .map_err(|source| KvistError::VendoringUnavailable {
                 path: project_dir.to_string_lossy().into_owned(),
                 reason: format!("cannot read vendoring manifest: {source}"),
@@ -338,14 +340,24 @@ impl LanguageStrategy for RustStrategy {
                          offline dependencies"
                     .to_owned(),
             })?;
+        // The registry and sandbox-config locations are fixed relative to the
+        // project root, so resolve them from `project_dir` (the location cargo
+        // and the sandbox actually see) rather than the absolute paths the
+        // manifest recorded on the host that produced it. Using the recorded
+        // paths would break any checkout at a different root with
+        // `No such file or directory`.
+        let vendored = self.vendored_dir(project_dir);
+        let sandbox_cargo = project_dir
+            .join(".kvist")
+            .join(rust_vendoring::SANDBOX_CARGO_CONFIG_DIRNAME);
         Ok(vec![
             VendoredMount {
-                source: PathBuf::from(manifest.vendored_dir.clone()),
+                source: vendored,
                 destination: self.vendored_mount_dest().to_owned(),
                 identity: lockfile_digest.to_owned(),
             },
             VendoredMount {
-                source: PathBuf::from(manifest.sandbox_cargo_dir.clone()),
+                source: sandbox_cargo,
                 destination: self.sandbox_config_dest().to_owned(),
                 identity: lockfile_digest.to_owned(),
             },
@@ -1190,6 +1202,67 @@ mod tests {
             strategy.enforce(project),
             Err(KvistError::VendoringUnavailable { .. })
         ));
+    }
+
+    #[test]
+    fn rust_mounts_resolve_from_current_root_not_recorded_host_path() {
+        let tmp = project_with(&[(
+            "Cargo.lock",
+            "version = 4\n\n[[package]]\nname = \"serde_json\"\nversion = \"1.0.151\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n",
+        )]);
+        let project = tmp.path();
+        let strategy = detect_language_strategy(project).unwrap();
+
+        // Provision the material under the CURRENT root.
+        fs::create_dir_all(project.join(".kvist").join("vendored").join("serde_json"))
+            .expect("vendored package");
+
+        // Record a manifest whose absolute paths name a DIFFERENT host root
+        // (the path the manifest recorded on the machine that produced it).
+        // This is the real-world layout: `kvist vendor` writes the producing
+        // host's absolute paths, and the project is later checked out at a
+        // different root.
+        let lockfile_digest = rust_vendoring::lockfile_digest(
+            &fs::read(project.join("Cargo.lock")).expect("lockfile"),
+        );
+        let manifest = rust_vendoring::VendorManifest {
+            schema_version: rust_vendoring::VENDOR_SCHEMA_VERSION,
+            generated_at_unix_secs: 1,
+            project_root: "/opt/proj/kvist".to_owned(),
+            lockfile_path: "Cargo.lock".to_owned(),
+            lockfile_digest: lockfile_digest.clone(),
+            vendored_dir: "/opt/proj/kvist/.kvist/vendored".to_owned(),
+            sandbox_cargo_dir: "/opt/proj/kvist/.kvist/sandbox-cargo".to_owned(),
+            sandbox_vendored_mount: rust_vendoring::VENDOR_SANDBOX_MOUNT.to_owned(),
+            verified: true,
+        };
+        manifest.save(project).expect("save manifest");
+
+        // Enforcement must resolve the registry from the CURRENT root (where
+        // the material is), not the recorded host path (which does not exist
+        // here). A stale absolute path must not produce "No such file or
+        // directory".
+        let report = strategy.enforce(project).expect("enforce with foreign-root manifest");
+        assert!(report.ready());
+
+        // The mounts the offline build will make must point at the current
+        // root's directories, not the recorded `/opt/proj/kvist` paths.
+        let mounts = strategy.mounts(project, &lockfile_digest).expect("mounts");
+        let registry = mounts
+            .iter()
+            .find(|mount| mount.destination == rust_vendoring::VENDOR_SANDBOX_MOUNT)
+            .expect("registry mount");
+        assert_eq!(registry.source, project.join(".kvist").join("vendored"));
+        assert!(!registry.source.to_string_lossy().starts_with("/opt/proj/kvist"));
+        let cargo_config = mounts
+            .iter()
+            .find(|mount| mount.destination == rust_vendoring::SANDBOX_CARGO_CONFIG_MOUNT)
+            .expect("cargo-config mount");
+        assert_eq!(
+            cargo_config.source,
+            project.join(".kvist").join(rust_vendoring::SANDBOX_CARGO_CONFIG_DIRNAME)
+        );
+        assert!(!cargo_config.source.to_string_lossy().starts_with("/opt/proj/kvist"));
     }
 
     #[test]

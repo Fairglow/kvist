@@ -327,9 +327,25 @@ impl VendorManifest {
         Ok(lockfile_digest(&contents))
     }
 
+    /// The on-disk vendored registry for this project, resolved from the
+    /// current project root. The manifest's recorded `vendored_dir` is the
+    /// absolute path of the host that produced it (informational); resolution
+    /// must always derive from the project root so a checkout at any location
+    /// — including the sandbox's — resolves to the registry that is actually
+    /// there instead of a `No such file or directory` on the recorded host.
+    pub fn vendored_registry(&self, project_dir: &Path) -> PathBuf {
+        project_dir.join(".kvist").join(DEFAULT_VENDORED_DIRNAME)
+    }
+
+    /// The sandbox cargo-configuration directory for this project, resolved
+    /// from the current project root; see [`Self::vendored_registry`].
+    pub fn sandbox_cargo_dir(&self, project_dir: &Path) -> PathBuf {
+        project_dir.join(".kvist").join(SANDBOX_CARGO_CONFIG_DIRNAME)
+    }
+
     /// Recompute a readiness report against the current project state.
     pub fn report(&self, project_dir: &Path) -> Result<VendoringReport> {
-        enforce_offline_readiness(project_dir, Path::new(&self.vendored_dir))
+        enforce_offline_readiness(project_dir, &self.vendored_registry(project_dir))
     }
 
     /// Enforce that the manifest still matches a buildable project. Returns an
@@ -473,7 +489,9 @@ checksum = \"41ed3c71d68f1f04ad7790f37911905f10320b73714c9c6f7e6f6b92\"\n\n\
         let tmp = tempfile::tempdir().expect("tempdir");
         let project = tmp.path();
         write_lock(project, LOCK_WITH_MISSING);
-        let vendored = project.join("vendored");
+        // The registry lives at `.kvist/vendored`; resolution derives from the
+        // project root (not the manifest's recorded absolute path).
+        let vendored = project.join(".kvist").join("vendored");
         std::fs::create_dir_all(vendored.join("serde_json")).expect("vendored dir");
         std::fs::create_dir_all(vendored.join("itoa")).expect("vendored dir");
         let digest = digest_of(LOCK_WITH_MISSING);

@@ -6,6 +6,9 @@
 
 all: audit format lint build test
 
+vendor:
+    cargo run --locked -p kvist -- vendor .
+
 build:
     cargo build --locked --workspace --all-features
 
@@ -28,6 +31,7 @@ release:
     cargo build --locked --workspace --release --all-features
 
 test:
+    kvist vendor
     cargo nextest run --locked --workspace --all-features --test-threads num-cpus
 
 audit:
