@@ -1,0 +1,675 @@
+#[cfg(not(target_os = "linux"))]
+compile_error!("agent-runtime currently supports Linux only");
+
+use std::{
+    io::{IsTerminal, Write},
+    path::PathBuf,
+    process::ExitCode,
+    time::Duration,
+};
+
+use sav::{
+    CancellationToken, CatalogProvider, CommandSpec, DirectModelTransport, Error,
+    LocalModelProvider, ModelDiscoveryOptions, ModelMessage, ModelRequest, ModelStreamEvent,
+    ModelTransport, ReasoningEffort, SetupOptions, SupervisionPolicy, ToolChoice,
+    default_profile_config_path, discover_models, load_profile,
+    render_command_with_reasoning_effort, resolve_prompt, run_setup_wizard_with_options,
+    run_supervised, run_supervised_capture,
+};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "agent-run",
+    version,
+    about = "Run an AI prompt under bounded Linux host-process supervision"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Send a text-only request directly to local Ollama or llama-server.
+    Model(ModelArguments),
+    /// Discover provider-advertised model identifiers without running inference.
+    Models(ModelsArguments),
+    Run(RunArguments),
+    /// Replay an agent execution session from a structured JSONL journal file.
+    Replay(ReplayArguments),
+    /// Interactively create or update a reusable provider profile.
+    Setup(SetupArguments),
+}
+
+#[derive(Debug, Args)]
+struct ReplayArguments {
+    /// Path to the session JSONL journal file.
+    #[arg(value_name = "SESSION_JSONL")]
+    session_file: PathBuf,
+
+    /// Maximum turn to step through (optional).
+    #[arg(long)]
+    max_turns: Option<usize>,
+
+    /// Emit replay summary as JSON.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct ModelsArguments {
+    #[arg(long, value_enum)]
+    provider: CatalogProviderArgument,
+
+    #[arg(long, value_name = "HTTP_LOOPBACK_URL")]
+    endpoint: Option<String>,
+
+    #[arg(long, value_name = "PATH")]
+    executable: Option<String>,
+
+    /// Acknowledge one no-prompt ACP provider session.
+    #[arg(long)]
+    allow_host_discovery: bool,
+
+    #[arg(long, default_value_t = 5)]
+    timeout: u64,
+
+    #[arg(long, default_value_t = 65_536)]
+    max_response_bytes: usize,
+
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum CatalogProviderArgument {
+    Ollama,
+    LlamaServer,
+    Copilot,
+    Gemini,
+    LlamaCli,
+    CustomScript,
+}
+
+impl CatalogProviderArgument {
+    fn catalog_provider(self) -> sav::Result<CatalogProvider> {
+        match self {
+            Self::Ollama => Ok(CatalogProvider::Ollama),
+            Self::LlamaServer => Ok(CatalogProvider::LlamaServer),
+            Self::Copilot => Ok(CatalogProvider::Copilot),
+            Self::Gemini => Ok(CatalogProvider::Gemini),
+            Self::LlamaCli => Err(Error::UnsupportedCapability {
+                provider: "llama-cli",
+                capability: "provider model catalog",
+            }),
+            Self::CustomScript => Err(Error::UnsupportedCapability {
+                provider: "custom-script",
+                capability: "provider model catalog",
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct ModelArguments {
+    #[arg(value_name = "PROMPT", conflicts_with_all = ["file", "editor"])]
+    prompt: Option<String>,
+
+    #[arg(short, long, value_name = "PROMPT_FILE", conflicts_with_all = ["prompt", "editor"])]
+    file: Option<PathBuf>,
+
+    #[arg(long, conflicts_with_all = ["prompt", "file"])]
+    editor: bool,
+
+    #[arg(long, value_enum)]
+    provider: ModelProviderArgument,
+
+    /// Seconds to wait for the endpoint to begin serving before failing.
+    /// Local servers spawn a requested model on a routed port, which can take
+    /// longer on cold start than any single request; raise this when swapping
+    /// to a model that is not already loaded.
+    #[arg(long, default_value_t = 60)]
+    slot_timeout: u64,
+
+    /// Seconds to wait for the first token before failing. Must be greater
+    /// than `--slot-timeout` and less than `--timeout`.
+    #[arg(long, default_value_t = 120)]
+    ttft_timeout: u64,
+
+    #[arg(long, value_name = "HTTP_LOOPBACK_URL")]
+    endpoint: String,
+
+    #[arg(long, value_name = "MODEL")]
+    model: String,
+
+    #[arg(long)]
+    stream: bool,
+
+    #[arg(long, default_value_t = 300)]
+    timeout: u64,
+
+    #[arg(long, default_value_t = 1_048_576)]
+    max_response_bytes: usize,
+
+    #[arg(long, value_enum)]
+    /// Provider reasoning-effort hint (native transport only).
+    reasoning_effort: Option<ReasoningEffortArgument>,
+
+    /// Apply a provider-native JSON Schema generation constraint.
+    #[arg(long, value_name = "JSON_SCHEMA")]
+    output_schema: Option<String>,
+
+    /// Show provider-supplied reasoning on stderr.
+    #[arg(long, conflicts_with = "json")]
+    show_reasoning: bool,
+
+    /// Emit one canonical model-turn JSON object.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ModelProviderArgument {
+    Ollama,
+    LlamaServer,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ReasoningEffortArgument {
+    None,
+    Minimal,
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+impl From<ReasoningEffortArgument> for ReasoningEffort {
+    fn from(value: ReasoningEffortArgument) -> Self {
+        match value {
+            ReasoningEffortArgument::None => Self::None,
+            ReasoningEffortArgument::Minimal => Self::Minimal,
+            ReasoningEffortArgument::Low => Self::Low,
+            ReasoningEffortArgument::Medium => Self::Medium,
+            ReasoningEffortArgument::High => Self::High,
+            ReasoningEffortArgument::Xhigh => Self::Xhigh,
+            ReasoningEffortArgument::Max => Self::Max,
+        }
+    }
+}
+
+impl From<ModelProviderArgument> for LocalModelProvider {
+    fn from(value: ModelProviderArgument) -> Self {
+        match value {
+            ModelProviderArgument::Ollama => Self::Ollama,
+            ModelProviderArgument::LlamaServer => Self::LlamaServer,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct RunArguments {
+    #[arg(value_name = "PROMPT", conflicts_with_all = ["file", "editor"])]
+    prompt: Option<String>,
+
+    #[arg(short, long, value_name = "PROMPT_FILE", conflicts_with_all = ["prompt", "editor"])]
+    file: Option<PathBuf>,
+
+    #[arg(long, conflicts_with_all = ["prompt", "file"])]
+    editor: bool,
+
+    #[arg(
+        long,
+        value_name = "TEMPLATE",
+        required_unless_present = "profile",
+        conflicts_with = "profile"
+    )]
+    command: Option<String>,
+
+    #[arg(
+        long,
+        value_name = "NAME",
+        required_unless_present = "command",
+        conflicts_with = "command"
+    )]
+    profile: Option<String>,
+
+    #[arg(long, value_name = "PATH")]
+    config: Option<PathBuf>,
+
+    #[arg(long = "context", value_name = "PATH")]
+    context_paths: Vec<PathBuf>,
+
+    #[arg(long, value_name = "DIR", default_value = ".")]
+    working_directory: PathBuf,
+
+    #[arg(long, default_value_t = 900)]
+    idle_timeout: u64,
+
+    #[arg(long)]
+    detect_loops: bool,
+
+    #[arg(long, default_value_t = 3)]
+    max_retries: u32,
+
+    #[arg(long, default_value_t = 1_048_576)]
+    max_output_bytes: usize,
+
+    #[arg(long)]
+    allow_host_execution: bool,
+
+    #[arg(long, value_enum)]
+    reasoning_effort: Option<ReasoningEffortArgument>,
+
+    /// Emit one JSON object with the captured provider stdout as `content`.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(Debug, Args)]
+struct SetupArguments {
+    /// Override the Linux user profile configuration path.
+    #[arg(long, value_name = "PATH")]
+    config: Option<PathBuf>,
+
+    /// Save the profile even when mandatory live qualification fails.
+    #[arg(long)]
+    force: bool,
+}
+
+fn main() -> ExitCode {
+    match execute() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn execute() -> sav::Result<()> {
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Model(arguments) => model(arguments),
+        Command::Models(arguments) => models(arguments),
+        Command::Run(arguments) => run(arguments),
+        Command::Replay(arguments) => replay(arguments),
+        Command::Setup(arguments) => setup(arguments),
+    }
+}
+
+fn replay(arguments: ReplayArguments) -> sav::Result<()> {
+    let report = sav::replay_trajectory(&arguments.session_file, arguments.max_turns)?;
+    if arguments.json {
+        let json = serde_json::to_string(&report).map_err(|e| Error::InvalidModelRequest {
+            reason: format!("failed to serialize replay report: {e}"),
+        })?;
+        println!("{json}");
+    } else {
+        println!(
+            "Replaying session `{}` for task `{}`:",
+            report.session_id.as_deref().unwrap_or("unknown"),
+            report.task_id.as_deref().unwrap_or("unknown"),
+        );
+        println!(
+            "Total events: {}, Replayed turns: {}, Tool calls: {}",
+            report.total_events, report.replayed_turns, report.tool_calls_count
+        );
+        println!("------------------------------------------------------------");
+        for event in &report.events {
+            match event {
+                sav::TrajectoryEvent::SessionStart {
+                    session_id,
+                    task_id,
+                    timestamp,
+                } => {
+                    println!("[SessionStart] id={session_id} task={task_id} time={timestamp}");
+                }
+                sav::TrajectoryEvent::TurnStart { turn, timestamp } => {
+                    println!("\n--- Turn {turn} (time={timestamp}) ---");
+                }
+                sav::TrajectoryEvent::PromptEval {
+                    turn,
+                    new_tokens,
+                    cached_tokens,
+                    ..
+                } => {
+                    println!(
+                        "[Turn {turn} PromptEval] new_tokens={new_tokens:?} cached_tokens={cached_tokens:?}"
+                    );
+                }
+                sav::TrajectoryEvent::ModelReasoning { turn, reasoning } => {
+                    println!("[Turn {turn} Reasoning]: {reasoning}");
+                }
+                sav::TrajectoryEvent::ToolDispatch {
+                    turn,
+                    tool,
+                    args,
+                    action_hash,
+                    ..
+                } => {
+                    println!(
+                        "[Turn {turn} ToolDispatch] {tool} (hash: {action_hash})\n  args: {args}"
+                    );
+                }
+                sav::TrajectoryEvent::ToolResult {
+                    turn,
+                    tool,
+                    exit_code,
+                    bytes,
+                    state_mutated,
+                    ..
+                } => {
+                    println!(
+                        "[Turn {turn} ToolResult] {tool} exit_code={exit_code} bytes={bytes} mutated={state_mutated}"
+                    );
+                }
+                sav::TrajectoryEvent::TurnFinish {
+                    turn,
+                    finish_reason,
+                    output_tokens,
+                } => {
+                    println!(
+                        "[Turn {turn} Finish] reason={finish_reason} output_tokens={output_tokens:?}"
+                    );
+                }
+                sav::TrajectoryEvent::SessionFinish {
+                    total_turns,
+                    total_tokens,
+                    success,
+                    ..
+                } => {
+                    println!(
+                        "\n[SessionFinish] turns={total_turns} tokens={total_tokens} success={success}"
+                    );
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn models(arguments: ModelsArguments) -> sav::Result<()> {
+    let provider = arguments.provider.catalog_provider()?;
+    match provider {
+        CatalogProvider::Ollama | CatalogProvider::LlamaServer
+            if arguments.executable.is_some() =>
+        {
+            return Err(Error::ModelCatalogInvalid {
+                reason: "--executable is only valid for ACP providers".to_owned(),
+            });
+        }
+        CatalogProvider::Copilot | CatalogProvider::Gemini if arguments.endpoint.is_some() => {
+            return Err(Error::ModelCatalogInvalid {
+                reason: "--endpoint is only valid for HTTP providers".to_owned(),
+            });
+        }
+        _ => {}
+    }
+    let working_directory = std::env::current_dir().map_err(|source| Error::Io {
+        operation: "determine discovery working directory",
+        path: PathBuf::from("."),
+        source,
+    })?;
+    let catalog = discover_models(
+        provider,
+        &ModelDiscoveryOptions {
+            endpoint: arguments.endpoint,
+            executable: arguments.executable,
+            working_directory,
+            timeout: Duration::from_secs(arguments.timeout),
+            max_response_bytes: arguments.max_response_bytes,
+            allow_host_discovery: arguments.allow_host_discovery,
+        },
+        &CancellationToken::new(),
+    )?;
+    let stdout = std::io::stdout();
+    let mut writer = stdout.lock();
+    if arguments.json {
+        serde_json::to_writer(&mut writer, &catalog).map_err(|source| Error::Io {
+            operation: "write JSON model catalog",
+            path: PathBuf::from("<stdout>"),
+            source: std::io::Error::other(source),
+        })?;
+        writer.write_all(b"\n").map_err(|source| Error::Io {
+            operation: "write JSON model catalog",
+            path: PathBuf::from("<stdout>"),
+            source,
+        })?;
+    } else {
+        for model in catalog.models() {
+            writeln!(writer, "{}", model.id()).map_err(|source| Error::Io {
+                operation: "write model catalog",
+                path: PathBuf::from("<stdout>"),
+                source,
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn model(arguments: ModelArguments) -> sav::Result<()> {
+    let prompt = resolve_prompt(
+        arguments.prompt,
+        arguments.file.as_deref(),
+        arguments.editor,
+    )?;
+    let provider = arguments.provider.into();
+    let output_schema = arguments
+        .output_schema
+        .map(|schema| {
+            serde_json::from_str(&schema).map_err(|_| Error::InvalidModelRequest {
+                reason: "--output-schema must contain one valid JSON value".to_owned(),
+            })
+        })
+        .transpose()?;
+    let timeout = Duration::from_secs(arguments.timeout);
+    let slot_timeout = Duration::from_secs(arguments.slot_timeout);
+    let ttft_timeout = Duration::from_secs(arguments.ttft_timeout);
+    if slot_timeout >= ttft_timeout || ttft_timeout >= timeout {
+        return Err(Error::InvalidModelTransport {
+            reason: format!(
+                "--slot-timeout ({}) must be less than --ttft-timeout ({}) which must be less than --timeout ({})",
+                arguments.slot_timeout, arguments.ttft_timeout, arguments.timeout
+            ),
+        });
+    }
+    let transport: Box<dyn ModelTransport> = Box::new(DirectModelTransport::with_watchdogs(
+        provider,
+        &arguments.endpoint,
+        timeout,
+        arguments.max_response_bytes,
+        slot_timeout,
+        ttft_timeout,
+    )?);
+    let request = ModelRequest {
+        model: arguments.model,
+        messages: vec![ModelMessage::User(prompt.clone())],
+        tools: Vec::new(),
+        tool_choice: ToolChoice::None,
+        reasoning_effort: arguments.reasoning_effort.map(Into::into),
+        output_schema,
+        max_output_tokens: None,
+    };
+    let cancellation = CancellationToken::new();
+    let stdout = std::io::stdout();
+    let mut writer = stdout.lock();
+
+    if arguments.stream {
+        if arguments.json {
+            let turn = transport.stream(&request, &cancellation, &mut |_| Ok(()))?;
+            write_json(&mut writer, &turn)?;
+        } else {
+            show_initial_prompt(&prompt);
+            let show_reasoning = arguments.show_reasoning;
+            transport.stream(&request, &cancellation, &mut |event| match event {
+                ModelStreamEvent::TextDelta(text) => writer
+                    .write_all(text.as_bytes())
+                    .and_then(|()| writer.flush())
+                    .map_err(|source| Error::Io {
+                        operation: "write model output",
+                        path: PathBuf::from("<stdout>"),
+                        source,
+                    }),
+                ModelStreamEvent::ReasoningDelta(reasoning) if show_reasoning => {
+                    write_stderr(reasoning.as_bytes())
+                }
+                ModelStreamEvent::ReasoningDelta(_) | ModelStreamEvent::ToolIntent(_) => Ok(()),
+            })?;
+        }
+    } else {
+        let turn = transport.complete(&request, &cancellation)?;
+        if arguments.json {
+            write_json(&mut writer, &turn)?;
+        } else {
+            show_initial_prompt(&prompt);
+            if arguments.show_reasoning
+                && let Some(reasoning) = &turn.reasoning
+            {
+                write_stderr(reasoning.as_bytes())?;
+                write_stderr(b"\n")?;
+            }
+            writer
+                .write_all(turn.text.as_bytes())
+                .map_err(|source| Error::Io {
+                    operation: "write model output",
+                    path: PathBuf::from("<stdout>"),
+                    source,
+                })?;
+        }
+    }
+    Ok(())
+}
+
+fn run(arguments: RunArguments) -> sav::Result<()> {
+    if !arguments.allow_host_execution {
+        return Err(Error::HostExecutionNotAcknowledged);
+    }
+    let prompt = resolve_prompt(
+        arguments.prompt,
+        arguments.file.as_deref(),
+        arguments.editor,
+    )?;
+    let policy = SupervisionPolicy {
+        idle_timeout: Duration::from_secs(arguments.idle_timeout),
+        attempt_timeout: None,
+        detect_loops: arguments.detect_loops,
+        max_retries: arguments.max_retries,
+        max_output_bytes: arguments.max_output_bytes,
+    };
+    let command_template = match (arguments.command, arguments.profile) {
+        (Some(command), None) => command,
+        (None, Some(profile)) => {
+            let config_path = resolve_config_path(arguments.config)?;
+            load_profile(&config_path, &profile)?.command
+        }
+        _ => {
+            return Err(Error::ProfileSetup {
+                reason: "exactly one of --command or --profile is required".to_owned(),
+            });
+        }
+    };
+
+    let reasoning_effort = arguments.reasoning_effort.map(Into::into);
+    let command_for_attempt = |context: &sav::AttemptContext| {
+        let prompt = match context.retry_notice() {
+            Some(notice) => format!("{prompt}\n\n{notice}"),
+            None => prompt.clone(),
+        };
+        let (program, command_arguments) = render_command_with_reasoning_effort(
+            &command_template,
+            &prompt,
+            &arguments.context_paths,
+            &arguments.working_directory,
+            reasoning_effort,
+        )?;
+        Ok(CommandSpec::new(program, command_arguments)
+            .in_directory(arguments.working_directory.clone()))
+    };
+    if arguments.json {
+        let report = run_supervised_capture(&policy, command_for_attempt)?;
+        let content = String::from_utf8_lossy(&report.stdout);
+        writeln!(
+            std::io::stdout(),
+            "{}",
+            serde_json::json!({"content": content})
+        )
+        .map_err(|source| Error::Io {
+            operation: "write JSON prompt output",
+            path: PathBuf::from("<stdout>"),
+            source,
+        })?;
+    } else {
+        show_initial_prompt(&prompt);
+        run_supervised(&policy, command_for_attempt)?;
+    }
+    Ok(())
+}
+
+fn setup(arguments: SetupArguments) -> sav::Result<()> {
+    let config_path = resolve_config_path(arguments.config)?;
+    let current_directory = std::env::current_dir().map_err(|source| Error::Io {
+        operation: "determine setup working directory",
+        path: PathBuf::from("."),
+        source,
+    })?;
+    let stdin = std::io::stdin();
+    let mut reader = std::io::BufReader::new(stdin.lock());
+    let stdout = std::io::stdout();
+    let mut writer = stdout.lock();
+    run_setup_wizard_with_options(
+        &mut reader,
+        &mut writer,
+        &current_directory,
+        &config_path,
+        SetupOptions {
+            force: arguments.force,
+            ..Default::default()
+        },
+    )?;
+    Ok(())
+}
+
+fn show_initial_prompt(prompt: &str) {
+    if std::io::stderr().is_terminal() {
+        eprintln!("Prompt:\n{prompt}\n\nResponse:");
+    }
+}
+
+fn write_stderr(bytes: &[u8]) -> sav::Result<()> {
+    let stderr = std::io::stderr();
+    let mut writer = stderr.lock();
+    writer
+        .write_all(bytes)
+        .and_then(|()| writer.flush())
+        .map_err(|source| Error::Io {
+            operation: "write provider reasoning",
+            path: PathBuf::from("<stderr>"),
+            source,
+        })
+}
+
+fn write_json(
+    writer: &mut impl Write,
+    turn: &sav::ModelTurn,
+) -> sav::Result<()> {
+    serde_json::to_writer(&mut *writer, turn).map_err(|source| Error::Io {
+        operation: "write JSON model output",
+        path: PathBuf::from("<stdout>"),
+        source: std::io::Error::other(source),
+    })?;
+    writer.write_all(b"\n").map_err(|source| Error::Io {
+        operation: "write JSON model output",
+        path: PathBuf::from("<stdout>"),
+        source,
+    })
+}
+
+fn resolve_config_path(path: Option<PathBuf>) -> sav::Result<PathBuf> {
+    path.or_else(default_profile_config_path)
+        .ok_or_else(|| Error::ProfileSetup {
+            reason: "cannot resolve profile configuration; set HOME or XDG_CONFIG_HOME".to_owned(),
+        })
+}

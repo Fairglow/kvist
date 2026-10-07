@@ -9,49 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
-name = "agent-runner"
-version = "0.2.0"
-dependencies = [
- "agent-runtime",
- "clap",
- "crossterm",
- "csscolorparser",
- "hex",
- "kvist-sandbox-runner",
- "nix 0.31.3",
- "pulldown-cmark",
- "ratatui",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "syntect",
- "tempfile",
- "thiserror 2.0.20",
- "toml",
- "tracing",
- "tracing-subscriber",
- "tui-textarea-2",
-]
-
-[[package]]
-name = "agent-runtime"
-version = "0.2.0"
-dependencies = [
- "clap",
- "hex",
- "nix 0.31.3",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tempfile",
- "thiserror 2.0.20",
- "tokio",
- "toml_edit",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -726,6 +683,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "galla"
+version = "0.2.0"
+dependencies = [
+ "hex",
+ "libc",
+ "nix 0.31.3",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -928,16 +898,16 @@ dependencies = [
 name = "kvist"
 version = "0.2.0"
 dependencies = [
- "agent-runtime",
  "chrono",
  "clap",
  "clap_complete",
  "crossterm",
+ "galla",
  "getrandom 0.4.3",
  "hex",
- "kvist-sandbox-runner",
  "nix 0.31.3",
  "reedline",
+ "sav",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -949,19 +919,6 @@ dependencies = [
  "toml_edit",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "kvist-sandbox-runner"
-version = "0.2.0"
-dependencies = [
- "hex",
- "libc",
- "nix 0.31.3",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "tempfile",
 ]
 
 [[package]]
@@ -1664,6 +1621,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "sav"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "hex",
+ "nix 0.31.3",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "toml_edit",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1819,6 +1794,31 @@ name = "siphasher"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
+
+[[package]]
+name = "skott"
+version = "0.2.0"
+dependencies = [
+ "clap",
+ "crossterm",
+ "csscolorparser",
+ "galla",
+ "hex",
+ "nix 0.31.3",
+ "pulldown-cmark",
+ "ratatui",
+ "sav",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "syntect",
+ "tempfile",
+ "thiserror 2.0.20",
+ "toml",
+ "tracing",
+ "tracing-subscriber",
+ "tui-textarea-2",
+]
 
 [[package]]
 name = "slab"
