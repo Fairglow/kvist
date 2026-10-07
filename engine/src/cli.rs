@@ -659,11 +659,19 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 vendored_dir,
             } => {
                 let project = context::ProjectContext::resolve(project_dir.as_deref())?;
+                // When the project has a sandbox configured, `kvist vendor`
+                // provisions a stale registry via the in-sandbox acquisition
+                // phase (network-allow `cargo fetch`) before the effect sandbox
+                // runs; otherwise the classic host `cargo vendor` pass is used.
+                let sandbox = crate::config::load(&project.project_dir)
+                    .ok()
+                    .and_then(|config| config.sandbox);
                 vendor_command::vendor_project(
                     &project.project_dir,
                     vendor_command::VendorOptions {
                         vendored_dir,
                         populate: true,
+                        sandbox,
                     },
                 )
                 .map(|report| {
@@ -1266,11 +1274,15 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 vendored_dir,
             } => {
                 let project = context::ProjectContext::resolve(project_dir.as_deref())?;
+                let sandbox = crate::config::load(&project.project_dir)
+                    .ok()
+                    .and_then(|config| config.sandbox);
                 vendor_command::vendor_project(
                     &project.project_dir,
                     vendor_command::VendorOptions {
                         vendored_dir,
                         populate: true,
+                        sandbox,
                     },
                 )
                 .map(|report| CommandOutput::message(report.to_string()))

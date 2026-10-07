@@ -106,6 +106,8 @@ pub enum ExecutionPhase {
     Authoring,
     /// A build/test verification run with network denied and read-only inputs.
     Verification,
+    /// A Cargo dependency acquisition with allowlisted package-source network.
+    DependencyAcquisition,
 }
 
 impl ExecutionPhase {
@@ -113,6 +115,7 @@ impl ExecutionPhase {
         match self {
             ExecutionPhase::Authoring => "authoring",
             ExecutionPhase::Verification => "verification",
+            ExecutionPhase::DependencyAcquisition => "dependency-acquisition",
         }
     }
 }
@@ -406,7 +409,28 @@ struct SandboxRequest<'a> {
 #[derive(Debug, Serialize)]
 struct SandboxNetwork {
     mode: &'static str,
-    allowed_sources: Vec<String>,
+    allowed_sources: Vec<SandboxAllowedSource>,
+}
+
+/// A package source a `PackageSources` (dependency-acquisition) sandbox may
+/// contact. Mirrors `kvist_sandbox_runner::protocol::AllowedSource` exactly so
+/// the serialized request is accepted by the runner's parser and validator.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+pub enum SandboxAllowedSource {
+    /// A Cargo registry with separate sparse-index and crate-download origins.
+    CargoRegistry {
+        name: String,
+        index_origin: String,
+        download_origin: String,
+        identity: String,
+    },
+    /// An immutable Cargo Git dependency.
+    CargoGit {
+        repository: String,
+        revision: String,
+        identity: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -474,19 +498,39 @@ struct SandboxCacheEndpoint {
     identity: String,
 }
 
-/// The read-only approved Cargo home for an offline build. Shape mirrors
-/// `kvist_sandbox_runner::protocol::Cache`: the exact registry and git children
-/// of `cargo_home`, plus the approved read-only endpoint. The writable,
-/// lockfile, and promotion acquisition fields are omitted, since verification
-/// only mounts an approved, immutable Cargo home.
+/// The Cargo home cache block for a Cargo-phase request. Shape mirrors
+/// `kvist_sandbox_runner::protocol::Cache`.
 #[derive(Debug, Serialize)]
-#[serde(deny_unknown_fields)]
 struct SandboxCache {
     cargo_home: String,
     registry: String,
     git: String,
+    /// Writable Cargo-home endpoint (dependency acquisition).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    writable: Option<SandboxCacheEndpoint>,
+    /// Read-only approved Cargo-home endpoint (offline verification).
     #[serde(skip_serializing_if = "Option::is_none")]
     approved: Option<SandboxCacheEndpoint>,
+    /// Isolated writable lockfile workspace (dependency acquisition).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lockfile: Option<SandboxLockfileWorkspace>,
+    /// Cache-promotion intent (dependency acquisition).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    promotion: Option<SandboxCachePromotion>,
+}
+
+/// The isolated writable lockfile workspace for a dependency-acquisition run.
+#[derive(Debug, Serialize)]
+struct SandboxLockfileWorkspace {
+    destination: String,
+    before_identity: String,
+}
+
+/// Pre-execution cache-promotion intent for a dependency-acquisition run.
+#[derive(Debug, Serialize)]
+struct SandboxCachePromotion {
+    enabled: bool,
+    source: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1053,6 +1097,17 @@ pub fn execute_with_timeout(
                 identity: digest_label(component_source.as_bytes()),
             });
         }
+        // Dependency acquisition runs through its own closed executor
+        // (`execute_dependency_acquisition`); the generic system-toolchain path
+        // must fail closed if it is ever asked for that phase.
+        ExecutionPhase::DependencyAcquisition => {
+            return Err(KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: "dependency acquisition must use the closed Cargo acquisition \
+                         executor, not the generic system-toolchain path"
+                    .to_owned(),
+            });
+        }
     }
     for mount in request.read_only_mounts {
         let source = canonical_source_str(
@@ -1258,6 +1313,11 @@ const CARGO_CARGO_HOME_DEST: &str = "/workspace/cargo-home";
 /// exposes the toolchain binaries and the system linker, and that `PATH` points
 /// at so a locked build can compile and link offline.
 const CARGO_RUNTIME_BIN_DEST: &str = "/workspace/bin";
+/// Sandbox working directory of the isolated writable lockfile workspace for a
+/// dependency-acquisition run. Distinct from the verification component mount
+/// and the scratch directory; the runner requires the acquisition working
+/// directory to equal the lockfile workspace destination.
+const ACQUISITION_LOCKFILE_DEST: &str = "/workspace/lockfile";
 
 /// Inputs for an offline, network-denied `cargo test --locked` verification
 /// against a vendored Rust project.
@@ -1546,10 +1606,15 @@ fn build_offline_cargo_verification_request(
             cargo_home: CARGO_CARGO_HOME_DEST.to_owned(),
             registry: format!("{CARGO_CARGO_HOME_DEST}/registry"),
             git: format!("{CARGO_CARGO_HOME_DEST}/git"),
+            // Verification mounts an approved, immutable Cargo home; the
+            // writable, lockfile, and promotion acquisition fields are omitted.
+            writable: None,
             approved: Some(SandboxCacheEndpoint {
                 destination: CARGO_CARGO_HOME_DEST.to_owned(),
                 identity: cache_identity,
             }),
+            lockfile: None,
+            promotion: None,
         }),
         scratch: Some(SandboxScratch {
             destination: CARGO_SCRATCH_DEST,
@@ -1561,6 +1626,319 @@ fn build_offline_cargo_verification_request(
         runner: config.runner.clone(),
         reason: format!("cannot encode offline Cargo verification request: {error}"),
     })
+}
+
+/// Inputs for a network-allow Cargo dependency-acquisition run (Phase 1 of the
+/// two-sandbox offline model). This is the in-sandbox provisioning step that
+/// replaces a bare-host `cargo vendor`: a network-allow sandbox with
+/// allowlisted package sources runs `cargo fetch`, and the runner promotes the
+/// fetched Cargo home into the project cache after the child exits. The
+/// fetched material is then repackaged into the vendored registry offline.
+pub struct DependencyAcquisition<'a> {
+    pub project_root: &'a Path,
+    pub vcs_selection: VcsSelection,
+    /// Immutable toolchain root (contains `cargo` beneath it).
+    pub toolchain_root: &'a Path,
+    /// The exact `cargo` executable beneath `toolchain_root`.
+    pub cargo_path: &'a Path,
+    /// Writable Cargo-home host directory (the acquisition cache source).
+    pub cargo_home: &'a Path,
+    /// Writable scratch host directory (target + HOME).
+    pub scratch_host_dir: &'a Path,
+    /// Writable lockfile-workspace host directory (contains `Cargo.lock`).
+    pub lockfile_workspace: &'a Path,
+    /// Digest of `Cargo.lock` before acquisition.
+    pub lockfile_before_identity: &'a str,
+    /// The allowlisted package sources the sandbox may contact.
+    pub sources: &'a [SandboxAllowedSource],
+    pub policy_identity: &'a str,
+    pub backend: &'a BackendIdentity,
+    pub config: &'a SandboxConfig,
+    pub expected_runner: &'a RunnerIdentity,
+}
+
+/// Build the version-one dependency-acquisition request: a Cargo toolchain, a
+/// writable Cargo home, an isolated writable lockfile workspace, target
+/// scratch, and pre-execution promotion intent, with allowlisted
+/// package-source network authority. The shape is validated against the runner
+/// by `build_acquisition_request_validates`.
+#[allow(clippy::too_many_arguments)]
+fn build_dependency_acquisition_request(
+    config: &SandboxConfig,
+    runner_identity: &str,
+    backend: &BackendIdentity,
+    policy_identity: &str,
+    toolchain_identity: &str,
+    lockfile_before_identity: &str,
+    toolchain_root: &Path,
+    cargo_path: &Path,
+    cargo_home: &Path,
+    scratch_host_dir: &Path,
+    lockfile_workspace: &Path,
+    sources: &[SandboxAllowedSource],
+) -> Result<Vec<u8>> {
+    let toolchain_root = canonical_source_str(
+        config,
+        toolchain_root,
+        "canonicalize cargo toolchain root for dependency acquisition",
+    )?;
+    let cargo_path = canonical_source_str(
+        config,
+        cargo_path,
+        "canonicalize cargo executable for dependency acquisition",
+    )?;
+    let cargo_home = canonical_source_str(
+        config,
+        cargo_home,
+        "canonicalize writable cargo home for dependency acquisition",
+    )?;
+    let scratch_host_dir = canonical_source_str(
+        config,
+        scratch_host_dir,
+        "canonicalize scratch directory for dependency acquisition",
+    )?;
+    let lockfile_workspace = canonical_source_str(
+        config,
+        lockfile_workspace,
+        "canonicalize lockfile workspace for dependency acquisition",
+    )?;
+
+    // `cargo` lives beneath the toolchain root; its sandbox path is the
+    // toolchain destination plus cargo's path relative to that root.
+    let rel = Path::new(&cargo_path)
+        .strip_prefix(&toolchain_root)
+        .map(|relative| relative.to_string_lossy().into_owned())
+        .map_err(|source| KvistError::SandboxUnavailable {
+            runner: config.runner.clone(),
+            reason: format!("cargo executable is not beneath the toolchain root: {source}"),
+        })?;
+    let cargo_sandbox_path = format!("{CARGO_TOOLCHAIN_DEST}/{rel}");
+
+    let cache_identity =
+        digest_label(format!("kvist-acquisition-cargo-home:{cargo_home}").as_bytes());
+    let scratch_identity = digest_label(
+        serde_json::to_string(&scratch_host_dir)
+            .map_err(|error| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!("cannot canonicalize scratch identity: {error}"),
+            })?
+            .as_bytes(),
+    );
+    let lockfile_identity = lockfile_before_identity.to_owned();
+
+    // The exact environment the runner's acquisition validator requires: the
+    // writable Cargo home, the scratch (HOME + target), and the isolated
+    // lockfile workspace. No `CARGO_NET_OFFLINE` — this is the one phase that
+    // may contact the allowlisted package sources.
+    let mut environment: BTreeMap<String, String> = BTreeMap::new();
+    environment.insert("HOME".to_owned(), format!("{CARGO_SCRATCH_DEST}/home"));
+    environment.insert("PATH".to_owned(), CARGO_RUNTIME_BIN_DEST.to_owned());
+    environment.insert("CARGO_HOME".to_owned(), CARGO_CARGO_HOME_DEST.to_owned());
+    environment.insert(
+        "CARGO_TARGET_DIR".to_owned(),
+        format!("{CARGO_SCRATCH_DEST}/target"),
+    );
+    environment.insert(
+        "CARGO_NET_GIT_FETCH_WITH_CLI".to_owned(),
+        "false".to_owned(),
+    );
+
+    let argv: Vec<String> = vec![cargo_sandbox_path.clone(), "fetch".to_owned()];
+
+    // Four mutually non-overlapping grants: the immutable toolchain, the
+    // writable Cargo home (the acquisition cache + promotion source), the
+    // writable scratch, and the isolated writable lockfile workspace (which is
+    // also the working directory, as the runner requires).
+    let grants: Vec<SandboxGrant> = vec![
+        SandboxGrant {
+            source: toolchain_root.clone(),
+            destination: CARGO_TOOLCHAIN_DEST.to_owned(),
+            access: "read-only",
+            purpose: "toolchain",
+            identity: toolchain_identity.to_owned(),
+        },
+        SandboxGrant {
+            source: cargo_home.clone(),
+            destination: CARGO_CARGO_HOME_DEST.to_owned(),
+            access: "read-write",
+            purpose: "dependency-cache",
+            identity: cache_identity.clone(),
+        },
+        SandboxGrant {
+            source: scratch_host_dir.clone(),
+            destination: CARGO_SCRATCH_DEST.to_owned(),
+            access: "read-write",
+            purpose: "scratch",
+            identity: scratch_identity.clone(),
+        },
+        SandboxGrant {
+            source: lockfile_workspace.clone(),
+            destination: ACQUISITION_LOCKFILE_DEST.to_owned(),
+            access: "read-write",
+            purpose: "lockfile",
+            identity: lockfile_identity.clone(),
+        },
+    ];
+
+    let resources = SandboxResources {
+        wall_time_ms: DEFAULT_WALL_TIME_MS,
+        max_output_bytes: DEFAULT_MAX_OUTPUT_BYTES,
+        max_processes: DEFAULT_MAX_PROCESSES,
+        max_files: DEFAULT_MAX_FILES,
+        max_file_bytes: DEFAULT_MAX_FILE_BYTES,
+        max_scratch_bytes: DEFAULT_MAX_SCRATCH_BYTES,
+        max_cache_bytes: Some(DEFAULT_MAX_CARGO_CACHE_BYTES),
+    };
+
+    let command_identity = digest_label(
+        serde_json::to_string(&argv)
+            .map_err(|error| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!("cannot canonicalize command identity: {error}"),
+            })?
+            .as_bytes(),
+    );
+    let mount_plan_identity = digest_label(
+        serde_json::to_string(&grants)
+            .map_err(|error| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!("cannot canonicalize mount plan identity: {error}"),
+            })?
+            .as_bytes(),
+    );
+
+    let sandbox_request = SandboxRequest {
+        protocol: REQUEST_PROTOCOL,
+        protocol_version: PROTOCOL_VERSION,
+        phase: ExecutionPhase::DependencyAcquisition.wire(),
+        argv: &argv,
+        working_directory: ACQUISITION_LOCKFILE_DEST,
+        environment: &environment,
+        network: SandboxNetwork {
+            mode: "package-sources",
+            allowed_sources: sources.to_vec(),
+        },
+        resources,
+        identities: SandboxIdentities {
+            runner: runner_identity.to_owned(),
+            backend: SandboxBackend {
+                kind: backend.kind.clone(),
+                path: backend.path.clone(),
+                digest: backend.digest.clone(),
+            },
+            policy: policy_identity.to_owned(),
+            toolchain: toolchain_identity.to_owned(),
+            command: command_identity,
+            mount_plan: mount_plan_identity,
+        },
+        grants: &grants,
+        toolchain: SandboxToolchain::Cargo {
+            identity: toolchain_identity.to_owned(),
+            root: CARGO_TOOLCHAIN_DEST.to_owned(),
+            cargo: cargo_sandbox_path.clone(),
+        },
+        cache: Some(SandboxCache {
+            cargo_home: CARGO_CARGO_HOME_DEST.to_owned(),
+            registry: format!("{CARGO_CARGO_HOME_DEST}/registry"),
+            git: format!("{CARGO_CARGO_HOME_DEST}/git"),
+            writable: Some(SandboxCacheEndpoint {
+                destination: CARGO_CARGO_HOME_DEST.to_owned(),
+                identity: cache_identity,
+            }),
+            approved: None,
+            lockfile: Some(SandboxLockfileWorkspace {
+                destination: ACQUISITION_LOCKFILE_DEST.to_owned(),
+                before_identity: lockfile_identity.clone(),
+            }),
+            promotion: Some(SandboxCachePromotion {
+                enabled: true,
+                source: CARGO_CARGO_HOME_DEST.to_owned(),
+            }),
+        }),
+        scratch: Some(SandboxScratch {
+            destination: CARGO_SCRATCH_DEST,
+            identity: scratch_identity,
+        }),
+    };
+
+    serde_json::to_vec(&sandbox_request).map_err(|error| KvistError::SandboxUnavailable {
+        runner: config.runner.clone(),
+        reason: format!("cannot encode dependency acquisition request: {error}"),
+    })
+}
+
+/// Execute a dependency-acquisition run: spawn the trusted runner with the
+/// version-one request (network-allow, allowlisted package sources,
+/// `cargo fetch`), supervise it under the bounded capture and process-group
+/// termination machinery, and return the exit status. The runner promotes the
+/// fetched Cargo home into the project cache after the child exits.
+pub fn execute_dependency_acquisition(
+    config: &SandboxConfig,
+    request: &DependencyAcquisition<'_>,
+    options: ExecutionOptions,
+) -> Result<ExecutionResult> {
+    let environment: BTreeMap<String, String> = BTreeMap::new();
+    let program = request.cargo_path.to_string_lossy().into_owned();
+    let fetch_args: Vec<String> = vec!["fetch".to_owned()];
+    validate_request_inputs(config, &program, &fetch_args, &environment)?;
+
+    // Rehash and revalidate the approval-bound enforcement backend immediately
+    // before execution, as in the generic path.
+    let current_backend = backend_identity(config, request.project_root, request.vcs_selection)?;
+    if &current_backend != request.backend {
+        return Err(KvistError::SandboxUnavailable {
+            runner: config.runner.clone(),
+            reason: "the enforcement backend identity changed after the availability probe"
+                .to_owned(),
+        });
+    }
+    let launch = checked_runner_launch(
+        config,
+        request.project_root,
+        request.vcs_selection,
+        request.expected_runner,
+    )?;
+
+    // Resolve the exact cargo executable so argv[0] and the toolchain block
+    // agree, and derive the toolchain identity from its bytes.
+    let resolved = resolve_program(config, &program, &environment)?;
+    let cargo_bytes = fs::read(&resolved.canonical_path).map_err(|source| KvistError::Io {
+        operation: "read cargo executable for dependency acquisition toolchain identity",
+        path: PathBuf::from(&resolved.canonical_path),
+        source,
+    })?;
+    let toolchain_identity = digest_label(&cargo_bytes);
+
+    let encoded = build_dependency_acquisition_request(
+        config,
+        &request.expected_runner.digest,
+        request.backend,
+        request.policy_identity,
+        &toolchain_identity,
+        request.lockfile_before_identity,
+        request.toolchain_root,
+        Path::new(&resolved.canonical_path),
+        request.cargo_home,
+        request.scratch_host_dir,
+        request.lockfile_workspace,
+        request.sources,
+    )?;
+
+    tracing::info!(
+        project = %request.project_root.display(),
+        cargo_home = %request.cargo_home.display(),
+        "executing network-allow dependency acquisition (cargo fetch)"
+    );
+
+    run_launched_bounded(
+        &launch,
+        config,
+        EXECUTE_ARGUMENT,
+        Some(&encoded),
+        options.timeout,
+        options.output_limit,
+        options.live_stdout,
+    )
 }
 
 /// Run an offline, network-denied `cargo test --locked` verification against an
@@ -3130,6 +3508,137 @@ mod tests {
         assert!(
             request.argv[0].starts_with(&format!("{CARGO_TOOLCHAIN_DEST}/")),
             "cargo must be the sandbox path under the toolchain root"
+        );
+    }
+
+    #[test]
+    fn dependency_acquisition_request_satisfies_the_shared_runner_validator() {
+        use kvist_sandbox_runner::protocol::{Access, NetworkMode, Purpose, Toolchain};
+        use kvist_sandbox_runner::validation;
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().expect("tmp root");
+        let project = root.path().join("project");
+        fs::create_dir_all(&project).expect("project dir");
+
+        // Immutable toolchain root holding an exact cargo executable beneath it.
+        let toolchain = tempfile::tempdir().expect("toolchain");
+        let bin = toolchain.path().join("bin");
+        fs::create_dir_all(&bin).expect("toolchain bin");
+        let cargo = bin.join("cargo");
+        fs::write(&cargo, "#!/bin/sh\n").expect("cargo file");
+        fs::set_permissions(&cargo, std::fs::Permissions::from_mode(0o755))
+            .expect("cargo executable");
+
+        // Writable Cargo home (the acquisition cache + promotion source),
+        // writable scratch, and the isolated writable lockfile workspace.
+        let cargo_home = tempfile::tempdir().expect("cargo home");
+        let scratch = tempfile::tempdir().expect("scratch");
+        let lockfile_workspace = tempfile::tempdir().expect("lockfile workspace");
+        let lockfile_before_identity = digest_label(b"kvist-lockfile-before");
+
+        let config = SandboxConfig {
+            runner: "/usr/bin/bwrap".to_owned(),
+            backend: "/usr/bin/true".to_owned(),
+            environment_allowlist: Vec::new(),
+            acquisition: crate::config::AcquisitionConfig::default(),
+        };
+        let backend = sample_backend();
+        let runner_digest = format!("sha256:{}", "c".repeat(64));
+        let toolchain_identity = digest_label(b"kvist-cargo-toolchain");
+
+        // The allowlisted package sources: canonical crates.io (sparse index +
+        // crate download origins) and its derived identity.
+        let sources = vec![SandboxAllowedSource::CargoRegistry {
+            name: crate::acquisition::CANONICAL_CRATES_IO_NAME.to_owned(),
+            index_origin: crate::acquisition::CANONICAL_CRATES_IO_INDEX_ORIGIN.to_owned(),
+            download_origin: crate::acquisition::CANONICAL_CRATES_IO_DOWNLOAD_ORIGIN.to_owned(),
+            identity: crate::acquisition::crates_io_identity().as_str().to_owned(),
+        }];
+
+        let encoded = build_dependency_acquisition_request(
+            &config,
+            &runner_digest,
+            &backend,
+            &digest_label(b"policy"),
+            &toolchain_identity,
+            &lockfile_before_identity,
+            toolchain.path(),
+            &cargo,
+            cargo_home.path(),
+            scratch.path(),
+            lockfile_workspace.path(),
+            &sources,
+        )
+        .expect("build dependency acquisition request");
+        let request = validation::parse_and_validate(&encoded)
+            .expect("dependency acquisition request must satisfy the runner validator");
+
+        // Network-allow, allowlisted package sources only.
+        assert_eq!(request.network.mode, NetworkMode::PackageSources);
+        assert_eq!(request.network.allowed_sources.len(), 1);
+        assert_eq!(
+            request.phase,
+            kvist_sandbox_runner::protocol::Phase::DependencyAcquisition
+        );
+
+        // The closed acquisition topology is exactly four grants: toolchain,
+        // writable dependency-cache, writable scratch, and writable lockfile.
+        assert_eq!(
+            request.grants.len(),
+            4,
+            "acquisition topology is four grants"
+        );
+        let purposes: Vec<_> = request.grants.iter().map(|grant| grant.purpose).collect();
+        assert!(purposes.contains(&Purpose::Toolchain));
+        assert!(purposes.contains(&Purpose::DependencyCache));
+        assert!(purposes.contains(&Purpose::Scratch));
+        assert!(purposes.contains(&Purpose::Lockfile));
+
+        // The writable Cargo home is the cache + promotion source, read-write.
+        let cache = request.cache.as_ref().expect("acquisition has a cache");
+        assert!(
+            cache.approved.is_none(),
+            "acquisition must not declare an approved home"
+        );
+        let writable = cache.writable.as_ref().expect("writable cargo home");
+        assert_eq!(writable.destination, CARGO_CARGO_HOME_DEST);
+        let cache_grant = request
+            .grants
+            .iter()
+            .find(|grant| grant.purpose == Purpose::DependencyCache)
+            .expect("dependency-cache grant");
+        assert_eq!(cache_grant.access, Access::ReadWrite);
+        assert_eq!(cache_grant.identity, writable.identity);
+
+        // The lockfile workspace is writable, is the working directory, and the
+        // promotion source equals the writable Cargo home.
+        let lockfile = cache.lockfile.as_ref().expect("lockfile workspace");
+        assert_eq!(lockfile.destination, ACQUISITION_LOCKFILE_DEST);
+        assert_eq!(lockfile.before_identity, lockfile_before_identity);
+        assert_eq!(request.working_directory, ACQUISITION_LOCKFILE_DEST);
+        let promotion = cache.promotion.as_ref().expect("promotion intent");
+        assert!(promotion.enabled);
+        assert_eq!(promotion.source, CARGO_CARGO_HOME_DEST);
+
+        // `cargo fetch` argv, with cargo as the sandbox path under the toolchain
+        // root (equal to argv[0]).
+        assert_eq!(request.argv.len(), 2);
+        assert_eq!(request.argv[1], "fetch");
+        let Toolchain::Cargo { cargo, .. } = &request.toolchain else {
+            panic!("acquisition uses a Cargo toolchain");
+        };
+        assert_eq!(*cargo, request.argv[0]);
+        assert!(
+            request.argv[0].starts_with(&format!("{CARGO_TOOLCHAIN_DEST}/")),
+            "cargo must be the sandbox path under the toolchain root"
+        );
+
+        // No offline flag: this is the one phase that may contact the
+        // allowlisted package sources.
+        assert!(
+            !request.environment.contains_key("CARGO_NET_OFFLINE"),
+            "acquisition is not offline"
         );
     }
 

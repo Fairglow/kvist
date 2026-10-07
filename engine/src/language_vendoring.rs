@@ -1242,7 +1242,9 @@ mod tests {
         // the material is), not the recorded host path (which does not exist
         // here). A stale absolute path must not produce "No such file or
         // directory".
-        let report = strategy.enforce(project).expect("enforce with foreign-root manifest");
+        let report = strategy
+            .enforce(project)
+            .expect("enforce with foreign-root manifest");
         assert!(report.ready());
 
         // The mounts the offline build will make must point at the current
@@ -1253,16 +1255,28 @@ mod tests {
             .find(|mount| mount.destination == rust_vendoring::VENDOR_SANDBOX_MOUNT)
             .expect("registry mount");
         assert_eq!(registry.source, project.join(".kvist").join("vendored"));
-        assert!(!registry.source.to_string_lossy().starts_with("/opt/proj/kvist"));
+        assert!(
+            !registry
+                .source
+                .to_string_lossy()
+                .starts_with("/opt/proj/kvist")
+        );
         let cargo_config = mounts
             .iter()
             .find(|mount| mount.destination == rust_vendoring::SANDBOX_CARGO_CONFIG_MOUNT)
             .expect("cargo-config mount");
         assert_eq!(
             cargo_config.source,
-            project.join(".kvist").join(rust_vendoring::SANDBOX_CARGO_CONFIG_DIRNAME)
+            project
+                .join(".kvist")
+                .join(rust_vendoring::SANDBOX_CARGO_CONFIG_DIRNAME)
         );
-        assert!(!cargo_config.source.to_string_lossy().starts_with("/opt/proj/kvist"));
+        assert!(
+            !cargo_config
+                .source
+                .to_string_lossy()
+                .starts_with("/opt/proj/kvist")
+        );
     }
 
     #[test]

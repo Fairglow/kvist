@@ -74,6 +74,28 @@ Validated live (security-sensitive, requires the bwrap runner environment):
   lacks the bwrap runner. Extending the closed topology admits new read-only
   authority and is documented here rather than certified.
 
+- **In-sandbox acquisition provisioning.** When the registry is stale,
+  `kvist vendor` runs a network-allow **dependency-acquisition sandbox**
+  (`cargo fetch` with allowlisted package sources) *before* the effect sandbox
+  executes, then repacks the fetched material into the vendored registry with an
+  **offline** `cargo vendor --offline` (the host never resolves crate sources).
+  The request is the closed four-grant `DependencyAcquisition` topology
+  (toolchain, writable Cargo home, writable scratch, writable lockfile
+  workspace) with `PackageSources` network authority, built by
+  `sandbox::build_dependency_acquisition_request` and executed by
+  `sandbox::execute_dependency_acquisition`; the runner promotes the fetched
+  Cargo home after the fetch child exits. When a sandbox cannot run (no runner,
+  backend, or toolchain) the pass falls back to the classic host `cargo vendor`
+  so plain checkouts and CI keep working. Implemented and unit-tested: the
+  acquisition request is validated against the shared runner parser/validator
+  (`sandbox::tests::dependency_acquisition_request_satisfies_the_shared_runner_validator`),
+  the fallback path is tested
+  (`vendor_command::tests::acquisition_fallback_when_no_toolchain_is_resolvable`),
+  and a live end-to-end test
+  (`engine/tests/offline_cargo_verification_e2e.rs::acquisition_sandbox_provisions_vendored_registry_before_verification`)
+  drives the full in-sandbox provision → offline verify path (it self-skips
+  where the live sandbox cannot run).
+
 ## Lock-file digest as the directory-mount identity
 
 Read-only directory sources wired into the sandbox (the vendored registry, the
@@ -100,8 +122,12 @@ The vendoring model is language-agnostic at the enforcement layer and
 Rust-first in detection. Each language provisions its exact locked material on
 the host outside the sandbox and re-checks it against its own lock file:
 
-- **Rust** — `cargo vendor` into `.kvist/vendored`, enforced exactly through
-  `Cargo.lock`; offline config at `/workspace/.cargo`.
+- **Rust** — the network step is `cargo fetch` in a network-allow
+  **acquisition sandbox** (allowlisted package sources), run before the effect
+  sandbox executes; the fetched material is repacked into `.kvist/vendored` by
+  an offline `cargo vendor --offline` (falling back to a host `cargo vendor`
+  when no sandbox can run). Enforced exactly through `Cargo.lock`; offline
+  config at `/workspace/.cargo`.
 - **Python** — `pip`/`uv`: `requirements.lock.txt` or `uv.lock`; vendored
   wheels/sdists in `.kvist/vendored-python`; offline `pip.conf` at
   `/workspace/.pip`.
@@ -140,13 +166,24 @@ cargo or its subprocesses with attacker-controlled inputs.
 Provision the dependency material once, on the host, as a vendored registry, and
 make the sandbox build from it offline.
 
-- **Provision on the host.** `kvist vendor` populates a vendored registry from
-  the exact locked versions with `cargo vendor` and the project `Cargo.lock`,
-  restricted to the sources approved under [ADR 0005](0005-mediated-dependency-and-model-networking.md).
-  Git dependencies must be immutable and pre-approved. The vendored registry is
-  the only step that may contact the network, and it runs outside the effect
-  sandbox. When the registry already holds material it is reused and cargo is
-  never invoked again.
+- **Provision in a network-allow acquisition sandbox, before the effect sandbox
+  executes.** When the vendored registry is stale (a locked dependency is absent
+  and the registry does not satisfy the lock), `kvist vendor` runs a
+  **dependency-acquisition sandbox** — a network-allow phase with allowlisted
+  package sources (crates.io plus any project-approved sources) — that executes
+  `cargo fetch` **before the effect sandbox executes**. This is the only step
+  that may contact the network, and it runs inside a sandbox, not as an
+  unrestricted host `cargo`. The fetched material is then repacked into the
+  vendored registry by an **offline** `cargo vendor --offline` (network denied,
+  so the host never resolves crate sources); the runner promotes the fetched
+  Cargo home into a project cache after the fetch child exits. When a sandbox
+  cannot run in the environment (no runner, backend, or toolchain), the pass
+  falls back to the classic host `cargo vendor` so plain checkouts and CI keep
+  working. Git dependencies must be immutable and pre-approved, restricted to
+  the sources approved under
+  [ADR 0005](0005-mediated-dependency-and-model-networking.md). When the
+  registry already holds material it is reused and the acquisition pass is
+  never run.
 - **Record a versioned manifest.** `kvist vendor` writes `.kvist/vendoring-v1.json`
   under the project, recording the lockfile digest, the vendored directory, the
   sandbox `.cargo/config.toml` directory, and the fixed sandbox mount
@@ -168,16 +205,20 @@ make the sandbox build from it offline.
   execute inside the effect sandbox with network denied, resolving everything
   from the vendored registry with the toolchain mounted read-only. No
   acquisition cache or network is required for the build itself.
-- **Run network operations outside the sandbox.** `cargo vendor`,
-  `cargo generate-lockfile`, and `cargo fetch`/`cargo add` run as host-authorized
+- **Run network operations in a mediated acquisition sandbox.** `cargo fetch`
+  runs in a network-allow **dependency-acquisition sandbox** with allowlisted
+  package sources, before the effect sandbox executes; `cargo vendor
+  --offline` (the repack) and `cargo generate-lockfile` run as host-authorized
   steps under the [ADR 0005](0005-mediated-dependency-and-model-networking.md)
-  acquisition model, never as unrestricted sandbox tools.
+  acquisition model, never as unrestricted sandbox tools. The effect sandbox
+  itself is always network-denied.
 
 ## Where actions are performed
 
 | Action                                                         | Performs it                        | Network                                                                              | Boundary    |
 | -------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------ | ----------- |
-| `cargo vendor`, `cargo generate-lockfile`, `cargo fetch`/`add` | Host, authorized acquisition phase | Approved sources only ([ADR 0005](0005-mediated-dependency-and-model-networking.md)) | Acquisition |
+| `cargo fetch` (acquisition)                                    | Dependency-acquisition sandbox     | Approved sources only ([ADR 0005](0005-mediated-dependency-and-model-networking.md)) | Acquisition |
+| `cargo vendor --offline` (repack), `cargo generate-lockfile`   | `kvist` engine (host)              | None (offline)                                                                       | Acquisition |
 | Vendoring manifest record and enforcement                      | `kvist` engine (host)              | None                                                                                 | Authority   |
 | `cargo test --locked`, `cargo build`                           | Effect sandbox                     | None (`deny` + offline + vendored registry)                                          | Isolation   |
 | `cargo`, `rustc`, toolchain material                           | Effect sandbox                     | None (read-only mount)                                                               | Isolation   |
@@ -185,12 +226,15 @@ make the sandbox build from it offline.
 ## Rationale
 
 - **Preserves the authority model.** No ambient network or authority is given to
-  the sandbox; network toolchain operations are a bounded, approved host phase.
+  the sandbox; network toolchain operations are a bounded, approved
+  dependency-acquisition sandbox phase with allowlisted package sources.
 - **Deterministic and reproducible.** The vendored registry holds the exact
   locked versions, so offline builds resolve identically every time.
 - **Seamless for the user.** Once vendored, the agent builds and tests Rust with
-  no network and no manual steps. Adding a dependency requires one host-side pass
-  (`cargo add`, then `kvist vendor`) that refreshes the registry and manifest.
+  no network and no manual steps. Adding a dependency requires one pass
+  (`cargo add`, then `kvist vendor`) that refreshes the registry and manifest;
+  the network step (the `cargo fetch` in the acquisition sandbox) runs
+  automatically, before the effect sandbox executes.
 - **Durable, inspectable state.** The lock file (`Cargo.lock` and, for other
   languages, their respective lock files) is the durable, version-controlled
   catalogue; the manifest records its digest and the vendored layout, and Kvist

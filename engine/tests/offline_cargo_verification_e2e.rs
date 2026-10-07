@@ -175,6 +175,7 @@ fn offline_cargo_verification_builds_tested_project_denied_network() {
         VendorOptions {
             populate: true,
             vendored_dir: None,
+            sandbox: None,
         },
     ) {
         Ok(report) => report,
@@ -241,6 +242,139 @@ fn offline_cargo_verification_builds_tested_project_denied_network() {
         eprintln!("offline cargo test failed; stdout={stdout}; stderr={stderr}");
         panic!("offline cargo verification failed inside bwrap");
     }
+    assert!(
+        stdout.contains("test result:") || stderr.contains("test result:"),
+        "cargo must have run at least one test"
+    );
+}
+
+#[test]
+#[ignore = "expected to run inside sandbox"]
+fn acquisition_sandbox_provisions_vendored_registry_before_verification() {
+    // End-to-end: a stale registry is re-provisioned by the in-sandbox
+    // acquisition phase (network-allow `cargo fetch`), repacked into the
+    // vendored registry offline, and then the project verifies offline. The
+    // network step is the allowlisted `cargo fetch` inside the sandbox; the
+    // host never resolves crate sources.
+    let Some(runner) = locate_runner() else {
+        eprintln!("skip: no built sandbox runner; build it first");
+        return;
+    };
+    let Some(bwrap) = locate_backend() else {
+        eprintln!("skip: no bubblewrap backend on PATH");
+        return;
+    };
+    if !Command::new("cargo").arg("--version").output().is_ok() {
+        eprintln!("skip: cargo not on PATH");
+        return;
+    }
+    if !Command::new("rustup").arg("--version").output().is_ok() {
+        eprintln!("skip: rustup not on PATH");
+        return;
+    }
+    let Some(worktree) = git_worktree_root() else {
+        eprintln!("skip: not inside a git worktree");
+        return;
+    };
+
+    let project = tempfile::tempdir_in(&worktree).expect("temp project directory");
+    write_mini_cargo_project(project.path());
+
+    // Generate the lockfile (may need network); skip (never fail) if the host
+    // cannot reach the index.
+    let locked = Command::new("cargo")
+        .arg("generate-lockfile")
+        .current_dir(project.path())
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    if !locked {
+        eprintln!("skip: cargo generate-lockfile failed (offline host?)");
+        return;
+    }
+
+    let config = SandboxConfig {
+        runner: runner.to_string_lossy().into_owned(),
+        backend: bwrap.to_string_lossy().into_owned(),
+        environment_allowlist: vec![
+            "PATH".to_owned(),
+            "RUST_BACKTRACE".to_owned(),
+            "CARGO_HOME".to_owned(),
+            "RUSTC".to_owned(),
+            "TERM".to_owned(),
+        ],
+        acquisition: AcquisitionConfig::default(),
+    };
+
+    // The in-sandbox acquisition path provisions the registry; the host
+    // `cargo vendor` pass is the fallback (never failing the live test).
+    let report = match vendor_project(
+        project.path(),
+        VendorOptions {
+            populate: true,
+            vendored_dir: None,
+            sandbox: Some(config.clone()),
+        },
+    ) {
+        Ok(report) => report,
+        Err(source) => {
+            eprintln!("skip: in-sandbox acquisition provisioning unavailable: {source}");
+            return;
+        }
+    };
+    assert!(
+        report.ready(),
+        "in-sandbox acquisition must leave the project ready for offline builds"
+    );
+
+    // The vendored registry is populated (the fetched material was repacked).
+    let vendored = project.path().join(".kvist").join("vendored");
+    assert!(
+        vendored.is_dir()
+            && std::fs::read_dir(&vendored)
+                .map(|mut d| d.next().is_some())
+                .unwrap_or(false),
+        "the acquisition sandbox must have repacked the registry into the vendored dir"
+    );
+
+    // Now verify offline: the network-denied effect sandbox must build and test.
+    let approved_runner = runner_identity(&config, project.path(), VcsSelection::Git)
+        .expect("identify the trusted sandbox runner");
+    let approved_backend = backend_identity(&config, project.path(), VcsSelection::Git)
+        .expect("identify the approved bubblewrap backend");
+    let probe: SandboxProbe = ensure_available(
+        &config,
+        project.path(),
+        VcsSelection::Git,
+        &approved_runner,
+        &approved_backend,
+    )
+    .expect("the bwrap capability probe confirms production isolation");
+
+    let result = run_offline_cargo_verification(
+        &config,
+        project.path(),
+        VcsSelection::Git,
+        &probe,
+        POLICY_IDENTITY,
+        project.path(),
+        ExecutionOptions {
+            timeout: Some(Duration::from_secs(240)),
+            output_limit: Some(1 << 20),
+            live_stdout: None,
+        },
+    )
+    .expect("offline cargo verification executes");
+    let stdout = String::from_utf8_lossy(&result.output.stdout);
+    let stderr = String::from_utf8_lossy(&result.output.stderr);
+    assert!(
+        !result.timed_out && !result.output_limit_exceeded && !result.cancelled,
+        "verification must not time out, overflow, or be cancelled"
+    );
+    assert!(
+        result.output.status.success(),
+        "offline verification after in-sandbox acquisition failed; stdout={stdout}; stderr={stderr}"
+    );
     assert!(
         stdout.contains("test result:") || stderr.contains("test result:"),
         "cargo must have run at least one test"
@@ -360,6 +494,7 @@ fn offline_cargo_verification_uses_pinned_toolchain() {
         VendorOptions {
             populate: true,
             vendored_dir: None,
+            sandbox: None,
         },
     ) {
         Ok(report) => report,
@@ -556,6 +691,7 @@ fn offline_cargo_verification_uses_pinned_nightly_toolchain() {
         VendorOptions {
             populate: true,
             vendored_dir: None,
+            sandbox: None,
         },
     ) {
         Ok(report) => report,

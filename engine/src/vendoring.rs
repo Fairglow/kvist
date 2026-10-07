@@ -340,7 +340,9 @@ impl VendorManifest {
     /// The sandbox cargo-configuration directory for this project, resolved
     /// from the current project root; see [`Self::vendored_registry`].
     pub fn sandbox_cargo_dir(&self, project_dir: &Path) -> PathBuf {
-        project_dir.join(".kvist").join(SANDBOX_CARGO_CONFIG_DIRNAME)
+        project_dir
+            .join(".kvist")
+            .join(SANDBOX_CARGO_CONFIG_DIRNAME)
     }
 
     /// Recompute a readiness report against the current project state.

@@ -147,6 +147,7 @@ fn provision(project: &Path) -> bool {
         VendorOptions {
             populate: true,
             vendored_dir: None,
+            sandbox: None,
         },
     ) {
         Ok(report) => {

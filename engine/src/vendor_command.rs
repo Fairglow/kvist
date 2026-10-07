@@ -29,6 +29,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::error::{KvistError, Result};
+use crate::sandbox::SandboxAllowedSource;
 use crate::vendoring::{
     VendorManifest, enforce_offline_readiness, now_unix_secs, offline_cargo_config,
 };
@@ -86,6 +87,13 @@ pub struct VendorOptions {
     /// yet satisfy the lock; a complete registry is reused and cargo is never
     /// invoked.
     pub populate: bool,
+    /// The project's sandbox configuration. When present, a stale registry is
+    /// re-provisioned by a network-allow dependency-acquisition sandbox
+    /// (`cargo fetch`) run before the effect sandbox executes; the host
+    /// `cargo vendor` is then used only to repack the fetched material into the
+    /// vendored registry offline (never contacting the network). When absent
+    /// (no sandbox configured), the classic host `cargo vendor` pass is used.
+    pub sandbox: Option<crate::config::SandboxConfig>,
 }
 
 /// Ensure a locked project can build offline and record what was produced.
@@ -216,8 +224,27 @@ fn vendor_rust_project(
     // into an attempt-local, content-addressed-on-disk registry.
     let mut report = enforce_offline_readiness(project_dir, &vendored_dir)?;
     if options.populate && !report.ready() {
-        populate_with_cargo_vendor(project_dir, &vendored_dir)?;
-        report = enforce_offline_readiness(project_dir, &vendored_dir)?;
+        if let Some(sandbox) = &options.sandbox {
+            let in_sandbox =
+                provision_rust_via_acquisition_sandbox(project_dir, sandbox, &vendored_dir)?;
+            match in_sandbox {
+                ProvisionOutcome::Ready => {
+                    report = enforce_offline_readiness(project_dir, &vendored_dir)?;
+                }
+                ProvisionOutcome::Fallback(reason) => {
+                    tracing::warn!(
+                        project = %project_dir.to_string_lossy(),
+                        %reason,
+                        "falling back to the host cargo vendor pass"
+                    );
+                    populate_with_cargo_vendor(project_dir, &vendored_dir)?;
+                    report = enforce_offline_readiness(project_dir, &vendored_dir)?;
+                }
+            }
+        } else {
+            populate_with_cargo_vendor(project_dir, &vendored_dir)?;
+            report = enforce_offline_readiness(project_dir, &vendored_dir)?;
+        }
     }
     report.enforce()?;
 
@@ -259,6 +286,280 @@ fn vendor_rust_project(
         "vendored dependencies for offline builds"
     );
     Ok(report)
+}
+
+/// The outcome of an in-sandbox acquisition provisioning pass.
+///
+/// `Ready` means the vendored registry now satisfies the lock and the manifest
+/// can be recorded. `Fallback` means the network-allow acquisition sandbox could
+/// not run here (no runner, backend, toolchain, or a failed fetch), so the
+/// caller should use the classic host `cargo vendor` pass.
+#[derive(Debug)]
+enum ProvisionOutcome {
+    /// The vendored registry was re-provisioned from the acquisition sandbox.
+    Ready,
+    /// The in-sandbox path could not run; use the host `cargo vendor` pass.
+    Fallback(String),
+}
+
+/// Re-provision a Rust vendored registry *inside the sandbox*: run a
+/// network-allow dependency-acquisition sandbox (`cargo fetch`) with allowlisted
+/// package sources before the effect sandbox executes, then repack the fetched
+/// material into the project's vendored registry offline.
+///
+/// This is the in-sandbox provisioning step ADR-0011 describes as running the
+/// acquisition outside the effect sandbox. The one step that may contact the
+/// network is the allowlisted `cargo fetch` inside the acquisition sandbox; the
+/// repack (`cargo vendor --offline`) runs on the host with network denied, so
+/// the host never resolves crate sources. When the sandbox cannot run in this
+/// environment (no runner, backend, or toolchain, or the fetch fails), the
+/// result is `Fallback` so the caller can use the classic host `cargo vendor`
+/// pass.
+fn provision_rust_via_acquisition_sandbox(
+    project_dir: &Path,
+    sandbox_config: &crate::config::SandboxConfig,
+    vendored_dir: &Path,
+) -> Result<ProvisionOutcome> {
+    use crate::config::{PackageSource, VcsSelection};
+    use crate::sandbox::{SandboxProbe, backend_identity, ensure_available, runner_identity};
+
+    // The VCS selection is a property of the project; load it from the project
+    // configuration. A missing/invalid configuration is not a reason to fail the
+    // vendoring pass, so fall back to the host `cargo vendor` path.
+    let vcs = match crate::config::load(project_dir) {
+        Ok(config) => config.vcs,
+        Err(_) => VcsSelection::Git,
+    };
+
+    // Resolve the pinned toolchain (immutable root + exact cargo beneath it).
+    let toolchain = match crate::toolchain::resolve_pinned_toolchain(
+        project_dir,
+        "dependency-acquisition sandbox",
+    ) {
+        Ok(toolchain) => toolchain,
+        Err(_) => {
+            return Ok(ProvisionOutcome::Fallback(
+                "no resolvable Rust toolchain for the acquisition sandbox".to_owned(),
+            ));
+        }
+    };
+
+    // Rehash the trusted runner and backend identities; a changed runner fails
+    // closed before any network contact.
+    let expected_runner = match runner_identity(sandbox_config, project_dir, vcs) {
+        Ok(identity) => identity,
+        Err(_) => {
+            return Ok(ProvisionOutcome::Fallback(
+                "the trusted sandbox runner is not available".to_owned(),
+            ));
+        }
+    };
+    let backend = match backend_identity(sandbox_config, project_dir, vcs) {
+        Ok(identity) => identity,
+        Err(_) => {
+            return Ok(ProvisionOutcome::Fallback(
+                "the sandbox enforcement backend is not available".to_owned(),
+            ));
+        }
+    };
+    // Probe the live sandbox; it must be able to run before the fetch is
+    // attempted.
+    let probe: SandboxProbe =
+        match ensure_available(sandbox_config, project_dir, vcs, &expected_runner, &backend) {
+            Ok(probe) => probe,
+            Err(_) => {
+                return Ok(ProvisionOutcome::Fallback(
+                    "the sandbox runner is not available in this environment".to_owned(),
+                ));
+            }
+        };
+
+    // Provision the writable acquisition inputs under the Kvist-owned
+    // `.kvist/acquisition/` directory, regenerated on every pass.
+    let acquisition = project_dir.join(".kvist").join("acquisition");
+    let cargo_home = acquisition.join("cargo-home");
+    let scratch = acquisition.join("scratch");
+    let lockfile_workspace = acquisition.join("lockfile-workspace");
+    std::fs::create_dir_all(&cargo_home).map_err(|source| KvistError::Io {
+        operation: "create writable acquisition cargo home",
+        path: cargo_home.clone(),
+        source,
+    })?;
+    for child in ["registry/cache", "git/db"] {
+        std::fs::create_dir_all(cargo_home.join(child)).map_err(|source| KvistError::Io {
+            operation: "create acquisition cargo home layout",
+            path: cargo_home.clone(),
+            source,
+        })?;
+    }
+    std::fs::create_dir_all(&scratch).map_err(|source| KvistError::Io {
+        operation: "create acquisition scratch",
+        path: scratch.clone(),
+        source,
+    })?;
+    std::fs::create_dir_all(&lockfile_workspace).map_err(|source| KvistError::Io {
+        operation: "create acquisition lockfile workspace",
+        path: lockfile_workspace.clone(),
+        source,
+    })?;
+    // The sandbox working directory is the lockfile workspace; `cargo fetch`
+    // resolves the workspace from `Cargo.lock` there.
+    let lockfile_src = project_dir.join(crate::vendoring::CARGO_LOCK_FILENAME);
+    let lockfile_dst = lockfile_workspace.join(crate::vendoring::CARGO_LOCK_FILENAME);
+    std::fs::copy(&lockfile_src, &lockfile_dst).map_err(|source| KvistError::Io {
+        operation: "copy lockfile into acquisition workspace",
+        path: lockfile_dst,
+        source,
+    })?;
+    let lockfile_before_identity =
+        crate::vendoring::lockfile_digest(&std::fs::read(&lockfile_src).map_err(|source| {
+            KvistError::Io {
+                operation: "read lockfile for acquisition identity",
+                path: lockfile_src.clone(),
+                source,
+            }
+        })?);
+
+    // The allowlisted package sources the sandbox may contact: canonical
+    // crates.io plus any project-approved additional sources.
+    let mut sources: Vec<SandboxAllowedSource> = vec![SandboxAllowedSource::CargoRegistry {
+        name: crate::acquisition::CANONICAL_CRATES_IO_NAME.to_owned(),
+        index_origin: crate::acquisition::CANONICAL_CRATES_IO_INDEX_ORIGIN.to_owned(),
+        download_origin: crate::acquisition::CANONICAL_CRATES_IO_DOWNLOAD_ORIGIN.to_owned(),
+        identity: crate::acquisition::crates_io_identity().as_str().to_owned(),
+    }];
+    for source in &sandbox_config.acquisition.additional_sources {
+        match source {
+            PackageSource::CargoRegistry {
+                name,
+                index_origin,
+                download_origin,
+            } => sources.push(SandboxAllowedSource::CargoRegistry {
+                name: name.clone(),
+                index_origin: index_origin.clone(),
+                download_origin: download_origin.clone(),
+                identity: crate::acquisition::registry_identity(
+                    name,
+                    index_origin,
+                    download_origin,
+                )
+                .as_str()
+                .to_owned(),
+            }),
+            PackageSource::CargoGit {
+                repository,
+                revision,
+            } => sources.push(SandboxAllowedSource::CargoGit {
+                repository: repository.clone(),
+                revision: revision.clone(),
+                identity: crate::acquisition::git_identity(repository, revision)
+                    .as_str()
+                    .to_owned(),
+            }),
+        }
+    }
+
+    // A valid-format policy identity: this pass is a host-authorized,
+    // non-interactive provisioning step, so the identity is derived from the
+    // runner digest it ran under.
+    let policy_identity = crate::vendoring::lockfile_digest(expected_runner.digest.as_bytes());
+
+    // Run the network-allow acquisition sandbox: `cargo fetch` with the
+    // allowlisted package sources.
+    let result = crate::sandbox::execute_dependency_acquisition(
+        sandbox_config,
+        &crate::sandbox::DependencyAcquisition {
+            project_root: project_dir,
+            vcs_selection: vcs,
+            toolchain_root: &toolchain.root,
+            cargo_path: &toolchain.cargo,
+            cargo_home: &cargo_home,
+            scratch_host_dir: &scratch,
+            lockfile_workspace: &lockfile_workspace,
+            lockfile_before_identity: &lockfile_before_identity,
+            sources: &sources,
+            policy_identity: &policy_identity,
+            backend: &probe.backend,
+            config: sandbox_config,
+            expected_runner: &expected_runner,
+        },
+        crate::sandbox::ExecutionOptions {
+            // A fetch may download a large dependency set; give it ample time.
+            timeout: Some(std::time::Duration::from_secs(900)),
+            output_limit: None,
+            live_stdout: None,
+        },
+    );
+    let result = match result {
+        Ok(result) => result,
+        Err(_) => {
+            return Ok(ProvisionOutcome::Fallback(
+                "the dependency-acquisition sandbox could not run".to_owned(),
+            ));
+        }
+    };
+    if result.timed_out || result.output_limit_exceeded || result.cancelled {
+        return Ok(ProvisionOutcome::Fallback(
+            "the dependency-acquisition sandbox did not complete cleanly".to_owned(),
+        ));
+    }
+    if !result.output.status.success() {
+        let stderr = String::from_utf8_lossy(&result.output.stderr);
+        let truncated: String = stderr.chars().take(MAX_VENDOR_ERROR_BYTES).collect();
+        return Ok(ProvisionOutcome::Fallback(format!(
+            "cargo fetch in the acquisition sandbox failed: {truncated}"
+        )));
+    }
+
+    // The fetched material lives in the writable acquisition cargo home (the
+    // runner also promotes it into a sibling `project-cache`); repack it into
+    // the project's vendored registry offline. This is the only host step and
+    // it runs with network denied.
+    repack_fetched_cache(project_dir, vendored_dir, &cargo_home)
+}
+
+/// Repack a fetched Cargo home into the project's vendored registry using
+/// `cargo vendor --offline`. This is a pure, network-denied host step: it
+/// re-lays the exact locked material the acquisition sandbox already fetched
+/// into the directory the offline build resolves from.
+fn repack_fetched_cache(
+    project_dir: &Path,
+    vendored_dir: &Path,
+    fetched_cargo_home: &Path,
+) -> Result<ProvisionOutcome> {
+    let output = Command::new("cargo")
+        .arg("vendor")
+        .arg(vendored_dir)
+        .arg("--offline")
+        .current_dir(project_dir)
+        .env("CARGO_HOME", fetched_cargo_home)
+        .env("CARGO_NET_OFFLINE", "true")
+        .output()
+        .map_err(|source| {
+            if source.kind() == std::io::ErrorKind::NotFound {
+                KvistError::VendoringUnavailable {
+                    path: project_dir.to_string_lossy().into_owned(),
+                    reason: "cargo executable was not found on PATH; install a Rust \
+                             toolchain before vendoring dependencies"
+                        .to_owned(),
+                }
+            } else {
+                KvistError::VendoringUnavailable {
+                    path: project_dir.to_string_lossy().into_owned(),
+                    reason: format!("cannot invoke cargo to repack fetched dependencies: {source}"),
+                }
+            }
+        })?;
+    if output.status.success() {
+        return Ok(ProvisionOutcome::Ready);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let truncated: String = stderr.chars().take(MAX_VENDOR_ERROR_BYTES).collect();
+    // A repack failure means the fetched material did not yield a complete
+    // registry; the host `cargo vendor` pass can recover it.
+    Ok(ProvisionOutcome::Fallback(format!(
+        "offline repack of the fetched registry did not complete: {truncated}"
+    )))
 }
 
 /// Run `cargo vendor <dir>` at the project directory, failing closed with a
@@ -870,5 +1171,46 @@ fn canonical_or(path: &Path) -> Result<PathBuf> {
             path: path.to_path_buf(),
             source,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn locked_rust_project(tmp: &Path) {
+        std::fs::write(
+            tmp.join("Cargo.lock"),
+            "version = 4\n\n[[package]]\nname = \"serde_json\"\nversion = \"1.0.151\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n",
+        )
+        .expect("write lock");
+    }
+
+    /// The in-sandbox acquisition path must degrade to a `Fallback` (not a hard
+    /// error) when the sandbox cannot run here — e.g. no resolvable toolchain —
+    /// so the caller can use the classic host `cargo vendor` pass. This is the
+    /// property that keeps `kvist vendor` working in environments without a
+    /// bubblewrap runner.
+    #[test]
+    fn acquisition_fallback_when_no_toolchain_is_resolvable() {
+        let tmp = tempfile::tempdir().expect("project");
+        let project = tmp.path();
+        locked_rust_project(project);
+        let vendored = project.join(".kvist").join("vendored");
+        std::fs::create_dir_all(&vendored).expect("vendored dir");
+
+        let sandbox = crate::config::SandboxConfig {
+            runner: "/nonexistent/runner".to_owned(),
+            backend: "/nonexistent/bwrap".to_owned(),
+            environment_allowlist: Vec::new(),
+            acquisition: crate::config::AcquisitionConfig::default(),
+        };
+        let outcome = provision_rust_via_acquisition_sandbox(project, &sandbox, &vendored)
+            .expect("provisioning must not hard-fail");
+        assert!(
+            matches!(outcome, ProvisionOutcome::Fallback(_)),
+            "without a resolvable toolchain the in-sandbox path must fall back to \
+             the host cargo vendor pass"
+        );
     }
 }
