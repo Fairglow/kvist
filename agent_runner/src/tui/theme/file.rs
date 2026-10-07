@@ -4,8 +4,10 @@
 //!
 //! A theme is plain data (see `themes/dark.toml` and `themes/light.toml` in
 //! the repository for the canonical examples and the full format
-//! description). Nothing about a theme's colors lives in Rust source: editing
-//! or adding a theme file takes effect on the next run, with no rebuild.
+//! description). Nothing about a theme's colors lives in Rust source: a
+//! theme file is re-read from disk on every selection (the in-app menu
+//! re-scans the directory when it opens), so editing or adding a theme file
+//! takes effect immediately, with no rebuild.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};

@@ -79,7 +79,10 @@ at load with the accepted list). The `--theme` flag overrides the
 configuration for one run, the menu's **Theme** item opens a picker listing
 every discovered theme, and **Ctrl+S** cycles through all of them live:
 existing transcript rows are restyled in place while text and Markdown
-highlighting are left untouched.
+highlighting are left untouched. Theme files are re-read from disk when a
+theme is selected (the picker re-scans the `themes/` directory when it
+opens), so editing a file — or dropping in a new one — applies immediately
+with no restart.
 
 Layout cues are theme-independent and keep content scannable: the transcript
 and prompt panels carry a single top edge (no side or bottom borders), the

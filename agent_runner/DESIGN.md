@@ -623,16 +623,18 @@ The two built-ins, `dark` and `light`, live at `agent_runner/themes/*.toml`
 and are embedded into the binary (`include_str!`) as the fallback, loaded
 through the exact same parser as any user file. A `themes/` directory next to
 the resolved `config.toml` (see `tui::theme::file::themes_dir_for_config`) is
-discovered at startup; a file there named `dark.toml` or `light.toml`
-overrides the matching built-in, and any other `<name>.toml` adds a selectable
-theme — no rebuild required. The configuration's `theme` key selects the
-theme by name (default `dark`) — an unknown name fails at load — the CLI
-`--theme` flag overrides it per run, the menu's "Theme" item opens a picker
-listing every discovered theme, and Ctrl+S cycles through all of them in
-discovery order: existing rows are restyled in place (prompt rows take the
-prompt style, reasoning rows are rebuilt with the edge and tint, everything
-else gains the panel background) while text, Markdown spans, and code
-highlights are left untouched.
+discovered when the theme picker opens (re-scanned on every open, so a file
+added after startup shows up immediately); a file there named `dark.toml` or
+`light.toml` overrides the matching built-in, and any other `<name>.toml`
+adds a selectable theme — no rebuild required. The configuration's `theme`
+key selects the theme by name (default `dark`) — an unknown name fails at
+load — the CLI `--theme` flag overrides it per run, the menu's "Theme" item
+opens a picker listing every discovered theme, and Ctrl+S cycles through all
+of them in discovery order: each selection re-reads the theme file from
+disk, so an edited file applies on the next switch, and existing rows are
+restyled in place (prompt rows take the prompt style, reasoning rows are
+rebuilt with the edge and tint, everything else gains the panel background)
+while text, Markdown spans, and code highlights are left untouched.
 
 Every rendered frame starts with a full-frame base fill — a borderless block
 styled with the theme's panel background and foreground, drawn before any

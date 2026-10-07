@@ -1,8 +1,8 @@
 //! The terminal UI: setup, event loop, and teardown.
 
-mod app;
+pub mod app;
 mod render;
-mod theme;
+pub mod theme;
 
 pub use theme::file as theme_files;
 pub use theme::{THEME_NAMES, Theme};

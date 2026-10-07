@@ -13,10 +13,11 @@
 # no "hidden" color can show through.
 #
 # A `[section]` with `fg`/`bg` may also set `bold`, `dim`, or `italic` (all
-# default to `false`). This file is data, not code: edit it and restart
-# agent-runner (no rebuild) to see the change, or copy it to add your own
-# theme — see the "themes" entry in `agent-runner --help` / the in-app help
-# overlay for where agent-runner looks for theme files.
+# default to `false`). This file is data, not code: edit it and reselect the
+# theme (Esc -> Theme, or Ctrl+S) to see the change — no rebuild, no restart.
+# Copy it to add your own theme — see the "themes" entry in
+# `agent-runner --help` / the in-app help overlay for where agent-runner
+# looks for theme files.
 
 [title]
 fg = "cyan"
@@ -35,12 +36,12 @@ spinner = "magenta"
 stats = "limegreen"
 
 [panel]
-bg = "black"
+bg = "#081018"
 border = "dimgray"
 
 [reasoning]
 fg = "gray"
-bg = "#14101e"
+bg = "#181018"
 dim = true
 
 [reasoning_placeholder]
@@ -73,8 +74,8 @@ heading = [
     { fg = "dodgerblue" },
     { fg = "magenta" },
 ]
-code_inline = { fg = "#ded6d0", bg = "#14141c" }
-code_bg = { bg = "#14141c" }
+code_inline = { fg = "#ded6d0", bg = "#14140c" }
+code_bg = { bg = "#14140c" }
 code_label = { fg = "dimgray", dim = true }
 code_gutter = { fg = "gray" }
 quote = { fg = "gray" }

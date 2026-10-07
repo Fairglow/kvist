@@ -8,8 +8,10 @@
 //! so agent-runner always has a working theme), and [`file::discover`] lists
 //! every theme available — the two built-ins plus any `*.toml` file found in
 //! a user's themes directory (see [`file::themes_dir_for_config`]). Dropping
-//! a new file there, or editing an existing one, takes effect on the next
-//! run: no rebuild. See `themes/dark.toml` for the full file format.
+//! a new file there, or editing an existing one, takes effect the next time
+//! the theme is picked (the in-app menu re-scans the directory when it
+//! opens, and [`file::load`] re-reads the file on every selection): no
+//! rebuild, no restart. See `themes/dark.toml` for the full file format.
 //!
 //! Themes are selected in the configuration (`theme = "dark"`), overridden by
 //! the CLI `--theme` flag, cycled live with Ctrl+S, or picked from the

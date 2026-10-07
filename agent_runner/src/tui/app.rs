@@ -95,8 +95,8 @@ impl ScreenLine {
 
 /// The left-edge glyphs for reasoning rows: a block on the first row of a
 /// run, a vertical bar on continuations — a quiet bar down the thinking strip.
-const REASONING_EDGE_FIRST: &str = "\u{258c} ";
-const REASONING_EDGE_CONT: &str = "\u{2502} ";
+pub const REASONING_EDGE_FIRST: &str = "\u{258c} ";
+pub const REASONING_EDGE_CONT: &str = "\u{2502} ";
 
 /// Maximum number of transcript lines retained before dropping the oldest.
 const MAX_LINES: usize = 5000;
@@ -406,8 +406,15 @@ impl App {
         self.theme = theme;
     }
 
-    /// Opens the theme-picker overlay, highlighting the current theme.
+    /// Opens the theme-picker overlay, highlighting the current theme. The
+    /// catalog is re-scanned first so a theme file added or renamed since
+    /// startup shows up here immediately, and selecting a theme (or cycling
+    /// with Ctrl+S) reloads its file from disk: edits to a theme file take
+    /// effect on the next switch, with no restart.
     fn open_theme_picker(&mut self) {
+        if let Some(dir) = &self.themes_dir {
+            self.available_themes = theme::file::discover(Some(dir));
+        }
         self.theme_selection = self
             .available_themes
             .iter()
@@ -2360,6 +2367,143 @@ mod tests {
         // A second cycle returns to the dark palette.
         app.cycle_theme();
         assert_eq!(app.theme.panel_bg, dark_bg);
+    }
+
+    /// A minimal valid theme file: the loader's schema is strict, so the
+    /// fixtures below copy its shape exactly (with a distinctive `panel.bg`)
+    /// rather than relying on the embedded built-ins.
+    const TEST_THEME_TOML: &str = r##"
+[title]
+fg = "cyan"
+
+[colors]
+dim = "gray"
+ok = "lime"
+warn = "yellow"
+err = "red"
+info = "blue"
+accent = "cyan"
+model = "lime"
+model_active = "yellow"
+spinner = "magenta"
+stats = "lime"
+
+[panel]
+bg = "#010203"
+border = "gray"
+
+[reasoning]
+fg = "gray"
+bg = "#040506"
+
+[reasoning_placeholder]
+fg = "gray"
+
+[prompt]
+fg = "white"
+
+[scrollbar]
+fg = "gray"
+bg = "#070809"
+
+[menu.selected]
+fg = "yellow"
+bg = "#070809"
+
+[menu.plain]
+fg = "white"
+bg = "#070809"
+
+[markdown]
+paragraph = { fg = "white" }
+heading = [
+    { fg = "red" },
+    { fg = "yellow" },
+    { fg = "lime" },
+    { fg = "cyan" },
+    { fg = "blue" },
+    { fg = "magenta" },
+]
+code_inline = { fg = "white", bg = "#070809" }
+code_bg = { bg = "#070809" }
+code_label = { fg = "gray" }
+code_gutter = { fg = "gray" }
+quote = { fg = "gray" }
+quote_gutter = { fg = "gray" }
+link = { fg = "cyan" }
+link_url = { fg = "gray" }
+html = { fg = "gray" }
+rule = { fg = "gray" }
+list_bullet = { fg = "gray" }
+task_open = { fg = "gray" }
+task_closed = { fg = "lime" }
+table_header = { fg = "cyan" }
+table_sep = { fg = "gray" }
+"##;
+
+    /// The real path to the picker: the menu's "Theme" item calls
+    /// `open_theme_picker`, which re-scans the catalog before it renders.
+    fn open_picker(app: &mut App) {
+        app.overlay = Overlay::Menu;
+        app.open_theme_picker();
+    }
+
+    /// Navigates the open picker from its current highlight to `name` and
+    /// confirms with Enter, as the real loop does.
+    fn pick_theme(app: &mut App, name: &str) {
+        let current = app.theme_selection;
+        let target = app
+            .available_themes
+            .iter()
+            .position(|n| n == name)
+            .unwrap_or_else(|| panic!("`{name}` is in the picker"));
+        for _ in 0..target.saturating_sub(current) {
+            assert_eq!(app.on_key(ch(KeyCode::Down)), KeyAction::Idle);
+        }
+        for _ in 0..current.saturating_sub(target) {
+            assert_eq!(app.on_key(ch(KeyCode::Up)), KeyAction::Idle);
+        }
+        assert_eq!(app.on_key(ch(KeyCode::Enter)), KeyAction::Idle);
+        assert!(matches!(app.overlay, Overlay::None));
+    }
+
+    #[test]
+    fn selecting_a_theme_from_the_menu_reloads_the_file() {
+        let dir = tempfile::tempdir().expect("temp themes dir").keep();
+        let mut app = app();
+        app.set_theme_catalog(Some(dir.clone()));
+        assert!(!app.available_themes.contains(&"custom".to_owned()));
+
+        // A file dropped into the themes directory after startup appears in
+        // the picker on the next open (the catalog is re-scanned), and can be
+        // selected and applied without a restart.
+        std::fs::write(dir.join("custom.toml"), TEST_THEME_TOML).expect("write theme file");
+        open_picker(&mut app);
+        pick_theme(&mut app, "custom");
+        assert_eq!(app.theme.name, "custom");
+        assert_eq!(app.theme.panel_bg, Color::Rgb(1, 2, 3));
+
+        // Editing the same file, then re-selecting it from the picker, picks
+        // up the new content: the theme is re-read from disk, not cached.
+        let old_panel_bg = app.theme.panel_bg;
+        std::fs::write(dir.join("custom.toml"), TEST_THEME_TOML.replace("#010203", "#010204"))
+            .expect("rewrite theme file");
+        open_picker(&mut app);
+        pick_theme(&mut app, "custom");
+        assert_eq!(app.theme.name, "custom");
+        assert_ne!(app.theme.panel_bg, old_panel_bg, "reselecting must apply the edited file");
+        assert_eq!(app.theme.panel_bg, Color::Rgb(1, 2, 4));
+    }
+
+    #[test]
+    fn theme_picker_esc_backs_out_without_changing_the_theme() {
+        let mut app = app();
+        let current = app.theme.clone();
+        open_picker(&mut app);
+        assert_eq!(app.on_key(ch(KeyCode::Down)), KeyAction::Idle);
+        assert_eq!(app.on_key(ch(KeyCode::Esc)), KeyAction::Idle);
+        assert!(matches!(app.overlay, Overlay::Menu));
+        assert_eq!(app.theme, current, "backing out must not change the theme");
     }
 
     #[test]
