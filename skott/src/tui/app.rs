@@ -665,8 +665,31 @@ impl App {
     /// row the reasoning tint — the cues that keep thinking distinct from the
     /// black output without a full box.
     fn push_reasoning_lines(&mut self, text: &str) {
+        // Add a blank line before the reasoning block if the transcript isn't
+        // empty and the last line isn't already blank or a reasoning line.
+        if !self.lines.is_empty() {
+            let last = &self.lines[self.lines.len() - 1];
+            if last.kind != LineKind::Reasoning
+                && last.kind != LineKind::Placeholder
+                && !last.line.to_string().is_empty()
+            {
+                self.lines.push(ScreenLine::plain(
+                    "",
+                    Style::default(),
+                    LineKind::Normal,
+                    self.theme.panel_bg,
+                ));
+            }
+        }
         self.lines
             .extend(self.reasoning_rows(text, self.content_width()));
+        // Add a blank line after the reasoning block.
+        self.lines.push(ScreenLine::plain(
+            "",
+            Style::default(),
+            LineKind::Normal,
+            self.theme.panel_bg,
+        ));
         self.maybe_truncate();
         self.follow();
     }
@@ -1207,6 +1230,21 @@ impl App {
             return;
         }
         let rows = render_document_styles(&md, self.content_width(), &self.theme.markdown);
+        // Determine if this is a code block (starts with a code row).
+        let is_code_block = rows.first().is_some_and(|row| row.is_code);
+        // Add a blank line before code blocks if the transcript isn't empty and
+        // the last line isn't already blank.
+        if is_code_block && !self.lines.is_empty() {
+            let last = &self.lines[self.lines.len() - 1];
+            if !last.line.to_string().is_empty() {
+                self.lines.push(ScreenLine::plain(
+                    "",
+                    Style::default(),
+                    LineKind::Normal,
+                    self.theme.panel_bg,
+                ));
+            }
+        }
         for (index, row) in rows.into_iter().enumerate() {
             // Highlighted code keeps its indentation and gets the theme's code
             // patch; everything else sits on the plain panel background so the
@@ -1231,6 +1269,15 @@ impl App {
                 bg,
                 reasoning_first: false,
             });
+        }
+        // Add a blank line after code blocks.
+        if is_code_block {
+            self.lines.push(ScreenLine::plain(
+                "",
+                Style::default(),
+                LineKind::Normal,
+                self.theme.panel_bg,
+            ));
         }
         self.maybe_truncate();
         self.follow();
@@ -3474,12 +3521,14 @@ table_sep = { fg = "gray" }
         let before = app.lines.len();
         app.push_event(Event::Text("```rust\nfn main() {}\n```".to_owned()));
         app.flush_pending_text();
-        // A fenced block renders two rows: a marked language label, then the source.
+        // A fenced block at the start of the transcript renders without a leading
+        // blank (nothing before it), but with a trailing blank: label, source,
+        // blank. That's 3 rows total.
         let lines = rendered_text(&app);
         assert_eq!(
             lines.len() - before,
-            2,
-            "a fence label and one source row: {lines:?}"
+            3,
+            "a fence block at the start has no leading blank: {lines:?}"
         );
         assert!(
             lines[0].contains("rust"),
