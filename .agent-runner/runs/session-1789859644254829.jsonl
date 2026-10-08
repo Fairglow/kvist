@@ -1,6 +1,0 @@
-{"event":"session_start","session_id":"agent-runner-tiel-coder-35b-q4","task_id":"agent-runner-tiel-coder-35b-q4","timestamp":1789859646653}
-{"event":"turn_start","turn":1,"timestamp":1789859649265}
-{"event":"model_reasoning","turn":1,"reasoning":"The user just said \"Hi\". There's no task yet. I should respond briefly and ask what they need.\n"}
-{"event":"turn_finish","turn":1,"output_tokens":0,"finish_reason":"stop"}
-{"event":"prompt_eval","turn":1,"new_tokens":0}
-{"event":"session_finish","session_id":"agent-runner-tiel-coder-35b-q4","task_id":"agent-runner-tiel-coder-35b-q4","total_turns":1,"total_tokens":0,"success":true}
