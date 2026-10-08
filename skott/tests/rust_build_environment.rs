@@ -223,6 +223,64 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
 
 #[test]
 #[ignore = "requires an explicitly selected runner and native Bubblewrap"]
+fn rust_toolchain_is_discoverable_via_path_and_version_commands() {
+    let directory = fixture();
+    let workdir = directory.path().canonicalize().unwrap();
+    fs::create_dir(workdir.join("src")).unwrap();
+    fs::write(
+        workdir.join("Cargo.toml"),
+        "[package]\nname=\"discover-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n",
+    )
+    .unwrap();
+    fs::write(workdir.join("src/lib.rs"), "pub fn answer() -> u8 { 42 }\n").unwrap();
+    fs::write(
+        workdir.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = \"discover-trial\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let registry = resolve(&workdir).unwrap();
+    let executor = SandboxExecutor::new(
+        registry,
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        workdir.clone(),
+    );
+    // Verify toolchain discoverability via PATH and version commands.
+    // This ensures an agent can find and use the toolchain without
+    // needing to know the exact mount path. Note that cargo is the
+    // offline/locked shim at /rust/runtime/bin/cargo, while rustc and
+    // rustdoc are the real binaries at /rust/toolchain/bin/.
+    let result = shell(
+        &executor,
+        "echo PATH=$PATH && which rustc && which cargo && which rustdoc && rustc --version && cargo --version && rustdoc --version",
+    );
+    let output = result.output_text(8192);
+    let error = result.error_text(8192);
+    assert!(!result.failed(), "{}", error);
+    assert!(
+        output.contains("/rust/toolchain/bin/rustc"),
+        "rustc not found at expected path"
+    );
+    assert!(
+        output.contains("/rust/runtime/bin/cargo"),
+        "cargo shim not found at expected path"
+    );
+    assert!(
+        output.contains("/rust/toolchain/bin/rustdoc"),
+        "rustdoc not found at expected path"
+    );
+    assert!(output.contains("rustc 1."), "rustc version output missing");
+    assert!(output.contains("cargo 1."), "cargo version output missing");
+    assert!(
+        output.contains("rustdoc 1."),
+        "rustdoc version output missing"
+    );
+}
+
+#[test]
+#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn changing_project_pin_after_resolution_fails_before_effects() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
