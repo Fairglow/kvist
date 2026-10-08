@@ -19,7 +19,9 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use super::app::{App, MENU_HOTKEYS, MENU_ITEMS, Overlay, REPLAY_HINT, wrap};
+use super::app::{
+    App, MENU_HOTKEYS, MENU_ITEMS, Overlay, REPLAY_HINT, prompt_block_title, wrap,
+};
 
 /// Rows reserved for the multiline prompt editor around the transcript.
 const INPUT_ROWS: u16 = 4;
@@ -233,6 +235,21 @@ fn render_transcript_scrollbar(
 
 fn render_input(f: &mut ratatui::Frame, app: &App, area: Rect) {
     f.render_widget(&app.editor, area);
+    // The prompt box draws its title through ratatui's block title, which
+    // erases the border's opening cells — so, like the transcript, overlay the
+    // full edge (a two-cell horizontal-line lead, the title, then the rest)
+    // onto the top border row to keep both top borders consistent.
+    let inner_width = usize::from(area.width.max(1));
+    let edge = panel_top_edge(
+        prompt_block_title(&app.theme),
+        Style::default().fg(app.theme.dim),
+        Style::default().fg(app.theme.panel_border),
+        inner_width,
+    );
+    f.render_widget(
+        &edge,
+        Rect::new(area.left(), area.top(), inner_width as u16, 1),
+    );
     // The editor reports the terminal-relative cursor position from the most
     // recent render; park the real terminal cursor there so typing is visible.
     if let Some(position) = app.editor.rendered_cursor_position() {
@@ -743,6 +760,13 @@ mod tests {
         assert!(
             !prompt_top.contains('│'),
             "no left border on the prompt:\n{text}"
+        );
+        // Like the transcript, the prompt's top edge leads with a run of
+        // horizontal-line cells before its title, so both top borders read the
+        // same way (a border line that opens with `──`).
+        assert!(
+            prompt_top.starts_with("──"),
+            "prompt top edge must lead with horizontal-line cells:\n{text}"
         );
         // The transcript's last column carries the scrollbar on every content
         // row (the adaptive thumb plus its track symbols); row 2 is the top

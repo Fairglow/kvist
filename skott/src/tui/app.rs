@@ -1881,9 +1881,19 @@ fn prompt_block(theme: &Theme) -> ratatui::widgets::Block<'static> {
         .borders(ratatui::widgets::Borders::TOP)
         .border_style(ratatui::style::Style::default().fg(theme.panel_border))
         .title(Span::styled(
-            " prompt · Enter/Ctrl+Enter send · Shift+Enter · Tab model · Shift+Tab effort · Ctrl+Insert copy · Ctrl+S theme · Ctrl-Q quit · Esc menu · Ctrl+H help ".to_owned(),
+            prompt_block_title(theme),
             Style::default().fg(theme.dim),
         ))
+}
+
+/// The prompt box's top border title, in the theme's dim colour. Shared by
+/// [`prompt_block`] and the rendered top-edge overlay (see
+/// `render_input`), so the block title and the overlay edge never drift apart.
+pub(crate) fn prompt_block_title(theme: &Theme) -> String {
+    " prompt · Enter/Ctrl+Enter send · Shift+Enter · Tab model · \
+     Shift+Tab effort · Ctrl+Insert copy · Ctrl+S theme · Ctrl-Q quit · Esc menu · \
+     Ctrl+H help "
+        .to_owned()
 }
 
 /// Writes the OSC 52 clipboard escape to stdout. Called by the event loop after

@@ -36,12 +36,12 @@ spinner = "magenta"
 stats = "limegreen"
 
 [panel]
-bg = "#081018"
+bg = "#000010"
 border = "dimgray"
 
 [reasoning]
-fg = "gray"
-bg = "#181018"
+fg = "beige"
+bg = "#001000"
 dim = true
 
 [reasoning_placeholder]
