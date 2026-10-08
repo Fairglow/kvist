@@ -620,6 +620,7 @@ mod tests {
             kind: crate::tui::app::LineKind::Normal,
             md: None,
             bg: app.theme.panel_bg,
+            reasoning_first: false,
         });
         app
     }

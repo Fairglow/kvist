@@ -51,6 +51,9 @@ pub struct ScreenLine {
     /// thinking rows use the reasoning tint; highlighted code rows use the
     /// code patch — the two cues that keep those areas distinct.
     pub bg: Color,
+    /// Whether this reasoning row is the first in its run (block edge) or a
+    /// continuation (bar edge). Used when re-styling or re-wrapping.
+    pub reasoning_first: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +70,7 @@ impl ScreenLine {
             kind,
             md: None,
             bg,
+            reasoning_first: false,
         }
     }
 
@@ -89,6 +93,7 @@ impl ScreenLine {
             kind: LineKind::Reasoning,
             md: None,
             bg: theme.reasoning_bg,
+            reasoning_first: edge == REASONING_EDGE_FIRST,
         }
     }
 }
@@ -1224,6 +1229,7 @@ impl App {
                     MarkdownRow::Continuation
                 }),
                 bg,
+                reasoning_first: false,
             });
         }
         self.maybe_truncate();
@@ -1785,6 +1791,7 @@ impl App {
                             MarkdownRow::Continuation
                         }),
                         bg,
+                        reasoning_first: false,
                     });
                 }
                 index = next;
@@ -1839,10 +1846,10 @@ fn restyle_row(line: &mut ScreenLine, theme: &Theme) {
                 .strip_prefix(REASONING_EDGE_FIRST)
                 .or_else(|| text.strip_prefix(REASONING_EDGE_CONT))
                 .unwrap_or(&text);
-            let edge = if text.starts_with(' ') {
-                REASONING_EDGE_CONT
-            } else {
+            let edge = if line.reasoning_first {
                 REASONING_EDGE_FIRST
+            } else {
+                REASONING_EDGE_CONT
             };
             *line = ScreenLine::reasoning(edge, text.to_owned(), theme);
         }
@@ -3265,6 +3272,44 @@ table_sep = { fg = "gray" }
                 .map(|l| l.line.to_string())
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn wrapped_reasoning_lines_use_continuation_edge() {
+        // Soft-wrapped reasoning lines should use the continuation edge (│)
+        // on all lines after the first, which uses the block edge (▌).
+        let mut app = app();
+        // A long reasoning line that will wrap at 80 columns.
+        let long_text = "This is a very long reasoning line that should wrap across multiple rows in the terminal. It contains enough text to force several line breaks when wrapped.";
+        app.push_event(Event::Reasoning(long_text.to_owned()));
+        app.push_event(Event::Finished {
+            message: "done".to_owned(),
+        });
+        let reasoning_lines: Vec<&ScreenLine> = app
+            .lines
+            .iter()
+            .filter(|line| line.kind == LineKind::Reasoning)
+            .collect();
+        assert!(
+            reasoning_lines.len() > 1,
+            "reasoning should wrap into multiple lines"
+        );
+        // First line should have the block edge.
+        let first = reasoning_lines[0].line.to_string();
+        assert!(
+            first.starts_with(REASONING_EDGE_FIRST),
+            "first reasoning line should have block edge: {:?}",
+            first
+        );
+        // Continuation lines should have the bar edge.
+        for line in &reasoning_lines[1..] {
+            let text = line.line.to_string();
+            assert!(
+                text.starts_with(REASONING_EDGE_CONT),
+                "continuation reasoning line should have bar edge: {:?}",
+                text
+            );
+        }
     }
 
     #[test]
