@@ -684,7 +684,7 @@ dependencies = [
 
 [[package]]
 name = "galla"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "hex",
  "libc",
@@ -896,7 +896,7 @@ dependencies = [
 
 [[package]]
 name = "kvist"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "clap",
@@ -1622,7 +1622,7 @@ dependencies = [
 
 [[package]]
 name = "sav"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "hex",
@@ -1797,7 +1797,7 @@ checksum = "8ee5873ec9cce0195efcb7a4e9507a04cd49aec9c83d0389df45b1ef7ba2e649"
 
 [[package]]
 name = "skott"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "crossterm",

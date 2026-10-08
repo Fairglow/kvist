@@ -1,6 +1,6 @@
 [package]
 name = "kvist"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.95"
 authors = ["Stefan Lindblad"]
@@ -28,9 +28,9 @@ toml = "1.1"
 toml_edit = "0.25.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
-sav = { version = "=0.2.0", path = "../sav" }
+sav = { version = "=0.3.0", path = "../sav" }
 reedline = "0.51"
 terminal_size = "0.4"
 
 [dev-dependencies]
-galla = { version = "=0.2.0", path = "../galla" }
+galla = { version = "=0.3.0", path = "../galla" }

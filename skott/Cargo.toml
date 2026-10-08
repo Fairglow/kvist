@@ -1,6 +1,6 @@
 [package]
 name = "skott"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.95"
 authors = ["Stefan Lindblad"]
@@ -21,8 +21,8 @@ name = "skott-file-tool"
 path = "src/bin/file_tool.rs"
 
 [dependencies]
-sav = { version = "=0.2.0", path = "../sav" }
-galla = { version = "=0.2.0", path = "../galla" }
+sav = { version = "=0.3.0", path = "../sav" }
+galla = { version = "=0.3.0", path = "../galla" }
 clap = { version = "4.6", features = ["derive"] }
 ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
 crossterm = "0.29"
