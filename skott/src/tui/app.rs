@@ -117,7 +117,7 @@ const SPINNER_FRAME_MS: u128 = 100;
 const MAX_PROMPT_CHARS: usize = 1_048_576;
 /// The selectable thinking effort levels, in ascending order; the UI can only
 /// present these valid choices.
-const EFFORTS: [ReasoningEffort; 7] = [
+pub const EFFORTS: [ReasoningEffort; 7] = [
     ReasoningEffort::None,
     ReasoningEffort::Minimal,
     ReasoningEffort::Low,
@@ -190,11 +190,27 @@ pub enum Overlay {
     Replay,
     /// The list of available themes, reached from the menu's "Theme" item.
     ThemePicker,
+    /// The list of available models, reached from the menu's "Select model" item.
+    ModelPicker,
+    /// The thinking effort picker, reached from the menu's "Thinking effort" item.
+    EffortPicker,
 }
 
 /// The `Esc` menu actions, in display order, with their single-letter hotkeys.
-pub const MENU_ITEMS: [&str; 4] = ["New session", "Session history", "Theme", "Quit"];
-pub const MENU_HOTKEYS: [char; 4] = ['n', 'h', 't', 'q'];
+/// The cancel item is conditionally shown only when a session is running.
+pub const MENU_ITEMS: [&str; 7] = [
+    "Select model",
+    "Thinking effort",
+    "New session",
+    "Session history",
+    "Theme",
+    "Quit",
+    "Back",
+];
+pub const MENU_HOTKEYS: [char; 7] = ['m', 'e', 'n', 'h', 't', 'q', 'b'];
+
+/// The index of the cancel item (shown conditionally).
+pub const MENU_CANCEL_INDEX: usize = 5;
 
 /// The interactive application state driven by events and key input.
 pub struct App {
@@ -250,7 +266,11 @@ pub struct App {
     /// The highlighted index into `available_themes` while the theme picker
     /// overlay is open.
     pub theme_selection: usize,
-    /// The themes directory to search for a theme file beyond the two
+    /// The highlighted index into `models` while the model picker overlay is open.
+    pub model_selection: usize,
+    /// The highlighted index into EFFORTS while the effort picker overlay is open.
+    pub effort_selection: usize,
+    ///
     /// built-ins, set once at startup from the resolved configuration path.
     themes_dir: Option<PathBuf>,
     /// Where to look for past-session transcripts, resolved from overrides.
@@ -337,6 +357,8 @@ impl App {
             replay_scroll: 0,
             available_themes: theme::file::discover(None),
             theme_selection: 0,
+            model_selection: 0,
+            effort_selection: EFFORTS.iter().position(|e| *e == effort).unwrap_or(3),
             themes_dir: None,
             log_dir: None,
             width,
@@ -868,6 +890,8 @@ impl App {
             Overlay::History => return self.handle_history_key(key),
             Overlay::Replay => return self.handle_replay_key(key),
             Overlay::ThemePicker => return self.handle_theme_picker_key(key),
+            Overlay::ModelPicker => return self.handle_model_picker_key(key),
+            Overlay::EffortPicker => return self.handle_effort_picker_key(key),
             Overlay::None => {}
         }
         if self.show_help {
@@ -1482,6 +1506,22 @@ impl App {
         self.overlay = Overlay::Menu;
     }
 
+    /// Opens the model picker overlay, pre-selecting the current model.
+    fn open_model_picker(&mut self) {
+        self.model_selection = self
+            .model
+            .as_ref()
+            .and_then(|model| self.models.iter().position(|id| id == model))
+            .unwrap_or(0);
+        self.overlay = Overlay::ModelPicker;
+    }
+
+    /// Opens the effort picker overlay, pre-selecting the current effort.
+    fn open_effort_picker(&mut self) {
+        self.effort_selection = EFFORTS.iter().position(|e| *e == self.effort).unwrap_or(3);
+        self.overlay = Overlay::EffortPicker;
+    }
+
     /// Opens the session-history overlay, listing past transcripts.
     fn open_history(&mut self) {
         let dir = self
@@ -1533,28 +1573,52 @@ impl App {
     }
 
     /// Runs the action chosen by the highlighted menu item. Selecting an item
-    /// always leaves the menu, except the theme picker, which replaces it:
-    /// a new session returns to the prompt, the history overlay takes over,
-    /// the theme picker lists every available theme, and quit ends the
-    /// application.
+    /// always leaves the menu, except pickers (model, effort, theme) which
+    /// replace it. A new session returns to the prompt, the history overlay
+    /// takes over, and quit ends the application.
     fn dispatch_menu(&mut self) -> KeyAction {
         match self.menu_selection {
             0 => {
+                // Select model
+                self.open_model_picker();
+                KeyAction::Idle
+            }
+            1 => {
+                // Thinking effort
+                self.open_effort_picker();
+                KeyAction::Idle
+            }
+            2 => {
+                // New session
                 self.new_session();
                 self.overlay = Overlay::None;
                 KeyAction::NewSession
             }
-            1 => {
+            3 => {
+                // Session history
                 self.open_history();
                 KeyAction::Idle
             }
-            2 => {
+            4 => {
+                // Theme
                 self.open_theme_picker();
                 KeyAction::Idle
             }
+            5 => {
+                // Cancel (if running) or Quit
+                if self.running {
+                    self.quit_running();
+                    self.overlay = Overlay::None;
+                    KeyAction::Idle
+                } else {
+                    self.should_quit = true;
+                    KeyAction::Quit
+                }
+            }
             _ => {
-                self.should_quit = true;
-                KeyAction::Quit
+                // Back
+                self.overlay = Overlay::None;
+                KeyAction::Idle
             }
         }
     }
@@ -1595,6 +1659,76 @@ impl App {
                 KeyAction::Idle
             }
             KeyCode::Enter => self.dispatch_menu(),
+            _ => KeyAction::Idle,
+        }
+    }
+
+    /// Handles keys while the model picker is open.
+    fn handle_model_picker_key(&mut self, key: KeyEvent) -> KeyAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.overlay = Overlay::Menu;
+                KeyAction::Idle
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.model_selection = self.model_selection.saturating_sub(1);
+                KeyAction::Idle
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.model_selection = self
+                    .model_selection
+                    .saturating_add(1)
+                    .min(self.models.len() - 1);
+                KeyAction::Idle
+            }
+            KeyCode::Enter => {
+                if let Some(model) = self.models.get(self.model_selection).cloned() {
+                    self.model = Some(model.clone());
+                    self.note(
+                        self.theme.accent,
+                        &format!("model changed to {model}; applies to the next prompt"),
+                    );
+                }
+                self.overlay = Overlay::Menu;
+                KeyAction::Idle
+            }
+            _ => KeyAction::Idle,
+        }
+    }
+
+    /// Handles keys while the effort picker is open.
+    fn handle_effort_picker_key(&mut self, key: KeyEvent) -> KeyAction {
+        match key.code {
+            KeyCode::Esc => {
+                self.overlay = Overlay::Menu;
+                KeyAction::Idle
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.effort_selection = self.effort_selection.saturating_sub(1);
+                KeyAction::Idle
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.effort_selection = self
+                    .effort_selection
+                    .saturating_add(1)
+                    .min(EFFORTS.len() - 1);
+                KeyAction::Idle
+            }
+            KeyCode::Enter => {
+                let effort = EFFORTS[self.effort_selection];
+                if effort != self.effort {
+                    self.effort = effort;
+                    self.note(
+                        self.theme.accent,
+                        &format!(
+                            "thinking effort changed to {}; applies to the next prompt",
+                            effort.as_str()
+                        ),
+                    );
+                }
+                self.overlay = Overlay::Menu;
+                KeyAction::Idle
+            }
             _ => KeyAction::Idle,
         }
     }
@@ -1946,10 +2080,7 @@ fn prompt_block(theme: &Theme) -> ratatui::widgets::Block<'static> {
 /// rendered top-edge overlay (see `render_input`), so the block title and the
 /// overlay edge never drift apart. Theme colours are applied at the call site.
 pub(crate) fn prompt_block_title() -> String {
-    " prompt · Enter/Ctrl+Enter send · Shift+Enter · Tab model · \
-     Shift+Tab effort · Ctrl+Insert copy · Ctrl+S theme · Ctrl-Q quit · Esc menu · \
-     Ctrl+H help "
-        .to_owned()
+    " prompt · Enter send · Esc menu · Ctrl+H help ".to_owned()
 }
 
 /// Writes the OSC 52 clipboard escape to stdout. Called by the event loop after
@@ -3953,7 +4084,11 @@ table_sep = { fg = "gray" }
         let mut app = app();
         app.note(app.theme.dim, "earlier output that should vanish");
         app.open_menu();
-        assert_eq!(app.menu_selection, 0);
+        // Move to "New session" (index 2 in the new menu layout).
+        for _ in 0..2 {
+            app.on_key(ch(KeyCode::Down));
+        }
+        assert_eq!(app.menu_selection, 2);
         assert_eq!(app.on_key(ch(KeyCode::Enter)), KeyAction::NewSession);
         assert!(
             !app.lines
@@ -3968,11 +4103,11 @@ table_sep = { fg = "gray" }
     fn menu_enter_on_quit_selection_quits() {
         let mut app = app();
         app.open_menu();
-        // Move to the Quit action (the last item) and activate with Enter.
-        for _ in 0..MENU_ITEMS.len() - 1 {
+        // Move to the Quit action (index 5 in the new menu layout) and activate with Enter.
+        for _ in 0..5 {
             app.on_key(ch(KeyCode::Down));
         }
-        assert_eq!(app.menu_selection, MENU_ITEMS.len() - 1);
+        assert_eq!(app.menu_selection, 5);
         app.on_key(ch(KeyCode::Enter));
         assert!(app.should_quit);
     }

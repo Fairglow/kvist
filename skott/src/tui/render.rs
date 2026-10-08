@@ -19,7 +19,10 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use super::app::{App, MENU_HOTKEYS, MENU_ITEMS, Overlay, REPLAY_HINT, prompt_block_title, wrap};
+use super::app::{
+    App, MENU_CANCEL_INDEX, MENU_HOTKEYS, MENU_ITEMS, Overlay, REPLAY_HINT, prompt_block_title,
+    wrap,
+};
 
 /// Rows reserved for the multiline prompt editor around the transcript.
 const INPUT_ROWS: u16 = 4;
@@ -102,8 +105,22 @@ pub fn render(f: &mut ratatui::Frame, app: &App) {
         (true, _) => render_help(f, app, transcript_area),
         (false, Overlay::History) => render_history(f, app, transcript_area),
         (false, Overlay::Replay) => render_replay(f, app, transcript_area),
-        (false, Overlay::Menu) => render_menu(f, app, transcript_area),
-        (false, Overlay::ThemePicker) => render_theme_picker(f, app, transcript_area),
+        (false, Overlay::Menu) => {
+            render_transcript(f, app, transcript_area);
+            render_menu(f, app, transcript_area);
+        }
+        (false, Overlay::ModelPicker) => {
+            render_transcript(f, app, transcript_area);
+            render_model_picker(f, app, transcript_area);
+        }
+        (false, Overlay::EffortPicker) => {
+            render_transcript(f, app, transcript_area);
+            render_effort_picker(f, app, transcript_area);
+        }
+        (false, Overlay::ThemePicker) => {
+            render_transcript(f, app, transcript_area);
+            render_theme_picker(f, app, transcript_area);
+        }
         (false, Overlay::None) => render_transcript(f, app, transcript_area),
     }
     render_input(f, app, input_area);
@@ -357,17 +374,23 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
 }
 
 /// The action overlay menu, reached with Esc. Items are navigated with the
-/// arrow keys or `j`/`k`, activated with Enter, or via their single-letter
-/// hotkeys; Esc or `r` returns to the prompt.
+/// The `Esc` action menu: a compact pop-up list of session operations
+/// selectable with arrow keys or `j`/`k`, activated with Enter, or via their
+/// single-letter hotkeys; Esc or `b` returns to the prompt.
 fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
     let theme = &app.theme;
+    // Build the menu lines with conditional cancel item.
     let mut lines: Vec<Line> = vec![
         Line::from(Span::styled(" skott menu ", theme.title)),
         Line::from(""),
-        Line::from("  up/down or j/k select · enter act · esc / r return"),
+        Line::from("  up/down or j/k select · enter act · esc / b return"),
         Line::from(""),
     ];
     for (index, item) in MENU_ITEMS.iter().enumerate() {
+        // Skip the cancel item if not running.
+        if index == MENU_CANCEL_INDEX && !app.running {
+            continue;
+        }
         let selected = index == app.menu_selection;
         let style = if selected {
             theme.menu_selected
@@ -381,25 +404,149 @@ fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
             style,
         )));
     }
+    // Render the menu as a centered pop-up box.
+    let menu_height = lines.len() as u16 + 2;
+    let menu_width = 40;
+    let y_offset = if area.height >= menu_height + 2 {
+        (area.height - menu_height) / 2
+    } else {
+        1
+    };
+    let x_offset = if area.width >= menu_width + 4 {
+        (area.width - menu_width) / 2
+    } else {
+        2
+    };
+    let menu_area = Rect::new(
+        area.x + x_offset,
+        area.y + y_offset,
+        menu_width.min(area.width - x_offset * 2),
+        menu_height.min(area.height - y_offset),
+    );
     let block = Block::default()
-        .borders(Borders::TOP)
+        .borders(Borders::ALL)
         .border_style(Style::default().fg(theme.panel_border))
-        .title(Span::styled(" menu", theme.title));
+        .title(Span::styled(" menu", theme.title))
+        .style(Style::default().bg(theme.panel_bg));
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
         .alignment(Alignment::Left)
         .wrap(Wrap { trim: false });
-    f.render_widget(paragraph, area);
-    let edge = panel_top_edge(
-        " menu".to_owned(),
-        theme.title,
-        Style::default().fg(theme.panel_border),
-        usize::from(area.width.max(1)),
+    f.render_widget(paragraph, menu_area);
+}
+
+/// The model picker: a pop-up list of configured model ids. Enter selects
+/// the highlighted model; Esc returns to the menu.
+fn render_model_picker(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(" select model ", theme.title)),
+        Line::from(""),
+    ];
+    for (index, model) in app.models.iter().enumerate() {
+        let selected = index == app.model_selection;
+        let style = if selected {
+            theme.menu_selected
+        } else {
+            theme.menu_plain
+        };
+        let marker = if selected { "> " } else { "  " };
+        let current = if app.model.as_deref() == Some(model.as_str()) {
+            " (current)"
+        } else {
+            ""
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  {marker}{model}{current}"),
+            style,
+        )));
+    }
+    // Centered pop-up box.
+    let picker_height = lines.len() as u16 + 2;
+    let picker_width = 50;
+    let y_offset = if area.height >= picker_height + 2 {
+        (area.height - picker_height) / 2
+    } else {
+        1
+    };
+    let x_offset = if area.width >= picker_width + 4 {
+        (area.width - picker_width) / 2
+    } else {
+        2
+    };
+    let picker_area = Rect::new(
+        area.x + x_offset,
+        area.y + y_offset,
+        picker_width.min(area.width - x_offset * 2),
+        picker_height.min(area.height - y_offset),
     );
-    f.render_widget(
-        &edge,
-        Rect::new(area.left(), area.top(), area.width.max(1), 1),
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.panel_border))
+        .title(Span::styled(" models", theme.title))
+        .style(Style::default().bg(theme.panel_bg));
+    let paragraph = Paragraph::new(Text::from(lines))
+        .block(block)
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: false });
+    f.render_widget(paragraph, picker_area);
+}
+
+/// The effort picker: a pop-up list of reasoning effort levels. Enter selects
+/// the highlighted effort; Esc returns to the menu.
+fn render_effort_picker(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
+    let mut lines: Vec<Line> = vec![
+        Line::from(Span::styled(" thinking effort ", theme.title)),
+        Line::from(""),
+    ];
+    for (index, effort) in crate::tui::app::EFFORTS.iter().enumerate() {
+        let selected = index == app.effort_selection;
+        let style = if selected {
+            theme.menu_selected
+        } else {
+            theme.menu_plain
+        };
+        let marker = if selected { "> " } else { "  " };
+        let current = if *effort == app.effort {
+            " (current)"
+        } else {
+            ""
+        };
+        lines.push(Line::from(Span::styled(
+            format!("  {marker}{}{current}", effort.as_str()),
+            style,
+        )));
+    }
+    // Centered pop-up box.
+    let picker_height = lines.len() as u16 + 2;
+    let picker_width = 35;
+    let y_offset = if area.height >= picker_height + 2 {
+        (area.height - picker_height) / 2
+    } else {
+        1
+    };
+    let x_offset = if area.width >= picker_width + 4 {
+        (area.width - picker_width) / 2
+    } else {
+        2
+    };
+    let picker_area = Rect::new(
+        area.x + x_offset,
+        area.y + y_offset,
+        picker_width.min(area.width - x_offset * 2),
+        picker_height.min(area.height - y_offset),
     );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.panel_border))
+        .title(Span::styled(" effort", theme.title))
+        .style(Style::default().bg(theme.panel_bg));
+    let paragraph = Paragraph::new(Text::from(lines))
+        .block(block)
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: false });
+    f.render_widget(paragraph, picker_area);
 }
 
 /// The session-history overlay: a scrollable list of past transcripts. Enter
@@ -591,7 +738,7 @@ fn visible_overlay_rows<'a>(
 mod tests {
     use super::render;
     use crate::session::Event;
-    use crate::tui::app::{App, Overlay};
+    use crate::tui::app::{App, MENU_CANCEL_INDEX, Overlay};
     use crate::tui::theme::Theme;
     use crossterm::event::KeyCode;
     use ratatui::Terminal;
