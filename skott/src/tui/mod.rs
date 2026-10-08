@@ -311,7 +311,8 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
     let themes_dir = overrides
         .config_path
         .as_deref()
-        .and_then(theme_files::themes_dir_for_config);
+        .and_then(theme_files::themes_dir_for_config)
+        .or_else(theme_files::bundled_themes_dir);
     let mut app = App::new(
         &model_ids,
         app_model_label.as_deref(),

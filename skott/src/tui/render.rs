@@ -19,9 +19,7 @@ use ratatui::widgets::{
     Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use super::app::{
-    App, MENU_HOTKEYS, MENU_ITEMS, Overlay, REPLAY_HINT, prompt_block_title, wrap,
-};
+use super::app::{App, MENU_HOTKEYS, MENU_ITEMS, Overlay, REPLAY_HINT, prompt_block_title, wrap};
 
 /// Rows reserved for the multiline prompt editor around the transcript.
 const INPUT_ROWS: u16 = 4;
@@ -241,7 +239,7 @@ fn render_input(f: &mut ratatui::Frame, app: &App, area: Rect) {
     // onto the top border row to keep both top borders consistent.
     let inner_width = usize::from(area.width.max(1));
     let edge = panel_top_edge(
-        prompt_block_title(&app.theme),
+        prompt_block_title(),
         Style::default().fg(app.theme.dim),
         Style::default().fg(app.theme.panel_border),
         inner_width,

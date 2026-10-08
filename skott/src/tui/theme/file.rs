@@ -314,11 +314,12 @@ pub fn load_file(path: &Path) -> Result<Theme, String> {
     parse_str(&text, name)
 }
 
-/// Lists the themes available: the two built-ins (`dark`, `light`) plus any
-/// `*.toml` file in `dir`, alphabetically, with duplicates (a user file that
-/// overrides a built-in name) counted once.
+/// Lists the themes available: the three built-ins (`terminal`, `dark`,
+/// `light`) plus any `*.toml` file in `dir`, alphabetically, with duplicates
+/// (a user file that overrides a built-in name) counted once.
 pub fn discover(dir: Option<&Path>) -> Vec<String> {
     let mut names: BTreeSet<String> = BTreeSet::new();
+    names.insert("terminal".to_owned());
     names.insert("dark".to_owned());
     names.insert("light".to_owned());
     if let Some(dir) = dir
@@ -344,21 +345,50 @@ pub fn themes_dir_for_config(config_path: &Path) -> Option<PathBuf> {
     config_path.parent().map(|dir| dir.join("themes"))
 }
 
-/// Loads a theme by name: a file named `<name>.toml` in `dir` when present,
-/// else the embedded built-in `dark`/`light`.
-pub fn load(name: &str, dir: Option<&Path>) -> Result<Theme, String> {
-    if let Some(dir) = dir {
-        let candidate = dir.join(format!("{name}.{THEME_FILE_EXTENSION}"));
-        if candidate.is_file() {
-            return load_file(&candidate);
+/// The bundled themes directory (shipped with the binary). Used as the
+/// default when no configuration file is present, so theme files are always
+/// reloaded from disk rather than embedded strings.
+pub fn bundled_themes_dir() -> Option<PathBuf> {
+    // Look for themes relative to the binary location, or fall back to the
+    // current directory's themes/ subdirectory.
+    if let Ok(exe) = std::env::current_exe() {
+        let candidate = exe.parent()?.join("themes");
+        if candidate.is_dir() {
+            return Some(candidate);
         }
     }
-    match name {
-        "dark" => Ok(Theme::dark()),
-        "light" => Ok(Theme::light()),
-        _ => Err(format!(
-            "theme `{name}` is not recognized; expected one of: {}",
-            discover(dir).join(", ")
-        )),
+    let cwd = std::env::current_dir().ok()?;
+    let candidate = cwd.join("themes");
+    if candidate.is_dir() {
+        Some(candidate)
+    } else {
+        None
     }
+}
+
+/// Loads a theme by name: a file named `<name>.toml` in `dir`, or one of the
+/// built-in themes (`terminal`, `dark`, `light`). The `terminal` theme uses
+/// the terminal's own color scheme and requires no file.
+pub fn load(name: &str, dir: Option<&Path>) -> Result<Theme, String> {
+    // Built-in themes that don't require files.
+    if name.eq_ignore_ascii_case("terminal") {
+        return Ok(Theme::terminal());
+    }
+    if name.eq_ignore_ascii_case("dark") {
+        return Ok(Theme::dark());
+    }
+    if name.eq_ignore_ascii_case("light") {
+        return Ok(Theme::light());
+    }
+
+    // Custom themes require a file.
+    let dir = dir.ok_or("no themes directory configured")?;
+    let candidate = dir.join(format!("{name}.{THEME_FILE_EXTENSION}"));
+    if !candidate.is_file() {
+        return Err(format!(
+            "theme `{name}` not found; expected one of: {}",
+            discover(Some(dir)).join(", ")
+        ));
+    }
+    load_file(&candidate)
 }

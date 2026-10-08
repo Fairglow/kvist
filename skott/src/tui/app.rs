@@ -1875,21 +1875,23 @@ fn restyle_row(line: &mut ScreenLine, theme: &Theme) {
 /// gains a line of height), with the theme's colours.
 fn prompt_block(theme: &Theme) -> ratatui::widgets::Block<'static> {
     ratatui::widgets::Block::default()
-        .style(ratatui::style::Style::default().bg(theme.panel_bg).fg(
-            theme.prompt.fg.unwrap_or_default(),
-        ))
+        .style(
+            ratatui::style::Style::default()
+                .bg(theme.panel_bg)
+                .fg(theme.prompt.fg.unwrap_or_default()),
+        )
         .borders(ratatui::widgets::Borders::TOP)
         .border_style(ratatui::style::Style::default().fg(theme.panel_border))
         .title(Span::styled(
-            prompt_block_title(theme),
+            prompt_block_title(),
             Style::default().fg(theme.dim),
         ))
 }
 
-/// The prompt box's top border title, in the theme's dim colour. Shared by
-/// [`prompt_block`] and the rendered top-edge overlay (see
-/// `render_input`), so the block title and the overlay edge never drift apart.
-pub(crate) fn prompt_block_title(theme: &Theme) -> String {
+/// The prompt box's top border title text. Shared by [`prompt_block`] and the
+/// rendered top-edge overlay (see `render_input`), so the block title and the
+/// overlay edge never drift apart. Theme colours are applied at the call site.
+pub(crate) fn prompt_block_title() -> String {
     " prompt · Enter/Ctrl+Enter send · Shift+Enter · Tab model · \
      Shift+Tab effort · Ctrl+Insert copy · Ctrl+S theme · Ctrl-Q quit · Esc menu · \
      Ctrl+H help "
@@ -2345,7 +2347,23 @@ mod tests {
 
     #[test]
     fn cycling_theme_restyles_rows_without_changing_text() {
+        let dir = tempfile::tempdir().expect("temp themes dir").keep();
+        // Write two theme files with distinct panel backgrounds so we can
+        // verify the theme actually changes.
+        std::fs::write(dir.join("dark.toml"), TEST_THEME_TOML).expect("write dark theme");
+        std::fs::write(
+            dir.join("light.toml"),
+            TEST_THEME_TOML
+                .replace("#010203", "#ffffff")
+                .replace("white", "black"),
+        )
+        .expect("write light theme");
+
         let mut app = app();
+        app.set_theme_catalog(Some(dir));
+        // Load the initial theme from the temp directory, not the embedded
+        // theme, so cycle_theme starts from a file-based theme.
+        app.select_theme(0);
         app.push_event(Event::Reasoning("a reason".to_owned()));
         app.push_event(Event::Text("answer here".to_owned()));
         app.push_event(Event::ToolCall {
@@ -2353,14 +2371,16 @@ mod tests {
             name: "shell".to_owned(),
         });
         let before: Vec<String> = app.lines.iter().map(|line| line.line.to_string()).collect();
-        let dark_bg = app.theme.panel_bg;
-        let light = Theme::light();
+        let first_bg = app.theme.panel_bg;
         app.cycle_theme();
         assert_eq!(app.theme.name, "light");
+        let second_bg = app.theme.panel_bg;
+        assert_ne!(
+            first_bg, second_bg,
+            "themes must have different backgrounds"
+        );
         let after: Vec<String> = app.lines.iter().map(|line| line.line.to_string()).collect();
         assert_eq!(before, after, "text is unchanged by a theme switch");
-        assert_eq!(app.theme.panel_bg, light.panel_bg);
-        assert_eq!(dark_bg, Theme::dark().panel_bg);
         // Ordinary rows now carry the light panel background; reasoning keeps
         // its edge and the light tint.
         assert!(
@@ -2374,9 +2394,12 @@ mod tests {
                 .iter()
                 .all(|line| { line.bg == app.theme.panel_bg || line.bg == app.theme.reasoning_bg })
         );
-        // A second cycle returns to the dark palette.
+        // Cycle to terminal theme, then back to dark.
         app.cycle_theme();
-        assert_eq!(app.theme.panel_bg, dark_bg);
+        assert_eq!(app.theme.name, "terminal");
+        app.cycle_theme();
+        assert_eq!(app.theme.name, "dark");
+        assert_eq!(app.theme.panel_bg, first_bg);
     }
 
     /// A minimal valid theme file: the loader's schema is strict, so the
@@ -3311,10 +3334,24 @@ table_sep = { fg = "gray" }
 
     #[test]
     fn ctrl_s_cycles_the_theme() {
+        let dir = tempfile::tempdir().expect("temp themes dir").keep();
+        std::fs::write(dir.join("dark.toml"), TEST_THEME_TOML).expect("write dark theme");
+        std::fs::write(
+            dir.join("light.toml"),
+            TEST_THEME_TOML
+                .replace("#010203", "#ffffff")
+                .replace("white", "black"),
+        )
+        .expect("write light theme");
+
         let mut app = app();
+        app.set_theme_catalog(Some(dir));
+        app.select_theme(0);
         assert_eq!(app.theme.name, "dark");
         app.on_key(ctrl(KeyCode::Char('s')));
         assert_eq!(app.theme.name, "light");
+        app.on_key(ctrl(KeyCode::Char('s')));
+        assert_eq!(app.theme.name, "terminal");
         app.on_key(ctrl(KeyCode::Char('s')));
         assert_eq!(app.theme.name, "dark");
     }

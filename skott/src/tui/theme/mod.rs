@@ -25,7 +25,7 @@ use ratatui::style::{Color, Style};
 use crate::markdown::MarkdownStyles;
 
 /// The built-in theme names, always available even with no themes directory.
-pub const THEME_NAMES: [&str; 2] = ["dark", "light"];
+pub const THEME_NAMES: [&str; 3] = ["terminal", "dark", "light"];
 
 /// The embedded `dark` theme file, compiled in as a fallback so skott
 /// always has a working default even when no external theme file exists.
@@ -88,18 +88,21 @@ pub struct Theme {
 }
 
 impl Default for Theme {
-    /// The default theme is `dark`.
+    /// The default theme is `terminal`, which uses the terminal's own color
+    /// scheme. No theme file is required.
     fn default() -> Self {
-        Self::dark()
+        Self::terminal()
     }
 }
 
 impl Theme {
-    /// Looks a built-in selector up; `None` when the name is not `dark` or
-    /// `light`. Use [`file::load`] to also search a themes directory.
+    /// Looks a built-in selector up; `None` when the name is not one of the
+    /// built-ins. Use [`file::load`] to also search a themes directory.
     pub fn by_name(name: &str) -> Option<Self> {
         let trimmed = name.trim();
-        if trimmed.eq_ignore_ascii_case("dark") {
+        if trimmed.eq_ignore_ascii_case("terminal") {
+            Some(Self::terminal())
+        } else if trimmed.eq_ignore_ascii_case("dark") {
             Some(Self::dark())
         } else if trimmed.eq_ignore_ascii_case("light") {
             Some(Self::light())
@@ -108,13 +111,14 @@ impl Theme {
         }
     }
 
-    /// The next built-in theme in the cycle (`dark` <-> `light`). The live
-    /// Ctrl+S toggle in the UI instead cycles every discovered theme; see
-    /// `App::cycle_theme`.
+    /// The next built-in theme in the cycle (`terminal` -> `dark` -> `light`
+    /// -> `terminal`). The live Ctrl+S toggle in the UI instead cycles every
+    /// discovered theme; see `App::cycle_theme`.
     pub fn next(&self) -> Self {
         match self.name.as_str() {
+            "terminal" => Self::dark(),
             "dark" => Self::light(),
-            _ => Self::dark(),
+            _ => Self::terminal(),
         }
     }
 
@@ -128,6 +132,38 @@ impl Theme {
     pub fn light() -> Self {
         file::parse_str(LIGHT_TOML, "light")
             .expect("themes/light.toml is a valid, checked-in built-in theme")
+    }
+
+    /// The terminal theme: uses basic ANSI color codes that map to the
+    /// terminal's own color scheme. This theme adapts to whatever dark or
+    /// light palette the user has configured in their terminal, requiring
+    /// no theme file and no rebuild. Background surfaces use the terminal's
+    /// default (Reset) so nothing is painted over.
+    pub fn terminal() -> Self {
+        Self {
+            name: "terminal".to_owned(),
+            title: Style::default().fg(Color::Cyan).bold(),
+            dim: Color::DarkGray,
+            ok: Color::Green,
+            warn: Color::Yellow,
+            err: Color::Red,
+            info: Color::Blue,
+            accent: Color::Cyan,
+            model: Color::Green,
+            model_active: Color::Yellow,
+            spinner: Color::Magenta,
+            stats: Color::Green,
+            panel_bg: Color::Reset,
+            panel_border: Color::DarkGray,
+            reasoning_bg: Color::Reset,
+            reasoning: Style::default().fg(Color::DarkGray).dim(),
+            reasoning_placeholder: Style::default().fg(Color::DarkGray),
+            prompt: Style::default().fg(Color::White).bold(),
+            scrollbar: Style::default().fg(Color::DarkGray).bg(Color::Reset),
+            menu_selected: Style::default().fg(Color::Yellow).bg(Color::Reset).bold(),
+            menu_plain: Style::default().fg(Color::White).bg(Color::Reset),
+            markdown: MarkdownStyles::default(),
+        }
     }
 }
 
