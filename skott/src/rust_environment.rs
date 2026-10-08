@@ -1095,6 +1095,7 @@ mod tests {
                 vendor_identity: label(b"empty"),
                 has_vendor: false,
                 pinned: false,
+                user_cargo_bin: None,
             }),
         }
     }
