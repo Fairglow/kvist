@@ -2080,10 +2080,7 @@ fn prompt_block(theme: &Theme) -> ratatui::widgets::Block<'static> {
 /// rendered top-edge overlay (see `render_input`), so the block title and the
 /// overlay edge never drift apart. Theme colours are applied at the call site.
 pub(crate) fn prompt_block_title() -> String {
-    " prompt · Enter/Ctrl+Enter send · Shift+Enter · Tab model · \
-      Shift+Tab effort · Ctrl+Insert copy · Ctrl+S theme · Ctrl-Q quit · Esc menu · \
-      Ctrl+H help "
-        .to_owned()
+    " prompt · Enter send · Esc menu · Ctrl+H help ".to_owned()
 }
 
 /// Writes the OSC 52 clipboard escape to stdout. Called by the event loop after
