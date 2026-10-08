@@ -48,12 +48,17 @@ const LIVE_PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 /// The provider's token usage is not known until the turn ends, so the running
 /// output estimate is derived from the characters streamed so far; the context
 /// figures come from the session's live context, which does not change mid-turn.
+/// `cumulative_output` carries output tokens from earlier turns so the live
+/// path can report the whole-session average on the same basis as the post-turn
+/// figure (cumulative output over decode time).
 struct LiveProgress<'a> {
     session: &'a AgentSession,
     context: &'a ContextManager,
     tool_defs: usize,
     started_at: Instant,
     cumulative_total: u64,
+    cumulative_output: u64,
+    decode_seconds: f64,
 }
 
 /// Emits a single live progress update while a turn streams, so the stats bar
@@ -64,8 +69,9 @@ struct LiveProgress<'a> {
 ///
 /// The output speed is the estimated tokens divided by the wall time spent
 /// generating this turn (prompt processing excluded), which is what the user
-/// expects `tok/s` to mean and what `llama-server` measures. The cumulative
-/// rate since the prompt started is reported separately as the average.
+/// expects `tok/s` to mean and what `llama-server` measures. The running
+/// session average over the same decode time is reported separately as the
+/// average, so it stays comparable to the live speed.
 fn emit_live_progress<S: EventSink>(
     sink: &S,
     progress: &LiveProgress,
@@ -83,6 +89,11 @@ fn emit_live_progress<S: EventSink>(
         .saturating_duration_since(attempt_started)
         .as_secs_f64()
         .max(1e-9);
+    // Whole-session average over decode time: output tokens from earlier
+    // turns plus this turn's estimate, over the decode seconds from earlier
+    // turns plus this turn's, on the same basis as the post-turn average.
+    let cumulative_output = progress.cumulative_output.saturating_add(output_tokens);
+    let cumulative_decode = progress.decode_seconds + generation_secs;
     sink.send(Event::Progress {
         token_accounting: TokenAccounting::Estimated,
         input_tokens: progress.cumulative_total,
@@ -96,7 +107,7 @@ fn emit_live_progress<S: EventSink>(
             .session
             .compaction_progress(progress.context, progress.tool_defs),
         generation_tokens_per_sec: output_tokens as f64 / generation_secs,
-        average_tokens_per_sec: total_tokens as f64 / elapsed,
+        average_tokens_per_sec: cumulative_output as f64 / cumulative_decode.max(1e-9),
         total_tokens,
         elapsed_secs: elapsed,
     })
@@ -174,9 +185,10 @@ pub enum Event {
         /// turn streams this is derived from the streamed output estimate;
         /// afterwards it is the provider's turn output over its generation time.
         generation_tokens_per_sec: f64,
-        /// Average tokens per second since the prompt started: cumulative
-        /// provider tokens over wall clock, the throughput figure a whole
-        /// session (with its tool and think gaps) actually sustained.
+        /// Average tokens per second over decode time: cumulative output
+        /// tokens divided by the same generation seconds that drive `t/s`, so
+        /// the average is on the same basis and is directly comparable to the
+        /// live speed (prompt tokens and inter-turn gaps are excluded).
         average_tokens_per_sec: f64,
         /// Cumulative provider tokens observed across the session.
         total_tokens: u64,
@@ -870,6 +882,11 @@ impl Skott {
                     tool_defs: session.tool_defs.len(),
                     started_at,
                     cumulative_total: input.saturating_add(output),
+                    // Prior turns' cumulative output and decode seconds, so
+                    // the live path's average is the whole-session average over
+                    // decode time (this turn's streamed estimate is added on).
+                    cumulative_output: output,
+                    decode_seconds: generation_seconds,
                 },
                 budget,
                 &mut tokens_remaining,
@@ -1261,8 +1278,12 @@ impl Skott {
         started_at: Instant,
         generation_seconds: f64,
     ) -> Result<()> {
+        // Whole-session average over decode time: output tokens from every
+        // turn so far over their combined decode seconds, on the same basis as
+        // the live `t/s`, so the two are comparable (prompt tokens and
+        // inter-turn gaps excluded).
+        let average = output_tokens as f64 / generation_seconds.max(1e-9);
         let context_tokens = session.estimate_context_tokens(session.tool_definitions().len());
-        let elapsed = started_at.elapsed().as_secs_f64().max(1e-9);
         sink.send(Event::Progress {
             token_accounting,
             input_tokens,
@@ -1277,9 +1298,9 @@ impl Skott {
             // tokens and the gaps between turns are excluded, so this is
             // comparable to `llama-server`'s tokens/sec.
             generation_tokens_per_sec: output_tokens as f64 / generation_seconds.max(1e-9),
-            average_tokens_per_sec: total_tokens as f64 / elapsed,
+            average_tokens_per_sec: average,
             total_tokens,
-            elapsed_secs: elapsed,
+            elapsed_secs: started_at.elapsed().as_secs_f64().max(1e-9),
         })
     }
 }

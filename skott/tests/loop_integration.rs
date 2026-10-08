@@ -797,6 +797,63 @@ fn progress_is_emitted_after_each_turn_with_cumulative_totals() {
 }
 
 #[test]
+fn average_is_comparable_to_generation_rate_over_decode_time() {
+    // The whole-session average must be on the same basis as the live `t/s`:
+    // output tokens over decode time, so prompt tokens and inter-turn gaps do
+    // not inflate it. Every progress report therefore carries an average
+    // equal to `generation_tokens_per_sec`. The old implementation used
+    // cumulative (input + output) tokens over wall clock, which ran far above
+    // the decode-only speed, so a mismatch here would catch a regression.
+    let transport = ScriptedTransport::new(vec![
+        tool_turn(
+            "inspect the file",
+            "shell",
+            json!({ "command": "echo inspect" }),
+        ),
+        answer_turn("here it is"),
+    ]);
+    let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
+    let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
+    let mut recorder = FakeRecorder::default();
+    let cancellation = CancellationToken::new();
+
+    let mut session = make_session();
+    session.push_user("do the thing");
+    let (_summary, sink) = run_collected(
+        &mut session,
+        &transport,
+        &executor,
+        &cancellation,
+        &mut context,
+        &mut recorder,
+    );
+
+    let reports: Vec<Event> = sink
+        .events()
+        .into_iter()
+        .filter(|e| matches!(e, Event::Progress { .. }))
+        .collect();
+    assert!(
+        reports.len() >= 2,
+        "expected the per-turn progress reports, got {}",
+        reports.len()
+    );
+    for event in &reports {
+        if let Event::Progress {
+            generation_tokens_per_sec,
+            average_tokens_per_sec,
+            ..
+        } = event
+        {
+            assert!(
+                (*average_tokens_per_sec - *generation_tokens_per_sec).abs() < 1e-9,
+                "average {average_tokens_per_sec} must equal t/s {generation_tokens_per_sec}"
+            );
+        }
+    }
+}
+
+#[test]
 fn cancellation_before_a_tool_is_executed_stops_the_loop() {
     let transport = ScriptedTransport::new(vec![
         tool_turn("about to work", "shell", json!({ "command": "echo hi" })),
