@@ -1,4 +1,4 @@
-// Component tests for the agent-runner building blocks: configuration loading
+// Component tests for the skott building blocks: configuration loading
 // and validation, the tool registry and command policy, sandbox request
 // construction, the error surface, and the CLI helpers. These exercise the
 // public library API directly, so they document and guard the exact contract
@@ -38,7 +38,7 @@ base_url = "http://127.0.0.1:11434"
 model = "qwen2.5"
 deadline_secs = 120
 [sandbox]
-runner = "/usr/local/bin/kvist-sandbox-runner"
+runner = "/usr/local/bin/galla-runner"
 backend = "/usr/bin/bwrap"
 [tool_policy]
 shell_deny_substrings = []
@@ -491,7 +491,7 @@ fn shell_command_within_argv_bound_stays_inline_and_beyond_stages_script() {
             "/usr/bin/bash".to_owned(),
             "-c".to_owned(),
             at_bound.clone(),
-            "agent-runner".to_owned(),
+            "skott".to_owned(),
         ]
     );
     assert!(inline.shell_script.is_none());
@@ -510,7 +510,7 @@ fn shell_command_within_argv_bound_stays_inline_and_beyond_stages_script() {
         vec![
             "/usr/bin/bash".to_owned(),
             "-c".to_owned(),
-            "exec bash -c \"$(cat /context/0)\" agent-runner".to_owned(),
+            "exec bash -c \"$(cat /context/0)\" skott".to_owned(),
         ]
     );
     assert_eq!(staged.shell_script.as_deref(), Some(over.as_str()));
@@ -644,7 +644,7 @@ fn shell_argv() -> Vec<String> {
         "/usr/bin/bash".to_owned(),
         "-c".to_owned(),
         "true".to_owned(),
-        "agent-runner".to_owned(),
+        "skott".to_owned(),
     ]
 }
 
@@ -671,7 +671,7 @@ fn build_request_produces_a_closed_authoring_request() {
         "/usr/bin/bash".to_owned(),
         "-c".to_owned(),
         "echo hi".to_owned(),
-        "agent-runner".to_owned(),
+        "skott".to_owned(),
     ];
     let read_roots: Vec<PathBuf> = Vec::new();
     let environment: BTreeMap<String, String> = BTreeMap::new();
@@ -880,7 +880,7 @@ fn execute_fails_closed_when_runner_is_missing() {
         "/usr/bin/bash".to_owned(),
         "-c".to_owned(),
         "echo hi".to_owned(),
-        "agent-runner".to_owned(),
+        "skott".to_owned(),
     ];
     let req = sandbox::build_request(
         &sb,

@@ -1,6 +1,6 @@
 <!-- kvist-design-version: 1 -->
 
-# Sandbox Runner Design
+# Galla Design
 
 ## Design overview
 
@@ -29,12 +29,12 @@ prerequisites or invalid requests fail closed.
 The enforcement path composes the validated request into one explicit
 Bubblewrap execution — resolved mounts, namespace boundaries, `prlimit`
 resources, the source-aware network guard, and process supervision — without
-importing engine types.
+importing maerg types.
 
 ## Interactions and state
 
 The runner receives one bounded JSON request on standard input, validates it
-independently, and persists no state. It never trusts engine-side validation as
+independently, and persists no state. It never trusts maerg-side validation as
 a substitute for its own. The enforcement path constructs one explicit
 Bubblewrap execution from a validated request, supervises it, enforces
 resources, cleans up the process tree, and returns bounded results.

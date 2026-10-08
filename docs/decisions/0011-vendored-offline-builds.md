@@ -3,7 +3,7 @@
 ## Status
 
 Accepted. The decision is in place: `kvist vendor` provisions and enforces an
-offline vendored dependency registry, and the `engine` vendoring module records
+offline vendored dependency registry, and the `maerg` vendoring module records
 and re-checks a versioned manifest so a sandbox build can resolve dependencies
 fully offline. This document records the decision and its rationale; it is not a
 compliance certification.
@@ -23,7 +23,7 @@ Implemented:
   bytes (`ReadOnlyMount::file`). This is what makes it possible to mount a
   vendored registry without hashing hundreds of thousands of files. See
   "Lock-file digest as the directory-mount identity".
-- **Language-aware vendoring enforcement.** `engine::language_vendoring`
+- **Language-aware vendoring enforcement.** `maerg::language_vendoring`
   provides a `LanguageStrategy` trait and a single `enforce_vendoring`
   entry point that Kvist owns: Rust enforces each locked registry and Git entry
   exactly (through the existing `VendorManifest` machinery), while Python
@@ -38,7 +38,7 @@ Implemented:
   `/workspace/vendored`, a cargo-config mount at `/workspace/.cargo`, and a
   runtime-bin mount at `/workspace/bin`. The two vendored mounts are each
   identified by the lock-file digest so the mount plan is a build-time claim over
-  the locked catalogue. The engine routes Rust verification through
+  the locked catalogue. The maerg routes Rust verification through
   `sandbox::run_offline_cargo_verification`, which enforces vendoring readiness,
   resolves the immutable toolchain, provisions a read-only approved Cargo home,
   a read-only runtime bin (symlinks exposing `rustc`, `rustdoc`, and the system
@@ -66,7 +66,7 @@ Validated live (security-sensitive, requires the bwrap runner environment):
 
 - **The extended Cargo topology runs under the real bwrap runner.** The routing,
   the vendored mounts, and the runtime-bin mount are exercised end to end by
-  `engine/tests/offline_cargo_verification_e2e.rs`, which vendors a small project
+  `maerg/tests/offline_cargo_verification_e2e.rs`, which vendors a small project
   and runs a network-denied `cargo test --locked` inside bubblewrap that compiles,
   links, and executes. The test self-skips when the live sandbox cannot run
   (no built runner, no bubblewrap backend, no cargo/rustup, no git worktree, or no
@@ -92,7 +92,7 @@ Validated live (security-sensitive, requires the bwrap runner environment):
   the fallback path is tested
   (`vendor_command::tests::acquisition_fallback_when_no_toolchain_is_resolvable`),
   and a live end-to-end test
-  (`engine/tests/offline_cargo_verification_e2e.rs::acquisition_sandbox_provisions_vendored_registry_before_verification`)
+  (`maerg/tests/offline_cargo_verification_e2e.rs::acquisition_sandbox_provisions_vendored_registry_before_verification`)
   drives the full in-sandbox provision → offline verify path (it self-skips
   where the live sandbox cannot run).
 
@@ -218,8 +218,8 @@ make the sandbox build from it offline.
 | Action                                                         | Performs it                        | Network                                                                              | Boundary    |
 | -------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------ | ----------- |
 | `cargo fetch` (acquisition)                                    | Dependency-acquisition sandbox     | Approved sources only ([ADR 0005](0005-mediated-dependency-and-model-networking.md)) | Acquisition |
-| `cargo vendor --offline` (repack), `cargo generate-lockfile`   | `kvist` engine (host)              | None (offline)                                                                       | Acquisition |
-| Vendoring manifest record and enforcement                      | `kvist` engine (host)              | None                                                                                 | Authority   |
+| `cargo vendor --offline` (repack), `cargo generate-lockfile`   | `kvist` maerg (host)              | None (offline)                                                                       | Acquisition |
+| Vendoring manifest record and enforcement                      | `kvist` maerg (host)              | None                                                                                 | Authority   |
 | `cargo test --locked`, `cargo build`                           | Effect sandbox                     | None (`deny` + offline + vendored registry)                                          | Isolation   |
 | `cargo`, `rustc`, toolchain material                           | Effect sandbox                     | None (read-only mount)                                                               | Isolation   |
 

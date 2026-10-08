@@ -1,6 +1,6 @@
 <!-- kvist-contract-version: 1 -->
 
-# Agent Runtime Contract
+# Sav Contract
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
@@ -9,9 +9,9 @@ all capitals.
 
 ## Boundary and ownership
 
-- **Component ID:** `agent-runtime`
-- **Contract IDs:** `agent-runtime.library/v1`, `agent-runtime.cli/v1`
-- **Owner:** standalone `agent-runtime` crate
+- **Component ID:** `sav`
+- **Contract IDs:** `sav.library/v1`, `sav.cli/v1`
+- **Owner:** standalone `sav` crate
 - **Consumers:** Kvist and other embedding Rust applications; standalone CLI
   users
 
@@ -28,7 +28,7 @@ rendering, typed supervision policy and attempt context, supervised host
 execution, named profile storage and setup operations, provider-neutral model
 messages/turns, and local direct transports.
 
-The standalone `agent-run` CLI provides:
+The standalone `sav-run` CLI provides:
 
 - `setup [--force]` for profile creation, automatic qualification, and update;
 - `models --provider PROVIDER [--endpoint URL] [--executable PATH]

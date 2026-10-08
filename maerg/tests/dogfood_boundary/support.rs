@@ -216,7 +216,7 @@ pub fn repository_root() -> PathBuf {
     }
 }
 
-fn engine_authority_root() -> PathBuf {
+fn maerg_authority_root() -> PathBuf {
     repository_root().join("maerg")
 }
 
@@ -292,12 +292,12 @@ fn copy_authority(project: &Path, name: &str) {
         .unwrap_or_else(|error| panic!("copy {name}: {error}"));
 }
 
-fn copy_engine_artifact(engine: &Path, name: &str) {
-    fs::copy(engine_authority_root().join(name), engine.join(name))
-        .unwrap_or_else(|error| panic!("copy engine/{name}: {error}"));
+fn copy_maerg_artifact(maerg: &Path, name: &str) {
+    fs::copy(maerg_authority_root().join(name), maerg.join(name))
+        .unwrap_or_else(|error| panic!("copy maerg/{name}: {error}"));
 }
 
-fn queue(engine: &Path, status: &str, recovery_state: &str) -> String {
+fn queue(maerg: &Path, status: &str, recovery_state: &str) -> String {
     let completed_at = if status == "completed" {
         "\"2026-09-01T20:30:00Z\""
     } else {
@@ -352,9 +352,9 @@ tasks:
     blocked_reason: null
     recovery_state: {recovery_state}
 "#,
-        sha256_file(&engine.join("REQUIREMENTS.md")),
-        sha256_file(&engine.join("CONTRACT.md")),
-        sha256_file(&engine.join("DESIGN.md")),
+        sha256_file(&maerg.join("REQUIREMENTS.md")),
+        sha256_file(&maerg.join("CONTRACT.md")),
+        sha256_file(&maerg.join("DESIGN.md")),
     )
 }
 
@@ -370,7 +370,7 @@ pub fn task_block<'a>(queue: &'a str, task_id: &str) -> &'a str {
 }
 
 pub fn add_independent_ready_implementation_task(project: &Path) {
-    let queue_path = project.join("engine/TODOS.yaml");
+    let queue_path = project.join("maerg/TODOS.yaml");
     let mut queue = fs::read_to_string(&queue_path).expect("read fixture queue");
     queue.push_str(
         r#"  - id: "independent-implementation"
@@ -396,11 +396,11 @@ pub fn add_independent_ready_implementation_task(project: &Path) {
     fs::write(queue_path, queue).expect("add independent fixture task");
 }
 
-fn create_child(engine: &Path, name: &str, package: &str) {
-    let child = engine.join(name);
+fn create_child(maerg: &Path, name: &str, package: &str) {
+    let child = maerg.join(name);
     fs::create_dir_all(child.join("src")).expect("create child source directory");
     for artifact in ["REQUIREMENTS.md", "CONTRACT.md", "DESIGN.md", "IMPL.md"] {
-        copy_engine_artifact(&child, artifact);
+        copy_maerg_artifact(&child, artifact);
     }
     let child_queue = format!(
         r#"schema_version: 1
@@ -421,7 +421,7 @@ tasks: []
         sha256_file(&child.join("REQUIREMENTS.md")),
         sha256_file(&child.join("CONTRACT.md")),
         sha256_file(&child.join("DESIGN.md")),
-        sha256_file(&engine.join("CONTRACT.md")),
+        sha256_file(&maerg.join("CONTRACT.md")),
     );
     fs::write(child.join("TODOS.yaml"), child_queue).expect("write child queue");
     fs::write(
@@ -434,7 +434,7 @@ tasks: []
 }
 
 fn write_controlled_runner(project: &Path, external_tools: &Path) -> PathBuf {
-    let runner = external_tools.join("controlled-sandbox-runner");
+    let runner = external_tools.join("controlled-galla-runner");
     let request_log = external_tools.join("runner-request.json");
     let backend = Path::new("/usr/bin/true");
     let script = format!(
@@ -447,8 +447,8 @@ if [ "${{1-}}" = "--kvist-sandbox-probe-v1" ]; then
   exit 0
 fi
 cat > "{request_log}"
-printf 'started\n' > "{project}/engine/tests/supervised-run-started"
-printf '#[test]\nfn generated() {{}}\n' > "{project}/engine/tests/generated.rs"
+printf 'started\n' > "{project}/maerg/tests/supervised-run-started"
+printf '#[test]\nfn generated() {{}}\n' > "{project}/maerg/tests/generated.rs"
 "#,
         backend = backend.display(),
         request_log = request_log.display(),
@@ -468,31 +468,31 @@ pub fn create_target_project(status: &str) -> TargetProject {
         copy_authority(project.path(), artifact);
     }
     fs::create_dir(project.path().join("docs")).expect("create docs");
-    fs::create_dir_all(project.path().join("engine/src")).expect("create engine source");
-    fs::create_dir(project.path().join("engine/tests")).expect("create engine tests");
-    let engine = project.path().join("engine");
+    fs::create_dir_all(project.path().join("maerg/src")).expect("create maerg source");
+    fs::create_dir(project.path().join("maerg/tests")).expect("create maerg tests");
+    let maerg = project.path().join("maerg");
     for artifact in ["REQUIREMENTS.md", "CONTRACT.md", "DESIGN.md", "IMPL.md"] {
-        copy_engine_artifact(&engine, artifact);
+        copy_maerg_artifact(&maerg, artifact);
     }
-    fs::write(engine.join("TODOS.yaml"), queue(&engine, status, "null"))
-        .expect("write engine queue");
+    fs::write(maerg.join("TODOS.yaml"), queue(&maerg, status, "null"))
+        .expect("write maerg queue");
     fs::write(
-        engine.join("Cargo.toml"),
+        maerg.join("Cargo.toml"),
         r#"[package]
 name = "dogfood-fixture"
 version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = [".", "agent_runtime", "sandbox_runner"]
+members = [".", "sav", "galla"]
 resolver = "3"
 "#,
     )
-    .expect("write engine manifest");
-    fs::write(engine.join("Cargo.lock"), "version = 4\n").expect("write lockfile");
-    fs::write(engine.join("src/lib.rs"), "pub fn existing() {}\n").expect("write engine source");
-    create_child(&engine, "agent_runtime", "fixture-agent-runtime");
-    create_child(&engine, "sandbox_runner", "fixture-sandbox-runner");
+    .expect("write maerg manifest");
+    fs::write(maerg.join("Cargo.lock"), "version = 4\n").expect("write lockfile");
+    fs::write(maerg.join("src/lib.rs"), "pub fn existing() {}\n").expect("write maerg source");
+    create_child(&maerg, "sav", "fixture-sav");
+    create_child(&maerg, "galla", "fixture-galla-runner");
     let runner = write_controlled_runner(project.path(), external_tools.path());
     // The host-side model turn extracts a loopback endpoint from the profile
     // command template. Inject a reachable one (hermetic mock by default) so the
@@ -503,7 +503,7 @@ resolver = "3"
         project.path().join("kvist.toml"),
         format!(
             r##"schema_version = 1
-component_root = "engine"
+component_root = "maerg"
 
 [review]
 required = false
@@ -581,11 +581,11 @@ command = "/usr/bin/test -f tests/generated.rs"
 }
 
 pub fn write_ambiguous_attempt(project: &Path) {
-    let engine = project.join("engine");
+    let maerg = project.join("maerg");
     fs::write(
-        engine.join("TODOS.yaml"),
+        maerg.join("TODOS.yaml"),
         queue(
-            &engine,
+            &maerg,
             "in-progress",
             &format!(
                 "{{ state: fenced, attempt_id: \"{ATTEMPT_ID}\", reason: \"ambiguous-effects\" }}"
@@ -593,9 +593,9 @@ pub fn write_ambiguous_attempt(project: &Path) {
         ),
     )
     .expect("write fenced queue");
-    let attempts = engine.join(".kvist-attempts");
+    let attempts = maerg.join(".kvist-attempts");
     fs::create_dir_all(&attempts).expect("create attempt journal directory");
-    let pre_queue = git(project, &["show", "HEAD:engine/TODOS.yaml"]);
+    let pre_queue = git(project, &["show", "HEAD:maerg/TODOS.yaml"]);
     assert_success(&pre_queue, "read pre-attempt queue");
     let event = json!({
         "schema_version": 1,
@@ -603,11 +603,11 @@ pub fn write_ambiguous_attempt(project: &Path) {
         "task_id": TASK_ID,
         "phase": "prepared",
         "pre_queue_digest": sha256_bytes(&pre_queue.stdout),
-        "intended_post_queue_digest": sha256_file(&engine.join("TODOS.yaml")),
+        "intended_post_queue_digest": sha256_file(&maerg.join("TODOS.yaml")),
         "policy_identity": sha256_bytes(b"policy"),
         "runner_identity": sha256_bytes(b"runner"),
         "approved_write_scope": [{
-            "path": "engine/tests",
+            "path": "maerg/tests",
             "pre_digest": sha256_bytes(b"empty")
         }]
     });
@@ -616,29 +616,29 @@ pub fn write_ambiguous_attempt(project: &Path) {
         format!("{event}\n"),
     )
     .expect("write ambiguous attempt");
-    fs::write(engine.join("tests/uncertain.rs"), "// uncertain effect\n")
+    fs::write(maerg.join("tests/uncertain.rs"), "// uncertain effect\n")
         .expect("write ambiguous source effect");
 }
 
 pub fn write_finalizable_attempt(project: &Path, verification_success: bool) {
-    let engine = project.join("engine");
+    let maerg = project.join("maerg");
     fs::write(
-        engine.join("TODOS.yaml"),
-        queue(&engine, "in-progress", "null"),
+        maerg.join("TODOS.yaml"),
+        queue(&maerg, "in-progress", "null"),
     )
     .expect("write in-progress queue");
     fs::write(
-        engine.join("tests/generated.rs"),
+        maerg.join("tests/generated.rs"),
         "#[test]\nfn generated() {}\n",
     )
     .expect("write scoped task result");
-    let attempts = engine.join(".kvist-attempts");
+    let attempts = maerg.join(".kvist-attempts");
     fs::create_dir_all(&attempts).expect("create attempt journal directory");
     let changes = json!([{
-        "path": "engine/tests/generated.rs",
+        "path": "maerg/tests/generated.rs",
         "operation": "create",
         "pre_digest": Value::Null,
-        "post_digest": sha256_file(&engine.join("tests/generated.rs"))
+        "post_digest": sha256_file(&maerg.join("tests/generated.rs"))
     }]);
     let events = [
         json!({
@@ -647,13 +647,13 @@ pub fn write_finalizable_attempt(project: &Path, verification_success: bool) {
             "task_id": TASK_ID,
             "phase": "prepared",
             "pre_queue_digest": sha256_bytes(
-                &git(project, &["show", "HEAD:engine/TODOS.yaml"]).stdout
+                &git(project, &["show", "HEAD:maerg/TODOS.yaml"]).stdout
             ),
-            "intended_post_queue_digest": sha256_file(&engine.join("TODOS.yaml")),
-            "policy_identity": sha256_bytes(b"engine-approved-policy"),
-            "runner_identity": sha256_bytes(b"engine-approved-runner"),
+            "intended_post_queue_digest": sha256_file(&maerg.join("TODOS.yaml")),
+            "policy_identity": sha256_bytes(b"maerg-approved-policy"),
+            "runner_identity": sha256_bytes(b"maerg-approved-runner"),
             "approved_write_scope": [{
-                "path": "engine/tests",
+                "path": "maerg/tests",
                 "pre_digest": sha256_bytes(b"empty")
             }]
         }),
@@ -696,31 +696,31 @@ pub fn runner_path() -> PathBuf {
 
 fn resolve_runner_path() -> PathBuf {
     let mut candidates = Vec::new();
-    if let Some(path) = std::env::var_os("KVIST_SANDBOX_RUNNER_TEST_BIN") {
+    if let Some(path) = std::env::var_os("KVIST_GALLA_TEST_BIN") {
         candidates.push(PathBuf::from(path));
     }
-    if let Some(path) = option_env!("CARGO_BIN_EXE_sandbox-runner") {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_galla-runner") {
         candidates.push(PathBuf::from(path));
     }
-    if let Some(path) = option_env!("CARGO_BIN_EXE_kvist-sandbox-runner") {
+    if let Some(path) = option_env!("CARGO_BIN_EXE_galla-runner") {
         candidates.push(PathBuf::from(path));
     }
     let root = repository_root();
     if let Ok(executable) = std::env::current_exe()
         && let Some(debug_directory) = executable.parent().and_then(Path::parent)
     {
-        candidates.push(debug_directory.join("sandbox-runner"));
-        candidates.push(debug_directory.join("kvist-sandbox-runner"));
+        candidates.push(debug_directory.join("galla-runner"));
+        candidates.push(debug_directory.join("galla-runner"));
     }
     if let Some(target) = std::env::var_os("CARGO_TARGET_DIR") {
-        candidates.push(PathBuf::from(&target).join("debug/sandbox-runner"));
-        candidates.push(PathBuf::from(target).join("debug/kvist-sandbox-runner"));
+        candidates.push(PathBuf::from(&target).join("debug/galla-runner"));
+        candidates.push(PathBuf::from(target).join("debug/galla-runner"));
     }
     for relative in [
-        "engine/target/debug/sandbox-runner",
-        "engine/target/debug/kvist-sandbox-runner",
-        "target/debug/sandbox-runner",
-        "target/debug/kvist-sandbox-runner",
+        "maerg/target/debug/galla-runner",
+        "maerg/target/debug/galla-runner",
+        "target/debug/galla-runner",
+        "target/debug/galla-runner",
     ] {
         candidates.push(root.join(relative));
     }
@@ -750,9 +750,9 @@ fn resolve_runner_path() -> PathBuf {
             .args([
                 "build",
                 "-p",
-                "kvist-sandbox-runner",
+                "galla-runner",
                 "--bin",
-                "kvist-sandbox-runner",
+                "galla-runner",
             ])
             .current_dir(repository_root())
             .status();
@@ -771,7 +771,7 @@ fn resolve_runner_path() -> PathBuf {
             let staged_dir =
                 std::env::temp_dir().join(format!("kvist-test-sandbox-bin-{}", std::process::id()));
             let _ = fs::create_dir_all(&staged_dir);
-            let staged_runner = staged_dir.join("kvist-sandbox-runner");
+            let staged_runner = staged_dir.join("galla-runner");
             let tmp_staged = staged_dir.join(format!("tmp-runner-{}", std::process::id()));
             if let Ok(bytes) = fs::read(path)
                 && fs::write(&tmp_staged, &bytes).is_ok()
@@ -789,7 +789,7 @@ fn resolve_runner_path() -> PathBuf {
 
     panic!(
         "the real Bubblewrap sandbox runner is not installed outside the selected \
-         worktree; build sandbox_runner and set KVIST_SANDBOX_RUNNER_TEST_BIN \
+         worktree; build galla and set KVIST_GALLA_TEST_BIN \
          to its installed regular-file executable"
     )
 }

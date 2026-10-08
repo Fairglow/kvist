@@ -30,7 +30,7 @@
 //!   is bound into the [`CheckedIntent`] so the applier can prove the result.
 //! - `propose_decision`: `summary` + `why` + optional `patch`. Surfaces an
 //!   impactful, uncovered decision for the user. It never writes a protected
-//!   document; the engine records a redacted proposal under the component state
+//!   document; the maerg records a redacted proposal under the component state
 //!   directory and ends the run in the awaiting-decision state.
 //! - `request_dependency`: `name` + `origin`. Requests a new dependency. A request
 //!   within policy (an exact, pinned revision) is recorded and accepted so the

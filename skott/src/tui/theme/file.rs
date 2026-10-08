@@ -337,8 +337,8 @@ pub fn discover(dir: Option<&Path>) -> Vec<String> {
 }
 
 /// Resolves the themes directory for a configuration file: the `themes`
-/// subdirectory next to it, so `~/.config/agent-runner/config.toml` pairs
-/// with `~/.config/agent-runner/themes/`. Themes there override a built-in of
+/// subdirectory next to it, so `~/.config/skott/config.toml` pairs
+/// with `~/.config/skott/themes/`. Themes there override a built-in of
 /// the same name and need no rebuild to take effect.
 pub fn themes_dir_for_config(config_path: &Path) -> Option<PathBuf> {
     config_path.parent().map(|dir| dir.join("themes"))

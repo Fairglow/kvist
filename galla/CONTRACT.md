@@ -1,6 +1,6 @@
 <!-- kvist-contract-version: 1 -->
 
-# Sandbox Runner Contract
+# Galla Contract
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
@@ -9,11 +9,11 @@ all capitals.
 
 ## Boundary and ownership
 
-- **Component ID:** `sandbox-runner`
-- **Contract IDs:** `sandbox-runner.protocol/v1`,
-  `sandbox-runner.cli/v1`
-- **Owner:** standalone `sandbox-runner` crate
-- **Consumers:** the Kvist engine and Linux operators
+- **Component ID:** `galla`
+- **Contract IDs:** `galla.protocol/v1`,
+  `galla.cli/v1`
+- **Owner:** standalone `galla` crate
+- **Consumers:** the Kvist maerg and Linux operators
 
 The component owns independent request validation and operating-system
 enforcement. It does not authorize grants, transition tasks, promote output,
@@ -21,7 +21,7 @@ or mint Kvist evidence.
 
 ## Provided interfaces
 
-The executable is named `kvist-sandbox-runner`. It accepts exactly one protocol
+The executable is named `galla-runner`. It accepts exactly one protocol
 mode argument:
 
 - `--kvist-sandbox-request-v1` reads one bounded JSON request from standard
@@ -54,7 +54,7 @@ atomicity.
 The production runner will require Linux namespace support and a verified
 Bubblewrap executable. This revision requires the Rust standard library, `nix`
 for safe descriptor-relative Linux filesystem operations, `serde`/`serde_json`
-for parsing, and `sha2`/`hex` for identities, and receives no engine authority.
+for parsing, and `sha2`/`hex` for identities, and receives no maerg authority.
 
 ## Data and schemas
 

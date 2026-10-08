@@ -1,6 +1,6 @@
 <!-- kvist-requirements-version: 1 -->
 
-# Sandbox Runner Requirements
+# Galla Requirements
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
@@ -9,7 +9,7 @@ all capitals.
 
 ## Purpose and scope
 
-`sandbox-runner` is the independently installed Linux enforcement component
+`galla` is the independently installed Linux enforcement component
 for approved Kvist task grants. This component strictly parses and validates
 the redefined version-one probe and request contracts, rejects every
 superseded ("legacy") shape, implements the mediated Cargo validation and
@@ -26,8 +26,8 @@ request MUST fail closed.
 
 ## Stakeholders and concerns
 
-- Kvist engine integrators need a separately packaged executable boundary that
-  agrees with the engine on one bounded version-one wire contract.
+- Kvist maerg integrators need a separately packaged executable boundary that
+  agrees with the maerg on one bounded version-one wire contract.
 - Security reviewers need fail-closed behavior whenever enforcement
   prerequisites are unavailable.
 - Operators need an honest distinction between a verified enforcement
@@ -44,7 +44,7 @@ enforcement readiness.
 ### SR-REQ-PROTOCOL-BOUNDARY
 
 The component MUST build as a Rust 2024 package, expose one
-`kvist-sandbox-runner` executable, and keep its source, schemas, and tests
+`galla-runner` executable, and keep its source, schemas, and tests
 adjacent to local intent. It MUST strictly parse and independently validate the
 redefined bounded version-one `kvist-sandbox-request-v1` request: exact
 protocol identifier and version, typed phase (`authoring`, `verification`, or
@@ -125,7 +125,7 @@ rather than reinventing them.
   Retain current compile-time unsafe guards unless deliberately approving
   such an exception; this policy does not authorize their broad removal.
 - Executable support is Linux-only.
-- The component MUST NOT import Kvist engine implementation types.
+- The component MUST NOT import Kvist maerg implementation types.
 - Repository input and protocol input are untrusted and bounded before use.
 - The dependency graph remains small: the runtime crates are the Rust standard
   library, `nix` for safe Linux descriptor-relative filesystem operations,

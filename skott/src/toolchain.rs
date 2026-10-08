@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
 
-/// Concrete read-only Rust resources; no engine provisioning authority.
+/// Concrete read-only Rust resources; no maerg provisioning authority.
 #[path = "rust_environment.rs"]
 pub mod rust_environment;
 

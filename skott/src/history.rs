@@ -1,7 +1,7 @@
 //! Durable session history for the interactive UI.
 //!
 //! Every session writes a human-readable transcript under the log directory
-//! (`.agent-runner/runs` by default). This module reads that directory to build a
+//! (`.skott/runs` by default). This module reads that directory to build a
 //! list of past sessions — enough to choose one — and loads a single transcript
 //! for a read-only replay in the UI.
 //!

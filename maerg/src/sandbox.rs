@@ -43,7 +43,7 @@ const PROBE_PROTOCOL: &str = "kvist-sandbox-probe-v1";
 const PROBE_ARGUMENT: &str = "--kvist-sandbox-probe-v1";
 const EXECUTE_ARGUMENT: &str = "--kvist-sandbox-request-v1";
 const MAX_PROBE_BYTES: usize = 64 * 1024;
-/// These producer bounds mirror `sandbox_runner::protocol`: both sides accept
+/// These producer bounds mirror `galla::protocol`: both sides accept
 /// at most 1024 argv entries and 4096 bytes per argv/environment value.
 const MAX_ARGV_ENTRIES: usize = 1024;
 const MAX_REQUEST_VALUE_BYTES: usize = 4096;
@@ -60,7 +60,7 @@ const DEFAULT_MAX_OUTPUT_BYTES: u64 = 1024 * 1024;
 
 /// Explicit safe maxima for each bounded resource limit. These MUST match the
 /// runner's authoritative `protocol::MAX_*` constants: the runner rejects any
-/// request whose limits exceed them, so the engine never emits a request that
+/// request whose limits exceed them, so the maerg never emits a request that
 /// would exceed them and never saturates a converted value to `u64::MAX`.
 const MAX_WALL_TIME_MS: u64 = 24 * 60 * 60 * 1000;
 const MAX_OUTPUT_BYTES: u64 = 256 * 1024 * 1024;
@@ -562,7 +562,7 @@ struct ResolvedProgram {
 ///
 /// The returned canonical path replaces argv[0] and its digest is the exact
 /// content identity used for the conservative toolchain grant, so the runner's
-/// parser (which requires a canonical absolute argv[0]) and the engine producer
+/// parser (which requires a canonical absolute argv[0]) and the maerg producer
 /// agree on the exact executable that will run.
 fn resolve_program(
     config: &SandboxConfig,

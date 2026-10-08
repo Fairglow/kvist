@@ -1,8 +1,8 @@
-//! Process-level interrupt registry shared by the engine and the runtime.
+//! Process-level interrupt registry shared by the maerg and the runtime.
 //!
 //! A single `sigaction` handler for SIGINT and SIGTERM records an atomic
 //! interrupt flag and forwards the signal to the currently active child
-//! process group. Supervision loops (the engine sandbox supervisor and the
+//! process group. Supervision loops (the maerg sandbox supervisor and the
 //! host supervisor) register their process group while a child runs and poll
 //! the flag between supervision steps.
 //!

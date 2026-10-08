@@ -736,7 +736,7 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 ..
             } => {
                 let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
-                // `--json` runs the standalone agent-runner in headless mode; the
+                // `--json` runs the standalone skott in headless mode; the
                 // NDJSON event stream is the complete machine-readable output of
                 // the run.
                 run_headless_prompt(
@@ -1316,7 +1316,7 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 multi_turn,
             } => {
                 let resolved_prompt = prompt_input::resolve(prompt, file.as_deref(), editor)?;
-                // With a terminal, the standalone agent-runner shell runs the prompt
+                // With a terminal, the standalone skott shell runs the prompt
                 // in the sandbox by default (multi-turn); --allow-host-execution opts
                 // into the interactive host escape. Without a terminal the same shell
                 // runs headless and sandbox-only, inheriting stdout.
@@ -1904,22 +1904,22 @@ fn json_string_escape(output: &mut String, value: &str) {
     output.push('"');
 }
 
-/// Resolve the standalone `agent-runner` executable: an explicit path via the
-/// `KVIST_AGENT_RUNNER` environment variable, otherwise the first `agent-runner`
+/// Resolve the standalone `skott` executable: an explicit path via the
+/// `KVIST_SKOTT` environment variable, otherwise the first `skott`
 /// found on `PATH`. Returns an actionable message when it is not installed, so a
 /// missing agent fails closed rather than falling back to unconstrained host
 /// execution.
-fn resolve_agent_runner() -> std::result::Result<PathBuf, String> {
-    let explicit = std::env::var_os("KVIST_AGENT_RUNNER");
+fn resolve_skott() -> std::result::Result<PathBuf, String> {
+    let explicit = std::env::var_os("KVIST_SKOTT");
     let path = std::env::var_os("PATH");
-    resolve_agent_runner_from(explicit, path)
+    resolve_skott_from(explicit, path)
 }
 
-/// Pure resolution used by [`resolve_agent_runner`]. An explicit executable path
-/// wins; otherwise the `PATH` directories are scanned for an `agent-runner` file.
+/// Pure resolution used by [`resolve_skott`]. An explicit executable path
+/// wins; otherwise the `PATH` directories are scanned for an `skott` file.
 /// Kept free of direct I/O so it is unit-testable without touching the process
 /// environment.
-fn resolve_agent_runner_from(
+fn resolve_skott_from(
     explicit: Option<std::ffi::OsString>,
     path: Option<std::ffi::OsString>,
 ) -> std::result::Result<PathBuf, String> {
@@ -1929,29 +1929,29 @@ fn resolve_agent_runner_from(
             return Ok(candidate);
         }
         return Err(format!(
-            "KVIST_AGENT_RUNNER points at `{}` which is not an executable file",
+            "KVIST_SKOTT points at `{}` which is not an executable file",
             candidate.display()
         ));
     }
     let Some(paths) = path else {
-        return Err("PATH is not set; cannot locate the agent-runner executable".to_owned());
+        return Err("PATH is not set; cannot locate the skott executable".to_owned());
     };
     for dir in std::env::split_paths(&paths) {
-        let candidate = dir.join("agent-runner");
+        let candidate = dir.join("skott");
         if candidate.is_file() {
             return Ok(candidate);
         }
     }
     Err(
-        "the `agent-runner` executable was not found on PATH; build it with \
-         `cargo build -p agent-runner` and add its output to PATH, or set \
-         KVIST_AGENT_RUNNER to its path"
+        "the `skott` executable was not found on PATH; build it with \
+         `cargo build -p skott` and add its output to PATH, or set \
+         KVIST_SKOTT to its path"
             .to_owned(),
     )
 }
 
 /// Resolve a role-name argument to its configured role profile, mirroring the
-/// selection the interactive and headless agent-runner paths perform.
+/// selection the interactive and headless skott paths perform.
 fn resolve_role_config<'a>(
     config: &'a crate::config::ProjectConfig,
     role_name: &str,
@@ -1969,13 +1969,13 @@ fn resolve_role_config<'a>(
     Ok(profile)
 }
 
-/// The autonomous turn cap the engine grants when a user opts into multi-turn
+/// The autonomous turn cap the maerg grants when a user opts into multi-turn
 /// host execution via `kvist prompt --allow-host-execution --multi-turn`. It
 /// mirrors the sandbox's own default cap: sandboxed interactive work is
 /// multi-turn by default, while host work is single-turn unless this opts in.
 const HOST_AUTONOMOUS_CAP: u32 = 50;
 
-/// Launch the standalone `agent-runner` shell for an interactive, sandboxed
+/// Launch the standalone `skott` shell for an interactive, sandboxed
 /// custom prompt. Kvist supplies the authored prompt and the preselected model
 /// and thinking effort, and inherits the child's stdio so the terminal UI is the
 /// transcript; the child's exit status is surfaced.
@@ -1995,8 +1995,8 @@ fn delegate_interactive_prompt(
         return Ok(false);
     }
 
-    let binary = resolve_agent_runner().map_err(|reason| KvistError::AgentSetupFailed {
-        reason: format!("could not start agent-runner: {reason}"),
+    let binary = resolve_skott().map_err(|reason| KvistError::AgentSetupFailed {
+        reason: format!("could not start skott: {reason}"),
     })?;
 
     let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
@@ -2007,7 +2007,7 @@ fn delegate_interactive_prompt(
     let config = crate::config::load(&current_dir)?;
     let role_config = resolve_role_config(&config, role_name)?;
     // Preselect the model the role is configured to use; an explicit `--model`
-    // override wins. The id must exist in agent-runner's own configuration.
+    // override wins. The id must exist in skott's own configuration.
     let model = model.or(Some(role_config.profile.as_str()));
     let effort = effort.or(role_config.thinking_effort);
 
@@ -2034,29 +2034,29 @@ fn delegate_interactive_prompt(
                 .arg(HOST_AUTONOMOUS_CAP.to_string());
         }
     }
-    // The prompt is positional; agent-runner prefills and auto-starts it.
+    // The prompt is positional; skott prefills and auto-starts it.
     command.arg(prompt);
 
     let status = command.status().map_err(|source| KvistError::Io {
-        operation: "run agent-runner",
+        operation: "run skott",
         path: binary,
         source,
     })?;
     if !status.success() {
         return Err(KvistError::AgentSetupFailed {
-            reason: format!("agent-runner exited with status {status}"),
+            reason: format!("skott exited with status {status}"),
         });
     }
     Ok(true)
 }
 
-/// Run a custom prompt headless through the standalone `agent-runner` shell.
+/// Run a custom prompt headless through the standalone `skott` shell.
 /// The same sandboxed, multi-turn loop the interactive shell uses runs without
 /// a terminal: stdout (plain answer, or NDJSON events with `--json`) is
 /// inherited by the caller, stderr carries diagnostics, and the child's exit
 /// status is surfaced.
 ///
-/// Headless execution is sandbox-only by agent-runner contract, so
+/// Headless execution is sandbox-only by skott contract, so
 /// `--allow-host-execution` is rejected here; the host-execution opt-out
 /// remains an interactive escape hatch only.
 fn run_headless_prompt(
@@ -2076,8 +2076,8 @@ fn run_headless_prompt(
         });
     }
 
-    let binary = resolve_agent_runner().map_err(|reason| KvistError::AgentSetupFailed {
-        reason: format!("could not start agent-runner: {reason}"),
+    let binary = resolve_skott().map_err(|reason| KvistError::AgentSetupFailed {
+        reason: format!("could not start skott: {reason}"),
     })?;
 
     let current_dir = std::env::current_dir().map_err(|source| KvistError::Io {
@@ -2088,7 +2088,7 @@ fn run_headless_prompt(
     let config = crate::config::load(&current_dir)?;
     let role_config = resolve_role_config(&config, role_name)?;
     // Preselect the model the role is configured to use; an explicit `--model`
-    // override wins. The id must exist in agent-runner's own configuration.
+    // override wins. The id must exist in skott's own configuration.
     let model = model.or(Some(role_config.profile.as_str()));
     let effort = effort.or(role_config.thinking_effort);
 
@@ -2106,18 +2106,18 @@ fn run_headless_prompt(
     if let Some(effort) = effort {
         command.arg("--effort").arg(effort.as_str());
     }
-    // The prompt is positional; agent-runner submits it and exits after the
+    // The prompt is positional; skott submits it and exits after the
     // run, reporting the final disposition through the NDJSON stream.
     command.arg(prompt);
 
     let status = command.status().map_err(|source| KvistError::Io {
-        operation: "run agent-runner",
+        operation: "run skott",
         path: binary,
         source,
     })?;
     if !status.success() {
         return Err(KvistError::AgentSetupFailed {
-            reason: format!("agent-runner exited with status {status}"),
+            reason: format!("skott exited with status {status}"),
         });
     }
     Ok(())
@@ -2243,16 +2243,16 @@ mod tests {
     }
 
     #[test]
-    fn resolve_agent_runner_prefers_explicit_file_path() {
-        // An explicit `KVIST_AGENT_RUNNER` wins when it names an executable file,
-        // even when a different `agent-runner` also sits on `PATH`.
+    fn resolve_skott_prefers_explicit_file_path() {
+        // An explicit `KVIST_SKOTT` wins when it names an executable file,
+        // even when a different `skott` also sits on `PATH`.
         let dir = tempfile::TempDir::new().expect("temp dir");
-        let explicit = dir.path().join("explicit-agent-runner");
+        let explicit = dir.path().join("explicit-skott");
         std::fs::write(&explicit, "").expect("seed explicit executable");
-        let on_path = dir.path().join("path-agent-runner");
+        let on_path = dir.path().join("path-skott");
         std::fs::write(&on_path, "").expect("seed path executable");
         let path_value = on_path.to_string_lossy().into_owned();
-        let resolved = resolve_agent_runner_from(
+        let resolved = resolve_skott_from(
             Some(std::ffi::OsString::from(explicit.clone())),
             Some(std::ffi::OsString::from(path_value)),
         )
@@ -2261,13 +2261,13 @@ mod tests {
     }
 
     #[test]
-    fn resolve_agent_runner_rejects_a_non_file_explicit_path() {
+    fn resolve_skott_rejects_a_non_file_explicit_path() {
         // An explicit path that is not an executable file fails closed rather
         // than falling back to the host path.
         let dir = tempfile::TempDir::new().expect("temp dir");
         let not_a_file = dir.path().join("is-a-directory");
         std::fs::create_dir_all(&not_a_file).expect("create directory");
-        let message = resolve_agent_runner_from(Some(not_a_file.into_os_string()), None)
+        let message = resolve_skott_from(Some(not_a_file.into_os_string()), None)
             .expect_err("a directory is not an executable file");
         assert!(
             message.contains("not an executable file"),
@@ -2276,22 +2276,22 @@ mod tests {
     }
 
     #[test]
-    fn resolve_agent_runner_scans_path_for_the_binary() {
-        // Without an explicit path, the first `agent-runner` file found on `PATH`
+    fn resolve_skott_scans_path_for_the_binary() {
+        // Without an explicit path, the first `skott` file found on `PATH`
         // wins.
         let dir = tempfile::TempDir::new().expect("temp dir");
-        let found = dir.path().join("agent-runner");
+        let found = dir.path().join("skott");
         std::fs::write(&found, "").expect("seed executable");
         let path_value = dir.path().to_string_lossy().into_owned();
-        let resolved = resolve_agent_runner_from(None, Some(std::ffi::OsString::from(path_value)))
+        let resolved = resolve_skott_from(None, Some(std::ffi::OsString::from(path_value)))
             .expect("the PATH binary should resolve");
         assert_eq!(resolved, found);
     }
 
     #[test]
-    fn resolve_agent_runner_fails_closed_when_absent_from_path() {
+    fn resolve_skott_fails_closed_when_absent_from_path() {
         // Empty PATH yields the actionable not-found message rather than a panic.
-        let message = resolve_agent_runner_from(None, Some(std::ffi::OsString::new()))
+        let message = resolve_skott_from(None, Some(std::ffi::OsString::new()))
             .expect_err("a binary missing from PATH should fail closed");
         assert!(
             message.contains("was not found on PATH"),
@@ -2505,7 +2505,7 @@ mod tests {
             "kvist",
             "task",
             "recover",
-            "engine",
+            "maerg",
             "task-1",
             "attempt-0001",
             "--disposition",
@@ -2527,7 +2527,7 @@ mod tests {
             panic!("expected task recover command");
         };
 
-        assert_eq!(component_dir, Some(PathBuf::from("engine")));
+        assert_eq!(component_dir, Some(PathBuf::from("maerg")));
         assert_eq!(task_id, "task-1");
         assert_eq!(attempt_id, "attempt-0001");
         assert!(matches!(

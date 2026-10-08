@@ -1,6 +1,6 @@
 <!-- kvist-contract-version: 1 -->
 
-# Agent Runner — Contract
+# Skott — Contract
 
 ## Run reliability extension
 
@@ -34,7 +34,7 @@ Rust resource selection occurs on the host before tools and consumes only
 installed resources. The effect sandbox receives a validated concrete
 toolchain and vendored resolver read-only, with private scratch and denied
 network. It never receives the user's home, rustup settings or credentials.
-These resources are not engine task approval or compliance evidence.
+These resources are not maerg task approval or compliance evidence.
 
 Journals retain bounded notices and request estimates, nullable provider usage,
 capacity provenance and terminal failures. Readable terminal records use
@@ -44,14 +44,14 @@ per-prompt turns/time, identify unavailable usage and include the failure.
 
 The pre-release API has no compatibility or migration promise.
 
-`agent-runner --headless PROMPT` runs without a terminal. `--json` selects
+`skott --headless PROMPT` runs without a terminal. `--json` selects
 NDJSON envelopes `{schema_version: 1, sequence: N, event: ...}` with a final
 run-summary event. Human diagnostics go to stderr. Headless mode rejects
 `--allow-host-execution`, `--host-turns`, and `--no-logs`; it uses exactly the
-same sandboxed loop as the UI, not the engine's protected task broker.
-Neither interface authorizes engine tasks or creates canonical evidence.
+same sandboxed loop as the UI, not the maerg's protected task broker.
+Neither interface authorizes maerg tasks or creates canonical evidence.
 The workspace remains fully writable; protected task execution must use the
-engine's narrow broker, never this workspace shell.
+maerg's narrow broker, never this workspace shell.
 
 `--response-reserve TOKENS` sets the initial generation reserve; absent values
 use per-model configuration or a window-aware default. `--max-run-secs SECONDS`
@@ -98,7 +98,7 @@ and next-offset metadata. `list_dir`, search and discovery return bounded,
 deterministically sorted pages. `edit_file` requires `path`, `old_text`,
 `new_text` and `expected_sha256`; it performs one exact replacement only when
 the file's digest matches. A stale/no-match/multiple-match result changes
-nothing. File tools use the separately installed `agent-runner-file-tool`
+nothing. File tools use the separately installed `skott-file-tool`
 Rust helper, mounted read-only outside the writable scope, and private
 read-only payload grants. No model-selected path or call ID is used for host
 staging. Mutation paths are canonical, confined, and non-link. External
@@ -108,7 +108,7 @@ external writers.
 
 ## Independent review extension
 
-`agent-runner --headless PROMPT --review` appends a single independent review
+`skott --headless PROMPT --review` appends a single independent review
 phase to a successful run. The review is a second, completely fresh session —
 new conversation, new model context, new private journal — that receives only
 the review system prompt, the original task prompt, the implementation run's
@@ -155,7 +155,7 @@ exits unsuccessfully after reporting it.
 Review journals are named with a `-review-` marker in the record stem, are
 private and no-clobber, live outside the writable workspace, and their
 metadata records the implementation model, the reviewer model, and the mode.
-The review is advisory: it authorizes no engine task, mints no canonical
+The review is advisory: it authorizes no maerg task, mints no canonical
 evidence, determines no compliance, and its report is not an acceptance
 receipt. The implementation answer embedded in the review prompt is untrusted
 data. The phase adds no persistent state beyond the journal; reruns review the
@@ -163,13 +163,13 @@ current workspace and are never resumed or cached.
 
 ## Boundary and ownership
 
-This document defines what `agent-runner` exposes to consumers: the library
+This document defines what `skott` exposes to consumers: the library
 public API, the configuration schema, the command-line interface, and the exact
 sandbox request it produces. Private algorithm choices live in `DESIGN.md`.
 
 ## Model selection and activation
 
-`agent-runner` MUST prefer a model that the default provider already has loaded
+`skott` MUST prefer a model that the default provider already has loaded
 over a statically configured one, so an already-active model is used without
 paying a model load/switch. The active model is discovered by a bounded,
 read-only, loopback-only probe of each configured provider endpoint (llama-server
@@ -220,13 +220,13 @@ configuration file automatically.
 
 ## Provided interfaces
 
-All public items live in the `agent_runner` crate and are re-exported from
-`lib.rs`. Consumers (the `agent-runner` binary, and Kvist as a future caller)
+All public items live in the `skott` crate and are re-exported from
+`lib.rs`. Consumers (the `skott` binary, and Kvist as a future caller)
 interact only through these items.
 
 ### `Error` / `Result`
 
-`agent_runner::Error` is the crate domain error type. `agent_runner::Result<T>`
+`skott::Error` is the crate domain error type. `skott::Result<T>`
 is `Result<T, Error>`. Errors carry an `exit_code() -> u8` and a `describe() ->
 String` that produces an actionable, non-secret message. Errors never unwrap the
 underlying source when printing; formatting failures degrade gracefully.
@@ -253,7 +253,7 @@ deadline_secs: u64, max_attempts: u32, retry_base_delay_secs: u64,
 retry_max_delay_secs: u64, cadence_timeout_secs: u64 }` — `provider` is one of
   `llama-server`, `ollama`. The `id` is the user-facing selector; `model` is the
   provider-facing selector. The retry fields bound transient-failure recovery for a
-  turn (see `AgentRunner`); `max_attempts` defaults to `DEFAULT_MAX_ATTEMPTS`,
+  turn (see `Skott`); `max_attempts` defaults to `DEFAULT_MAX_ATTEMPTS`,
   delays to `DEFAULT_RETRY_BASE_DELAY` / `DEFAULT_RETRY_MAX_DELAY`. `deadline_secs`
   is the per-turn generation budget (default 300s). `cadence_timeout_secs` sets the
   inter-token cadence watchdog: a turn that sends no token for this many seconds
@@ -268,10 +268,10 @@ ReviewFailurePolicy }` — every field is optional in the file; an absent table
   `[review]` keys fail at load like other unknown keys. See "Independent review
   extension".
 - `SandboxPaths { runner: PathBuf, backend: PathBuf }` — absolute paths to the
-  `kvist-sandbox-runner` executable and the Bubblewrap backend. Either may point
+  `galla-runner` executable and the Bubblewrap backend. Either may point
   at a binary on disk; both are hashed at request construction and the backend
   is re-verified at runtime by the runner.
-- `ReasoningEffort` mirrors `agent_runtime::ReasoningEffort`
+- `ReasoningEffort` mirrors `sav::ReasoningEffort`
   (`none|minimal|low|medium|high|xhigh|max`) with `FromStr`/`as_str`.
 
 `Config::load(path)` reads and validates a TOML file, returns `Err` on missing,
@@ -284,7 +284,7 @@ read-time byte bound, not only a pathname metadata check.
 
 ### `ToolRegistry`, `ExecContext`, and `RenderedTool`
 
-`agent_runner::tools::ToolRegistry` owns the model-facing tool definitions and
+`skott::tools::ToolRegistry` owns the model-facing tool definitions and
 renders a sandbox command for an approved tool intent.
 
 ```
@@ -305,7 +305,7 @@ Result<ToolRegistry>` resolves the canonical `bash` path and the honest, gated
 - `ToolRegistry::with_profiles(self, Vec<ToolProfile>)` narrows the advertised
   profiles (used by tests); otherwise `new`/`resolve` decide the set.
 - `ToolRegistry::tool_definitions(&self) -> Vec<ToolDefinition>` — the
-  `agent_runtime::ToolDefinition` list exposed to the model (stable order).
+  `sav::ToolDefinition` list exposed to the model (stable order).
 - `ToolRegistry::profiles(&self) -> Vec<&'static str>` — the enabled profile
   identifiers, sorted for determinism.
 - `ToolRegistry::render(&self, intent: &ToolIntent, context: &ExecContext) ->
@@ -320,14 +320,14 @@ file_helper: Option<PathBuf>, shell_script: Option<String> }` —
   only for shell commands longer than one 4096-byte argv entry: the executor
   stages the exact command text as a private regular file, which the request
   mounts read-only at `/context/0`, and `argv` reads it via the wrapper
-  `exec bash -c "$(cat /context/0)" agent-runner`; it is never set together
+  `exec bash -c "$(cat /context/0)" skott`; it is never set together
   with `file_request`, and the semantics (script text, exit status, `$0`)
   match the inline form exactly.
 - `ExecContext { workdir: PathBuf, call_id: String }` supplies the renderer the
   host working directory and a descriptive per-call id. IDs never select
   staging paths.
 - `ToolRegistry::with_file_helper(path)` explicitly selects the installed helper.
-  Production resolution defaults to `agent-runner-file-tool` adjacent to the
+  Production resolution defaults to `skott-file-tool` adjacent to the
   calling executable. The executor rejects absent, nonregular, linked or
   workspace-contained helpers; it never falls back to host execution.
 - `ToolProfile` (ids `generic`, `python`, `rust`, `javascript`, `go`, `c`)
@@ -384,7 +384,7 @@ lines; binary files are counted and skipped. Discovery does not inspect file
 contents. Unreadable/unsupported ordinary entries fail explicitly.
 
 Generated directory basenames `.git`, `target`, `node_modules`, `vendor`,
-`vendored` and `.agent-runner` are pruned unless `include_generated=true`;
+`vendored` and `.skott` are pruned unless `include_generated=true`;
 an explicitly selected generated scope remains accessible. `skipped_generated`
 counts pruned directory roots, not hidden descendants. Search accepts a regular
 file as well as a directory. `file_pattern` matches a literal substring of the
@@ -401,7 +401,7 @@ arbitrary external writers are not locked transactionally.
 
 ### `Tool profiles, settings, and detection`
 
-`agent_runner::toolchain` owns the honest advertisement of language tool-chains.
+`skott::toolchain` owns the honest advertisement of language tool-chains.
 
 - `ToolProfile` — the set of profiles (`Generic`, `Python`, `Rust`, `JavaScript`,
   `Go`, `C`). `Generic` is the always-on base (coreutils, git, the read-only
@@ -473,9 +473,9 @@ safe; configuration may add entries but must not remove the built-in minimum.
 
 ### `SandboxRequestBuilder`
 
-`agent_runner::sandbox::build_request(sandbox: &SandboxPaths,
+`skott::sandbox::build_request(sandbox: &SandboxPaths,
 request: &BuildRequest) -> Result<SandboxRequest>` — produces a version-one
-`SandboxRequest` (the shared `kvist_sandbox_runner::protocol` type) in the
+`SandboxRequest` (the shared `kvist_galla::protocol` type) in the
 `Authoring` phase. `BuildRequest { argv, working_directory, read_roots,
 environment, policy, resources }` carries the inputs; `execute` renders the tool
 argv and passes it here. It:
@@ -504,9 +504,9 @@ argv and passes it here. It:
 
 ### `execute` (sandbox executor)
 
-`agent_runner::sandbox::execute(sandbox: &SandboxPaths, request: &SandboxRequest,
+`skott::sandbox::execute(sandbox: &SandboxPaths, request: &SandboxRequest,
 cancellation: &CancellationToken) -> Result<ToolOutcome>` — spawns
-`kvist-sandbox-runner --kvist-sandbox-request-v1`, writes the request to its
+`galla-runner --kvist-sandbox-request-v1`, writes the request to its
 stdin, supervises stdout/stderr (bounded, timeout, cancellation), kills the
 process group on interrupt, and returns the captured output as a `ToolOutcome`.
 Captured stdout plus stderr and intermediate buffering are bounded; final
@@ -548,8 +548,8 @@ durable record faithful without inventing sandbox results.
 
 ### `AgentSession`
 
-`agent_runner::session::AgentSession` holds the ordered conversation and drives
-turns against any `ModelTransport` from `agent_runtime`.
+`skott::session::AgentSession` holds the ordered conversation and drives
+turns against any `ModelTransport` from `sav`.
 
 ```
 struct AgentSession {
@@ -644,13 +644,13 @@ line matches the executed one.
 (`tokens_per_sec`), context utilization and the compaction progress bar, plus
 cumulative `total_tokens` and `elapsed_secs` for progress.
 
-### `AgentRunner` (loop)
+### `Skott` (loop)
 
-`agent_runner::session::AgentRunner { max_turns }` runs the multi-turn loop and
+`skott::session::Skott { max_turns }` runs the multi-turn loop and
 returns a [`RunSummary`]. Its generic `run` drives one session:
 
 ```
-AgentRunner::run::<M, E, S>(
+Skott::run::<M, E, S>(
     &self, session, transport, executor, sink, cancellation,
     context, recorder,
 ) -> Result<RunSummary>
@@ -662,9 +662,9 @@ stop only on a validated normal `Stop` with nonblank text and no tools.
 Compaction trims only the model context; the optional `recorder` is an operational record. The
 loop reports token accounting and compaction via `Event::Progress`.
 
-`AgentRunner` also carries a `RetryPolicy` that makes a turn resilient to
+`Skott` also carries a `RetryPolicy` that makes a turn resilient to
 temporal, recoverable failures. When `drive_turn` sees an error for which
-`agent_runtime::Error::is_retryable` returns `true` (a dropped connection, a
+`sav::Error::is_retryable` returns `true` (a dropped connection, a
 provider timeout, or a transient server error), it waits `RetryPolicy::backoff_delay`
 — exponential growth capped at the policy's maximum delay — and replays the turn
 with a fresh request. Each retry is granted a larger budget than the last: the
@@ -713,7 +713,7 @@ struct RunSummary {
 
 ### `ContextManager` (rolling context)
 
-`agent_runner::context::ContextManager` bounds the model context across a session
+`skott::context::ContextManager` bounds the model context across a session
 so long-running work stays reliable. It estimates the token size of the next
 request (`estimate_request`), reports when it crosses a warm-up threshold
 (75% of the window by default), and compacts the oldest completed turns into a
@@ -746,19 +746,19 @@ Result<Option<Compaction>>` is the authoritative pre-I/O path. It estimates
 ## Required interfaces
 
 - **Model transport.** The session and loop are transport-agnostic: they consume a
-  `ModelTransport` from `agent_runtime` for streaming turns and never spawn or
+  `ModelTransport` from `sav` for streaming turns and never spawn or
   talk to a model directly.
 - **Executor.** The loop hands tool intents to `ToolExecutor`; the production
   executor renders argv/payloads and supervises execution. Loop policy is unit-testable with a
   recording executor and never perform blocking subprocess I/O themselves.
 - **Sandbox runner.** Tool execution is delegated to the externally installed
-  `kvist-sandbox-runner` subprocess (`--kvist-sandbox-request-v1`); `agent-runner`
+  `galla-runner` subprocess (`--kvist-sandbox-request-v1`); `skott`
   writes a version-one `SandboxRequest` to its stdin and supervises bounded,
   timed, cancellable output.
 - **Events and recording.** The loop emits typed `Event`s over a bounded channel to
   the UI and writes durable session records (`session_start`, `turn_start`,
   `turn_finish`, `tool_result`, `session_finish`) to a pluggable `Recorder`.
-- **Cancellation.** A shared `CancellationToken` from `agent_runtime` is checked
+- **Cancellation.** A shared `CancellationToken` from `sav` is checked
   between turns and terminates the sandbox process group on interrupt.
 
 ## Data and schemas
@@ -790,7 +790,7 @@ deadline_secs = 300
 cadence_timeout_secs = 30
 
 [sandbox]
-runner = "/usr/local/bin/kvist-sandbox-runner"
+runner = "/usr/local/bin/galla-runner"
 backend = "/usr/bin/bwrap"
 
 [tool_policy]
@@ -839,12 +839,12 @@ model id, `thinking_effort` a known effort, `max_turns` 1..=500,
 ## Command-line interface
 
 ```
-agent-runner [OPTIONS] [PROMPT]
+skott [OPTIONS] [PROMPT]
 
 Options:
   -c, --config <PATH>         Path to the TOML configuration (default: search
-                              ./agent-runner.toml, then the per-user
-                              agent-runner/config.toml, then XDG_CONFIG_DIRS
+                              ./skott.toml, then the per-user
+                              skott/config.toml, then XDG_CONFIG_DIRS
                               (default /etc/xdg))
   -m, --model <ID>            Select a configured model id for this session
   -e, --effort <LEVEL>        Set the thinking effort for this session
@@ -905,8 +905,8 @@ Options:
   successful final answer (and, when the review phase runs, the review
   assessment after it); NDJSON ends with a run-summary disposition and, when
   the review phase runs, a review-summary disposition.
-  Interactive logs default to `.agent-runner/runs`; headless logs default to
-  `$XDG_STATE_HOME/agent-runner/runs` or `$HOME/.local/state/agent-runner/runs`.
+  Interactive logs default to `.skott/runs`; headless logs default to
+  `$XDG_STATE_HOME/skott/runs` or `$HOME/.local/state/skott/runs`.
   Required logs must be private, non-linked and outside the writable workspace.
   Plain answers/diagnostics visibly escape terminal controls except LF/tab;
   JSON and private transcripts preserve original text. History reads reject
@@ -999,7 +999,7 @@ Options:
 
 ## Errors and failure semantics
 
-- `agent_runner::Error` and `agent_runner::Result<T>` carry an
+- `skott::Error` and `skott::Result<T>` carry an
   `exit_code() -> u8` and a `describe() -> String` that produce actionable,
   non-secret messages; formatting failures degrade gracefully and errors never
   unwrap their underlying source when printing.
@@ -1017,7 +1017,7 @@ Options:
 ## Security and authority
 
 The executor emits exactly one `SandboxRequest` per tool call, shaped as in
-`src/sandbox.rs`, matching `../sandbox_runner/schema/kvist-sandbox-request-v1.schema.json`
+`src/sandbox.rs`, matching `../galla/schema/kvist-sandbox-request-v1.schema.json`
 and the runner's closed version-one protocol. Guarantees:
 
 - `phase = "authoring"`, `network.mode = "deny"`, no Cargo cache.
@@ -1040,7 +1040,7 @@ Any deviation is reported as an `Err` before spawning the runner.
 
 ## Compatibility and verification
 
-- The sandbox request matches the shared version-one `kvist_sandbox_runner::protocol`
+- The sandbox request matches the shared version-one `kvist_galla::protocol`
   wire shape and the closed version-one request schema (JSON Schema draft 2020-12), so the
   wire format stays identical to the runner's own statement of the contract.
 - `schema_version` is `1`; unknown top-level fields, unknown profile keys, and

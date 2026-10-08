@@ -19,7 +19,7 @@ use crate::context::ContextManager;
 use crate::error::{Error, Result};
 use crate::retry::RetryPolicy;
 use crate::session::{
-    AgentRunner, AgentSession, Event, EventSink, Recorder, RunLimits, ToolExecutor,
+    Skott, AgentSession, Event, EventSink, Recorder, RunLimits, ToolExecutor,
 };
 
 /// Receives [`Event`]s from the worker; implements [`EventSink`].
@@ -119,7 +119,7 @@ where
                 shutdown: Arc::clone(&worker_shutdown),
             };
             // The worker stays alive until shutdown or prompt disconnection.
-            // `AgentRunner::run` records each prompt's session
+            // `Skott::run` records each prompt's session
             // boundary in the durable recorder, so the worker does not manage the
             // record lifecycle itself. Cancellation re-arms the token after each
             // turn so a cancelled turn does not end the session.
@@ -135,7 +135,7 @@ where
                     break;
                 }
                 session.push_user(text);
-                let runner = AgentRunner::with_retry(max_turns, retry);
+                let runner = Skott::with_retry(max_turns, retry);
                 // Borrow the recorder only for this run; the borrow ends before the
                 // next iteration, and each run starts and finishes its own record.
                 let result = runner.with_limits(limits).and_then(|runner| {

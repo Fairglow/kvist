@@ -130,7 +130,7 @@ fn run_wizard_inner<R: BufRead, W: Write>(
         if profiles.is_empty() {
             return Err(KvistError::AgentSetupFailed {
                 reason: format!(
-                    "no standalone profiles exist in `{}`; run `agent-run setup` first",
+                    "no standalone profiles exist in `{}`; run `sav-run setup` first",
                     profile_config.display()
                 ),
             });

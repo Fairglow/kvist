@@ -1,4 +1,4 @@
-# agent-runner UI theme: "dark" (the built-in default).
+# skott UI theme: "dark" (the built-in default).
 #
 # Every color below is either a CSS Color Module Level 4 named color (see
 # https://www.w3.org/TR/css-color-4/#named-colors — e.g. "black", "tomato",
@@ -16,7 +16,7 @@
 # default to `false`). This file is data, not code: edit it and reselect the
 # theme (Esc -> Theme, or Ctrl+S) to see the change — no rebuild, no restart.
 # Copy it to add your own theme — see the "themes" entry in
-# `agent-runner --help` / the in-app help overlay for where agent-runner
+# `skott --help` / the in-app help overlay for where skott
 # looks for theme files.
 
 [title]

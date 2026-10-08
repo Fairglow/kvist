@@ -29,17 +29,17 @@ models = [{ name = "capture", command = "/bin/echo '{prompt}'" }]
     project
 }
 
-/// Installs a stub `agent-runner` that records its arguments to `log` and
+/// Installs a stub `skott` that records its arguments to `log` and
 /// emits one version-one NDJSON run-summary line, so the delegation contract
 /// can be asserted without a live model. Returns the stub path.
-fn install_stub_agent_runner(project: &Path, log: &Path) -> PathBuf {
-    let stub = project.join("stub-agent-runner");
+fn install_stub_skott(project: &Path, log: &Path) -> PathBuf {
+    let stub = project.join("stub-skott");
     let script = format!(
         "#!/bin/sh\nprintf '%s\\n' \"$@\" > {log}\nprintf \
          '{{\"schema_version\":1,\"sequence\":1,\"event\":\"run-summary\"}}\\n'\nexit 0\n",
         log = log.display()
     );
-    fs::write(&stub, script).expect("write stub agent-runner");
+    fs::write(&stub, script).expect("write stub skott");
     fs::set_permissions(&stub, fs::Permissions::from_mode(0o700)).expect("make stub executable");
     stub
 }
@@ -51,7 +51,7 @@ fn run_kvist_in(project: &Path, args: &[&str], stub: Option<&Path>) -> std::proc
         command.arg(argument);
     }
     if let Some(stub) = stub {
-        command.env("KVIST_AGENT_RUNNER", stub);
+        command.env("KVIST_SKOTT", stub);
     }
     command
         .env_remove("VISUAL")
@@ -61,10 +61,10 @@ fn run_kvist_in(project: &Path, args: &[&str], stub: Option<&Path>) -> std::proc
 }
 
 #[test]
-fn prompt_headless_delegates_to_agent_runner() {
+fn prompt_headless_delegates_to_skott() {
     let project = configured_project();
     let log = project.path().join("stub-args.txt");
-    let stub = install_stub_agent_runner(project.path(), &log);
+    let stub = install_stub_skott(project.path(), &log);
     let prompt_path = project.path().join("prompt.md");
     fs::write(&prompt_path, "Prompt loaded from a file").expect("write prompt");
     let prompt_path = prompt_path.to_string_lossy().into_owned();
@@ -103,7 +103,7 @@ fn prompt_headless_delegates_to_agent_runner() {
 fn prompt_headless_uses_explicit_model_and_effort() {
     let project = configured_project();
     let log = project.path().join("stub-args.txt");
-    let stub = install_stub_agent_runner(project.path(), &log);
+    let stub = install_stub_skott(project.path(), &log);
 
     let output = run_kvist_in(
         project.path(),
@@ -143,12 +143,12 @@ fn prompt_headless_uses_explicit_model_and_effort() {
 fn prompt_headless_reads_redirected_standard_input() {
     let project = configured_project();
     let log = project.path().join("stub-args.txt");
-    let stub = install_stub_agent_runner(project.path(), &log);
+    let stub = install_stub_skott(project.path(), &log);
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_kvist"))
         .current_dir(project.path())
         .args(["prompt"])
-        .env("KVIST_AGENT_RUNNER", &stub)
+        .env("KVIST_SKOTT", &stub)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -174,7 +174,7 @@ fn prompt_headless_reads_redirected_standard_input() {
 fn prompt_headless_can_be_authored_with_an_editor() {
     let project = configured_project();
     let log = project.path().join("stub-args.txt");
-    let stub = install_stub_agent_runner(project.path(), &log);
+    let stub = install_stub_skott(project.path(), &log);
     let editor = project.path().join("editor.sh");
     fs::write(
         &editor,
@@ -187,7 +187,7 @@ fn prompt_headless_can_be_authored_with_an_editor() {
     let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
         .current_dir(project.path())
         .args(["prompt", "--editor"])
-        .env("KVIST_AGENT_RUNNER", &stub)
+        .env("KVIST_SKOTT", &stub)
         .env("VISUAL", &editor)
         .env_remove("EDITOR")
         .output()
@@ -221,13 +221,13 @@ fn prompt_headless_rejects_host_execution() {
 }
 
 #[test]
-fn prompt_requires_an_installed_agent_runner() {
+fn prompt_requires_an_installed_skott() {
     let project = configured_project();
 
     let output = Command::new(env!("CARGO_BIN_EXE_kvist"))
         .current_dir(project.path())
         .args(["prompt", "a prompt"])
-        .env("KVIST_AGENT_RUNNER", "")
+        .env("KVIST_SKOTT", "")
         .env("PATH", "")
         .output()
         .expect("run prompt command");
@@ -236,14 +236,14 @@ fn prompt_requires_an_installed_agent_runner() {
     assert!(
         String::from_utf8(output.stderr)
             .expect("UTF-8 error")
-            .contains("agent-runner")
+            .contains("skott")
     );
 }
 
 #[test]
 fn prompt_headless_surfaces_child_failure() {
     let project = configured_project();
-    let stub = project.path().join("failing-agent-runner");
+    let stub = project.path().join("failing-skott");
     fs::write(&stub, "#!/bin/sh\nexit 3\n").expect("write failing stub");
     fs::set_permissions(&stub, fs::Permissions::from_mode(0o700)).expect("make stub executable");
 
@@ -262,7 +262,7 @@ fn prompt_rejects_conflicting_explicit_sources() {
         .current_dir(project.path())
         .args(["prompt", "positional prompt", "--file"])
         .arg(&prompt_path)
-        .env_remove("KVIST_AGENT_RUNNER")
+        .env_remove("KVIST_SKOTT")
         .output()
         .expect("run conflicting prompt command");
 
@@ -285,7 +285,7 @@ fn prompt_rejects_oversized_files_before_agent_execution() {
         .current_dir(project.path())
         .args(["prompt", "--file"])
         .arg(&prompt_path)
-        .env_remove("KVIST_AGENT_RUNNER")
+        .env_remove("KVIST_SKOTT")
         .output()
         .expect("run oversized prompt command");
 
@@ -309,7 +309,7 @@ fn prompt_rejects_linked_files_before_agent_execution() {
         .current_dir(project.path())
         .args(["prompt", "--file"])
         .arg(&prompt_path)
-        .env_remove("KVIST_AGENT_RUNNER")
+        .env_remove("KVIST_SKOTT")
         .output()
         .expect("run linked prompt command");
 

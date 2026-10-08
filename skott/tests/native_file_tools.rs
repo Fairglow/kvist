@@ -669,7 +669,7 @@ fn native_search_generated_sources_are_excluded_and_counted_by_default() {
         "node_modules",
         "vendor",
         "vendored",
-        ".agent-runner",
+        ".skott",
     ] {
         fs::create_dir(root.join(generated)).unwrap();
         fs::write(
@@ -1395,7 +1395,7 @@ fn bare_registry_defers_helper_location_but_production_resolution_supplies_it() 
             .unwrap()
             .parent()
             .unwrap()
-            .join("agent-runner-file-tool")
+            .join("skott-file-tool")
     );
     assert_eq!(
         bare.tool_definitions()

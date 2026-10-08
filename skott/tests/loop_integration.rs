@@ -1,6 +1,6 @@
 // End-to-end tests for the transport-agnostic agent loop.
 //
-// These drive `AgentRunner::run` directly with a scripted `ModelTransport` and
+// These drive `Skott::run` directly with a scripted `ModelTransport` and
 // a recording `ToolExecutor`, so they exercise the real loop policy - turn
 // folding, tool execution, result feedback, compaction, cancellation, and
 // progress accounting - without spawning a sandbox or talking to a model.
@@ -22,7 +22,7 @@ use sav::{
 use serde_json::json;
 
 use skott::{
-    AgentRunner, AgentSession, ContextManager, DEFAULT_CONTEXT_TOKENS, Error, Event, EventSink,
+    Skott, AgentSession, ContextManager, DEFAULT_CONTEXT_TOKENS, Error, Event, EventSink,
     MAX_TURNS, Model, ModelProvider, Recorder, RetryPolicy, RunSummary, ToolExecutor, ToolOutcome,
     ToolPolicy, ToolRegistry,
 };
@@ -131,7 +131,7 @@ fn invalid_injected_turn_limits_fail_before_model_io() {
         let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
         let mut session = make_session();
         session.push_user("go");
-        let result = AgentRunner::with_retry(limit, fast_retry()).run(
+        let result = Skott::with_retry(limit, fast_retry()).run(
             &mut session,
             &transport,
             &executor,
@@ -376,7 +376,7 @@ fn run_once(
     context: &mut ContextManager,
     recorder: &mut FakeRecorder,
 ) -> RunSummary {
-    let runner = AgentRunner::default();
+    let runner = Skott::default();
     runner
         .run(
             session,
@@ -645,7 +645,7 @@ fn a_follow_up_prompt_carries_the_earlier_prompt_in_context() {
 
     let mut session = make_session();
     session.push_user("first task text");
-    let summary1 = AgentRunner::default()
+    let summary1 = Skott::default()
         .run(
             &mut session,
             &transport,
@@ -659,7 +659,7 @@ fn a_follow_up_prompt_carries_the_earlier_prompt_in_context() {
     assert_eq!(summary1.answer.as_deref(), Some("first"));
 
     session.push_user("second task text");
-    let summary2 = AgentRunner::default()
+    let summary2 = Skott::default()
         .run(
             &mut session,
             &transport,
@@ -994,7 +994,7 @@ fn llama_wire_stop_or_missing_finish_with_tools_never_dispatches() {
         session.push_user("go");
         let executor = RecordingExecutor::new(ToolPolicy::minimum(), PathBuf::from("/tmp"));
         let sink = Collector::default();
-        let result = AgentRunner::with_retry(1, fast_retry()).run(
+        let result = Skott::with_retry(1, fast_retry()).run(
             &mut session,
             &transport,
             &executor,
@@ -1107,7 +1107,7 @@ fn hardening_previous_answer_is_not_returned_after_a_failed_followup() {
     assert_eq!(first.answer.as_deref(), Some("old answer"));
     session.push_user("next");
     let failure = RetryingTransport::new(usize::MAX, answer_turn("never"));
-    let second = AgentRunner::with_retry(1, fast_retry())
+    let second = Skott::with_retry(1, fast_retry())
         .run(
             &mut session,
             &failure,
@@ -1257,7 +1257,7 @@ fn reliability_length_is_regenerated_before_any_tool_effects() {
     let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
     let mut recorder = FakeRecorder::default();
     let sink = Collector::default();
-    let summary = AgentRunner::default()
+    let summary = Skott::default()
         .run(
             &mut session,
             &transport,
@@ -1384,7 +1384,7 @@ fn reliability_length_recovery_respects_window_and_shared_token_budgets() {
             },
             ..skott::session::RunLimits::default()
         };
-        let result = AgentRunner::default().with_limits(limits).unwrap().run(
+        let result = Skott::default().with_limits(limits).unwrap().run(
             &mut session,
             &transport,
             &executor,
@@ -1415,7 +1415,7 @@ fn reliability_recovery_recording_failure_stops_before_effects() {
         fail_notice: true,
         ..FakeRecorder::default()
     };
-    let result = AgentRunner::default().run(
+    let result = Skott::default().run(
         &mut session,
         &transport,
         &executor,
@@ -1473,7 +1473,7 @@ fn hardening_record_failure_precedes_effects_and_closes_unsuccessfully() {
         fail_dispatch: true,
         ..FakeRecorder::default()
     };
-    let result = AgentRunner::default().run(
+    let result = Skott::default().run(
         &mut session,
         &transport,
         &executor,
@@ -1496,7 +1496,7 @@ fn hardening_transport_failure_closes_exactly_once() {
     session.push_user("work");
     let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
     let mut recorder = FakeRecorder::default();
-    let summary = AgentRunner::with_retry(1, fast_retry())
+    let summary = Skott::with_retry(1, fast_retry())
         .run(
             &mut session,
             &transport,
@@ -1520,7 +1520,7 @@ fn hardening_token_budget_is_charged_before_any_provider_attempt() {
     session.push_user("work");
     let mut context = ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6);
     let mut recorder = FakeRecorder::default();
-    let summary = AgentRunner::default()
+    let summary = Skott::default()
         .with_limits(skott::RunLimits {
             max_tokens: 1,
             ..skott::RunLimits::default()
@@ -1554,7 +1554,7 @@ fn hardening_cancellation_interrupts_backoff_without_another_attempt() {
         canceller.cancel();
     });
     let started = std::time::Instant::now();
-    let summary = AgentRunner::with_retry(
+    let summary = Skott::with_retry(
         2,
         RetryPolicy::new(2, Duration::from_secs(5), Duration::from_secs(5)),
     )
@@ -1581,7 +1581,7 @@ fn hardening_shared_deadline_bounds_backoff() {
     let mut session = make_session();
     session.push_user("work");
     let started = std::time::Instant::now();
-    let summary = AgentRunner::with_retry(
+    let summary = Skott::with_retry(
         2,
         RetryPolicy::new(2, Duration::from_secs(5), Duration::from_secs(5)),
     )
@@ -1618,7 +1618,7 @@ fn a_transient_failure_is_retried_until_success() {
 
     let mut session = make_session();
     session.push_user("go");
-    let summary = AgentRunner::with_retry(MAX_TURNS, fast_retry()).run(
+    let summary = Skott::with_retry(MAX_TURNS, fast_retry()).run(
         &mut session,
         &transport,
         &executor,
@@ -1655,7 +1655,7 @@ fn a_single_turn_cap_limits_one_prompt_to_one_model_turn() {
 
     let mut session = make_session();
     session.push_user("go");
-    let summary = AgentRunner::with_retry(1, fast_retry())
+    let summary = Skott::with_retry(1, fast_retry())
         .run(
             &mut session,
             &transport,
@@ -1693,7 +1693,7 @@ fn a_single_turn_that_produces_an_answer_is_a_clean_completion() {
 
     let mut session = make_session();
     session.push_user("go");
-    let summary = AgentRunner::with_retry(1, fast_retry())
+    let summary = Skott::with_retry(1, fast_retry())
         .run(
             &mut session,
             &transport,
@@ -1724,7 +1724,7 @@ fn a_retry_is_reported_as_a_note_before_each_attempt() {
 
     let mut session = make_session();
     session.push_user("go");
-    let _ = AgentRunner::with_retry(MAX_TURNS, fast_retry())
+    let _ = Skott::with_retry(MAX_TURNS, fast_retry())
         .run(
             &mut session,
             &transport,
@@ -1760,7 +1760,7 @@ fn exhausted_retries_report_the_failure() {
 
     let mut session = make_session();
     session.push_user("go");
-    let result = AgentRunner::with_retry(MAX_TURNS, fast_retry()).run(
+    let result = Skott::with_retry(MAX_TURNS, fast_retry()).run(
         &mut session,
         &transport,
         &executor,
@@ -1827,7 +1827,7 @@ fn a_non_retryable_failure_is_not_retried() {
 
     let mut session = make_session();
     session.push_user("go");
-    let result = AgentRunner::with_retry(MAX_TURNS, fast_retry()).run(
+    let result = Skott::with_retry(MAX_TURNS, fast_retry()).run(
         &mut session,
         &transport,
         &executor,
@@ -1921,7 +1921,7 @@ fn each_retry_grants_a_larger_and_capped_budget() {
 
     let mut session = make_session();
     session.push_user("go");
-    let _ = AgentRunner::with_retry(MAX_TURNS, fast_retry()).run(
+    let _ = Skott::with_retry(MAX_TURNS, fast_retry()).run(
         &mut session,
         &transport,
         &executor,
@@ -1995,7 +1995,7 @@ fn a_streaming_turn_emits_live_progress_mid_turn() {
 
     let mut session = make_session();
     session.push_user("go");
-    AgentRunner::with_retry(MAX_TURNS, fast_retry())
+    Skott::with_retry(MAX_TURNS, fast_retry())
         .run(
             &mut session,
             &transport,
@@ -2115,7 +2115,7 @@ fn a_denied_tool_still_records_a_tool_result_for_the_next_turn() {
 
     let mut session = make_session();
     session.push_user("please go");
-    let runner = AgentRunner::default();
+    let runner = Skott::default();
     let sink = Collector::default();
     let summary = runner
         .run(

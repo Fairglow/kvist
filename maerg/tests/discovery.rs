@@ -206,7 +206,7 @@ fn discovers_top_level_peer_components_when_root_is_dot() {
     )
     .expect("write kvist.toml");
     create_component(
-        &workspace.path().join("engine"),
+        &workspace.path().join("maerg"),
         &[
             ComponentArtifact::Requirements,
             ComponentArtifact::Contract,
@@ -216,7 +216,7 @@ fn discovers_top_level_peer_components_when_root_is_dot() {
         ],
     );
     create_component(
-        &workspace.path().join("agent_runtime"),
+        &workspace.path().join("sav"),
         &[
             ComponentArtifact::Requirements,
             ComponentArtifact::Contract,
@@ -236,8 +236,8 @@ fn discovers_top_level_peer_components_when_root_is_dot() {
             .map(|c| c.relative_path.as_path())
             .collect::<Vec<_>>(),
         [
-            std::path::Path::new("agent_runtime"),
-            std::path::Path::new("engine")
+            std::path::Path::new("maerg"),
+            std::path::Path::new("sav")
         ]
     );
     assert!(

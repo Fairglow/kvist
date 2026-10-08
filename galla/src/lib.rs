@@ -24,8 +24,8 @@
 //!   that establishes namespace isolation and resource limits.
 //!
 //! The types here are the runner's own authoritative statement of the wire
-//! contract; they intentionally do not import Kvist engine implementation
-//! types and never trust engine-side validation as a substitute for their own.
+//! contract; they intentionally do not import Kvist maerg implementation
+//! types and never trust maerg-side validation as a substitute for their own.
 
 #[cfg(not(target_os = "linux"))]
 compile_error!("galla-runner currently supports Linux only");

@@ -2,7 +2,7 @@
 # Component Compliance Review
 
 > Historical evidence notice: this review predates the one-way move from the
-> root component at `src/` to `engine/`. Its original review boundary is
+> root component at `src/` to `maerg/`. Its original review boundary is
 > retained, and this report does not certify the migrated layout.
 
 ## Review boundary and independence
@@ -31,7 +31,7 @@ corroboration (not read from source):
   setup stdout isolation, and qualification failure/force/cancellation paths.
 - Installed Copilot/Gemini live catalog probes passed in the child runtime.
 
-`agent-runtime` is an opaque child dependency; several assisted-setup behaviors
+`sav` is an opaque child dependency; several assisted-setup behaviors
 are contractually delegated to it and are therefore not directly observable in
 the root `IMPL.md`. Where the root record correctly attributes a behavior to
 the opaque runtime and the bounded evidence corroborates it, the claim is
@@ -166,7 +166,7 @@ and the bounded evidence. Each item is classified as **compliant**,
   documenter ... must verify implemented behavior").
 - Observed: IMPL "Evidence boundary" attests derivation from implementation,
   tests, and the manifest only, excluding intent, architecture, prior records,
-  reviews, and version-control evidence; `agent_runtime/` treated as opaque.
+  reviews, and version-control evidence; `sav/` treated as opaque.
 
 ### C-10 Target workflows correctly not claimed as implemented — compliant
 
@@ -190,16 +190,16 @@ and the bounded evidence. Each item is classified as **compliant**,
 
 No **mismatched** items were found within the assisted-model-setup scope. All
 open items are **underspecified** at the root observation boundary because the
-behavior is contractually delegated to the opaque `agent-runtime` child and is
+behavior is contractually delegated to the opaque `sav` child and is
 corroborated only by bounded child/wizard evidence. None are compliance
 failures; each is recorded for human awareness.
 
 | ID | Stable locator | Intent | Observed IMPL / evidence | Class | Severity | Owner |
 | --- | --- | --- | --- | --- | --- | --- |
-| U-1 | REQ-AGENT-INTEGRATION; CONTRACT `agent setup` | Fixed prompt is exactly `Reply with exactly: OK` | IMPL delegates qualification to opaque runtime; exact bytes not observable at root; wizard qualification tests + live probes pass | underspecified | info | clean-slate documenter (root record scope) / child `agent-runtime` |
-| U-2 | REQ-AGENT-INTEGRATION; DESIGN | Catalog presented first; manual entry only via final custom choice | IMPL: catalog is child-owned; evidence shows catalog choice flowing to roles + live catalog probes pass | underspecified | info | child `agent-runtime` |
-| U-3 | REQ-AGENT-INTEGRATION; CONTRACT | `--force` persists failed profile only after an explicit visible warning | IMPL: `--force` passed to runtime as override; warning surface not observable at root; force/cancellation tested | underspecified | info | child `agent-runtime` |
-| U-4 | REQ-AGENT-INTEGRATION; DESIGN | Qualification-command output MUST NOT be forwarded in JSON mode | IMPL: JSON wizard interaction to stderr; qualification bounded-capture is child-owned; JSON stdout-isolation test passes | underspecified | info | child `agent-runtime` |
+| U-1 | REQ-AGENT-INTEGRATION; CONTRACT `agent setup` | Fixed prompt is exactly `Reply with exactly: OK` | IMPL delegates qualification to opaque runtime; exact bytes not observable at root; wizard qualification tests + live probes pass | underspecified | info | clean-slate documenter (root record scope) / child `sav` |
+| U-2 | REQ-AGENT-INTEGRATION; DESIGN | Catalog presented first; manual entry only via final custom choice | IMPL: catalog is child-owned; evidence shows catalog choice flowing to roles + live catalog probes pass | underspecified | info | child `sav` |
+| U-3 | REQ-AGENT-INTEGRATION; CONTRACT | `--force` persists failed profile only after an explicit visible warning | IMPL: `--force` passed to runtime as override; warning surface not observable at root; force/cancellation tested | underspecified | info | child `sav` |
+| U-4 | REQ-AGENT-INTEGRATION; DESIGN | Qualification-command output MUST NOT be forwarded in JSON mode | IMPL: JSON wizard interaction to stderr; qualification bounded-capture is child-owned; JSON stdout-isolation test passes | underspecified | info | child `sav` |
 | U-5 | REQ-AGENT-INTEGRATION | Setup acknowledgement covers discovery + qualification only, not later prompt | IMPL: later `prompt` still requires `--allow-host-execution`; explicit scope wording not restated at root | underspecified | info | clean-slate documenter (root record scope) |
 | U-6 | CONTRACT `agent setup`; DESIGN | Binding a saved reusable profile skips qualification | IMPL distinguishes the two paths but does not explicitly assert the skip; standalone-profile materialization tested | underspecified | info | clean-slate documenter (root record scope) |
 | U-7 | CONTRACT `prompt` | Model selection limited to configured models for the role; reasoning effort fails without `{reasoning_effort}` placeholder | IMPL: optional model + typed reasoning effort, delegated rendering; restriction/placeholder-gate not restated at root; typed-effort tests pass | underspecified | info | clean-slate documenter (root record scope) |
@@ -215,7 +215,7 @@ qualification/force/cancellation, plus passing Copilot/Gemini live catalog
 probes in the child runtime). No **mismatched** or **approved-deferred**
 discrepancies were identified in scope. The seven **underspecified** items are
 root-boundary observability limits for behavior owned by the opaque
-`agent-runtime` child; they are informational and do not indicate
+`sav` child; they are informational and do not indicate
 noncompliance.
 
 **Promotion is NOT blocked** on compliance grounds for the assisted-model-setup

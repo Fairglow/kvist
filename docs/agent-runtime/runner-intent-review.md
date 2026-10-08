@@ -33,17 +33,17 @@ Global constraints:
 
 Runner intent and observed record:
 
-- `/opt/proj/kvist/agent_runner/REQUIREMENTS.md`
-- `/opt/proj/kvist/agent_runner/CONTRACT.md`
-- `/opt/proj/kvist/agent_runner/DESIGN.md`
-- `/opt/proj/kvist/agent_runner/IMPL.md`
+- `/opt/proj/kvist/skott/REQUIREMENTS.md`
+- `/opt/proj/kvist/skott/CONTRACT.md`
+- `/opt/proj/kvist/skott/DESIGN.md`
+- `/opt/proj/kvist/skott/IMPL.md`
 
 Runtime intent and observed record:
 
-- `/opt/proj/kvist/agent_runtime/REQUIREMENTS.md`
-- `/opt/proj/kvist/agent_runtime/CONTRACT.md`
-- `/opt/proj/kvist/agent_runtime/DESIGN.md`
-- `/opt/proj/kvist/agent_runtime/IMPL.md`
+- `/opt/proj/kvist/sav/REQUIREMENTS.md`
+- `/opt/proj/kvist/sav/CONTRACT.md`
+- `/opt/proj/kvist/sav/DESIGN.md`
+- `/opt/proj/kvist/sav/IMPL.md`
 
 Actual supplied run evidence:
 
@@ -117,7 +117,7 @@ would be needed to close the broader guarantee.
 
 ### F3 — P1 — observed mismatch: wire finish normalization defeats strict rejection
 
-**Intent:** Runner hardening contract, `AgentRunner` behavioral guarantees and
+**Intent:** Runner hardening contract, `Skott` behavioral guarantees and
 design interactions reject inconsistent finish/tool combinations before
 effects; tools require `ToolCalls`. `RUN-REQ-PROVIDERS` also requires finish
 classification and deterministic integrity tests.
@@ -141,7 +141,7 @@ not be rewritten merely to conceal the inconsistency.
 **Protected artifacts:** `ROOT_CONTRACT.md` says agents must not write queues,
 intent, implementation records, approval state or canonical evidence.
 `RUN-REQ-AUTHORITY`/runner contract instead deliberately expose an entirely
-writable selected workspace and disclaim engine authorization/evidence APIs.
+writable selected workspace and disclaim maerg authorization/evidence APIs.
 Architecture explicitly distinguishes this workspace shell from the protected
 broker. There is no stated root-contract exception reconciling a workspace
 that contains those protected artifacts.
@@ -153,7 +153,7 @@ that local design.
 
 These are contradictions in intended authority, not evidence of an observed
 unauthorized write, sandbox escape or unintended host fallback. “Does not mint
-engine evidence” and “cannot modify evidence files” are distinct guarantees.
+maerg evidence” and “cannot modify evidence files” are distinct guarantees.
 The human needs to arbitrate scope/exceptions explicitly before an unqualified
 global-conformance statement is meaningful.
 
@@ -229,13 +229,13 @@ The records explicitly say the runner journal and runtime trajectory formats
 are incompatible and no conversion exists. No interoperability was promised by
 the reviewed hardening extension, so that difference is **no discrepancy
 observed**, not a request to introduce automatic replay. Neither format is
-canonical engine evidence.
+canonical maerg evidence.
 
 ## Clause-by-clause bounded comparison
 
 | Scope | Classification and conclusion |
 | --- | --- |
-| `RUN-REQ-AUTHORITY` | **No discrepancy observed** for sandbox default, no host fallback, explicit interactive unconfined mode, headless host/log rejection, scope labels/instructions and absence of engine approval/promotion APIs. The records support private operational provenance, not authorization proof. Global intent conflicts are F4; process/output limits are F1/F2. |
+| `RUN-REQ-AUTHORITY` | **No discrepancy observed** for sandbox default, no host fallback, explicit interactive unconfined mode, headless host/log rejection, scope labels/instructions and absence of maerg approval/promotion APIs. The records support private operational provenance, not authorization proof. Global intent conflicts are F4; process/output limits are F1/F2. |
 | `RUN-REQ-CONTEXT` | **No discrepancy observed** for full canonical request accounting, output reserve propagation, pre-I/O irreducible rejection, complete call/result grouping, exact systems/current goal retention, lossy labelled summaries and combined result preview. The byte-based estimate is expressly heuristic, so lack of a tokenizer guarantee is not a violation. Legacy compact helpers are documented as diagnostic, not the send path. |
 | `RUN-REQ-LIFECYCLE` | **No discrepancy observed** for fallible recording, synchronized pre-effect dispatch, recording failure stopping effects, fresh answers/dispositions, unknown interrupted effects/no replay, private no-clobber files and owned worker shutdown/backpressure handling. Built-in cleanup and selected history/UI/follow-up guarantees remain F2/F8. Null mutation state is honest uncertainty, not missing effect certification. |
 | `RUN-REQ-BUDGET` | **No discrepancy observed** for attempt charges, clipped deadlines/backoff, cancellable short retry waits, argument-hash correction/circuit breaker and injected turn limits 1..=50. Injected collaborator cancellation is explicitly cooperative. Built-in deadline completeness is F2; cancelled follow-up pairing evidence is F8. No requirement to prove filesystem progress or add temperature jitter is imposed by this clause. |
@@ -283,14 +283,14 @@ The follow-up reread these exact global and component inputs:
 - `/opt/proj/kvist/ARCHITECTURE.md`
 - `/opt/proj/kvist/ROOT_CONTRACT.md`
 - `/opt/proj/kvist/docs/standards.md`
-- `/opt/proj/kvist/agent_runner/REQUIREMENTS.md`
-- `/opt/proj/kvist/agent_runner/CONTRACT.md`
-- `/opt/proj/kvist/agent_runner/DESIGN.md`
-- `/opt/proj/kvist/agent_runner/IMPL.md`
-- `/opt/proj/kvist/agent_runtime/REQUIREMENTS.md`
-- `/opt/proj/kvist/agent_runtime/CONTRACT.md`
-- `/opt/proj/kvist/agent_runtime/DESIGN.md`
-- `/opt/proj/kvist/agent_runtime/IMPL.md`
+- `/opt/proj/kvist/skott/REQUIREMENTS.md`
+- `/opt/proj/kvist/skott/CONTRACT.md`
+- `/opt/proj/kvist/skott/DESIGN.md`
+- `/opt/proj/kvist/skott/IMPL.md`
+- `/opt/proj/kvist/sav/REQUIREMENTS.md`
+- `/opt/proj/kvist/sav/CONTRACT.md`
+- `/opt/proj/kvist/sav/DESIGN.md`
+- `/opt/proj/kvist/sav/IMPL.md`
 
 The only run inputs for this follow-up were:
 
@@ -331,7 +331,7 @@ does not independently authenticate execution or turn tests into proof.
 ### Current actual-run evidence
 
 Both component runs name
-`cargo test --locked -p agent-runner -p agent-runtime`, using
+`cargo test --locked -p skott -p sav`, using
 `rustc 1.99.0 (b940084d7 2026-09-28)` and
 `cargo 1.99.0 (5f94df478 2026-08-27)`.
 
@@ -348,8 +348,8 @@ independent requirement coverage. Subprocess fixtures use actual host processes
 or a fake runner; their passes do not establish namespace/network isolation.
 
 The quality log records `cargo fmt --all --check` without printed errors,
-`cargo clippy --locked -p agent-runner -p agent-runtime --all-targets -- -D warnings`
-and `cargo build --locked -p agent-runner -p agent-runtime -p kvist` with finished
+`cargo clippy --locked -p skott -p sav --all-targets -- -D warnings`
+and `cargo build --locked -p skott -p sav -p kvist` with finished
 profiles. It then records
 `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.bareRepository GIT_CONFIG_VALUE_0=all cargo test --locked --workspace`.
 These are substantially better actual gate records than the initial quiet
@@ -529,7 +529,7 @@ append records and replay without file/line/event-count bounds or leaf-link
 rejection/privacy/durability enforcement. The three passing trajectory cases
 do not establish those absent limits.
 
-This is the older `agent-run replay`/public trajectory facility, not runner
+This is the older `sav-run replay`/public trajectory facility, not runner
 history replay or its private operational journal. The record does not show
 the runner using this facility; lack of journal-format conversion is not a
 hardening failure and automatic replay remains deliberately absent. F9 must
@@ -608,14 +608,14 @@ The intent/record inputs were exactly:
 - `/opt/proj/kvist/ARCHITECTURE.md`
 - `/opt/proj/kvist/ROOT_CONTRACT.md`
 - `/opt/proj/kvist/docs/standards.md`
-- `/opt/proj/kvist/agent_runner/REQUIREMENTS.md`
-- `/opt/proj/kvist/agent_runner/CONTRACT.md`
-- `/opt/proj/kvist/agent_runner/DESIGN.md`
-- `/opt/proj/kvist/agent_runner/IMPL.md`
-- `/opt/proj/kvist/agent_runtime/REQUIREMENTS.md`
-- `/opt/proj/kvist/agent_runtime/CONTRACT.md`
-- `/opt/proj/kvist/agent_runtime/DESIGN.md`
-- `/opt/proj/kvist/agent_runtime/IMPL.md`
+- `/opt/proj/kvist/skott/REQUIREMENTS.md`
+- `/opt/proj/kvist/skott/CONTRACT.md`
+- `/opt/proj/kvist/skott/DESIGN.md`
+- `/opt/proj/kvist/skott/IMPL.md`
+- `/opt/proj/kvist/sav/REQUIREMENTS.md`
+- `/opt/proj/kvist/sav/CONTRACT.md`
+- `/opt/proj/kvist/sav/DESIGN.md`
+- `/opt/proj/kvist/sav/IMPL.md`
 
 The existing report was read only for append/history preservation. No source,
 test source, manifest, queue, Git/history/diff, other report/review/research or
@@ -628,8 +628,8 @@ Calculated record identities:
 
 | Record | SHA-256 of current record bytes |
 | --- | --- |
-| `/opt/proj/kvist/agent_runner/IMPL.md` | `a16117b4f014b81839ecdebd02308543be02532a70f5c46408fe48922af4b850` |
-| `/opt/proj/kvist/agent_runtime/IMPL.md` | `5dd818a0e47cc63785bacfffaaf3820c9bdbf55ed1c8f7f01d075fb899da52b9` |
+| `/opt/proj/kvist/skott/IMPL.md` | `a16117b4f014b81839ecdebd02308543be02532a70f5c46408fe48922af4b850` |
+| `/opt/proj/kvist/sav/IMPL.md` | `5dd818a0e47cc63785bacfffaaf3820c9bdbf55ed1c8f7f01d075fb899da52b9` |
 
 Both have the `kvist-implementation-record-version: 1` envelope. Runner
 observations were regenerated using the current component source-only scope;
@@ -673,7 +673,7 @@ All intervals below are UTC on 2026-10-02. Component/live/quality logs report
 | `runtime-final-tests.log` | 00:08:04–00:08:15 | 26 | 431 | 0 | 3 |
 
 The current component command is
-`cargo test --locked -p agent-runner -p agent-runtime`. Its 452 passes comprise
+`cargo test --locked -p skott -p sav`. Its 452 passes comprise
 312 runner and 140 runtime tests. The older 431-pass combined run is not
 current-runner evidence; only its identity-matched 140 runtime passes support
 the retained runtime record. The live command executes the three otherwise
@@ -695,8 +695,8 @@ supplies explicit final caller linkage:
 | Logged executable | SHA-256 |
 | --- | --- |
 | `/opt/target/debug/deps/live_llama-91e0887ff0465c78` | `b1eb241879e75cf9931403b586732cd89892a87411b19aac89f11488ace50c1b` |
-| `/opt/target/debug/agent-runner-file-tool` | `e3bec788c17915dce58f5cc2b6b72bb87d6cda814c755d31840b21f6a02ed76b` |
-| `/opt/target/release/kvist-sandbox-runner` | `db631ad7a514a31c0b57f74815ef612f224b25ff8b662affb0a64d9af7fda1b3` |
+| `/opt/target/debug/skott-file-tool` | `e3bec788c17915dce58f5cc2b6b72bb87d6cda814c755d31840b21f6a02ed76b` |
+| `/opt/target/release/galla-runner` | `db631ad7a514a31c0b57f74815ef612f224b25ff8b662affb0a64d9af7fda1b3` |
 | `/usr/bin/bwrap` | `d9498f8b15b1c69e09791badee317d56f33abd359a306d6e96534f136381ad74` |
 
 Endpoint/model are `http://127.0.0.1:9931` /
@@ -836,7 +836,7 @@ state/early-supervisor-cleanup limits are not newly certified by this review.
 ### Structural validity is not accepted revision state
 
 The supplied artifact inspection at 01:11:17 records successful
-`kvist component validate agent_runner` and `agent_runtime`; `kvist doctor`
+`kvist component validate skott` and `sav`; `kvist doctor`
 reports valid version-one documents, including both implementation-record
 envelopes. Its project “current”/read-only-ready output is structural/project
 state, not source-blind compliance approval.
@@ -916,14 +916,14 @@ The paths in this table are relative to exactly `/opt/proj/kvist/`:
 | `ARCHITECTURE.md` | `877edcec2e97a916120878b9df54e8eb2118a66c79adf7dd86767b68a9055666` |
 | `ROOT_CONTRACT.md` | `cb10d639c82054b219b74a4517743867b85ef72fa4661c8deada8b10b744bfe6` |
 | `docs/standards.md` | `fe1913244e36a4566ee386c51bcca90e3c41dd91ac10ec107af75289da145afa` |
-| `agent_runner/REQUIREMENTS.md` | `1172ed1499ce2565cc2da19d9a38d2e155413e4402787d3400224b51626960d0` |
-| `agent_runner/CONTRACT.md` | `e19db5744a80a0dff7ec8314d2dcf1e50ac4b961e71d6099bcf504539ec79d17` |
-| `agent_runner/DESIGN.md` | `be5498e7d4c39c3e3bf8985785b415b183345e4373923d8f4c7ce28cd5301912` |
-| `agent_runner/IMPL.md` | `f5bf350e8976c977d6fa9b5e1f1dfcc7a094f8ba1191302d6297e71932a64d1e` |
-| `agent_runtime/REQUIREMENTS.md` | `c69a969113c1896e07097e238ccc686e7710f54d155f038090f0eda0682930f2` |
-| `agent_runtime/CONTRACT.md` | `b0397042ceb9615189474439b74c60a173a4ad258354df7df6d65af5e94a9d7d` |
-| `agent_runtime/DESIGN.md` | `100caaa460ee11e5db50f29425f4dd56bde6a22c945070b91df34b0ebf9bb365` |
-| `agent_runtime/IMPL.md` | `5dd818a0e47cc63785bacfffaaf3820c9bdbf55ed1c8f7f01d075fb899da52b9` |
+| `skott/REQUIREMENTS.md` | `1172ed1499ce2565cc2da19d9a38d2e155413e4402787d3400224b51626960d0` |
+| `skott/CONTRACT.md` | `e19db5744a80a0dff7ec8314d2dcf1e50ac4b961e71d6099bcf504539ec79d17` |
+| `skott/DESIGN.md` | `be5498e7d4c39c3e3bf8985785b415b183345e4373923d8f4c7ce28cd5301912` |
+| `skott/IMPL.md` | `f5bf350e8976c977d6fa9b5e1f1dfcc7a094f8ba1191302d6297e71932a64d1e` |
+| `sav/REQUIREMENTS.md` | `c69a969113c1896e07097e238ccc686e7710f54d155f038090f0eda0682930f2` |
+| `sav/CONTRACT.md` | `b0397042ceb9615189474439b74c60a173a4ad258354df7df6d65af5e94a9d7d` |
+| `sav/DESIGN.md` | `100caaa460ee11e5db50f29425f4dd56bde6a22c945070b91df34b0ebf9bb365` |
+| `sav/IMPL.md` | `5dd818a0e47cc63785bacfffaaf3820c9bdbf55ed1c8f7f01d075fb899da52b9` |
 
 The regenerated runner record declares its source-only scope and supplied
 component/live executions. This reviewer did not inspect its derivation
@@ -982,9 +982,9 @@ Current live build/hash/run linkage records:
 
 - Caller `/opt/target/debug/deps/live_llama-91e0887ff0465c78`:
   `3c09e7a95d63467d2c89b970ab6f0901f0df5b9a00f1fe73aede8b61d3bf8ed2`.
-- Helper `/opt/target/debug/agent-runner-file-tool`:
+- Helper `/opt/target/debug/skott-file-tool`:
   `4eb88623d1bddc02c591edad2abc0723257222a85225389fc2e71475cbdcec28`.
-- Installed `/opt/target/release/kvist-sandbox-runner`:
+- Installed `/opt/target/release/galla-runner`:
   `db631ad7a514a31c0b57f74815ef612f224b25ff8b662affb0a64d9af7fda1b3`.
 - `/usr/bin/bwrap`:
   `d9498f8b15b1c69e09791badee317d56f33abd359a306d6e96534f136381ad74`.
@@ -1160,8 +1160,8 @@ input table finds only these two changed files, relative to `/opt/proj/kvist/`:
 
 | Current input | SHA-256 |
 | --- | --- |
-| `agent_runner/DESIGN.md` | `373c696278e8c51bb74988abec4b2daaf406e7078b75f00e5ff61ac0568a1902` |
-| `agent_runner/IMPL.md` | `535355299a18a934ce35939b8f0c5aa4ff937596aacef2def0924e0cbb88f719` |
+| `skott/DESIGN.md` | `373c696278e8c51bb74988abec4b2daaf406e7078b75f00e5ff61ac0568a1902` |
+| `skott/IMPL.md` | `535355299a18a934ce35939b8f0c5aa4ff937596aacef2def0924e0cbb88f719` |
 
 The other ten paths/identities are exactly those in the preceding handoff
 table, including runtime IMPL
@@ -1194,7 +1194,7 @@ intervals on 2026-10-02.
 | `runtime-final-tests.log` | `724b25f2e4a619435ae1aedf8278c6a9eba23ff2a32882d78a64d8ef2ef9e15b` | 00:08:04–00:08:15 | 431 / 0 / 3 |
 
 The current component command is
-`cargo test --locked -p agent-runner -p agent-runtime`. Its 26 result groups
+`cargo test --locked -p skott -p sav`. Its 26 result groups
 contain **325 runner passes**: 178 library, 35 component, 18 context, four
 headless, three input-boundary, 33 loop, 28 native and 26 subprocess; other
 runner binary/doc targets have zero cases. Runtime contributes **140 passes**.
@@ -1319,9 +1319,9 @@ executable hashes:
 
 - `/opt/target/debug/deps/live_llama-91e0887ff0465c78`:
   `21ee008846fc059275550dc8c1c847947851a2725807c96808efbc1e9259f7d6`.
-- `/opt/target/debug/agent-runner-file-tool`:
+- `/opt/target/debug/skott-file-tool`:
   `4ca60e7a5381febc0d47ad83f5d93cf314b3ba19d8af07c06c27c99de31f5400`.
-- `/opt/target/release/kvist-sandbox-runner`:
+- `/opt/target/release/galla-runner`:
   `db631ad7a514a31c0b57f74815ef612f224b25ff8b662affb0a64d9af7fda1b3`.
 - `/usr/bin/bwrap`:
   `d9498f8b15b1c69e09791badee317d56f33abd359a306d6e96534f136381ad74`.
@@ -1334,10 +1334,10 @@ supplied real-terminal startup/resize trial, authenticated executable
 attestation, or server/weights identity.
 
 The 02:04:56 artifact log binds current input identities to actual
-`kvist component validate agent_runner`, `kvist component validate agent_runtime`
+`kvist component validate skott`, `kvist component validate sav`
 and `kvist doctor` outputs reporting valid version-one artifacts.
 `kvist status` nevertheless reports **both components stale**, and
-`kvist task next agent_runner` / `kvist task next agent_runtime` reject that
+`kvist task next skott` / `kvist task next sav` reject that
 state. No queue progress, suggested Git command or acceptance suggestion is
 used as compliance evidence or executed. Valid documents/project “current”
 output is not accepted component revisions.
@@ -1374,8 +1374,8 @@ preceding input provenance, relative to `/opt/proj/kvist/`:
 
 | Current input | SHA-256 |
 | --- | --- |
-| `agent_runner/DESIGN.md` | `37cd366b0c63ec27bcfb9a53dc47f15d94659b57591180027363716f1f385226` |
-| `agent_runner/IMPL.md` | `ab614a72be04f2018a625265470d3a5fb32093f57047db675c18e9a9bdb4b8c5` |
+| `skott/DESIGN.md` | `37cd366b0c63ec27bcfb9a53dc47f15d94659b57591180027363716f1f385226` |
+| `skott/IMPL.md` | `ab614a72be04f2018a625265470d3a5fb32093f57047db675c18e9a9bdb4b8c5` |
 
 The remaining ten exact paths/hashes are unchanged from the prior tables.
 In particular, requirements, consumer contracts and global authority have
@@ -1503,9 +1503,9 @@ to the recorded executed caller:
 
 - `/opt/target/debug/deps/live_llama-91e0887ff0465c78`:
   `e25362395cd443dc8335c881ce9f18984806658f48b49c9c7f40ba86f10ea1a2`.
-- `/opt/target/debug/agent-runner-file-tool`:
+- `/opt/target/debug/skott-file-tool`:
   `f077d76c3c168ee8b2510f2560d26bff7927e115700583a677638602a8799300`.
-- `/opt/target/release/kvist-sandbox-runner`:
+- `/opt/target/release/galla-runner`:
   `db631ad7a514a31c0b57f74815ef612f224b25ff8b662affb0a64d9af7fda1b3`.
 - `/usr/bin/bwrap`:
   `d9498f8b15b1c69e09791badee317d56f33abd359a306d6e96534f136381ad74`.
@@ -1517,10 +1517,10 @@ assertions are unchanged in scope; neither server/weights identity nor
 real-terminal layout execution or independent binary attestation is supplied.
 
 The exact-input-linked 02:16:15 inspection records actual
-`kvist component validate agent_runner`, `kvist component validate agent_runtime`
+`kvist component validate skott`, `kvist component validate sav`
 and `kvist doctor` results reporting structurally valid version-one documents/
 current project. `kvist status` still reports **both components stale**;
-`kvist task next agent_runner` and `kvist task next agent_runtime` reject them
+`kvist task next skott` and `kvist task next sav` reject them
 as stale. Queue progress, suggested Git/acceptance commands and operational
 journals are not compliance evidence or executed instructions here.
 
@@ -1553,8 +1553,8 @@ provenance table, relative to `/opt/proj/kvist/`:
 
 | Current input | SHA-256 |
 | --- | --- |
-| `agent_runner/DESIGN.md` | `8e0acacd3ee74f3df78d11268879cf6abd3ac34029bb251b8f86cee8258385f0` |
-| `agent_runner/IMPL.md` | `73e0420e5dc2f219a4ae2b0c8bc581d74cb442f807b9251567d30300ecef50cf` |
+| `skott/DESIGN.md` | `8e0acacd3ee74f3df78d11268879cf6abd3ac34029bb251b8f86cee8258385f0` |
+| `skott/IMPL.md` | `73e0420e5dc2f219a4ae2b0c8bc581d74cb442f807b9251567d30300ecef50cf` |
 
 The other ten exact paths/hashes are unchanged from earlier tables, including
 runtime IMPL
@@ -1686,9 +1686,9 @@ ignored-test target. Current logged identities are:
 
 - `/opt/target/debug/deps/live_llama-91e0887ff0465c78`:
   `08b82e8fd163951e364509aebe6904fd745bfc628fe5aec483e01cb7f912e381`.
-- `/opt/target/debug/agent-runner-file-tool`:
+- `/opt/target/debug/skott-file-tool`:
   `3a7264d97aadd70a89fcf08d7fa97ea57f8e09d3d6fc64ec6a2ab6c3378f9f97`.
-- `/opt/target/release/kvist-sandbox-runner`:
+- `/opt/target/release/galla-runner`:
   `db631ad7a514a31c0b57f74815ef612f224b25ff8b662affb0a64d9af7fda1b3`.
 - `/usr/bin/bwrap`:
   `d9498f8b15b1c69e09791badee317d56f33abd359a306d6e96534f136381ad74`.

@@ -217,12 +217,12 @@ mod tests {
         assert_eq!(short_prompt(theme, None, None, false), "kvist ❯ ");
         assert_eq!(short_prompt(theme, Some("no-vcs"), None, false), "kvist ❯ ");
         assert_eq!(
-            short_prompt(theme, Some("main"), Some("engine"), false),
-            "kvist engine/ (main) ❯ "
+            short_prompt(theme, Some("main"), Some("maerg"), false),
+            "kvist maerg/ (main) ❯ "
         );
         assert_eq!(
-            short_prompt(theme, None, Some("engine"), false),
-            "kvist engine/ ❯ "
+            short_prompt(theme, None, Some("maerg"), false),
+            "kvist maerg/ ❯ "
         );
         assert_eq!(
             short_prompt(theme, Some("main"), Some("."), false),
@@ -230,8 +230,8 @@ mod tests {
         );
         // A failed last command shows the failure marker.
         assert_eq!(
-            short_prompt(theme, Some("main"), Some("engine"), true),
-            "kvist engine/ (main) ✘ ❯ "
+            short_prompt(theme, Some("main"), Some("maerg"), true),
+            "kvist maerg/ (main) ✘ ❯ "
         );
         assert_eq!(short_prompt(theme, None, None, true), "kvist ✘ ❯ ");
     }
@@ -304,7 +304,7 @@ mod tests {
             Theme::plain(),
             &status,
             Some("feature/long-branch-name-overflow-test"),
-            Some("engine"),
+            Some("maerg"),
         );
         for line in banner.lines() {
             assert!(

@@ -31,7 +31,7 @@ provider = "none"
 
 [sandbox]
 schema_version = 1
-runner = "/opt/target/release/kvist-sandbox-runner"
+runner = "/opt/target/release/galla-runner"
 backend = "/usr/bin/bwrap"
 network = "deny"
 mount = "component"
@@ -49,15 +49,19 @@ max_output_bytes = 1048576
 # real test executions (resolved offline from the approved Cargo home cache),
 # never placeholders: recorded verification success is compliance evidence.
 [[test_policy.commands]]
-component = "engine"
+component = "maerg"
 command = "cargo test"
 
 [[test_policy.commands]]
-component = "agent_runtime"
+component = "sav"
 command = "cargo test"
 
 [[test_policy.commands]]
-component = "sandbox_runner"
+component = "galla"
+command = "cargo test"
+
+[[test_policy.commands]]
+component = "skott"
 command = "cargo test"
 
 [agent]

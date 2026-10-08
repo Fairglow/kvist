@@ -1,6 +1,6 @@
 <!-- kvist-requirements-version: 1 -->
 
-# Agent Runner — Requirements
+# Skott — Requirements
 
 ## RUN-REQ-HISTORY-NAVIGATION
 
@@ -48,7 +48,7 @@ from forbidden symbolic links without weakening mutation protection.
 
 An installed Rust toolchain MUST be usable through validated read-only
 host-selected resources, without user-home/configuration/credential mounts,
-toolchain installation, network access, or an engine dependency. Offline
+toolchain installation, network access, or an maerg dependency. Offline
 vendored resolution MUST use sandbox-native paths and bounded private scratch.
 The normal sandbox Cargo entry point MUST force `--offline --locked`, including
 when callers omit those flags. Builds MUST fail actionably for a missing or
@@ -168,7 +168,7 @@ after-fix states separately, listing every fix it made.
 
 The review is advisory. Findings and severity MUST NOT change the
 implementation run's disposition, MUST NOT block the returned answer, and are
-not compliance evidence, engine authorization, canonical task evidence, or an
+not compliance evidence, maerg authorization, canonical task evidence, or an
 acceptance receipt. A review failure MUST NOT fail a completed implementation
 run by default (`on_failure = "warn"`); an explicit `on_failure = "fail"`
 makes the process exit unsuccessfully after the review failure is reported.
@@ -193,10 +193,10 @@ state and is never resumed or cached.
 
 ## Purpose and scope
 
-`agent-runner` is a first-class, interactive agent shell that lets a person talk
+`skott` is a first-class, interactive agent shell that lets a person talk
 to an AI coding agent while the agent performs real work on their machine,
 similar in feel to `gemini` or GitHub `copilot`. It is a standalone tool
-(`agent-runner` binary) that is intentionally independent of the `kvist` CLI but
+(`skott` binary) that is intentionally independent of the `kvist` CLI but
 shares its bounded runtime mechanisms and its sandbox enforcement boundary so it
 can also be launched from Kvist.
 
@@ -219,7 +219,7 @@ headlessly.
 - **The AI coding agent.** Operates only within the tools, working directory, and
   authority boundaries that configuration declares, and never asks the person for
   per-action permission.
-- **Kvist and future callers.** May launch `agent-runner` as a bounded subprocess
+- **Kvist and future callers.** May launch `skott` as a bounded subprocess
   and rely on the documented CLI, configuration schema, sandbox request contract,
   and deterministic, non-interactive diagnostics.
 
@@ -227,7 +227,7 @@ headlessly.
 
 Successful use produces:
 
-- a single command, `agent-runner`, that opens a modern terminal UI in the
+- a single command, `skott`, that opens a modern terminal UI in the
   current directory;
 - the ability to choose an configured model and a thinking effort before or
   during the session, with the current choice always visible;
@@ -283,7 +283,7 @@ Successful use produces:
   configurable profile be `on`/`auto`/`off`, detect the project language
   advisingly, and fail at startup when a requested or `on` profile is missing.
 - Construction and execution of a version-one Authoring-phase sandbox request
-  against the installed `kvist-sandbox-runner`, reusing its closed protocol and
+  against the installed `galla-runner`, reusing its closed protocol and
   Bubblewrap enforcement.
 - A first-class terminal UI: scrollable transcript, model/thinking selectors,
   input line, status bar, and an help overlay, with responsive cancellation.
@@ -355,7 +355,7 @@ Successful use produces:
 ## Acceptance and traceability
 
 - Given a configuration that declares one model and a working directory,
-  `agent-runner` opens the UI, rejects non-interactive input with an actionable
+  `skott` opens the UI, rejects non-interactive input with an actionable
   diagnostic, and does not start a session.
 - Given a prompt, the agent performs at least one model turn, and when the model
   proposes an approved tool call, the tool runs in the sandbox and its result is
@@ -368,10 +368,10 @@ Successful use produces:
 - Given a missing or misconfigured sandbox runner or backend, the tool reports
   the problem and exits without executing anything on the host.
 - Given an explicit or `on` language profile whose interpreter does not reach the
-  sandbox, `agent-runner` fails startup with a `ToolchainUnavailable` diagnostic
+  sandbox, `skott` fails startup with a `ToolchainUnavailable` diagnostic
   instead of advertising a tool the sandbox cannot run; a profile set to `auto`
   is advertised only when its interpreter is available.
-- Given a project whose root manifest names a language, `agent-runner` may log
+- Given a project whose root manifest names a language, `skott` may log
   the detected language but does not advertise that profile unless its interpreter
   is available or the profile is explicitly enabled.
 - Given interactive input, the UI renders a transcript, the status bar reflects
@@ -386,11 +386,11 @@ Successful use produces:
   16,384-character bound, and the session record is named by date, time, and
   the first words of the first prompt.
 - Given no explicit model selection and a provider that already has a configured
-  model loaded, `agent-runner` selects that model without a load/switch and
+  model loaded, `skott` selects that model without a load/switch and
   announces it; the probe is read-only and a down provider falls through rather
   than failing startup.
 - Given no explicit selection, no active match, and exactly one default-provider
-  model, `agent-runner` auto-selects it; given several default-provider models,
+  model, `skott` auto-selects it; given several default-provider models,
   no active match, and no `is_default` model, the TUI starts with no model
   selected and headless fails fast with an actionable diagnostic. When the
   default provider has no active model but a `is_default` model, that model is
@@ -400,7 +400,7 @@ Successful use produces:
   model, an explicit selection, or a single default-provider model.
 - An active provider model that is not configured produces an offered
   ready-to-paste `[[models]]` entry and never a write to the configuration file.
-- Given a completed headless run and an enabled review, `agent-runner` starts
+- Given a completed headless run and an enabled review, `skott` starts
   a fresh-context review session with the resolved reviewer model, emits a
   versioned review summary with an advisory assessment, and prints the
   assessment after the implementation answer; the review sees no
@@ -425,21 +425,21 @@ Successful use produces:
 ## Security-first runtime hardening
 
 This extension implements the P0/P1 recommendations in
-`../docs/agent-runtime/upstream-agent-comparison.md`. The user's improvement
+`../docs/sav/upstream-agent-comparison.md`. The user's improvement
 request authorizes these conservative changes; remote authority and automatic
 resume remain deliberately deferred. Advisory intent-review enforcement is not
 implemented and no acceptance receipt is claimed.
 
 ### RUN-REQ-AUTHORITY
 
-This is an interactive workspace agent, not the engine's
+This is an interactive workspace agent, not the maerg's
 protected-task broker. Sandboxed effects remain network-denied; host execution
 remains an explicit interactive opt-out. Headless execution MUST reject host
-opt-out and disabled recording. It MUST NOT authorize tasks, write engine
+opt-out and disabled recording. It MUST NOT authorize tasks, write maerg
 evidence, accept intent, or promote results.
 The UI and model instructions MUST identify the actual execution scope.
 Operational records MUST identify the scope, workspace, policy and limits
-without claiming engine authorization.
+without claiming maerg authorization.
 Plain answers and human diagnostics MUST visibly escape terminal controls
 other than LF/tab; JSON and private transcripts retain the original text.
 

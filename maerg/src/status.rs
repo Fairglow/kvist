@@ -950,8 +950,8 @@ tasks:
             PathBuf::from("CONTRACT.md")
         );
         assert_eq!(
-            normalize_relative_path(Path::new("src/engine/REQUIREMENTS.md")),
-            PathBuf::from("src/engine/REQUIREMENTS.md")
+            normalize_relative_path(Path::new("src/maerg/REQUIREMENTS.md")),
+            PathBuf::from("src/maerg/REQUIREMENTS.md")
         );
         assert_eq!(
             normalize_relative_path(Path::new("..")),

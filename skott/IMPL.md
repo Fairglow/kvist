@@ -2,14 +2,14 @@
 
 # Component Implementation Record
 
-## Observed implementation: agent-runner
+## Observed implementation: skott
 
 ## Observation basis
 
 This replacement record was derived on 2026-10-02 from this package's Rust
-implementation and tests, its Cargo manifest, and the permitted agent-runtime
+implementation and tests, its Cargo manifest, and the permitted sav
 implementation and tests. No intent documents, previous implementation record,
-reviews, Git history, engine implementation, or sandbox-runner implementation
+reviews, Git history, maerg implementation, or galla implementation
 were read. This is an implementation observation, not an intent review,
 authorization decision, or compliance certification.
 
@@ -30,7 +30,7 @@ is not compliance certification or component acceptance.
   following; Ctrl+End selects the bottom and resumes following. Plain Home/End
   fall through to the editor. Live shortcuts require exactly CONTROL; replay
   shortcuts accept modifiers containing CONTROL. Replay intercepts input before
-  the editor. (`agent_runner/src/tui/app.rs:742-755,852-862,887-892,1483-1523`)
+  the editor. (`skott/src/tui/app.rs:742-755,852-862,887-892,1483-1523`)
   Tests assert Ctrl+Home preserves the editor cursor and subsequent output does
   not move the viewport, and Ctrl+End restores following. (`app.rs:3017-3049`)
 - **Replay extents:** `replay_scroll` is `usize`. Navigation uses saturating
@@ -44,7 +44,7 @@ is not compliance certification or component acceptance.
 - **Rendering/theme:** Live and replay views share the right-edge scrollbar,
   styled from the current `app.theme.scrollbar`. Replay reserves its last column,
   wraps and slices rows using a `usize` offset, and independently clamps the
-  rendered slice. (`agent_runner/src/tui/render.rs:152-214,431-505`)
+  rendered slice. (`skott/src/tui/render.rs:152-214,431-505`)
   Tests assert dark/light scrollbar colors, unobscured wrapped tail content,
   reversible top/bottom rendering and scrollbar presence in empty, short and
   one-column views. (`render.rs:691-751`)
@@ -52,7 +52,7 @@ is not compliance certification or component acceptance.
   instruction allowing Markdown, recommending CommonMark/GFM, and distinguishing
   presentation from structured tool arguments and trusted metadata. The test
   checks Markdown feature strings in both prompts.
-  (`agent_runner/src/run.rs:201-235,532-550`)
+  (`skott/src/run.rs:201-235,532-550`)
 
 Only those source/test ranges were inspected. Referenced wrapping/editor/theme
 implementations were not inspected. No concrete logic discrepancy was
@@ -60,18 +60,18 @@ established within that scope.
 
 ## Package and public surface
 
-`agent_runner/Cargo.toml` defines package `agent-runner` 0.2.0, edition 2024,
-minimum Rust 1.95, library `agent_runner`, and binaries `agent-runner` and
-`agent-runner-file-tool`. The library forbids unsafe code. Its Unix filesystem
-and process APIs, `/proc` use, and Linux-only agent-runtime dependency make the
+`skott/Cargo.toml` defines package `skott` 0.2.0, edition 2024,
+minimum Rust 1.95, library `skott`, and binaries `skott` and
+`skott-file-tool`. The library forbids unsafe code. Its Unix filesystem
+and process APIs, `/proc` use, and Linux-only sav dependency make the
 observed implementation Linux-specific.
 
-`agent_runner/src/lib.rs` exposes:
+`skott/src/lib.rs` exposes:
 
 - Configuration: `Cli`, `parse_effort`, `resolve_config_path`, `Config`, `Model`,
   `ModelProvider`, `SandboxPaths`, `ToolPolicy`, `DEFAULT_WRITE_ROOT`;
   `config::ModelBudgets` and configuration bounds are also publicly accessible.
-- Conversation and execution: `AgentSession`, `AgentRunner`, `Event`,
+- Conversation and execution: `AgentSession`, `Skott`, `Event`,
   `EventSink`, `ToolExecutor`, `Recorder`, `RunSummary`, `RunLimits`, `MAX_TURNS`,
   `SandboxExecutor`, `HostExecutor`, `ToolOutcome`, and `system_prompt`.
 - Context: `ContextManager`, `Compaction`, token/message estimates, and
@@ -93,7 +93,7 @@ the public toolchain module.
 
 ## Configuration and startup
 
-`agent_runner/src/config.rs` reads at most 64 KiB of UTF-8 TOML from a regular
+`skott/src/config.rs` reads at most 64 KiB of UTF-8 TOML from a regular
 file using `O_NOFOLLOW | O_NONBLOCK`. A second stream bound catches growth.
 Parse/type diagnostics identify the line without echoing TOML contents.
 The raw configuration and its nested model, sandbox, and policy tables reject
@@ -129,9 +129,9 @@ Providers are `llama-server` and `ollama`, with default endpoints
 `http://127.0.0.1:9931` and `http://127.0.0.1:11434`. Defaults are deadline
 300 seconds, three attempts, 2-second base/30-second maximum backoff, and
 30-second cadence; zero cadence disables that watchdog. Transport construction
-uses agent-runtime's direct transport with an 8 MiB response limit. Loopback
+uses sav's direct transport with an 8 MiB response limit. Loopback
 endpoint validation occurs when constructing that transport, not when parsing
-TOML. Default executables are `/usr/local/bin/kvist-sandbox-runner` and
+TOML. Default executables are `/usr/local/bin/galla-runner` and
 `/usr/bin/bwrap`.
 
 `Model::resolve_budgets` selects context and output overrides independently:
@@ -145,13 +145,13 @@ membership and fills defaults; it is not equivalent to full TOML validation.
 Startup canonicalizes the chosen working directory, including relative or
 linked CLI overrides, and rejects non-directories.
 
-`agent_runner/src/cli.rs` searches explicit config, current-directory
-`agent-runner.toml`, XDG user config, then XDG system directories. Relative
+`skott/src/cli.rs` searches explicit config, current-directory
+`skott.toml`, XDG user config, then XDG system directories. Relative
 `XDG_CONFIG_HOME` falls back to `HOME/.config`; system paths come from
 colon-separated `XDG_CONFIG_DIRS`, default `/etc/xdg`. It does not search
 ancestor projects. `--list-models` loads and prints configured models without a
-terminal. `--import-kvist` does not need an agent-runner configuration:
-`agent_runner/src/kvist_import.rs` extracts `[agent.profiles]`, ignores unrelated
+terminal. `--import-kvist` does not need an skott configuration:
+`skott/src/kvist_import.rs` extracts `[agent.profiles]`, ignores unrelated
 fields and command templates, and prints sorted `[[models]]` snippets for the
 two supported providers, with escaped TOML strings and a 120-second import
 deadline default. Import is read-only and does not validate a complete target
@@ -164,19 +164,19 @@ disabled logs, listing, and import; JSON requires headless. Whole-prompt CLI
 defaults are 1800 seconds and 1,000,000 estimated tokens, with maxima 24 hours
 and 1,000,000,000 tokens. Error exit codes are normally 1, selection/terminal/
 effort/toolchain/host-turn errors 2, policy errors 3
-(`agent_runner/src/error.rs`, `agent_runner/src/main.rs`).
+(`skott/src/error.rs`, `skott/src/main.rs`).
 
-Evidence includes `agent_runner/tests/component_tests.rs`:
+Evidence includes `skott/tests/component_tests.rs`:
 `loads_a_valid_configuration`, `rejects_unknown_top_level_fields`,
 `rejects_duplicate_model_ids`, `rejects_out_of_bound_cadence`; and
-`agent_runner/tests/model_budgets.rs`:
+`skott/tests/model_budgets.rs`:
 `configured_capacity_and_cli_precedence_have_no_8192_fallback`,
 `automatic_generation_reserve_has_room_for_reasoning_but_fits_small_windows`,
 `unavailable_discovery_requests_explicit_capacity_instead_of_assuming_8192`.
 
 ## Tool model and authority
 
-`agent_runner/src/tools.rs` renders rather than executes tools. `ExecContext`
+`skott/src/tools.rs` renders rather than executes tools. `ExecContext`
 contains host `workdir` and `call_id`; `RenderedTool` contains `argv`, human
 `summary`, optional typed `file_request`, and optional `file_helper`.
 Definitions are offered in stable order: shell, read_file, write_file, list_dir,
@@ -185,7 +185,7 @@ descriptions/resources, not these tool names.
 
 Shell accepts exactly `{"command": <string>}`: nonblank, NUL-free, at most
 16 KiB. Rendering produces absolute bash, `-c`, the unchanged command, and
-`agent-runner` as argv0. The built-in case-sensitive substring denylist includes
+`skott` as argv0. The built-in case-sensitive substring denylist includes
 `rm -rf`, `rm -fr`, `mkfs`, `dd if=`, `dd bs=`, `> /dev/`, `:() {`,
 `exec 9<>`, `reboot`, `shutdown`; trimmed-start prefix `mknod ` is denied.
 Configuration adds denials rather than removing the minimum. This is an
@@ -193,7 +193,7 @@ advisory textual filter, not shell parsing or isolation. Policy identity hashes
 sorted, NUL-delimited write-root/deny entries. Unknown tools or malformed
 arguments fail before executor effects.
 
-`agent_runner/src/toolchain.rs` keeps generic enabled; configurable profiles
+`skott/src/toolchain.rs` keeps generic enabled; configurable profiles
 default auto. On/forced requires availability, auto omits unavailable profiles,
 off excludes them. Non-Rust probing searches PATH, fixed system directories,
 and selected home paths, but accepts only executable canonical paths beneath
@@ -209,12 +209,12 @@ shell argv, not semantic shell-path confinement. Native operations instead
 map the write-root namespace onto the canonical host workdir and retain their
 own mutation checks. Host shell calls allow 120 seconds and 8 KiB combined
 capture; native helper calls allow 7001 captured bytes
-(`agent_runner/src/host.rs`). Neither executor makes operational logs canonical
+(`skott/src/host.rs`). Neither executor makes operational logs canonical
 task evidence.
 
 ## Native filesystem operations
 
-`agent_runner/src/file_tools.rs` defines closed `FileRequest` JSON:
+`skott/src/file_tools.rs` defines closed `FileRequest` JSON:
 `write_root` and `operation`, the latter tagged by `tool` with `arguments`.
 Unknown fields/types fail. Request bytes are limited to 256 KiB; paths to
 4096 UTF-8 bytes; absolute lexical paths exclude NUL, empty components, `.`,
@@ -256,7 +256,7 @@ index bytes. Optional typed strings reject explicit null.
 Directory traversal uses held descriptors, no-follow components, and
 `/proc/self/fd` enumeration. Recursive discovery/search skips links and, by
 default, directories named `.git`, `target`, `node_modules`, `vendor`,
-`vendored`, `.agent-runner`; explicit generated opt-in and an explicitly chosen
+`vendored`, `.skott`; explicit generated opt-in and an explicitly chosen
 scope remain available. Traversal is bounded to depth 32 and 4096 visited
 entries; unsupported ordinary entries or read errors fail rather than silently
 becoming an empty result. Search additionally limits each complete file to
@@ -275,12 +275,12 @@ replacement names. This is not transactional compare-and-swap against arbitrary
 external writers; a race after recheck or an error after rename can leave an
 effect despite a failed result. Parent directories must already exist.
 
-`agent_runner/src/bin/file_tool.rs` requires exactly one payload file, opens it
+`skott/src/bin/file_tool.rs` requires exactly one payload file, opens it
 no-follow/nonblocking, verifies bounded regular-file type, parses/revalidates
 the request, and emits one JSON line. Failure prints a diagnostic and exits 2.
 The helper is not itself a sandbox.
 
-Executed evidence in `agent_runner/tests/native_file_tools.rs` includes
+Executed evidence in `skott/tests/native_file_tools.rs` includes
 `edits_preserve_unrelated_bytes_crlf_missing_newline_and_mode`,
 `stale_zero_multiple_and_overlapping_matches_never_mutate`,
 `mutations_reject_traversal_sibling_prefix_and_symlink_parents_or_targets`,
@@ -291,7 +291,7 @@ and `oversized_mutation_metadata_is_rejected_before_file_effects`.
 
 ## Sandbox construction and process ownership
 
-`agent_runner/src/executor.rs` checks cancellation before rendering, staging,
+`skott/src/executor.rs` checks cancellation before rendering, staging,
 request construction, and execution. Native argv is `["/context/1",
 "/context/0"]`: helper then payload. The helper defaults beside the running
 executable; configured or default helper must be a regular non-link path with
@@ -304,7 +304,7 @@ filesystem-root workspaces cannot stage there. Payload and helper become
 read-only, byte-hashed context files; the RAII payload owner outlives execution
 and cleans up on success, build failure, or spawn failure.
 
-`agent_runner/src/sandbox.rs` constructs a shared protocol request with
+`skott/src/sandbox.rs` constructs a shared protocol request with
 `protocol = kvist-sandbox-request-v1`, version 1, phase Authoring, argv,
 write-root working directory, environment, denied network with empty allowed
 sources, resources, identities, System toolchain rooted at `/usr`, grants, and
@@ -335,7 +335,7 @@ selected Cargo source/registry/HTTP names and registry token. Executing the
 request serializes at most 1 MiB JSON to the runner's stdin with
 `--kvist-sandbox-request-v1`. Failure never selects a host fallback.
 
-`agent_runner/src/process.rs` is a private single-threaded pump for both
+`skott/src/process.rs` is a private single-threaded pump for both
 executors and bounded rustup queries. It spawns a new process group, uses
 nonblocking stdin/stdout/stderr, 8192-byte chunks and 5-ms idle polls, and shares
 one exact capture budget across streams. It drains output while feeding stdin,
@@ -352,10 +352,10 @@ produce explicit errors, not delayed success; escaped descendants and
 uninterruptible kernel work cannot be universally terminated.
 
 Construction evidence includes
-`agent_runner/tests/component_tests.rs::build_request_produces_a_closed_authoring_request`;
+`skott/tests/component_tests.rs::build_request_produces_a_closed_authoring_request`;
 payload evidence includes
-`agent_runner/tests/native_file_tools.rs::private_payload_and_helper_are_readonly_hashed_context_files_and_cleaned_after_failure`.
-Executed `agent_runner/tests/subprocess_supervision.rs` covers
+`skott/tests/native_file_tools.rs::private_payload_and_helper_are_readonly_hashed_context_files_and_cleaned_after_failure`.
+Executed `skott/tests/subprocess_supervision.rs` covers
 `sandbox_writes_complete_large_request_without_deadlocking_on_output`,
 `successful_early_stdin_close_is_not_false_success`,
 `sandbox_retained_pipes_are_explicit_failure_not_delayed_success`,
@@ -364,8 +364,8 @@ Executed `agent_runner/tests/subprocess_supervision.rs` covers
 
 ## Installed Rust and offline resources
 
-`agent_runner/src/rust_environment.rs` resolves an existing installation; it
-does not install dependencies/toolchains or consume engine toolchain manifests.
+`skott/src/rust_environment.rs` resolves an existing installation; it
+does not install dependencies/toolchains or consume maerg toolchain manifests.
 It reads only top-level `rust-toolchain.toml` or `rust-toolchain`; both present
 is an error. Pins are bounded to 64 KiB. TOML permits channel, components,
 targets, profile only. Channel accepts bounded release/version tokens, not
@@ -407,7 +407,7 @@ toolchain file, nor continuous revalidation of arbitrary host changes. Auto Rust
 reports omission; explicit Rust fails startup on resolution failure. Host
 opt-out uses the simpler profile resolver, not these sandbox Rust resources.
 
-Native executed tests in `agent_runner/tests/rust_build_environment.rs` were
+Native executed tests in `skott/tests/rust_build_environment.rs` were
 `native_installed_rust_compiles_links_and_documents_offline`,
 `native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation`,
 and `changing_project_pin_after_resolution_fails_before_effects`.
@@ -419,7 +419,7 @@ trials do not independently verify all external runner quotas or all platforms.
 
 ## Conversation, effects, accounting, and recovery
 
-`agent_runner/src/session.rs` provides the injectable blocking loop.
+`skott/src/session.rs` provides the injectable blocking loop.
 `AgentSession` owns model, effort, host system prompt, ordered messages, tool
 definitions and last answer. Pushing a user clears the previous answer.
 Requests prepend the host system prompt, offer Auto tools and configured effort,
@@ -427,7 +427,7 @@ and omit output schema. Only a nonblank Stop turn with no tool intents becomes
 an answer. The low-level assistant helper folds messages; the runner separately
 validates before accepting a turn.
 
-For each prompt, `AgentRunner::run` validates turn count 1–50 and whole-prompt
+For each prompt, `Skott::run` validates turn count 1–50 and whole-prompt
 limits, starts an owned deadline watcher, starts the recorder, performs request
 preflight, and then charges estimated request plus reserved output before each
 attempt. It never refunds retries based on missing/actual usage. Watcher checks
@@ -454,7 +454,7 @@ nonempty, at most 256 bytes/NUL-free; names nonempty, at most 128 bytes/NUL-free
 arguments objects with at most 1 MiB encoded bytes. Rendering/transport imposes
 additional name/argument restrictions.
 
-Transient agent-runtime errors receive deterministic capped exponential
+Transient sav errors receive deterministic capped exponential
 backoff (default three total attempts). Retries reuse unchanged accepted
 history and announce prior streaming text as provisional. Deadline grows
 linearly by attempt number, capped by total attempts and remaining prompt time.
@@ -488,7 +488,7 @@ turn usage accumulates provider totals, with incomplete usage marked unavailable
 These displayed totals differ from conservative budget charges and context
 estimates. Terminal answer is cleared on failure/cancel/budget exhaustion.
 
-Executed loop evidence includes `agent_runner/tests/loop_integration.rs`:
+Executed loop evidence includes `skott/tests/loop_integration.rs`:
 `hardening_duplicate_call_ids_reject_the_entire_turn`,
 `hardening_record_failure_precedes_effects_and_closes_unsuccessfully`,
 `cancelled_multicall_turn_is_valid_for_a_subsequent_prompt`,
@@ -500,7 +500,7 @@ Executed loop evidence includes `agent_runner/tests/loop_integration.rs`:
 
 ## Context and durable records
 
-`agent_runner/src/context.rs` estimates four UTF-8 bytes/token, full serialized
+`skott/src/context.rs` estimates four UTF-8 bytes/token, full serialized
 canonical request including escaping/schema/optional fields, plus fixed
 request/message/tool framing. This is not a tokenizer or guaranteed upper
 bound. Serialization failure estimates usize::MAX.
@@ -522,14 +522,14 @@ Irreducible excess errors without changing request/manager state. Legacy
 `compact`, `estimate_messages`, and `AgentSession::maybe_compact` do not provide
 this complete-request/reserve/group guarantee.
 
-Executed `agent_runner/tests/context_preflight.rs` includes
+Executed `skott/tests/context_preflight.rs` includes
 `serialized_estimate_accounts_for_every_canonical_field_and_framing`,
 `malformed_groups_fail_even_when_the_request_is_small`,
 `an_error_after_a_success_does_not_change_the_rolling_summary`,
 `reliability_continuation_retains_the_complete_outstanding_original_goal`,
 and `reliability_large_window_retains_history_according_to_capacity`.
 
-`agent_runner/src/session_log.rs` opens generated no-clobber 0600 journal/
+`skott/src/session_log.rs` opens generated no-clobber 0600 journal/
 transcript files under a private final 0700 directory, traversing all components
 no-follow with held descriptors. It rejects `.`, `..`, links, or nonprivate
 final directory; existing ancestor directory privacy is not universally
@@ -555,23 +555,23 @@ directory. A dispatch without result is an unknown effect, not a replayable
 checkpoint. Default interactive logs are within the writable workspace and
 explicitly not protected evidence.
 
-`agent_runner/src/history.rs` reads diagnostic transcripts only, newest filename
+`skott/src/history.rs` reads diagnostic transcripts only, newest filename
 first, with 4096 directory-entry and 5 MiB/file limits, no-link descriptor reads,
 growth bounds, and lossy UTF-8 replay. Missing/unusable histories do not block
 the UI. Replay is viewing, not command execution or model-state restoration.
 Unit evidence includes `private_no_clobber_files_and_versioned_records`,
 `argument_values_and_output_are_not_in_journal_and_mutation_is_unknown`
-in `agent_runner/src/session_log.rs`, and
+in `skott/src/session_log.rs`, and
 `history_rejects_link_targets_and_link_ancestors` in
-`agent_runner/src/history.rs`.
+`skott/src/history.rs`.
 
 ## Headless and terminal behavior
 
-`agent_runner/src/headless.rs` accepts one nonblank prompt of at most 64 KiB,
+`skott/src/headless.rs` accepts one nonblank prompt of at most 64 KiB,
 requires recording, and forbids host execution. It canonicalizes workdir and
 requires log paths outside its writable scope, with no dot traversal and
 SessionLog's no-link/private-directory checks. Default logs use absolute
-XDG_STATE_HOME or HOME/.local/state plus `agent-runner/runs`; unlike config
+XDG_STATE_HOME or HOME/.local/state plus `skott/runs`; unlike config
 discovery, relative state base is an error.
 
 JSON emits ordered flushed NDJSON envelopes with schema_version 1/sequence,
@@ -584,23 +584,23 @@ startup failures do not manufacture success events. Main returns 0 for success,
 mapping. Controls other than newline/tab are visibly escaped in plain output
 and error descriptions; JSON retains original text via JSON escaping and
 private transcripts retain original text.
-`agent_runner/tests/headless_cli.rs::headless_returns_ordered_versioned_events_without_a_terminal`,
+`skott/tests/headless_cli.rs::headless_returns_ordered_versioned_events_without_a_terminal`,
 `headless_truncation_has_an_unsuccessful_final_disposition_and_exit`,
 `plain_answer_escapes_terminal_commands_but_private_text_is_preserved`,
 `headless_rejects_agent_writable_logs_before_model_io`, and
 `startup_uses_selected_serving_capacity_without_a_cli_override` were executed.
 
-`agent_runner/src/tui/mod.rs` requires terminal stdin, initializes raw mode,
+`skott/src/tui/mod.rs` requires terminal stdin, initializes raw mode,
 alternate screen, mouse capture and Ratatui. Sandboxed prompts permit 50 turns;
 host opt-out defaults to one and accepts explicit 1–50 caps. Scope remains
 visible in UI/record/system prompt; host mode does not claim confinement.
-`agent_runner/src/run.rs` owns a blocking worker, 128-slot event channel,
+`skott/src/run.rs` owns a blocking worker, 128-slot event channel,
 unbounded prompt channel, cancellation token, and context across prompts.
 Drop cancels, stops backpressure/waits, and joins. Cancel resets the token for
 later prompts; a fatal recorder/channel error ends the worker. Model/effort
 changes start a fresh worker on next submission.
 
-`agent_runner/src/tui/app.rs` bounds submissions to 16,384 characters, keeps
+`skott/src/tui/app.rs` bounds submissions to 16,384 characters, keeps
 up to 5000 visible transcript rows, buffers streamed paragraphs/reasoning,
 shows provisional retry notices, completion/failure/cancellation/cap status,
 spinner, estimated context/ETA, provenance-specific speed, scrolling and
@@ -630,15 +630,15 @@ the normal setup/run path, not a catch-all restoration guard for every partial
 setup failure. Interactive UI completion is not itself a prompt-success exit
 certification. These are source observations, not terminal trials.
 
-`agent_runner/src/markdown.rs` uses pulldown-cmark/syntect for headings,
+`skott/src/markdown.rs` uses pulldown-cmark/syntect for headings,
 emphasis, code, quotes, lists/task lists, tables, links, strikethrough, and rules,
 wrapping styled rows and code/table tails. Tests use a TestBackend/pure rendering,
 not a real interactive terminal. Worker tests
 `worker_drop_joins_with_a_retained_prompt_sender` and
 `worker_drop_joins_when_the_event_queue_is_full` were executed from
-`agent_runner/src/run.rs`. Logging initializes once, stderr only, using
-AGENT_RUNNER_LOG then RUST_LOG, default warn (debug in unit tests), ANSI only
-for terminal stderr (`agent_runner/src/logging.rs`).
+`skott/src/run.rs`. Logging initializes once, stderr only, using
+SKOTT_LOG then RUST_LOG, default warn (debug in unit tests), ANSI only
+for terminal stderr (`skott/src/logging.rs`).
 
 ## Executed verification and limits
 
@@ -646,7 +646,7 @@ All commands used `TMPDIR` pointing to project-local fixture storage; that
 storage and observation-only captured outputs were removed before this record
 was written. No source/test edits were made by this observer.
 
-1. `cargo test -p agent-runner -p agent-runtime --offline --locked` initially
+1. `cargo test -p skott -p sav --offline --locked` initially
    stopped in runner loop integration: 39 passed, one failed.
    `reliability_successful_distinct_effect_resets_repeat_stalls` observed three
    executed calls versus the compiled assertion's expectation of two.
@@ -654,15 +654,15 @@ was written. No source/test edits were made by this observer.
    The targeted rerun passed (1 passed, 39 filtered). The observation therefore
    spans a changing workspace, not an immutable source snapshot; the initial
    failure is retained here rather than retroactively called successful.
-2. `cargo test -p agent-runner --offline --locked --test model_budgets
+2. `cargo test -p skott --offline --locked --test model_budgets
    --test native_file_tools --test rust_build_environment
    --test subprocess_supervision` passed: 3, 36, 3, and 26 tests respectively;
    three native Rust tests remained ignored in that invocation.
-3. `KVIST_RUST_TEST_RUNNER=/opt/proj/kvist/target/rust-environment-runner/debug/kvist-sandbox-runner
-   cargo test -p agent-runner --offline --locked --test rust_build_environment
+3. `KVIST_RUST_TEST_RUNNER=/opt/proj/kvist/target/rust-environment-runner/debug/galla-runner
+   cargo test -p skott --offline --locked --test rust_build_environment
    -- --include-ignored` passed all six tests, including the three named native
    trials above. The executable was used, not inspected.
-4. Final `cargo test -p agent-runner --offline --locked` passed:
+4. Final `cargo test -p skott --offline --locked` passed:
 
    | Test target | Passed | Ignored |
    | --- | ---: | ---: |
@@ -683,7 +683,7 @@ was written. No source/test edits were made by this observer.
    with zero tests.
 
 The live llama-server/model-driven sandbox tests in
-`agent_runner/tests/live_llama.rs` were not enabled. Native Rust trials do not
+`skott/tests/live_llama.rs` were not enabled. Native Rust trials do not
 substitute for those inference workflows. No formatter/linter, other packages'
 tests, real interactive terminal session, or comprehensive external sandbox
 resource-limit assessment was performed. Named coverage above is source/test
@@ -697,7 +697,7 @@ no observation about the runtime package and makes no compliance conclusion.
 
 ### Native output encoding
 
-In `agent_runner/src/file_tools.rs::output_fits`, `MAX_OUTPUT_BYTES` is 7000.
+In `skott/src/file_tools.rs::output_fits`, `MAX_OUTPUT_BYTES` is 7000.
 The function serializes the complete outcome to a JSON string and rejects a
 raw encoding of 7000 bytes or more. It then serializes that string as a JSON
 string value, including quotes and escaping, and requires this nested encoding
@@ -707,7 +707,7 @@ check; read-page and listing-page sizing also use `output_fits`.
 The limit is therefore not merely a raw-JSON length check, nor a bound on the
 entire enclosing model request.
 
-`agent_runner/tests/loop_integration.rs::reliability_native_page_metadata_survives_outer_model_json_escaping`
+`skott/tests/loop_integration.rs::reliability_native_page_metadata_survives_outer_model_json_escaping`
 uses repeated quote, backslash, and newline content, generates a native read
 page, records it into a session, and parses the resulting model-facing payload
 as complete JSON. It checks retained digest, byte-based `next_offset`, total
@@ -716,7 +716,7 @@ bytes.
 
 ### Compacted argument and result references
 
-`agent_runner/src/context.rs::turn_summary` now emits an explicit `path=`
+`skott/src/context.rs::turn_summary` now emits an explicit `path=`
 reference for a string-valued tool argument path before the short serialized
 full-arguments prefix. The path is JSON-string escaped and uses
 `truncate(path, 4096)`; this retains the first 4096 Unicode characters and adds
@@ -729,7 +729,7 @@ fields before a short result preview. These references remain summary text,
 not execution authority. Aggregate summary limits and subsequent shrinking
 still apply; complete retention of every long path is not guaranteed.
 
-`agent_runner/tests/context_preflight.rs::reliability_compacted_native_references_precede_lossy_body_prefixes`
+`skott/tests/context_preflight.rs::reliability_compacted_native_references_precede_lossy_body_prefixes`
 places a long path after a 200-character argument field and combines an
 8000-character result body with pagination/digest metadata. After compaction,
 it checks retention of the complete fixture path, both offsets, digest, and
@@ -739,9 +739,9 @@ process status despite lossy body/argument previews.
 
 Using project-local fixture storage via `TMPDIR`, independently executed:
 
-- `cargo test -p agent-runner --offline --locked --test loop_integration reliability_native_page_metadata --quiet`:
+- `cargo test -p skott --offline --locked --test loop_integration reliability_native_page_metadata --quiet`:
   one passed, zero failed/ignored, 40 filtered out.
-- `cargo test -p agent-runner --offline --locked --test context_preflight reliability_compacted_native_references --quiet`:
+- `cargo test -p skott --offline --locked --test context_preflight reliability_compacted_native_references --quiet`:
   one passed, zero failed/ignored, 20 filtered out.
 
 These are targeted executions after the two refinements, not reruns of the
@@ -755,7 +755,7 @@ their separately recorded execution evidence remain unchanged.
 
 ### Current wrapper and diagnostic
 
-`agent_runner/src/rust_environment.rs:600–611` creates the trusted Cargo shim
+`skott/src/rust_environment.rs:600–611` creates the trusted Cargo shim
 with `create_new`, mode `0500`, synchronizes it, and adds its hash to the
 executables revalidated before execution. The script now executes:
 
@@ -766,7 +766,7 @@ executables revalidated before execution. The script now executes:
 Thus ordinary calls through this wrapper receive `--locked` even when the
 caller supplies neither `--offline` nor `--locked`. The fixed offline vendor
 replacement is retained. `diagnostic` at
-`agent_runner/src/rust_environment.rs:629–652` now explicitly describes Cargo
+`skott/src/rust_environment.rs:629–652` now explicitly describes Cargo
 as offline and locked and instructs separate provisioning of a matching
 `Cargo.lock`. The source does not introduce automatic lockfile generation or
 repair. This is a wrapper option, not a read-only filesystem grant for the
@@ -774,7 +774,7 @@ workspace lockfile or proof about every Cargo subcommand or explicit write.
 
 ### Current regression coverage
 
-`agent_runner/tests/rust_build_environment.rs::normal_cargo_requires_matching_lock_without_creating_or_updating_it`
+`skott/tests/rust_build_environment.rs::normal_cargo_requires_matching_lock_without_creating_or_updating_it`
 constructs a sandbox executor using an explicitly selected runner and
 `/usr/bin/bwrap`. Without caller-supplied lock flags, it checks:
 
@@ -789,7 +789,7 @@ constructs a sandbox executor using an explicitly selected runner and
 This test is normally ignored because it requires the native runner and
 Bubblewrap. The existing installed-toolchain and vendor-snapshot native
 fixtures now explicitly provide matching lockfiles
-(`agent_runner/tests/rust_build_environment.rs:161,257–261`) before their
+(`skott/tests/rust_build_environment.rs:161,257–261`) before their
 compilation/documentation trials.
 
 ### Supplied execution evidence inspected

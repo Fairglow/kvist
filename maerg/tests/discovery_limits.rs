@@ -342,7 +342,7 @@ fn sandbox_configuration_requires_explicit_deny_network_component_mount_and_envi
     let base = "schema_version = 1\ncomponent_root = \"src\"\n";
     let runner = project
         .path()
-        .join("trusted-sandbox-runner")
+        .join("trusted-galla-runner")
         .to_string_lossy()
         .replace('\\', "\\\\");
     let valid = format!(
@@ -386,7 +386,7 @@ fn sandbox_acquisition_policy_defaults_and_validates_sources_and_bounds() {
     let base = "schema_version = 1\ncomponent_root = \"src\"\n";
     let runner = project
         .path()
-        .join("trusted-sandbox-runner")
+        .join("trusted-galla-runner")
         .to_string_lossy()
         .replace('\\', "\\\\");
     let sandbox = |extra: &str| {

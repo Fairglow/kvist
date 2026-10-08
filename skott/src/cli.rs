@@ -1,4 +1,4 @@
-//! Command-line interface for the agent-runner binary.
+//! Command-line interface for the skott binary.
 
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -8,15 +8,15 @@ use clap::Parser;
 /// A first-class, sandbox-integrated interactive agent runner shell.
 #[derive(Debug, Parser)]
 #[command(
-    name = "agent-runner",
+    name = "skott",
     version,
     about = "Talk to an AI coding agent that works inside a sandbox.",
     long_about = None,
 )]
 pub struct Cli {
     /// Path to the TOML configuration file. Without this flag the
-    /// configuration is resolved in order: `./agent-runner.toml` in the
-    /// current directory, then `$XDG_CONFIG_HOME/agent-runner/config.toml`
+    /// configuration is resolved in order: `./skott.toml` in the
+    /// current directory, then `$XDG_CONFIG_HOME/skott/config.toml`
     /// (or `$HOME/.config` when `XDG_CONFIG_HOME` is unset), then the
     /// `XDG_CONFIG_DIRS` system locations (default `/etc/xdg`).
     #[arg(short, long, value_name = "PATH")]
@@ -58,7 +58,7 @@ pub struct Cli {
     pub list_models: bool,
 
     /// Directory for the session journal and transcript (default
-    /// `.agent-runner/runs` under the working directory).
+    /// `.skott/runs` under the working directory).
     #[arg(long, value_name = "PATH")]
     pub log_dir: Option<PathBuf>,
 
@@ -117,11 +117,11 @@ pub struct Cli {
 }
 
 /// The per-app configuration directory name under the XDG config directories.
-const CONFIG_SUBDIR: &str = "agent-runner";
+const CONFIG_SUBDIR: &str = "skott";
 /// The configuration file name inside the XDG configuration directory.
 const CONFIG_FILE: &str = "config.toml";
 /// The project-local configuration file name searched in the current directory.
-const LOCAL_CONFIG_FILE: &str = "agent-runner.toml";
+const LOCAL_CONFIG_FILE: &str = "skott.toml";
 /// The default XDG system configuration directory (per the XDG Base Directory
 /// specification).
 const DEFAULT_XDG_CONFIG_DIRS: &str = "/etc/xdg";
@@ -229,23 +229,23 @@ mod tests {
 
     #[test]
     fn headless_is_terminal_free_but_has_no_host_or_recording_escape() {
-        assert!(Cli::try_parse_from(["agent-runner", "--headless", "--json", "inspect"]).is_ok());
+        assert!(Cli::try_parse_from(["skott", "--headless", "--json", "inspect"]).is_ok());
         for flag in ["--allow-host-execution", "--host-turns", "--no-logs"] {
-            let mut args = vec!["agent-runner", "--headless", flag];
+            let mut args = vec!["skott", "--headless", flag];
             if flag == "--host-turns" {
                 args.push("2");
             }
             args.push("inspect");
             assert!(Cli::try_parse_from(args).is_err(), "{flag}");
         }
-        assert!(Cli::try_parse_from(["agent-runner", "--headless"]).is_err());
-        assert!(Cli::try_parse_from(["agent-runner", "--json", "inspect"]).is_err());
+        assert!(Cli::try_parse_from(["skott", "--headless"]).is_err());
+        assert!(Cli::try_parse_from(["skott", "--json", "inspect"]).is_err());
     }
 
     #[test]
     fn parses_model_effort_cwd_profile_overrides_and_prompt() {
         let cli = Cli::parse_from([
-            "agent-runner",
+            "skott",
             "-m",
             "llama",
             "-e",
@@ -268,7 +268,7 @@ mod tests {
     fn prompt_defaults_to_sandboxed_multi_turn() {
         // The sandbox is the safe default: a prompt runs multi-turn with no host
         // privileges and no explicit acknowledgement.
-        let cli = Cli::try_parse_from(["agent-runner", "explain this"]).expect("valid prompt");
+        let cli = Cli::try_parse_from(["skott", "explain this"]).expect("valid prompt");
         assert!(
             !cli.allow_host_execution,
             "host privileges require an explicit flag"
@@ -282,7 +282,7 @@ mod tests {
 
     #[test]
     fn allow_host_execution_requires_explicit_flag() {
-        let cli = Cli::try_parse_from(["agent-runner", "--allow-host-execution", "refactor this"])
+        let cli = Cli::try_parse_from(["skott", "--allow-host-execution", "refactor this"])
             .expect("valid prompt");
         assert!(
             cli.allow_host_execution,
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn host_turns_parses_only_with_allow_host_execution() {
         let cli = Cli::parse_from([
-            "agent-runner",
+            "skott",
             "--allow-host-execution",
             "--host-turns",
             "5",
@@ -307,13 +307,13 @@ mod tests {
 
     #[test]
     fn host_turns_without_host_execution_is_rejected() {
-        assert!(Cli::try_parse_from(["agent-runner", "--host-turns", "5"]).is_err());
+        assert!(Cli::try_parse_from(["skott", "--host-turns", "5"]).is_err());
     }
 
     #[test]
     fn parses_list_models_and_session_flags() {
         let cli = Cli::parse_from([
-            "agent-runner",
+            "skott",
             "--list-models",
             "--no-logs",
             "--context-limit",
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn parses_an_empty_cli_when_idle() {
-        let cli = Cli::parse_from(["agent-runner"]);
+        let cli = Cli::parse_from(["skott"]);
         assert!(cli.model.is_none());
         assert!(cli.effort.is_none());
         assert!(cli.cwd.is_none());
@@ -345,7 +345,7 @@ mod tests {
     #[test]
     fn parses_import_kvist_with_explicit_kvist_config() {
         let cli = Cli::parse_from([
-            "agent-runner",
+            "skott",
             "--import-kvist",
             "--kvist-config",
             "/tmp/kvist.toml",
@@ -391,14 +391,14 @@ mod tests {
         let system = root.path().join("xdg-sys");
         for dir in [
             &local,
-            &user.join("agent-runner"),
-            &system.join("agent-runner"),
+            &user.join("skott"),
+            &system.join("skott"),
         ] {
             std::fs::create_dir_all(dir).expect("create dir");
         }
         let local_file = local.join(LOCAL_CONFIG_FILE);
-        let user_file = user.join("agent-runner").join("config.toml");
-        let system_file = system.join("agent-runner").join("config.toml");
+        let user_file = user.join("skott").join("config.toml");
+        let system_file = system.join("skott").join("config.toml");
         for file in [&local_file, &user_file, &system_file] {
             std::fs::write(file, "").expect("seed config file");
         }
@@ -413,10 +413,10 @@ mod tests {
     fn resolve_config_path_prefers_the_local_file_over_xdg() {
         // The local file is honoured even when an XDG user config exists.
         let (_root, local_file, user_file, _) = config_tree();
-        // XDG_CONFIG_HOME is the parent of the `agent-runner` directory.
+        // XDG_CONFIG_HOME is the parent of the `skott` directory.
         let xdg = user_file
             .parent()
-            .expect("agent-runner dir")
+            .expect("skott dir")
             .parent()
             .expect("xdg dir");
         let env = env_map(vec![("XDG_CONFIG_HOME", str_of(xdg))]);
@@ -437,7 +437,7 @@ mod tests {
         let _ = std::fs::remove_file(&local_file);
         let xdg = user_file
             .parent()
-            .expect("agent-runner dir")
+            .expect("skott dir")
             .parent()
             .expect("xdg dir");
         let env = env_map(vec![("XDG_CONFIG_HOME", str_of(xdg))]);
@@ -453,7 +453,7 @@ mod tests {
         let home = root.path().join("home");
         let home_config = home
             .join(".config")
-            .join("agent-runner")
+            .join("skott")
             .join("config.toml");
         std::fs::create_dir_all(home_config.parent().expect("parent")).expect("create");
         std::fs::write(&home_config, "").expect("seed");
@@ -474,7 +474,7 @@ mod tests {
         let home = root.path().join("home");
         let home_config = home
             .join(".config")
-            .join("agent-runner")
+            .join("skott")
             .join("config.toml");
         std::fs::create_dir_all(home_config.parent().expect("parent")).expect("create");
         std::fs::write(&home_config, "").expect("seed");
@@ -526,7 +526,7 @@ mod tests {
         let conventional = root
             .path()
             .join(".config")
-            .join("agent-runner")
+            .join("skott")
             .join("config.toml")
             .display()
             .to_string();

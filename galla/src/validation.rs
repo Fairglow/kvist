@@ -1115,7 +1115,7 @@ fn child_path(parent: &str, child: &str) -> Result<String, ProtocolError> {
     })
 }
 
-/// Independently derives the canonical registry identity used by the engine.
+/// Independently derives the canonical registry identity used by the maerg.
 pub fn registry_identity(name: &str, index_origin: &str, download_origin: &str) -> String {
     source_identity(
         b"kvist/cargo-registry/v1\0",
@@ -1127,7 +1127,7 @@ pub fn registry_identity(name: &str, index_origin: &str, download_origin: &str) 
     )
 }
 
-/// Independently derives the canonical immutable-Git identity used by the engine.
+/// Independently derives the canonical immutable-Git identity used by the maerg.
 pub fn git_identity(repository: &str, revision: &str) -> String {
     source_identity(
         b"kvist/cargo-git/v1\0",

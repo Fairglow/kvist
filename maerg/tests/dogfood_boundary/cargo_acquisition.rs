@@ -10,7 +10,7 @@
 //! subcommands and source-policy violations) pass today.
 //!
 //! The second group is host-independent planning coverage that runs directly
-//! against the engine's acquisition plan builder and the runner's independent
+//! against the maerg's acquisition plan builder and the runner's independent
 //! parser. These are additive and never substitute for the real-runner cases
 //! above.
 
@@ -897,8 +897,8 @@ mod planning {
     }
 
     #[test]
-    fn engine_and_runner_independently_agree_on_source_identity_golden_vectors() {
-        let engine_registry = registry_identity(
+    fn maerg_and_runner_independently_agree_on_source_identity_golden_vectors() {
+        let maerg_registry = registry_identity(
             "private",
             "https://registry.example.invalid/index/",
             "https://registry.example.invalid/crates/",
@@ -908,13 +908,13 @@ mod planning {
             "https://registry.example.invalid/index/",
             "https://registry.example.invalid/crates/",
         );
-        assert_eq!(engine_registry.as_str(), runner_registry);
+        assert_eq!(maerg_registry.as_str(), runner_registry);
         assert_eq!(
-            engine_registry.as_str(),
+            maerg_registry.as_str(),
             "sha256:4d3fc763437bea9217f14b2bc9b5201dbf78ea13ac0ef390497cc54896ab9486"
         );
 
-        let engine_git = git_identity(
+        let maerg_git = git_identity(
             "https://git.example.invalid/dependency.git",
             "0123456789abcdef0123456789abcdef01234567",
         );
@@ -922,9 +922,9 @@ mod planning {
             "https://git.example.invalid/dependency.git",
             "0123456789abcdef0123456789abcdef01234567",
         );
-        assert_eq!(engine_git.as_str(), runner_git);
+        assert_eq!(maerg_git.as_str(), runner_git);
         assert_eq!(
-            engine_git.as_str(),
+            maerg_git.as_str(),
             "sha256:3405bc5e24e0f91ff11d2271a69f9c9b7a0547adb6acace6d10638fee39d2fe6"
         );
     }

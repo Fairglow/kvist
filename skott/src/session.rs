@@ -1,7 +1,7 @@
 //! The transport-agnostic agent session and multi-turn loop.
 //!
 //! [`AgentSession`] owns the ordered conversation and builds turns.
-//! [`AgentRunner::run`] drives the loop against any [`ModelTransport`], executes
+//! [`Skott::run`] drives the loop against any [`ModelTransport`], executes
 //! the tool intents via a [`ToolExecutor`], and forwards progress through an
 //! [`EventSink`]. Nothing here performs blocking subprocess I/O directly; the
 //! executor is injected so the loop is unit-testable with fakes.
@@ -679,7 +679,7 @@ fn finish_reason_str(reason: &sav::FinishReason) -> &str {
 }
 
 /// The multi-turn loop driver.
-pub struct AgentRunner {
+pub struct Skott {
     pub max_turns: u32,
     /// How to retry a turn that ends in a transient, recoverable failure.
     pub retry: RetryPolicy,
@@ -687,9 +687,9 @@ pub struct AgentRunner {
     pub limits: RunLimits,
 }
 
-impl Default for AgentRunner {
+impl Default for Skott {
     fn default() -> Self {
-        AgentRunner {
+        Skott {
             max_turns: MAX_TURNS,
             retry: RetryPolicy::default(),
             limits: RunLimits::default(),
@@ -697,10 +697,10 @@ impl Default for AgentRunner {
     }
 }
 
-impl AgentRunner {
+impl Skott {
     /// Creates a loop driver with an explicit retry policy.
     pub fn with_retry(max_turns: u32, retry: RetryPolicy) -> Self {
-        AgentRunner {
+        Skott {
             max_turns,
             retry,
             limits: RunLimits::default(),
@@ -714,7 +714,7 @@ impl AgentRunner {
     }
 }
 
-impl AgentRunner {
+impl Skott {
     /// Runs the loop to completion, streaming [`Event`]s through `sink`.
     ///
     /// Each parameter is a distinct collaborator the loop needs: `session` (the

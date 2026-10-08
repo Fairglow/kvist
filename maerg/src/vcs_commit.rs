@@ -174,7 +174,7 @@ fn verify_head_pre_digest(
 
 /// Loads the acceptance record from either an acceptance journal or a task attempt journal.
 pub fn load_acceptance_record(project_dir: &Path, acceptance_id: &str) -> Result<AcceptanceRecord> {
-    let attempts_dir = project_dir.join("engine/.kvist-attempts");
+    let attempts_dir = project_dir.join("maerg/.kvist-attempts");
 
     // 1. Check if a dedicated acceptance journal exists
     let acceptance_path = attempts_dir.join(format!("acceptance-{}.json", acceptance_id));

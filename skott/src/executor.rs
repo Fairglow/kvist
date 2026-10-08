@@ -167,7 +167,7 @@ pub(crate) fn resolve_file_helper(configured: Option<&Path>, workdir: &Path) -> 
         .map_err(|e| io_error("inspect native file helper", Some(display), e))?;
     if !metadata.is_file() {
         return Err(Error::SandboxBuild {
-            reason: "install agent-runner-file-tool as a regular non-link file".to_owned(),
+            reason: "install skott-file-tool as a regular non-link file".to_owned(),
         });
     }
     let workdir = workdir
@@ -224,7 +224,7 @@ pub(crate) fn stage_bytes(
     })?;
     check_cancelled(cancellation)?;
     let directory = tempfile::Builder::new()
-        .prefix(".agent-runner-payload-")
+        .prefix(".skott-payload-")
         .tempdir_in(parent)
         .map_err(|e| {
             io_error(

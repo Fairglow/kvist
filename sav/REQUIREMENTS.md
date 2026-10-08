@@ -1,6 +1,6 @@
 <!-- kvist-requirements-version: 1 -->
 
-# Agent Runtime Requirements
+# Sav Requirements
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
@@ -9,7 +9,7 @@ all capitals.
 
 ## Purpose and scope
 
-`agent-runtime` provides a reusable Linux-first Rust library and standalone CLI
+`sav` provides a reusable Linux-first Rust library and standalone CLI
 for bounded prompt acquisition, provider profile management, shell-free command
 rendering, process supervision, local model transport, and the planned
 provider-neutral native agent runtime.
@@ -200,6 +200,6 @@ review.
 
 The consumer boundary is defined in [`CONTRACT.md`](CONTRACT.md), private
 realization in [`DESIGN.md`](DESIGN.md), supplemental authority design in
-[`../../docs/agent-runtime/architecture.md`](../../docs/agent-runtime/architecture.md),
+[`../../docs/sav/architecture.md`](../../docs/sav/architecture.md),
 and Rig evaluation evidence in
-[`../../docs/agent-runtime/rig-evaluation.md`](../../docs/agent-runtime/rig-evaluation.md).
+[`../../docs/sav/rig-evaluation.md`](../../docs/sav/rig-evaluation.md).

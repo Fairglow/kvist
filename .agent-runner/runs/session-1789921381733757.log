@@ -1,0 +1,3 @@
+== session agent-runner-tiel-coder-35b-q4 started 561s ago ==
+[turn 1] reasoning: ...The user is asking for advice on design decisions for an "agent-runner" application. They have several questions:  1. Restore both prompts and output from the last session when it starts 2. A command to start a new fresh session 3. Log everything: input prompts, agent thinking, tool usage and results 4. Whether to remove thinking output after a prompt is complete, replacing it with a link to its log-file 5. A session handler where the user can return to a previous session and continue it 6. Whet
+[turn 1] list_dir zCT9bDUTpgk5bnJLAuNNWk2MzQsdDW77: 

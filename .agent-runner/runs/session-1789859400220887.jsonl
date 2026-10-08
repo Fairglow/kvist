@@ -1,0 +1,6 @@
+{"event":"session_start","session_id":"agent-runner-local","task_id":"agent-runner-local","timestamp":1789859414135}
+{"event":"turn_start","turn":1,"timestamp":1789859418187}
+{"event":"model_reasoning","turn":1,"reasoning":"The user is just saying \"hi\" — a simple greeting. No tools needed. Following the guidelines, I should respond naturally and concisely, and ask how I can help.\n"}
+{"event":"turn_finish","turn":1,"output_tokens":0,"finish_reason":"stop"}
+{"event":"prompt_eval","turn":1,"new_tokens":0}
+{"event":"session_finish","session_id":"agent-runner-local","task_id":"agent-runner-local","total_turns":1,"total_tokens":0,"success":true}

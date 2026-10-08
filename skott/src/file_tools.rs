@@ -665,7 +665,7 @@ impl WalkState {
 fn generated_directory(name: &str) -> bool {
     matches!(
         name,
-        ".git" | "target" | "node_modules" | "vendor" | "vendored" | ".agent-runner"
+        ".git" | "target" | "node_modules" | "vendor" | "vendored" | ".skott"
     )
 }
 

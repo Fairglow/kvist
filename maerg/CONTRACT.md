@@ -1,6 +1,6 @@
 <!-- kvist-contract-version: 1 -->
 
-# Kvist Engine Contract
+# Kvist Maerg Contract
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
@@ -9,7 +9,7 @@ all capitals.
 
 ## Boundary and ownership
 
-- **Component ID:** `kvist.engine`
+- **Component ID:** `kvist.maerg`
 - **Contract IDs:** `kvist.cli/v1`, `kvist.artifacts/v1`
 - **Owner:** Kvist root component
 - **Consumers:** human CLI users, scripts, future editor/web integrations, and
@@ -156,14 +156,14 @@ Commands are non-interactive unless their contract explicitly obtains terminal
 input; `prompt` (with a terminal), `shell`, the agent setup/configuration flows,
 and `task run` without TASK_ID (which confirms the suggested task) are the
 interactive exceptions. `prompt` obtains a terminal to open the standalone
-`agent-runner` shell; with no interactive terminal it runs the same shell
-headless (`agent-runner --headless --json`), which is sandbox-only and rejects
+`skott` shell; with no interactive terminal it runs the same shell
+headless (`skott --headless --json`), which is sandbox-only and rejects
 `--allow-host-execution`.
 Success is written to standard output. Domain failures are actionable, written
 to standard error, and return a nonzero status. Parser help returns success and
 parser input errors use the parser's nonzero status.
 
-`prompt` runs the standalone `agent-runner` shell in every case: on an
+`prompt` runs the standalone `skott` shell in every case: on an
 interactive terminal the shell is interactive (sandboxed and multi-turn by
 default, with an interactive `--allow-host-execution` opt-out); without a
 terminal it runs headless, inheriting the child's standard output. Global
@@ -325,7 +325,7 @@ require an explicit in-shell confirmation.
 
 Kvist requires:
 
-- `agent-runtime.library/v1` for prompt acquisition, command rendering,
+- `sav.library/v1` for prompt acquisition, command rendering,
   profiles, setup, process supervision, and model transports;
 - a selected Git or Jujutsu repository for durable-artifact tracking checks;
 - an independently installed runner implementing
@@ -412,7 +412,7 @@ later legal queue updates do not re-fence it.
 represented as sandboxed. `task run` now emits the redefined version-one
 sandbox request: a closed, typed value with an explicit phase, argument vector,
 working directory, environment, network capability, resource limits, and
-approval-bound grants. Before serialization the engine resolves `argv[0]` to a
+approval-bound grants. Before serialization the maerg resolves `argv[0]` to a
 canonical, non-symlink executable (a bare name only against an explicitly
 present request `PATH`, with no ambient host fallback) and replaces `argv[0]`
 with that canonical path; every grant source is canonical; the request policy
@@ -437,7 +437,7 @@ independently installed runner strictly parses and validates this request and
 rejects the retired shape, but Bubblewrap enforcement is not yet integrated, so
 a valid request fails closed and `task run` still cannot execute Kvist's own
 root workspace safely. There is no fallback to the legacy request or host
-execution. The engine builds fallible typed mediated-acquisition and offline-verification
+execution. The maerg builds fallible typed mediated-acquisition and offline-verification
 plans with distinct canonical UTF-8 host sources and fixed sandbox
 destinations. Acquisition is exactly `cargo fetch` using a real writable
 attempt-local `CARGO_HOME`, an isolated writable lockfile workspace, and
@@ -494,7 +494,7 @@ and scoped changes. Automatic selection, retry, and completion are not part of
 that tier.
 
 An acceptance with `--commit` creates one local commit from a canonical set of
-accepted paths and engine-written state. It leaves unrelated staged, unstaged,
+accepted paths and maerg-written state. It leaves unrelated staged, unstaged,
 and untracked paths unchanged and refuses any overlap or concurrent head
 change. Commit automation does not push or amend. A commit failure does not
 reverse acceptance; it returns the acceptance ID and leaves a retryable
@@ -520,11 +520,11 @@ performs a single, write-only authoring turn; the target tier runs a multi-turn
 loop that persists the agent's intermediate reasoning in a per-run trajectory
 and persists only the final brokered effect, preserving Kvist's durable,
 inspectable state rather than in-chat context. When `task run` executes an
-external agent, the engine performs each model turn on the host, outside the
+external agent, the maerg performs each model turn on the host, outside the
 effect sandbox. The selected model command must target a numeric loopback model
 gateway; any other command is refused before any transport work with
 `AgentCommandNotModelGateway`, so no agent command ever runs on the host outside
-the effect sandbox. The engine liveness-probes the gateway with a bounded TCP
+the effect sandbox. The maerg liveness-probes the gateway with a bounded TCP
 connect to the resolved endpoint before issuing the model turn. The probe issues
 no HTTP request, so it never loads, selects, or shifts a model slot; a gateway
 that does not accept a connection fails fast with `LocalModelGatewayUnreachable`
@@ -537,7 +537,7 @@ each turn's untrusted tool intents to capability-bound effects under a
 deny-by-default policy; a dropped intent fails that turn without ending the run.
 `read_file` is honored within the read scope and logged to the trajectory but
 produces no persisted effect. `write_file` and `edit_file` are reduced to the
-writable component scope and applied by the engine itself inside the effect
+writable component scope and applied by the maerg itself inside the effect
 sandbox against a read-only staged-intent mount; the host never writes component
 state for an effect, and only the final brokered effect of a run is persisted.
 `request_dependency` is evaluated by the broker's dependency-origin policy rather
@@ -563,7 +563,7 @@ profile timeout, covering the liveness probe, every model and brokered turn, eve
 retry backoff; the per-attempt transport deadline is the remaining budget. When
 the gateway accepts but a turn still hits a transient availability failure — a
 socket connection refused, timed out, interrupted, or reset error, a
-slot-allocation timeout, or an overall transport timeout — the engine retries it
+slot-allocation timeout, or an overall transport timeout — the maerg retries it
 up to three attempts with a short fixed backoff, then surfaces the error if it
 never succeeds. Response-level failures (a non-success HTTP status, a malformed
 or oversized response, or cancellation) are never retried, because they

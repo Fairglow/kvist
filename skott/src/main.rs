@@ -1,4 +1,4 @@
-//! Process entry point for the `agent-runner` binary.
+//! Process entry point for the `skott` binary.
 //!
 //! Logging initialisation, configuration resolution, and dispatch to the
 //! interactive terminal UI. All logic lives in the `skott` library;
@@ -27,7 +27,7 @@ fn run() -> skott::Result<ExitCode> {
     let cli = Cli::parse();
 
     // Importing Kvist agent profiles is a read-only, non-interactive command
-    // that does not need an agent-runner configuration.
+    // that does not need an skott configuration.
     if cli.import_kvist {
         return import_kvist(cli.kvist_config.clone())
             .map_err(|reason| Error::Config { path: None, reason });
@@ -116,7 +116,7 @@ fn run() -> skott::Result<ExitCode> {
 }
 
 /// Prints `[[models]]` entries derived from a Kvist project configuration so
-/// the project's agents can be reused in the agent-runner configuration.
+/// the project's agents can be reused in the skott configuration.
 fn import_kvist(kvist_config: Option<std::path::PathBuf>) -> std::result::Result<ExitCode, String> {
     let path = skott::resolve_kvist_config_path(kvist_config)?;
     let snippet = skott::import_models(&path).map_err(|error| error.describe())?;

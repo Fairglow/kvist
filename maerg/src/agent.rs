@@ -419,7 +419,7 @@ fn probe_gateway_reachable(endpoint: &str, budget: &TurnBudget) -> Result<()> {
     loop {
         let remaining = budget.remaining();
         if remaining.is_zero() {
-            return Err(KvistError::AgentRuntime(ModelError::ModelTransportTimedOut));
+            return Err(KvistError::Sav(ModelError::ModelTransportTimedOut));
         }
         let connect_timeout = Duration::from_secs(2).min(remaining);
         match std::net::TcpStream::connect_timeout(&addr, connect_timeout) {
@@ -589,7 +589,7 @@ fn complete_turn<T: ModelTransport>(
     let mut attempt = 1u32;
     loop {
         if budget.remaining().is_zero() {
-            return Err(KvistError::AgentRuntime(ModelError::ModelTransportTimedOut));
+            return Err(KvistError::Sav(ModelError::ModelTransportTimedOut));
         }
         let transport = make_transport()?;
         let (outcome, emitted) = if stream_output {
@@ -613,7 +613,7 @@ fn complete_turn<T: ModelTransport>(
                 thread::sleep(MODEL_TURN_RETRY_BACKOFF.min(budget.remaining()));
                 attempt += 1;
             }
-            Err(source) => return Err(KvistError::AgentRuntime(source)),
+            Err(source) => return Err(KvistError::Sav(source)),
         }
     }
 }
@@ -687,7 +687,7 @@ fn execute_host_turn(
                 budget.remaining(),
                 profile.max_output_bytes,
             )
-            .map_err(KvistError::AgentRuntime)
+            .map_err(KvistError::Sav)
         },
         &model_request,
         cancellation,
@@ -830,7 +830,7 @@ fn apply_authoring_effects(
         // the component state directory.
         let _ = fs::remove_file(&staged_path);
         if result.cancelled {
-            return Err(KvistError::AgentRuntime(sav::Error::Cancelled));
+            return Err(KvistError::Sav(sav::Error::Cancelled));
         }
         records.push(summarize_effect(effect, result));
     }
@@ -898,7 +898,7 @@ struct TurnFailure {
 impl TurnFailure {
     fn from_kvist_error(error: &KvistError) -> Self {
         let (timed_out, output_limit_exceeded, cancelled) = match error {
-            KvistError::AgentRuntime(model_error) => match model_error {
+            KvistError::Sav(model_error) => match model_error {
                 sav::Error::ModelTransportTimedOut
                 | sav::Error::SlotAllocationTimedOut { .. }
                 | sav::Error::TtftTimedOut { .. }
@@ -1087,7 +1087,7 @@ pub fn execute_agent(
                     Some(&failure),
                 )?;
                 if failure.cancelled {
-                    return Err(KvistError::AgentRuntime(sav::Error::Cancelled));
+                    return Err(KvistError::Sav(sav::Error::Cancelled));
                 }
                 return Ok(result);
             }
@@ -1935,7 +1935,7 @@ mod tests {
         assert!(
             matches!(
                 error,
-                KvistError::AgentRuntime(ModelError::ModelTransportTimedOut)
+                KvistError::Sav(ModelError::ModelTransportTimedOut)
                     | KvistError::LocalModelGatewayUnreachable { .. }
             ),
             "expected a timeout or unreachable classification, got {error:?}"
@@ -2170,7 +2170,7 @@ mod tests {
         assert!(
             matches!(
                 error,
-                KvistError::AgentRuntime(ModelError::ModelProviderStatus { status: 500 })
+                KvistError::Sav(ModelError::ModelProviderStatus { status: 500 })
             ),
             "unexpected error: {error:?}"
         );
@@ -2194,7 +2194,7 @@ mod tests {
         assert!(
             matches!(
                 error,
-                KvistError::AgentRuntime(ModelError::ModelTransportIo { .. })
+                KvistError::Sav(ModelError::ModelTransportIo { .. })
             ),
             "the last transient error must be surfaced: {error:?}"
         );
@@ -2217,7 +2217,7 @@ mod tests {
         .expect_err("a streamed attempt that emitted text must fail, not retry");
         assert!(matches!(
             error,
-            KvistError::AgentRuntime(ModelError::ModelTransportIo { .. })
+            KvistError::Sav(ModelError::ModelTransportIo { .. })
         ));
         assert_eq!(
             transport.attempt_count(),
@@ -2244,7 +2244,7 @@ mod tests {
         assert!(
             matches!(
                 error,
-                KvistError::AgentRuntime(ModelError::ModelTransportTimedOut)
+                KvistError::Sav(ModelError::ModelTransportTimedOut)
             ),
             "unexpected error: {error:?}"
         );
@@ -2445,24 +2445,24 @@ mod tests {
 
     #[test]
     fn turn_failure_classifies_deadlines_limits_and_cancellation() {
-        let timeout = TurnFailure::from_kvist_error(&KvistError::AgentRuntime(
+        let timeout = TurnFailure::from_kvist_error(&KvistError::Sav(
             ModelError::ModelTransportTimedOut,
         ));
         assert!(timeout.timed_out);
         assert!(!timeout.cancelled);
 
-        let cancelled = TurnFailure::from_kvist_error(&KvistError::AgentRuntime(
+        let cancelled = TurnFailure::from_kvist_error(&KvistError::Sav(
             ModelError::ModelTransportCancelled,
         ));
         assert!(cancelled.cancelled);
         assert!(!cancelled.timed_out);
 
-        let oversized = TurnFailure::from_kvist_error(&KvistError::AgentRuntime(
+        let oversized = TurnFailure::from_kvist_error(&KvistError::Sav(
             ModelError::ModelResponseLimitExceeded { max_bytes: 1 },
         ));
         assert!(oversized.output_limit_exceeded);
 
-        let other = TurnFailure::from_kvist_error(&KvistError::AgentRuntime(
+        let other = TurnFailure::from_kvist_error(&KvistError::Sav(
             ModelError::ModelProviderStatus { status: 500 },
         ));
         assert!(!other.timed_out && !other.output_limit_exceeded && !other.cancelled);

@@ -1,12 +1,12 @@
 # Standalone Agent Runtime: User Guide
 
-`agent-runtime` is a bounded, host-supervised Linux execution harness and inference client for AI agents and language models. It operates completely independently of the Kvist workflow engine, providing:
+`sav` is a bounded, host-supervised Linux execution harness and inference client for AI agents and language models. It operates completely independently of the Kvist workflow engine, providing:
 
 1. **Deterministic Host-Process Supervision:** Non-interactive, process-group-isolated execution with wall-clock timers, idle detectors, output bounds, and repetition breakers.
 2. **Direct Local Model Transport:** Zero-dependency HTTP streaming against local inference backends (`llama-server`, `Ollama`) with slot-allocation, time-to-first-token (TTFT), and inter-token cadence watchdogs.
 3. **Structured Grammar-Constrained Sampling:** Dynamic compilation of JSON Schemas and tool definitions into native GBNF (GGML BNF) grammars passed directly to `llama-server`.
 4. **Multi-Tier Loop Detection Engine:** Turn-level Action Hash Ring (Tier 1), environment observation invariant tracker (Tier 2), and N-gram reasoning similarity detector (Tier 3) with progressive soft corrections and temperature jitter.
-5. **Deterministic Session Trajectory Journaling & Replay:** Structured `.jsonl` event stream recording and turn-by-turn trajectory inspection (`agent-run replay`).
+5. **Deterministic Session Trajectory Journaling & Replay:** Structured `.jsonl` event stream recording and turn-by-turn trajectory inspection (`sav-run replay`).
 
 ---
 
@@ -14,25 +14,25 @@
 
 ### 1.1 Building and Installing
 
-`agent-runtime` is built as both a library crate and a standalone CLI binary named `agent-run`.
+`sav` is built as both a library crate and a standalone CLI binary named `sav-run`.
 
 To build the executable in release mode:
 
 ```bash
-cargo build --release -p agent-runtime
+cargo build --release -p sav
 ```
 
-The resulting binary will be located at `target/release/agent-run`. You can install it into your `$PATH` via:
+The resulting binary will be located at `target/release/sav-run`. You can install it into your `$PATH` via:
 
 ```bash
-cargo install --path agent_runtime
+cargo install --path sav
 ```
 
 Verify the installation:
 
 ```bash
-agent-run --version
-agent-run --help
+sav-run --version
+sav-run --help
 ```
 
 ---
@@ -42,13 +42,13 @@ agent-run --help
 The quickest way to configure your local or CLI providers is via the interactive setup wizard:
 
 ```bash
-agent-run setup
+sav-run setup
 ```
 
 The wizard will:
 1. Probe local network loopbacks and standard directories for installed model backends (`llama-server`, `Ollama`, `copilot`, `gemini`).
 2. Test connection and model readiness with a qualification prompt.
-3. Persist a reusable profile in `~/.config/agent-runtime/config.toml`.
+3. Persist a reusable profile in `~/.config/sav/config.toml`.
 
 ---
 
@@ -58,7 +58,7 @@ Send a prompt directly to a running `llama-server` or `Ollama` instance:
 
 ```bash
 # Query Ollama with streaming output
-agent-run model 
+sav-run model 
   --provider ollama 
   --endpoint http://127.0.0.1:11434 
   --model qwen2.5-coder:7b 
@@ -68,7 +68,7 @@ agent-run model
 
 ```bash
 # Query llama-server with reasoning display
-agent-run model 
+sav-run model 
   --provider llama-server 
   --endpoint http://127.0.0.1:8080 
   --model deepseek-r1 
@@ -85,7 +85,7 @@ Execute any agent script or command line under supervision, ensuring it cannot h
 
 ```bash
 # Supervise an agent run with automatic loop detection and restart policy
-agent-run run 
+sav-run run 
   --command "python3 run_agent.py --prompt {prompt}" 
   --detect-loops 
   --idle-timeout 60 
@@ -102,10 +102,10 @@ Step through and inspect an agent trajectory journal (`.jsonl`) generated during
 
 ```bash
 # Inspect the entire trajectory
-agent-run replay session_run.jsonl
+sav-run replay session_run.jsonl
 
 # Inspect up to turn 3 in machine-readable JSON format
-agent-run replay --max-turns 3 --json session_run.jsonl
+sav-run replay --max-turns 3 --json session_run.jsonl
 ```
 
 ---
@@ -114,9 +114,9 @@ agent-run replay --max-turns 3 --json session_run.jsonl
 
 ### 2.1 Configuration File Location
 
-`agent-run` reads profile configurations from the following location in order of precedence:
+`sav-run` reads profile configurations from the following location in order of precedence:
 1. Explicit path supplied via the `--config <PATH>` flag.
-2. `$XDG_CONFIG_HOME/agent-runtime/config.toml` (typically `~/.config/agent-runtime/config.toml`).
+2. `$XDG_CONFIG_HOME/sav/config.toml` (typically `~/.config/sav/config.toml`).
 3. Fallback legacy path `~/.config/supervised-agent/config.toml`.
 
 ---
@@ -153,7 +153,7 @@ command = "gemini -p '{prompt}'"
 
 ### 2.3 Template Placeholders
 
-When defining command templates, `agent-runtime` substitutes values safely without invoking an intermediate shell:
+When defining command templates, `sav` substitutes values safely without invoking an intermediate shell:
 
 | Placeholder | Description |
 | :--- | :--- |
@@ -167,7 +167,7 @@ When defining command templates, `agent-runtime` substitutes values safely witho
 
 ### 2.4 Supervision Policy Settings
 
-When running supervised processes (`agent-run run`), the harness applies strict bounds:
+When running supervised processes (`sav-run run`), the harness applies strict bounds:
 
 * **Idle Timeout (`--idle-timeout <SECONDS>`):** Maximum duration (default: 900s) allowed to elapse without bytes emitted on standard output or standard error. Prevents hanging processes waiting on unmonitored stdin.
 * **Attempt Timeout:** Optional maximum wall-clock duration permitted for a single attempt.
@@ -182,7 +182,7 @@ When running supervised processes (`agent-run run`), the harness applies strict 
 
 ### 3.1 Use Case: Direct Local Inference with Hardware Watchdogs
 
-Local inference engines running on consumer GPUs or CPUs frequently suffer from driver freezes, context allocation stalls, or prefill deadlocks. `agent-runtime` integrates three hardware watchdogs directly into its transport layer:
+Local inference engines running on consumer GPUs or CPUs frequently suffer from driver freezes, context allocation stalls, or prefill deadlocks. `sav` integrates three hardware watchdogs directly into its transport layer:
 
 ```
 [Prompt Sent] ---> [Slot Allocation Timeout (15s)]
@@ -199,7 +199,7 @@ Local inference engines running on consumer GPUs or CPUs frequently suffer from 
 
 #### Example: CLI Invocation
 ```bash
-agent-run model 
+sav-run model 
   --provider llama-server 
   --endpoint http://127.0.0.1:8080 
   --model default 
@@ -208,7 +208,7 @@ agent-run model
   "Refactor the error handling module in src/error.rs."
 ```
 
-If the server stalls while allocating context slots, `agent-run` detects the freeze, drops the socket connection immediately (releasing server resources), and reports:
+If the server stalls while allocating context slots, `sav-run` detects the freeze, drops the socket connection immediately (releasing server resources), and reports:
 ```
 error: slot allocation timed out after 15s
 ```
@@ -217,7 +217,7 @@ error: slot allocation timed out after 15s
 
 ### 3.2 Use Case: Grammar-Constrained Sampling via GBNF
 
-To guarantee that a local model never generates invalid syntax, unclosed quotes, or missing JSON fields, `agent-runtime` compiles JSON Schema constraints into native GBNF (GGML BNF) grammar rules:
+To guarantee that a local model never generates invalid syntax, unclosed quotes, or missing JSON fields, `sav` compiles JSON Schema constraints into native GBNF (GGML BNF) grammar rules:
 
 #### Step 1: Create a JSON Schema (`schema.json`)
 ```json
@@ -241,7 +241,7 @@ To guarantee that a local model never generates invalid syntax, unclosed quotes,
 
 #### Step 2: Query with Sampler-Level Enforcement
 ```bash
-agent-run model 
+sav-run model 
   --provider llama-server 
   --endpoint http://127.0.0.1:8080 
   --model default 
@@ -249,7 +249,7 @@ agent-run model
   "Identify the entrypoint file in this repository."
 ```
 
-`agent-runtime` compiles the schema into GBNF and injects it into the `/v1/chat/completions` payload:
+`sav` compiles the schema into GBNF and injects it into the `/v1/chat/completions` payload:
 ```bnf
 root_action_1 ::= (""read"" ws | ""write"" ws | ""patch"" ws | ""delete"" ws)
 root_line_number_2 ::= integer
@@ -265,13 +265,13 @@ The model's logits are constrained during sampling; generating responses that vi
 
 When running external coding agents (such as Aider, Cline, Goose, or custom Python agents), unsupervised processes can enter infinite retry loops, emit endless error cascades, or hang waiting for terminal input.
 
-`agent-run run` supervises the process:
+`sav-run run` supervises the process:
 * Spawns the process in its own detached process group (`setsid`).
 * Monopolizes child process reaping: on timeout or termination, sends `SIGTERM`, waits a drain period, and enforces cleanup with `SIGKILL` across the entire process group (`kill -9 -<pgid>`).
 * Emits supervisor retry context warning the next attempt about prior side effects.
 
 ```bash
-agent-run run 
+sav-run run 
   --command "aider --message {prompt}" 
   --idle-timeout 30 
   --max-retries 2 
@@ -311,7 +311,7 @@ You can replay and inspect historical trajectories for regression testing or off
 
 ```bash
 # Human-readable step-through
-agent-run replay run_482.trajectory.jsonl
+sav-run replay run_482.trajectory.jsonl
 
 # Output:
 # Replaying session `run_482` for task `refactor-auth`:
@@ -334,11 +334,11 @@ agent-run replay run_482.trajectory.jsonl
 
 ## 4. Rust Library API Guide
 
-If you are embedding `agent-runtime` directly into your own Rust applications, add the dependency to your `Cargo.toml`:
+If you are embedding `sav` directly into your own Rust applications, add the dependency to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-agent-runtime = { path = "agent_runtime" }
+sav = { path = "sav" }
 serde_json = "1.0"
 ```
 
@@ -347,7 +347,7 @@ serde_json = "1.0"
 Use `ActionHashRing` to prevent models from getting trapped in repetitive action cycles:
 
 ```rust
-use agent_runtime::{
+use sav::{
     ActionHashRing, LoopDecision, compute_action_hash, compute_observation_hash,
 };
 use serde_json::json;
@@ -398,7 +398,7 @@ fn main() {
 ### 4.2 Compiling Tool Definitions to GBNF
 
 ```rust
-use agent_runtime::{ToolDefinition, compile_tools_schema};
+use sav::{ToolDefinition, compile_tools_schema};
 use serde_json::json;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -442,7 +442,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust
 use std::time::Duration;
-use agent_runtime::{
+use sav::{
     CancellationToken, DirectModelTransport, LocalModelProvider, ModelMessage, ModelRequest, ToolChoice,
 };
 
@@ -474,8 +474,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Stream tokens with real-time watchdogs
     transport.stream(&request, &cancellation, &mut |event| {
         match event {
-            agent_runtime::ModelStreamEvent::TextDelta(text) => print!("{text}"),
-            agent_runtime::ModelStreamEvent::ReasoningDelta(r) => eprint!("{r}"),
+            sav::ModelStreamEvent::TextDelta(text) => print!("{text}"),
+            sav::ModelStreamEvent::ReasoningDelta(r) => eprint!("{r}"),
             _ => {}
         }
         Ok(())
@@ -490,6 +490,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## 5. Security & Isolation Considerations
 
-* **Host Process Authority:** `agent-run` operates on the host machine. While it enforces strict process group reaping (`setsid` + `SIGKILL`), CPU quotas, and output size caps, it does not create container or filesystem namespaces on its own. For root filesystem isolation or network containment, use Kvist's `sandbox_runner` boundary or bubblewrap (`bwrap`).
+* **Host Process Authority:** `sav-run` operates on the host machine. While it enforces strict process group reaping (`setsid` + `SIGKILL`), CPU quotas, and output size caps, it does not create container or filesystem namespaces on its own. For root filesystem isolation or network containment, use Kvist's `galla` boundary or bubblewrap (`bwrap`).
 * **Environment Redaction:** Secret environment variables and sensitive API tokens should not be embedded directly into command lines; use credential files or stdin streaming where feasible.
 * **Bounded Staging:** Always configure `--max-output-bytes` and `--idle-timeout` on long-running commands to avoid filling disk partitions with runaway log generation.

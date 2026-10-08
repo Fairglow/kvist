@@ -3,21 +3,21 @@
 # Component Implementation Record
 
 > Historical evidence notice: this record predates the one-way move from the
-> repository-root Rust layout to `engine/`. Its original evidence paths are
+> repository-root Rust layout to `maerg/`. Its original evidence paths are
 > retained rather than rewritten as a new clean-slate derivation.
 
 ## Evidence boundary
 
 This record was derived from the Rust implementation files directly under
 `src/`, the integration tests under `tests/`, and the root Cargo manifest.
-`src/agent_runtime/` was not inspected and is treated as an opaque dependency.
+`src/sav/` was not inspected and is treated as an opaque dependency.
 No intent, architecture, existing implementation-record, review, guide, or
 version-control evidence was used.
 
 The root package is `kvist` version `0.2.0`, uses Rust edition 2024, declares a
 minimum Rust version of 1.94, forbids unsafe code in the library, and fails
 compilation on non-Linux targets. It builds a library and a CLI binary. The
-workspace also names the opaque `agent-runtime` package as a path dependency.
+workspace also names the opaque `sav` package as a path dependency.
 
 ## Observed process boundary
 
@@ -295,7 +295,7 @@ otherwise, and hard-splits only words longer than the available width.
 
 - Accepts exactly one direct prompt source, `--file`, or `--editor` according
   to Clap conflicts; detailed acquisition is delegated to the opaque
-  `agent-runtime` dependency.
+  `sav` dependency.
 - Requires `--allow-host-execution`; without it the opaque runtime supplies the
   error.
 - Selects developer, architect, or security-reviewer configuration. An
@@ -454,7 +454,7 @@ otherwise, and hard-splits only words longer than the available width.
 - Public result structures generally expose owned paths, classifications,
   bounded output, token counts, timestamps, or diagnostics. `KvistError` is
   non-exhaustive and is the shared domain error.
-- Several public root functions call `agent-runtime` for prompt acquisition,
+- Several public root functions call `sav` for prompt acquisition,
   command rendering, supervision, profile storage/collection, and runtime
   errors. Only the arguments supplied and results consumed by the root
   component are established here.
@@ -531,7 +531,7 @@ pass/fail result.
 
 ## Uncertainty and limits of this record
 
-- The opaque `agent-runtime` implementation was not read. Its internal prompt
+- The opaque `sav` implementation was not read. Its internal prompt
   limits, editor behavior, command grammar, provider qualification,
   supervision, retry/loop detection, profile persistence, and error semantics
   are unknown except where root code supplies inputs or consumes outputs.

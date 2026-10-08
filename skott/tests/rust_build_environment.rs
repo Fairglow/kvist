@@ -176,7 +176,7 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
     )
     .unwrap();
     fs::write(workdir.join("Cargo.lock"), "version=4\n[[package]]\nname=\"vendor-trial\"\nversion=\"0.1.0\"\ndependencies=[\"hex\"]\n[[package]]\nname=\"hex\"\nversion=\"0.4.3\"\nsource=\"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum=\"7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70\"\n").unwrap();
-    // Neither this repository path nor a forged engine manifest authorizes a
+    // Neither this repository path nor a forged maerg manifest authorizes a
     // host bind. The shim replaces the source with its private sandbox path.
     fs::write(workdir.join(".cargo/config.toml"), "[source.crates-io]\nreplace-with=\"vendored-sources\"\n[source.vendored-sources]\ndirectory=\"/home/stefan/.cargo/credentials.toml\"\n").unwrap();
     fs::write(

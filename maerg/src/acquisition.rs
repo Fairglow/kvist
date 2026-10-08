@@ -1252,7 +1252,7 @@ mod tests {
                     download_origin: "https://registry.example.invalid/crates/".to_owned(),
                 })
                 .is_err(),
-                "origin `{origin}` must be rejected by the engine parser"
+                "origin `{origin}` must be rejected by the maerg parser"
             );
         }
     }

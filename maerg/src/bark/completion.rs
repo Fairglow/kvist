@@ -1055,14 +1055,14 @@ mod tests {
         };
         scopes.insert(".".into(), root);
 
-        let engine = ComponentScope {
+        let maerg = ComponentScope {
             tasks: vec![task("build-tree")],
             attempts: BTreeMap::new(),
         };
-        scopes.insert("engine".into(), engine);
+        scopes.insert("maerg".into(), maerg);
 
         DynamicState::new(
-            vec![".".into(), "engine".into()],
+            vec![".".into(), "maerg".into()],
             scopes,
             vec!["llama-cli".into(), "ollama".into()],
             Some("feature/shell".into()),
@@ -1084,13 +1084,13 @@ mod tests {
     #[test]
     fn component_positional_offers_component_paths() {
         let c = completer_with_state(fixture_state());
-        assert_eq!(values(&complete(&c, "task run ")), vec![".", "engine"]);
+        assert_eq!(values(&complete(&c, "task run ")), vec![".", "maerg"]);
     }
 
     #[test]
     fn component_positional_prefix_filters() {
         let c = completer_with_state(fixture_state());
-        assert_eq!(values(&complete(&c, "task run e")), vec!["engine"]);
+        assert_eq!(values(&complete(&c, "task run m")), vec!["maerg"]);
     }
 
     #[test]
@@ -1101,7 +1101,7 @@ mod tests {
             vec!["write-tests", "implement-code"]
         );
         assert_eq!(
-            values(&complete(&c, "task run engine ")),
+            values(&complete(&c, "task run maerg ")),
             vec!["build-tree"]
         );
     }
@@ -1136,7 +1136,7 @@ mod tests {
         // A task with no attempts offers nothing.
         assert!(complete(&c, "task finalize . implement-code ").is_empty());
         // A task in another component does not leak its attempts here.
-        assert!(complete(&c, "task finalize engine write-tests ").is_empty());
+        assert!(complete(&c, "task finalize maerg write-tests ").is_empty());
     }
 
     #[test]
@@ -1166,13 +1166,13 @@ mod tests {
     #[test]
     fn dynamic_values_do_not_leak_across_components() {
         let c = completer_with_state(fixture_state());
-        // The root's tasks must not appear when completing engine's tasks.
+        // The root's tasks must not appear when completing maerg tasks.
         assert_eq!(
-            values(&complete(&c, "task run engine ")),
+            values(&complete(&c, "task run maerg ")),
             vec!["build-tree"]
         );
-        // The root's attempts must not appear under engine's tasks.
-        assert!(complete(&c, "task finalize engine build-tree ").is_empty());
+        // The root's attempts must not appear under tasks.
+        assert!(complete(&c, "task finalize maerg build-tree ").is_empty());
     }
 
     #[test]
@@ -1188,20 +1188,20 @@ mod tests {
 
     #[test]
     fn current_component_is_offered_first() {
-        let c = completer_with_state_and_focus(fixture_state(), Some("engine"));
-        assert_eq!(values(&complete(&c, "task run ")), vec!["engine", "."]);
+        let c = completer_with_state_and_focus(fixture_state(), Some("maerg"));
+        assert_eq!(values(&complete(&c, "task run ")), vec!["maerg", "."]);
     }
 
     #[test]
     fn current_component_is_offered_first_in_the_run_builtin() {
-        let c = completer_with_state_and_focus(fixture_state(), Some("engine"));
+        let c = completer_with_state_and_focus(fixture_state(), Some("maerg"));
         // The bare `run` builtin completes its component from the focus.
-        assert_eq!(values(&complete(&c, "run ")), vec!["engine", "."]);
+        assert_eq!(values(&complete(&c, "run ")), vec!["maerg", "."]);
     }
 
     #[test]
     fn typed_component_still_scopes_tasks_over_the_current_component() {
-        let c = completer_with_state_and_focus(fixture_state(), Some("engine"));
+        let c = completer_with_state_and_focus(fixture_state(), Some("maerg"));
         assert_eq!(
             values(&complete(&c, "task run . ")),
             vec!["write-tests", "implement-code"]
@@ -1211,7 +1211,7 @@ mod tests {
     #[test]
     fn unknown_current_component_changes_no_ordering() {
         let c = completer_with_state_and_focus(fixture_state(), Some("ghost"));
-        assert_eq!(values(&complete(&c, "task run ")), vec![".", "engine"]);
+        assert_eq!(values(&complete(&c, "task run ")), vec![".", "maerg"]);
     }
 
     // ---- Stage 7: rich descriptions and the `--` separator ----------------
@@ -1277,13 +1277,13 @@ mod tests {
 
     #[test]
     fn current_component_candidate_carries_a_description() {
-        let c = completer_with_state_and_focus(fixture_state(), Some("engine"));
+        let c = completer_with_state_and_focus(fixture_state(), Some("maerg"));
         let res = complete(&c, "task run ");
-        let engine = res
+        let maerg = res
             .iter()
-            .find(|candidate| candidate.value == "engine")
+            .find(|candidate| candidate.value == "maerg")
             .expect("candidate present");
-        assert_eq!(engine.description.as_deref(), Some("current component"));
+        assert_eq!(maerg.description.as_deref(), Some("current component"));
         let root = res
             .iter()
             .find(|candidate| candidate.value == ".")

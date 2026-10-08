@@ -1,0 +1,1978 @@
+== session agent-runner-tiel-coder-35b-q4 started 12s ago ==
+[turn 1] reasoning: The user just said hello. I should respond directly.
+== session agent-runner-tiel-coder-35b-q4 finished: 1 turns, 0 tokens, 14s, ok ==
+== session agent-runner-tiel-coder-35b-q4 started 177s ago ==
+[turn 2] reasoning: ...The user is asking for advice about implementing support for skill or instruction files like `.github/copilot-instructions.md`, `AGENTS.md`, etc. This is a design/architecture advisory question. But I don't have context about what "us" or "our" project is. This seems to be a question about their product/project decisions.  Let me think about whether I need to look at the project. The question is ambiguous about what "us" refers to. But this is a general advisory question about best practices. Le
+[turn 2] list_dir jHBkHGQGwM8gdnMh59i8QIx23dA0jtND: total 440
+drwxr-xr-x 16 1000 1000  4096 Sep 20 15:44 .
+drwxr-xr-x  9 1000 1000   260 Sep 20 15:46 ..
+drwxr-xr-x  3 1000 1000  4096 Sep 19 23:06 .agent-runner
+drwxr-xr-x  3 1000 1000  4096 Aug 24 17:49 .agents
+drwxr-xr-x  2 1000 1000  4096 Sep 11 21:30 .cargo
+drwxr-xr-x  8 1000 1000  4096 Sep 20 15:31 .git
+drwxr-xr-x  3 1000 1000  4096 Sep 19 22:10 .github
+-rw-r--r--  1 1000 1000   325 Sep 20 10:38 .gitignore
+drwxr-xr-x  3 1000 1000  4096 Sep 15 05:33 .kvist
+drwxr-xr-x  2 1000 1000  4096 Sep 15 20:04 .review-scratch
+drwxr-xr-x  2 1000 1000  4096 Aug 11 15:30 .zed
+-rw-r--r--  1 1000 1000 13410 Sep  4 19:59 ARCHITECTURE.md
+-rw-r--r--  1 1000 1000   878 Sep  4 19:59 COMMERCIAL-LICENSE.md
+-rw-r--r--  1 1000 1000 19649 Sep  1 21:17 COMPLIANCE_REVIEW.md
+-rw-r--r--  1 1000 1000  1559 Sep  4 19:59 CONTRIBUTING.md
+-rw-r--r--  1 1000 1000 63768 Sep 20 06:58 Cargo.lock
+-rw-r--r--  1 1000 1000   265 Sep 19 22:10 Cargo.toml
+-rw-r--r--  1 1000 1000 22495 Sep 15 17:04 GUIDE.md
+-rw-r--r--  1 1000 1000 19165 Sep  4 19:59 KVIST_Architectural_Specification_Full.md
+-rw-r--r--  1 1000 1000 34523 Sep  4 19:59 LICENSE
+-rw-r--r--  1 1000 1000 63033 Sep 18 08:15 README.md
+-rw-r--r--  1 1000 1000  6648 Sep  4 19:59 REVIEW_RUNBOOK.md
+-rw-r--r--  1 1000 1000  4736 Sep  4 19:59 ROOT_CONTRACT.md
+-rw-r--r--  1 1000 1000 35628 Sep 18 08:16 TODO.md
+-rw-r--r--  1 1000 1000  5144 Aug 31 19:06 VISION.md
+-rw-r--r--  1 1000 1000 16790 Sep 18 18:07 _kvist_todos-design-review.md
+-rw-r--r--  1 1000 1000  3539 Sep 20 15:44 _next_prompt.md
+drwxr-xr-x  4 1000 1000  4096 Sep 20 06:58 agent_runner
+-rw-r--r--  1 1000 1000  1008 Sep 19 23:12 agent_runner.toml
+drwxr-xr-x  6 1000 1000  4096 Sep 18 13:29 agent_runtime
+-rw-r--r--  1 1000 1000   528 Sep  4 19:59 deny.toml
+drwxr-xr-x  4 1000 1000  4096 Sep  5 06:53 docs
+drwxr-xr-x  6 1000 1000  4096 Sep 20 15:41 engine
+-rw-r--r--  1 1000 1000  2093 Sep 13 10:11 issues.txt
+-rw-r--r--  1 1000 1000  1129 Sep 15 17:04 justfile
+-rw-------  1 1000 1000  2831 Sep 18 08:27 kvist.toml
+-rw-r--r--  1 1000 1000  3909 Sep 18 08:16 kvist.toml.example
+drwxr-xr-x  9 1000 1000  4096 Sep  5 11:38 node_modules
+-rw-r--r--  1 1000 1000  5750 Sep  9 22:00 package-lock.json
+-rw-r--r--  1 1000 1000   151 Sep  9 21:59 package.json
+drwxr-xr-x  7 1000 1000  4096 Sep 18 08:16 sandbox_runner
+
+[turn 3] reasoning: This appears to be a Rust project. There's an agent_runner, agent_runtime, engine, sandbox_runner. There are already `.agents`, `.github`, and `_next_prompt.md`. Let me look at the key files to understand what "we" are building. Let me check the .agents directory, the _next_prompt.md, and the project structure.
+[turn 3] read_file xLzgkWzX6fPRDEGAU6dklHzr56pXIQNb: # Next prompt ideas
+
+When things become complicated, remember the principle, divide and conquer.
+
+---
+
+Make sure integration with the llama-server is first-class, reliable and fully-featured. This is our main focus and needs full attention. We want to support that integration fully, even with features and handling that might not be general. Just keep a common part and support specific per agent integration. Depending on what is supported in each case. If there is common ground here, then please support that common-ground, but also allow for specifics on top of it. Because we want to have the ability to integrate fully with each of them.
+
+- [ ] Can we and should we start the `llama-server` ourselves?
+
+  That would allow handling of its output, if necessary. Perhaps we have the
+  same information available anyway. Otherwise that might be a way to collect
+  it, as it does provide information about its current progress.
+
+- [ ] Should we add tools for the agent to interact with the TODOS file?
+
+  Is that possible and advisable? Would that help with
+  adding/changing/listing/removing those items? We'd rather have Kvist do that,
+  rather than an agent.
+
+- [ ] Full Markdown support in all output, and input.
+
+  Can we have extension too, like full support for the GitHub variant, and with
+  tables too? What about maths? And other common things? What are the
+  alternatives here? What is the BKM? What is expected from a tool like this?
+
+- [ ] Support for .github/copilot-instructions.md
+
+  What other skills/instructions should be automatically loaded/parsed? What
+  about `AGENTS.md`? Any other documents?
+
+- [ ] Dependency package source code, must be available to the agent. This has
+  to be done autmatically and found automatically, according to the rules per
+  each programming language. For instance on my system the Rust deps are
+  available under the `~/.cargo/registry/cache/`. Make sure this is indentified
+  and all files underneath are always available to the agent and easily found
+  without searching for it. How should that work reliably?
+
+---
+
+Integrate the new agent-runner fully with Kvist, whenever prompting defer to
+it. However typically the user, in Kvist, you should not need to write prompts
+yourself. Kvist should do that for you.
+
+---
+
+- [X] Will agent auto-compact their context when it becomes full? Where's the cutoff for this, and is it configurable? What's the BKM?
+- [X] Are the TODOS.yaml up-to-date, relevant and accurate?
+- [ ] Are agent output saved to log files, and available for inspection:
+  - [ ] Including all thinking?
+  - [ ] Are there links to these files?
+- [ ] Are we fully ready for running Kvist on the project now?
+- [ ] Fuzzy testing?
+- [ ] View command for external tools:
+  - [ ] View patch diff from task
+  - [ ] View assessment/review/etc. document
+- [ ] TUI header/footer, with top/bottom bar with metadata
+- [?] Proper support for pretty-printed tabular content?
+- [?] Live progress view? (test what is there first)
+  - [ ] Progress bar, at least for compaction, with ETA (when possible)
+  - [ ] Token per second counts
+- [?] Kvist tree, should provide the hierarchy as a tree structure in the output?
+- [ ] In `agent role`, why are the available models listed as roles?
+- [ ] Isn't it enough to have top and bottom lines? Left edge maybe(?), but never a right edge
+- [ ] Add a CODEOWNER file, to allow others to contribute
+
+---
+
+- [ ] Editor plug-in for Kvist
+  - [ ] Zed
+  - [ ] RustRover (IntelliJ?)
+  - [ ] VSCode
+  - [?] neowim
+  - [?] emacs
+  - [ ] others?
+
+---
+
+
+[turn 3] list_dir z7zfKBp4Gz2PjsaYyecPWkv7i14aikQ5: total 12
+drwxr-xr-x  3 1000 1000 4096 Aug 24 17:49 .
+drwxr-xr-x 16 1000 1000 4096 Sep 20 15:44 ..
+drwxr-xr-x  3 1000 1000 4096 Aug 24 18:05 skills
+
+[turn 3] list_dir 6QnkkEa0m1JbydNIIBH44rCwwj77Ng8M: total 28
+drwxr-xr-x  3 1000 1000 4096 Sep 19 22:10 .
+drwxr-xr-x 16 1000 1000 4096 Sep 20 15:44 ..
+-rw-r--r--  1 1000 1000  932 Sep  4 19:59 FUNDING.yml
+-rw-r--r--  1 1000 1000 8296 Sep 20 14:37 copilot-instructions.md
+drwxr-xr-x  2 1000 1000 4096 Sep 15 17:04 workflows
+
+[turn 3] read_file 2wJYZg504LqxZFU9Vry2mtZ3o9gypAXd: # Example agent-runner configuration.
+schema_version = 1
+
+# Optional override for the working directory; defaults to the process
+# current directory when omitted. Must be absolute and exist.
+working_directory = "/opt/proj/kvist"
+
+default_model = "tiel-coder-35b-q4"
+default_thinking_effort = "xhigh"
+
+# Models selectable in the UI with -m/--model.
+[[models]]
+id = "qwen38-27b-q4-swift"
+provider = "llama-server"
+base_url = "http://127.0.0.1:9931"
+model = "Swift-Qwen3.8-27B-Q4_K_M"
+deadline_secs = 120
+
+[[models]]
+id = "tiel-coder-35b-q4"
+provider = "llama-server"
+base_url = "http://127.0.0.1:9931"
+model = "Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL"
+deadline_secs = 120
+
+# The independent sandbox enforcement boundary.
+[sandbox]
+runner = "/opt/target/release/kvist-sandbox-runner"
+backend = "/usr/bin/bwrap"
+
+# Tool policy. The denylist entries below are appended to the built-in safe
+# minimum, which already forbids clearly destructive commands.
+[tool_policy]
+shell_deny_substrings = []
+shell_deny_prefixes = []
+
+[turn 4] reasoning: This is interesting. There's already a `.github/copilot-instructions.md`, and a `.agents/skills` directory. Let me look at these to understand what's already there and what the project structure is. Let me also check the agent_runner directory and the engine to understand how prompting works.
+[turn 4] read_file JPZ3mV4kA3Of6daGvAzMaexj81iPrsoe: cat: /workspace/.agents/skills: Is a directory
+
+[turn 4] read_file tXMd2vEw17b0nEXge33mELMQCZ2NUAwq: # Kvist Copilot Instructions
+
+## Project intent
+
+Kvist is a production-quality, headless Rust CLI that enforces a recursive,
+architecture-driven workflow for human-directed AI development. Product
+direction is authoritative in [`VISION.md`](../VISION.md), system structure in
+[`ARCHITECTURE.md`](../ARCHITECTURE.md), and the standards posture in
+[`docs/standards.md`](../docs/standards.md). Read the relevant documents before
+proposing or implementing a feature. Preserve these non-negotiable principles:
+
+- **Structure before syntax:** define and validate a component's requirements,
+  public contract, constraints, and test strategy before implementing it.
+- **Filesystem-native, recursive components:** a component directory owns
+  `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, `TODOS.yaml`, `IMPL.md`,
+  tests, and implementation.
+- **Durable, inspectable state:** persist workflow state in version-controlled
+  project files, never only in chat context or an opaque database.
+- **Strict context boundaries:** the immediate parent `CONTRACT.md` is the only
+  implicit propagated component context. Work from local artifacts, that
+  parent contract, and global constraints; do not couple a component to peer
+  implementations. General explicitly declared provider-contract
+  materialization remains deferred.
+- **Independent compliance review:** an implementer must not certify its own
+  work. A clean-slate context derives `IMPL.md` without reading intent
+  documents, and a separate source-blind context compares requirements,
+  contract, and design with observed and test evidence.
+- **Advisory intent review:** controlled intent should receive a
+  bounded AI review opportunity before acceptance when reasonable, or a
+  deliberate explicit exception. Findings are nonbinding, may be wrong or
+  overly exacting, and never determine compliance.
+
+## Change workflow
+
+1. Inspect `VISION.md`, `ARCHITECTURE.md`, `ROOT_CONTRACT.md`, the local
+   `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, immediate parent
+   `CONTRACT.md` when present, and `TODOS.yaml` before changing an existing
+   component. Treat each artifact's authority as binding.
+2. If a component does not yet have these artifacts, define or update the
+   requirements, consumer contract, design, and task breakdown before its
+   implementation. Do not silently invent externally observable behavior:
+   identify unresolved product decisions or use a clearly documented,
+   conservative assumption.
+3. Put outcomes, constraints, acceptance criteria, and verification obligations
+   in `REQUIREMENTS.md`; consumer-visible interfaces and semantics in
+   `CONTRACT.md`; and private structure, algorithms, state transitions, edge
+   cases, and recovery in `DESIGN.md`. Reference optional native schemas from
+   `CONTRACT.md` with exact paths and dialect/version.
+4. Make `TODOS.yaml` atomic, ordered, and traceable to requirements. Each
+   component queue must include `write_tests`, `implement_code`,
+   `security_audit`, and `compliance_review`, in that order.
+5. When the planned advisory-review mechanism exists, request and record review
+   for the exact local `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, and
+   canonical task-definition projection before acceptance, or record the
+   explicit project opt-out or per-bundle exception. Acknowledge findings
+   without treating them as binding. Do not include peer or parent internals,
+   and do not treat review receipts or reports as compliance evidence.
+   Generated intent drafts are included. When a later project-level acceptance
+   surface exists, apply its review opportunity to controlled project intent
+   such as vision, architecture, root contract, ADRs, and referenced native
+   schemas.
+6. Write failing tests from the approved intent before production code. Update
+   tests, affected intent documents, and task state together only when a
+   deliberate change is approved.
+7. After implementation, derive `IMPL.md` from source and test evidence in a
+   clean-slate context that excludes all intent documents, the queue, prior
+   record, architecture/root intent, prior reviews, chat history, and Git
+   history. A separate reviewer compares requirements, contract, and design
+   with `IMPL.md` and test evidence. Report discrepancies for explicit human
+   arbitration; never conceal them by automatically changing either side.
+
+Current enforcement note: `component accept` only structurally validates and
+records revisions. Advisory-review receipts, acknowledgement/exception
+enforcement, project-level acceptance, IMPL-derived intent proposals, and
+contract-clause traceability are not implemented. Do not fabricate receipts,
+reports, command results, or current interfaces. The rubber-duck review in the
+parent context for the documentation change that introduced this policy is
+advisory input, not a Kvist receipt.
+
+## Rust engineering standards
+
+- Target stable Rust edition 2024. Prefer the standard library and a small,
+  justified dependency graph; add dependencies only when their capability,
+  maintenance, licensing, and security impact are appropriate for a local,
+  single-binary CLI.
+- Keep the engine headless and portable. Do not require cloud services,
+  telemetry, credentials, or a runtime daemon for core commands. External LLM
+  tools are optional subprocess integrations and must fail clearly when absent.
+- Model invalid states out of existence with types. Use explicit domain errors
+  (`Result` and meaningful error types); never use `unwrap`, `expect`, or
+  panics for recoverable input, filesystem, parsing, subprocess, or network
+  failures.
+- Define clear ownership and concurrency boundaries. Do not introduce shared
+  mutable state, blocking I/O in async paths, background processes, or unsafe
+  code without a documented invariant and targeted tests.
+- Treat filesystem data, YAML, Markdown, subprocess output, environment
+  variables, and paths as untrusted input. Validate schemas and bounds, avoid
+  shell interpolation, preserve atomic writes, and produce actionable,
+  non-secret error messages.
+- Expose small, documented module interfaces. Keep `main.rs` limited to CLI
+  setup and command dispatch; place business logic in testable library modules.
+  Use rustdoc for public APIs and non-obvious invariants.
+- Prefer deterministic behavior: stable ordering, explicit configuration,
+  reproducible output, and no hidden network or filesystem side effects.
+
+## Quality gates
+
+- The current artifact model is pre-release and intentionally has no backward
+  compatibility or migration. Do not recognize retired component documents,
+  command spellings, or queue fields. A local contract change affects declared
+  consumers; only an immediate parent `CONTRACT.md` change propagates
+  implicitly to a child.
+- For sandboxed task execution, the component is writable at
+  `/workspace/component`; `ROOT_CONTRACT.md` is read-only at
+  `/workspace/context/ROOT_CONTRACT.md`; and a child's nearest ancestor
+  component contract is read-only at
+  `/workspace/context/PARENT_CONTRACT.md`. Transparent namespace directories
+  may separate the child from that ancestor.
+- Cover normal behavior, boundary cases, malformed input, error propagation,
+  and platform-sensitive path behavior. Use unit tests for pure logic and
+  integration tests for CLI and filesystem workflows.
+- Run the smallest relevant existing formatter, lint, type-check, and test
+  commands after a code change. Do not weaken tests, skip checks, or change
+  production behavior merely to make validation pass.
+- Make surgical changes. Do not reformat, rename, or alter unrelated files.
+  Do not modify licensing terms without explicit authorization; Kvist uses
+  AGPL-3.0-or-later with optional separate commercial licensing as defined by
+  the project.
+
+## Conventional wisdom
+
+- When things get complicated, remember the principle of divide and conquer
+- Always maintain a structure with proper separation of concerns
+- Logging and transparency, be honest and informative about what's going on in the system, at all times, but never spamming. Do it responsibly and at an appropriate log level
+- Error handling must be robust and resilient, always informative and useful
+- All source code for Rust dependencies can be under `~/.cargo/registry/cache/index.crates.io-*/`.
+
+[turn 4] list_dir NR4AxT7YLg1TM7iwxI6D8bNhFvKuC1pK: total 108
+drwxr-xr-x  4 1000 1000  4096 Sep 20 06:58 .
+drwxr-xr-x 16 1000 1000  4096 Sep 20 15:44 ..
+-rw-r--r--  1 1000 1000 16529 Sep 19 22:10 CONTRACT.md
+-rw-r--r--  1 1000 1000  1099 Sep 20 06:58 Cargo.toml
+-rw-r--r--  1 1000 1000 12626 Sep 19 22:10 DESIGN.md
+-rw-r--r--  1 1000 1000  2657 Sep 19 22:10 README.md
+-rw-r--r--  1 1000 1000  6328 Sep 19 22:10 REQUIREMENTS.md
+-rw-r--r--  1 1000 1000 34528 Sep 19 22:10 TODOS.yaml
+-rw-r--r--  1 1000 1000   938 Sep 19 22:10 config.example.toml
+drwxr-xr-x  3 1000 1000  4096 Sep 20 07:52 src
+drwxr-xr-x  2 1000 1000  4096 Sep 19 22:10 tests
+
+[turn 4] list_dir zXVInWVuniiKOWqZa6GYu9F0papYRPSb: total 292
+drwxr-xr-x  6 1000 1000   4096 Sep 20 15:41 .
+drwxr-xr-x 16 1000 1000   4096 Sep 20 15:44 ..
+drwxr-xr-x  5 1000 1000   4096 Sep 12 14:18 .kvist
+drwxr-xr-x  2 1000 1000   4096 Sep 18 08:16 .kvist-attempts
+-rw-r--r--  1 1000 1000  13931 Sep  4 19:59 COMPLIANCE_REVIEW.md
+-rw-r--r--  1 1000 1000  25484 Sep 18 08:15 CONTRACT.md
+-rw-r--r--  1 1000 1000   1155 Sep 19 22:27 Cargo.toml
+-rw-r--r--  1 1000 1000  32450 Sep 18 13:27 DESIGN.md
+-rw-r--r--  1 1000 1000  28649 Sep  4 19:59 IMPL.md
+-rw-r--r--  1 1000 1000  21901 Sep 18 08:15 REQUIREMENTS.md
+-rw-------  1 1000 1000 138819 Sep 18 13:29 TODOS.yaml
+drwxr-xr-x  4 1000 1000   4096 Sep 18 08:15 src
+drwxr-xr-x  4 1000 1000   4096 Sep 19 18:26 tests
+
+[turn 5] reasoning: ...The user is asking me for advice on skill/instruction files. This is a design/architecture question, not an implementation request. I need to give a sharp, advice-oriented answer. Let me understand the context more before giving advice.  Let me understand the current state: 1. There's already a `.github/copilot-instructions.md` file (8296 bytes) with detailed Kvist-specific instructions. 2. There's an `.agents/skills` directory (I should look at what's in it). 3. There's a `docs/standards.md` re
+[turn 5] shell UAFJgFMvXsMzawZRXFL6WDsrE9B4TgOr: /workspace/.agents/skills
+/workspace/.agents/skills/README.md
+/workspace/.agents/skills/kvist-compliance
+/workspace/.agents/skills/kvist-compliance/queue-design.rs
+/workspace/.agents/skills/kvist-compliance/reviewed-queue-generation.rs
+/workspace/.agents/skills/kvist-compliance/component-intent-interview.rs
+/workspace/.agents/skills/kvist-compliance/component-design.rs
+/workspace/.agents/skills/kvist-compliance/clean-slate-documentation.rs
+/workspace/.agents/skills/kvist-compliance/implementation-and-test.rs
+/workspace/.agents/skills/kvist-compliance/human-arbitration.rs
+---STANDARDS---
+total 44
+drwxr-xr-x  4 1000 1000 4096 Sep  5 06:53 .
+drwxr-xr-x 16 1000 1000 4096 Sep 20 15:44 ..
+drwxr-xr-x  2 1000 1000 4096 Sep 18 08:16 agent-runtime
+drwxr-xr-x  2 1000 1000 4096 Sep 19 22:10 decisions
+-rw-r--r--  1 1000 1000 5143 Sep  5 06:54 logging.md
+-rw-r--r--  1 1000 1000 9902 Sep  5 06:54 standards.md
+-rw-r--r--  1 1000 1000 7692 Sep  4 19:59 why-kvist.md
+---git log---
+e2f178c fix(tui): concatenate reasoning fragments and follow latest output
+1a75c7d Add a streaming test
+7bf7e20 Inform about where to find deps source code
+7e0de6a fix(agent-runner): concatenate streamed tokens instead of one row per newline
+cba2f9f feat(agent-runner): ? types again; Enter/Shift+Enter/Ctrl+Enter submit rules; drop cursor-line underline
+f00d7c7 Ignore local agent runner config
+ce2ccc4 feat(agent-runner): interactive prompter UI, config discovery, and Kvist import
+ed4c4b5 fix(agent-runner): per-turn progress, compaction dedup, sandbox HOME; track review findings
+
+[turn 5] shell 4axthdkKLNmyNvjVy4yYCvHWefUJZYuz: /workspace/agent_runner/src/session.rs:125:        // The system prompt is host-owned instructions, so it leads the
+/workspace/engine/src/task_commands.rs:3297:Instructions:
+/workspace/engine/src/config.rs:156:            "copilot" => {
+/workspace/engine/src/config.rs:157:                "copilot --prompt '{prompt}'".to_owned()
+
+[turn 6] reasoning: Now I have a good understanding. Let me look at how the current prompt building works in agent_runner to understand the mechanics, and check the skills README. But I think I have enough to advise. Let me quickly look at the skills README and the session.rs prompt building to understand the current mechanism.  Actually, I have enough context to give a strong advisory. Let me read the skills README and the prompt building section briefly to make sure my advice is grounded in the actual code.
+[turn 6] read_file 9jSNlnynpZZjQmbj4ONuBncFDA5sGiMS: # Agent Skills Directory
+
+This directory contains **agent skills** — reusable, portable, self-contained components
+that can be invoked by the `kvist` CLI.
+
+## Architecture Overview
+
+```
+.agents/skills/
+├── kvist-compliance/          ← Rust component (Phase 3 automation)
+│   ├── SKILL.md              ← Human-readable documentation
+│   └── component-design.rs   ← Rust implementation
+├── kvist-architect/          ← Another Rust component
+├── kvist-sqlite/            ← Another Rust component
+└── markdown-skills/         ← Markdown-based skills
+    ├── document-summarizer/SKILL.md
+    └── text-classifier/SKILL.md
+```
+
+## Two Types of Skills
+
+### 1. Markdown Skills (`.md` + `SKILL.md`)
+
+**Purpose:** Simple, well-defined tasks that don't require Rust compilation.
+
+**When to use:**
+- Text processing (summarization, classification, extraction)
+- Markdown manipulation (formatting, conversion, validation)
+- Small utilities that don't need to integrate with Kvist's domain
+
+**Structure:**
+```
+my-skill/
+├── SKILL.md    ← Prompt + description + constraints
+└── (optionally) context/  ← Supporting files
+```
+
+The `SKILL.md` file contains the full skill definition: description, inputs,
+outputs, constraints, and the actual prompt template.
+
+### 2. Rust Components (`.rs` + `SKILL.md`)
+
+**Purpose:** Complex tasks that need to integrate with Kvist's CLI, access
+domain types, or produce structured outputs.
+
+**When to use:**
+- Tasks that need to access Kvist's `Task`, `Queue`, `Component` types
+- Tasks that produce structured JSON/TOML outputs
+- Tasks that need to integrate with Kvist's sandbox or queue system
+- Tasks that require compilation and distribution as binaries
+
+**Structure:**
+```
+my-component/
+├── SKILL.md      ← Human-readable documentation
+└── component.rs  ← Rust implementation
+```
+
+The `.rs` file is compiled into a binary that can be invoked directly from the
+CLI via `kvist skill <name> <args>`.
+
+Kvist compliance skills preserve the project artifact hierarchy:
+`VISION.md` -> `ARCHITECTURE.md` -> component `REQUIREMENTS.md`,
+`CONTRACT.md`, and `DESIGN.md` -> `TODOS.yaml` -> `IMPL.md`.
+`REQUIREMENTS.md` owns outcomes, constraints, acceptance, and verification;
+`CONTRACT.md` owns consumer-visible semantics and references optional native
+schemas; `DESIGN.md` owns private realization. The immediate parent
+`CONTRACT.md` is the only implicit propagated component context. Queue paths
+use one or more `..` segments followed by `CONTRACT.md` to reach the actual
+nearest ancestor component across transparent namespace directories.
+
+Queue-producing skills emit `requirements_revision`, `contract_revision`,
+`design_revision`, and `parent_contract`. Implementation skills enforce tests
+before production code. Clean-slate documentation excludes every intent
+document and prior record; compliance comparison is independent and cannot be
+performed by the implementer.
+
+Sandboxed implementation work receives one writable `/workspace/component`
+mount plus read-only `/workspace/context/ROOT_CONTRACT.md` and, for children,
+`/workspace/context/PARENT_CONTRACT.md`. General materialization of other
+explicitly declared provider contracts remains deferred.
+
+## Why Two Types?
+
+| Aspect | Markdown Skills | Rust Components |
+|--------|-----------------|-----------------|
+| **Portability** | Pure text, runs anywhere | Compiled binary, platform-specific |
+| **Integration** | No access to Kvist types | Full access to Kvist domain |
+| **Output** | Text/markdown only | Structured data (JSON, TOML) |
+| **Performance** | Interpreted, slower | Compiled, fast |
+| **Deployment** | Copy the `.md` file | Build and install binary |
+| **Complexity** | Low | High (full Rust project) |
+
+## How Skills Are Invoked
+
+### Markdown Skills
+
+```bash
+kvist skill document-summarizer /path/to/file.md
+```
+
+The CLI reads `SKILL.md`, parses it, and invokes the skill.
+
+### Rust Components
+
+```bash
+kvist skill component-design \
+  --requirements=REQUIREMENTS.md \
+  --contract=CONTRACT.md \
+  --design=DESIGN.md
+```
+
+The CLI compiles the Rust source and runs the resulting binary.
+
+## Directory Naming
+
+- **Dot-prefixed directories** (`.agents/skills/`) are **global** — they live
+  outside the project and are meant to be shared across projects.
+- **Subdirectories** like `kvist-compliance/` are **named by domain** — they
+  are not hidden files, they are organized by skill domain.
+- **Dot-prefixed files** (`.rs`, `.md`) are **unusual** but intentional:
+  they signal "this is a skill artifact, not a normal project file."
+
+## Project-Specific Skills
+
+For skills that are specific to *this* project (rather than global), they go
+into `.kvist/`:
+
+```
+.kvist/
+├── components/
+│   └── kvist-compliance/    ← Rust component for this project
+│       ├── SKILL.md
+│       └── component.rs
+├── skills/
+│   └── my-markdown-skill/   ← Markdown skill for this project
+│       └── SKILL.md
+└── SKILL.md                 ← Project-level skill
+```
+
+## Adding a New Skill
+
+### Markdown Skill
+
+1. Create a directory: `mkdir -p .agents/skills/my-skill`
+2. Create `SKILL.md` with your prompt and description
+3. (Optional) Add supporting files in a subdirectory
+4. Build the project with `cargo build`
+5. Run: `kvist skill my-skill <args>`
+
+### Rust Component
+
+1. Create a directory: `mkdir -p .agents/skills/my-component`
+2. Create `SKILL.md` with documentation
+3. Create `component.rs` with the implementation
+4. Add dependencies to `Cargo.toml`
+5. Build the project with `cargo build`
+6. Run: `kvist skill my-component <args>`
+
+## File Naming Conventions
+
+- `SKILL.md` — Always uppercase, first file in directory
+- `component.rs` or `skill.rs` — Implementation file
+- Lowercase directory names: `kvist-compliance`, `markdown-summarizer`
+- Dot-prefixed files: `.rs`, `.md` (signals "skill artifact")
+
+## See Also
+
+- [`SKILL.md`](../SKILL.md) — The meta-documentation for all skills
+- [Phase 3 Backlog](../TODO.md#phase-3-independent-compliance-automation) —
+  The skills being implemented in `kvist-compliance`
+
+[turn 6] read_file H1xFJgQOhk93FyC6cGXbQy8HSAujo4IY: //! The transport-agnostic agent session and multi-turn loop.
+//!
+//! [`AgentSession`] owns the ordered conversation and builds turns.
+//! [`AgentRunner::run`] drives the loop against any [`ModelTransport`], executes
+//! the tool intents via a [`ToolExecutor`], and forwards progress through an
+//! [`EventSink`]. Nothing here performs blocking subprocess I/O directly; the
+//! executor is injected so the loop is unit-testable with fakes.
+
+use std::time::Instant;
+
+use agent_runtime::{
+    CancellationToken, ModelMessage, ModelRequest, ModelStreamEvent, ModelTransport, ModelTurn,
+    ModelUsage, ReasoningEffort, ToolChoice, ToolDefinition, ToolIntent,
+};
+
+use crate::config::Model;
+use crate::context::ContextManager;
+use crate::error::Result;
+use crate::sandbox::ToolOutcome;
+
+/// The maximum number of model turns in one session before the loop stops.
+pub const MAX_TURNS: u32 = 50;
+/// The maximum bytes of a tool result folded back to the model.
+pub const MAX_TOOL_RESULT_BYTES: usize = 64 * 1024;
+
+/// A progress event emitted while a session runs.
+#[derive(Debug, Clone)]
+pub enum Event {
+    /// A model turn began.
+    TurnStart { model: String },
+    /// A fragment of model reasoning text.
+    Reasoning(String),
+    /// A fragment of model answer text.
+    Text(String),
+    /// A tool call was proposed by the model.
+    ToolCall { name: String },
+    /// A tool call finished; `failed` marks a non-zero or non-exiting result.
+    ToolResult { name: String, failed: bool },
+    /// The session produced a final answer.
+    Finished { message: String },
+    /// The session failed before producing an answer.
+    Failed(String),
+    /// A non-terminal notice (for example, a compaction that trimmed the model
+    /// context). Rendered as a muted line rather than an error.
+    Note(String),
+    /// Periodic context/token accounting, emitted after each turn, feeding the
+    /// live speed stat, the context bargraph, and the compaction progress bar.
+    Progress {
+        /// Cumulative input tokens so far.
+        input_tokens: u64,
+        /// Cumulative output tokens so far.
+        output_tokens: u64,
+        /// Tokens the model currently holds in context.
+        context_tokens: usize,
+        /// The model context limit, in tokens.
+        context_limit: usize,
+        /// Context utilization against the limit (`0.0..=1.0+`).
+        context_utilization: f64,
+        /// How close compaction is to the hard limit (`0.0..=1.0`).
+        compaction_progress: f64,
+        /// Session-wide tokens per second.
+        tokens_per_sec: f64,
+        /// Cumulative provider tokens observed across the session.
+        total_tokens: u64,
+        /// Wall-clock seconds since the run started.
+        elapsed_secs: f64,
+    },
+}
+
+/// The sink that receives [`Event`]s, typically a channel to the UI.
+pub trait EventSink: Send {
+    /// Forwards one event; an error (e.g. a closed channel) stops the loop.
+    fn send(&self, event: Event) -> Result<()>;
+}
+
+/// The transport-agnostic conversation state.
+pub struct AgentSession {
+    model: Model,
+    thinking_effort: ReasoningEffort,
+    system_prompt: String,
+    messages: Vec<ModelMessage>,
+    tool_defs: Vec<ToolDefinition>,
+    answer: Option<String>,
+}
+
+impl AgentSession {
+    /// Creates an empty session for one model.
+    pub fn new(
+        model: Model,
+        thinking_effort: ReasoningEffort,
+        tool_defs: Vec<ToolDefinition>,
+        system_prompt: String,
+    ) -> Self {
+        AgentSession {
+            model,
+            thinking_effort,
+            system_prompt,
+            messages: Vec::new(),
+            tool_defs,
+            answer: None,
+        }
+    }
+
+    /// Appends a user message. The session then has pending work.
+    pub fn push_user(&mut self, text: impl Into<String>) {
+        self.messages.push(ModelMessage::User(text.into()));
+    }
+
+    /// The model selector id for this session.
+    pub fn model_selector(&self) -> &str {
+        &self.model.id
+    }
+
+    /// The tool definitions offered to the model, whose count is used to size
+    /// the model context. Exposed so context accounting can include them.
+    pub fn tool_definitions(&self) -> &[ToolDefinition] {
+        &self.tool_defs
+    }
+
+    /// The next turn request, or `None` when there is no pending work.
+    pub fn next_request(&self) -> Option<ModelRequest> {
+        if self.messages.is_empty() {
+            return None;
+        }
+        // The system prompt is host-owned instructions, so it leads the
+        // conversation as a `System` message ahead of the user history.
+        let mut messages = Vec::with_capacity(self.messages.len() + 1);
+        if !self.system_prompt.is_empty() {
+            messages.push(ModelMessage::System(self.system_prompt.clone()));
+        }
+        messages.extend(self.messages.iter().cloned());
+        Some(ModelRequest {
+            model: self.model.model.clone(),
+            messages,
+            tools: self.tool_defs.clone(),
+            tool_choice: ToolChoice::Auto,
+            reasoning_effort: Some(self.thinking_effort),
+            output_schema: None,
+        })
+    }
+
+    /// Folds an assistant turn into the conversation and returns the tool
+    /// intents it proposed, which the caller must execute.
+    pub fn apply_assistant(&mut self, turn: ModelTurn) -> Vec<ToolIntent> {
+        let tool_intents = turn.tool_intents.clone();
+        self.messages.push(ModelMessage::Assistant {
+            text: turn.text.clone(),
+            tool_intents: turn.tool_intents,
+        });
+        if tool_intents.is_empty() {
+            self.answer = Some(turn.text);
+        }
+        tool_intents
+    }
+
+    /// Records one tool result, redacted and bounded, as a model message.
+    pub fn record_tool_result(&mut self, call_id: &str, name: &str, outcome: &ToolOutcome) {
+        let mut body = outcome.output_text(MAX_TOOL_RESULT_BYTES);
+        let stderr = outcome.error_text(MAX_TOOL_RESULT_BYTES);
+        if !stderr.is_empty() {
+            if !body.is_empty() {
+                body.push('\n');
+            }
+            body.push_str(&format!("[stderr] {stderr}"));
+        }
+        if outcome.timed_out {
+            body.push_str("\n[sandbox: wall-clock timeout]");
+        }
+        if outcome.output_limit_exceeded {
+            body.push_str(&format!(
+                "\n[sandbox: output limited to {} bytes]",
+                MAX_TOOL_RESULT_BYTES
+            ));
+        }
+        self.messages.push(ModelMessage::ToolResult {
+            call_id: call_id.to_owned(),
+            name: name.to_owned(),
+            content: body,
+        });
+    }
+
+    /// The token size of the conversation that would next be sent to the model,
+    /// plus the always-present tool definitions. Used to track context usage.
+    pub fn estimate_context_tokens(&self, tool_definitions: usize) -> usize {
+        crate::context::estimate_messages(&self.messages, tool_definitions)
+    }
+
+    /// Compacts the conversation when it crosses the manager's warm-up threshold,
+    /// rolling the oldest completed turns into a summary. Returns the compaction
+    /// metadata when anything was compacted, so the caller can log and display it.
+    pub fn maybe_compact(
+        &mut self,
+        manager: &mut ContextManager,
+        tool_definitions: usize,
+    ) -> Option<crate::context::Compaction> {
+        let context_tokens = self.estimate_context_tokens(tool_definitions);
+        if !manager.should_compact(context_tokens) {
+            return None;
+        }
+        let (condensed, compaction) = manager.compact(&self.messages, tool_definitions);
+        self.messages = condensed;
+        Some(compaction)
+    }
+
+    /// The current context utilization fraction against the hard limit.
+    pub fn utilization(&self, manager: &ContextManager, tool_definitions: usize) -> f64 {
+        let context_tokens = self.estimate_context_tokens(tool_definitions);
+        manager.utilization(context_tokens)
+    }
+
+    /// How close compaction is to the hard limit, as a progress fraction.
+    pub fn compaction_progress(&self, manager: &ContextManager, tool_definitions: usize) -> f64 {
+        let context_tokens = self.estimate_context_tokens(tool_definitions);
+        manager.compaction_progress(context_tokens)
+    }
+}
+
+/// Executes a tool intent and returns its sandbox outcome. Injected into the
+/// loop so the loop itself needs no process or filesystem access. The executor
+/// owns the working directory and the sandbox configuration.
+pub trait ToolExecutor: Send {
+    /// Renders and executes one tool intent inside the sandbox.
+    fn execute(&self, intent: &ToolIntent, cancellation: &CancellationToken)
+    -> Result<ToolOutcome>;
+}
+
+/// A durable, pluggable sink for the session record. The production
+/// implementation ([`crate::session_log::SessionLog`]) writes a structured
+/// journal and a readable transcript; tests can record in memory. Recording the
+/// full reasoning trace here is what keeps thinking inspectable even after
+/// compaction removes it from the model context.
+pub trait Recorder: Send {
+    /// Writes the session-start event. Called once, before the first turn.
+    fn session_start(&mut self);
+    /// Begins one turn, capturing its reasoning trace. Returns the turn index
+    /// used by later tool records.
+    fn turn_start(&mut self, turn: &ModelTurn) -> usize;
+    /// Completes one turn, folding in provider token usage.
+    fn turn_finish(&mut self, turn: usize, usage: &Option<ModelUsage>, finish_reason: &str);
+    /// Records an approved tool call and its sandbox outcome.
+    fn tool_result(
+        &mut self,
+        turn: usize,
+        call_id: &str,
+        tool: &str,
+        args: &serde_json::Value,
+        outcome: &ToolOutcome,
+    );
+    /// Writes the terminal session-finish event with session totals.
+    fn session_finish(&mut self, success: bool);
+}
+
+/// The outcome of running a session loop.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct RunSummary {
+    /// The final answer text, when the loop produced one.
+    pub answer: Option<String>,
+    /// The number of model turns performed.
+    pub turns: u32,
+    /// The number of tool calls executed.
+    pub tools_executed: u32,
+    /// Whether the user cancelled the loop.
+    pub cancelled: bool,
+    /// Whether the loop stopped after too many turns.
+    pub exhausted: bool,
+}
+
+/// Maps a `FinishReason` to a short, stable string for the session record.
+fn finish_reason_str(reason: &agent_runtime::FinishReason) -> &str {
+    match reason {
+        agent_runtime::FinishReason::Stop => "stop",
+        agent_runtime::FinishReason::Length => "length",
+        agent_runtime::FinishReason::ToolCalls => "tool_calls",
+        agent_runtime::FinishReason::ContentFilter => "content_filter",
+        agent_runtime::FinishReason::Other(s) => s.as_str(),
+    }
+}
+
+/// The multi-turn loop driver.
+pub struct AgentRunner {
+    pub max_turns: u32,
+}
+
+impl Default for AgentRunner {
+    fn default() -> Self {
+        AgentRunner {
+            max_turns: MAX_TURNS,
+        }
+    }
+}
+
+impl AgentRunner {
+    /// Runs the loop to completion, streaming [`Event`]s through `sink`.
+    ///
+    /// Each parameter is a distinct collaborator the loop needs: `session` (the
+    /// conversation), `transport` (the model), `executor` (sandbox tools),
+    /// `sink` (events to the UI), `cancellation` (cooperative interrupt),
+    /// `context` (rolling compaction bound), and an optional `recorder` that
+    /// captures the durable record (reasoning included) for later inspection.
+    /// Compaction only ever trims the model context; the recorder is the
+    /// durable source of truth.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run<M, E, S>(
+        &self,
+        session: &mut AgentSession,
+        transport: &M,
+        executor: &E,
+        sink: &S,
+        cancellation: &CancellationToken,
+        context: &mut ContextManager,
+        mut recorder: Option<&mut dyn Recorder>,
+    ) -> Result<RunSummary>
+    where
+        M: ModelTransport,
+        E: ToolExecutor,
+        S: EventSink,
+    {
+        let tool_definitions = session.tool_definitions().len();
+        let mut summary = RunSummary::default();
+        let mut turn = 0u32;
+        let started_at = Instant::now();
+        let mut cumulative_tokens: u64 = 0;
+        let mut cumulative_input: u64 = 0;
+        let mut cumulative_output: u64 = 0;
+
+        // Record the durable session boundary before any turn, so the record
+        // has a clean start (and a matching finish) even for an empty run.
+        if let Some(recorder) = recorder.as_mut() {
+            recorder.session_start();
+        }
+
+        while turn < self.max_turns {
+            let Some(request) = session.next_request() else {
+                break;
+            };
+            turn += 1;
+
+            sink.send(Event::TurnStart {
+                model: session.model_selector().to_owned(),
+            })?;
+
+            // Stream the turn, forwarding text/reasoning to the UI and recording
+            // each tool intent the model proposes so the UI can show it live.
+            // The callback must return `agent_runtime::Result`, so forwarding to
+            // the sink is best-effort: a closed channel only means the UI is gone,
+            // which the loop surfaces on the next turn's own `sink.send`.
+            let result = transport.stream(&request, cancellation, &mut |event| match event {
+                ModelStreamEvent::TextDelta(delta) => {
+                    if !delta.is_empty() {
+                        let _ = sink.send(Event::Text(delta));
+                    }
+                    Ok(())
+                }
+                ModelStreamEvent::ReasoningDelta(delta) => {
+                    if !delta.is_empty() {
+                        let _ = sink.send(Event::Reasoning(delta));
+                    }
+                    Ok(())
+                }
+                ModelStreamEvent::ToolIntent(intent) => {
+                    let _ = sink.send(Event::ToolCall {
+                        name: intent.name.clone(),
+                    });
+                    Ok(())
+                }
+            });
+
+            let turn_value = match result {
+                Ok(turn) => turn,
+                Err(error) => {
+                    sink.send(Event::Failed(error.to_string()))?;
+                    summary.cancelled = cancellation.is_cancelled();
+                    return Ok(summary);
+                }
+            };
+
+            // Capture the full record first: reasoning + finish + usage. This is
+            // the durable copy that compaction and the UI may later drop.
+            let turn_index = recorder.as_mut().map(|rec| rec.turn_start(&turn_value));
+            let finish_reason = finish_reason_str(&turn_value.finish_reason);
+            if let Some(recorder) = recorder.as_mut() {
+                recorder.turn_finish(turn_index.unwrap_or(0), &turn_value.usage, finish_reason);
+            }
+            if let Some(usage) = &turn_value.usage {
+                cumulative_tokens += usage.total_tokens;
+                cumulative_input += usage.input_tokens;
+                cumulative_output += usage.output_tokens;
+            }
+
+            // No tools proposed: this assistant text is the final answer.
+            let tool_intents = session.apply_assistant(turn_value);
+            let terminal = tool_intents.is_empty();
+
+            if !terminal {
+                for intent in tool_intents {
+                    if cancellation.is_cancelled() {
+                        summary.cancelled = true;
+                        return Ok(summary);
+                    }
+                    match executor.execute(&intent, cancellation) {
+                        Ok(outcome) => {
+                            summary.tools_executed += 1;
+                            session.record_tool_result(&intent.id, &intent.name, &outcome);
+                            if let Some(recorder) = recorder.as_mut() {
+                                recorder.tool_result(
+                                    turn_index.unwrap_or(0),
+                                    &intent.id,
+                                    &intent.name,
+                                    &intent.arguments,
+                                    &outcome,
+                                );
+                            }
+                            let _ = sink.send(Event::ToolResult {
+                                name: intent.name.clone(),
+                                failed: outcome.failed(),
+                            });
+                        }
+                        Err(error) => {
+                            // A rejected or failed tool is reported, not fatal.
+                            if let Some(recorder) = recorder.as_mut() {
+                                recorder.tool_result(
+                                    turn_index.unwrap_or(0),
+                                    &intent.id,
+                                    &intent.name,
+                                    &intent.arguments,
+                                    &crate::sandbox::ToolOutcome::rejected(),
+                                );
+                            }
+                            let _ = sink.send(Event::ToolResult {
+                                name: intent.name.clone(),
+                                failed: true,
+                            });
+                            let _ = sink.send(Event::Failed(error.describe()));
+                        }
+                    }
+
+                    // Compact the model context now that this turn is fully
+                    // recorded, so the next request stays within the model's
+                    // window. The record is untouched.
+                    if let Some(compaction) = session.maybe_compact(context, tool_definitions)
+                        && compaction.compacted_turns > 0
+                    {
+                        let _ = sink.send(Event::Note(format!(
+                        "context compacted: {} earlier turn(s) rolled into a summary (kept in the session log)",
+                        compaction.compacted_turns
+                    )));
+                    }
+                }
+            }
+
+            // Report accounting after every turn — including the final one,
+            // whose report doubles as the session's last — so the live stats
+            // bar (speed, context utilization, compaction progress, and the
+            // compaction ETA) tracks the session while it runs, not only when
+            // it ends.
+            self.emit_progress(
+                sink,
+                session,
+                context,
+                cumulative_input,
+                cumulative_output,
+                cumulative_tokens,
+                started_at,
+            )?;
+            if terminal {
+                break;
+            }
+        }
+
+        if turn >= self.max_turns {
+            summary.exhausted = true;
+        }
+        summary.turns = turn;
+        summary.answer = session.answer.clone();
+        if let Some(answer) = &summary.answer {
+            let _ = sink.send(Event::Finished {
+                message: answer.clone(),
+            });
+        }
+        // Close the durable session record. A run that was cancelled or
+        // exhausted after too many turns is recorded as unsuccessful; a normal
+        // completion (with or without a final answer) is recorded as success.
+        let success = !summary.cancelled && !summary.exhausted;
+        if let Some(recorder) = recorder.as_mut() {
+            recorder.session_finish(success);
+        }
+        Ok(summary)
+    }
+
+    /// Emits a single accounting event so the UI can update the speed stat, the
+    /// context bargraph, and the compaction progress bar. Non-fatal: a dropped
+    /// sink only means the UI is gone.
+    #[allow(clippy::too_many_arguments)]
+    fn emit_progress<S: EventSink>(
+        &self,
+        sink: &S,
+        session: &AgentSession,
+        context: &ContextManager,
+        input_tokens: u64,
+        output_tokens: u64,
+        total_tokens: u64,
+        started_at: Instant,
+    ) -> Result<()> {
+        let context_tokens = session.estimate_context_tokens(session.tool_definitions().len());
+        let elapsed = started_at.elapsed().as_secs_f64().max(1e-9);
+        let tokens_per_sec = total_tokens as f64 / elapsed;
+        sink.send(Event::Progress {
+            input_tokens,
+            output_tokens,
+            context_tokens,
+            context_limit: context.limit_tokens(),
+            context_utilization: session.utilization(context, session.tool_definitions().len()),
+            compaction_progress: session
+                .compaction_progress(context, session.tool_definitions().len()),
+            tokens_per_sec,
+            total_tokens,
+            elapsed_secs: elapsed,
+        })
+    }
+}
+
+[turn 7] reasoning: Now I understand the setup. Let me find where the system prompt is constructed — that's the key place where instructions files would be folded in. Let me search for where the system_prompt is built.
+[turn 7] shell apDagGQRr1ovSxsHMWToLjCuQ5OngLw6: /workspace/agent_runner/src/lib.rs:35:pub use run::system_prompt;
+/workspace/agent_runner/src/tui/mod.rs:182:        let session = AgentSession::new(
+/workspace/agent_runner/src/tui/mod.rs:186:            run::system_prompt(&self.config.tool_policy.write_root),
+/workspace/agent_runner/src/run.rs:130:/// Builds the default system prompt for the agent, describing its sandbox scope.
+/workspace/agent_runner/src/run.rs:131:pub fn system_prompt(write_root: &str) -> String {
+/workspace/agent_runner/src/session.rs:80:    system_prompt: String,
+/workspace/agent_runner/src/session.rs:92:        system_prompt: String,
+/workspace/agent_runner/src/session.rs:97:            system_prompt,
+/workspace/agent_runner/src/session.rs:125:        // The system prompt is host-owned instructions, so it leads the
+
+[turn 7] shell 2T7Hg3pTBdniLOq1QIxFcJMaJ2vN70wd: cli.rs
+config.rs
+context.rs
+error.rs
+executor.rs
+kvist_import.rs
+lib.rs
+logging.rs
+main.rs
+run.rs
+sandbox.rs
+session.rs
+session_log.rs
+tools.rs
+tui
+---
+/workspace/agent_runner/src/cli.rs:19:    /// current directory, then `$XDG_CONFIG_HOME/agent-runner/config.toml`
+/workspace/agent_runner/src/cli.rs:43:    /// Set the working directory (must exist).
+/workspace/agent_runner/src/cli.rs:55:    /// Directory for the session journal and transcript (default
+/workspace/agent_runner/src/cli.rs:56:    /// `.agent-runner/runs` under the working directory).
+/workspace/agent_runner/src/cli.rs:73:/// The per-app configuration directory name under the XDG config directories.
+/workspace/agent_runner/src/cli.rs:75:/// The configuration file name inside the XDG configuration directory.
+/workspace/agent_runner/src/cli.rs:77:/// The project-local configuration file name searched in the current directory.
+/workspace/agent_runner/src/cli.rs:79:/// The default XDG system configuration directory (per the XDG Base Directory
+/workspace/agent_runner/src/cli.rs:84:/// path first, then the project-local file in the current directory, then the
+/workspace/agent_runner/src/cli.rs:85:/// XDG Base Directory specification: `$XDG_CONFIG_HOME` (or `$HOME/.config`
+/workspace/agent_runner/src/cli.rs:87:/// `/etc/xdg`). Only the current directory is searched for the project-local
+/workspace/agent_runner/src/cli.rs:98:/// directory and environment lookup.
+/workspace/agent_runner/src/cli.rs:129:             current directory, or place {CONFIG_SUBDIR}/{CONFIG_FILE} at `{}`",
+/workspace/agent_runner/src/cli.rs:134:             current directory, or place {CONFIG_SUBDIR}/{CONFIG_FILE} in an XDG config directory"
+/workspace/agent_runner/src/cli.rs:139:/// The XDG user configuration directory: `$XDG_CONFIG_HOME` when set to an
+/workspace/agent_runner/src/cli.rs:140:/// absolute path (per the XDG Base Directory specification; a relative value
+/workspace/agent_runner/src/cli.rs:148:        // the $HOME/.config default rather than treating it as a directory.
+/workspace/agent_runner/src/cli.rs:308:        // XDG_CONFIG_HOME is the parent of the `agent-runner` directory.
+/workspace/agent_runner/src/cli.rs:363:        // relative value must not be used as a directory.
+/workspace/agent_runner/src/cli.rs:385:    fn resolve_config_path_walks_xdg_config_dirs_in_order() {
+/workspace/agent_runner/src/config.rs:225:    /// The working directory the agent operates in.
+/workspace/agent_runner/src/config.rs:226:    pub working_directory: PathBuf,
+/workspace/agent_runner/src/config.rs:245:    working_directory: Option<String>,
+/workspace/agent_runner/src/config.rs:300:    /// Validates the parsed configuration against the working directory and the
+/workspace/agent_runner/src/config.rs:313:        let working_directory = match &raw.working_directory {
+/workspace/agent_runner/src/config.rs:316:                .map_err(|source| io_error("resolve current working directory", None, source))?,
+/workspace/agent_runner/src/config.rs:318:        if !working_directory.is_absolute() {
+/workspace/agent_runner/src/config.rs:322:                    "working_directory `{}` must be an absolute path",
+/workspace/agent_runner/src/config.rs:323:                    working_directory.display()
+/workspace/agent_runner/src/config.rs:327:        if !working_directory.exists() {
+
+[turn 8] reasoning: The system prompt is built from a single function that takes the write root. Let me look at run.rs to understand how the prompt is constructed and where I'd integrate instruction files.
+[turn 8] read_file 4w3m7pInKvnEfFszIasjT8kjvAkWxaHI: //! The worker thread that runs a session loop off the UI thread.
+//!
+//! The model transport and sandbox executor are blocking, so the loop runs on a
+//! detached thread and pushes [`Event`]s over a bounded channel. The UI owns the
+//! channel receiver and renders each event. Cancellation flows from a shared
+//! [`CancellationToken`], and new prompts flow from the UI over a prompt channel.
+
+use std::sync::mpsc;
+use std::thread::{self, JoinHandle};
+
+use agent_runtime::{CancellationToken, ModelTransport};
+
+use crate::context::ContextManager;
+use crate::error::{Error, Result};
+use crate::session::{AgentRunner, AgentSession, Event, EventSink, Recorder, ToolExecutor};
+
+/// Receives [`Event`]s from the worker; implements [`EventSink`].
+struct ChannelSink(mpsc::SyncSender<Event>);
+
+impl EventSink for ChannelSink {
+    fn send(&self, event: Event) -> Result<()> {
+        self.0.send(event).map_err(|_| Error::ChannelClosed)
+    }
+}
+
+/// A handle to a running session, holding the cancellation token and thread.
+pub struct SessionHandle {
+    cancellation: CancellationToken,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl SessionHandle {
+    /// Requests cancellation of the running turn.
+    pub fn cancel(&self) {
+        self.cancellation.cancel();
+    }
+
+    /// Reports whether a turn is still running.
+    #[allow(dead_code)]
+    pub fn is_running(&self) -> bool {
+        self.thread.is_some()
+    }
+}
+
+impl Drop for SessionHandle {
+    fn drop(&mut self) {
+        self.cancel();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// Starts a session loop on a worker thread and returns a handle, the event
+/// receiver owned by the UI, and the prompt sender the UI uses to submit prompts.
+///
+/// `context` bounds the model's context across the whole session, and an
+/// optional `recorder` captures the durable record (journal + transcript,
+/// including reasoning) for later inspection.
+pub fn start<M, E>(
+    mut session: AgentSession,
+    transport: M,
+    executor: E,
+    mut context: ContextManager,
+    mut recorder: Option<Box<dyn Recorder>>,
+) -> (SessionHandle, mpsc::Receiver<Event>, mpsc::Sender<String>)
+where
+    M: ModelTransport + Send + 'static,
+    E: ToolExecutor + Send + 'static,
+{
+    let (prompt_tx, prompt_rx) = mpsc::channel::<String>();
+    let (tx, rx) = mpsc::sync_channel(128);
+    let cancellation = CancellationToken::new();
+    let handle_cancellation = cancellation.clone();
+    let thread = thread::spawn(move || {
+        let sink = ChannelSink(tx);
+        // The worker stays alive across turns; it exits only when every prompt
+        // sender is dropped. `AgentRunner::run` records each turn's session
+        // boundary in the durable recorder, so the worker does not manage the
+        // record lifecycle itself. Cancellation re-arms the token after each
+        // turn so a cancelled turn does not end the session.
+        while let Some(text) = wait_for_prompt(&prompt_rx) {
+            session.push_user(text);
+            let runner = AgentRunner::default();
+            // Borrow the recorder only for this run; the borrow ends before the
+            // next iteration, and each run starts and finishes its own record.
+            let _ = runner
+                .run(
+                    &mut session,
+                    &transport,
+                    &executor,
+                    &sink,
+                    &cancellation,
+                    &mut context,
+                    borrow_recorder(&mut recorder),
+                )
+                .unwrap_or_else(|_| crate::session::RunSummary::default());
+            cancellation.reset();
+        }
+    });
+    (
+        SessionHandle {
+            cancellation: handle_cancellation,
+            thread: Some(thread),
+        },
+        rx,
+        prompt_tx,
+    )
+}
+
+/// Blocks until the next prompt arrives or every prompt sender is dropped.
+/// Returns `None` when the channel closes, which ends the worker.
+fn wait_for_prompt(rx: &mpsc::Receiver<String>) -> Option<String> {
+    rx.recv().ok()
+}
+
+/// Reborrow the recorder as `Option<&mut dyn Recorder>` for a single call.
+///
+/// The split borrow reborrows through the `Box`, so the mutable borrow ends
+/// with the call instead of being extended across the recorder's lifetime (as a
+/// direct `recorder.as_deref_mut()` borrow would be, because the value owns its
+/// drop). The recorder is reused across turns, so each call needs a fresh one.
+fn borrow_recorder(recorder: &mut Option<Box<dyn Recorder>>) -> Option<&mut dyn Recorder> {
+    match recorder {
+        Some(boxed) => Some(&mut **boxed),
+        None => None,
+    }
+}
+
+/// Builds the default system prompt for the agent, describing its sandbox scope.
+pub fn system_prompt(write_root: &str) -> String {
+    format!(
+        "You are a coding agent running inside a sandbox. The working directory is mounted at {write_root} \
+         and is the only place you may write. You can read files under {write_root} and the read-only system \
+         layout. Prefer small, reversible steps. When editing files, write complete files. State what you did."
+    )
+}
+
+[turn 9] reasoning: Now I have a clear picture. The `system_prompt` in `run.rs` is the single integration point, called from `tui/mod.rs`. Let me give my advice.
+== session agent-runner-tiel-coder-35b-q4 finished: 9 turns, 0 tokens, 218s, ok ==
+== session agent-runner-tiel-coder-35b-q4 started 570s ago ==
+[turn 10] reasoning: Let me implement the instructions module. First, let me understand the existing structure better — the run.rs system_prompt function, how it's called in tui/mod.rs, config.rs, and the error module.  Let me read the relevant files.
+[turn 10] read_file Wobg72bdxvnGfDayCLlkWjxQLNlQ3mF3: //! The agent-runner library.
+//!
+//! Agent-runner is a first-class, sandbox-integrated interactive agent shell.
+//! It shares Kvist's bounded `agent-runtime` mechanisms and its independently
+//! installed sandbox enforcement boundary. The library exposes configuration,
+//! the tool model, the sandbox request/execution layer, the transport-agnostic
+//! agent loop, rolling context management, and the durable session log; the
+//! binary wires these to a terminal UI.
+
+#![forbid(unsafe_code)]
+
+mod cli;
+mod kvist_import;
+mod logging;
+mod run;
+
+pub mod config;
+pub mod context;
+pub mod error;
+pub mod executor;
+pub mod sandbox;
+pub mod session;
+pub mod session_log;
+pub mod tools;
+pub mod tui;
+
+pub use cli::{Cli, parse_effort, resolve_config_path};
+pub use config::{Config, DEFAULT_WRITE_ROOT, Model, ModelProvider, SandboxPaths, ToolPolicy};
+pub use context::{
+    Compaction, ContextManager, DEFAULT_CONTEXT_TOKENS, estimate_messages, estimate_tokens,
+};
+pub use error::{Error, Result};
+pub use executor::SandboxExecutor;
+pub use kvist_import::{KVIST_CONFIG_FILE, import_models, resolve_kvist_config_path};
+pub use run::system_prompt;
+pub use sandbox::ToolOutcome;
+pub use session::{
+    AgentRunner, AgentSession, Event, EventSink, MAX_TURNS, Recorder, RunSummary, ToolExecutor,
+};
+pub use session_log::{DEFAULT_LOG_DIR, SessionLog};
+pub use tools::{ExecContext, RenderedTool, StagedWrite, ToolProfile, ToolRegistry};
+
+/// Initializes logging for the binary.
+pub fn init_logging() {
+    logging::init_logging();
+}
+
+[turn 10] read_file V8Kk2cH1V1MpT80BiHMjK47YK5GaOTYh: //! The terminal UI: setup, event loop, and teardown.
+
+mod app;
+mod render;
+
+use std::io::IsTerminal;
+use std::path::PathBuf;
+use std::process::ExitCode;
+use std::sync::{Arc, mpsc};
+use std::time::Duration;
+
+use agent_runtime::ReasoningEffort;
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyEventKind,
+    MouseEventKind,
+};
+use crossterm::execute;
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode, size,
+};
+use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
+
+use self::app::{App, KeyAction};
+use crate::config::{Config, Model};
+use crate::context::ContextManager;
+use crate::error::{Error, Result};
+use crate::executor::SandboxExecutor;
+use crate::run::{self, start};
+use crate::session::{AgentSession, Recorder};
+use crate::session_log::SessionLog;
+use crate::tools::ToolRegistry;
+
+/// User-selected overrides applied over a loaded configuration.
+pub struct Overrides {
+    /// The model id to select for this session.
+    pub model: Option<String>,
+    /// The thinking effort to select for this session.
+    pub effort: Option<ReasoningEffort>,
+    /// The working directory to select for this session.
+    pub cwd: Option<PathBuf>,
+    /// The language tool profile to select for this session.
+    pub profile: Option<crate::tools::ToolProfile>,
+    /// Directory for the session journal + transcript. `None` means the
+    /// default (`.agent-runner/runs` under the working directory).
+    pub log_dir: Option<PathBuf>,
+    /// Model context window in tokens. `None` uses the default (8192).
+    pub context_limit: Option<usize>,
+    /// Disable durable session logging entirely.
+    pub no_logs: bool,
+    /// The resolved configuration path, shown in the help overlay.
+    pub config_path: Option<PathBuf>,
+}
+
+/// Runs the interactive UI to completion and returns the process exit code.
+pub fn run(config: Config, overrides: Overrides) -> ExitCode {
+    if !std::io::stdin().is_terminal() {
+        eprintln!(
+            "{}",
+            Error::NotInteractive {
+                reason: "standard input is not a terminal".to_owned()
+            }
+            .describe()
+        );
+        return ExitCode::from(2);
+    }
+
+    let model_id = overrides.model.as_deref().unwrap_or(&config.default_model);
+    let model = match config.model(model_id) {
+        Some(model) => model.clone(),
+        None => {
+            let available = config
+                .models
+                .iter()
+                .map(|model| model.id.clone())
+                .collect::<Vec<_>>();
+            eprintln!(
+                "{}",
+                Error::ModelNotFound {
+                    requested: model_id.to_owned(),
+                    available,
+                }
+                .describe()
+            );
+            return ExitCode::from(2);
+        }
+    };
+
+    let app_model_label = app_model_id(&config, &model);
+
+    let effort = overrides.effort.unwrap_or(config.default_thinking_effort);
+    let working_directory = overrides
+        .cwd
+        .clone()
+        .unwrap_or_else(|| config.working_directory.clone());
+
+    let mut registry = match ToolRegistry::discover(config.tool_policy.clone()) {
+        Ok(registry) => registry,
+        Err(error) => {
+            eprintln!("{}", error.describe());
+            return ExitCode::from(error.exit_code());
+        }
+    };
+    if let Some(profile) = overrides.profile {
+        registry = registry.with_profiles(vec![profile]);
+    }
+    let tool_defs = registry.tool_definitions();
+
+    let executor = Arc::new(SandboxExecutor::new(
+        registry,
+        config.sandbox.clone(),
+        working_directory.clone(),
+    ));
+
+    let builder = SessionBuilder {
+        config: config.clone(),
+        executor,
+        tool_defs,
+        context_limit: overrides
+            .context_limit
+            .unwrap_or(crate::context::DEFAULT_CONTEXT_TOKENS),
+        log_dir: overrides.log_dir.clone(),
+        no_logs: overrides.no_logs,
+        working_directory,
+    };
+
+    let initial = match builder.start(&model, effort) {
+        Ok(worker) => worker,
+        Err(error) => {
+            eprintln!("{}", error.describe());
+            return ExitCode::from(error.exit_code());
+        }
+    };
+
+    let (width, height) = size().unwrap_or((100, 30));
+    let model_ids: Vec<String> = config.models.iter().map(|model| model.id.clone()).collect();
+    let app = App::new(
+        &model_ids,
+        &app_model_label,
+        effort,
+        overrides.config_path,
+        width,
+        height,
+    );
+
+    match ui_loop(app, &builder, Some(initial)) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("{}", error.describe());
+            ExitCode::from(error.exit_code())
+        }
+    }
+}
+
+/// Builds session workers for the selected model and effort. Each worker owns
+/// its transport, conversation, context window, and durable log; switching the
+/// model or the effort starts a fresh worker (the model's conversation context
+/// restarts, which the UI announces).
+struct SessionBuilder {
+    config: Config,
+    executor: Arc<SandboxExecutor>,
+    tool_defs: Vec<agent_runtime::ToolDefinition>,
+    context_limit: usize,
+    log_dir: Option<PathBuf>,
+    no_logs: bool,
+    working_directory: PathBuf,
+}
+
+/// One live session worker: the model loop thread plus its channels.
+struct Worker {
+    handle: run::SessionHandle,
+    rx: mpsc::Receiver<crate::session::Event>,
+    prompt_tx: mpsc::Sender<String>,
+    model_id: String,
+    effort: ReasoningEffort,
+}
+
+impl SessionBuilder {
+    /// Starts a session worker for `model` with `effort`.
+    fn start(&self, model: &Model, effort: ReasoningEffort) -> Result<Worker> {
+        let transport = build_transport(model)?;
+        let session = AgentSession::new(
+            model.clone(),
+            effort,
+            self.tool_defs.clone(),
+            run::system_prompt(&self.config.tool_policy.write_root),
+        );
+        let context = ContextManager::new(self.context_limit, 6);
+        let recorder = if self.no_logs {
+            None
+        } else {
+            let dir = self.log_dir.clone().unwrap_or_else(|| {
+                self.working_directory
+                    .join(crate::session_log::DEFAULT_LOG_DIR)
+            });
+            match SessionLog::open(&dir, format!("agent-runner-{}", model.id)) {
+                Ok(log) => Some(Box::new(log) as Box<dyn Recorder>),
+                Err(error) => {
+                    // Logging is best-effort: report, then continue without it.
+                    eprintln!(
+                        "{}",
+                        Error::Io {
+                            operation: "open session log directory".to_owned(),
+                            path: Some(dir.to_string_lossy().into_owned()),
+                            source: error,
+                        }
+                        .describe()
+                    );
+                    None
+                }
+            }
+        };
+        let (handle, rx, prompt_tx) = start(
+            session,
+            transport,
+            Arc::clone(&self.executor),
+            context,
+            recorder,
+        );
+        Ok(Worker {
+            handle,
+            rx,
+            prompt_tx,
+            model_id: model.id.clone(),
+            effort,
+        })
+    }
+}
+
+fn app_model_id(config: &Config, model: &Model) -> String {
+    config
+        .models
+        .iter()
+        .find(|candidate| candidate.id == model.id)
+        .map(|candidate| candidate.id.clone())
+        .unwrap_or_else(|| model.id.clone())
+}
+
+fn build_transport(model: &Model) -> Result<agent_runtime::DirectModelTransport> {
+    let provider = model.provider.to_agent_provider();
+    let deadline = Duration::from_secs(model.deadline_secs.max(1));
+    agent_runtime::DirectModelTransport::new(provider, &model.base_url, deadline, 8 * 1024 * 1024)
+        .map_err(|error| Error::ModelTransport {
+            model: Some(model.id.clone()),
+            reason: error.to_string(),
+        })
+}
+
+fn ui_loop(mut app: App, builder: &SessionBuilder, mut worker: Option<Worker>) -> Result<()> {
+    enable_raw_mode()?;
+    let mut stdout = std::io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let result = run_ui(&mut terminal, &mut app, builder, &mut worker);
+
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+    result
+}
+
+fn run_ui<M: std::io::Write>(
+    terminal: &mut Terminal<CrosstermBackend<M>>,
+    app: &mut App,
+    builder: &SessionBuilder,
+    worker: &mut Option<Worker>,
+) -> Result<()> {
+    loop {
+        terminal.draw(|frame| render::render(frame, app))?;
+
+        // Drain loop events without blocking.
+        if let Some(current) = worker.as_ref() {
+            app.pump(&current.rx)?;
+        }
+
+        if event::poll(Duration::from_millis(150))? {
+            match event::read()? {
+                CrosstermEvent::Resize(width, height) => app.resize(width, height),
+                CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
+                    match app.on_key(key) {
+                        KeyAction::Submit => {
+                            let text = app.take_pending_prompt();
+                            let changed = match worker.as_ref() {
+                                Some(current) => {
+                                    current.model_id != app.model || current.effort != app.effort
+                                }
+                                None => true,
+                            };
+                            if text.is_some() && changed {
+                                // A model or effort change applies to the next
+                                // prompt: the old worker is cancelled and
+                                // joined (dropped), then a fresh session starts.
+                                let model = builder.config.model(&app.model).ok_or_else(|| {
+                                    Error::ModelNotFound {
+                                        requested: app.model.clone(),
+                                        available: builder
+                                            .config
+                                            .models
+                                            .iter()
+                                            .map(|model| model.id.clone())
+                                            .collect(),
+                                    }
+                                })?;
+                                *worker = Some(builder.start(model, app.effort)?);
+                            }
+                            if let (Some(text), Some(current)) = (text, worker.as_ref()) {
+                                let _ = current.prompt_tx.send(text);
+                            }
+                        }
+                        KeyAction::Cancel => {
+                            if let Some(current) = worker.as_ref() {
+                                current.handle.cancel();
+                            }
+                        }
+                        KeyAction::Quit => {
+                            app.should_quit = true;
+                        }
+                        KeyAction::Idle => {}
+                    }
+                }
+                CrosstermEvent::Key(_) => {}
+                CrosstermEvent::Mouse(mouse) if mouse.kind == MouseEventKind::ScrollUp => {
+                    app.scroll_up(3);
+                }
+                CrosstermEvent::Mouse(mouse) if mouse.kind == MouseEventKind::ScrollDown => {
+                    app.scroll_down(3);
+                }
+                _ => {}
+            }
+        }
+
+        if app.should_quit {
+            break;
+        }
+    }
+    Ok(())
+}
+
+[turn 10] read_file Av8yM5Qm4RtFZ8ictxYr0xjGiXpHO9Wf: //! Crate error type with actionable, non-secret messages and exit codes.
+
+use std::fmt;
+
+/// The single error type for the agent-runner crate.
+///
+/// Every variant carries enough context to act on the failure and an exit code.
+/// Messages never expose secrets (tokens, credentials, or raw untrusted tool
+/// output); they name the resource, the operation, and a remediation hint.
+#[derive(Debug)]
+pub enum Error {
+    /// Configuration could not be read or failed validation.
+    Config {
+        /// The configuration path, when known.
+        path: Option<String>,
+        /// A human-readable reason.
+        reason: String,
+    },
+    /// Standard input is not an interactive terminal.
+    NotInteractive {
+        /// Why interactive input is unavailable.
+        reason: String,
+    },
+    /// The selected model id is not present in the configuration.
+    ModelNotFound {
+        /// The requested model id.
+        requested: String,
+        /// The configured model ids.
+        available: Vec<String>,
+    },
+    /// The reasoning effort string did not parse to a known level.
+    InvalidEffort {
+        /// The offending string.
+        value: String,
+    },
+    /// A path was missing, not a directory, or otherwise invalid.
+    InvalidPath {
+        /// The offending path.
+        path: String,
+        /// Why it is invalid.
+        reason: String,
+    },
+    /// The sandbox runner or backend is unavailable or unverified.
+    SandboxUnavailable {
+        /// The configured runner path, when known.
+        runner: Option<String>,
+        /// Why the boundary could not be established.
+        reason: String,
+    },
+    /// The sandbox request could not be constructed.
+    SandboxBuild {
+        /// Why construction failed.
+        reason: String,
+    },
+    /// A sandbox execution failed.
+    SandboxExec {
+        /// The failing tool name, when known.
+        tool: Option<String>,
+        /// The root cause message.
+        reason: String,
+    },
+    /// A tool call was rejected by policy before any sandbox request.
+    ToolPolicy {
+        /// The tool that was rejected.
+        tool: String,
+        /// Why the call violates policy.
+        reason: String,
+    },
+    /// A tool argument was malformed or could not be rendered.
+    ToolRender {
+        /// The tool that could not be rendered.
+        tool: String,
+        /// The reason it could not be rendered.
+        reason: String,
+    },
+    /// The model transport failed.
+    ModelTransport {
+        /// The provider or model selector, when known.
+        model: Option<String>,
+        /// The root cause message.
+        reason: String,
+    },
+    /// A generic input/output failure.
+    Io {
+        /// The operation in progress.
+        operation: String,
+        /// The offending path, when relevant.
+        path: Option<String>,
+        /// The underlying source.
+        source: std::io::Error,
+    },
+    /// The bounded event channel between the worker and the UI closed early.
+    ChannelClosed,
+}
+
+/// The convenience `Result` alias for this crate.
+pub type Result<T> = std::result::Result<T, Error>;
+
+fn format_source(source: &std::io::Error) -> String {
+    let message = source.to_string();
+    let truncated: String = message.chars().take(200).collect();
+    if truncated.len() == message.len() {
+        truncated
+    } else {
+        format!("{truncated}… (truncated)")
+    }
+}
+
+impl Error {
+    /// The process exit code to use for this error.
+    pub fn exit_code(&self) -> u8 {
+        match self {
+            Error::NotInteractive { .. } => 2,
+            Error::ModelNotFound { .. } => 2,
+            Error::InvalidEffort { .. } => 2,
+            Error::ToolPolicy { .. } => 3,
+            _ => 1,
+        }
+    }
+
+    /// An actionable, non-secret message describing the failure.
+    pub fn describe(&self) -> String {
+        match self {
+            Error::Config { path, reason } => match path {
+                Some(path) => format!("invalid configuration `{path}`: {reason}"),
+                None => format!("invalid configuration: {reason}"),
+            },
+            Error::NotInteractive { reason } => {
+                format!("interactive input unavailable: {reason}")
+            }
+            Error::ModelNotFound {
+                requested,
+                available,
+            } => format!(
+                "unknown model `{requested}`; configured models: {}",
+                if available.is_empty() {
+                    "none".to_owned()
+                } else {
+                    available.join(", ")
+                }
+            ),
+            Error::InvalidEffort { value } => format!(
+                "invalid thinking effort `{value}`; expected none, minimal, low, medium, high, xhigh, or max"
+            ),
+            Error::InvalidPath { path, reason } => format!("invalid path `{path}`: {reason}"),
+            Error::SandboxUnavailable { runner, reason } => match runner {
+                Some(runner) => format!(
+                    "sandbox unavailable: {reason} (check `sandbox.runner` and `sandbox.backend` for `{runner}`)"
+                ),
+                None => format!("sandbox unavailable: {reason}"),
+            },
+            Error::SandboxBuild { reason } => {
+                format!("could not build the sandbox request: {reason}")
+            }
+            Error::SandboxExec { tool, reason } => match tool {
+                Some(tool) => format!("sandbox execution of `{tool}` failed: {reason}"),
+                None => format!("sandbox execution failed: {reason}"),
+            },
+            Error::ToolPolicy { tool, reason } => {
+                format!("tool `{tool}` is not permitted: {reason}")
+            }
+            Error::ToolRender { tool, reason } => {
+                format!("could not render tool `{tool}`: {reason}")
+            }
+            Error::ModelTransport { model, reason } => match model {
+                Some(model) => format!("model `{model}` request failed: {reason}"),
+                None => format!("model request failed: {reason}"),
+            },
+            Error::Io {
+                operation,
+                path,
+                source,
+            } => match path {
+                Some(path) => format!("{operation} `{path}` failed: {}", format_source(source)),
+                None => format!("{operation} failed: {}", format_source(source)),
+            },
+            Error::ChannelClosed => {
+                "the worker connection closed before the turn finished".to_owned()
+            }
+        }
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.describe())
+    }
+}
+
+impl std::error::Error for Error {}
+
+impl From<std::io::Error> for Error {
+    fn from(source: std::io::Error) -> Self {
+        Error::Io {
+            operation: "operation".to_owned(),
+            path: None,
+            source,
+        }
+    }
+}
+
+/// Builds a generic input/output error with an explicit operation and path.
+pub fn io_error(operation: &str, path: Option<&str>, source: std::io::Error) -> Error {
+    Error::Io {
+        operation: operation.to_owned(),
+        path: path.map(str::to_owned),
+        source,
+    }
+}
+
+impl From<agent_runtime::Error> for Error {
+    fn from(source: agent_runtime::Error) -> Self {
+        Error::ModelTransport {
+            model: None,
+            reason: source.to_string(),
+        }
+    }
+}
+
+impl From<kvist_sandbox_runner::validation::ProtocolError> for Error {
+    fn from(source: kvist_sandbox_runner::validation::ProtocolError) -> Self {
+        Error::SandboxBuild {
+            reason: source.to_string(),
+        }
+    }
+}
+
+[turn 11] reasoning: Now I understand the structure. Let me build the `instructions.rs` module, wire it into `run.rs::system_prompt`, and update the `tui/mod.rs` call site. I'll add a config flag and tests.  Let me first check the justfile / how tests are run, and whether there's a tests directory in agent_runner.
+[turn 11] shell pWXTcuk22tWmKV9JDE67q82PuAHPgT76: # Optional convenience recipes using only Cargo and Rustup.
+#
+# `just` itself is optional; the equivalent Cargo commands are documented in
+# README.md. The default recipes do not depend on cargo-nextest, cargo-outdated,
+# unbuffer, nightly Rust, or generated log files.
+
+all: format lint build test
+
+build:
+    cargo build --locked --workspace --all-features
+
+format:
+    cargo fmt --check
+
+lint:
+    cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+msrv:
+    cargo +1.95.0 test --locked --workspace --all-features
+
+reformat:
+    cargo fmt
+
+release:
+    cargo build --locked --workspace --release --all-features
+
+test:
+    cargo nextest run --locked --workspace --all-features --test-threads num-cpus
+
+audit:
+    cargo deny --all-features --locked check advisories bans licenses sources
+
+wine:
+    @echo "error: Windows support is deferred; Kvist currently supports Linux only" >&2
+    @exit 1
+
+completions:
+    cargo run --locked -p kvist -- completions bash > /dev/null
+    cargo run --locked -p kvist -- completions zsh > /dev/null
+    cargo run --locked -p kvist -- completions fish > /dev/null
+---agent_runner Cargo.toml---
+[package]
+name = "agent-runner"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+authors = ["Stefan Lindblad"]
+description = "First-class, sandbox-integrated interactive agent runner shell for Kvist"
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/Fairglow/kvist"
+homepage = "https://github.com/Fairglow/kvist"
+
+[lib]
+name = "agent_runner"
+
+[[bin]]
+name = "agent-runner"
+path = "src/main.rs"
+
+[dependencies]
+agent-runtime = { version = "=0.1.0", path = "../agent_runtime" }
+kvist-sandbox-runner = { version = "=0.1.0", path = "../sandbox_runner" }
+clap = { version = "4.6", features = ["derive"] }
+ratatui = "0.30"
+crossterm = "0.29"
+tui-textarea-2 = "0.13"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "1.1"
+sha2 = "0.11"
+hex = "0.4"
+nix = { version = "0.31", default-features = false, features = ["fs", "poll", "process", "signal", "term"] }
+thiserror = "2.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
+
+[dev-dependencies]
+tempfile = "3.27"
+serde_json = "1.0"
+---tests dir---
+component_tests.rs
+loop_integration.rs
+
+[turn 12] reasoning: Now I'll build the `instructions.rs` module. Let me write it carefully.
+[turn 12] write_file 7y0EtsnhIkQ5ViABG6gv8prZQb2vRqeP: 

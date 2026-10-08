@@ -350,7 +350,7 @@ impl App {
         };
         app.note(
             app.theme.accent,
-            "agent-runner ready. Type a prompt and press Ctrl+Enter. Ctrl-Q quits; Esc opens the menu; Ctrl+H helps.",
+            "skott ready. Type a prompt and press Ctrl+Enter. Ctrl-Q quits; Esc opens the menu; Ctrl+H helps.",
         );
         app
     }
@@ -1895,7 +1895,7 @@ pub fn emit_pending_osc_52(app: &mut App) -> Result<()> {
     app.emit_pending_osc_52()
 }
 
-/// Minimal base64 encoder for the OSC 52 clipboard escape. Keeps `agent-runner`
+/// Minimal base64 encoder for the OSC 52 clipboard escape. Keeps `skott`
 /// free of an external clipboard/base64 dependency while remaining correct for
 /// the small, UTF-8-encoded transcripts it copies.
 fn base64_encode(input: &[u8]) -> String {

@@ -7,7 +7,7 @@
 .kvist
 .vscode
 .zed
-agent_runner.toml
+skott.toml
 kvist.toml
 
 # Ignore temporal files
@@ -15,9 +15,9 @@ kvist.toml
 /*.log
 /_*.md
 
-# Ignore agent-runner runtime data (session journals + transcripts)
-.agent-runner/
-agent_runner/.kvist-attempts/
+# Ignore skott runtime data (session journals + transcripts)
+.skott/
+skott/.kvist-attempts/
 .review-scratch/
 
 # Ignore Gemini CLI deps

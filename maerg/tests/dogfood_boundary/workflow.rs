@@ -9,11 +9,11 @@ use crate::support::{
 };
 
 fn attempt_journal(project: &std::path::Path) -> std::path::PathBuf {
-    project.join(format!("engine/.kvist-attempts/{TASK_ID}.jsonl"))
+    project.join(format!("maerg/.kvist-attempts/{TASK_ID}.jsonl"))
 }
 
 fn assert_attempt_is_fenced_and_unfinalized(project: &std::path::Path) {
-    let queue = fs::read_to_string(project.join("engine/TODOS.yaml"))
+    let queue = fs::read_to_string(project.join("maerg/TODOS.yaml"))
         .expect("read refused-finalization queue");
     let task = task_block(&queue, TASK_ID);
     assert!(task.contains("status: in-progress"));
@@ -91,15 +91,15 @@ fn successful_process_and_verification_remain_pending_for_human_disposition() {
     assert!(
         project
             .path()
-            .join("engine/tests/supervised-run-started")
+            .join("maerg/tests/supervised-run-started")
             .is_file()
             || project
                 .path()
-                .join("engine/tests/supervised-agent-started")
+                .join("maerg/tests/supervised-agent-started")
                 .is_file(),
         "the controlled runner or authoring command must prove task execution started"
     );
-    let queue = fs::read_to_string(project.path().join("engine/TODOS.yaml"))
+    let queue = fs::read_to_string(project.path().join("maerg/TODOS.yaml"))
         .expect("read pending-disposition queue");
     let task = task_block(&queue, TASK_ID);
     assert!(
@@ -109,7 +109,7 @@ fn successful_process_and_verification_remain_pending_for_human_disposition() {
     assert!(!task.contains("status: completed"));
     let journal_path = project
         .path()
-        .join(format!("engine/.kvist-attempts/{TASK_ID}.jsonl"));
+        .join(format!("maerg/.kvist-attempts/{TASK_ID}.jsonl"));
     let pending_journal =
         fs::read_to_string(&journal_path).expect("read pending-disposition journal");
     assert!(pending_journal.contains("\"phase\":\"execution-finished\""));
@@ -136,7 +136,7 @@ fn successful_process_and_verification_remain_pending_for_human_disposition() {
         output_text(&output)
     );
     let queue =
-        fs::read_to_string(project.path().join("engine/TODOS.yaml")).expect("read final queue");
+        fs::read_to_string(project.path().join("maerg/TODOS.yaml")).expect("read final queue");
     assert!(task_block(&queue, TASK_ID).contains("status: completed"));
     let journal = fs::read_to_string(journal_path).expect("read final attempt journal");
     assert!(journal.contains("\"phase\":\"human-finalized\""));
@@ -173,13 +173,13 @@ fn human_can_block_a_successful_attempt_without_automatic_retry() {
         output_text(&output)
     );
     let queue =
-        fs::read_to_string(project.path().join("engine/TODOS.yaml")).expect("read blocked queue");
+        fs::read_to_string(project.path().join("maerg/TODOS.yaml")).expect("read blocked queue");
     assert!(queue.contains("status: blocked"));
     assert!(queue.contains("human review rejected the scoped change"));
     let journal = fs::read_to_string(
         project
             .path()
-            .join(format!("engine/.kvist-attempts/{TASK_ID}.jsonl")),
+            .join(format!("maerg/.kvist-attempts/{TASK_ID}.jsonl")),
     )
     .expect("read final attempt journal");
     assert!(journal.contains("\"disposition\":\"blocked\""));
@@ -194,7 +194,7 @@ fn human_can_block_a_successful_attempt_without_automatic_retry() {
 fn ambiguous_effects_remain_fenced_and_cannot_be_force_unlocked() {
     let project = create_target_project("pending");
     write_ambiguous_attempt(project.path());
-    let queue_path = project.path().join("engine/TODOS.yaml");
+    let queue_path = project.path().join("maerg/TODOS.yaml");
     let before = fs::read(&queue_path).expect("read fenced queue");
 
     let recover = run_kvist(
@@ -239,8 +239,8 @@ fn ambiguous_effects_remain_fenced_and_cannot_be_force_unlocked() {
 #[test]
 fn a_prepared_record_and_user_disposition_do_not_prove_execution_never_started() {
     let project = create_target_project("pending");
-    let queue_path = project.path().join("engine/TODOS.yaml");
-    let attempts = project.path().join("engine/.kvist-attempts");
+    let queue_path = project.path().join("maerg/TODOS.yaml");
+    let attempts = project.path().join("maerg/.kvist-attempts");
     fs::create_dir_all(&attempts).expect("create attempts");
     let event = json!({
         "schema_version": 1,
@@ -252,7 +252,7 @@ fn a_prepared_record_and_user_disposition_do_not_prove_execution_never_started()
         "policy_identity": crate::support::sha256_bytes(b"policy"),
         "runner_identity": crate::support::sha256_bytes(b"runner"),
         "approved_write_scope": [{
-            "path": "engine/tests",
+            "path": "maerg/tests",
             "pre_digest": crate::support::sha256_bytes(b"empty")
         }]
     });
@@ -305,7 +305,7 @@ fn recovery_can_use_independent_durable_pre_spawn_failure_evidence() {
     fs::remove_file(
         project
             .external_tools_path()
-            .join("controlled-sandbox-runner"),
+            .join("controlled-galla-runner"),
     )
     .expect("remove approved runner before descriptor launch");
     let execution = run_kvist(project.path(), &["task", "run", ".", TASK_ID]);
@@ -340,7 +340,7 @@ fn recovery_can_use_independent_durable_pre_spawn_failure_evidence() {
         output_text(&output)
     );
     let queue =
-        fs::read_to_string(project.path().join("engine/TODOS.yaml")).expect("read recovered queue");
+        fs::read_to_string(project.path().join("maerg/TODOS.yaml")).expect("read recovered queue");
     assert!(task_block(&queue, TASK_ID).contains("status: pending"));
     let journal =
         fs::read_to_string(attempt_journal(project.path())).expect("read recovered journal");
@@ -355,7 +355,7 @@ fn recovery_can_use_independent_durable_pre_spawn_failure_evidence() {
 fn forged_pre_spawn_evidence_cannot_clear_a_fenced_attempt() {
     let project = create_target_project("pending");
     write_ambiguous_attempt(project.path());
-    fs::remove_file(project.path().join("engine/tests/uncertain.rs"))
+    fs::remove_file(project.path().join("maerg/tests/uncertain.rs"))
         .expect("remove ambiguous effect before forging evidence");
     let journal_path = attempt_journal(project.path());
     let mut journal = fs::read_to_string(&journal_path).expect("read prepared journal");
@@ -374,7 +374,7 @@ fn forged_pre_spawn_evidence_cannot_clear_a_fenced_attempt() {
     ));
     fs::write(&journal_path, &journal).expect("write forged host evidence");
     let queue_before =
-        fs::read(project.path().join("engine/TODOS.yaml")).expect("read fenced queue");
+        fs::read(project.path().join("maerg/TODOS.yaml")).expect("read fenced queue");
 
     let output = run_kvist(
         project.path(),
@@ -398,11 +398,11 @@ fn forged_pre_spawn_evidence_cannot_clear_a_fenced_attempt() {
             || output_text(&output).contains("authentic")
             || output_text(&output).contains("bound")
             || output_text(&output).contains("fenced"),
-        "forged pre-spawn refusal must identify missing engine binding: {}",
+        "forged pre-spawn refusal must identify missing maerg binding: {}",
         output_text(&output)
     );
     assert_eq!(
-        fs::read(project.path().join("engine/TODOS.yaml"))
+        fs::read(project.path().join("maerg/TODOS.yaml"))
             .expect("read queue after forged recovery"),
         queue_before
     );
@@ -422,7 +422,7 @@ fn forged_recovered_evidence_cannot_enable_transition_unlock_or_run() {
     fs::remove_file(
         project
             .external_tools_path()
-            .join("controlled-sandbox-runner"),
+            .join("controlled-galla-runner"),
     )
     .expect("remove runner before descriptor validation");
     assert!(
@@ -447,7 +447,7 @@ fn forged_recovered_evidence_cannot_enable_transition_unlock_or_run() {
         })
     ));
     fs::write(&journal_path, journal).expect("append forged recovered evidence");
-    let queue_path = project.path().join("engine/TODOS.yaml");
+    let queue_path = project.path().join("maerg/TODOS.yaml");
     let before = fs::read(&queue_path).expect("read fenced queue");
 
     for arguments in [
@@ -471,7 +471,7 @@ fn unresolved_attempt_fences_every_component_queue_writer() {
     let project = create_target_project("pending");
     write_ambiguous_attempt(project.path());
     add_independent_ready_implementation_task(project.path());
-    let queue_path = project.path().join("engine/TODOS.yaml");
+    let queue_path = project.path().join("maerg/TODOS.yaml");
     let before = fs::read(&queue_path).expect("read fenced two-task queue");
 
     let transition = run_kvist(
@@ -524,7 +524,7 @@ fn unresolved_attempt_fences_every_component_queue_writer() {
     fs::remove_file(
         project
             .external_tools_path()
-            .join("controlled-sandbox-runner"),
+            .join("controlled-galla-runner"),
     )
     .expect("remove runner before independent automatic selection");
     let run = run_kvist(
@@ -555,7 +555,7 @@ fn recovery_resumes_durable_partial_states_and_restores_the_pre_attempt_status()
     fs::remove_file(
         project
             .external_tools_path()
-            .join("controlled-sandbox-runner"),
+            .join("controlled-galla-runner"),
     )
     .expect("remove runner before descriptor validation");
     assert!(
@@ -563,7 +563,7 @@ fn recovery_resumes_durable_partial_states_and_restores_the_pre_attempt_status()
             .status
             .success()
     );
-    let queue_path = project.path().join("engine/TODOS.yaml");
+    let queue_path = project.path().join("maerg/TODOS.yaml");
     let fenced_queue = fs::read(&queue_path).expect("save fenced queue");
     let journal_path = attempt_journal(project.path());
 
@@ -688,7 +688,7 @@ fn changed_scoped_file_after_journal_recording_refuses_finalization() {
     let project = create_target_project("pending");
     write_finalizable_attempt(project.path(), true);
     fs::write(
-        project.path().join("engine/tests/generated.rs"),
+        project.path().join("maerg/tests/generated.rs"),
         "#[test]\nfn changed_after_recording() {}\n",
     )
     .expect("change scoped file after journal recording");
@@ -714,15 +714,15 @@ fn journal_claimed_out_of_scope_path_cannot_expand_engine_bound_scope() {
     let project = create_target_project("pending");
     write_finalizable_attempt(project.path(), true);
     fs::rename(
-        project.path().join("engine/tests/generated.rs"),
-        project.path().join("engine/src/out-of-scope.rs"),
+        project.path().join("maerg/tests/generated.rs"),
+        project.path().join("maerg/src/out-of-scope.rs"),
     )
-    .expect("move reported change outside engine-approved scope");
+    .expect("move reported change outside maerg-approved scope");
     let journal_path = attempt_journal(project.path());
     let journal = fs::read_to_string(&journal_path)
         .expect("read attempt journal")
-        .replace("engine/tests/generated.rs", "engine/src/out-of-scope.rs")
-        .replace("\"path\":\"engine/tests\"", "\"path\":\"engine/src\"");
+        .replace("maerg/tests/generated.rs", "maerg/src/out-of-scope.rs")
+        .replace("\"path\":\"maerg/tests\"", "\"path\":\"maerg/src\"");
     fs::write(&journal_path, &journal).expect("forge expanded journal scope");
 
     let output = run_kvist(
@@ -735,7 +735,7 @@ fn journal_claimed_out_of_scope_path_cannot_expand_engine_bound_scope() {
         output_text(&output).contains("scope")
             || output_text(&output).contains("policy")
             || output_text(&output).contains("approved"),
-        "out-of-scope refusal must use engine-bound authority, not journal claims: {}",
+        "out-of-scope refusal must use maerg-bound authority, not journal claims: {}",
         output_text(&output)
     );
     assert_attempt_is_fenced_and_unfinalized(project.path());
@@ -745,7 +745,7 @@ fn journal_claimed_out_of_scope_path_cannot_expand_engine_bound_scope() {
 fn mismatched_reported_post_digest_refuses_finalization() {
     let project = create_target_project("pending");
     write_finalizable_attempt(project.path(), true);
-    let generated = project.path().join("engine/tests/generated.rs");
+    let generated = project.path().join("maerg/tests/generated.rs");
     let actual_digest = sha256_file(&generated);
     let journal_path = attempt_journal(project.path());
     let journal = fs::read_to_string(&journal_path)
@@ -777,7 +777,7 @@ fn mismatched_reported_post_digest_refuses_finalization() {
 fn finalization_is_bound_to_the_exact_task_and_attempt_identity() {
     let project = create_target_project("pending");
     write_finalizable_attempt(project.path(), true);
-    let queue_path = project.path().join("engine/TODOS.yaml");
+    let queue_path = project.path().join("maerg/TODOS.yaml");
     let before = fs::read(&queue_path).expect("read queue");
 
     for arguments in [

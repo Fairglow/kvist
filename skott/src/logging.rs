@@ -1,4 +1,4 @@
-//! Diagnostic logging for agent-runner.
+//! Diagnostic logging for skott.
 //!
 //! Structured, level-filtered logging over `tracing`. Diagnostic events are
 //! directed exclusively to standard error so they never interfere with the
@@ -10,8 +10,8 @@ use tracing_subscriber::EnvFilter;
 
 static INIT: Once = Once::new();
 
-/// Environment variable for agent-runner-specific log filtering.
-pub const AGENT_RUNNER_LOG_ENV: &str = "AGENT_RUNNER_LOG";
+/// Environment variable for skott-specific log filtering.
+pub const SKOTT_LOG_ENV: &str = "SKOTT_LOG";
 /// Standard fallback environment variable for Rust log filtering.
 pub const RUST_LOG_ENV: &str = "RUST_LOG";
 /// Default production log level when no filter is specified.
@@ -43,7 +43,7 @@ pub fn init_test_logging() {
 pub fn init_logging_with_default(default_level: &str) {
     INIT.call_once(|| {
         let filter =
-            match std::env::var(AGENT_RUNNER_LOG_ENV).or_else(|_| std::env::var(RUST_LOG_ENV)) {
+            match std::env::var(SKOTT_LOG_ENV).or_else(|_| std::env::var(RUST_LOG_ENV)) {
                 Ok(env_val) if !env_val.trim().is_empty() => EnvFilter::builder()
                     .with_default_directive(tracing::level_filters::LevelFilter::WARN.into())
                     .parse_lossy(env_val),

@@ -1777,7 +1777,7 @@ pub fn accept(
 
         if commit {
             let queue_rel = if context.component_path == Path::new(".") {
-                PathBuf::from("engine/TODOS.yaml")
+                PathBuf::from("maerg/TODOS.yaml")
             } else {
                 context
                     .component_path
@@ -1815,7 +1815,7 @@ pub fn accept(
                 (ComponentArtifact::Design, &design),
             ] {
                 let doc_rel = if context.component_path == Path::new(".") {
-                    PathBuf::from(format!("engine/{}", kind.filename()))
+                    PathBuf::from(format!("maerg/{}", kind.filename()))
                 } else {
                     context.component_path.join(kind.filename())
                 };
@@ -2842,8 +2842,8 @@ pub fn finalize(
         let mut tamper_reason = String::new();
 
         let config = crate::config::load(&context.project_dir)?;
-        let engine_approved = approved_write_scope(&context.project_dir, &context, &config)?;
-        let engine_scope_paths: Vec<PathBuf> = engine_approved
+        let maerg_approved = approved_write_scope(&context.project_dir, &context, &config)?;
+        let maerg_scope_paths: Vec<PathBuf> = maerg_approved
             .into_iter()
             .map(|s| {
                 let p = PathBuf::from(s.path);
@@ -2875,7 +2875,7 @@ pub fn finalize(
                     .any(|s| normalized_change.starts_with(s) || normalized_change == *s)
                     && !change.path.to_string_lossy().contains("out-of-scope")
             } else {
-                engine_scope_paths
+                maerg_scope_paths
                     .iter()
                     .any(|s| normalized_change.starts_with(s) || normalized_change == *s)
             };
@@ -3067,12 +3067,12 @@ pub fn finalize(
 
                     let mut all_accepted_changes = attempt_changes.clone();
                     let queue_path_rel = if context.component_path == Path::new(".") {
-                        PathBuf::from("engine/TODOS.yaml")
+                        PathBuf::from("maerg/TODOS.yaml")
                     } else {
                         context.component_path.join("TODOS.yaml")
                     };
                     let journal_path_rel = if context.component_path == Path::new(".") {
-                        PathBuf::from(format!("engine/.kvist-attempts/{task_id}.jsonl"))
+                        PathBuf::from(format!("maerg/.kvist-attempts/{task_id}.jsonl"))
                     } else {
                         context
                             .component_path
@@ -4730,7 +4730,7 @@ pub fn task_log(project_dir: &Path, component_path: &Path, task_id: &str) -> Res
 /// Replays an agent execution session from a structured JSONL journal file.
 pub fn replay_task_session(session_file: &Path, max_turns: Option<usize>) -> Result<String> {
     let report = sav::replay_trajectory(session_file, max_turns)
-        .map_err(KvistError::AgentRuntime)?;
+        .map_err(KvistError::Sav)?;
 
     let mut out = String::new();
     out.push_str(&format!(

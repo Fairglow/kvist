@@ -1,9 +1,9 @@
 <!-- kvist-compliance-review-version: 1 -->
 
-# agent_runtime compliance review
+# sav compliance review
 
 > Historical evidence notice: this review predates relocation from
-> `src/agent_runtime/` to `engine/agent_runtime/`. Its original review boundary
+> `src/sav/` to `maerg/sav/`. Its original review boundary
 > is retained, and this report does not certify the migrated layout.
 
 ## Review basis and limits
@@ -12,12 +12,12 @@ This review was regenerated as an independent, source-blind comparison using
 only:
 
 - `ROOT_CONTRACT.md`
-- `src/agent_runtime/REQUIREMENTS.md`
-- `src/agent_runtime/CONTRACT.md`
-- `src/agent_runtime/DESIGN.md`
-- `src/agent_runtime/IMPL.md`
-- `src/agent_runtime/tests/**/*.rs`
-- `src/agent_runtime/Cargo.toml` for feature interpretation
+- `src/sav/REQUIREMENTS.md`
+- `src/sav/CONTRACT.md`
+- `src/sav/DESIGN.md`
+- `src/sav/IMPL.md`
+- `src/sav/tests/**/*.rs`
+- `src/sav/Cargo.toml` for feature interpretation
 
 No production Rust sources, prior `COMPLIANCE_REVIEW.md`, TODO queues,
 project-level vision or architecture documents, chat/session history, Git
@@ -49,7 +49,7 @@ controlled intent bundle. Three material gaps remain explicit:
 3. the contract's tool-descriptor semantics are richer than the public
    `ToolDefinition` surface evidenced by the tests.
 
-Human arbitration is required before treating `agent_runtime` as fully
+Human arbitration is required before treating `sav` as fully
 compliant with its current requirements and contract.
 
 ## Implemented behavior evidenced as aligned
@@ -195,7 +195,7 @@ allowed evidence rather than being compliance failures:
 
 ## Final assessment
 
-`agent_runtime` has strong static conformance evidence for its current
+`sav` has strong static conformance evidence for its current
 command/CLI/profile/setup/catalog/supervision/transport implementation.
 However, the allowed evidence does **not** justify a clean full-compliance
 claim against the entire present requirements and contract bundle. The native

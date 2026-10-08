@@ -12,8 +12,8 @@ use std::process::{Command, Stdio};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use kvist_sandbox_runner::protocol::SandboxRequest;
-use kvist_sandbox_runner::validation::{self, ProtocolError};
+use galla::protocol::SandboxRequest;
+use galla::validation::{self, ProtocolError};
 
 fn digest(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
@@ -672,7 +672,7 @@ fn executable_fails_closed_on_a_valid_request() {
 
 #[test]
 fn executable_probe_fails_closed_without_enforcement() {
-    let output = Command::new(env!("CARGO_BIN_EXE_kvist-sandbox-runner"))
+    let output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
         .arg("--kvist-sandbox-probe-v1")
         .env_clear()
         .output()
@@ -806,7 +806,7 @@ fn schema_mirrors_parser_enumerants_and_required_fields() {
 }
 
 fn run_runner(request: &[u8]) -> std::process::Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_kvist-sandbox-runner"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
         .arg("--kvist-sandbox-request-v1")
         .env_clear()
         .stdin(Stdio::piped())

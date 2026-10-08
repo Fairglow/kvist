@@ -852,8 +852,8 @@ impl Shell {
         }
 
         // The shell's `cd` focus stands in for an omitted COMPONENT_DIR so
-        // that `cd engine` followed by `task next` targets `engine`, exactly
-        // as `cd engine && kvist task next` does in the regular CLI.
+        // that `cd maerg` followed by `task next` targets `maerg`, exactly
+        // as `cd maerg && kvist task next` does in the regular CLI.
         inject_command_focus(&mut cmd, self.current_component().as_deref());
 
         // Destructive operations require an explicit in-shell confirmation.
@@ -916,7 +916,7 @@ impl Shell {
                     if matches!(
                         error,
                         KvistError::AgentSetupCancelled
-                            | KvistError::AgentRuntime(sav::Error::Cancelled)
+                            | KvistError::Sav(sav::Error::Cancelled)
                     ) {
                         println!("Operation cancelled.");
                     } else {
@@ -938,7 +938,7 @@ impl Shell {
                 if !matches!(
                     error,
                     KvistError::AgentSetupCancelled
-                        | KvistError::AgentRuntime(sav::Error::Cancelled)
+                        | KvistError::Sav(sav::Error::Cancelled)
                 )
         ));
     }
@@ -1797,13 +1797,13 @@ mod tests {
                 component_dir: None,
             },
         };
-        inject_command_focus(&mut next, Some("engine"));
+        inject_command_focus(&mut next, Some("maerg"));
         match next {
             cli::Command::Task { command } => match command {
                 cli::TaskCommand::Next { component_dir, .. } => {
                     assert_eq!(
                         component_dir.as_deref(),
-                        Some(std::path::Path::new("engine"))
+                        Some(std::path::Path::new("maerg"))
                     )
                 }
                 _ => panic!("expected task next"),
@@ -1819,7 +1819,7 @@ mod tests {
                 stream: false,
             },
         };
-        inject_command_focus(&mut run, Some("engine"));
+        inject_command_focus(&mut run, Some("maerg"));
         match run {
             cli::Command::Task {
                 command: cli::TaskCommand::Run { component_dir, .. },
@@ -1835,7 +1835,7 @@ mod tests {
                 message: None,
             },
         };
-        inject_command_focus(&mut accept, Some("engine"));
+        inject_command_focus(&mut accept, Some("maerg"));
         let mut transition = cli::Command::Task {
             command: cli::TaskCommand::Transition {
                 args: vec!["write-tests".to_owned(), "blocked".to_owned()],
@@ -1846,7 +1846,7 @@ mod tests {
                 _unparsed: std::marker::PhantomData,
             },
         };
-        inject_command_focus(&mut transition, Some("engine"));
+        inject_command_focus(&mut transition, Some("maerg"));
         match (accept, transition) {
             (
                 cli::Command::Component {
@@ -1862,9 +1862,9 @@ mod tests {
             ) => {
                 assert_eq!(
                     component_dir.as_deref(),
-                    Some(std::path::Path::new("engine"))
+                    Some(std::path::Path::new("maerg"))
                 );
-                assert_eq!(tdir.as_deref(), Some(std::path::Path::new("engine")));
+                assert_eq!(tdir.as_deref(), Some(std::path::Path::new("maerg")));
             }
             _ => panic!("expected component accept and task transition"),
         }
@@ -1872,7 +1872,7 @@ mod tests {
         // Non component-scoped commands are left untouched, and an empty
         // focus changes nothing.
         let mut tree = cli::Command::Tree { path: None };
-        inject_command_focus(&mut tree, Some("engine"));
+        inject_command_focus(&mut tree, Some("maerg"));
         inject_command_focus(&mut tree, None);
         match tree {
             cli::Command::Tree { path } => assert!(path.is_none()),
@@ -1971,7 +1971,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let (mut shell, history) = test_shell(dir.path());
         assert_eq!(
-            shell.handle_line("cd engine", &history),
+            shell.handle_line("cd maerg", &history),
             LoopAction::Continue
         );
         assert_eq!(shell.journal.entries()[0].result, "unknown component");
@@ -1981,11 +1981,11 @@ mod tests {
 
     #[test]
     fn resolve_cd_handles_show_set_unknown_and_invalid() {
-        let known = vec![".".to_owned(), "engine".to_owned()];
+        let known = vec![".".to_owned(), "maerg".to_owned()];
         assert!(matches!(resolve_cd(&[], &known), CdOutcome::Show));
         assert!(matches!(
-            resolve_cd(&["engine".to_owned()], &known),
-            CdOutcome::Set(c) if c == "engine"
+            resolve_cd(&["maerg".to_owned()], &known),
+            CdOutcome::Set(c) if c == "maerg"
         ));
         assert!(matches!(
             resolve_cd(&["ghost".to_owned()], &known),
@@ -2010,15 +2010,15 @@ mod tests {
         let args = parse_tasks_args(&[
             "--status".to_owned(),
             "blocked".to_owned(),
-            "engine".to_owned(),
+            "maerg".to_owned(),
         ])
         .expect("valid args");
-        assert_eq!(args.component.as_deref(), Some("engine"));
+        assert_eq!(args.component.as_deref(), Some("maerg"));
         assert_eq!(args.status, Some(TaskStatus::Blocked));
 
-        let args = parse_tasks_args(&["engine".to_owned(), "--status=pending".to_owned()])
+        let args = parse_tasks_args(&["maerg".to_owned(), "--status=pending".to_owned()])
             .expect("valid args");
-        assert_eq!(args.component.as_deref(), Some("engine"));
+        assert_eq!(args.component.as_deref(), Some("maerg"));
         assert_eq!(args.status, Some(TaskStatus::Pending));
 
         assert!(parse_tasks_args(&["a".to_owned(), "b".to_owned()]).is_err());
@@ -2030,12 +2030,12 @@ mod tests {
     fn parse_run_args_accepts_optional_component_and_task() {
         assert_eq!(parse_run_args(&[]).expect("valid"), (None, None));
         assert_eq!(
-            parse_run_args(&["engine".to_owned()]).expect("valid"),
-            (Some("engine".to_owned()), None)
+            parse_run_args(&["maerg".to_owned()]).expect("valid"),
+            (Some("maerg".to_owned()), None)
         );
         assert_eq!(
-            parse_run_args(&["engine".to_owned(), "t-1".to_owned()]).expect("valid"),
-            (Some("engine".to_owned()), Some("t-1".to_owned()))
+            parse_run_args(&["maerg".to_owned(), "t-1".to_owned()]).expect("valid"),
+            (Some("maerg".to_owned()), Some("t-1".to_owned()))
         );
         assert!(parse_run_args(&["a".to_owned(), "b".to_owned(), "c".to_owned()]).is_err());
     }
@@ -2128,28 +2128,28 @@ mod tests {
         let ready = ready_task("done", TaskStatus::Completed, &[]);
         let blocked = ready_task("b1", TaskStatus::Blocked, &["done"]);
         let tasks = vec![blocked.clone(), ready];
-        let next = next_command_for(&blocked, &tasks, "engine").expect("command");
-        assert_eq!(next, "kvist task run engine b1");
+        let next = next_command_for(&blocked, &tasks, "maerg").expect("command");
+        assert_eq!(next, "kvist task run maerg b1");
 
         // Incomplete chain: reopen with the incomplete-dependency count.
         let pending = ready_task("p1", TaskStatus::Pending, &[]);
         let blocked = ready_task("b2", TaskStatus::Blocked, &["p1"]);
         let tasks = vec![blocked.clone(), pending];
-        let next = next_command_for(&blocked, &tasks, "engine").expect("command");
+        let next = next_command_for(&blocked, &tasks, "maerg").expect("command");
         assert_eq!(
             next,
-            "kvist task transition engine b2 pending (1 dependency task incomplete)"
+            "kvist task transition maerg b2 pending (1 dependency task incomplete)"
         );
 
         // Awaiting-decision points at the help topic; other states have none.
         let paused = ready_task("d1", TaskStatus::AwaitingDecision, &[]);
-        let next = next_command_for(&paused, &[], "engine").expect("command");
+        let next = next_command_for(&paused, &[], "maerg").expect("command");
         assert!(next.contains("kvist help task-states"));
         assert!(
-            next_command_for(&ready_task("x", TaskStatus::Pending, &[]), &[], "engine").is_none()
+            next_command_for(&ready_task("x", TaskStatus::Pending, &[]), &[], "maerg").is_none()
         );
         assert!(
-            next_command_for(&ready_task("x", TaskStatus::Completed, &[]), &[], "engine").is_none()
+            next_command_for(&ready_task("x", TaskStatus::Completed, &[]), &[], "maerg").is_none()
         );
     }
 
@@ -2157,27 +2157,27 @@ mod tests {
     fn component_focus_hint_only_when_requested_differs_from_focus() {
         // No focus: naming a component suggests focusing it.
         assert_eq!(
-            component_focus_hint(None, "engine"),
-            Some("note: no component focused (cd engine to switch)".to_owned())
+            component_focus_hint(None, "maerg"),
+            Some("note: no component focused (cd maerg to switch)".to_owned())
         );
         // A root request with no focus matches: no hint.
         assert_eq!(component_focus_hint(None, "."), None);
         // A request matching the focus: no hint.
-        assert_eq!(component_focus_hint(Some("engine"), "engine"), None);
+        assert_eq!(component_focus_hint(Some("maerg"), "maerg"), None);
         // A different component than the focus: hint.
         assert_eq!(
-            component_focus_hint(Some("engine"), "sav"),
-            Some("note: still focused on engine (cd sav to switch)".to_owned())
+            component_focus_hint(Some("maerg"), "sav"),
+            Some("note: still focused on maerg (cd sav to switch)".to_owned())
         );
         // Requesting root while focused elsewhere: hint.
         assert_eq!(
-            component_focus_hint(Some("engine"), "."),
-            Some("note: still focused on engine (cd . to switch)".to_owned())
+            component_focus_hint(Some("maerg"), "."),
+            Some("note: still focused on maerg (cd . to switch)".to_owned())
         );
         // A root focus compares equal to no focus.
         assert_eq!(
-            component_focus_hint(Some("."), "engine"),
-            Some("note: no component focused (cd engine to switch)".to_owned())
+            component_focus_hint(Some("."), "maerg"),
+            Some("note: no component focused (cd maerg to switch)".to_owned())
         );
     }
 
@@ -2221,8 +2221,8 @@ mod tests {
             row("a", TaskStatus::Completed),
             row("b", TaskStatus::Pending),
         ];
-        let text = render_tasks(Theme::plain(), "engine", &rows, Some("b"));
-        assert!(text.starts_with("Tasks in `engine` (2 shown):\n"));
+        let text = render_tasks(Theme::plain(), "maerg", &rows, Some("b"));
+        assert!(text.starts_with("Tasks in `maerg` (2 shown):\n"));
         assert!(text.contains("★ b"));
         assert!(text.contains("next ready: b"));
 
@@ -2252,13 +2252,13 @@ mod tests {
         let text = render_tasks(Theme::plain(), ".", &multiline, None);
         assert!(text.contains("blocked: first line"));
         assert!(!text.contains("second line"));
-        assert!(render_tasks(Theme::plain(), "engine", &[], None).contains("match the filter"));
+        assert!(render_tasks(Theme::plain(), "maerg", &[], None).contains("match the filter"));
 
         // A colored theme keeps every line at the same visible width as the
         // plain rendering, so styled cells never drift out of their columns.
         let colored = Theme::enabled();
-        let plain_text = render_tasks(Theme::plain(), "engine", &rows, Some("b"));
-        let styled_text = render_tasks(colored, "engine", &rows, Some("b"));
+        let plain_text = render_tasks(Theme::plain(), "maerg", &rows, Some("b"));
+        let styled_text = render_tasks(colored, "maerg", &rows, Some("b"));
         for (plain, styled) in plain_text.lines().zip(styled_text.lines()) {
             assert_eq!(
                 style::visible_len(styled),
@@ -2293,7 +2293,7 @@ mod tests {
         fs::create_dir_all(record.parent().unwrap()).unwrap();
         fs::write(&record, "{}").unwrap();
         let runs = vec![RecentRun {
-            component: Some("engine".to_owned()),
+            component: Some("maerg".to_owned()),
             task_id: Some("t-1".to_owned()),
             timestamp: Some("2026-09-11T22-00-00Z".to_owned()),
             success: Some(true),

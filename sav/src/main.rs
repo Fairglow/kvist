@@ -1,5 +1,5 @@
 #[cfg(not(target_os = "linux"))]
-compile_error!("agent-runtime currently supports Linux only");
+compile_error!("sav currently supports Linux only");
 
 use std::{
     io::{IsTerminal, Write},
@@ -20,7 +20,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "agent-run",
+    name = "sav-run",
     version,
     about = "Run an AI prompt under bounded Linux host-process supervision"
 )]

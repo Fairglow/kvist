@@ -1,6 +1,6 @@
 <!-- kvist-design-version: 1 -->
 
-# Agent Runner — Design
+# Skott — Design
 
 ## October run remediation
 
@@ -31,7 +31,7 @@ accounts for exclusions/oversize without loading oversized files, and keeps
 all existing recursion/entry/byte and encoded-page ceilings. File search uses
 secure non-following descriptor access and explicit file-vs-directory errors.
 Rust integration remains a separately bounded host-selection/read-only-mount
-path; it must not import engine policy/types or relax its closed Cargo phases.
+path; it must not import maerg policy/types or relax its closed Cargo phases.
 
 ## Security-first hardening design
 
@@ -77,10 +77,10 @@ encoded output.
 The headless CLI and TUI share transport/executor/session construction. NDJSON
 events have a version and sequence; stdout is reserved for events or answer
 text, with diagnostics on stderr. Headless mode has no host-execution escape
-hatch and always records. The engine's separate protected broker remains the
+hatch and always records. The maerg's separate protected broker remains the
 only task-authoring integration.
 
-This document explains how `agent-runner` realizes the requirements and contract.
+This document explains how `skott` realizes the requirements and contract.
 It covers module layout, the agent loop, tool rendering, tool-chain advertisement
 and gating, sandbox request construction, the terminal UI, cancellation, and the
 edge cases that the tests cover.
@@ -106,8 +106,8 @@ src/
   session_log.rs private versioned fallible operational journal
   headless.rs   terminal-free same-loop execution and NDJSON
   sandbox.rs    request construction (Authoring phase) + executor
-  session.rs    AgentSession (turn model) + AgentRunner (loop + events)
-  run.rs        worker: drives AgentRunner on a thread, channel of events
+  session.rs    AgentSession (turn model) + Skott (loop + events)
+  run.rs        worker: drives Skott on a thread, channel of events
   tui/
     mod.rs      ratatui run loop, event handling, wiring to run.rs
     app.rs      App state: transcript, selectors, input, status
@@ -145,7 +145,7 @@ The loop is the classic stream-and-execute cycle, kept transport-agnostic:
 1. `AgentSession::next_request` returns the next `ModelRequest` built from the
    accumulated `messages`, the tool definitions, `tool_choice = Auto`, and the
    selected `reasoning_effort`.
-2. `AgentRunner` calls `transport.stream(request, token, on_event)`. The
+2. `Skott` calls `transport.stream(request, token, on_event)`. The
    `on_event` closure forwards `TextDelta`/`ReasoningDelta` as `Event::Text`/
    `Event::Reasoning` to the UI, and buffers `ToolIntent` events.
 3. After the turn, `ModelTurn.tool_intents` are the resolved proposals. For each
@@ -158,9 +158,9 @@ The loop is the classic stream-and-execute cycle, kept transport-agnostic:
    answer. Invalid finishes/identities fail before effects. Every rejected or
    interrupted pending call gets a paired result.
 
-Cancellation: a shared `CancellationToken` (from `agent_runtime`) is checked
+Cancellation: a shared `CancellationToken` (from `sav`) is checked
 between turns and is threaded through the sandbox executor, which terminates the
-process group on interrupt. `agent_runtime::install_handler` routes Ctrl+C/SIGTERM
+process group on interrupt. `sav::install_handler` routes Ctrl+C/SIGTERM
 to a cooperative flag so the whole process stays safe.
 
 Why a worker thread: the model transport and sandbox are blocking. The UI runs
@@ -225,7 +225,7 @@ Phase resolution:
    `edit_file` out of the advertised definitions; `apply_fixes` mode keeps the
    full set. Both modes keep the shell, reads, search, and build tools so the
    reviewer can verify by running.
-5. Run `AgentRunner` with the phase's own `RunLimits` (the reviewer model's
+5. Run `Skott` with the phase's own `RunLimits` (the reviewer model's
    resolved budgets, `max_turns` from the policy) and the shared cancellation
    token, emitting `review_start` first and `review_summary` last over the
    sink. The review prompt is the composed user message: the original task
@@ -346,13 +346,13 @@ Each is rendered to an argv whose `[0]` is an absolute
 canonical path, so the sandbox accepts it and no shell globbing or PATH lookup
 happens on our argv.
 
-- `shell { command }` → `["<bash>", "-c", "<command>", "agent-runner"]`. The
+- `shell { command }` → `["<bash>", "-c", "<command>", "skott"]`. The
   command string is the agent's own script. Bash resolves inner tool names via
   the sandbox `PATH` we set (prepared `/rust/runtime/bin` first when available,
   then `/usr/bin:/bin:/usr/sbin:/sbin`). The `shell`
   command string is checked against the denylist before rendering.
   Commands longer than one 4096-byte protocol argv entry render instead as
-  `["<bash>", "-c", "exec bash -c \"$(cat /context/0)\" agent-runner"]` with
+  `["<bash>", "-c", "exec bash -c \"$(cat /context/0)\" skott"]` with
   `shell_script` carrying the text; the executor stages it as a mode-0600 file
   in a mode-0700 private directory in the workspace's canonical parent (never
   inside the writable mount) and the request mounts it read-only at
@@ -406,7 +406,7 @@ the sandbox, never against the host `PATH`.
 
 The System gate lives in `ToolRegistry::resolve`. Sandboxed terminal/headless
 startup uses `resolve_for_workspace`, adding validated installed Rust resources
-and a bounded private vendor snapshot without changing the engine Cargo topology.
+and a bounded private vendor snapshot without changing the maerg Cargo topology.
 The fixed Cargo shim prepends `--offline --locked` and source overrides to every
 normal PATH Cargo invocation; Cargo handles missing/stale locks before a build
 can update them. Flags also apply to metadata and checks; version/help remain
@@ -417,7 +417,7 @@ rustdoc and native libraries remain under `/rust/toolchain`; the trusted shim
 is under `/rust/runtime`. `HOME=/tmp`, `CARGO_HOME=/tmp/cargo-home` and
 `CARGO_TARGET_DIR=/tmp/target` are private invocation scratch, not host caches.
 Selection uses the standard host rustup layout, ignoring ambient overrides and
-custom linked roots; engine `.kvist/rust-toolchain.json` is not authorization.
+custom linked roots; maerg `.kvist/rust-toolchain.json` is not authorization.
 Preparation bounds are 30 seconds, 1 GiB vendor aggregate, 256 MiB/file,
 100,000 entries, depth 64 and 32 MiB retained paths. Stage ownership is shared
 with the registry/executor and removed when the final owner drops. Pin/root
@@ -507,9 +507,9 @@ the explicit host-execution flag, even when no prompt is supplied.
   a larger per-turn deadline, reported to the user via `Event::Note`; a retry that
   exhausts `max_attempts` is surfaced as `Event::Failed`. Cancellation is never
   retried.
-- A shared `CancellationToken` (from `agent_runtime`) is checked between turns and
+- A shared `CancellationToken` (from `sav`) is checked between turns and
   threaded through the sandbox executor, which terminates the process group on
-  interrupt; `agent_runtime::install_handler` routes Ctrl+C/SIGTERM to a
+  interrupt; `sav::install_handler` routes Ctrl+C/SIGTERM to a
   cooperative flag so the whole process stays safe.
 - A missing or unverified sandbox runner or backend fails closed with an actionable
   diagnostic and never triggers host execution; oversized or non-UTF-8 output is
@@ -518,7 +518,7 @@ the explicit host-execution flag, even when no prompt is supplied.
 ## Security and resource design
 
 `sandbox::build_request` assembles a version-one `SandboxRequest` in the
-`Authoring` phase, reusing the shared `kvist_sandbox_runner::protocol` types so
+`Authoring` phase, reusing the shared `kvist_galla::protocol` types so
 the wire shape is identical to the runner's own statement of the contract.
 
 Identities are honest `sha256:` digests rather than placeholders: `runner` is
@@ -619,7 +619,7 @@ explicit `bg` in the file; inline accents (dim, ok, warn, err, info, accent,
 model, spinner, stats, …) are foreground-only because they are always drawn
 over one of those already-explicit surfaces.
 
-The two built-ins, `dark` and `light`, live at `agent_runner/themes/*.toml`
+The two built-ins, `dark` and `light`, live at `skott/themes/*.toml`
 and are embedded into the binary (`include_str!`) as the fallback, loaded
 through the exact same parser as any user file. A `themes/` directory next to
 the resolved `config.toml` (see `tui::theme::file::themes_dir_for_config`) is
@@ -762,7 +762,7 @@ trust. No speculative or misleading number is ever shown.
   names (`LD_*`, `GIT_*`, `CARGO_*`, proxies) are not forwarded.
 - Arguments and output values are hash-only in the operational journal.
   Private transcripts may contain sensitive text; logging can be explicitly
-  disabled in interactive mode, never headless. Neither file is engine evidence.
+  disabled in interactive mode, never headless. Neither file is maerg evidence.
 - The denylist and write-root enforcement are tested so a regression cannot
   silently widen authority.
 - The review phase is advisory and reuses the closed sandbox request; assess-only

@@ -5,7 +5,7 @@
 //! A theme is external data, not Rust code: `themes/dark.toml` and
 //! `themes/light.toml` in the repository are the canonical built-in themes
 //! (embedded into the binary as the fallback `Theme::dark()`/`Theme::light()`
-//! so agent-runner always has a working theme), and [`file::discover`] lists
+//! so skott always has a working theme), and [`file::discover`] lists
 //! every theme available — the two built-ins plus any `*.toml` file found in
 //! a user's themes directory (see [`file::themes_dir_for_config`]). Dropping
 //! a new file there, or editing an existing one, takes effect the next time
@@ -27,7 +27,7 @@ use crate::markdown::MarkdownStyles;
 /// The built-in theme names, always available even with no themes directory.
 pub const THEME_NAMES: [&str; 2] = ["dark", "light"];
 
-/// The embedded `dark` theme file, compiled in as a fallback so agent-runner
+/// The embedded `dark` theme file, compiled in as a fallback so skott
 /// always has a working default even when no external theme file exists.
 const DARK_TOML: &str = include_str!("../../../themes/dark.toml");
 /// The embedded `light` theme file; see [`DARK_TOML`].

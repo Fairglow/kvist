@@ -47,7 +47,7 @@ pub struct Overrides {
     /// The language tool profile to select for this session.
     pub profile: Option<crate::tools::ToolProfile>,
     /// Directory for the session journal + transcript. `None` means the
-    /// default (`.agent-runner/runs` under the working directory).
+    /// default (`.skott/runs` under the working directory).
     pub log_dir: Option<PathBuf>,
     /// Serving context override. `None` uses model configuration or discovery.
     pub context_limit: Option<usize>,
@@ -451,7 +451,7 @@ impl SessionBuilder {
                     .join(crate::session_log::DEFAULT_LOG_DIR)
             });
             Some(Box::new(
-                SessionLog::open(&dir, format!("agent-runner-{}", model.id))
+                SessionLog::open(&dir, format!("skott-{}", model.id))
                     .map_err(|source| {
                         crate::error::io_error(
                             "open private session log directory",

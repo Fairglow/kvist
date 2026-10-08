@@ -1,6 +1,6 @@
 <!-- kvist-requirements-version: 1 -->
 
-# Kvist Engine Requirements
+# Kvist Maerg Requirements
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
@@ -9,13 +9,13 @@ all capitals.
 
 ## Purpose and scope
 
-The root component provides the local headless Kvist engine and CLI. It owns
+The root component provides the local headless Kvist maerg and CLI. It owns
 project initialization, component-document validation, bounded discovery,
 project status, durable task queues, task lifecycle, Kvist-specific role and
 policy selection, sandbox integration, context selection, import/conversion,
 and durable execution evidence.
 
-The reusable provider runtime belongs to the child `agent-runtime` component.
+The reusable provider runtime belongs to the child `sav` component.
 Kvist consumes that component's public contract and MUST NOT make its provider
 or implementation types part of Kvist's durable formats.
 
@@ -115,10 +115,10 @@ effects from a missing process.
 
 ### REQ-PROJECT-LAYOUT
 
-Kvist's target repository layout MUST place the root engine artifacts, Cargo
-workspace manifest and lockfile, engine source, and root integration tests
-inside one `engine/` component directory. `agent-runtime` and
-`sandbox-runner` MUST be complete child components. Project vision,
+Kvist's target repository layout MUST place the root maerg artifacts, Cargo
+workspace manifest and lockfile, maerg source, and root integration tests
+inside one `maerg/` component directory. `sav` and
+`galla` MUST be complete child components. Project vision,
 architecture, root contract, decisions, licensing, and project documentation
 MUST remain outside the implementation component. The migration MUST NOT retain
 aliases for the retired paths.
@@ -199,7 +199,7 @@ mutating an arbitrary project-cache pathname. Verification MUST run exactly
 `cargo test --locked`, with network denied and offline true, using the approved
 generation as a read-only `CARGO_HOME` and separate writable target scratch.
 
-Current implementation status: the engine implements typed, bounded planning
+Current implementation status: the maerg implements typed, bounded planning
 with distinct host and sandbox paths, full source-config parity, and
 attempt-local lockfile identities. The independently installed runner validates
 the exact Cargo phase shapes, independently derives source identities, and
@@ -213,7 +213,7 @@ generation selection remain deferred. An otherwise valid request fails closed.
 An agent MAY request a new or changed dependency mid-task, because the required
 dependency is often only known while implementing. A request carries the crate
 identity and an exact, approved source. When the request matches the configured
-supported package sources and all bounds, the engine MUST fetch it in the distinct
+supported package sources and all bounds, the maerg MUST fetch it in the distinct
 dependency-acquisition phase, bind the lockfile before/after identities, promote
 an immutable generation, and allow the agent to continue using it, all without
 human intervention. The request and its outcome MUST be recorded durably as
@@ -332,7 +332,7 @@ remaining budget. Only transient gateway availability failures are retried a
 bounded number of times; response-level failures and surfaced decisions end the
 loop deterministically.
 
-Each turn returns untrusted intents that the engine classifies into exactly one
+Each turn returns untrusted intents that the maerg classifies into exactly one
 of: read (bounded, state-changing, logged), write (brokered and applied in the
 effect sandbox), dependency acquisition request (evaluated against policy), or
 decision proposal (surfaced to the human). Read and write results are fed back
@@ -566,7 +566,7 @@ actionable next command, or, where the next step is a human decision, an
 explicit pointer to the help topic that explains the state and its resolution.
 Hints MUST be short, dense, and name real commands.
 
-The engine MUST provide `kvist help` rendering a short tour of the core
+The maerg MUST provide `kvist help` rendering a short tour of the core
 concepts (project, component, intent documents, tasks) and the component
 lifecycle, plus named topics: the core concepts, the lifecycle with the exact
 commands, and the durable task states with the legal transitions and the
@@ -678,7 +678,7 @@ explicitly draft rather than inferred truth.
   dependency requests that auto-fetch an in-policy revision remain target
   requirements, not claims about the current CLI.
 - Configuration is limited to 64 KiB. Component Markdown and YAML artifacts
-  read by the engine are limited to 1 MiB.
+  read by the maerg are limited to 1 MiB.
 - Traversal depth, directory count, component count, entries per directory,
   path length, subprocess duration, and output are explicitly bounded.
 - Writes use regular non-link paths and synchronized no-clobber or atomic

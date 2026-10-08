@@ -1,23 +1,23 @@
-# agent-runner
+# skott
 
-A first-class, interactive agent shell for Kvist. `agent-runner` lets you talk to
+A first-class, interactive agent shell for Kvist. `skott` lets you talk to
 an AI coding agent in a modern terminal UI while the agent does real work, in the
 style of `gemini` or GitHub `copilot`. Every tool the agent runs executes inside
 the independently installed Bubblewrap sandbox, so it never asks for per-action
 permission — the tools, working directory, and authority boundaries are declared
 once, in configuration.
 
-It is a standalone binary (`agent-runner`) that is independent of the `kvist` CLI
-but shares the `agent-runtime` bounded mechanisms and the `kvist-sandbox-runner`
+It is a standalone binary (`skott`) that is independent of the `kvist` CLI
+but shares the `sav` bounded mechanisms and the `galla-runner`
 enforcement boundary, so it can also be launched from Kvist.
 
 ## Quick start
 
 ```
-agent-runner                       # open the UI in the current directory
-agent-runner --config ./cfg.toml   # use a specific configuration
-agent-runner -m ollama "explain this repo"   # pick a model and submit a prompt
-agent-runner --list-models         # print configured models and exit
+skott                       # open the UI in the current directory
+skott --config ./cfg.toml   # use a specific configuration
+skott -m ollama "explain this repo"   # pick a model and submit a prompt
+skott --list-models         # print configured models and exit
 ```
 
 Run it from an interactive terminal. It refuses non-interactive input with an
@@ -36,7 +36,7 @@ complete, commented example. Key points:
   (including an unloaded Ollama model). `response_reserve` controls the initial
   generation budget; by default it is up to 8192 tokens or a quarter of a small
   window. CLI budget overrides take precedence.
-- `sandbox.runner` and `sandbox.backend` point at the `kvist-sandbox-runner`
+- `sandbox.runner` and `sandbox.backend` point at the `galla-runner`
   executable and the Bubblewrap backend; they default to resolved system paths.
 - `tool_policy` exposes the shell denylist and the sandbox write root; the safe
   minimum denylist is always enforced.
@@ -65,7 +65,7 @@ or edit one without rebuilding. Two built-ins ship, embedded as a fallback:
 Drop a `themes/` directory next to your `config.toml` to customize: a file
 named `dark.toml` or `light.toml` there overrides the matching built-in, and
 any other `<name>.toml` adds a new theme, selectable without a rebuild. See
-`agent_runner/themes/dark.toml` and `light.toml` for the full, documented
+`skott/themes/dark.toml` and `light.toml` for the full, documented
 schema — every item lists an explicit colour, and surfaces that paint their
 own background (panel, reasoning, scrollbar, menu, code blocks) require one.
 Colours may be written as a named colour or numeric RGB interchangeably
@@ -104,7 +104,7 @@ transcript: Ctrl+Home stops auto-follow, and Ctrl+End resumes it.
 History currently displays bounded diagnostic `.log` text, not a structured
 Markdown conversation or an executable checkpoint. Files above 5 MiB are not
 listed, and individual recorded text items may be truncated at 64 KiB.
-The [Markdown transcript proposal](../docs/proposals/agent-runner-markdown-transcripts.md)
+The [Markdown transcript proposal](../docs/proposals/skott-markdown-transcripts.md)
 describes shared rendering, folding, full re-theming and safe continuation;
 those capabilities are proposed, not implemented.
 
@@ -168,9 +168,9 @@ vendored dependencies require reprovisioning on the host and restarting.
 ## Development
 
 ```
-cargo build -p agent-runner
-cargo test -p agent-runner
-cargo clippy -p agent-runner --all-targets
+cargo build -p skott
+cargo test -p skott
+cargo clippy -p skott --all-targets
 ```
 
 The component follows the Kvist five-artifact model: [REQUIREMENTS.md](./REQUIREMENTS.md),

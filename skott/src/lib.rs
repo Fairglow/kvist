@@ -1,7 +1,7 @@
-//! The agent-runner library.
+//! The skott library.
 //!
-//! Agent-runner is a first-class, sandbox-integrated interactive agent shell.
-//! It shares Kvist's bounded `agent-runtime` mechanisms and its independently
+//! Skott is a first-class, sandbox-integrated interactive agent shell.
+//! It shares Kvist's bounded `sav` mechanisms and its independently
 //! installed sandbox enforcement boundary. The library exposes configuration,
 //! the tool model, the sandbox request/execution layer, the transport-agnostic
 //! agent loop, rolling context management, and the durable session log; the
@@ -48,7 +48,7 @@ pub use retry::{
 pub use run::system_prompt;
 pub use sandbox::ToolOutcome;
 pub use session::{
-    AgentRunner, AgentSession, Event, EventSink, MAX_TURNS, Recorder, RunLimits, RunSummary,
+    Skott, AgentSession, Event, EventSink, MAX_TURNS, Recorder, RunLimits, RunSummary,
     ToolExecutor,
 };
 pub use session_log::{DEFAULT_LOG_DIR, SessionLog};

@@ -207,7 +207,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"models":{"availableModels":[{"
 #[test]
 fn invalid_xdg_config_home_falls_back_to_absolute_home() {
     let workspace = TempDir::new().expect("workspace");
-    let expected = workspace.path().join(".config/agent-runtime/config.toml");
+    let expected = workspace.path().join(".config/sav/config.toml");
 
     for xdg in ["", "relative-config"] {
         let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
@@ -288,7 +288,7 @@ fn canonical_profile_store_takes_precedence_over_legacy_store() {
          command = \"/bin/echo '{prompt}'\"\n",
     )
     .expect("write legacy profiles");
-    let canonical_directory = workspace.path().join("agent-runtime");
+    let canonical_directory = workspace.path().join("sav");
     fs::create_dir(&canonical_directory).expect("create canonical profile directory");
     fs::write(
         canonical_directory.join("config.toml"),
@@ -965,7 +965,7 @@ fn standalone_cli_replays_trajectory_journal() {
     let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
         .args(["replay", file.to_str().unwrap()])
         .output()
-        .expect("run agent-run replay");
+        .expect("run sav-run replay");
 
     assert!(
         output.status.success(),
@@ -990,7 +990,7 @@ fn standalone_cli_replays_trajectory_json() {
     let output = Command::new(env!("CARGO_BIN_EXE_sav-run"))
         .args(["replay", "--json", file.to_str().unwrap()])
         .output()
-        .expect("run agent-run replay json");
+        .expect("run sav-run replay json");
 
     assert!(
         output.status.success(),

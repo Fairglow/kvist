@@ -1,6 +1,6 @@
 <!-- kvist-design-version: 1 -->
 
-# Kvist Engine Design
+# Kvist Maerg Design
 
 ## Design overview
 
@@ -10,7 +10,7 @@ component documents, discovery, project state, queues, task commands, sandbox
 protocol, VCS inspection, agent integration, conversion, and presentation.
 `main.rs` only converts the library result into process output and exit status.
 
-Kvist depends on the standalone `agent-runtime` crate for reusable provider and
+Kvist depends on the standalone `sav` crate for reusable provider and
 process mechanisms while retaining task policy, authority, context, and
 evidence.
 
@@ -26,12 +26,12 @@ evidence.
 | Interactive shell | `shell` (`completion`, `journal`, `locks`, `pager`, `prompt_editor`, `runs`, `state`, `status`, `stream`, `style`) | Reedline host, clap-derived completion tree, dynamic state snapshot, builtins, journal, lock inspection, paging, streaming, theming |
 | Onboarding        | `init`, `convert`, `import`, `reverse_discovery`                                                                   | New projects and explicit source-derived drafts                                                                                     |
 
-`engine/`, `agent_runtime/`, and `sandbox_runner/` are top-level peer
+`maerg/`, `sav/`, and `galla/` are top-level peer
 components under the root Rust workspace manifest (`/Cargo.toml`). Each owns
 its own requirements, contract, design, queue, records, tests, and manifest.
-`kvist.engine` depends on `agent-runtime` as a Rust library, while
-`sandbox-runner` is an independent execution boundary that communicates with
-the engine only through the versioned protocol. The one-way migration from the
+`kvist.maerg` depends on `sav` as a Rust library, while
+`galla` is an independent execution boundary that communicates with
+the maerg only through the versioned protocol. The one-way migration from the
 original `src/` layout is recorded in
 [`../docs/decisions/0003-align-rust-workspace-with-components.md`](../docs/decisions/0003-align-rust-workspace-with-components.md).
 
@@ -111,7 +111,7 @@ other scope, whose providers lose on name conflict) with the same bounded
 document rules and lists the target scope's profiles in deterministic name
 order. Each profile's test command is its explicit `command` when present,
 otherwise the merged provider's synthesized template. Testing reuses
-`agent_runtime::verify_profile` with the fixed setup prompt, so supervision,
+`sav::verify_profile` with the fixed setup prompt, so supervision,
 capture bounds, and diagnostics match setup qualification exactly; no new
 execution path is introduced. The interactive loop reuses the wizard's
 cancellation-aware input handling, and per-failure removal reuses the standard
@@ -128,7 +128,7 @@ turning; the probe never loads or selects a model. When the gateway accepts, the
 turn is dispatched through the runtime transport and advertises the closed
 authoring tool set. The broker reduces the turn's untrusted tool intents to
 capability-bound effects under a deny-by-default policy; a dropped intent fails
-the turn. Each authorized effect is applied by the engine itself inside the
+the turn. Each authorized effect is applied by the maerg itself inside the
 effect sandbox against a read-only staged-intent mount, so the host never writes
 component state for an effect. A turn succeeds only when it produced a usable
 result, no intent was dropped, and every authorized effect applied.
@@ -152,12 +152,12 @@ Significant artifact separation rationale is retained in
 
 ### Planned dogfooding execution boundary
 
-The engine replaces the unreleased sandbox protocol's original shape while
+The maerg replaces the unreleased sandbox protocol's original shape while
 retaining protocol version 1. A request is a closed typed value containing the
 phase, working directory, argv, environment, network capability, resource
 limits, and mount grants. Each mount identifies its canonical source, fixed
 sandbox destination, access, purpose, and approval-bound identity. Before the
-request is serialized the engine resolves `argv[0]` to an exact executable: a
+request is serialized the maerg resolves `argv[0]` to an exact executable: a
 bare program name is resolved only against a `PATH` explicitly present in the
 request environment (no ambient host fallback), an absolute program path is used
 directly, the target must be a regular non-symlink executable, and it is
@@ -187,8 +187,8 @@ which is the authenticated execution-approval digest rather than a locally
 computed unapproved hash. The availability probe itself runs under a fixed short
 deadline and combined-output cap with process-group termination, never an
 unbounded capture. The runner independently parses the request and cannot import
-engine types or trust engine path validation as a substitute for its own checks.
-The engine drains runner stdout and stderr nonblockingly and fairly under that
+maerg types or trust maerg path validation as a substitute for its own checks.
+The maerg drains runner stdout and stderr nonblockingly and fairly under that
 single combined cap, polling direct-child status until both streams reach EOF.
 The deadline and cap remain active after direct-child exit; either breach kills
 the process group, reaps the direct child when necessary, and returns bounded
@@ -214,7 +214,7 @@ traversal, checksum, lockfile before/after, source, and link validation.
 Verification mounts a selected generation read-only as its `CARGO_HOME`, uses
 separate target scratch, and disables network.
 
-The engine implements this as typed, bounded, fallible planning in
+The maerg implements this as typed, bounded, fallible planning in
 `acquisition`: private plan fields expose only validated host-path and
 sandbox-path getters. It derives the real attempt-local Cargo home,
 lockfile workspace, phase-specific scratch, exact Cargo identity,
@@ -292,7 +292,7 @@ the run. The state machine advances turn by turn through a running state and
 terminates in one of complete, awaiting-decision, or fatal. A run reaches
 complete only
 when the agent reports completion, no decision worthy of intervention remains
-surfaced, and every authorized effect applied by the engine. A decision worthy of
+surfaced, and every authorized effect applied by the maerg. A decision worthy of
 intervention terminates the run in awaiting-decision rather than continuing, and
 a fatal
 transport or gateway failure terminates it in fatal.
@@ -301,7 +301,7 @@ Reads execute within a bounded read scope: the whole current project plus
 approved dependency source, constrained by per-file, per-turn, and directory-depth
 limits. Reads are logged to the per-run trajectory with the run's redaction
 values applied, so intermediate investigation is inspectable without being
-persisted as an effect. Only brokered write effects are applied by the engine
+persisted as an effect. Only brokered write effects are applied by the maerg
 inside the effect sandbox against a read-only staged-intent mount; the host never
 writes component state, and only the final brokered effect of a run is persisted,
 preserving durable, inspectable state over in-chat reasoning.
@@ -351,7 +351,7 @@ remains the closed [`ALLOWED_TOOLS`](crate::authoring::ALLOWED_TOOLS) set in the
 broker; a change to that set is a change to that code and its tests, never to an
 untrusted agent.
 
-The broker ([`engine/src/authoring`](src/authoring/mod.rs)) routes each untrusted
+The broker ([`maerg/src/authoring`](src/authoring/mod.rs)) routes each untrusted
 intent through the single funnel [`classify_intent`](src/authoring/mod.rs) to one
 of four outcomes: an authorized write effect ([`CheckedIntent`]), a surfaced
 decision ([`ProposedDecision`]), an accepted dependency request
@@ -360,7 +360,7 @@ decision ([`ProposedDecision`]), an accepted dependency request
 `dependency_requests` alongside `effects` and `dropped`.
 
 `propose_decision` takes `summary`, `why`, and an optional `patch`. It never
-writes a protected intent document; instead the engine records a bounded,
+writes a protected intent document; instead the maerg records a bounded,
 redacted proposal as durable, inspectable evidence under
 `<component>/.kvist/authoring/proposals/<id>.json`. When a turn contains a
 surfaced decision the loop stops before applying that turn's write effects, sets
@@ -459,13 +459,13 @@ and `Scratch` purposes in authoring, rejects `Toolchain::Cargo` outside Cargo
 phases, and rejects a declared Cargo cache in authoring. The vendored
 registry, sandbox cargo config, and runtime bin therefore cannot be mounted
 for authoring. Two paths exist: (a) extend the runner contract (protocol
-change plus conformance updates in `sandbox_runner` and the `agent_runner`
+change plus conformance updates in `galla` and the `skott`
 serialization) to permit the read-only Cargo purposes in authoring, or (b)
 carry the vendored registry, cargo config, and runtime bin under the already
 permitted `Context` purpose with a `Toolchain::System` toolchain block rooted
 at the toolchain destination and a writable `Scratch` serving as
 `CARGO_HOME`/`CARGO_TARGET_DIR` — no protocol change, but the request builder
-must be engine-side and the resulting topology is a documented variant of the
+must be maerg-side and the resulting topology is a documented variant of the
 verification topology. Path (b) is the first candidate because it reuses the
 existing closed purposes and the pinned-toolchain manifest.
 
@@ -661,7 +661,7 @@ history is reedline's file-backed history at `.kvist/history`. Both are local
 state and are excluded from compliance evidence.
 
 Cancellation is process-level: the shell installs one `sigaction` handler for
-SIGINT/SIGTERM through the shared `agent_runtime::interrupt` registry. The
+SIGINT/SIGTERM through the shared `sav::interrupt` registry. The
 handler sets an atomic flag and forwards the signal to the currently active
 process group, which the sandbox supervisor and the runtime supervisor register
 around each child (both spawn with their own process group). The supervision

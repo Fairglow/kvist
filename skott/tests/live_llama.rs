@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use skott::{
-    AgentRunner, AgentSession, ContextManager, Event, EventSink, Model, ModelProvider, RunLimits,
+    Skott, AgentSession, ContextManager, Event, EventSink, Model, ModelProvider, RunLimits,
     SandboxExecutor, SandboxPaths, SessionLog, ToolPolicy, ToolRegistry,
 };
 use sav::{
@@ -28,9 +28,9 @@ fn real_sandbox_confines_native_files_and_denies_host_network() {
     let executor = SandboxExecutor::new(
         registry,
         SandboxPaths {
-            runner: std::env::var_os("KVIST_LIVE_SANDBOX_RUNNER")
+            runner: std::env::var_os("KVIST_LIVE_GALLA_RUNNER")
                 .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("/usr/local/bin/kvist-sandbox-runner")),
+                .unwrap_or_else(|| PathBuf::from("/usr/local/bin/galla-runner")),
             backend: PathBuf::from("/usr/bin/bwrap"),
         },
         workspace.clone(),
@@ -152,9 +152,9 @@ fn live_llama_reads_edits_and_verifies_inside_the_real_sandbox() {
     let target = workspace.join("answer.txt");
     std::fs::write(&target, "answer = 41\r\nunchanged = yes").unwrap();
     let sandbox = SandboxPaths {
-        runner: std::env::var_os("KVIST_LIVE_SANDBOX_RUNNER")
+        runner: std::env::var_os("KVIST_LIVE_GALLA_RUNNER")
             .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/usr/local/bin/kvist-sandbox-runner")),
+            .unwrap_or_else(|| PathBuf::from("/usr/local/bin/galla-runner")),
         backend: PathBuf::from("/usr/bin/bwrap"),
     };
     let registry = ToolRegistry::resolve(
@@ -183,7 +183,7 @@ fn live_llama_reads_edits_and_verifies_inside_the_real_sandbox() {
     );
     let sink = Events::default();
     let mut log = SessionLog::open(&root.path().join("logs"), "live-isolated-edit").unwrap();
-    let summary = AgentRunner::with_retry(8, model.retry_policy())
+    let summary = Skott::with_retry(8, model.retry_policy())
         .with_limits(RunLimits {
             wall_time: Duration::from_secs(180),
             max_tokens: 100_000,

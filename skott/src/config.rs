@@ -47,7 +47,7 @@ pub enum ModelProvider {
 }
 
 impl ModelProvider {
-    /// Maps the configuration provider to the agent-runtime transport provider.
+    /// Maps the configuration provider to the sav transport provider.
     pub const fn to_agent_provider(self) -> sav::LocalModelProvider {
         match self {
             ModelProvider::LlamaServer => sav::LocalModelProvider::LlamaServer,
@@ -269,7 +269,7 @@ fn default_cadence_timeout_secs() -> u64 {
 /// Paths to the independent sandbox enforcement boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SandboxPaths {
-    /// Path to the `kvist-sandbox-runner` executable.
+    /// Path to the `galla-runner` executable.
     pub runner: PathBuf,
     /// Path to the Bubblewrap backend executable.
     pub backend: PathBuf,
@@ -287,7 +287,7 @@ impl Default for SandboxPaths {
 impl SandboxPaths {
     /// The default sandbox runner path when not configured.
     pub fn default_runner() -> PathBuf {
-        PathBuf::from("/usr/local/bin/kvist-sandbox-runner")
+        PathBuf::from("/usr/local/bin/galla-runner")
     }
 
     /// The default Bubblewrap backend path when not configured.

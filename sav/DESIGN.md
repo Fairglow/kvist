@@ -1,6 +1,6 @@
 <!-- kvist-design-version: 1 -->
 
-# Agent Runtime Design
+# Sav Design
 
 ## Selected-model capacity and usage
 
@@ -40,7 +40,7 @@ supported as opaque processes constrained by an outer execution backend.
 | `direct_transport` | Bounded loopback Ollama and llama-server HTTP adapters                                        |
 | `trajectory`       | Bounded recorded event stream for agent execution trajectories                                |
 | `gbnf`             | GBNF grammar escaping for provider tool schemas                                               |
-| `interrupt`        | Process-level interrupt registry shared with the engine supervisor                            |
+| `interrupt`        | Process-level interrupt registry shared with the maerg supervisor                            |
 | `lib` / `main`     | Public library surface and standalone CLI boundary                                            |
 
 The future runtime layers are run coordinator, model transport, native loop,
@@ -159,9 +159,9 @@ Provider-native enforcement is only a generation aid; returned JSON parsing
 and validation remain a host responsibility.
 
 Detailed authority rationale and delivery ordering live in
-`../../docs/agent-runtime/architecture.md`; the historical evaluation evidence
+`../../docs/sav/architecture.md`; the historical evaluation evidence
 for the rejected Rig experiment lives in
-`../../docs/agent-runtime/rig-evaluation.md` (ADR 0009).
+`../../docs/sav/rig-evaluation.md` (ADR 0009).
 
 ## Failure and recovery
 
@@ -215,7 +215,7 @@ The broker cannot broaden host grants. Capability states distinguish
 advertised, conformance-tested, and policy-enabled behavior. Provider
 permission flags are defense in depth rather than proof of isolation.
 
-Tool effects are delegated to the installed `kvist-sandbox-runner` through a
+Tool effects are delegated to the installed `galla-runner` through a
 replaceable execution-backend interface. The runner binary and its verified
 backend capabilities are resolved and bound before any effect is delegated.
 Unavailability of the runner, its backend, or its prerequisites fails closed;

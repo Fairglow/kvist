@@ -2,26 +2,26 @@
 
 # Component Implementation Record
 
-## Observed implementation: agent-runtime
+## Observed implementation: sav
 
 ## Observation basis and package
 
 This replacement record was independently derived on 2026-10-02 from
-`agent_runtime/src/**/*.rs`, `agent_runtime/tests/**/*.rs`, this package's
+`sav/src/**/*.rs`, `sav/tests/**/*.rs`, this package's
 Cargo manifest, and executed tests. Intent documents, previous implementation
-records, reviews, Git history, and engine/sandbox-runner implementation were
+records, reviews, Git history, and maerg/galla implementation were
 excluded. This is an observation, not intent review or compliance certification.
 Paths are repository-relative; source-derived limitations are distinguished
 from executed behavioral trials.
 
-`agent_runtime/Cargo.toml` defines agent-runtime 0.2.0, Rust edition 2024,
-minimum Rust 1.95, library `agent_runtime`, and binary `agent-run`.
-Default features are empty; Tokio is optional. `agent_runtime/src/lib.rs` and
+`sav/Cargo.toml` defines sav 0.2.0, Rust edition 2024,
+minimum Rust 1.95, library `sav`, and binary `sav-run`.
+Default features are empty; Tokio is optional. `sav/src/lib.rs` and
 the binary explicitly reject non-Linux targets. The active direct transport is
 blocking standard-library TCP, not an asynchronous framework client. This crate
 supervises host processes; it does not provide a sandbox.
 
-The public exports in `agent_runtime/src/lib.rs` include:
+The public exports in `sav/src/lib.rs` include:
 
 - Prompt acquisition: `resolve_prompt`, `MAX_PROMPT_BYTES`.
 - Shell-free parsing/rendering: `split_raw_command`, `render_command`,
@@ -43,7 +43,7 @@ The public exports in `agent_runtime/src/lib.rs` include:
 
 ## Prompt and command mechanics
 
-`agent_runtime/src/prompt.rs` resolves explicit prompt first, then file, then
+`sav/src/prompt.rs` resolves explicit prompt first, then file, then
 editor, then stdin. File `-` means stdin. Without an explicit source, piped
 stdin is read directly; terminal stdin asks about opening an editor, or reads
 until EOF. Every returned prompt must be nonblank UTF-8 and at most 1 MiB.
@@ -58,7 +58,7 @@ the editor is executed without shell interpolation, successful exit is required,
 and edited contents are revalidated. Editor execution itself is not governed by
 SupervisionPolicy or a timeout; terminal choice reads are not byte-bounded.
 
-`agent_runtime/src/command.rs` tokenizes whitespace outside single/double
+`sav/src/command.rs` tokenizes whitespace outside single/double
 quotes, preserves empty quoted arguments, and permits escaping active quote/
 backslash within quotes. Unterminated quotes fail. This is not a shell:
 operators, variables, globbing, command substitution and outside-quote
@@ -75,18 +75,18 @@ placeholder. Relevant paths must be UTF-8 when substituted. Substitution can
 repeat within an argument and does not re-tokenize generated text. It is literal
 replacement, not a general template language.
 
-Executed `agent_runtime/tests/command.rs` includes
+Executed `sav/tests/command.rs` includes
 `renders_prompt_context_and_target_without_a_shell`,
 `renders_a_prompt_as_a_complete_json_string`,
 `removes_option_before_an_empty_context_placeholder`,
 `reasoning_effort_requires_and_renders_an_explicit_placeholder`.
 CLI file/stdin behavior is covered by
-`agent_runtime/tests/cli.rs::standalone_cli_runs_a_prompt_from_a_file` and
+`sav/tests/cli.rs::standalone_cli_runs_a_prompt_from_a_file` and
 `supervised_provider_cannot_consume_caller_stdin`.
 
 ## Profile persistence and setup
 
-`agent_runtime/src/profile.rs` stores schema_version integer 1 and
+`sav/src/profile.rs` stores schema_version integer 1 and
 `[[profiles]]` entries with `name`, `provider`, `command`. Unrelated values,
 tables, fields, comments and other profiles are preserved with toml_edit;
 unknown surrounding fields are not rejected.
@@ -99,7 +99,7 @@ The provider field is descriptive, not an enumeration that dispatches
 execution. Load validates all profiles before selecting one.
 
 Default location uses absolute XDG_CONFIG_HOME, or absolute HOME/.config,
-then `agent-runtime/config.toml`. Actual implementation falls back to
+then `sav/config.toml`. Actual implementation falls back to
 `supervised-agent/config.toml` if the canonical file is absent and that legacy
 path exists; canonical takes priority.
 
@@ -111,14 +111,14 @@ no-clobber for new ones, and syncs the parent. It is atomic replacement, not a
 transactional multiwriter update; all ancestor components are not traversed
 with pinned no-follow descriptors.
 
-`agent_runtime/tests/profiles.rs::update_preserves_comments_unrelated_values_and_profiles`,
+`sav/tests/profiles.rs::update_preserves_comments_unrelated_values_and_profiles`,
 `invalid_existing_configuration_remains_unchanged`, and
 `rejects_invalid_profile_names_before_writing` were executed.
 Legacy/canonical path behavior was executed in
-`agent_runtime/tests/cli.rs::default_profile_path_reads_legacy_store_when_canonical_store_is_absent`
+`sav/tests/cli.rs::default_profile_path_reads_legacy_store_when_canonical_store_is_absent`
 and `canonical_profile_store_takes_precedence_over_legacy_store`.
 
-`agent_runtime/src/setup.rs` offers llama-cli, llama-server, Ollama, Copilot,
+`sav/src/setup.rs` offers llama-cli, llama-server, Ollama, Copilot,
 Gemini CLI, and custom wrapper. Setup collects model/provider executable/profile
 name/template, validates it, runs mandatory live qualification using the fixed
 prompt `Reply with exactly: OK`, then persists. Qualification checks successful
@@ -154,15 +154,15 @@ Generated defaults actually include:
 These setup wrappers run with host authority and can differ from the direct
 transport's capabilities. Qualification uses 30-second idle, 300-second attempt,
 loop detection, no retries, and 64 KiB output. Executed examples include
-`agent_runtime/tests/cli.rs::setup_uses_fixed_prompt_and_refuses_failed_qualification`,
+`sav/tests/cli.rs::setup_uses_fixed_prompt_and_refuses_failed_qualification`,
 `setup_force_persists_profile_after_failed_qualification`,
 `installed_gemini_and_copilot_use_noninteractive_templates`,
-and `agent_runtime/tests/setup.rs::llama_server_default_json_encodes_the_rendered_prompt`.
+and `sav/tests/setup.rs::llama_server_default_json_encodes_the_rendered_prompt`.
 These tests use local fixtures, not real accounts/provider services.
 
 ## Canonical model boundary
 
-`agent_runtime/src/model.rs` defines:
+`sav/src/model.rs` defines:
 
 - `ReasoningEffort`: none/minimal/low/medium/high/xhigh/max, lower-case wire
   values; parser trims and is case-insensitive.
@@ -193,7 +193,7 @@ transports honor an extended/reduced deadline.
 
 ## Direct HTTP transport and request validation
 
-`agent_runtime/src/direct_transport.rs` supports only numeric-loopback HTTP
+`sav/src/direct_transport.rs` supports only numeric-loopback HTTP
 with explicit nonzero port: IPv4 loopback or bracketed IPv6 loopback. DNS names,
 remote addresses, HTTPS, credentials, queries/fragments, whitespace/control
 bytes, and nontrivial base paths fail. Provider paths are fixed. There is no
@@ -221,7 +221,7 @@ Before connecting, canonical validation requires:
 - Encoded provider request ≤8 MiB.
 
 The subsequently added
-`agent_runtime/tests/model_transport.rs::reliability_large_context_requests_are_not_limited_by_the_old_two_mib_ceiling`
+`sav/tests/model_transport.rs::reliability_large_context_requests_are_not_limited_by_the_old_two_mib_ceiling`
 was separately executed against frozen production source. Its loopback fixture
 accepts a 3-MiB user message and captures the request; an 8-MiB user message
 whose provider encoding exceeds 8 MiB returns `InvalidModelRequest` before
@@ -250,7 +250,7 @@ as options.num_predict and effort as think=false for none, otherwise the string.
 Ollama output schema becomes format; llama-server receives strict json_schema
 response_format named kvist_output and, when compilation succeeds, a grammar.
 
-Executed request evidence in `agent_runtime/tests/model_transport.rs` includes
+Executed request evidence in `sav/tests/model_transport.rs` includes
 `direct_transports_encode_output_bounds_and_preserve_absent_defaults`,
 `invalid_output_bounds_fail_before_connect_for_both_providers`,
 `direct_transports_map_every_reasoning_effort_value`,
@@ -309,7 +309,7 @@ have emitted provisional text. This crate does not enforce that a Stop answer
 is nonblank or that ending/call consistency permits tools; consumers must make
 that decision. No tools are executed here.
 
-`agent_runtime/src/error.rs` supplies typed configuration/schema/capability,
+`sav/src/error.rs` supplies typed configuration/schema/capability,
 transport cancellation/deadline/slot/TTFT/cadence, status/limit/malformed,
 duplicate-call, socket, process and filesystem errors. `is_retryable` is true
 for transport watchdog/deadline errors; reset/abort/broken-pipe/timeout/refused/
@@ -320,7 +320,7 @@ decides. Diagnostics intentionally avoid provider response bodies, but raw
 model output and arbitrary filesystem/command errors are not globally redacted
 or terminal-control sanitized.
 
-Executed stream evidence in `agent_runtime/tests/model_transport.rs` includes
+Executed stream evidence in `sav/tests/model_transport.rs` includes
 `llama_server_stream_assembles_text_and_fragmented_tool_arguments`,
 `llama_server_stream_terminal_marker_alone_does_not_infer_stop`,
 `ollama_native_terminal_stop_or_absence_keeps_tool_call_convention`,
@@ -347,12 +347,12 @@ non-object capacity metadata is classified as `MalformedModelResponse`, not
 `InvalidModelRequest`; invalid caller model selectors still use
 `InvalidModelRequest`. This classification refinement is a source observation,
 not claimed as covered by the earlier package execution.
-Executed `agent_runtime/tests/model_capacity.rs` covers
+Executed `sav/tests/model_capacity.rs` covers
 `selected_llama_context_uses_model_qualified_runtime_properties`,
 `ollama_capacity_is_for_the_matching_loaded_model_only`, and
 `capacity_discovery_rejects_cancelled_requests_and_unsafe_endpoints`.
 
-`agent_runtime/src/catalog.rs` exposes separate bounded catalog discovery:
+`sav/src/catalog.rs` exposes separate bounded catalog discovery:
 Ollama `/api/tags`, llama `/v1/models`, or Copilot/Gemini ACP subprocess.
 Options hold endpoint, executable, working_directory, timeout, response bound,
 host-discovery acknowledgement. Defaults: `.`, 5 seconds, 64 KiB, no host
@@ -385,7 +385,7 @@ write/reap condition. A substantive discovery error takes precedence over
 cleanup error. Signal installation occurs, but ACP does not register the
 process group in the shared active-group registry.
 
-Executed `agent_runtime/tests/catalog.rs` includes
+Executed `sav/tests/catalog.rs` includes
 `canonical_catalog_is_bounded_deduplicated_and_serializes_as_version_one`,
 `acp_discovery_correlates_responses_and_uses_absolute_no_bridge_session`,
 `acp_discovery_requires_acknowledgement_and_rejects_wrong_ids_and_requests`,
@@ -395,7 +395,7 @@ Executed `agent_runtime/tests/catalog.rs` includes
 
 ## Host supervision and interrupts
 
-`agent_runtime/src/supervisor.rs` takes `SupervisionPolicy` with positive idle
+`sav/src/supervisor.rs` takes `SupervisionPolicy` with positive idle
 timeout ≤3600 seconds, optional positive attempt timeout ≤24 hours, loop flag,
 max retries ≤10, combined output 1–16 MiB. `CommandSpec` has program, exact
 arguments and optional cwd. Commands run directly with inherited environment
@@ -430,11 +430,11 @@ direct child waited, readers drained and joined; a one-second drain timeout
 stops readers and reports retained streams. Forwarding polls output readiness
 for one second, then writes/flushes; this is not a guarantee against every
 partial/blocking write. Group cleanup/direct wait itself is not bounded by the
-pipe-drain timeout. This supervisor differs from agent-runner's private
+pipe-drain timeout. This supervisor differs from skott's private
 single-threaded child pump: it polls/reaps via try_wait and has no universal
 escaped-process/kernel-work termination guarantee.
 
-`agent_runtime/src/interrupt.rs` installs SIGINT/SIGTERM handlers once with
+`sav/src/interrupt.rs` installs SIGINT/SIGTERM handlers once with
 SA_RESTART using unsafe sigaction calls; handler only sets an atomic flag and
 sends SIGINT to the currently registered positive group. Both incoming signals
 forward SIGINT. Supervision registers/clears one process-global group and
@@ -443,18 +443,18 @@ multi-child registry; callers must coordinate. `clear_active_process_group_if`
 provides compare-and-clear protection for a matching registration. Failed
 handler installation warns rather than aborting.
 
-Executed `agent_runtime/tests/supervisor.rs` includes
+Executed `sav/tests/supervisor.rs` includes
 `retry_context_warns_about_prior_side_effects`,
 `nonzero_exit_is_not_retried`,
 `attempt_timeout_is_independent_of_continuing_output`,
 `output_limit_is_terminal_and_not_retried`,
 `escaped_descendant_retaining_output_fails_without_hanging`.
-`agent_runtime/tests/cli.rs::interrupt_terminates_the_supervised_process_group`
+`sav/tests/cli.rs::interrupt_terminates_the_supervised_process_group`
 and both interrupt module unit tests were executed.
 
 ## Loop detector, grammar, and trajectory utilities
 
-`agent_runtime/src/loop_detection.rs` recursively normalizes JSON with sorted
+`sav/src/loop_detection.rs` recursively normalizes JSON with sorted
 object keys; action hash is SHA256(tool name concatenated with canonical JSON),
 observation hash SHA256(stdout, NUL, stderr). `ActionHashRing` retains eight
 actions/reasoning traces by default (capacity floor one); exposes history,
@@ -470,10 +470,10 @@ SoftCorrection, subsequent TemperatureJitter (base default 0.2, +0.5 capped
 inference changes or authorization. Recording a non-invariant observation
 resets stalls; callers can reset independently. Neither host supervisor nor
 direct transport automatically wires this detector into model/tool execution.
-Tests in `agent_runtime/tests/loop_detection.rs` exercise canonical hashes,
+Tests in `sav/tests/loop_detection.rs` exercise canonical hashes,
 window/action/observation/reasoning paths and escalation.
 
-`agent_runtime/src/gbnf.rs` compiles primitive types, primitive enums, arrays,
+`sav/src/gbnf.rs` compiles primitive types, primitive enums, arrays,
 and sorted object properties to grammar text. Tool compilation produces one
 `{"name":..., "arguments":...}` dispatch alternative and rejects an empty tool
 list. All-required object path enforces fixed key sequence; optional-property
@@ -484,12 +484,12 @@ Public compilation itself has no general node/depth/resource guard; the direct
 transport's output-schema validator supplies separate bounds. It can omit
 grammar if compilation fails while still sending native response_format.
 Grammar is a generation aid, not a complete validator or authority boundary.
-All nine `agent_runtime/tests/gbnf.rs` cases ran, including
+All nine `sav/tests/gbnf.rs` cases ran, including
 `compile_strict_object_schema_with_required_properties` and
 `compile_object_with_optional_properties`; these do not prove full schema
 equivalence or execution inside a real llama grammar engine.
 
-`agent_runtime/src/trajectory.rs` defines `{event: snake_case, ...}` events:
+`sav/src/trajectory.rs` defines `{event: snake_case, ...}` events:
 session_start/session_finish IDs/task/timestamps/totals/success; turn_start;
 prompt_eval optional cached/new tokens and duration; model_reasoning;
 tool_dispatch call/tool/raw args/action hash; tool_result raw stdout/stderr,
@@ -510,9 +510,9 @@ recorded tools. All three trajectory tests ran, including
 
 ## Standalone CLI and operational limitations
 
-`agent_runtime/src/main.rs` implements:
+`sav/src/main.rs` implements:
 
-- `agent-run model`: explicit local provider, endpoint, model and prompt/file/
+- `sav-run model`: explicit local provider, endpoint, model and prompt/file/
   editor/stdin; stream/unary, reasoning hint, output-schema JSON string,
   show-reasoning stderr or canonical turn JSON. Defaults: 300-second overall,
   60-second slot, 120-second TTFT, 1 MiB response. Requires slot < TTFT < overall.
@@ -521,11 +521,11 @@ recorded tools. All three trajectory tests ran, including
   retry policy or native max-output-tokens CLI flag. JSON streaming suppresses
   intermediate event presentation. Direct model CLI does not install the host
   supervisor's signal handler or link a signal watcher to its cancellation token.
-- `agent-run models`: bounded provider discovery with optional endpoint or ACP
+- `sav-run models`: bounded provider discovery with optional endpoint or ACP
   executable, host-discovery acknowledgement, timeout/response bound, plain
   ID lines or catalog JSON. Endpoint/executable restrictions depend on provider.
   llama-cli/custom-script catalogs are rejected without spawning.
-- `agent-run run`: exactly command template or named profile, optional config,
+- `sav-run run`: exactly command template or named profile, optional config,
   prompt source, repeated context paths, cwd (default `.`), effort hint,
   idle timeout (default 900), loop flag, retries (default 3), output bound
   (default 1 MiB), mandatory allow-host-execution. Acknowledgement is checked
@@ -534,9 +534,9 @@ recorded tools. All three trajectory tests ran, including
   Retry notice is appended to prompt before re-rendering. Plain mode forwards
   streams; JSON captures and emits only `{"content": <lossy stdout>}` from the
   successful attempt, excluding stderr/attempt count.
-- `agent-run setup`: selected/default profile config and force switch;
+- `sav-run setup`: selected/default profile config and force switch;
   interactive provider discovery/qualification/persistence as above.
-- `agent-run replay`: diagnostic event display or replay-report JSON, optional
+- `sav-run replay`: diagnostic event display or replay-report JSON, optional
   max-turn filter; no process execution.
 
 Plain prompt preamble appears on terminal stderr only, not piped stdout.
@@ -547,8 +547,8 @@ this binary. Trajectory logging is opt-in library use and is not automatically
 created by these run/model commands.
 
 Executed CLI evidence includes
-`agent_runtime/tests/model_cli.rs::streaming_model_command_preserves_provider_content_exactly`,
-`agent_runtime/tests/cli.rs::host_execution_requires_explicit_acknowledgement`,
+`sav/tests/model_cli.rs::streaming_model_command_preserves_provider_content_exactly`,
+`sav/tests/cli.rs::host_execution_requires_explicit_acknowledgement`,
 `standalone_json_run_emits_only_captured_content`,
 `standalone_json_run_replaces_invalid_utf8_content`,
 `models_reports_manual_providers_as_unsupported_without_spawning`,
@@ -556,7 +556,7 @@ Executed CLI evidence includes
 
 ## Executed verification
 
-Executed `cargo test -p agent-runtime --offline --locked` independently using
+Executed `cargo test -p sav --offline --locked` independently using
 project-local TMPDIR fixture storage; it completed successfully:
 
 | Test target | Passed |
@@ -579,19 +579,19 @@ Total 145 passed, zero failed, zero ignored. Binary unit target and doctests
 ran zero tests. This full-suite execution preceded the final capacity-error
 classification refinement and new large-request fixture.
 After production source was reported frozen,
-`cargo test -p agent-runtime --offline --locked --test model_transport
+`cargo test -p sav --offline --locked --test model_transport
 reliability_large_context_requests_are_not_limited_by_the_old_two_mib_ceiling`
 passed one test, with 44 filtered out. This separate targeted result is not
 reported as a rerun of the entire package.
 An initial combined two-package invocation stopped on an
-agent-runner integration assertion before reaching runtime; it is not counted
+skott integration assertion before reaching runtime; it is not counted
 as successful runtime verification. Captured outputs and fixture storage were
 removed before writing this record.
 
 Transport/catalog/setup trials use loopback fixture servers and subprocess
 fixtures, not live Ollama/llama-server or real Copilot/Gemini account discovery.
 No real editor interaction, non-Linux build, optional-feature build, formatter/
-linter, adversarial full JSON Schema equivalence assessment, or engine/sandbox
+linter, adversarial full JSON Schema equivalence assessment, or maerg/sandbox
 implementation assessment was performed. Source observations explain the
 bounded mechanisms and gaps; passing tests are not certification of arbitrary
 host isolation, side-effect rollback, provider correctness, or full recovery.
@@ -604,12 +604,12 @@ executed results remain unchanged.
 
 ### Source-observed behavior
 
-`agent_runtime/src/lib.rs:1–11` documents the unsafe boundary and points to
-`interrupt::install_handler`. A search of current `agent_runtime/src/**/*.rs`
+`sav/src/lib.rs:1–11` documents the unsafe boundary and points to
+`interrupt::install_handler`. A search of current `sav/src/**/*.rs`
 found exactly two `unsafe` expressions: the SIGINT and SIGTERM `sigaction`
-calls in `agent_runtime/src/interrupt.rs:66,73`.
+calls in `sav/src/interrupt.rs:66,73`.
 
-`agent_runtime/src/interrupt.rs::install_handler` uses process-global `Once`
+`sav/src/interrupt.rs::install_handler` uses process-global `Once`
 to attempt both installations once, with a static handler, an empty signal
 mask and `SA_RESTART`. Each failed installation emits its own `tracing::warn!`
 with the error and leaves that signal's existing disposition unchanged.
@@ -630,7 +630,7 @@ proof of async-signal safety.
 
 ### Native test coverage and supplied execution evidence
 
-Both tests are in `agent_runtime/src/interrupt.rs`:
+Both tests are in `sav/src/interrupt.rs`:
 
 - `interrupt::tests::install_handler_is_idempotent_and_flag_round_trips`
   calls installation twice, then checks false/true/false flag consumption.

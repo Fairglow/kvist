@@ -32,7 +32,7 @@ pub struct ModelProfile {
 pub fn default_profile_config_path() -> Option<PathBuf> {
     let base = absolute_environment_path("XDG_CONFIG_HOME")
         .or_else(|| absolute_environment_path("HOME").map(|home| home.join(".config")))?;
-    let canonical = base.join("agent-runtime").join("config.toml");
+    let canonical = base.join("sav").join("config.toml");
     match fs::symlink_metadata(&canonical) {
         Ok(_) => Some(canonical),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {

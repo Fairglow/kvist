@@ -34,7 +34,7 @@ tasks:
     recovery_state: null
   - id: "dogfood-boundary-write-tests"
     title: "Define dogfooding execution boundary tests"
-    description: "Write failing engine and real-runner tests for the workspace migration, redefined sandbox protocol version 1, typed path grants, protected workflow state, explicit recovery, supervised finalization, exact accepted-change Git commits, mediated Cargo acquisition, offline verification, and fail-closed Bubblewrap enforcement."
+    description: "Write failing maerg and real-runner tests for the workspace migration, redefined sandbox protocol version 1, typed path grants, protected workflow state, explicit recovery, supervised finalization, exact accepted-change Git commits, mediated Cargo acquisition, offline verification, and fail-closed Bubblewrap enforcement."
     context: "Kvist cannot safely execute its own tasks until the runner, workspace, network, and lifecycle authority boundaries are executable rather than represented by test fakes."
     purpose: "Establish complete negative and positive evidence before changing repository layout or enabling any new effectful path."
     expected_outcome: "Tests cover malformed and legacy requests, path aliasing and links, write-scope escape, hidden state, backend identity, dependency-source policy, cache bounds, process cleanup, ambiguous recovery, human disposition, isolated-index exact commits, unrelated and overlapping changes, commit recovery, hook and signing policy, unsupported VCS backends, and absence of host fallback."
@@ -59,10 +59,10 @@ tasks:
     recovery_state: null
   - id: "dogfood-layout-implement-code"
     title: "Align the workspace with component ownership"
-    description: "Move the root Rust workspace and component artifacts to engine, relocate agent-runtime as a complete child, prepare the sandbox-runner child intent and queue before its code, and update configuration, CI, documentation, path dependencies, fixtures, and commands without retaining old-path aliases."
+    description: "Move the root Rust workspace and component artifacts to maerg, relocate sav as a complete child, prepare the galla child intent and queue before its code, and update configuration, CI, documentation, path dependencies, fixtures, and commands without retaining old-path aliases."
     context: "The current src component excludes its manifest and integration tests, preventing one coherent component authority and verification boundary."
     purpose: "Make Kvist's own repository obey the filesystem-native component structure expected from projects it manages."
-    expected_outcome: "The engine component owns its manifest, source, and tests under engine; both child components are complete and current; all supported commands and checks use the new layout only."
+    expected_outcome: "The maerg component owns its manifest, source, and tests under maerg; both child components are complete and current; all supported commands and checks use the new layout only."
     kind: implementation
     status: completed
     depends_on:
@@ -146,8 +146,8 @@ tasks:
     recovery_state: null
   - id: "dogfood-runner-integrate-code"
     title: "Integrate supervised Bubblewrap execution"
-    description: "Complete and independently install the sandbox-runner child, bind runner and Bubblewrap identity, integrate phase-specific mounts and limits, add explicit supervised execution and human finalization, and keep remote models and unattended promotion disabled."
-    context: "The engine needs a real enforcement implementation and a reviewable lifecycle before task run can be used on Kvist itself."
+    description: "Complete and independently install the galla child, bind runner and Bubblewrap identity, integrate phase-specific mounts and limits, add explicit supervised execution and human finalization, and keep remote models and unattended promotion disabled."
+    context: "The maerg needs a real enforcement implementation and a reviewable lifecycle before task run can be used on Kvist itself."
     purpose: "Enable one narrow local-agent dogfooding task without weakening context boundaries or treating process success as human acceptance."
     expected_outcome: "A local agent can author only an approved task scope, Cargo acquisition and verification use their own grants, all other effects fail closed, and the exact attempt awaits explicit human acceptance or blocking."
     kind: implementation
@@ -215,7 +215,7 @@ tasks:
   - id: "dogfood-boundary-compliance-review"
     title: "Review dogfooding execution compliance"
     description: "Derive the migrated layout, recovery, protocol, dependency acquisition, runner, supervised execution, finalization, acceptance-set, and exact local-commit behavior from source and native evidence in clean-slate contexts, then compare it with approved intent without reading production source in the review context."
-    context: "The authors of the engine and runner cannot certify the boundary that controls effects and workflow claims."
+    context: "The authors of the maerg and runner cannot certify the boundary that controls effects and workflow claims."
     purpose: "Retain an independent disposition for every authority, context, network, recovery, and lifecycle guarantee before DOC-01 resumes."
     expected_outcome: "The review records satisfied clauses, commit-scope and recovery guarantees, discrepancies, unsupported VCS tiers, and required arbitration, and permits supervised local dogfooding only if no blocking mismatch remains."
     kind: compliance-review
@@ -1453,7 +1453,7 @@ tasks:
     description: "Replace the combined specification implementation with separate component intent documents and wire the model through CLI, discovery, status, queues, task context, onboarding, and durable evidence."
     context: "The pre-release project has no compatibility or migration obligation, so all old names and schema fields are removed rather than aliased."
     purpose: "Make architecture, consumer contracts, private design, and task provenance independently inspectable and enforceable."
-    expected_outcome: "The engine consistently uses the five-artifact component model with exact local revisions and immediate-parent contract provenance."
+    expected_outcome: "The maerg consistently uses the five-artifact component model with exact local revisions and immediate-parent contract provenance."
     kind: implementation
     status: completed
     depends_on:
@@ -1841,7 +1841,7 @@ tasks:
     recovery_state: null
   - id: "test-policy-verification-write-tests"
     title: "Define real test-policy verification tests"
-    description: "Write engine tests that reject placeholder verification commands in the committed project test policy, that supervised execution runs the configured per-component command set, and that policy approval digests the actual command set."
+    description: "Write maerg tests that reject placeholder verification commands in the committed project test policy, that supervised execution runs the configured per-component command set, and that policy approval digests the actual command set."
     context: "The project kvist.toml test policy currently contains /usr/bin/echo 'Verification passed' placeholders for all three components, so a recorded verification success would not have executed any component test."
     purpose: "Make placeholder verification detectable and replaceable before the dogfood flow relies on recorded verification evidence."
     expected_outcome: "Tests fail while the committed policy contains placeholder echo commands and pass once real per-component verification commands are committed, approved, and executed."
@@ -1919,7 +1919,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "sandbox-runner-install-policy-write-tests"
+  - id: "galla-install-policy-write-tests"
     title: "Define runner installation policy tests"
     description: "Write tests that an absent configured runner produces an actionable diagnostic naming the installation step, and that the documented installation policy references the configured [sandbox] runner path and the descriptor-bound validation that follows it."
     context: "The project kvist.toml pins a machine-local absolute runner path, so the installation procedure must be explicit and testable before it is trusted on another host."
@@ -1938,7 +1938,7 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: "sandbox-runner-install-policy"
+  - id: "galla-install-policy"
     title: "Document sandbox runner installation policy"
     description: "Record how the project builds and installs the sandbox runner to the configured [sandbox] runner path, keep the fail-closed runner validation, and make missing-runner diagnostics name the installation step."
     context: "The project kvist.toml pins a machine-local absolute runner path, so another host or a fresh checkout has no documented way to obtain the verified runner bytes."
@@ -1947,7 +1947,7 @@ tasks:
     kind: implementation
     status: pending
     depends_on:
-      - "sandbox-runner-install-policy-write-tests"
+      - "galla-install-policy-write-tests"
     requirements:
       - "CONTRACT.md#Compatibility-and-verification"
       - "REQUIREMENTS.md#REQ-EXECUTION-BOUNDARY"
@@ -2232,7 +2232,7 @@ tasks:
     recovery_state: null
   - id: "brokered-turn-write-tests"
     title: "Define brokered model-turn and effect-loop tests"
-    description: "Write failing engine tests for the brokered turn: shared wall-clock budget across probe, attempts, and backoff; bounded transient retry; refusal of non-loopback model commands; the closed authoring tool set; intent authorization and dropping; the in-sandbox effect dispatch; no-follow symbolic-link refusal; edit_file authorization and applier identity re-derivation; tool definitions; and streamed-delta redaction and relay."
+    description: "Write failing maerg tests for the brokered turn: shared wall-clock budget across probe, attempts, and backoff; bounded transient retry; refusal of non-loopback model commands; the closed authoring tool set; intent authorization and dropping; the in-sandbox effect dispatch; no-follow symbolic-link refusal; edit_file authorization and applier identity re-derivation; tool definitions; and streamed-delta redaction and relay."
     context: "The branch review found the brokered effect loop was not wired, non-loopback commands ran unsandboxed on the host, the model-phase deadline could exceed the configured timeout, and evidence was merged, discarded, or mislabeled."
     purpose: "Establish executable evidence for the brokered transport, effect loop, and evidence semantics before the implementation is trusted."
     expected_outcome: "Tests fail while the loop is unwired, the budget unshared, non-loopback commands executable, or evidence divergent, and pass once the brokered path and its evidence are correct."
@@ -2314,7 +2314,7 @@ tasks:
     recovery_state: null
   - id: "agent-check-write-tests"
     title: "Define agent role-list presentation and agent check tests"
-    description: "Write failing engine tests that `agent role list` presents only the predefined roles with their assigned profiles (never profile names as roles), and that `agent check` live-verifies scope profiles behind an explicit acknowledgement, refuses to execute without it, removes a failed profile on choice, ignores on choice, cancels at every prompt, reports nothing to check without profiles, and honors the global scope through the user configuration."
+    description: "Write failing maerg tests that `agent role list` presents only the predefined roles with their assigned profiles (never profile names as roles), and that `agent check` live-verifies scope profiles behind an explicit acknowledgement, refuses to execute without it, removes a failed profile on choice, ignores on choice, cancels at every prompt, reports nothing to check without profiles, and honors the global scope through the user configuration."
     context: "The shell presented model profile names as roles, and configured profiles had no interactive way to verify they were reachable before a task relied on them."
     purpose: "Establish executable evidence for the role-list presentation and the live agent check semantics before the implementation is trusted."
     expected_outcome: "Tests fail while profile names appear as roles or the check executes without acknowledgement, and pass once both behaviors match the contract."
@@ -2590,7 +2590,7 @@ tasks:
     recovery_state: null
   - id: "go-e2e-write-tests"
     title: "Define the Go offline e2e test"
-    description: "Write a self-skipping end-to-end test in engine/tests/language_offline_e2e.rs that provisions a small real Go module on the host (go mod tidy plus kvist vendor dispatch) and runs its real go test -mod=vendor ./... offline inside the Bubblewrap sandbox with the network denied, in the shape of offline_cargo_verification_e2e."
+    description: "Write a self-skipping end-to-end test in maerg/tests/language_offline_e2e.rs that provisions a small real Go module on the host (go mod tidy plus kvist vendor dispatch) and runs its real go test -mod=vendor ./... offline inside the Bubblewrap sandbox with the network denied, in the shape of offline_cargo_verification_e2e."
     context: "Support is never claimed without executable evidence, and Go is the first language wired into the shared offline language topology."
     purpose: "Establish executable evidence that a Go module builds and tests offline in the sandbox before Go is claimed as vendored-supported."
     expected_outcome: "go_offline_verification_builds_and_tests_denied_network passes where the live sandbox and Go toolchain exist and self-skips elsewhere."

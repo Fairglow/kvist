@@ -1,0 +1,42 @@
+# Example agent-runner configuration.
+schema_version = 1
+
+# Optional override for the working directory; defaults to the process
+# current directory when omitted. Must be absolute and exist.
+working_directory = "/opt/proj/kvist"
+
+# The provider to query for the currently active model. When the provider has
+# an active model that is already loaded, it is reused with no switch. When it
+# has none, the provider's default model (is_default = true) is used as the
+# fall-back; if there is more than one model for that provider and no active
+# model, you are asked to pick one.
+default_provider = "llama-server"
+default_thinking_effort = "xhigh"
+
+# Models selectable in the UI with -m/--model.
+[[models]]
+id = "qwen38-27b-q4-swift"
+provider = "llama-server"
+base_url = "http://127.0.0.1:9931"
+model = "Swift-Qwen3.8-27B-Q4_K_M"
+# Fall-back model for the default provider, used only when no model is active.
+deadline_secs = 300
+
+[[models]]
+id = "tiel-coder-35b-q4"
+provider = "llama-server"
+base_url = "http://127.0.0.1:9931"
+model = "Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL"
+is_default = true
+deadline_secs = 300
+
+# The independent sandbox enforcement boundary.
+[sandbox]
+runner = "/opt/target/release/kvist-sandbox-runner"
+backend = "/usr/bin/bwrap"
+
+# Tool policy. The denylist entries below are appended to the built-in safe
+# minimum, which already forbids clearly destructive commands.
+[tool_policy]
+shell_deny_substrings = []
+shell_deny_prefixes = []

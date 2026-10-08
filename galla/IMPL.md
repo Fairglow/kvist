@@ -3,7 +3,7 @@
 
 ## Observed component status
 
-The Rust package builds a library and an executable named `kvist-sandbox-runner`.
+The Rust package builds a library and an executable named `galla-runner`.
 The runner strictly parses and validates the version-one sandbox protocol and
 enforces isolated execution via Bubblewrap.
 

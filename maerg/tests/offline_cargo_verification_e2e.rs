@@ -30,7 +30,7 @@ use kvist::vendor_command::{VendorOptions, vendor_project};
 const POLICY_IDENTITY: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-/// The workspace root is the parent of the engine crate manifest.
+/// The workspace root is the parent of the maerg crate manifest.
 fn workspace_root() -> Option<PathBuf> {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -70,7 +70,7 @@ fn locate_runner() -> Option<PathBuf> {
             .is_some_and(|canonical| !canonical.starts_with(root)),
         None => true,
     };
-    if let Ok(path) = std::env::var("KVIST_SANDBOX_RUNNER") {
+    if let Ok(path) = std::env::var("KVIST_GALLA") {
         let candidate = Path::new(&path);
         if candidate.is_file() && outside_worktree(candidate) {
             return Some(candidate.to_path_buf());
@@ -78,7 +78,7 @@ fn locate_runner() -> Option<PathBuf> {
     }
     for root in candidate_target_roots() {
         for profile in ["debug", "release"] {
-            let candidate = root.join(profile).join("kvist-sandbox-runner");
+            let candidate = root.join(profile).join("galla-runner");
             if candidate.is_file() && outside_worktree(&candidate) {
                 return Some(candidate);
             }

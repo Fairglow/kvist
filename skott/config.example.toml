@@ -1,4 +1,4 @@
-# Example agent-runner configuration.
+# Example skott configuration.
 schema_version = 1
 
 # Optional override for the working directory; defaults to the process
@@ -26,7 +26,7 @@ default_thinking_effort = "medium"
 # selectable theme. Every colour may be written as a CSS Color Module Level 4
 # name (e.g. "midnightblue") or numeric RGB (e.g. "#1a1b26", "rgb(26,27,38)"),
 # interchangeably. See `themes/dark.toml` / `themes/light.toml` in the
-# agent-runner source for the full schema and inline documentation.
+# skott source for the full schema and inline documentation.
 theme = "dark"
 
 # Models selectable in the UI with -m/--model.
@@ -65,7 +65,7 @@ cadence_timeout_secs = 30
 
 # The independent sandbox enforcement boundary.
 [sandbox]
-runner = "/usr/local/bin/kvist-sandbox-runner"
+runner = "/usr/local/bin/galla-runner"
 backend = "/usr/bin/bwrap"
 
 # Tool policy. The denylist entries below are appended to the built-in safe

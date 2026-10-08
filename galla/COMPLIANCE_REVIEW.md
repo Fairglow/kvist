@@ -1,4 +1,4 @@
-# sandbox_runner compliance review
+# galla compliance review
 
 ## Review basis and limits
 
@@ -6,16 +6,16 @@ This review was conducted as an independent, source-blind comparison using
 only:
 
 - `ROOT_CONTRACT.md`
-- `sandbox_runner/REQUIREMENTS.md`
-- `sandbox_runner/CONTRACT.md`
-- `sandbox_runner/DESIGN.md`
-- `sandbox_runner/IMPL.md`
-- `sandbox_runner/tests/**/*.rs`
-- `sandbox_runner/Cargo.toml`
+- `galla/REQUIREMENTS.md`
+- `galla/CONTRACT.md`
+- `galla/DESIGN.md`
+- `galla/IMPL.md`
+- `galla/tests/**/*.rs`
+- `galla/Cargo.toml`
 
 All evidence below is static. Test names and assertions were inspected in
 source. This document records conformance findings and protocol verification;
-it confirms the accepted enforcement boundary for `sandbox_runner`.
+it confirms the accepted enforcement boundary for `galla`.
 
 ## Summary
 

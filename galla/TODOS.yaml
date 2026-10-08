@@ -14,7 +14,7 @@ component:
         expected_revision: "sha256:bfd660184d2c7b0fb9d0ccee84cb946cd2f69bf53a33efb40ee1503b0a70b6e1"
         observed_revision: "sha256:1323af464fc004721bafc8fd3a0a524eaafb99fc078ea313570d7a04f46660e8"
 tasks:
-  - id: "sandbox-runner-write-tests"
+  - id: "galla-write-tests"
     title: "Define sandbox runner protocol tests"
     description: "Write native failing tests for the redefined version-one probe and request, strict typed grants, Bubblewrap identity and namespace enforcement, resource bounds, process cleanup, and fail-closed behavior."
     context: "The buildable scaffold intentionally implements no runner protocol or operating-system enforcement."
@@ -34,16 +34,16 @@ tasks:
       completed_at: "2026-09-02T08:00:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: "sandbox-runner-implement-code"
+  - id: "galla-implement-code"
     title: "Implement Bubblewrap sandbox runner"
-    description: "Implement the accepted bounded version-one protocol, independent typed-grant validation, verified Bubblewrap execution, Linux namespace and resource enforcement, and complete process cleanup without importing engine types."
+    description: "Implement the accepted bounded version-one protocol, independent typed-grant validation, verified Bubblewrap execution, Linux namespace and resource enforcement, and complete process cleanup without importing maerg types."
     context: "Only the scaffold exists; it fails closed and cannot execute an approved task."
     purpose: "Provide the independently installed enforcement boundary required for supervised Kvist execution."
     expected_outcome: "The runner satisfies the preceding native tests and never degrades to the host or retired request shape."
     kind: implementation
     status: completed
     depends_on:
-      - "sandbox-runner-write-tests"
+      - "galla-write-tests"
     requirements:
       - "CONTRACT.md#Behavioral-guarantees"
       - "DESIGN.md#Interactions-and-state"
@@ -55,7 +55,7 @@ tasks:
       completed_at: "2026-09-02T08:00:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: "sandbox-runner-security-audit"
+  - id: "galla-security-audit"
     title: "Audit sandbox runner authority"
     description: "Independently review request parsing, canonical paths, mount construction, namespace isolation, Bubblewrap substitution, environment and network denial, resource enforcement, process cleanup, and fallback resistance."
     context: "The production runner will turn untrusted request data into operating-system effects."
@@ -64,7 +64,7 @@ tasks:
     kind: security-audit
     status: completed
     depends_on:
-      - "sandbox-runner-implement-code"
+      - "galla-implement-code"
     requirements:
       - "DESIGN.md#Security-and-resource-design"
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
@@ -75,7 +75,7 @@ tasks:
       completed_at: "2026-09-12T14:32:46Z"
     blocked_reason: null
     recovery_state: null
-  - id: "sandbox-runner-compliance-review"
+  - id: "galla-compliance-review"
     title: "Review sandbox runner compliance"
     description: "Derive observed runner behavior from source and native tests in a clean-slate context, then compare the resulting implementation record with approved local and parent intent in a separate source-blind context."
     context: "The runner implementer cannot certify the boundary that enforces task effects."
@@ -84,7 +84,7 @@ tasks:
     kind: compliance-review
     status: completed
     depends_on:
-      - "sandbox-runner-security-audit"
+      - "galla-security-audit"
     requirements:
       - "CONTRACT.md#Compatibility-and-verification"
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
@@ -95,7 +95,7 @@ tasks:
       completed_at: "2026-09-12T14:32:54Z"
     blocked_reason: null
     recovery_state: null
-  - id: "sandbox-runner-reverification-security-audit"
+  - id: "galla-reverification-security-audit"
     title: "Re-run sandbox runner security audit"
     description: "Independently re-run the sandbox runner security audit in a genuine agent context, covering request parsing, canonical paths, mount construction, namespace isolation, Bubblewrap substitution, environment and network denial, resource enforcement, and fallback resistance."
     context: "The branch review found the placeholder-era attempt logs for the completed sandbox runner security audit contain only echo-placeholder agent output, so the recorded completion is not valid independent evidence."
@@ -104,7 +104,7 @@ tasks:
     kind: security-audit
     status: blocked
     depends_on:
-      - "sandbox-runner-implement-code"
+      - "galla-implement-code"
     requirements:
       - "CONTRACT.md#Security-and-authority"
       - "REQUIREMENTS.md#SR-REQ-PRODUCTION-RUNNER"
@@ -113,9 +113,9 @@ tasks:
       created_at: "2026-09-15T13:15:00Z"
       updated_at: "2026-09-28T22:32:35Z"
       completed_at: null
-    blocked_reason: "agent execution exceeded the combined output limit while contacting the local model gateway. Bounded redacted logs are written to: /opt/proj/kvist/./sandbox_runner/.kvist/logs/sandbox-runner-reverification-security-audit_2026-09-28T22-32-13Z.log"
+    blocked_reason: "agent execution exceeded the combined output limit while contacting the local model gateway. Bounded redacted logs are written to: /opt/proj/kvist/./galla/.kvist/logs/galla-reverification-security-audit_2026-09-28T22-32-13Z.log"
     recovery_state: null
-  - id: "sandbox-runner-reverification-compliance-review"
+  - id: "galla-reverification-compliance-review"
     title: "Re-run sandbox runner compliance review"
     description: "Re-derive the observed runner behavior from source and native tests in a clean-slate context, then compare the resulting implementation record with the approved local and parent intent in a separate source-blind context."
     context: "The placeholder-era compliance receipts, including the committed COMPLIANCE_REVIEW.md, contain only echo-placeholder agent output, so the recorded completion is not valid independent evidence."
@@ -124,7 +124,7 @@ tasks:
     kind: compliance-review
     status: pending
     depends_on:
-      - "sandbox-runner-reverification-security-audit"
+      - "galla-reverification-security-audit"
     requirements:
       - "REVIEW_RUNBOOK.md#Clean-slate-implementation-record-pass"
       - "REVIEW_RUNBOOK.md#Source-blind-compliance-pass"

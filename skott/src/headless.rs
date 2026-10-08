@@ -1,4 +1,4 @@
-//! Terminal-free sandboxed workspace execution. This is not the engine broker.
+//! Terminal-free sandboxed workspace execution. This is not the maerg broker.
 
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -11,7 +11,7 @@ use serde_json::json;
 use crate::config::Config;
 use crate::error::{Error, Result, io_error};
 use crate::executor::SandboxExecutor;
-use crate::session::{AgentRunner, AgentSession, Event, EventSink, RunSummary};
+use crate::session::{Skott, AgentSession, Event, EventSink, RunSummary};
 use crate::session_log::SessionLog;
 use crate::tools::ToolRegistry;
 use crate::tui::Overrides;
@@ -72,7 +72,7 @@ fn state_directory() -> Result<PathBuf> {
             reason: "headless state directory must be absolute".into(),
         });
     }
-    Ok(base.join("agent-runner/runs"))
+    Ok(base.join("skott/runs"))
 }
 
 fn log_scope(log_dir: &Path, workdir: &Path) -> Result<PathBuf> {
@@ -219,7 +219,7 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
     let resource_notes = registry.diagnostics().to_vec();
     let definitions = registry.tool_definitions();
     let executor = SandboxExecutor::new(registry, config.sandbox.clone(), workdir.clone());
-    let mut log = SessionLog::open(&logs, format!("agent-runner-{}", model.id))
+    let mut log = SessionLog::open(&logs, format!("skott-{}", model.id))
         .map_err(|source| {
             io_error(
                 "open private headless journal",
@@ -278,7 +278,7 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
         }
     }
     sav::install_handler();
-    let result = AgentRunner::with_retry(crate::session::MAX_TURNS, model.retry_policy())
+    let result = Skott::with_retry(crate::session::MAX_TURNS, model.retry_policy())
         .with_limits(budgets.limits)?
         .run(
             &mut session,

@@ -36,13 +36,13 @@ const MAX_INLINE_SHELL_COMMAND_BYTES: usize = MAX_VALUE_BYTES;
 /// interpreter so the process tree, exit status, and `$0` are identical to the
 /// inline form. A bare `$(cat /context/0)` as the `-c` script would be wrong:
 /// the exec'd bash would run `cat` and word-split its output into a command.
-const STAGED_SCRIPT_WRAPPER: &str = "exec bash -c \"$(cat /context/0)\" agent-runner";
+const STAGED_SCRIPT_WRAPPER: &str = "exec bash -c \"$(cat /context/0)\" skott";
 
 pub(crate) fn default_file_helper_path() -> crate::error::Result<PathBuf> {
     std::env::current_exe()
         .map_err(|e| crate::error::io_error("locate executable for native helper", None, e))?
         .parent()
-        .map(|parent| parent.join("agent-runner-file-tool"))
+        .map(|parent| parent.join("skott-file-tool"))
         .ok_or_else(|| crate::error::Error::SandboxBuild {
             reason: "cannot find executable directory for native helper".to_owned(),
         })
@@ -77,7 +77,7 @@ pub struct RenderedTool {
     /// A bounded, validated native file operation for read-only payload staging.
     pub file_request: Option<FileRequest>,
     /// An explicit configured helper override; absence selects the executable
-    /// next to the running agent-runner binary at execution time.
+    /// next to the running skott binary at execution time.
     pub file_helper: Option<PathBuf>,
     /// The complete shell command text that must be staged as the `/context/0`
     /// read-only script file before execution; `argv` references it. `None`
@@ -420,7 +420,7 @@ impl ToolRegistry {
                     self.bash.to_string_lossy().into_owned(),
                     "-c".to_owned(),
                     command.clone(),
-                    "agent-runner".to_owned(),
+                    "skott".to_owned(),
                 ],
                 summary: describe_tool_call(intent),
                 file_request: None,

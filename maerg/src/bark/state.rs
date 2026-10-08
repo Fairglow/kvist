@@ -466,8 +466,8 @@ tasks:
     fn component_key_maps_root_to_dot() {
         assert_eq!(component_key(Path::new(".")), ".");
         assert_eq!(component_key(Path::new("")), ".");
-        assert_eq!(component_key(Path::new("engine")), "engine");
-        assert_eq!(component_key(Path::new("engine/src")), "engine/src");
+        assert_eq!(component_key(Path::new("maerg")), "maerg");
+        assert_eq!(component_key(Path::new("maerg/src")), "maerg/src");
     }
 
     #[test]
@@ -608,7 +608,7 @@ tasks:
     fn all_task_ids_follow_component_then_queue_order() {
         let mut scopes = BTreeMap::new();
         scopes.insert(
-            "engine".to_owned(),
+            "maerg".to_owned(),
             ComponentScope {
                 tasks: vec![
                     task("write-tests", task_queue::TaskStatus::Pending, &[]),
@@ -629,7 +629,7 @@ tasks:
             },
         );
         let state = DynamicState::new(
-            vec![".".to_owned(), "engine".to_owned()],
+            vec![".".to_owned(), "maerg".to_owned()],
             scopes,
             Vec::new(),
             None,

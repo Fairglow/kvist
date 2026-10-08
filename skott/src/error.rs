@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-/// The single error type for the agent-runner crate.
+/// The single error type for the skott crate.
 ///
 /// Every variant carries enough context to act on the failure and an exit code.
 /// Messages never expose secrets (tokens, credentials, or raw untrusted tool

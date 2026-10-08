@@ -2,7 +2,7 @@
 //!
 //! Arguments and outputs are represented by hashes in the versioned journal.
 //! The bounded transcript may contain sensitive user/model/tool text. Neither
-//! file is engine evidence or an executable checkpoint; an unanswered dispatch
+//! file is a maerg evidence or an executable checkpoint; an unanswered dispatch
 //! is an unknown effect and must not be automatically replayed.
 
 use std::fs::File;
@@ -24,11 +24,11 @@ use crate::sandbox::ToolOutcome;
 use crate::session::{Recorder, RunSummary};
 
 /// Interactive history location; this agent-writable history is not evidence.
-pub const DEFAULT_LOG_DIR: &str = ".agent-runner/runs";
+pub const DEFAULT_LOG_DIR: &str = ".skott/runs";
 const MAX_TRANSCRIPT_TEXT: usize = 64 * 1024;
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
-/// The actual boundary of a workspace session, not engine task authority.
+/// The actual boundary of a workspace session, not maerg task authority.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionScope {
@@ -286,7 +286,7 @@ impl SessionLog {
     pub fn transcript_path(&self) -> &Path {
         &self.transcript_path
     }
-    /// Caller-supplied descriptive label; not an engine approval identity.
+    /// Caller-supplied descriptive label; not a maerg approval identity.
     pub fn task_id(&self) -> &str {
         &self.task_id
     }

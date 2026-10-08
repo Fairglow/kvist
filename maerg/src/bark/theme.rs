@@ -40,7 +40,7 @@ pub const LIGHT_ID: u16 = 1;
 pub struct Palette {
     /// Prompt verb (`kvist`).
     pub prompt: String,
-    /// Component context segment (`engine/`).
+    /// Component context segment (`maerg/`).
     pub component: String,
     /// Failure marker after a failed command.
     pub failure: String,

@@ -64,7 +64,7 @@ tasks:
   - id: model-capacity-compliance-review
     title: "Compare capacity observations with intent"
     description: "Source-only IMPL derivation and separate source-blind intent comparison. Human arbitration permits necessary, minimally scoped unsafe with documented invariants, verification and independent review; reassess the signal-installation policy clarification."
-    context: "Source-only observer 81ad5b9f-d2f0-42f6-8bb7-06a95490397c refreshed IMPL; source-blind comparator 1a13da35-ba48-43ba-a3d1-d39911423c5f supports the scoped capacity remediation and resolves the unsafe-policy contradiction after explicit human arbitration. Audit a3a9fdf7-68f4-4190-9853-feb581f736af found no vulnerabilities. Two native signal tests exercise installation and forwarding, not general signal-safety proof. Comparison completed without formal component acceptance or renewed engine approval; revisions remain stale."
+    context: "Source-only observer 81ad5b9f-d2f0-42f6-8bb7-06a95490397c refreshed IMPL; source-blind comparator 1a13da35-ba48-43ba-a3d1-d39911423c5f supports the scoped capacity remediation and resolves the unsafe-policy contradiction after explicit human arbitration. Audit a3a9fdf7-68f4-4190-9853-feb581f736af found no vulnerabilities. Two native signal tests exercise installation and forwarding, not general signal-safety proof. Comparison completed without formal component acceptance or renewed maerg approval; revisions remain stale."
     purpose: "Avoid implementer self-certification."
     expected_outcome: "Discrepancies retained for human arbitration."
     kind: compliance-review
@@ -129,7 +129,7 @@ tasks:
   - id: model-output-bound-write-tests
     title: "Define provider output-bound tests"
     description: "Write failing llama-server and Ollama fixtures for positive bounded max_output_tokens, absent bounds and invalid pre-I/O rejection."
-    context: "The agent-runner needs an enforced response reserve."
+    context: "The skott needs an enforced response reserve."
     purpose: "Pin output-budget wire semantics before code."
     expected_outcome: "Tests fail before optional output bounds are implemented."
     kind: test
@@ -258,7 +258,7 @@ tasks:
     recovery_state: null
   - id: "sa-03-write-tests"
     title: "Define execution-backend delegation tests"
-    description: "Write tests for the selected execution-backend seam: runner and backend capability probing, protocol binding of delegated effects to the installed kvist-sandbox-runner, and fail-closed refusal when the runner or its backend is unavailable."
+    description: "Write tests for the selected execution-backend seam: runner and backend capability probing, protocol binding of delegated effects to the installed galla-runner, and fail-closed refusal when the runner or its backend is unavailable."
     context: "Host mode, restricted users, and fakeroot do not independently provide complete mediation."
     purpose: "Make delegation to the approved isolation layer executable and fail closed without it."
     expected_outcome: "Tests fail closed unless every declared filesystem, process, environment, network, and resource restriction is enforced."
@@ -276,7 +276,7 @@ tasks:
     recovery_state: null
   - id: "sa-03-implement-code"
     title: "Implement pluggable execution-backend interface"
-    description: "Add a replaceable execution-backend interface that resolves and binds the installed kvist-sandbox-runner, probes its verified backend capabilities, and delegates every approved effect through its version-one protocol without constructing isolation primitives in this crate."
+    description: "Add a replaceable execution-backend interface that resolves and binds the installed galla-runner, probes its verified backend capabilities, and delegates every approved effect through its version-one protocol without constructing isolation primitives in this crate."
     context: "The standalone runtime needs a real reference monitor before strict mode can replace explicit host execution."
     purpose: "Delegate least-authority isolation to the approved layer with no silent fallback when the runner or backend is unavailable."
     expected_outcome: "Strict Linux runs expose only approved resources and tools, report backend capabilities, and fail before launch on incomplete enforcement."
@@ -365,7 +365,7 @@ tasks:
       created_at: "2026-08-30T07:05:12Z"
       updated_at: "2026-09-17T22:05:39Z"
       completed_at: null
-    blocked_reason: "agent failed during task execution. Bounded redacted logs are written to: /opt/proj/kvist/./agent_runtime/.kvist/logs/sa-08-implement-code_2026-09-17T22-05-39Z.log"
+    blocked_reason: "agent failed during task execution. Bounded redacted logs are written to: /opt/proj/kvist/./sav/.kvist/logs/sa-08-implement-code_2026-09-17T22-05-39Z.log"
     recovery_state: null
   - id: "sa-08-security-audit"
     title: "Audit layered runtime boundaries"
@@ -562,7 +562,7 @@ tasks:
   - id: "sa-06-write-tests"
     title: "Define reusable model setup tests"
     description: "Write failing library and CLI tests for generic named profiles, provider defaults, command verification, formatting-preserving profile persistence, host-execution acknowledgement, and Kvist role binding."
-    context: "Provider and model setup remains embedded in Kvist even though profile creation and verification are useful to every agent-runtime caller."
+    context: "Provider and model setup remains embedded in Kvist even though profile creation and verification are useful to every sav caller."
     purpose: "Establish the standalone setup contract before moving wizard and configuration behavior across the component boundary."
     expected_outcome: "Tests distinguish reusable provider profiles from Kvist-specific role mappings and fail until both standalone setup and compatibility integration exist."
     kind: test
@@ -579,10 +579,10 @@ tasks:
     recovery_state: null
   - id: "sa-06-implement-code"
     title: "Extract model profiles and setup"
-    description: "Move generic provider defaults, profile validation and verification, formatting-preserving global persistence, and terminal setup into agent-runtime; keep Kvist role bindings and project policy in Kvist."
+    description: "Move generic provider defaults, profile validation and verification, formatting-preserving global persistence, and terminal setup into sav; keep Kvist role bindings and project policy in Kvist."
     context: "The reusable crate already owns prompting and supervision but standalone users must still configure commands manually."
     purpose: "Make the library and CLI self-contained for discovering, testing, saving, and running named model profiles."
-    expected_outcome: "agent-run setup manages reusable profiles, Kvist can bind those profiles to roles, and kvist agent setup remains a compatibility surface without duplicated setup logic."
+    expected_outcome: "sav-run setup manages reusable profiles, Kvist can bind those profiles to roles, and kvist agent setup remains a compatibility surface without duplicated setup logic."
     kind: implementation
     status: completed
     depends_on:
@@ -1100,7 +1100,7 @@ tasks:
     recovery_state: null
   - id: "sa-16-write-tests"
     title: "Define agent runtime rename tests"
-    description: "Update tests to require the agent-runtime package, agent_runtime library, agent-run executable, canonical agent-runtime profile path, and deterministic fallback to an existing legacy supervised-agent profile only when the canonical path is absent."
+    description: "Update tests to require the sav package, sav library, sav-run executable, canonical sav profile path, and deterministic fallback to an existing legacy supervised-agent profile only when the canonical path is absent."
     context: "The component now supplies a provider-neutral runtime rather than one concrete supervised agent, but existing users may already have stored standalone profiles."
     purpose: "Make the new technical identity explicit without silently losing profile configuration during the rename."
     expected_outcome: "Tests fail until all public identifiers are renamed and legacy profile discovery remains bounded, deterministic, and subordinate to the canonical path."
@@ -1119,10 +1119,10 @@ tasks:
     recovery_state: null
   - id: "sa-16-implement-code"
     title: "Rename component to agent runtime"
-    description: "Rename the component directory, Cargo package, Rust crate, executable, imports, user-facing commands, documentation paths, and canonical profile directory to agent-runtime, preserving deterministic legacy profile discovery when no canonical file exists."
+    description: "Rename the component directory, Cargo package, Rust crate, executable, imports, user-facing commands, documentation paths, and canonical profile directory to sav, preserving deterministic legacy profile discovery when no canonical file exists."
     context: "Agent runtime is the conventional provider-neutral name for transport, supervision, retry, broker, and future isolation infrastructure; it does not define the component identity."
     purpose: "Align names with the component's layered runtime responsibility before downstream API adoption grows."
-    expected_outcome: "Kvist and standalone usage consistently expose agent-runtime, agent_runtime, and agent-run with no stale technical identifier outside deliberate migration references."
+    expected_outcome: "Kvist and standalone usage consistently expose sav, sav, and sav-run with no stale technical identifier outside deliberate migration references."
     kind: implementation
     status: completed
     depends_on:
@@ -1475,10 +1475,10 @@ tasks:
     recovery_state: null
   - id: "msrv-195-docs-align"
     title: "Align MSRV statements with the 1.95 manifest floor"
-    description: "Update the root TODO.md AGN-09 acceptance criteria, the agent-runtime quality constraints, and the Rig evaluation notes that still state Rust 1.94 as the supported MSRV to the 1.95 floor declared by the workspace manifests, retaining the historical 1.94 Rig rationale as history."
+    description: "Update the root TODO.md AGN-09 acceptance criteria, the sav quality constraints, and the Rig evaluation notes that still state Rust 1.94 as the supported MSRV to the 1.95 floor declared by the workspace manifests, retaining the historical 1.94 Rig rationale as history."
     context: "The reedline 0.51 shell integration raised the manifest MSRV to 1.95, but intent and evaluation documents still cite 1.94, which a compliance review would flag as drift."
     purpose: "Keep binding intent documents consistent with the declared toolchain floor."
-    expected_outcome: "Every MSRV statement in the root backlog, agent-runtime requirements, and evaluation docs matches the 1.95 manifest floor."
+    expected_outcome: "Every MSRV statement in the root backlog, sav requirements, and evaluation docs matches the 1.95 manifest floor."
     kind: implementation
     status: pending
     depends_on:

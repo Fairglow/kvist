@@ -39,13 +39,13 @@ fn track_project(project: &TempDir) {
 }
 
 #[cfg(target_os = "linux")]
-fn fake_sandbox_runner_path(project: &TempDir) -> std::path::PathBuf {
+fn fake_galla_path(project: &TempDir) -> std::path::PathBuf {
     project
         .path()
         .parent()
         .expect("temporary project parent")
         .join(format!(
-            "fake-sandbox-runner-{}",
+            "fake-galla-runner-{}",
             project
                 .path()
                 .file_name()
@@ -59,7 +59,7 @@ fn configure_fake_sandbox(project: &TempDir) {
     kvist::init_test_logging();
     use std::os::unix::fs::PermissionsExt;
 
-    let runner = fake_sandbox_runner_path(project);
+    let runner = fake_galla_path(project);
     fs::write(
         &runner,
         r#"#!/bin/sh
@@ -180,7 +180,7 @@ impl MockGateway {
     }
 
     /// Spawns a gateway that echoes the request's user-message content back as a
-    /// text response, so a test can observe the rendered prompt the engine sent.
+    /// text response, so a test can observe the rendered prompt the maerg sent.
     fn spawn_echo_prompt(delay: std::time::Duration) -> Self {
         Self::serve(
             move |request| {
@@ -996,11 +996,11 @@ command = "/usr/bin/echo 'mocking verify'"
     assert!(manifest.contains("\"purpose\":\"context\""));
     assert!(manifest.contains("\"/workspace/context/ROOT_CONTRACT.md\""));
     assert!(manifest.contains("\"working_directory\":\"/workspace/component\""));
-    // Producer -> parser conformance: the exact request the engine serialized
+    // Producer -> parser conformance: the exact request the maerg serialized
     // must satisfy the independent runner parser and validator without coupling
     // the production crates (the runner is only a dev-dependency here).
     galla::validation::parse_and_validate(manifest.as_bytes())
-        .expect("engine-produced authoring request must satisfy the runner parser");
+        .expect("maerg-produced authoring request must satisfy the runner parser");
     assert_eq!(
         fs::read_to_string(project.path().join("runner-ambient-env.txt"))
             .expect("read runner environment evidence"),
@@ -1254,7 +1254,7 @@ command = "/usr/bin/echo verify"
             .status
             .success()
     );
-    fs::write(fake_sandbox_runner_path(&project), "#!/bin/sh\nexit 0\n").expect("change runner");
+    fs::write(fake_galla_path(&project), "#!/bin/sh\nexit 0\n").expect("change runner");
 
     let output = run_kvist(&project, &["task", "run", ".", "implement-code"]);
     assert!(!output.status.success());
@@ -1391,7 +1391,7 @@ command = "/usr/bin/echo verify"
         ),
     )
     .expect("write config");
-    let runner = fake_sandbox_runner_path(&project);
+    let runner = fake_galla_path(&project);
     fs::write(
         &runner,
         format!(
@@ -1560,13 +1560,13 @@ fn task_run_refuses_missing_sandbox_before_transition() {
 
 #[test]
 #[cfg(target_os = "linux")]
-fn task_run_refuses_a_project_local_sandbox_runner_before_transition() {
+fn task_run_refuses_a_project_local_galla_before_transition() {
     use std::os::unix::fs::PermissionsExt;
 
     let project = TempDir::new().expect("project");
     initialize(project.path()).expect("initialize");
     fs::write(project.path().join("src/TODOS.yaml"), queue()).expect("write queue");
-    let runner = project.path().join("fake-sandbox-runner");
+    let runner = project.path().join("fake-galla-runner");
     fs::write(
         &runner,
         "#!/bin/sh\nprintf 'kvist-sandbox-probe-v1: network=deny; mount=component\\n'\n",
@@ -1619,7 +1619,7 @@ fn task_run_refuses_a_sibling_runner_in_the_selected_worktree() {
     let project = checkout.path().join("nested-project");
     initialize(&project).expect("initialize nested project");
     fs::write(project.join("src/TODOS.yaml"), queue()).expect("write queue");
-    let runner = checkout.path().join("sibling-sandbox-runner");
+    let runner = checkout.path().join("sibling-galla-runner");
     fs::write(
         &runner,
         "#!/bin/sh\nprintf 'kvist-sandbox-probe-v1: network=deny; mount=component\\n'\n",
@@ -1990,7 +1990,7 @@ command = "/usr/bin/echo verification-secret"
         .expect("read config")
         .replace(
             "REPLACED_BY_TEST",
-            &fake_sandbox_runner_path(&project).display().to_string(),
+            &fake_galla_path(&project).display().to_string(),
         );
     fs::write(config_path, config).expect("configure runner");
     track_project(&project);

@@ -1,0 +1,4210 @@
+== session agent-runner-tiel-coder-35b-q4 started 519s ago ==
+[turn 1] reasoning: Let me understand the task. The user is talking about "Kvist shell" — this seems to be a project they're working on. Let me first investigate the codebase to understand what "Kvist" is, what the shell does, and what "status" and "overview" commands do.  Let me explore the workspace first.
+[turn 1] list_dir m4C81xLBzJY8XHZoS0OjQnSCyIWerZ2z: total 448
+drwxr-xr-x 17 1000 1000  4096 Sep 24 18:24 .
+drwxr-xr-x  9 1000 1000   260 Sep 24 19:54 ..
+drwxr-xr-x  3 1000 1000  4096 Sep 19 23:06 .agent-runner
+drwxr-xr-x  2 1000 1000  4096 Sep 21 21:04 .agent-writes
+drwxr-xr-x  3 1000 1000  4096 Aug 24 17:49 .agents
+drwxr-xr-x  2 1000 1000  4096 Sep 11 21:30 .cargo
+drwxr-xr-x  8 1000 1000  4096 Sep 24 19:43 .git
+drwxr-xr-x  3 1000 1000  4096 Sep 22 21:49 .github
+-rw-r--r--  1 1000 1000   355 Sep 24 18:24 .gitignore
+drwxr-xr-x  3 1000 1000  4096 Sep 15 05:33 .kvist
+drwxr-xr-x  2 1000 1000  4096 Sep 15 20:04 .review-scratch
+drwxr-xr-x  2 1000 1000  4096 Aug 11 15:30 .zed
+-rw-r--r--  1 1000 1000 13410 Sep  4 19:59 ARCHITECTURE.md
+-rw-r--r--  1 1000 1000   878 Sep  4 19:59 COMMERCIAL-LICENSE.md
+-rw-r--r--  1 1000 1000 19649 Sep  1 21:17 COMPLIANCE_REVIEW.md
+-rw-r--r--  1 1000 1000  1559 Sep  4 19:59 CONTRIBUTING.md
+-rw-r--r--  1 1000 1000 69239 Sep 22 21:49 Cargo.lock
+-rw-r--r--  1 1000 1000   265 Sep 22 21:49 Cargo.toml
+-rw-r--r--  1 1000 1000 22495 Sep 15 17:04 GUIDE.md
+-rw-r--r--  1 1000 1000 19165 Sep  4 19:59 KVIST_Architectural_Specification_Full.md
+-rw-r--r--  1 1000 1000 34523 Sep  4 19:59 LICENSE
+-rw-r--r--  1 1000 1000 64625 Sep 22 21:49 README.md
+-rw-r--r--  1 1000 1000  6648 Sep  4 19:59 REVIEW_RUNBOOK.md
+-rw-r--r--  1 1000 1000  4736 Sep  4 19:59 ROOT_CONTRACT.md
+-rw-r--r--  1 1000 1000 35628 Sep 22 21:49 TODO.md
+-rw-r--r--  1 1000 1000  5144 Aug 31 19:06 VISION.md
+-rw-r--r--  1 1000 1000 16790 Sep 18 18:07 _kvist_todos-design-review.md
+-rw-r--r--  1 1000 1000  1305 Sep 22 21:42 _next_prompt.md
+drwxr-xr-x  6 1000 1000  4096 Sep 23 22:27 agent_runner
+-rw-r--r--  1 1000 1000  1008 Sep 19 23:12 agent_runner.toml
+drwxr-xr-x  6 1000 1000  4096 Sep 22 21:49 agent_runtime
+-rw-r--r--  1 1000 1000   560 Sep 22 21:49 deny.toml
+drwxr-xr-x  4 1000 1000  4096 Sep  5 06:53 docs
+drwxr-xr-x  6 1000 1000  4096 Sep 24 19:00 engine
+-rw-r--r--  1 1000 1000  2093 Sep 13 10:11 issues.txt
+-rw-r--r--  1 1000 1000  1214 Sep 22 21:49 justfile
+-rw-------  1 1000 1000  2907 Sep 24 06:04 kvist.toml
+-rw-r--r--  1 1000 1000  3909 Sep 22 21:49 kvist.toml.example
+drwxr-xr-x  9 1000 1000  4096 Sep  5 11:38 node_modules
+-rw-r--r--  1 1000 1000  5750 Sep  9 22:00 package-lock.json
+-rw-r--r--  1 1000 1000   151 Sep  9 21:59 package.json
+drwxr-xr-x  7 1000 1000  4096 Sep 22 21:49 sandbox_runner
+
+[turn 2] reasoning: This is a Rust project. Let me look at the CLI/shell code and find where "status" and "overview" and "invalid project" are handled.
+[turn 2] shell ZlzdvBB8xfIBLnoT6Zh3XTWb2LvQp9Cx: engine/src/discovery.rs:64:    Invalid(InvalidArtifactKind),
+engine/src/discovery.rs:67:/// Why an artifact path is invalid.
+engine/src/discovery.rs:69:pub enum InvalidArtifactKind {
+engine/src/discovery.rs:89:    Invalid {
+engine/src/discovery.rs:90:        /// Artifacts that have invalid filesystem entries.
+engine/src/discovery.rs:91:        invalid: Vec<ComponentArtifact>,
+engine/src/discovery.rs:111:        let invalid = REQUIRED_ARTIFACTS
+engine/src/discovery.rs:115:                matches!(self.artifact_status(*artifact), ArtifactStatus::Invalid(_))
+engine/src/discovery.rs:118:        if !invalid.is_empty() {
+engine/src/discovery.rs:119:            return ComponentStatus::Invalid { invalid };
+engine/src/discovery.rs:543:            Ok(ArtifactStatus::Invalid(InvalidArtifactKind::SymbolicLink))
+engine/src/discovery.rs:547:            Ok(ArtifactStatus::Invalid(InvalidArtifactKind::Directory))
+engine/src/discovery.rs:549:        Ok(_) => Ok(ArtifactStatus::Invalid(InvalidArtifactKind::Other)),
+engine/src/tree.rs:7:    discovery::{self, ArtifactStatus, Component, ComponentArtifact, InvalidArtifactKind},
+engine/src/tree.rs:61:        ArtifactStatus::Invalid(kind) => Some(format!(
+engine/src/tree.rs:64:            invalid_artifact_description(kind)
+engine/src/tree.rs:75:        format!("invalid: {}", diagnostics.join("; "))
+engine/src/tree.rs:81:const fn invalid_artifact_description(kind: InvalidArtifactKind) -> &'static str {
+engine/src/tree.rs:83:        InvalidArtifactKind::Directory => "a directory",
+engine/src/tree.rs:84:        InvalidArtifactKind::SymbolicLink => "a symbolic link",
+engine/src/tree.rs:85:        InvalidArtifactKind::Other => "an unsupported filesystem object",
+engine/src/import.rs:97:            reason: "destination directory is invalid UTF-8".to_owned(),
+engine/src/task_queue.rs:297:            return Err(TaskQueueError::invalid(format!(
+engine/src/task_queue.rs:316:            return Err(TaskQueueError::invalid(format!(
+engine/src/task_queue.rs:328:    #[error("invalid TODO queue YAML: {0}")]
+engine/src/task_queue.rs:339:    #[error("invalid TODO queue: {0}")]
+engine/src/task_queue.rs:340:    Invalid(String),
+engine/src/task_queue.rs:344:    fn invalid(reason: impl Into<String>) -> Self {
+engine/src/task_queue.rs:345:        Self::Invalid(reason.into())
+engine/src/task_queue.rs:644:            return Err(TaskQueueError::invalid(
+engine/src/task_queue.rs:660:                return Err(TaskQueueError::invalid(
+engine/src/task_queue.rs:667:                return Err(TaskQueueError::invalid(
+engine/src/task_queue.rs:673:                return Err(TaskQueueError::invalid(
+engine/src/task_queue.rs:678:                return Err(TaskQueueError::invalid(
+engine/src/task_queue.rs:688:            return Err(TaskQueueError::invalid(format!(
+engine/src/task_queue.rs:701:            return Err(TaskQueueError::invalid(format!(
+engine/src/task_queue.rs:729:            return Err(TaskQueueError::invalid(format!(
+engine/src/task_queue.rs:739:                return Err(TaskQueueError::invalid(format!(
+engine/src/task_queue.rs:745:                return Err(TaskQueueError::invalid(format!(
+engine/src/task_queue.rs:757:                return Err(TaskQueueError::invalid(format!(
+
+[turn 2] shell 3Hfh1pspyIWYeagqysiG2ONUKQqtlHXe: engine/src/vcs.rs
+engine/src/discovery.rs
+engine/src/task_queue.rs
+engine/src/agent.rs
+engine/src/cli.rs
+engine/src/convert.rs
+engine/src/status.rs
+engine/src/error.rs
+engine/src/task_commands.rs
+engine/src/lib.rs
+engine/src/sandbox.rs
+engine/src/wizard.rs
+engine/src/component_documents.rs
+engine/src/artifacts.rs
+engine/src/shell/style.rs
+engine/src/shell/tree.rs
+engine/src/shell/journal.rs
+engine/src/shell/completion.rs
+engine/src/shell/status.rs
+engine/src/shell/state.rs
+engine/src/shell/prompt_editor.rs
+engine/src/shell/runs.rs
+engine/src/shell/stream.rs
+engine/src/shell/locks.rs
+engine/src/main.rs
+engine/src/vcs_commit.rs
+engine/src/authoring/mod.rs
+engine/src/project_state.rs
+engine/src/reverse_discovery.rs
+engine/src/interruptible_stdin.rs
+engine/src/config.rs
+engine/src/shell.rs
+engine/src/logging.rs
+engine/tests/vcs.rs
+engine/tests/import.rs
+engine/tests/test_policy.rs
+engine/tests/agent.rs
+engine/tests/discovery_limits.rs
+engine/tests/phase_one.rs
+engine/tests/status.rs
+
+[turn 3] reasoning: There's a `shell/status.rs`, `cli.rs`, and `wizard.rs`. Let me look at the shell directory structure and the key files: shell/status.rs, shell.rs, and the command handling.
+[turn 3] shell U0Eq9MOKiG31aEX0XWWlzeUVwnckoPCV: completion.rs
+journal.rs
+locks.rs
+pager.rs
+prompt_editor.rs
+runs.rs
+state.rs
+status.rs
+stream.rs
+style.rs
+tree.rs
+---STATUS.RS---
+   298 engine/src/shell/status.rs
+   486 engine/src/status.rs
+  1246 engine/src/wizard.rs
+  2440 engine/src/cli.rs
+  1937 engine/src/shell.rs
+  6407 total
+
+[turn 3] shell 4LC5y4jTDu7UDN47Xa6XDjojJJ2EuIPQ: engine/src/shell.rs:215:            // In the interactive shell REPL, bare 'status' and 'overview'
+engine/src/shell.rs:216:            // display the human-friendly project overview; anything with
+engine/src/shell.rs:218:            "status" | "overview" if arguments.is_empty() => {
+engine/src/shell.rs:219:                self.handle_overview(line);
+engine/src/shell.rs:247:    /// Shows the human-friendly project overview for bare `status`/`overview`.
+engine/src/shell.rs:248:    fn handle_overview(&mut self, line: &str) {
+engine/src/shell.rs:558:                        "no such task `{task_id}`. Try `tasks` to list tasks or `overview` for project status."
+engine/src/shell.rs:1097:    text.push_str("  status | overview              human-friendly project overview\n");
+engine/src/shell.rs:1849:            "cd", "tasks", "run", "last", "history", "journal", "locks", "prompt", "status",
+engine/src/shell/tree.rs:158:        long: Some("status".to_owned()),
+engine/src/shell/tree.rs:387:            "status",
+engine/src/shell/tree.rs:388:            "overview",
+engine/src/shell/tree.rs:419:        let status = tasks.find_flag_by_long("status").expect("status flag");
+engine/src/shell/tree.rs:600:        let status = node(&root, "status");
+engine/src/shell/tree.rs:604:            vec!["text", "json", "overview"]
+engine/src/shell/journal.rs:191:        journal.append(entry("status", "ok"));
+engine/src/shell/journal.rs:203:            serde_json::to_string(&entry("status", "ok")).unwrap()
+engine/src/shell/journal.rs:230:        journal.append(entry("status", "ok"));
+engine/src/shell/journal.rs:271:        let entries = vec![entry("status", "ok"), entry("task next .", "")];
+engine/src/shell/completion.rs:787:            "status",
+engine/src/shell/completion.rs:788:            "overview",
+engine/src/shell/completion.rs:955:            vec!["text", "json", "overview"]
+engine/src/shell/completion.rs:958:        assert_eq!(values(&complete(&c, "status --format o")), vec!["overview"]);
+engine/src/shell/completion.rs:966:            vec!["text", "json", "overview"]
+engine/src/shell/completion.rs:969:        assert_eq!(values(&complete(&c, "status --format=o")), vec!["overview"]);
+engine/src/shell/status.rs:138:    rows.push("Commands: overview, status, task run, help".to_owned());
+engine/src/shell/runs.rs:159:                        .get("status")
+engine/src/shell/runs.rs:258:            r#"{"status":"success","tokens_input":10,"tokens_output":5}"#,
+engine/src/shell/stream.rs:449:            r#"{"status":"success","tokens_input":12,"tokens_output":8}"#,
+engine/src/shell/stream.rs:545:            r#"{"status":"completed","tokens_input":900,"tokens_output":400}"#,
+
+[turn 4] reasoning: Now let me read the key files: shell.rs around the handle_overview and command dispatch, and shell/status.rs.
+[turn 4] read_file aBCCmWuoSqo7ictYn0e8zHu8dvQtyvOj: //! Kvist Interactive Workspace Shell implementation.
+//!
+//! The shell is a reedline line editor hosting a Kvist-specific completer.
+//! Static completion (verbs, flags, enum literals) is derived from the same
+//! clap command surface the parser uses, plus the shell builtins; dynamic
+//! completion (component paths, task IDs, attempt IDs, model names, the
+//! active branch) is resolved in memory from a [`DynamicState`] snapshot that
+//! is refreshed after every command so completions always track the durable
+//! project state.
+//!
+//! **Commands as Primary:** Standard user inputs are parsed directly as commands
+//! (e.g. `task run`, `component validate`). No artificial prefix (like `/` or `:`)
+//! is required.
+//!
+//! **Builtins:** `cd`, `tasks`, `run`, `help`, `last`, `history`, `journal`,
+//! `locks`, and `exit`/`quit` are dispatched before a line is re-parsed by
+//! clap. `cd` remembers the current component for the builtins, the prompt,
+//! and completion ordering; `run` without a task executes the next ready task.
+//!
+//! **Prompt Authoring:** Raw prompt authoring is an explicit action: typing
+//! `prompt <task_id>` opens an external editor (respecting `$VISUAL`/`$EDITOR`)
+//! seeded with the task's context, then validates, displays, and submits the
+//! result only after explicit confirmation.
+//!
+//! **Output Streaming & Link Replacement:** During sandboxed model execution,
+//! transient progress is displayed on stderr alongside a progress spinner.
+//! Once execution completes, ANSI escape sequences clear the raw progress line,
+//! replacing it with:
+//! 1. The prompt block
+//! 2. A clickable link to the raw execution log (`Logs: ./.kvist/logs/...`)
+//! 3. The clean, finalized command result
+//!
+//! **Terminal Output Pagination:** All output is passed through a pager wrapper
+//! using the `minus` crate, ensuring large component trees, long logs, and complex
+//! status tables are paginated cleanly without buffer overflows or color loss.
+//!
+//! **Session Journal:** The shell maintains an append-only session journal at
+//! `.kvist/session.log` that records final command inputs, execution
+//! results, and log links. Transient progress states are excluded. The editor
+//! history is reedline's file-backed history at `.kvist/history`.
+
+mod completion;
+mod journal;
+mod locks;
+mod pager;
+mod prompt_editor;
+mod runs;
+mod state;
+mod status;
+mod stream;
+mod style;
+mod tree;
+
+use std::io::{self, BufRead, IsTerminal, Write};
+use std::path::{Component as PathComponent, Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+use reedline::{
+    DefaultHinter, DefaultPrompt, DefaultPromptSegment, Emacs, IdeMenu, KeyCode, KeyModifiers,
+    MenuBuilder, Reedline, ReedlineEvent, ReedlineMenu, Signal, default_emacs_keybindings,
+};
+
+use clap::Parser;
+
+use crate::{
+    KvistError, Result, cli, task_commands,
+    task_queue::{self, TaskKind, TaskStatus},
+};
+use agent_runtime::split_raw_command;
+
+use completion::KvistCompleter;
+pub use journal::{JournalEntry, SESSION_JOURNAL, SessionJournal, display_session_status};
+pub use pager::display_output;
+pub use prompt_editor::{
+    build_prompt_seed, edit_prompt_with_seed, print_prompt_block, prompt_editor_command,
+};
+pub use runs::RecentRun;
+pub use state::DynamicState;
+pub use status::{StatusContext, print_welcome_banner, short_prompt, status_bar_label};
+pub use stream::{AgentFeedback, ProgressSpinner, StreamManager};
+pub use style::{Theme, report_error};
+use tree::build_root;
+
+/// Name of the completion menu registered with the line editor.
+const COMPLETION_MENU: &str = "kvist_completion";
+
+/// Truncates text to a maximum character count, adding an ellipsis if needed.
+pub(crate) fn truncate(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        text.to_owned()
+    } else {
+        let mut truncated: String = text.chars().take(max_chars.saturating_sub(3)).collect();
+        truncated.push_str("...");
+        truncated
+    }
+}
+
+/// The outcome of handling one shell line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoopAction {
+    /// Keep the REPL running.
+    Continue,
+    /// Leave the REPL.
+    Exit,
+}
+
+/// Builds a journal entry for a command line and a result summary.
+fn journal_entry(command: &str, result: &str) -> JournalEntry {
+    JournalEntry {
+        timestamp: chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string(),
+        command: command.to_owned(),
+        result: result.to_owned(),
+    }
+}
+
+/// One interactive session: the project root, its append-only journal, the
+/// stream manager, the resolved theme, the current-component focus shared
+/// with completion, and the last command's exit state for the prompt.
+pub(crate) struct Shell {
+    project_dir: PathBuf,
+    journal: SessionJournal,
+    stream_manager: StreamManager,
+    theme: Theme,
+    /// The current component (via `cd`), shared with the completer so it can
+    /// be reordered without rebuilding the line editor.
+    focus: Arc<Mutex<Option<String>>>,
+    /// Whether the last executed command failed; the next prompt shows the
+    /// failure marker until a command succeeds.
+    last_failed: bool,
+}
+
+impl Shell {
+    /// Creates a shell session for one project directory.
+    pub(crate) fn new(project_dir: &Path, focus: Arc<Mutex<Option<String>>>, theme: Theme) -> Self {
+        Self {
+            project_dir: project_dir.to_path_buf(),
+            journal: SessionJournal::new(project_dir),
+            stream_manager: StreamManager::new(project_dir, theme),
+            theme,
+            focus,
+            last_failed: false,
+        }
+    }
+
+    /// Records the exit state of the last handled line for the prompt.
+    fn note(&mut self, failed: bool) {
+        self.last_failed = failed;
+    }
+
+    /// The current component focus, when one is set.
+    pub(crate) fn current_component(&self) -> Option<String> {
+        self.focus.lock().ok().and_then(|guard| guard.clone())
+    }
+
+    /// Handles one shell line, never returning an error: every failure mode
+    /// is reported to the user and the session continues.
+    pub(crate) fn handle_line(
+        &mut self,
+        line: &str,
+        history: &dyn reedline::History,
+    ) -> LoopAction {
+        let line = line.trim();
+        if line.is_empty() {
+            return LoopAction::Continue;
+        }
+        if line == "exit" || line == "quit" {
+            return LoopAction::Exit;
+        }
+
+        let (program, arguments) = match split_raw_command(line) {
+            Ok(split) => split,
+            Err(error) => {
+                report_error(self.theme, &error.to_string());
+                self.journal.append(journal_entry(line, "syntax error"));
+                self.note(true);
+                return LoopAction::Continue;
+            }
+        };
+
+        match program.as_str() {
+            "journal" => {
+                display_session_status(self.theme, &self.journal);
+                self.journal.append(journal_entry(line, "shown"));
+                self.note(false);
+            }
+            "history" => {
+                self.handle_history(&arguments, line, history);
+            }
+            "help" => {
+                display_output(&render_help(self.theme));
+                self.journal.append(journal_entry(line, "shown"));
+                self.note(false);
+            }
+            "cd" => {
+                self.handle_cd(&arguments, line);
+            }
+            "tasks" => {
+                self.handle_tasks(&arguments, line);
+            }
+            "run" => {
+                self.handle_run(&arguments, line);
+            }
+            "last" => {
+                self.handle_last(&arguments, line);
+            }
+            "locks" if arguments.is_empty() || arguments == ["clean"] => {
+                handle_locks(self.theme, !arguments.is_empty(), &self.journal);
+                self.note(false);
+            }
+            "locks" => {
+                report_error(self.theme, "usage: locks [clean]");
+                self.journal.append(journal_entry(line, "usage hint"));
+                self.note(true);
+            }
+            // In the interactive shell REPL, bare 'status' and 'overview'
+            // display the human-friendly project overview; anything with
+            // arguments is the real CLI command.
+            "status" | "overview" if arguments.is_empty() => {
+                self.handle_overview(line);
+            }
+            // `prompt` is an explicit, high-signal authoring action and never
+            // falls through to the CLI parser (an unknown task must not run
+            // as prompt text).
+            "prompt" => match arguments.len() {
+                0 => {
+                    report_error(
+                        self.theme,
+                        "usage: prompt <TASK_ID> — opens your editor seeded with the task context",
+                    );
+                    self.journal.append(journal_entry(line, "usage hint"));
+                    self.note(true);
+                }
+                1 => {
+                    self.handle_prompt_authoring(line, &arguments[0]);
+                }
+                _ => {
+                    self.dispatch(line);
+                }
+            },
+            _ => {
+                self.dispatch(line);
+            }
+        }
+        LoopAction::Continue
+    }
+
+    /// Shows the human-friendly project overview for bare `status`/`overview`.
+    fn handle_overview(&mut self, line: &str) {
+        let result = (|| {
+            let inspection = crate::project_state::inspect(&self.project_dir)?;
+            Ok::<String, KvistError>(crate::status::render(
+                &inspection,
+                crate::status::StatusFormat::Overview,
+                false,
+                false,
+                false,
+            ))
+        })();
+        match result {
+            Ok(text) => {
+                display_output(&text);
+                self.journal
+                    .append(journal_entry(line, &truncate(&text, 100)));
+                self.note(false);
+            }
+            Err(error) => {
+                let _ = error.print();
+                self.journal.append(journal_entry(line, "error"));
+                self.note(true);
+            }
+        }
+    }
+
+    /// `cd [COMPONENT_DIR]`: remember the current component for the builtins,
+    /// the prompt, and completion ordering.
+    fn handle_cd(&mut self, args: &[String], line: &str) -> LoopAction {
+        let known = DynamicState::load(&self.project_dir).components().to_vec();
+        match resolve_cd(args, &known) {
+            CdOutcome::Show => {
+                let current = self
+                    .current_component()
+                    .filter(|c| !c.is_empty() && c != ".")
+                    .unwrap_or_else(|| ". (root)".to_owned());
+                println!("Component: {}", self.theme.bold(&current));
+                self.journal.append(journal_entry(line, "show"));
+                self.note(false);
+            }
+            CdOutcome::Set(component) => {
+                if let Ok(mut guard) = self.focus.lock() {
+                    *guard = Some(component.clone());
+                }
+                println!("Component: {}", self.theme.bold(&component));
+                self.journal.append(journal_entry(line, &component));
+                self.note(false);
+            }
+            CdOutcome::Unknown { requested, known } => {
+                if known.is_empty() {
+                    report_error(self.theme, "no components discovered in this project");
+                } else {
+                    report_error(
+                        self.theme,
+                        &format!(
+                            "unknown component `{requested}`; known: {}",
+                            known.join(", ")
+                        ),
+                    );
+                }
+                self.journal
+                    .append(journal_entry(line, "unknown component"));
+                self.note(true);
+            }
+            CdOutcome::Invalid(requested) => {
+                report_error(
+                    self.theme,
+                    &format!(
+                        "`{requested}` is not a valid component path (use a relative path or `.`)"
+                    ),
+                );
+                self.journal
+                    .append(journal_entry(line, "invalid component path"));
+                self.note(true);
+            }
+            CdOutcome::Usage => {
+                report_error(self.theme, "usage: cd [COMPONENT_DIR]");
+                self.journal.append(journal_entry(line, "usage hint"));
+                self.note(true);
+            }
+        }
+        LoopAction::Continue
+    }
+
+    /// `tasks [COMPONENT_DIR] [--status STATUS]`: a compact task table.
+    fn handle_tasks(&mut self, args: &[String], line: &str) -> LoopAction {
+        let parsed = match parse_tasks_args(args) {
+            Ok(parsed) => parsed,
+            Err(message) => {
+                report_error(self.theme, &message);
+                self.journal.append(journal_entry(line, "usage hint"));
+                self.note(true);
+                return LoopAction::Continue;
+            }
+        };
+        let hint = parsed.component.as_deref().and_then(|requested| {
+            component_focus_hint(self.current_component().as_deref(), requested)
+        });
+        let component = parsed
+            .component
+            .or_else(|| self.current_component())
+            .unwrap_or_else(|| ".".to_owned());
+        if let Some(hint) = hint {
+            println!("{}", self.theme.dim(&hint));
+        }
+        let state = DynamicState::load(&self.project_dir);
+        if !state.components().iter().any(|c| c == &component) {
+            let known = state.components().join(", ");
+            if known.is_empty() {
+                report_error(self.theme, "no components discovered in this project");
+            } else {
+                report_error(
+                    self.theme,
+                    &format!("unknown component `{component}`; known: {known}"),
+                );
+            }
+            self.journal
+                .append(journal_entry(line, "unknown component"));
+            self.note(true);
+            return LoopAction::Continue;
+        }
+        let Some(scope) = state.scopes.get(&component) else {
+            println!("No readable task queue in `{component}`.");
+            self.journal.append(journal_entry(line, "no queue"));
+            self.note(false);
+            return LoopAction::Continue;
+        };
+        let next_ready = task_queue::next_ready_task_id(&scope.tasks);
+        let rows: Vec<TaskRow> = scope
+            .tasks
+            .iter()
+            .filter(|task| parsed.status.is_none_or(|s| s == task.status))
+            .map(|task| TaskRow {
+                id: task.id.clone(),
+                status: task.status,
+                kind: task.kind,
+                title: task.title.clone(),
+                blocked_reason: task.blocked_reason.clone(),
+            })
+            .collect();
+        display_output(&render_tasks(
+            self.theme,
+            &component,
+            &rows,
+            next_ready.as_deref(),
+        ));
+        self.journal
+            .append(journal_entry(line, &format!("{} tasks", rows.len())));
+        self.note(false);
+        LoopAction::Continue
+    }
+
+    /// `run [COMPONENT_DIR] [TASK_ID]`: run a task, or — when the task is
+    /// omitted — suggest the next ready task. An omitted task is never
+    /// auto-executed: the next ready task runs only after an explicit
+    /// confirmation (bare ENTER accepts).
+    fn handle_run(&mut self, args: &[String], line: &str) -> LoopAction {
+        let (requested_component, task) = match parse_run_args(args) {
+            Ok(parsed) => parsed,
+            Err(message) => {
+                report_error(self.theme, &message);
+                self.journal.append(journal_entry(line, "usage hint"));
+                self.note(true);
+                return LoopAction::Continue;
+            }
+        };
+        let hint = requested_component.as_deref().and_then(|requested| {
+            component_focus_hint(self.current_component().as_deref(), requested)
+        });
+        let component = requested_component
+            .or_else(|| self.current_component())
+            .unwrap_or_else(|| ".".to_owned());
+        if let Some(hint) = hint {
+            println!("{}", self.theme.dim(&hint));
+        }
+        let suggested = task.is_none();
+        let task = match task {
+            Some(task) => task,
+            None => {
+                match resolve_next_ready_task(&DynamicState::load(&self.project_dir), &component) {
+                    Some(task_id) => task_id,
+                    None => {
+                        report_error(
+                            self.theme,
+                            &format!(
+                                "no ready tasks in `{component}`; pass a TASK_ID or inspect `tasks`"
+                            ),
+                        );
+                        self.journal.append(journal_entry(line, "no ready task"));
+                        self.note(true);
+                        return LoopAction::Continue;
+                    }
+                }
+            }
+        };
+        if suggested && !self.confirm_suggested_run(&task, line) {
+            return LoopAction::Continue;
+        }
+        self.dispatch_labeled(&format!("task run {component} {task}"), line);
+        LoopAction::Continue
+    }
+
+    /// Asks the user to confirm a suggested (next-ready) run. A refusal, or a
+    /// confirmation that cannot be obtained in a non-interactive context, aborts
+    /// the run without changing durable state.
+    fn confirm_suggested_run(&mut self, task_id: &str, line: &str) -> bool {
+        match task_commands::confirm_run_suggestion(task_id) {
+            Ok(confirmed) => {
+                if !confirmed {
+                    println!("Cancelled: did not run the suggested task `{task_id}`.");
+                    self.journal.append(journal_entry(line, "run cancelled"));
+                    self.note(false);
+                }
+                confirmed
+            }
+            Err(error) => {
+                let _ = error.print();
+                self.journal
+                    .append(journal_entry(line, "confirmation unavailable"));
+                self.note(true);
+                false
+            }
+        }
+    }
+
+    /// `last [COUNT]`: recent agent runs with tokens and log links.
+    fn handle_last(&mut self, args: &[String], line: &str) -> LoopAction {
+        let count = match parse_count("last", args, 10) {
+            Ok(count) => count,
+            Err(message) => {
+                report_error(self.theme, &message);
+                self.journal.append(journal_entry(line, "usage hint"));
+                self.note(true);
+                return LoopAction::Continue;
+            }
+        };
+        let runs = runs::scan_recent_runs(&self.project_dir, count);
+        display_output(&render_recent_runs(self.theme, &runs, &self.project_dir));
+        self.journal
+            .append(journal_entry(line, &format!("{} runs", runs.len())));
+        self.note(false);
+        LoopAction::Continue
+    }
+
+    /// `history [COUNT]`: the editor's own history (what up-arrow recalls).
+    fn handle_history(
+        &mut self,
+        args: &[String],
+        line: &str,
+        history: &dyn reedline::History,
+    ) -> LoopAction {
+        let count = match parse_count("history", args, 20) {
+            Ok(count) => count,
+            Err(message) => {
+                report_error(self.theme, &message);
+                self.journal.append(journal_entry(line, "usage hint"));
+                self.note(true);
+                return LoopAction::Continue;
+            }
+        };
+        let query = reedline::SearchQuery {
+            direction: reedline::SearchDirection::Backward,
+            start_time: None,
+            end_time: None,
+            start_id: None,
+            end_id: None,
+            limit: Some(count as i64),
+            filter: reedline::SearchFilter::anything(None),
+        };
+        match history.search(query) {
+            Ok(items) if items.is_empty() => {
+                println!("Editor history: (empty)");
+                self.journal.append(journal_entry(line, "empty"));
+                self.note(false);
+            }
+            Ok(items) => {
+                let mut text = format!("Editor history ({} most recent):\n", items.len());
+                for (i, item) in items.iter().enumerate() {
+                    text.push_str(&format!(
+                        "  {}. {}\n",
+                        self.theme.dim(&format!("{i}")),
+                        item.command_line
+                    ));
+                }
+                display_output(&text);
+                self.journal
+                    .append(journal_entry(line, &format!("{} lines", items.len())));
+                self.note(false);
+            }
+            Err(error) => {
+                report_error(
+                    self.theme,
+                    &format!("could not read editor history: {error}"),
+                );
+                self.journal.append(journal_entry(line, "history error"));
+                self.note(true);
+            }
+        }
+        LoopAction::Continue
+    }
+
+    /// Runs the `prompt <task_id>` editor flow without ever killing the
+    /// session; submission requires explicit confirmation.
+    fn handle_prompt_authoring(&mut self, line: &str, task_id: &str) -> LoopAction {
+        let command = match prompt_editor_command(&self.project_dir, task_id) {
+            Ok(Some(command)) => command,
+            Ok(None) => {
+                report_error(
+                    self.theme,
+                    &format!(
+                        "no such task `{task_id}`. Try `tasks` to list tasks or `overview` for project status."
+                    ),
+                );
+                self.journal.append(journal_entry(line, "no such task"));
+                self.note(true);
+                return LoopAction::Continue;
+            }
+            Err(error) => {
+                let _ = error.print();
+                self.journal.append(journal_entry(line, "editor error"));
+                self.note(true);
+                return LoopAction::Continue;
+            }
+        };
+
+        // The prompt block is already displayed; running the agent still
+        // needs explicit consent.
+        if !confirm("Submit this prompt and start the agent run? [y/N] ") {
+            println!("Prompt submission cancelled.");
+            self.journal.append(journal_entry(line, "prompt cancelled"));
+            self.note(false);
+            return LoopAction::Continue;
+        }
+
+        let spinner = self.stream_manager.start_spinner("authoring prompt");
+        self.stream_manager.print_prompt_stage(line);
+        self.stream_manager.print_working_stage();
+        let result = cli::execute(command, false);
+        spinner.stop();
+        // A free prompt run records no trajectory, so there is nothing to correlate.
+        self.stream_manager
+            .print_result_stage(&result, &stream::FeedbackTarget::None);
+
+        let summary = match &result {
+            Ok(out) => truncate(&out.to_string(), 100),
+            Err(err) => truncate(&err.to_string(), 100),
+        };
+        self.journal.append(journal_entry(line, &summary));
+        self.note(result.is_err());
+        LoopAction::Continue
+    }
+
+    /// Dispatches a command line through the CLI, handling streaming,
+    /// paging, confirmation gates, and journaling. Total: every failure is
+    /// reported and the session continues.
+    fn dispatch(&mut self, line: &str) {
+        self.dispatch_labeled(line, line);
+    }
+
+    /// Dispatches `command_line` while journaling `journal_line` (used by
+    /// builtins that synthesize a CLI command, e.g. `run` → `task run`).
+    fn dispatch_labeled(&mut self, command_line: &str, journal_line: &str) {
+        let (program, arguments) = match split_raw_command(command_line) {
+            Ok(split) => split,
+            Err(error) => {
+                report_error(self.theme, &error.to_string());
+                self.journal
+                    .append(journal_entry(journal_line, "syntax error"));
+                self.note(true);
+                return;
+            }
+        };
+
+        let mut full_args: Vec<String> = vec!["kvist".to_owned(), program.clone()];
+        full_args.extend(arguments.iter().cloned());
+
+        let parsed = match cli::Cli::try_parse_from(&full_args) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                let _ = error.print();
+                self.journal
+                    .append(journal_entry(journal_line, "syntax error"));
+                self.note(true);
+                return;
+            }
+        };
+
+        if matches!(parsed.command, cli::Command::Shell(_)) {
+            println!("You are already in an active Kvist shell.");
+            self.journal
+                .append(journal_entry(journal_line, "already in shell"));
+            self.note(false);
+            return;
+        }
+
+        // Destructive operations require an explicit in-shell confirmation.
+        if let Some(gate) = destructive_gate(&parsed.command)
+            && !confirm(&format!("confirm {gate}? [y/N] "))
+        {
+            println!("Operation cancelled.");
+            self.journal
+                .append(journal_entry(journal_line, "confirmation declined"));
+            self.note(false);
+            return;
+        }
+
+        let streaming = is_streaming_command(&parsed.command);
+        let interactive = is_interactive_command(&parsed.command);
+        // Capture the run's task before moving the command, for feedback
+        // correlation with the run's own trajectory.
+        let run_task_id = match &parsed.command {
+            cli::Command::Task {
+                command: cli::TaskCommand::Run { task_id, .. },
+            } => task_id.clone(),
+            _ => None,
+        };
+        let mut cmd = parsed.command;
+        if streaming {
+            if let cli::Command::Task {
+                command: cli::TaskCommand::Run { ref mut stream, .. },
+            } = cmd
+            {
+                *stream = true;
+            }
+            self.stream_manager.print_prompt_stage(command_line);
+            self.stream_manager.print_working_stage();
+        }
+
+        // A spinner with elapsed time covers slow background work so it is
+        // visibly progressing rather than hung. Interactive commands drive their
+        // own prompt (a wizard here) and must not be covered by a spinner that
+        // would imply a background agent run while the command waits for input.
+        let spinner = if interactive {
+            None
+        } else {
+            Some(self.stream_manager.start_spinner(&program))
+        };
+        let result = cli::execute(cmd, false);
+        if let Some(spinner) = spinner {
+            spinner.stop();
+        }
+
+        if streaming {
+            let feedback_target = match run_task_id.as_deref() {
+                Some(task_id) => stream::FeedbackTarget::Task(task_id),
+                None => stream::FeedbackTarget::None,
+            };
+            self.stream_manager
+                .print_result_stage(&result, &feedback_target);
+        } else {
+            match &result {
+                Ok(output) => display_output(&output.to_string()),
+                Err(error) => {
+                    if matches!(
+                        error,
+                        KvistError::AgentSetupCancelled
+                            | KvistError::AgentRuntime(agent_runtime::Error::Cancelled)
+                    ) {
+                        println!("Operation cancelled.");
+                    } else {
+                        let _ = error.print();
+                    }
+                }
+            }
+        }
+
+        let summary = match &result {
+            Ok(out) => truncate(&out.to_string(), 100),
+            Err(err) => truncate(&err.to_string(), 100),
+        };
+        self.journal.append(journal_entry(journal_line, &summary));
+        // A cooperative cancellation is not a failure for the prompt state.
+        self.note(matches!(
+            &result,
+            Err(error)
+                if !matches!(
+                    error,
+                    KvistError::AgentSetupCancelled
+                        | KvistError::AgentRuntime(agent_runtime::Error::Cancelled)
+                )
+        ));
+    }
+}
+
+/// Lists live and stale task locks; `locks clean` removes the stale ones.
+fn handle_locks(theme: Theme, clean: bool, journal: &SessionJournal) -> LoopAction {
+    let command = if clean { "locks clean" } else { "locks" };
+    let entries = locks::scan();
+    let cleaned = if clean {
+        locks::clean_stale()
+    } else {
+        Vec::new()
+    };
+    if entries.is_empty() {
+        println!("No task locks.");
+        journal.append(journal_entry(command, "none"));
+        return LoopAction::Continue;
+    }
+    display_output(&render_locks(theme, &entries, &cleaned, clean));
+    journal.append(journal_entry(
+        command,
+        &format!("{} locks, {} cleaned", entries.len(), cleaned.len()),
+    ));
+    LoopAction::Continue
+}
+
+/// Renders the task-lock listing (pure, so it is testable without user state).
+fn render_locks(
+    theme: Theme,
+    entries: &[locks::LockEntry],
+    cleaned: &[PathBuf],
+    clean: bool,
+) -> String {
+    let mut text = format!(
+        "{}\n",
+        theme.bold(&format!("Task locks ({}):", entries.len()))
+    );
+    for entry in entries {
+        let state = if entry.live {
+            theme.green("[live]")
+        } else {
+            theme.red("[stale]")
+        };
+        let task = entry.task_id.as_deref().unwrap_or("<unknown>");
+        let pid = entry
+            .pid
+            .map(|pid| pid.to_string())
+            .unwrap_or_else(|| "<unknown>".to_owned());
+        let age = locks::format_age(entry.age_secs);
+        text.push_str(&format!(
+            "  {state} task {task} · pid {pid} · {}\n",
+            theme.dim(&format!("age {age}"))
+        ));
+    }
+    for path in cleaned {
+        text.push_str(&format!(
+            "  {}\n",
+            theme.dim(&format!("cleaned: {}", path.display()))
+        ));
+    }
+    if clean && cleaned.is_empty() {
+        text.push_str(&format!("  {}\n", theme.dim("no stale locks to clean")));
+    }
+    text
+}
+
+/// The outcome of resolving the `cd` builtin arguments.
+enum CdOutcome {
+    /// No argument: show the current component.
+    Show,
+    /// A discovered component to make current.
+    Set(String),
+    /// The argument is not a discovered component.
+    Unknown {
+        requested: String,
+        known: Vec<String>,
+    },
+    /// The argument is not a usable component path.
+    Invalid(String),
+    /// Too many arguments.
+    Usage,
+}
+
+/// Resolves `cd` arguments against the discovered component set (pure).
+fn resolve_cd(args: &[String], known: &[String]) -> CdOutcome {
+    if args.len() > 1 {
+        return CdOutcome::Usage;
+    }
+    let Some(arg) = args.first() else {
+        return CdOutcome::Show;
+    };
+    if arg != "."
+        && (Path::new(arg).is_absolute()
+            || Path::new(arg)
+                .components()
+                .any(|c| matches!(c, PathComponent::ParentDir | PathComponent::CurDir)))
+    {
+        return CdOutcome::Invalid(arg.clone());
+    }
+    if known.iter().any(|c| c == arg) {
+        CdOutcome::Set(arg.clone())
+    } else {
+        CdOutcome::Unknown {
+            requested: arg.clone(),
+            known: known.to_vec(),
+        }
+    }
+}
+
+/// One row of the `tasks` builtin table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct TaskRow {
+    id: String,
+    status: TaskStatus,
+    kind: TaskKind,
+    title: String,
+    blocked_reason: Option<String>,
+}
+
+/// The CLI spelling of a durable task status.
+fn status_label(status: TaskStatus) -> &'static str {
+    match status {
+        TaskStatus::Pending => "pending",
+        TaskStatus::InProgress => "in-progress",
+        TaskStatus::Blocked => "blocked",
+        TaskStatus::AwaitingDecision => "awaiting-decision",
+        TaskStatus::Completed => "completed",
+    }
+}
+
+/// The CLI spelling of a task lifecycle role.
+fn kind_label(kind: TaskKind) -> &'static str {
+    match kind {
+        TaskKind::Test => "test",
+        TaskKind::Implementation => "implementation",
+        TaskKind::SecurityAudit => "security-audit",
+        TaskKind::ComplianceReview => "compliance-review",
+    }
+}
+
+/// Parses a CLI status literal into a durable task status.
+fn parse_task_status(value: &str) -> std::result::Result<TaskStatus, String> {
+    match value {
+        "pending" => Ok(TaskStatus::Pending),
+        "in-progress" => Ok(TaskStatus::InProgress),
+        "blocked" => Ok(TaskStatus::Blocked),
+        "awaiting-decision" => Ok(TaskStatus::AwaitingDecision),
+        "completed" => Ok(TaskStatus::Completed),
+        other => Err(format!(
+            "unknown status `{other}`; expected pending, in-progress, blocked, awaiting-decision, or completed"
+        )),
+    }
+}
+
+/// Parsed `tasks` builtin arguments.
+struct TasksArgs {
+    component: Option<String>,
+    status: Option<TaskStatus>,
+}
+
+/// Parses `tasks [COMPONENT_DIR] [--status STATUS]` (pure).
+fn parse_tasks_args(args: &[String]) -> std::result::Result<TasksArgs, String> {
+    let mut component = None;
+    let mut status = None;
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if arg == "--status" {
+            let Some(value) = args.get(i + 1) else {
+                return Err(
+                    "--status needs a value: pending, in-progress, blocked, or completed"
+                        .to_owned(),
+                );
+            };
+            status = Some(parse_task_status(value)?);
+            i += 2;
+        } else if let Some(value) = arg.strip_prefix("--status=") {
+            status = Some(parse_task_status(value)?);
+            i += 1;
+        } else {
+            if component.is_some() {
+                return Err("usage: tasks [COMPONENT_DIR] [--status STATUS]".to_owned());
+            }
+            component = Some(arg.clone());
+            i += 1;
+        }
+    }
+    Ok(TasksArgs { component, status })
+}
+
+/// Parsed `run` builtin arguments: the optional component and task.
+type RunArgs = (Option<String>, Option<String>);
+
+/// Parses `run [COMPONENT_DIR] [TASK_ID]` (pure).
+fn parse_run_args(args: &[String]) -> std::result::Result<RunArgs, String> {
+    if args.len() > 2 {
+        return Err("usage: run [COMPONENT_DIR] [TASK_ID]".to_owned());
+    }
+    Ok((args.first().cloned(), args.get(1).cloned()))
+}
+
+/// Resolves the next ready task (the first pending task whose recorded
+/// dependencies are all completed) for a component from a snapshot, or
+/// `None` when the component has no readable queue or no task is ready.
+fn resolve_next_ready_task(state: &DynamicState, component: &str) -> Option<String> {
+    let scope = state.scopes.get(component)?;
+    task_queue::next_ready_task_id(&scope.tasks)
+}
+
+/// Builds a hint for when a command names a component that is not the current
+/// focus, so the user is never surprised by which component a later bare
+/// command will target. Returns `None` when the requested component matches the
+/// focus (root and an unset focus compare equal). Pure: it never changes focus.
+fn component_focus_hint(current: Option<&str>, requested: &str) -> Option<String> {
+    let requested_focus = if requested.is_empty() || requested == "." {
+        None
+    } else {
+        Some(requested)
+    };
+    let current_focus = match current {
+        Some(c) if !c.is_empty() && c != "." => Some(c),
+        _ => None,
+    };
+    if requested_focus == current_focus {
+        return None;
+    }
+    Some(match current_focus {
+        None => format!("note: no component focused (cd {requested} to switch)"),
+        Some(current) => format!("note: still focused on {current} (cd {requested} to switch)"),
+    })
+}
+
+/// Parses a `last [COUNT]` / `history [COUNT]` argument (pure).
+fn parse_count(
+    command: &str,
+    args: &[String],
+    default: usize,
+) -> std::result::Result<usize, String> {
+    match args.len() {
+        0 => Ok(default),
+        1 => match args[0].parse::<usize>() {
+            Ok(0) => Ok(default),
+            Ok(count) => Ok(count),
+            Err(_) => Err(format!(
+                "`{command}` expects a positive integer count, got `{}`",
+                args[0]
+            )),
+        },
+        _ => Err(format!("usage: {command} [COUNT]")),
+    }
+}
+
+/// The colored spelling of a durable task status in the `tasks` table.
+fn status_style(theme: Theme, status: TaskStatus) -> String {
+    match status {
+        TaskStatus::Pending => theme.dim(status_label(status)),
+        TaskStatus::InProgress => theme.cyan(status_label(status)),
+        TaskStatus::Blocked => theme.red(status_label(status)),
+        TaskStatus::AwaitingDecision => theme.yellow(status_label(status)),
+        TaskStatus::Completed => theme.green(status_label(status)),
+    }
+}
+
+/// Renders the `tasks` table (pure, so it is testable without a terminal).
+fn render_tasks(
+    theme: Theme,
+    component: &str,
+    rows: &[TaskRow],
+    next_ready: Option<&str>,
+) -> String {
+    if rows.is_empty() {
+        return format!("No tasks in `{component}` match the filter.");
+    }
+    let mut text = format!(
+        "{}\n",
+        theme.bold(&format!("Tasks in `{component}` ({} shown):", rows.len()))
+    );
+    for row in rows {
+        let marker = if next_ready.is_some_and(|n| n == row.id) {
+            theme.yellow("★ ")
+        } else {
+            "  ".to_owned()
+        };
+        text.push_str(&format!(
+            "{}{:<28} {} {:<16} {}\n",
+            style::pad_right(&marker, 2),
+            truncate(&row.id, 28),
+            style::pad_right(&status_style(theme, row.status), 12),
+            kind_label(row.kind),
+            truncate(&row.title, 60)
+        ));
+        if let Some(reason) = &row.blocked_reason {
+            text.push_str(&format!(
+                "   {}\n",
+                theme.dim(&format!("blocked: {}", truncate(reason, 100)))
+            ));
+        }
+    }
+    if let Some(next) = next_ready {
+        text.push_str(&format!(
+            "{} {}\n",
+            theme.dim("next ready:"),
+            theme.bold(next)
+        ));
+    }
+    text
+}
+
+/// Renders the `last` builtin run table (pure, so it is testable).
+fn render_recent_runs(theme: Theme, runs: &[RecentRun], project_root: &Path) -> String {
+    if runs.is_empty() {
+        return "No agent runs recorded yet.".to_owned();
+    }
+    let mut text = format!(
+        "{}\n",
+        theme.bold(&format!("Recent agent runs ({}):", runs.len()))
+    );
+    for run in runs {
+        let component = run.component.as_deref().unwrap_or(".");
+        let task = run.task_id.as_deref().unwrap_or("<unknown>");
+        let status = match run.success {
+            Some(true) => theme.green("success"),
+            Some(false) => theme.red("failed"),
+            None => theme.dim("unknown"),
+        };
+        let tokens = match (run.tokens_input, run.tokens_output) {
+            (Some(input), Some(output)) => format!("{input}/{output}"),
+            _ => "-".to_owned(),
+        };
+        let timestamp = theme.dim(run.timestamp.as_deref().unwrap_or("-"));
+        text.push_str(&format!(
+            "  {task:<28} {component:<14} {} {} {tokens:<12} {timestamp}\n",
+            style::pad_right(&status, 8),
+            theme.dim("tokens")
+        ));
+        let link = run.record_path.as_ref().or(run.trajectory_path.as_ref());
+        if let Some(path) = link
+            && let Ok(rel) = path.strip_prefix(project_root)
+        {
+            let kind = if run.record_path.as_ref() == Some(path) {
+                "record"
+            } else {
+                "trajectory"
+            };
+            text.push_str(&format!(
+                "    {}\n",
+                theme.dim(&format!("{kind}: ./{rel}", rel = rel.display()))
+            ));
+        }
+    }
+    text
+}
+
+/// Renders the `help` builtin text (pure, so it is testable).
+fn render_help(theme: Theme) -> String {
+    let mut text = String::new();
+    text.push_str(&format!("{}\n", theme.bold("Kvist shell — builtins:")));
+    text.push_str(
+        "  cd [COMPONENT]                 set the current component for builtins and completion\n",
+    );
+    text.push_str("  tasks [COMPONENT] [--status S] list tasks; S: pending, in-progress, blocked, completed\n");
+    text.push_str(
+        "  run [COMPONENT] [TASK]         run a task; omit TASK to confirm the next ready one\n",
+    );
+    text.push_str("  last [COUNT]                   recent agent runs with tokens and log links\n");
+    text.push_str("  history [COUNT]                recent editor history lines\n");
+    text.push_str("  journal                        the append-only session journal\n");
+    text.push_str("  locks [clean]                  inspect live/stale task locks; clean removes stale ones\n");
+    text.push_str("  prompt TASK                    author a prompt in your editor for a task\n");
+    text.push_str("  status | overview              human-friendly project overview\n");
+    text.push_str("  help                           this list\n");
+    text.push_str("  exit | quit                    leave the shell\n");
+    text.push_str(
+        "\nKey bindings: Tab complete · arrows navigate · Ctrl+C cancel command · Ctrl+D exit\n",
+    );
+    text.push_str("\nTop workflow commands (the full CLI surface also parses):\n");
+    text.push_str("  task next .            show the next ready task\n");
+    text.push_str("  task run . [TASK]      run a task; omit TASK to confirm the next ready one\n");
+    text.push_str("  task log . TASK        inspect an execution log\n");
+    text.push_str("  task transition . TASK STATUS  record a status transition\n");
+    text.push_str("  component validate DIR validate component intent documents\n");
+    text.push_str("  agent profile list     configured model profiles\n");
+    text.push_str("  tree                   the component tree\n");
+    text
+}
+
+/// Names the destructive part of a command that needs an in-shell
+/// confirmation, when the command is in the declared destructive set.
+fn destructive_gate(command: &cli::Command) -> Option<&'static str> {
+    match command {
+        cli::Command::Task {
+            command: cli::TaskCommand::Unlock { force: true, .. },
+        } => Some("task unlock --force (releases a component lock)"),
+        cli::Command::Agent {
+            command: cli::AgentCommand::Remove { all: true, .. },
+        } => Some("agent remove --all (removes every model profile)"),
+        cli::Command::Component {
+            command: cli::ComponentCommand::Accept { commit: true, .. },
+        } => Some("component accept --commit (creates a Git commit)"),
+        cli::Command::Vcs {
+            command: cli::VcsCommand::CommitAccepted { .. },
+        } => Some("vcs commit-accepted (creates an acceptance commit)"),
+        _ => None,
+    }
+}
+
+/// Asks the user to confirm an operation; a missing, unreadable, or cancelled
+/// answer is a refusal, so confirmation can never block, hang, or crash the
+/// session. Ctrl-C while the prompt is displayed interrupts the read and is
+/// treated as a refusal.
+fn confirm(prompt: &str) -> bool {
+    print!("{prompt}");
+    let _ = io::stdout().flush();
+    let mut answer = String::new();
+    let mut reader = crate::interruptible_stdin::interruptible_reader();
+    match reader.read_line(&mut answer) {
+        Ok(0) | Err(_) => false,
+        Ok(_) => matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes"),
+    }
+}
+
+/// Returns whether a command type produces long-running output that should be streamed.
+/// Commands that drive their own interactive prompt and therefore must not be
+/// covered by the progress spinner (see `dispatch_labeled`).
+fn is_interactive_command(command: &cli::Command) -> bool {
+    matches!(
+        command,
+        cli::Command::Agent {
+            command: cli::AgentCommand::Setup { .. }
+                | cli::AgentCommand::Profile {
+                    command: Some(cli::AgentProfileCommand::Add { .. })
+                }
+        }
+    )
+}
+
+fn is_streaming_command(command: &cli::Command) -> bool {
+    match command {
+        cli::Command::Task { command } => matches!(
+            command,
+            cli::TaskCommand::Run { .. } | cli::TaskCommand::Recover { .. }
+        ),
+        cli::Command::Prompt {
+            detect_loops,
+            max_restarts,
+            ..
+        } => *detect_loops || *max_restarts > 0,
+        _ => false,
+    }
+}
+
+/// Builds the line editor with the Kvist completer, inline hinter, IDE
+/// completion menu, and file-backed history at `.kvist/history`.
+fn build_editor(
+    completer: Box<KvistCompleter>,
+    project_dir: &Path,
+) -> std::result::Result<Reedline, KvistError> {
+    let completion_menu = Box::new(
+        IdeMenu::default()
+            .with_name(COMPLETION_MENU)
+            .with_default_border(),
+    );
+    let mut keybindings = default_emacs_keybindings();
+
+    // Tab opens the completion menu or cycles to next candidate
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Tab,
+        ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::Menu(COMPLETION_MENU.to_owned()),
+            ReedlineEvent::MenuNext,
+        ]),
+    );
+
+    // Ctrl+Space forces the completion menu on demand. `with_quick_completions`
+    // already opens the menu after a few characters, so this lets the user open
+    // or reopen it earlier and at will. It is the same convention fish and
+    // zsh+fzf use; the `>` marker + reverse highlight (reedline defaults)
+    // identify the selected candidate.
+    keybindings.add_binding(
+        KeyModifiers::CONTROL,
+        KeyCode::Char(' '),
+        ReedlineEvent::Menu(COMPLETION_MENU.to_owned()),
+    );
+
+    // Shift-Tab cycles to previous candidate
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::BackTab,
+        ReedlineEvent::MenuPrevious,
+    );
+    keybindings.add_binding(
+        KeyModifiers::SHIFT,
+        KeyCode::BackTab,
+        ReedlineEvent::MenuPrevious,
+    );
+
+    // Down arrow navigates menu when open, else standard Down
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Down,
+        ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::MenuDown,
+            ReedlineEvent::MenuNext,
+            ReedlineEvent::Down,
+        ]),
+    );
+
+    // Up arrow navigates menu when open, else standard Up
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Up,
+        ReedlineEvent::UntilFound(vec![
+            ReedlineEvent::MenuUp,
+            ReedlineEvent::MenuPrevious,
+            ReedlineEvent::Up,
+        ]),
+    );
+
+    // Left and Right arrow keys inside menu
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Right,
+        ReedlineEvent::UntilFound(vec![ReedlineEvent::MenuRight, ReedlineEvent::Right]),
+    );
+    keybindings.add_binding(
+        KeyModifiers::NONE,
+        KeyCode::Left,
+        ReedlineEvent::UntilFound(vec![ReedlineEvent::MenuLeft, ReedlineEvent::Left]),
+    );
+
+    // Esc closes the completion menu
+    keybindings.add_binding(KeyModifiers::NONE, KeyCode::Esc, ReedlineEvent::Esc);
+
+    // Ctrl+L clears the screen and redraws the prompt (reedline ships no
+    // default binding for it).
+    keybindings.add_binding(
+        KeyModifiers::CONTROL,
+        KeyCode::Char('l'),
+        ReedlineEvent::ClearScreen,
+    );
+
+    let edit_mode = Box::new(Emacs::new(keybindings));
+
+    // Persistent editor history; a history the editor cannot open must not
+    // prevent the shell from starting, so degrade to in-memory history.
+    let history: Box<dyn reedline::History> = match reedline::FileBackedHistory::with_file(
+        reedline::HISTORY_SIZE,
+        project_dir.join(".kvist").join("history"),
+    ) {
+        Ok(history) => Box::new(history),
+        Err(error) => {
+            eprintln!("warning: persistent history unavailable ({error}); using in-memory history");
+            Box::new(reedline::FileBackedHistory::default())
+        }
+    };
+
+    let editor = Reedline::create()
+        .with_completer(completer)
+        .with_history(history)
+        .with_hinter(Box::new(DefaultHinter::default()))
+        .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
+        .with_edit_mode(edit_mode)
+        .with_quick_completions(true);
+    Ok(editor)
+}
+
+/// Maximum consecutive terminal read failures before the shell exits.
+const MAX_CONSECUTIVE_READ_FAILURES: u32 = 3;
+
+/// Launches and runs the persistent interactive workspace shell (REPL).
+pub fn run_shell(project_dir: &Path) -> Result<()> {
+    // The line editor requires an interactive terminal; refuse early with an
+    // actionable diagnostic instead of dying inside reedline's read loop.
+    if !std::io::stdin().is_terminal() {
+        return Err(KvistError::ShellNotInteractive {
+            reason: "standard input is not a terminal (e.g. it is a pipe); run `kvist shell` from an interactive terminal, or use the regular CLI commands for scripts".to_owned(),
+        });
+    }
+
+    // Install the shared SIGINT/SIGTERM handler once for the process.
+    agent_runtime::install_handler();
+
+    // Resolve the theme once for the session: NO_COLOR, CLICOLOR,
+    // CLICOLOR_FORCE, TERM=dumb, and terminal detection are all honored, and
+    // the result degrades to plain text.
+    let theme = Theme::detect();
+
+    let root = build_root();
+    let state = Arc::new(Mutex::new(DynamicState::load(project_dir)));
+    let focus = Arc::new(Mutex::new(None));
+    let mut shell = Shell::new(project_dir, focus.clone(), theme);
+    let completer = Box::new(KvistCompleter::new(root, state.clone(), focus));
+    let status = StatusContext::load(project_dir);
+
+    let mut editor = build_editor(completer, project_dir)?;
+
+    let initial_branch = state
+        .lock()
+        .ok()
+        .and_then(|guard| guard.branch().map(str::to_owned));
+    print_welcome_banner(
+        theme,
+        &status,
+        initial_branch.as_deref(),
+        shell.current_component().as_deref(),
+    );
+
+    let mut consecutive_read_failures = 0_u32;
+    loop {
+        // Keep dynamic completions in step with the durable project state.
+        if let Ok(mut guard) = state.lock() {
+            *guard = DynamicState::load(project_dir);
+        }
+
+        let current_status = StatusContext::load(project_dir);
+        let branch = state
+            .lock()
+            .ok()
+            .and_then(|guard| guard.branch().map(str::to_owned));
+        let prompt = DefaultPrompt {
+            left_prompt: DefaultPromptSegment::Basic(short_prompt(
+                theme,
+                branch.as_deref(),
+                shell.current_component().as_deref(),
+                shell.last_failed,
+            )),
+            right_prompt: DefaultPromptSegment::Basic(status_bar_label(theme, &current_status)),
+        };
+
+        let signal = match editor.read_line(&prompt) {
+            Ok(signal) => {
+                consecutive_read_failures = 0;
+                signal
+            }
+            Err(error) => {
+                // A transient terminal glitch (resize storm, lost cursor
+                // query, broken pipe) must not kill the session: retry a few
+                // times, then exit with an actionable diagnostic.
+                consecutive_read_failures += 1;
+                if consecutive_read_failures >= MAX_CONSECUTIVE_READ_FAILURES {
+                    eprintln!("error: the terminal stopped responding (last error: {error})");
+                    eprintln!(
+                        "hint: check the terminal size and kill hung child processes, then run `kvist shell` again"
+                    );
+                    break;
+                }
+                eprintln!(
+                    "warning: could not read a line ({error}); retrying ({consecutive_read_failures}/{MAX_CONSECUTIVE_READ_FAILURES})..."
+                );
+                continue;
+            }
+        };
+
+        match signal {
+            Signal::CtrlC => {
+                println!("^C");
+                // A SIGINT delivered while the prompt was displayed is the
+                // same event; the `^C` echo is the feedback, so consume the
+                // flag silently instead of misreporting it on the next command.
+                let _ = agent_runtime::take_interrupted();
+            }
+            Signal::CtrlD => {
+                println!();
+                break;
+            }
+            Signal::Success(line) => {
+                if shell.handle_line(&line, editor.history()) == LoopAction::Exit {
+                    break;
+                }
+                // An interrupt arriving while a command ran is consumed by the
+                // command's supervision; if it still lingers, the command did
+                // not handle it and simply finished on its own.
+                if agent_runtime::take_interrupted() {
+                    eprintln!(
+                        "note: an interrupt was received while a command was running; it finished normally — re-run it if the result looks stale"
+                    );
+                }
+            }
+            // `Signal` is `#[non_exhaustive]`: future reedline releases can add
+            // variants (for example `HostCommand` or `ExternalBreak`). Match the
+            // ones Kvist acts on explicitly and treat anything else as a no-op so
+            // a library release can never break the shell with an exhaustiveness
+            // error.
+            _ => {}
+        }
+    }
+
+    // The journal is append-only on disk; nothing is buffered in memory.
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::*;
+    use tempfile::tempdir;
+
+    fn test_shell(dir: &Path) -> (Shell, reedline::FileBackedHistory) {
+        (
+            Shell::new(dir, Arc::new(Mutex::new(None)), Theme::plain()),
+            reedline::FileBackedHistory::default(),
+        )
+    }
+
+    #[test]
+    fn truncate_helper() {
+        assert_eq!(truncate("short", 10), "short");
+        assert_eq!(
+            truncate("a very long line of text exceeding limit", 10),
+            "a very ..."
+        );
+        // Multi-byte text must not panic on a byte boundary.
+        let multibyte = "é".repeat(100);
+        assert_eq!(truncate(&multibyte, 10).chars().count(), 10);
+    }
+
+    #[test]
+    fn is_streaming_command_classifies_correctly() {
+        let task_run = cli::Command::Task {
+            command: cli::TaskCommand::Run {
+                component_dir: ".".into(),
+                task_id: Some("t1".to_owned()),
+                stream: true,
+            },
+        };
+        assert!(is_streaming_command(&task_run));
+
+        let task_next = cli::Command::Task {
+            command: cli::TaskCommand::Next {
+                component_dir: ".".into(),
+            },
+        };
+        assert!(!is_streaming_command(&task_next));
+
+        let tree = cli::Command::Tree(cli::ProjectDirectory { path: ".".into() });
+        assert!(!is_streaming_command(&tree));
+
+        let agent_list = cli::Command::Agent {
+            command: cli::AgentCommand::List,
+        };
+        assert!(!is_streaming_command(&agent_list));
+    }
+
+    #[test]
+    fn dispatch_handles_unknown_command_gracefully() {
+        let dir = tempdir().unwrap();
+        let (mut shell, history) = test_shell(dir.path());
+        shell.handle_line("unknown-command", &history);
+        assert_eq!(shell.journal.entries().len(), 1);
+        assert_eq!(shell.journal.entries()[0].result, "syntax error");
+    }
+
+    #[test]
+    fn dispatch_handles_shell_recursion() {
+        let dir = tempdir().unwrap();
+        let (mut shell, history) = test_shell(dir.path());
+        shell.handle_line("shell", &history);
+        assert_eq!(shell.journal.entries()[0].result, "already in shell");
+    }
+
+    #[test]
+    fn handle_line_exits_on_exit_and_quit() {
+        let dir = tempdir().unwrap();
+        let (mut shell, history) = test_shell(dir.path());
+        assert_eq!(shell.handle_line("exit", &history), LoopAction::Exit);
+        assert_eq!(shell.handle_line("quit", &history), LoopAction::Exit);
+    }
+
+    #[test]
+    fn handle_line_continues_on_empty_lines() {
+        let dir = tempdir().unwrap();
+        let (mut shell, history) = test_shell(dir.path());
+        assert_eq!(shell.handle_line("", &history), LoopAction::Continue);
+        assert_eq!(shell.handle_line("   ", &history), LoopAction::Continue);
+    }
+
+    #[test]
+    fn handle_line_routes_journal_builtin() {
+        let dir = tempdir().unwrap();
+        let (mut shell, history) = test_shell(dir.path());
+        assert_eq!(shell.handle_line("journal", &history), LoopAction::Continue);
+        assert_eq!(shell.journal.entries()[0].result, "shown");
+    }
+
+    #[test]
+    fn handle_line_history_builtin_reads_editor_history() {
+        let dir = tempdir().unwrap();
+        let (mut shell, history) = test_shell(dir.path());
+        assert_eq!(shell.handle_line("history", &history), LoopAction::Continue);
+        assert_eq!(shell.journal.entries()[0].result, "empty");
+    }
+
+    #[test]
+    fn handle_line_rejects_unknown_prompt_task_instead_of_falling_through() {
+        let dir = tempdir().unwrap();
+        let (mut shell, history) = test_shell(dir.path());
+        assert_eq!(
+            shell.handle_line("prompt no-such-task", &history),
+            LoopAction::Continue
+        );
+        assert_eq!(shell.journal.entries().len(), 1);
+        assert_eq!(shell.journal.entries()[0].result, "no such task");
+    }
+
+    #[test]
+    fn handle_line_shows_prompt_usage_when_no_task_given() {
+        let dir = tempdir().unwrap();
+        let (mut shell, history) = test_shell(dir.path());
+        assert_eq!(shell.handle_line("prompt", &history), LoopAction::Continue);
+        assert_eq!(shell.journal.entries()[0].result, "usage hint");
+    }
+
+    #[test]
+    fn handle_line_never_propagates_unparseable_lines() {
+        let dir = tempdir().unwrap();
+        let (mut shell, history) = test_shell(dir.path());
+        assert_eq!(shell.handle_line("task", &history), LoopAction::Continue);
+        assert_eq!(shell.journal.entries().len(), 1);
+        assert_eq!(shell.journal.entries()[0].result, "syntax error");
+    }
+
+    #[test]
+    fn last_builtin_reports_no_runs_for_a_bare_directory() {
+        let dir = tempdir().unwrap();
+        let (mut shell, history) = test_shell(dir.path());
+        assert_eq!(shell.handle_line("last", &history), LoopAction::Continue);
+        assert_eq!(shell.journal.entries()[0].result, "0 runs");
+    }
+
+    #[test]
+    fn cd_builtin_without_components_reports_discovery_failure() {
+        let dir = tempdir().unwrap();
+        let (mut shell, history) = test_shell(dir.path());
+        assert_eq!(
+            shell.handle_line("cd engine", &history),
+            LoopAction::Continue
+        );
+        assert_eq!(shell.journal.entries()[0].result, "unknown component");
+    }
+
+    // ---- Pure builtin logic -------------------------------------------------
+
+    #[test]
+    fn resolve_cd_handles_show_set_unknown_and_invalid() {
+        let known = vec![".".to_owned(), "engine".to_owned()];
+        assert!(matches!(resolve_cd(&[], &known), CdOutcome::Show));
+        assert!(matches!(
+            resolve_cd(&["engine".to_owned()], &known),
+            CdOutcome::Set(c) if c == "engine"
+        ));
+        assert!(matches!(
+            resolve_cd(&["ghost".to_owned()], &known),
+            CdOutcome::Unknown { ref known, .. } if known.len() == 2
+        ));
+        assert!(matches!(
+            resolve_cd(&["/abs".to_owned()], &known),
+            CdOutcome::Invalid(_)
+        ));
+        assert!(matches!(
+            resolve_cd(&["..".to_owned()], &known),
+            CdOutcome::Invalid(_)
+        ));
+        assert!(matches!(
+            resolve_cd(&["a".to_owned(), "b".to_owned()], &known),
+            CdOutcome::Usage
+        ));
+    }
+
+    #[test]
+    fn parse_tasks_args_accepts_flag_and_positional_in_any_order() {
+        let args = parse_tasks_args(&[
+            "--status".to_owned(),
+            "blocked".to_owned(),
+            "engine".to_owned(),
+        ])
+        .expect("valid args");
+        assert_eq!(args.component.as_deref(), Some("engine"));
+        assert_eq!(args.status, Some(TaskStatus::Blocked));
+
+        let args = parse_tasks_args(&["engine".to_owned(), "--status=pending".to_owned()])
+            .expect("valid args");
+        assert_eq!(args.component.as_deref(), Some("engine"));
+        assert_eq!(args.status, Some(TaskStatus::Pending));
+
+        assert!(parse_tasks_args(&["a".to_owned(), "b".to_owned()]).is_err());
+        assert!(parse_tasks_args(&["--status".to_owned()]).is_err());
+        assert!(parse_tasks_args(&["--status".to_owned(), "nope".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn parse_run_args_accepts_optional_component_and_task() {
+        assert_eq!(parse_run_args(&[]).expect("valid"), (None, None));
+        assert_eq!(
+            parse_run_args(&["engine".to_owned()]).expect("valid"),
+            (Some("engine".to_owned()), None)
+        );
+        assert_eq!(
+            parse_run_args(&["engine".to_owned(), "t-1".to_owned()]).expect("valid"),
+            (Some("engine".to_owned()), Some("t-1".to_owned()))
+        );
+        assert!(parse_run_args(&["a".to_owned(), "b".to_owned(), "c".to_owned()]).is_err());
+    }
+
+    fn ready_task(id: &str, status: TaskStatus, deps: &[&str]) -> task_queue::Task {
+        task_queue::Task {
+            id: id.to_owned(),
+            title: id.to_owned(),
+            description: String::new(),
+            context: String::new(),
+            purpose: String::new(),
+            expected_outcome: String::new(),
+            kind: TaskKind::Test,
+            status,
+            depends_on: deps.iter().map(|dep| (*dep).to_owned()).collect(),
+            requirements: Vec::new(),
+            timestamps: task_queue::TaskTimestamps {
+                created_at: task_queue::Timestamp::default(),
+                updated_at: task_queue::Timestamp::default(),
+                completed_at: None,
+            },
+            blocked_reason: None,
+            recovery_state: None,
+            acceptance_id: None,
+            disposition: None,
+        }
+    }
+
+    fn state_with_scope(component: &str, tasks: Vec<task_queue::Task>) -> DynamicState {
+        let mut scopes = std::collections::BTreeMap::new();
+        scopes.insert(
+            component.to_owned(),
+            state::ComponentScope {
+                tasks,
+                attempts: std::collections::BTreeMap::new(),
+            },
+        );
+        DynamicState::new(vec![component.to_owned()], scopes, Vec::new(), None)
+    }
+
+    #[test]
+    fn resolve_next_ready_task_selects_the_first_ready_task() {
+        // `later` is listed first but waits on `dep`; `dep` is the ready task.
+        let state = state_with_scope(
+            ".",
+            vec![
+                ready_task("later", TaskStatus::Pending, &["dep"]),
+                ready_task("dep", TaskStatus::Pending, &[]),
+            ],
+        );
+        assert_eq!(resolve_next_ready_task(&state, "."), Some("dep".to_owned()));
+
+        // Once `dep` completes, `later` becomes the ready task.
+        let state = state_with_scope(
+            ".",
+            vec![
+                ready_task("later", TaskStatus::Pending, &["dep"]),
+                ready_task("dep", TaskStatus::Completed, &[]),
+            ],
+        );
+        assert_eq!(
+            resolve_next_ready_task(&state, "."),
+            Some("later".to_owned())
+        );
+
+        // A blocked queue has no ready task.
+        let state = state_with_scope(".", vec![ready_task("blocked", TaskStatus::Blocked, &[])]);
+        assert_eq!(resolve_next_ready_task(&state, "."), None);
+        // An unknown component has no scope.
+        assert_eq!(resolve_next_ready_task(&state, "ghost"), None);
+    }
+
+    #[test]
+    fn component_focus_hint_only_when_requested_differs_from_focus() {
+        // No focus: naming a component suggests focusing it.
+        assert_eq!(
+            component_focus_hint(None, "engine"),
+            Some("note: no component focused (cd engine to switch)".to_owned())
+        );
+        // A root request with no focus matches: no hint.
+        assert_eq!(component_focus_hint(None, "."), None);
+        // A request matching the focus: no hint.
+        assert_eq!(component_focus_hint(Some("engine"), "engine"), None);
+        // A different component than the focus: hint.
+        assert_eq!(
+            component_focus_hint(Some("engine"), "agent_runtime"),
+            Some("note: still focused on engine (cd agent_runtime to switch)".to_owned())
+        );
+        // Requesting root while focused elsewhere: hint.
+        assert_eq!(
+            component_focus_hint(Some("engine"), "."),
+            Some("note: still focused on engine (cd . to switch)".to_owned())
+        );
+        // A root focus compares equal to no focus.
+        assert_eq!(
+            component_focus_hint(Some("."), "engine"),
+            Some("note: no component focused (cd engine to switch)".to_owned())
+        );
+    }
+
+    #[test]
+    fn run_builtin_without_a_ready_task_reports_and_continues() {
+        let dir = tempdir().unwrap();
+
+[turn 5] reasoning: Now I understand the shell structure. When `handle_overview` fails, it just prints the error. I need to look at what happens when the project is invalid. Let me examine the `project_state::inspect` and `status::render` functions and the discovery errors. Let me also look at `wizard.rs` and the `status.rs` files.
+[turn 5] read_file e7CcE6az2N4B1vNhjjo8mqZPGiXWXAHv: //! Read-only classification of Kvist root artifacts.
+//!
+//! Phase 1 deliberately does not repair or migrate projects.  This module is
+//! the single inspection surface used by `init` and `doctor`, so the decision
+//! to refuse a project is based on the same checks shown to its owner.
+
+use std::{
+    fmt, fs, io,
+    path::{Path, PathBuf},
+};
+
+use sha2::{Digest, Sha256};
+
+use crate::{
+    KvistError, Result,
+    artifacts::{
+        ARCHITECTURE_VERSION, CONFIGURATION_VERSION, IMPLEMENTATION_RECORD_HEADING,
+        IMPLEMENTATION_RECORD_VERSION, IMPLEMENTATION_RECORD_VERSION_MARKER, ROOT_CONTRACT_VERSION,
+        ROOT_IMPLEMENTATION_RECORD_PATH, TODO_QUEUE_VERSION, VISION_VERSION,
+    },
+    component_documents::{self, DocumentDiagnosticKind, DocumentKind},
+    config::{self, DiscoveryLimits},
+    discovery::{self, ComponentArtifact},
+    filesystem::is_link_like,
+    task_queue::{self, StalenessCause, StalenessCauseKind, TaskQueue, TaskQueueError, TaskStatus},
+    vcs::{self, VcsInspection},
+};
+
+/// Required root artifacts, in stable diagnostic order.
+pub const REQUIRED_ROOT_ARTIFACT_PATHS: [&str; 9] = [
+    "kvist.toml",
+    "VISION.md",
+    "ARCHITECTURE.md",
+    "ROOT_CONTRACT.md",
+    "src/REQUIREMENTS.md",
+    "src/CONTRACT.md",
+    "src/DESIGN.md",
+    "src/TODOS.yaml",
+    ROOT_IMPLEMENTATION_RECORD_PATH,
+];
+
+/// Root artifact that is machine-local configuration. It must exist and be
+/// valid for a current project, but it is not a durable VCS-tracked artifact:
+/// local endpoint and toolchain settings must not be forced into version
+/// control.
+pub const LOCAL_ROOT_ARTIFACT_PATH: &str = "kvist.toml";
+
+/// Maximum supported size for root contract, TODO queue, and implementation records.
+pub const MAX_ROOT_TEXT_ARTIFACT_BYTES: u64 = 1024 * 1024;
+
+#[derive(Debug, Clone)]
+struct Artifact {
+    path: String,
+    kind: ArtifactKind,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ArtifactKind {
+    Configuration,
+    Vision,
+    Architecture,
+    RootContract,
+    ComponentDocument(DocumentKind),
+    TodoQueue,
+    ImplementationRecord,
+}
+
+/// The safe Phase 1 state of a project root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectState {
+    /// No Kvist root artifact exists.
+    Uninitialized,
+    /// Every root artifact is a current, valid regular file.
+    Current,
+    /// Some, but not all, root artifacts exist and those present are valid.
+    Partial,
+    /// An artifact has an invalid type or content.
+    Invalid,
+    /// An artifact declares a well-formed version this binary does not support.
+    UnsupportedVersion,
+}
+
+impl ProjectState {
+    /// Stable lowercase name used by `doctor`.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Uninitialized => "uninitialized",
+            Self::Current => "current",
+            Self::Partial => "partial",
+            Self::Invalid => "invalid",
+            Self::UnsupportedVersion => "unsupported-version",
+        }
+    }
+}
+
+impl fmt::Display for ProjectState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
+
+/// The inspection result for one required root artifact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactStatus {
+    /// Artifact path relative to the project root.
+    pub path: String,
+    /// Human-readable status suitable for `doctor`.
+    pub status: String,
+    /// Whether this artifact exists at the expected location.
+    pub exists: bool,
+    class: ArtifactClass,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArtifactClass {
+    Missing,
+    Valid,
+    Invalid,
+    UnsupportedVersion,
+}
+
+/// A complete, read-only project inspection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectInspection {
+    /// Inspected project directory.
+    pub project_dir: PathBuf,
+    /// Classification derived from all five required root artifacts.
+    pub state: ProjectState,
+    /// Per-artifact validation results in stable artifact order.
+    pub artifacts: Vec<ArtifactStatus>,
+    /// Project-root diagnostic when inspection could not enumerate artifacts.
+    pub root_diagnostic: Option<String>,
+    /// Read-only durable-artifact tracking inspection.
+    pub vcs: VcsInspection,
+    /// Action the owner can take without Kvist rewriting project content.
+    pub guidance: String,
+    /// Configured component root when the root project is current.
+    pub component_root: Option<PathBuf>,
+    /// Per-component inspection results in lexical path order.
+    pub components: Vec<ComponentInspection>,
+    /// Discovery failure captured without changing root-artifact classification.
+    pub discovery_error: Option<String>,
+}
+
+/// The inspected state of one discovered component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComponentState {
+    /// All component artifacts and workflow evidence are valid and ready.
+    Current,
+    /// An artifact uses a well-formed version this binary cannot inspect.
+    UnsupportedVersion,
+    /// An artifact or required parent contract cannot be validated.
+    Invalid,
+    /// One or more adjacent component artifacts are absent.
+    Missing,
+    /// The recorded or freshly derived intent-document evidence is stale.
+    Stale,
+    /// A current queue contains one or more explicitly blocked tasks.
+    Blocked,
+}
+
+impl ComponentState {
+    /// Stable lowercase name used by text and JSON status reports.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Current => "current",
+            Self::UnsupportedVersion => "unsupported-version",
+            Self::Invalid => "invalid",
+            Self::Missing => "missing",
+            Self::Stale => "stale",
+            Self::Blocked => "blocked",
+        }
+    }
+}
+
+/// The inspected state of one adjacent component artifact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComponentArtifactState {
+    /// A supported, valid artifact was read and parsed.
+    Valid,
+    /// No artifact exists at the expected path.
+    Missing,
+    /// An artifact has an invalid type, encoding, or content.
+    Invalid,
+    /// An artifact declares a supported-shape but unsupported version.
+    UnsupportedVersion,
+}
+
+impl ComponentArtifactState {
+    /// Stable lowercase name used by text and JSON status reports.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Valid => "valid",
+            Self::Missing => "missing",
+            Self::Invalid => "invalid",
+            Self::UnsupportedVersion => "unsupported-version",
+        }
+    }
+}
+
+/// Status inspection for one adjacent component artifact.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentArtifactInspection {
+    /// Filename adjacent to the component directory.
+    pub path: &'static str,
+    /// Validated artifact state.
+    pub state: ComponentArtifactState,
+}
+
+/// An attributable recorded or derived intent-document revision mismatch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevalidationCause {
+    /// The changed local document or immediate-parent contract.
+    pub kind: StalenessCauseKind,
+    /// Path relative to the component context.
+    pub path: String,
+    /// Revision recorded when the task queue was reviewed.
+    pub expected_revision: String,
+    /// Revision observed by this inspection.
+    pub observed_revision: String,
+}
+
+/// Complete read-only inspection for one discovered component.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComponentInspection {
+    /// Component path relative to the configured component root.
+    pub path: PathBuf,
+    /// Aggregate state with stable precedence.
+    pub state: ComponentState,
+    /// Adjacent artifact states in requirements, contract, design, queue, record order.
+    pub artifacts: Vec<ComponentArtifactInspection>,
+    /// Recorded and freshly derived document evidence explaining stale state.
+    pub revalidation_causes: Vec<RevalidationCause>,
+}
+
+impl fmt::Display for ProjectInspection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            formatter,
+            "project: {}\nstate: {}",
+            self.project_dir.display(),
+            self.state
+        )?;
+        if let Some(diagnostic) = &self.root_diagnostic {
+            writeln!(formatter, "diagnostic: {diagnostic}")?;
+        }
+
+        // Group artifacts: project root artifacts vs component artifacts
+        let mut root_artifacts = Vec::new();
+        let mut component_artifacts: std::collections::BTreeMap<String, Vec<&ArtifactStatus>> =
+            std::collections::BTreeMap::new();
+
+        for artifact in &self.artifacts {
+            if let Some((comp, _)) = artifact.path.split_once('/') {
+                component_artifacts
+                    .entry(comp.to_owned())
+                    .or_default()
+                    .push(artifact);
+            } else {
+                root_artifacts.push(artifact);
+            }
+        }
+
+        if !root_artifacts.is_empty() {
+            writeln!(formatter, "\n[Project Artifacts]")?;
+            for artifact in root_artifacts {
+                writeln!(formatter, "  {}: {}", artifact.path, artifact.status)?;
+            }
+        }
+
+        for (comp_name, comp_arts) in component_artifacts {
+            writeln!(formatter, "\n[Component: {comp_name}]")?;
+            for artifact in comp_arts {
+                writeln!(formatter, "  {}: {}", artifact.path, artifact.status)?;
+            }
+        }
+
+        writeln!(formatter, "\n[Version Control]")?;
+        writeln!(formatter, "  vcs: {}", self.vcs.summary)?;
+        if let Some(repository_root) = &self.vcs.repository_root {
+            writeln!(formatter, "  vcs repository: {}", repository_root.display())?;
+        }
+
+        let mut vcs_root_artifacts = Vec::new();
+        let mut vcs_component_artifacts: std::collections::BTreeMap<
+            String,
+            Vec<&crate::vcs::VcsArtifactStatus>,
+        > = std::collections::BTreeMap::new();
+
+        for artifact in &self.vcs.artifacts {
+            let path_str = artifact.path.to_string_lossy();
+            if let Some((comp, _)) = path_str.split_once('/') {
+                vcs_component_artifacts
+                    .entry(comp.to_owned())
+                    .or_default()
+                    .push(artifact);
+            } else {
+                vcs_root_artifacts.push(artifact);
+            }
+        }
+
+        if !vcs_root_artifacts.is_empty() {
+            writeln!(formatter, "  [Project Artifacts]")?;
+            for artifact in vcs_root_artifacts {
+                writeln!(
+                    formatter,
+                    "    vcs {}: {}",
+                    artifact.path.display(),
+                    artifact.state.description()
+                )?;
+            }
+        }
+
+        for (comp_name, comp_arts) in vcs_component_artifacts {
+            writeln!(formatter, "  [Component: {comp_name}]")?;
+            for artifact in comp_arts {
+                writeln!(
+                    formatter,
+                    "    vcs {}: {}",
+                    artifact.path.display(),
+                    artifact.state.description()
+                )?;
+            }
+        }
+
+        if let Some(diagnostic) = &self.vcs.diagnostic {
+            writeln!(formatter, "  vcs diagnostic: {diagnostic}")?;
+        }
+        write!(formatter, "\nguidance: {}", self.guidance)
+    }
+}
+
+/// Inspects a project without creating, modifying, or following root artifact
+/// symbolic links.
+pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
+    let root_exists = match fs::symlink_metadata(project_dir) {
+        Ok(metadata) => {
+            let file_type = metadata.file_type();
+            if is_link_like(&metadata) || !file_type.is_dir() {
+                return Ok(invalid_root_inspection(project_dir));
+            }
+            true
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "inspect project directory",
+                path: project_dir.to_path_buf(),
+                source,
+            });
+        }
+    };
+
+    if !root_exists {
+        let artifacts = artifacts_for_project(project_dir);
+        return Ok(ProjectInspection {
+            project_dir: project_dir.to_path_buf(),
+            state: ProjectState::Uninitialized,
+            artifacts: artifacts
+                .iter()
+                .map(|artifact| missing_status(&artifact.path))
+                .collect(),
+            root_diagnostic: None,
+            vcs: VcsInspection::not_checked(
+                "root artifacts do not exist yet; initialize and validate the project first",
+            ),
+            guidance: "run `kvist init` to create the Phase 1 root artifacts".to_owned(),
+            component_root: None,
+            components: Vec::new(),
+            discovery_error: None,
+        });
+    }
+
+    let artifact_specs = artifacts_for_project(project_dir);
+    let artifacts = artifact_specs
+        .iter()
+        .map(|artifact| inspect_artifact(project_dir, artifact))
+        .collect::<Result<Vec<_>>>()?;
+    let state = classify(&artifacts);
+    let (component_root, components, discovery_error) = inspect_components(project_dir, state)?;
+    tracing::debug!(
+        project_dir = %project_dir.display(),
+        state = state.name(),
+        components_count = components.len(),
+        "inspected project state"
+    );
+    Ok(ProjectInspection {
+        project_dir: project_dir.to_path_buf(),
+        state,
+        artifacts,
+        root_diagnostic: None,
+        vcs: inspect_vcs(project_dir, state),
+        guidance: guidance(state).to_owned(),
+        component_root,
+        components,
+        discovery_error,
+    })
+}
+
+fn artifacts_for_project(project_dir: &Path) -> Vec<Artifact> {
+    let component_root = config::load(project_dir)
+        .map(|configuration| configuration.component_root)
+        .unwrap_or_else(|_| PathBuf::from("src"));
+
+    let mut artifacts = vec![
+        Artifact {
+            path: "kvist.toml".to_owned(),
+            kind: ArtifactKind::Configuration,
+        },
+        Artifact {
+            path: "VISION.md".to_owned(),
+            kind: ArtifactKind::Vision,
+        },
+        Artifact {
+            path: "ARCHITECTURE.md".to_owned(),
+            kind: ArtifactKind::Architecture,
+        },
+        Artifact {
+            path: "ROOT_CONTRACT.md".to_owned(),
+            kind: ArtifactKind::RootContract,
+        },
+    ];
+
+    if component_root == Path::new(".") {
+        if let Ok(discovery) =
+            discovery::discover_with_limits(project_dir, DiscoveryLimits::default())
+        {
+            for component in discovery.components {
+                let comp_path = component.relative_path;
+                for (doc_kind, art_kind) in [
+                    (
+                        DocumentKind::Requirements,
+                        ArtifactKind::ComponentDocument(DocumentKind::Requirements),
+                    ),
+                    (
+                        DocumentKind::Contract,
+                        ArtifactKind::ComponentDocument(DocumentKind::Contract),
+                    ),
+                    (
+                        DocumentKind::Design,
+                        ArtifactKind::ComponentDocument(DocumentKind::Design),
+                    ),
+                ] {
+                    artifacts.push(Artifact {
+                        path: comp_path
+                            .join(doc_kind.filename())
+                            .to_string_lossy()
+                            .into_owned(),
+                        kind: art_kind,
+                    });
+                }
+                artifacts.push(Artifact {
+                    path: comp_path
+                        .join(ComponentArtifact::TaskQueue.filename())
+                        .to_string_lossy()
+                        .into_owned(),
+                    kind: ArtifactKind::TodoQueue,
+                });
+                artifacts.push(Artifact {
+                    path: comp_path
+                        .join(ComponentArtifact::ImplementationRecord.filename())
+                        .to_string_lossy()
+                        .into_owned(),
+                    kind: ArtifactKind::ImplementationRecord,
+                });
+            }
+        }
+    } else {
+        let component_path =
+            |filename: &str| component_root.join(filename).to_string_lossy().into_owned();
+
+        artifacts.extend([
+            Artifact {
+                path: component_path(DocumentKind::Requirements.filename()),
+                kind: ArtifactKind::ComponentDocument(DocumentKind::Requirements),
+            },
+            Artifact {
+                path: component_path(DocumentKind::Contract.filename()),
+                kind: ArtifactKind::ComponentDocument(DocumentKind::Contract),
+            },
+            Artifact {
+                path: component_path(DocumentKind::Design.filename()),
+                kind: ArtifactKind::ComponentDocument(DocumentKind::Design),
+            },
+            Artifact {
+                path: component_path(ComponentArtifact::TaskQueue.filename()),
+                kind: ArtifactKind::TodoQueue,
+            },
+            Artifact {
+                path: component_path(ComponentArtifact::ImplementationRecord.filename()),
+                kind: ArtifactKind::ImplementationRecord,
+            },
+        ]);
+    }
+
+    artifacts
+}
+
+fn invalid_root_inspection(project_dir: &Path) -> ProjectInspection {
+    ProjectInspection {
+        project_dir: project_dir.to_path_buf(),
+        state: ProjectState::Invalid,
+        artifacts: Vec::new(),
+        root_diagnostic: Some(
+            "project path must be a real directory, not a file or link-like path".to_owned(),
+        ),
+        vcs: VcsInspection::not_checked(
+            "project root is not a real directory, so durable artifact paths cannot be inspected",
+        ),
+        guidance: guidance(ProjectState::Invalid).to_owned(),
+        component_root: None,
+        components: Vec::new(),
+        discovery_error: None,
+    }
+}
+
+fn inspect_components(
+    project_dir: &Path,
+    project_state: ProjectState,
+) -> Result<(Option<PathBuf>, Vec<ComponentInspection>, Option<String>)> {
+    if project_state != ProjectState::Current {
+        return Ok((None, Vec::new(), None));
+    }
+
+    let config = match config::load(project_dir) {
+        Ok(config) => config,
+        Err(error) => return Ok((None, Vec::new(), Some(error.to_string()))),
+    };
+    let component_root = config.component_root.clone();
+    let discovery =
+        match discovery::discover_with_limits(&project_dir.join(&component_root), config.discovery)
+        {
+            Ok(discovery) => discovery,
+            Err(error) => return Ok((Some(component_root), Vec::new(), Some(error.to_string()))),
+        };
+
+    let components = discovery
+        .components
+        .iter()
+        .map(|component| inspect_component(&project_dir.join(&component_root), component))
+        .collect::<Result<Vec<_>>>()?;
+    Ok((Some(component_root), components, None))
+}
+
+fn inspect_component(
+    component_root: &Path,
+    component: &discovery::Component,
+) -> Result<ComponentInspection> {
+    let component_dir = component_root.join(&component.relative_path);
+    let requirements_path = component_dir.join(ComponentArtifact::Requirements.filename());
+    let contract_path = component_dir.join(ComponentArtifact::Contract.filename());
+    let design_path = component_dir.join(ComponentArtifact::Design.filename());
+    let queue_path = component_dir.join(ComponentArtifact::TaskQueue.filename());
+    let implementation_record_path =
+        component_dir.join(ComponentArtifact::ImplementationRecord.filename());
+
+    let (requirements_state, requirements_contents) =
+        inspect_component_document(DocumentKind::Requirements, &requirements_path)?;
+    let (contract_state, contract_contents) =
+        inspect_component_document(DocumentKind::Contract, &contract_path)?;
+    let (design_state, design_contents) =
+        inspect_component_document(DocumentKind::Design, &design_path)?;
+    let (queue_state, queue) = inspect_component_queue(&queue_path)?;
+    let implementation_record_state =
+        inspect_component_implementation_record(&implementation_record_path)?;
+    let artifacts = vec![
+        ComponentArtifactInspection {
+            path: ComponentArtifact::Requirements.filename(),
+            state: requirements_state,
+        },
+        ComponentArtifactInspection {
+            path: ComponentArtifact::Contract.filename(),
+            state: contract_state,
+        },
+        ComponentArtifactInspection {
+            path: ComponentArtifact::Design.filename(),
+            state: design_state,
+        },
+        ComponentArtifactInspection {
+            path: ComponentArtifact::TaskQueue.filename(),
+            state: queue_state,
+        },
+        ComponentArtifactInspection {
+            path: ComponentArtifact::ImplementationRecord.filename(),
+            state: implementation_record_state,
+        },
+    ];
+
+    let mut revalidation_causes = Vec::new();
+    let mut context_is_invalid = false;
+    let mut queue_is_stale = false;
+    let mut has_blocked_task = false;
+    if let Some(queue) = queue {
+        queue_is_stale = matches!(
+            queue.component.revalidation.state,
+            task_queue::RevalidationState::Stale
+        );
+        revalidation_causes.extend(
+            queue
+                .component
+                .revalidation
+                .causes
+                .iter()
+                .map(revalidation_cause),
+        );
+
+        if let Some(contents) = requirements_contents.as_deref() {
+            add_revision_cause(
+                &mut revalidation_causes,
+                StalenessCauseKind::ComponentRequirementsRevisionChanged,
+                ComponentArtifact::Requirements.filename(),
+                &queue.component.requirements_revision,
+                sha256_revision(contents),
+            );
+        }
+        if let Some(contents) = contract_contents.as_deref() {
+            add_revision_cause(
+                &mut revalidation_causes,
+                StalenessCauseKind::ComponentContractRevisionChanged,
+                ComponentArtifact::Contract.filename(),
+                &queue.component.contract_revision,
+                sha256_revision(contents),
+            );
+        }
+        if let Some(contents) = design_contents.as_deref() {
+            add_revision_cause(
+                &mut revalidation_causes,
+                StalenessCauseKind::ComponentDesignRevisionChanged,
+                ComponentArtifact::Design.filename(),
+                &queue.component.design_revision,
+                sha256_revision(contents),
+            );
+        }
+
+        let parent_info =
+            discovery::find_parent_component(component_root, &component.relative_path)?;
+        match (&queue.component.parent_contract, parent_info) {
+            (None, None) => {}
+            (Some(_), None) | (None, Some(_)) => context_is_invalid = true,
+            (Some(parent), Some((parent_component_dir, parent_relative_path))) => {
+                let parent_contract =
+                    parent_component_dir.join(ComponentArtifact::Contract.filename());
+                let (state, contents) =
+                    inspect_component_document(DocumentKind::Contract, &parent_contract)?;
+                if state != ComponentArtifactState::Valid {
+                    context_is_invalid = true;
+                } else if let Some(contents) = contents {
+                    let relative_parent_path = relative_parent_contract_path(
+                        &component.relative_path,
+                        &parent_relative_path,
+                    );
+                    if parent.path != relative_parent_path {
+                        context_is_invalid = true;
+                    }
+                    add_revision_cause(
+                        &mut revalidation_causes,
+                        StalenessCauseKind::ParentContractRevisionChanged,
+                        &relative_parent_path,
+                        &parent.revision,
+                        sha256_revision(&contents),
+                    );
+                }
+            }
+        }
+        has_blocked_task = queue
+            .tasks
+            .iter()
+            .any(|task| task.status == TaskStatus::Blocked);
+    }
+
+    let state = if artifacts
+        .iter()
+        .any(|artifact| artifact.state == ComponentArtifactState::UnsupportedVersion)
+    {
+        ComponentState::UnsupportedVersion
+    } else if artifacts
+        .iter()
+        .any(|artifact| artifact.state == ComponentArtifactState::Invalid)
+        || context_is_invalid
+    {
+        ComponentState::Invalid
+    } else if artifacts
+        .iter()
+        .any(|artifact| artifact.state == ComponentArtifactState::Missing)
+    {
+        ComponentState::Missing
+    } else if queue_is_stale || !revalidation_causes.is_empty() {
+        ComponentState::Stale
+    } else if has_blocked_task {
+        ComponentState::Blocked
+    } else {
+        ComponentState::Current
+    };
+
+    Ok(ComponentInspection {
+        path: if is_component_root(&component.relative_path) {
+            PathBuf::from(".")
+        } else {
+            component.relative_path.clone()
+        },
+        state,
+        artifacts,
+        revalidation_causes,
+    })
+}
+
+fn is_component_root(path: &Path) -> bool {
+    path.as_os_str().is_empty() || path == Path::new(".")
+}
+
+pub(crate) fn relative_parent_contract_path(
+    relative_path: &Path,
+    parent_relative_path: &Path,
+) -> String {
+    if parent_relative_path.as_os_str().is_empty() || parent_relative_path == Path::new(".") {
+        let depth = relative_path.components().count();
+        let mut path = String::new();
+        for _ in 0..depth {
+            path.push_str("../");
+        }
+        path.push_str("CONTRACT.md");
+        path
+    } else {
+        let child_depth = relative_path.components().count();
+        let parent_depth = parent_relative_path.components().count();
+        let mut path = String::new();
+        for _ in 0..(child_depth - parent_depth) {
+            path.push_str("../");
+        }
+        path.push_str("CONTRACT.md");
+        path
+    }
+}
+
+fn revalidation_cause(cause: &StalenessCause) -> RevalidationCause {
+    RevalidationCause {
+        kind: cause.kind,
+        path: cause.path.clone(),
+        expected_revision: cause.expected_revision.clone(),
+        observed_revision: cause.observed_revision.clone(),
+    }
+}
+
+fn add_revision_cause(
+    causes: &mut Vec<RevalidationCause>,
+    kind: StalenessCauseKind,
+    path: &str,
+    expected_revision: &str,
+    observed_revision: String,
+) {
+    if expected_revision == observed_revision {
+        return;
+    }
+    let cause = RevalidationCause {
+        kind,
+        path: path.to_owned(),
+        expected_revision: expected_revision.to_owned(),
+        observed_revision,
+    };
+    if !causes.contains(&cause) {
+        causes.push(cause);
+    }
+}
+
+fn sha256_revision(contents: &str) -> String {
+    format!(
+        "sha256:{}",
+        hex::encode(Sha256::digest(contents.as_bytes()))
+    )
+}
+
+fn inspect_component_document(
+    kind: DocumentKind,
+    path: &Path,
+) -> Result<(ComponentArtifactState, Option<String>)> {
+    let Some(contents) = read_component_text_artifact(path)? else {
+        return Ok((component_path_state(path)?, None));
+    };
+    let validation = component_documents::validate(kind, &contents);
+    if validation.is_valid() {
+        Ok((ComponentArtifactState::Valid, Some(contents)))
+    } else if validation.diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic.kind,
+            DocumentDiagnosticKind::UnsupportedTemplateVersion { .. }
+        )
+    }) {
+        Ok((ComponentArtifactState::UnsupportedVersion, None))
+    } else {
+        Ok((ComponentArtifactState::Invalid, None))
+    }
+}
+
+fn inspect_component_queue(path: &Path) -> Result<(ComponentArtifactState, Option<TaskQueue>)> {
+    let Some(contents) = read_component_text_artifact(path)? else {
+        return Ok((component_path_state(path)?, None));
+    };
+    match task_queue::parse(&contents) {
+        Ok(queue) => Ok((ComponentArtifactState::Valid, Some(queue))),
+        Err(TaskQueueError::UnsupportedVersion { .. }) => {
+            Ok((ComponentArtifactState::UnsupportedVersion, None))
+        }
+        Err(_) => Ok((ComponentArtifactState::Invalid, None)),
+    }
+}
+
+fn inspect_component_implementation_record(path: &Path) -> Result<ComponentArtifactState> {
+    let Some(contents) = read_component_text_artifact(path)? else {
+        return component_path_state(path);
+    };
+    Ok(markdown_component_state(
+        &contents,
+        IMPLEMENTATION_RECORD_VERSION_MARKER,
+        IMPLEMENTATION_RECORD_VERSION,
+        IMPLEMENTATION_RECORD_HEADING,
+    ))
+}
+
+fn read_component_text_artifact(path: &Path) -> Result<Option<String>> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "inspect component artifact",
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if is_link_like(&metadata) || !metadata.file_type().is_file() {
+        return Ok(None);
+    }
+    if metadata.len() > MAX_ROOT_TEXT_ARTIFACT_BYTES {
+        return Ok(None);
+    }
+    match fs::read_to_string(path) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(source) if source.kind() == io::ErrorKind::InvalidData => Ok(None),
+        Err(source) => Err(KvistError::Io {
+            operation: "read component artifact",
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn component_path_state(path: &Path) -> Result<ComponentArtifactState> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(ComponentArtifactState::Missing);
+        }
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "inspect component artifact",
+                path: path.to_path_buf(),
+                source,
+            });
+        }
+    };
+    if is_link_like(&metadata)
+        || !metadata.file_type().is_file()
+        || metadata.len() > MAX_ROOT_TEXT_ARTIFACT_BYTES
+    {
+        return Ok(ComponentArtifactState::Invalid);
+    }
+    match fs::read_to_string(path) {
+        Ok(_) => Ok(ComponentArtifactState::Invalid),
+        Err(source) if source.kind() == io::ErrorKind::InvalidData => {
+            Ok(ComponentArtifactState::Invalid)
+        }
+        Err(source) => Err(KvistError::Io {
+            operation: "read component artifact",
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn markdown_component_state(
+    contents: &str,
+    marker_name: &str,
+    supported_version: u32,
+    required_heading: &str,
+) -> ComponentArtifactState {
+    let expected_prefix = format!("<!-- {marker_name}: ");
+    let first_line = contents.lines().next().unwrap_or_default();
+    let Some(version_text) = first_line
+        .strip_prefix(&expected_prefix)
+        .and_then(|value| value.strip_suffix(" -->"))
+    else {
+        return ComponentArtifactState::Invalid;
+    };
+    let Ok(version) = version_text.parse::<u32>() else {
+        return ComponentArtifactState::Invalid;
+    };
+    if version == 0 {
+        return ComponentArtifactState::Invalid;
+    }
+    if version != supported_version {
+        return ComponentArtifactState::UnsupportedVersion;
+    }
+    if !contents.lines().any(|line| line == required_heading) {
+        return ComponentArtifactState::Invalid;
+    }
+    ComponentArtifactState::Valid
+}
+
+fn inspect_vcs(project_dir: &Path, state: ProjectState) -> VcsInspection {
+    if state != ProjectState::Current {
+        return VcsInspection::not_checked(
+            "root artifact state is not current; repair it before checking durable-artifact tracking",
+        );
+    }
+
+    let config = match config::load(project_dir) {
+        Ok(config) => config,
+        Err(error) => {
+            return VcsInspection::not_checked(format!(
+                "cannot load current project configuration for VCS inspection: {error}"
+            ));
+        }
+    };
+    let discovery = match discovery::discover_with_limits(
+        &project_dir.join(&config.component_root),
+        config.discovery,
+    ) {
+        Ok(discovery) => discovery,
+        Err(error) => {
+            return VcsInspection::not_checked(format!(
+                "cannot discover component artifacts for VCS inspection: {error}"
+            ));
+        }
+    };
+
+    let mut required_paths = REQUIRED_ROOT_ARTIFACT_PATHS[..4]
+        .iter()
+        .filter(|path| **path != LOCAL_ROOT_ARTIFACT_PATH)
+        .map(PathBuf::from)
+        .collect::<Vec<_>>();
+    for component in discovery.components {
+        let component_dir = if component.relative_path == Path::new(".") {
+            config.component_root.clone()
+        } else if config.component_root == Path::new(".") {
+            component.relative_path.clone()
+        } else {
+            config.component_root.join(component.relative_path)
+        };
+        for artifact in [
+            ComponentArtifact::Requirements,
+            ComponentArtifact::Contract,
+            ComponentArtifact::Design,
+            ComponentArtifact::TaskQueue,
+            ComponentArtifact::ImplementationRecord,
+        ] {
+            required_paths.push(component_dir.join(artifact.filename()));
+        }
+    }
+
+    vcs::inspect(project_dir, config.vcs, required_paths)
+}
+
+fn inspect_artifact(project_dir: &Path, artifact: &Artifact) -> Result<ArtifactStatus> {
+    let path = project_dir.join(&artifact.path);
+    if let Some(parent_problem) = parent_problem(project_dir, &artifact.path)? {
+        return Ok(ArtifactStatus {
+            path: artifact.path.clone(),
+            status: parent_problem,
+            exists: false,
+            class: ArtifactClass::Invalid,
+        });
+    }
+
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            return Ok(missing_status(&artifact.path));
+        }
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "inspect root artifact",
+                path,
+                source,
+            });
+        }
+    };
+    let file_type = metadata.file_type();
+    if is_link_like(&metadata) {
+        return Ok(invalid_status(&artifact.path, "invalid (link-like path)"));
+    }
+    if !file_type.is_file() {
+        return Ok(invalid_status(
+            &artifact.path,
+            "invalid (must be a regular file)",
+        ));
+    }
+
+    validate_artifact(project_dir, artifact)
+}
+
+fn parent_problem(project_dir: &Path, relative_path: &str) -> Result<Option<String>> {
+    let Some(parent) = Path::new(relative_path).parent() else {
+        return Ok(None);
+    };
+    if parent.as_os_str().is_empty() {
+        return Ok(None);
+    }
+    let path = project_dir.join(parent);
+    match fs::symlink_metadata(&path) {
+        Ok(metadata) if is_link_like(&metadata) => Ok(Some(format!(
+            "invalid (parent `{}` is link-like)",
+            parent.display()
+        ))),
+        Ok(metadata) if !metadata.file_type().is_dir() => Ok(Some(format!(
+            "invalid (parent `{}` is not a directory)",
+            parent.display()
+        ))),
+        Ok(_) => Ok(None),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(source) => Err(KvistError::Io {
+            operation: "inspect root artifact parent",
+            path,
+            source,
+        }),
+    }
+}
+
+fn validate_artifact(project_dir: &Path, artifact: &Artifact) -> Result<ArtifactStatus> {
+    let path = project_dir.join(&artifact.path);
+    match artifact.kind {
+        ArtifactKind::Configuration => match config::load(project_dir) {
+            Ok(_) => Ok(valid_status(
+                &artifact.path,
+                format!("valid (configuration version {CONFIGURATION_VERSION})"),
+            )),
+            Err(KvistError::UnsupportedProjectConfigurationVersion { version, .. }) => {
+                Ok(unsupported_status(
+                    &artifact.path,
+                    format!(
+                        "unsupported version {version} (supported configuration version {CONFIGURATION_VERSION})"
+                    ),
+                ))
+            }
+            Err(error) => Ok(invalid_status(&artifact.path, format!("invalid ({error})"))),
+        },
+        ArtifactKind::Vision => validate_markdown_version(
+            &artifact.path,
+            &path,
+            "kvist-vision-version",
+            VISION_VERSION,
+            "# Project Vision",
+        ),
+        ArtifactKind::Architecture => validate_markdown_version(
+            &artifact.path,
+            &path,
+            "kvist-architecture-version",
+            ARCHITECTURE_VERSION,
+            "# Project Architecture",
+        ),
+        ArtifactKind::RootContract => validate_markdown_version(
+            &artifact.path,
+            &path,
+            "kvist-root-contract-version",
+            ROOT_CONTRACT_VERSION,
+            "# Kvist Root Contract",
+        ),
+        ArtifactKind::ComponentDocument(kind) => {
+            let validation = match component_documents::validate_file(kind, &path) {
+                Ok(validation) => validation,
+                Err(KvistError::ComponentDocumentTooLarge { .. }) => {
+                    return Ok(invalid_status(
+                        &artifact.path,
+                        format!(
+                            "invalid (exceeds the {MAX_ROOT_TEXT_ARTIFACT_BYTES}-byte root artifact limit)"
+                        ),
+                    ));
+                }
+                Err(
+                    KvistError::ComponentDocumentIsSymlink { .. }
+                    | KvistError::ComponentDocumentNotFile { .. },
+                ) => {
+                    return Ok(invalid_status(
+                        &artifact.path,
+                        "invalid (must be a regular non-symbolic-link file)",
+                    ));
+                }
+                Err(KvistError::Io { source, .. })
+                    if source.kind() == io::ErrorKind::InvalidData =>
+                {
+                    return Ok(invalid_status(
+                        &artifact.path,
+                        "invalid (must be valid UTF-8)",
+                    ));
+                }
+                Err(error) => return Err(error),
+            };
+            if validation.is_valid() {
+                Ok(valid_status(
+                    &artifact.path,
+                    format!("valid ({} version {})", kind.filename(), kind.version()),
+                ))
+            } else if let Some(DocumentDiagnosticKind::UnsupportedTemplateVersion {
+                found, ..
+            }) =
+                validation
+                    .diagnostics
+                    .iter()
+                    .find_map(|diagnostic| match &diagnostic.kind {
+                        kind @ DocumentDiagnosticKind::UnsupportedTemplateVersion { .. } => {
+                            Some(kind)
+                        }
+                        _ => None,
+                    })
+            {
+                Ok(unsupported_status(
+                    &artifact.path,
+                    format!(
+                        "unsupported version {found} (supported {} version {})",
+                        kind.filename(),
+                        kind.version()
+                    ),
+                ))
+            } else {
+                Ok(invalid_status(
+                    &artifact.path,
+                    format!(
+                        "invalid ({})",
+                        component_documents::format_diagnostics(&validation.diagnostics)
+                    ),
+                ))
+            }
+        }
+        ArtifactKind::TodoQueue => validate_todo_queue(&artifact.path, &path),
+        ArtifactKind::ImplementationRecord => validate_markdown_version(
+            &artifact.path,
+            &path,
+            IMPLEMENTATION_RECORD_VERSION_MARKER,
+            IMPLEMENTATION_RECORD_VERSION,
+            IMPLEMENTATION_RECORD_HEADING,
+        ),
+    }
+}
+
+fn validate_markdown_version(
+    relative_path: &str,
+    path: &Path,
+    marker_name: &str,
+    supported_version: u32,
+    required_heading: &str,
+) -> Result<ArtifactStatus> {
+    let contents = match read_root_text_artifact(relative_path, path)? {
+        Ok(contents) => contents,
+        Err(status) => return Ok(status),
+    };
+    let expected_prefix = format!("<!-- {marker_name}: ");
+    let first_line = contents.lines().next().unwrap_or_default();
+    let Some(version_text) = first_line
+        .strip_prefix(&expected_prefix)
+        .and_then(|value| value.strip_suffix(" -->"))
+    else {
+        return Ok(invalid_status(
+            relative_path,
+            format!("invalid (line 1 must be `{expected_prefix}<positive integer> -->`)"),
+        ));
+    };
+    let Ok(version) = version_text.parse::<u32>() else {
+        return Ok(invalid_status(
+            relative_path,
+            "invalid (version must be a positive integer)",
+        ));
+    };
+    if version == 0 {
+        return Ok(invalid_status(
+            relative_path,
+            "invalid (version must be a positive integer)",
+        ));
+    }
+    if version != supported_version {
+        return Ok(unsupported_status(
+            relative_path,
+            format!("unsupported version {version} (supported version {supported_version})"),
+        ));
+    }
+    if !contents.lines().any(|line| line == required_heading) {
+        return Ok(invalid_status(
+            relative_path,
+            format!("invalid (missing required heading `{required_heading}`)"),
+        ));
+    }
+    Ok(valid_status(
+        relative_path,
+        format!("valid (version {supported_version})"),
+    ))
+}
+
+fn validate_todo_queue(relative_path: &str, path: &Path) -> Result<ArtifactStatus> {
+    let contents = match read_root_text_artifact(relative_path, path)? {
+        Ok(contents) => contents,
+        Err(status) => return Ok(status),
+    };
+    match task_queue::parse(&contents) {
+        Ok(_) => Ok(valid_status(
+            relative_path,
+            format!("valid (TODO queue version {TODO_QUEUE_VERSION})"),
+        )),
+        Err(TaskQueueError::UnsupportedVersion { found, .. }) => Ok(unsupported_status(
+            relative_path,
+            format!(
+                "unsupported version {found} (supported TODO queue version {TODO_QUEUE_VERSION})"
+            ),
+        )),
+        Err(error) => Ok(invalid_status(relative_path, format!("invalid ({error})"))),
+    }
+}
+
+fn read_root_text_artifact(
+    relative_path: &str,
+    path: &Path,
+) -> Result<std::result::Result<String, ArtifactStatus>> {
+    let metadata = fs::metadata(path).map_err(|source| KvistError::Io {
+        operation: "inspect root artifact",
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if metadata.len() > MAX_ROOT_TEXT_ARTIFACT_BYTES {
+        return Ok(Err(invalid_status(
+            relative_path,
+            format!(
+                "invalid (exceeds the {MAX_ROOT_TEXT_ARTIFACT_BYTES}-byte root artifact limit)"
+            ),
+        )));
+    }
+
+    match fs::read_to_string(path) {
+        Ok(contents) => Ok(Ok(contents)),
+        Err(source) if source.kind() == io::ErrorKind::InvalidData => Ok(Err(invalid_status(
+            relative_path,
+            "invalid (must be valid UTF-8)",
+        ))),
+        Err(source) => Err(KvistError::Io {
+            operation: "read root artifact",
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+fn classify(artifacts: &[ArtifactStatus]) -> ProjectState {
+    if artifacts
+        .iter()
+        .any(|artifact| artifact.class == ArtifactClass::UnsupportedVersion)
+    {
+        ProjectState::UnsupportedVersion
+    } else if artifacts
+        .iter()
+        .any(|artifact| artifact.class == ArtifactClass::Invalid)
+    {
+        ProjectState::Invalid
+    } else if artifacts
+        .iter()
+        .all(|artifact| artifact.class == ArtifactClass::Missing)
+    {
+        ProjectState::Uninitialized
+    } else if artifacts
+        .iter()
+        .all(|artifact| artifact.class == ArtifactClass::Valid)
+    {
+        ProjectState::Current
+    } else {
+        ProjectState::Partial
+    }
+}
+
+fn guidance(state: ProjectState) -> &'static str {
+    match state {
+        ProjectState::Uninitialized => "run `kvist init` to create the Phase 1 root artifacts",
+        ProjectState::Current => "project is ready for Phase 1 read-only commands",
+        ProjectState::Partial | ProjectState::Invalid | ProjectState::UnsupportedVersion => {
+            "Phase 1 never repairs or migrates artifacts automatically; preserve user content, inspect these diagnostics, and repair or migrate explicitly. A future explicit migration/repair command must define every rewrite."
+        }
+    }
+}
+
+fn missing_status(path: &str) -> ArtifactStatus {
+    ArtifactStatus {
+        path: path.to_owned(),
+        status: "missing".to_owned(),
+        exists: false,
+        class: ArtifactClass::Missing,
+    }
+}
+
+fn valid_status(path: &str, status: String) -> ArtifactStatus {
+    ArtifactStatus {
+        path: path.to_owned(),
+        status,
+        exists: true,
+        class: ArtifactClass::Valid,
+    }
+}
+
+fn invalid_status(path: &str, status: impl Into<String>) -> ArtifactStatus {
+    ArtifactStatus {
+        path: path.to_owned(),
+        status: status.into(),
+        exists: true,
+        class: ArtifactClass::Invalid,
+    }
+}
+
+fn unsupported_status(path: &str, status: String) -> ArtifactStatus {
+    ArtifactStatus {
+        path: path.to_owned(),
+        status,
+        exists: true,
+        class: ArtifactClass::UnsupportedVersion,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use tempfile::TempDir;
+
+    use crate::{artifacts::root_artifacts, init::initialize};
+
+    use super::*;
+
+    #[test]
+    fn independent_version_domains_are_declared() {
+        assert_eq!(CONFIGURATION_VERSION, 1);
+        assert_eq!(VISION_VERSION, 1);
+        assert_eq!(ARCHITECTURE_VERSION, 1);
+        assert_eq!(ROOT_CONTRACT_VERSION, 1);
+        assert_eq!(component_documents::REQUIREMENTS_VERSION, 1);
+        assert_eq!(component_documents::CONTRACT_VERSION, 1);
+        assert_eq!(component_documents::DESIGN_VERSION, 1);
+        assert_eq!(TODO_QUEUE_VERSION, 1);
+        assert_eq!(IMPLEMENTATION_RECORD_VERSION, 1);
+    }
+
+    #[test]
+    fn classifies_every_project_state() {
+        let uninitialized = TempDir::new().expect("workspace");
+        assert_eq!(
+            inspect(uninitialized.path()).expect("inspect").state,
+            ProjectState::Uninitialized
+        );
+
+        let current = TempDir::new().expect("workspace");
+        initialize(current.path()).expect("initialize");
+        assert_eq!(
+            inspect(current.path()).expect("inspect").state,
+            ProjectState::Current
+        );
+
+        let partial = TempDir::new().expect("workspace");
+        fs::write(
+            partial.path().join("kvist.toml"),
+            root_artifacts()[0].contents,
+        )
+        .expect("write");
+        assert_eq!(
+            inspect(partial.path()).expect("inspect").state,
+            ProjectState::Partial
+        );
+
+        let invalid = TempDir::new().expect("workspace");
+        initialize(invalid.path()).expect("initialize");
+        fs::write(invalid.path().join("ROOT_CONTRACT.md"), "not a contract").expect("write");
+        assert_eq!(
+            inspect(invalid.path()).expect("inspect").state,
+            ProjectState::Invalid
+        );
+
+        let unsupported = TempDir::new().expect("workspace");
+        initialize(unsupported.path()).expect("initialize");
+        fs::write(
+            unsupported.path().join("src/TODOS.yaml"),
+            "schema_version: 99\ntasks: []\n",
+        )
+        .expect("write");
+        assert_eq!(
+            inspect(unsupported.path()).expect("inspect").state,
+            ProjectState::UnsupportedVersion
+        );
+    }
+}
+
+[turn 5] read_file o0Id6s1yWk80JxmY2VlP1mNDoxDyzrI4: //! Deterministic, read-only project status rendering.
+
+use std::{fs, path::Path};
+
+use clap::ValueEnum;
+
+use crate::{
+    project_state::{ComponentInspection, ComponentState, ProjectInspection, RevalidationCause},
+    task_queue::StalenessCauseKind,
+};
+
+/// Presentation format for the versioned status report.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum StatusFormat {
+    /// Stable human-readable text intended for terminals and simple scripts.
+    Text,
+    /// Stable compact JSON intended for structured automation.
+    Json,
+    /// High-level human-friendly project overview with progress and next tasks.
+    Overview,
+}
+
+/// Renders a completed project inspection without performing any filesystem I/O.
+pub fn render(
+    inspection: &ProjectInspection,
+    format: StatusFormat,
+    only_documents: bool,
+    only_impls: bool,
+    unfinished: bool,
+) -> String {
+    match format {
+        StatusFormat::Text => render_text(inspection, only_documents, only_impls, unfinished),
+        StatusFormat::Json => render_json(inspection, only_documents, only_impls, unfinished),
+        StatusFormat::Overview => render_overview(inspection),
+    }
+}
+
+fn render_text(
+    inspection: &ProjectInspection,
+    only_documents: bool,
+    only_impls: bool,
+    unfinished: bool,
+) -> String {
+    let mut output = format!(
+        "status-format-version: 1\nproject: {}\nproject-state: {}",
+        escape_text(&inspection.project_dir.to_string_lossy()),
+        inspection.state.name()
+    );
+    match &inspection.component_root {
+        Some(component_root) => {
+            output.push_str("\ncomponent-root: ");
+            output.push_str(&escape_text(&component_root.to_string_lossy()));
+        }
+        None => output.push_str("\ncomponent-root: unavailable"),
+    }
+    if let Some(error) = &inspection.discovery_error {
+        output.push_str("\ndiscovery-error: ");
+        output.push_str(&escape_text(error));
+    }
+    for component in &inspection.components {
+        if unfinished && component.state == ComponentState::Current {
+            continue;
+        }
+        output.push_str("\ncomponent: ");
+        output.push_str(&escape_text(&component.path.to_string_lossy()));
+        output.push_str(" state: ");
+        output.push_str(component.state.name());
+        for artifact in &component.artifacts {
+            if only_documents
+                && !matches!(
+                    artifact.path,
+                    "REQUIREMENTS.md" | "CONTRACT.md" | "DESIGN.md"
+                )
+            {
+                continue;
+            }
+            if only_impls && artifact.path != "IMPL.md" {
+                continue;
+            }
+            output.push_str("\n  ");
+            output.push_str(artifact.path);
+            output.push_str(": ");
+            output.push_str(artifact.state.name());
+        }
+        if !only_impls {
+            if component.revalidation_causes.is_empty() {
+                output.push_str("\n  revalidation-causes: []");
+            } else {
+                for cause in &component.revalidation_causes {
+                    output.push_str("\n  cause: ");
+                    output.push_str(staleness_kind_name(cause.kind));
+                    output.push(' ');
+                    output.push_str(&escape_text(&cause.path));
+                    output.push_str(" expected ");
+                    output.push_str(&escape_text(&cause.expected_revision));
+                    output.push_str(" observed ");
+                    output.push_str(&escape_text(&cause.observed_revision));
+                }
+            }
+        }
+        if component.state == ComponentState::Stale {
+            output.push_str(&format!(
+                "\n  Next Step: Component intent documents have changed. Run 'kvist component accept {}' after review to record their revisions.",
+                escape_text(&component.path.to_string_lossy())
+            ));
+        } else if component.state == ComponentState::Blocked {
+            output.push_str(&format!(
+                "\n  Next Step: Component tasks are blocked or need manual intervention. Resolve the blocked tasks or manual gates in {}/TODOS.yaml.",
+                escape_text(&component.path.to_string_lossy())
+            ));
+        } else if component.state == ComponentState::Invalid {
+            output.push_str(&format!(
+                "\n  Next Step: The component contains invalid or malformed artifacts. Run 'kvist component validate {}' and check the reported Markdown or YAML document.",
+                escape_text(&component.path.to_string_lossy())
+            ));
+        } else if component.state == ComponentState::Missing {
+            output.push_str(&format!(
+                "\n  Next Step: The component is missing required adjacent Kvist artifacts. Run 'kvist component new {}' to create its intent-document templates.",
+                escape_text(&component.path.to_string_lossy())
+            ));
+        }
+    }
+    output
+}
+
+fn render_json(
+    inspection: &ProjectInspection,
+    only_documents: bool,
+    only_impls: bool,
+    unfinished: bool,
+) -> String {
+    let mut output = String::from("{\"format_version\":1,\"project_path\":");
+    json_string(&mut output, &inspection.project_dir.to_string_lossy());
+    output.push_str(",\"project_state\":");
+    json_string(&mut output, inspection.state.name());
+    output.push_str(",\"component_root\":");
+    match &inspection.component_root {
+        Some(component_root) => json_string(&mut output, &component_root.to_string_lossy()),
+        None => output.push_str("null"),
+    }
+    output.push_str(",\"components\":[");
+    let mut rendered_any = false;
+    for component in &inspection.components {
+        if unfinished && component.state == ComponentState::Current {
+            continue;
+        }
+        if rendered_any {
+            output.push(',');
+        }
+        append_component_json(&mut output, component, only_documents, only_impls);
+        rendered_any = true;
+    }
+    output.push_str("],\"discovery_error\":");
+    match &inspection.discovery_error {
+        Some(error) => json_string(&mut output, error),
+        None => output.push_str("null"),
+    }
+    output.push('}');
+    output
+}
+
+fn append_component_json(
+    output: &mut String,
+    component: &ComponentInspection,
+    only_documents: bool,
+    only_impls: bool,
+) {
+    output.push_str("{\"path\":");
+    json_string(output, &component.path.to_string_lossy());
+    output.push_str(",\"state\":");
+    json_string(output, component.state.name());
+    output.push_str(",\"artifacts\":[");
+    let mut rendered_any_artifact = false;
+    for artifact in &component.artifacts {
+        if only_documents
+            && !matches!(
+                artifact.path,
+                "REQUIREMENTS.md" | "CONTRACT.md" | "DESIGN.md"
+            )
+        {
+            continue;
+        }
+        if only_impls && artifact.path != "IMPL.md" {
+            continue;
+        }
+        if rendered_any_artifact {
+            output.push(',');
+        }
+        output.push_str("{\"path\":");
+        json_string(output, artifact.path);
+        output.push_str(",\"state\":");
+        json_string(output, artifact.state.name());
+        output.push('}');
+        rendered_any_artifact = true;
+    }
+    output.push_str("],\"revalidation_causes\":[");
+    if !only_impls {
+        for (index, cause) in component.revalidation_causes.iter().enumerate() {
+            if index > 0 {
+                output.push(',');
+            }
+            append_cause_json(output, cause);
+        }
+    }
+    output.push_str("]}");
+}
+
+fn append_cause_json(output: &mut String, cause: &RevalidationCause) {
+    output.push_str("{\"kind\":");
+    json_string(output, staleness_kind_name(cause.kind));
+    output.push_str(",\"path\":");
+    json_string(output, &cause.path);
+    output.push_str(",\"expected_revision\":");
+    json_string(output, &cause.expected_revision);
+    output.push_str(",\"observed_revision\":");
+    json_string(output, &cause.observed_revision);
+    output.push('}');
+}
+
+fn json_string(output: &mut String, value: &str) {
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '"' => output.push_str("\\\""),
+            '\\' => output.push_str("\\\\"),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            '\u{08}' => output.push_str("\\b"),
+            '\u{0c}' => output.push_str("\\f"),
+            '\0'..='\u{1f}' => {
+                use std::fmt::Write;
+
+                let _ = write!(output, "\\u{:04x}", character as u32);
+            }
+            _ => output.push(character),
+        }
+    }
+    output.push('"');
+}
+
+fn escape_text(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\\' => escaped.push_str("\\\\"),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            '\0'..='\u{1f}' | '\u{7f}' => {
+                use std::fmt::Write;
+
+                let _ = write!(escaped, "\\u{:04x}", character as u32);
+            }
+            _ => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn staleness_kind_name(kind: StalenessCauseKind) -> &'static str {
+    match kind {
+        StalenessCauseKind::ComponentRequirementsRevisionChanged => {
+            "component-requirements-revision-changed"
+        }
+        StalenessCauseKind::ComponentContractRevisionChanged => {
+            "component-contract-revision-changed"
+        }
+        StalenessCauseKind::ComponentDesignRevisionChanged => "component-design-revision-changed",
+        StalenessCauseKind::ParentContractRevisionChanged => "parent-contract-revision-changed",
+    }
+}
+
+/// Renders a human-oriented overview of the project, including component states,
+/// compact document summaries, task progress, and next tasks.
+pub fn render_overview(inspection: &ProjectInspection) -> String {
+    let mut output = String::new();
+    output.push_str("╭── Project Status ───────────────────────────────────────────────\n");
+    output.push_str(&format!(
+        "│  Project:  {} ({})\n",
+        inspection.project_dir.display(),
+        inspection.state.name()
+    ));
+
+    let mut total_tasks = 0;
+    let mut total_completed = 0;
+    let mut total_in_progress = 0;
+    let mut total_pending = 0;
+    let mut total_blocked = 0;
+
+    struct CompSummary {
+        path: String,
+        state: &'static str,
+        docs_summary: String,
+        tasks_summary: Option<String>,
+        next_task: Option<(String, String)>,
+        guidance: Option<String>,
+    }
+
+    let mut comp_summaries = Vec::new();
+
+    for component in &inspection.components {
+        let comp_path_str = component.path.to_string_lossy().into_owned();
+        let state_name = component.state.name();
+
+        let total_artifacts = component.artifacts.len();
+        let valid_artifacts = component
+            .artifacts
+            .iter()
+            .filter(|a| a.state.name() == "valid")
+            .count();
+
+        let docs_summary = if total_artifacts > 0 && valid_artifacts == total_artifacts {
+            format!("all valid ({valid_artifacts}/{total_artifacts})")
+        } else {
+            let invalid_or_missing: Vec<String> = component
+                .artifacts
+                .iter()
+                .filter(|a| a.state.name() != "valid")
+                .map(|a| format!("{}: {}", a.path, a.state.name()))
+                .collect();
+            if invalid_or_missing.is_empty() {
+                "none".to_owned()
+            } else {
+                format!(
+                    "{valid_artifacts}/{total_artifacts} valid (issues: {})",
+                    invalid_or_missing.join(", ")
+                )
+            }
+        };
+
+        let component_dir = match &inspection.component_root {
+            Some(root) => {
+                if root == Path::new(".") {
+                    inspection.project_dir.join(&component.path)
+                } else {
+                    inspection.project_dir.join(root).join(&component.path)
+                }
+            }
+            None => inspection.project_dir.join(&component.path),
+        };
+
+        let (tasks_summary, next_task) =
+            if let Ok(content) = fs::read_to_string(component_dir.join("TODOS.yaml")) {
+                if let Ok(queue) = crate::task_queue::parse(&content) {
+                    let comp_total = queue.tasks.len();
+                    let comp_completed = queue
+                        .tasks
+                        .iter()
+                        .filter(|t| t.status == crate::task_queue::TaskStatus::Completed)
+                        .count();
+                    let comp_in_progress = queue
+                        .tasks
+                        .iter()
+                        .filter(|t| t.status == crate::task_queue::TaskStatus::InProgress)
+                        .count();
+                    let comp_pending = queue
+                        .tasks
+                        .iter()
+                        .filter(|t| t.status == crate::task_queue::TaskStatus::Pending)
+                        .count();
+                    let comp_blocked = queue
+                        .tasks
+                        .iter()
+                        .filter(|t| t.status == crate::task_queue::TaskStatus::Blocked)
+                        .count();
+
+                    total_tasks += comp_total;
+                    total_completed += comp_completed;
+                    total_in_progress += comp_in_progress;
+                    total_pending += comp_pending;
+                    total_blocked += comp_blocked;
+
+                    let pct = (comp_completed * 100)
+                        .checked_div(comp_total)
+                        .unwrap_or(100);
+                    let mut detail_parts = Vec::new();
+                    if comp_in_progress > 0 {
+                        detail_parts.push(format!("{comp_in_progress} in-progress"));
+                    }
+                    if comp_pending > 0 {
+                        detail_parts.push(format!("{comp_pending} pending"));
+                    }
+                    if comp_blocked > 0 {
+                        detail_parts.push(format!("{comp_blocked} blocked"));
+                    }
+
+                    let summary = if detail_parts.is_empty() {
+                        format!("{comp_completed}/{comp_total} completed ({pct}%)")
+                    } else {
+                        format!(
+                            "{comp_completed}/{comp_total} completed ({pct}%) [{}]",
+                            detail_parts.join(", ")
+                        )
+                    };
+
+                    let next = crate::task_queue::next_ready_task_id(&queue.tasks)
+                        .and_then(|id| queue.tasks.iter().find(|t| t.id == id))
+                        .map(|t| (t.id.clone(), t.title.clone()));
+
+                    (Some(summary), next)
+                } else {
+                    (None, None)
+                }
+            } else {
+                (None, None)
+            };
+
+        let guidance = match component.state {
+            ComponentState::Stale => Some(format!(
+                "Run 'kvist component accept {comp_path_str}' after review."
+            )),
+            ComponentState::Blocked => Some(format!(
+                "Resolve blocked tasks in {comp_path_str}/TODOS.yaml."
+            )),
+            ComponentState::Invalid => Some(format!(
+                "Run 'kvist component validate {comp_path_str}' to inspect invalid artifacts."
+            )),
+            ComponentState::Missing => Some(format!(
+                "Run 'kvist component new {comp_path_str}' to create missing templates."
+            )),
+            ComponentState::UnsupportedVersion => Some(format!(
+                "Upgrade or adapt the unsupported artifact versions in {comp_path_str}."
+            )),
+            ComponentState::Current => None,
+        };
+
+        comp_summaries.push(CompSummary {
+            path: comp_path_str,
+            state: state_name,
+            docs_summary,
+            tasks_summary,
+            next_task,
+            guidance,
+        });
+    }
+
+    let overall_pct = (total_completed * 100)
+        .checked_div(total_tasks)
+        .unwrap_or(100);
+    let mut overall_details = Vec::new();
+    if total_in_progress > 0 {
+        overall_details.push(format!("{total_in_progress} in-progress"));
+    }
+    if total_pending > 0 {
+        overall_details.push(format!("{total_pending} pending"));
+    }
+    if total_blocked > 0 {
+        overall_details.push(format!("{total_blocked} blocked"));
+    }
+    let details_suffix = if overall_details.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", overall_details.join(", "))
+    };
+    output.push_str(&format!(
+        "│  Progress: {} components · {}/{} tasks completed ({}%){}\n",
+        inspection.components.len(),
+        total_completed,
+        total_tasks,
+        overall_pct,
+        details_suffix
+    ));
+
+    for comp in comp_summaries {
+        output.push_str("│\n");
+        output.push_str(&format!("│  Component: {}\n", comp.path));
+        output.push_str(&format!("│    State:     {}\n", comp.state));
+        output.push_str(&format!("│    Documents: {}\n", comp.docs_summary));
+        if let Some(tasks) = comp.tasks_summary {
+            output.push_str(&format!("│    Tasks:     {}\n", tasks));
+        }
+        if let Some((next_id, next_title)) = comp.next_task {
+            output.push_str(&format!(
+                "│    Next task: {} (\"{}\")\n",
+                next_id, next_title
+            ));
+        }
+        if let Some(hint) = comp.guidance {
+            output.push_str(&format!("│    Action:    {}\n", hint));
+        }
+    }
+
+    output.push_str("╰─────────────────────────────────────────────────────────────────");
+    output
+}
+
+[turn 6] reasoning: I need to dig into how the status command handles invalid projects and what guidance the wizard provides.
+[turn 6] shell f8e8U0Vt9ZOjuZMr2AiwYwKdvb0N5dvA: 9:    project_state, prompt_input, reverse_discovery, status, task_commands, task_queue::TaskStatus,
+542:pub fn execute(command: Command, json: bool) -> Result<CommandOutput> {
+893:                let inspection = project_state::inspect(&project.path)?;
+907:                let inspection = project_state::inspect(&path)?;
+917:                let inspection = project_state::inspect(&project.path)?;
+1446:            Command::Doctor(project) => project_state::inspect(&project.path)
+1454:            } => project_state::inspect(&path).map(|inspection| {
+1463:            Command::Overview(project) => project_state::inspect(&project.path).map(|inspection| {
+1466:                    status::StatusFormat::Overview,
+1677:fn execute_prompt(prompt: &str, options: PromptExecutionOptions<'_>) -> Result<Option<String>> {
+
+[turn 6] shell dMIHeAeZ2gcxdX1jvKf0sqSJlWySXXq4: //! Interactive agent model setup wizard.
+
+use std::{
+    fs,
+    io::{BufRead, Write},
+    path::{Path, PathBuf},
+};
+
+use toml_edit::{DocumentMut, Item, Table, Value, value};
+
+use crate::{
+    KvistError, Result, config,
+    file_io::{replace_file_atomically, write_new_file_atomically},
+    filesystem::is_link_like,
+};
+
+fn write_output<W: Write>(writer: &mut W, data: &str) -> Result<()> {
+    writer
+        .write_all(data.as_bytes())
+        .map_err(|source| KvistError::Io {
+            operation: "write setup wizard output",
+            path: PathBuf::from("stdout"),
+            source,
+        })?;
+    writer.flush().map_err(|source| KvistError::Io {
+        operation: "flush setup wizard output",
+        path: PathBuf::from("stdout"),
+        source,
+    })
+}
+
+fn read_input<R: BufRead>(reader: &mut R) -> Result<String> {
+    let mut buffer = String::new();
+    let bytes = match reader.read_line(&mut buffer) {
+        // An interrupt (Ctrl-C / SIGINT) during an interactive prompt is a
+        // cancellation, not an I/O failure, so surface it as such.
+        Err(source) if source.kind() == std::io::ErrorKind::Interrupted => {
+            return Err(KvistError::AgentSetupCancelled);
+        }
+        Err(source) => {
+            return Err(KvistError::Io {
+                operation: "read setup wizard input",
+                path: PathBuf::from("stdin"),
+                source,
+            });
+        }
+        Ok(bytes) => bytes,
+    };
+    if bytes == 0 {
+        return Err(KvistError::AgentSetupCancelled);
+    }
+    let trimmed = buffer.trim();
+    if trimmed == "\x1b"
+        || trimmed.eq_ignore_ascii_case("cancel")
+        || trimmed.eq_ignore_ascii_case("quit")
+        || trimmed.eq_ignore_ascii_case("q")
+        || trimmed.eq_ignore_ascii_case("c")
+    {
+        return Err(KvistError::AgentSetupCancelled);
+    }
+    Ok(trimmed.to_owned())
+}
+
+fn prompt_required<R: BufRead, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    prompt: &str,
+) -> Result<String> {
+    write_output(writer, prompt)?;
+    let value = read_input(reader)?;
+    if value.is_empty() {
+        return Err(KvistError::AgentSetupFailed {
+            reason: "required setup value must not be empty".to_owned(),
+        });
+    }
+    Ok(value)
+}
+
+/// Runs the interactive CLI wizard and safely creates or updates agent models.
+pub fn run_wizard<R: BufRead, W: Write>(
+
+[turn 7] reasoning: ...I'm getting a clearer picture of the architecture now—there's a status command that returns different formats, an overview command that renders human-readable output, and an internal handler for the REPL that displays project information. When someone runs the shell and queries status, it triggers the overview rendering through project state inspection, which is where the "project is invalid" error originates. The issue is that this error message comes directly from the inspection logic withou
+[turn 7] shell YfHQPwSXmUwBn5ecI63pICa3bNViyUD7:                     })
+                    .collect::<Vec<_>>();
+                Ok(CommandOutput::message(
+                    serde_json::json!({
+                        "status": "success",
+                        "command": "tree",
+                        "component_root": configuration.component_root.to_string_lossy(),
+                        "components": components,
+                    })
+                    .to_string(),
+                ))
+            }
+            Command::Doctor(project) => {
+                let inspection = project_state::inspect(&project.path)?;
+                let status_json =
+                    status::render(&inspection, status::StatusFormat::Json, false, false, false);
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"doctor\",\"inspection\":{status_json}}}"
+                )))
+            }
+            Command::Status {
+                path,
+                format: _,
+                only_documents,
+                only_impls,
+                unfinished,
+            } => {
+                let inspection = project_state::inspect(&path)?;
+                Ok(CommandOutput::message(status::render(
+                    &inspection,
+                    status::StatusFormat::Json,
+                    only_documents,
+                    only_impls,
+                    unfinished,
+                )))
+            }
+            Command::Overview(project) => {
+                let inspection = project_state::inspect(&project.path)?;
+                Ok(CommandOutput::message(status::render(
+                    &inspection,
+                    status::StatusFormat::Json,
+                    false,
+                    false,
+                    false,
+                )))
+            }
+            Command::Task {
+                command: TaskCommand::Next { component_dir },
+            } => {
+                let ready_task = task_commands::next(&component_dir)?;
+                let ready_task = if ready_task == "no ready task" {
+                    "null".to_owned()
+                } else {
+                    format!("\"{ready_task}\"")
+                };
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"task-next\",\"component_dir\":\"{}\",\"ready_task_id\":{ready_task}}}",
+                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                )))
+            }
+            Command::Task {
+                command: TaskCommand::Transition {
+                    component_dir,
+                    task_id,
+                    status,
+                    reason,
+                },
+            } => {
+                let message = task_commands::transition(
+                    &component_dir,
+                    &task_id,
+                    status.into(),
+                    reason.as_deref(),
+                )?;
+                Ok(CommandOutput::message(format!(
+                    "{{\"status\":\"success\",\"command\":\"task-transition\",\"component_dir\":\"{}\",\"task_id\":\"{}\",\"target_status\":\"{}\",\"message\":\"{}\"}}",
+                    component_dir.to_string_lossy().replace('\\', "\\\\"),
+                    task_id,
+                    task_status_name(status.into()),
+                    message.replace('\n', "\\n").replace('"', "\\\"")
+                )))
+            }
+            Command::Task {
+                command: TaskCommand::Run {
+                    component_dir,
+                    task_id,
+                    stream,
+                },
+            } => {
+                let message =
+                    task_commands::run_task_or_item(&component_dir, task_id.as_deref(), stream)?;
+===DOCTOR===
+            }
+            Command::Init(project) => init::initialize(&project.path)
+                .map(|outcome| CommandOutput::message(outcome.to_string())),
+            Command::Tree(project) => {
+                tree::render_project(&project.path).map(CommandOutput::message)
+            }
+            Command::Doctor(project) => project_state::inspect(&project.path)
+                .map(|inspection| CommandOutput::message(inspection.to_string())),
+            Command::Status {
+                path,
+                format,
+                only_documents,
+                only_impls,
+                unfinished,
+            } => project_state::inspect(&path).map(|inspection| {
+                CommandOutput::message(status::render(
+                    &inspection,
+                    format,
+                    only_documents,
+                    only_impls,
+                    unfinished,
+                ))
+            }),
+            Command::Overview(project) => project_state::inspect(&project.path).map(|inspection| {
+                CommandOutput::message(status::render(
+                    &inspection,
+                    status::StatusFormat::Overview,
+                    false,
+                    false,
+                    false,
+                ))
+            }),
+            Command::Task {
+                command: TaskCommand::Next { component_dir },
+            } => task_commands::next(&component_dir).map(CommandOutput::message),
+            Command::Task {
+                command:
+                    TaskCommand::Transition {
+                        component_dir,
+                        task_id,
+                        status,
+                        reason,
+                    },
+            } => task_commands::transition(
+                &component_dir,
+                &task_id,
+                status.into(),
+                reason.as_deref(),
+            )
+            .map(CommandOutput::message),
+            Command::Task {
+
+[turn 7] shell QJBq7caix4a6wS0Ou4nw3rDBBuVpYdqy: engine/src/cli.rs:10:    tree, wizard,
+engine/src/cli.rs:655:                        let text = wizard::list_models(&current_dir)?;
+engine/src/cli.rs:665:                        match wizard::run_wizard_with_force(&mut reader, &mut writer, &current_dir, force) {
+engine/src/cli.rs:684:                            wizard::remove_all_models(&config_path, &current_dir, !global)?
+engine/src/cli.rs:686:                            wizard::remove_model(&config_path, &current_dir, !global, &model_name)?
+engine/src/cli.rs:710:                        let text = wizard::list_roles(&current_dir)?;
+engine/src/cli.rs:738:                        let msg = wizard::set_role_model_with_effort(&config_path, &current_dir, !global, &role, &model, effort)?;
+engine/src/cli.rs:753:                        let msg = wizard::clear_role(&config_path, &current_dir, !global, role.as_deref(), all)?;
+engine/src/cli.rs:772:                match wizard::run_wizard_with_force(
+engine/src/cli.rs:779:                        r#"{"status":"success","command":"agent-setup","message":"agent setup wizard complete"}"#.to_owned()
+engine/src/cli.rs:795:                let text = wizard::list_models(&current_dir)?;
+engine/src/cli.rs:818:                    wizard::remove_all_models(&config_path, &current_dir, !global)?
+engine/src/cli.rs:820:                    wizard::remove_model(&config_path, &current_dir, !global, &model_name)?
+engine/src/cli.rs:841:                match wizard::check_agents(&mut reader, &mut writer, &current_dir, global) {
+engine/src/cli.rs:1243:                        wizard::list_models(&current_dir).map(CommandOutput::message)
+engine/src/cli.rs:1248:                        match wizard::run_wizard_with_force(
+engine/src/cli.rs:1275:                            wizard::remove_all_models(&config_path, &current_dir, !global)
+engine/src/cli.rs:1278:                            wizard::remove_model(&config_path, &current_dir, !global, &model_name)
+engine/src/cli.rs:1300:                        wizard::list_roles(&current_dir).map(CommandOutput::message)
+engine/src/cli.rs:1326:                        wizard::set_role_model_with_effort(
+engine/src/cli.rs:1347:                        wizard::clear_role(
+engine/src/cli.rs:1368:                match wizard::run_wizard_with_force(&mut reader, &mut writer, &current_dir, force) {
+engine/src/cli.rs:1370:                        "agent setup wizard complete".to_owned(),
+engine/src/cli.rs:1386:                wizard::list_models(&current_dir).map(CommandOutput::message)
+engine/src/cli.rs:1406:                    wizard::remove_all_models(&config_path, &current_dir, !global)
+engine/src/cli.rs:1409:                    wizard::remove_model(&config_path, &current_dir, !global, &model_name)
+engine/src/cli.rs:1429:                match wizard::check_agents(&mut reader, &mut writer, &current_dir, global) {
+
+[turn 8] reasoning: ...Now I have a clear picture of how the architecture works. The `inspect` function returns a `ProjectInspection` with a `state` field that classifies things like Uninitialized, Current, Partial, Invalid, and UnsupportedVersion, plus a `guidance` string that provides human-readable next steps. The status rendering logic already includes Next Step hints for invalid components and there's a wizard pattern in place for agent setup.  Looking at the user's actual concerns: they're frustrated that when t
+[turn 8] shell KFza1m2Piorfn1akfqAUgIwvFb0AASYq: 50:| `kvist doctor [PROJECT_DIR]`                                          | Read-only inspection of the root artifact state and recovery guidance.                                                                      |
+51:| `kvist status [PROJECT_DIR] [--format text\|json] [--only-documents]` | Read-only versioned inspection, optionally limited to document state.                                                                       |
+73:queue, status, task-transition, agent-runner, and test-verification mechanics
+486:`init`, `doctor`, `status`, `tree`, or component-document validation as
+522:maximum, otherwise `doctor` classifies the project invalid and `init`/`tree`
+548:`kvist doctor [PROJECT_DIR]` is the read-only recovery guidance surface. It
+556:artifact model. Preserve user content, use `doctor` to inspect it, and update
+559:## Project status reports
+561:`kvist status [PROJECT_DIR] [--format text|json] [--only-documents]` inspects
+571:Text output begins with `status-format-version: 1`; JSON output is a compact
+588:artifact. `kvist doctor` inspects root and discovered artifacts without
+607:tracking status rather than causing the entire inspection to fail.
+630:status; directories, symbolic links, and other filesystem objects at required
+631:artifact paths produce an invalid status. Content validation is performed by
+661:| `DESIGN.md`       | Private realization                             | Design overview; internal structure; interactions and state; algorithms and decisions; failure and recovery; security and resource design; verification strategy                                |
+682:or task status. It does not currently enforce AI review or inspect a review
+756:    status: pending
+791:mutable boolean. `kvist status` derives the mismatch when local requirements,
+806:| `id`                      | Unique 1-64 character lowercase kebab-case identifier                               | Stable local primary key for dependency edges, task selection, audit records, status output, and merge review. Never renumber or reuse it.                                                     |
+807:| `title`                   | Trimmed, nonblank, one-line text up to 120 Unicode scalar values                    | Short human label for CLI, CI, and UI status lists.                                                                                                                                            |
+813:| `status`                  | `pending`, `in-progress`, `blocked`, or `completed`                                 | Is the authoritative workflow state used by later ready-task selection and status views.                                                                                                       |
+927:**Safety status:** agent and test programs require an external sandbox runner
+
+[turn 8] shell knqCkZRnSWldZ7EwtYhDNPbnQzQxcdLv: use std::path::Path;
+
+use crate::config;
+
+use super::locks;
+use super::style::{self, Theme};
+
+/// Stable context shown in the status bar that does not change per prompt.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct StatusContext {
+    /// The configured sandbox backend name, or `none`.
+    pub sandbox_backend: String,
+    /// The configured default model profile, or `none`.
+    pub default_model: String,
+    /// Locks whose owning process is still alive.
+    pub live_locks: usize,
+    /// Leftover locks whose owner is gone (safe to clean with `locks clean`).
+    pub stale_locks: usize,
+}
+
+impl StatusContext {
+    pub fn load(project_dir: &Path) -> Self {
+        let (sandbox_backend, default_model) = Self::config_part(project_dir);
+        Self::from_parts(sandbox_backend, default_model, &locks::scan())
+    }
+
+    /// Reads the configured sandbox backend and default model, degrading to
+    /// `none` when the configuration is absent or invalid.
+    pub fn config_part(project_dir: &Path) -> (String, String) {
+        match config::load(project_dir) {
+            Ok(cfg) => (
+                cfg.sandbox
+                    .as_ref()
+                    .map(|sandbox| sandbox.backend.clone())
+                    .unwrap_or_else(|| "none".to_owned()),
+                if !cfg.agent.developer.profile.is_empty() {
+                    cfg.agent.developer.profile.clone()
+                } else {
+                    cfg.agent
+                        .developer
+                        .models
+                        .first()
+                        .map(|model| model.name.clone())
+                        .unwrap_or_else(|| "none".to_owned())
+                },
+            ),
+            Err(_) => ("none".to_owned(), "none".to_owned()),
+        }
+    }
+
+    /// Builds the status context from already-resolved parts (the injection
+    /// point for tests).
+    pub fn from_parts(
+        sandbox_backend: String,
+        default_model: String,
+        locks: &[super::locks::LockEntry],
+    ) -> Self {
+        let live_locks = locks.iter().filter(|lock| lock.live).count();
+        Self {
+            sandbox_backend,
+
+[turn 8] shell 0IKiagzoEb7XDinVDjtBUKc3dp4blAv0: ac4bdd9 feat(engine): broker propose_decision and request_dependency with awaiting-decision pause (phase 4)
+29de04b Ignore Kvist attempt logs
+817d24c feat(engine): drive task runs as a multi-turn agent loop
+75fb7e1 feat(engine): add an awaiting-decision task state
+60f7348 docs(engine): redesign agent execution as a multi-turn target
+
+[turn 9] reasoning: I'm looking at the current state of the shell and project to understand how status and overview currently work, where the "project invalid" error surfaces, and how the wizard guidance is structured. I need to figure out whether the user's complaint about status showing an error but no guidance is about the interactive shell experience or the CLI itself, since both seem to render inspection results but with different formats and levels of detail.
+[turn 9] shell A6OdsXD4Ozy9JmwOawpx3JZXhj3tMnFe: error: rustup could not choose a version of cargo to run, because one wasn't specified explicitly, and no default is configured.
+help: run 'rustup default stable' to download the latest stable release of Rust and set it as your default toolchain.
+
+[turn 10] reasoning: I need to configure the default toolchain to resolve the rustup setup issue.
+[turn 10] shell 1u2jcyAidZooy2y1MeDcpYHWvXuU7lRR: info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+error: could not download file from 'https://static.rust-lang.org/dist/channel-rust-stable.toml.sha256' to '/tmp/.rustup/tmp/a55vjzzumylieg8e_file': error downloading file: error sending request for url (https://static.rust-lang.org/dist/channel-rust-stable.toml.sha256): client error (Connect): dns error: failed to lookup address information: Temporary failure in name resolution
+/usr/sbin/cargo
+/usr/sbin/rustc
+error: rustup could not choose a version of cargo to run, because one wasn't specified explicitly, and no default is configured.
+help: run 'rustup default stable' to download the latest stable release of Rust and set it as your default toolchain.
+
+[turn 11] reasoning: No network access available. Let me check what toolchains are already installed locally.
+[turn 11] shell 73uLXiz5aUsUWMPeKzVmtBga0D26nB4j: no installed toolchains
+-rwxr-xr-x 1 65534 65534 11670224 Sep  1 18:45 /usr/bin/rustup
+
+[turn 12] reasoning: No toolchains available, and there's no network access, so I can't build the Rust code. Instead, I'll focus on reading the code and giving my assessment, which is what the user actually asked for.
+[turn 12] shell ymdIN0Yn2LzMA09lOeZtxtX9S1XwwUBK:             let Some(value) = args.get(i + 1) else {
+                return Err(
+                    "--status needs a value: pending, in-progress, blocked, or completed"
+                        .to_owned(),
+                );
+            };
+            status = Some(parse_task_status(value)?);
+            i += 2;
+        } else if let Some(value) = arg.strip_prefix("--status=") {
+            status = Some(parse_task_status(value)?);
+            i += 1;
+        } else {
+            if component.is_some() {
+                return Err("usage: tasks [COMPONENT_DIR] [--status STATUS]".to_owned());
+            }
+            component = Some(arg.clone());
+            i += 1;
+        }
+    }
+    Ok(TasksArgs { component, status })
+}
+
+/// Parsed `run` builtin arguments: the optional component and task.
+type RunArgs = (Option<String>, Option<String>);
+
+/// Parses `run [COMPONENT_DIR] [TASK_ID]` (pure).
+fn parse_run_args(args: &[String]) -> std::result::Result<RunArgs, String> {
+    if args.len() > 2 {
+        return Err("usage: run [COMPONENT_DIR] [TASK_ID]".to_owned());
+    }
+    Ok((args.first().cloned(), args.get(1).cloned()))
+}
+
+/// Resolves the next ready task (the first pending task whose recorded
+/// dependencies are all completed) for a component from a snapshot, or
+
+[turn 12] shell VXFhEIiW0SGx17pRvUAmq2HmXpGSVxw8: 9:#[derive(Debug, Clone, PartialEq, Eq, Default)]
+73:/// exit state; the branch is hidden outside a VCS repository.
+157:pub fn print_welcome_banner(
+176:    fn short_prompt_layout_and_exit_state() {
+232:            path: PathBuf::from("/state/kvist/task-locks-v1/x.lock"),
+
+[turn 13] reasoning: I've confirmed the issue: the `status` and `overview` commands are essentially duplicated since both invoke `handle_overview`, and the error handling there just prints the error without explaining what caused it or how to fix it.
+== session agent-runner-tiel-coder-35b-q4 finished: 13 turns, 0 tokens, 603s, ok ==

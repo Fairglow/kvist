@@ -66,7 +66,7 @@ pub fn edit_prompt_with_editor(seed: &str, editor: &str) -> Result<String> {
     let (program, mut arguments) = if Path::new(editor).is_file() {
         (editor.to_owned(), Vec::new())
     } else {
-        split_raw_command(editor).map_err(KvistError::AgentRuntime)?
+        split_raw_command(editor).map_err(KvistError::Sav)?
     };
     arguments.push(
         prompt_path

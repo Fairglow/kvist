@@ -3,7 +3,7 @@
 This document is the authoritative design for the Kvist command-line surface.
 It explains the core ideas behind the commands, how they fit together into one
 workflow, and the rules that keep the interface simple, predictable, and
-self-explanatory. Implementation in `engine/` MUST follow this document.
+self-explanatory. Implementation in `maerg/` MUST follow this document.
 
 ## 1. Goal
 
@@ -110,8 +110,8 @@ Removed from the previous surface (and why):
   root). When it is given, it is interpreted relative to the project's
   component root, as before.
 - **The shell's `cd` builtin** does the same job interactively: after
-  `cd engine`, every dispatched command — `task next`, `component
-validate`, `task run`, ... — targets `engine` without repetition. The
+  `cd maerg`, every dispatched command — `task next`, `component
+validate`, `task run`, ... — targets `maerg` without repetition. The
   prompt shows the focus, and typing a command that names a _different_
   component prints a one-line reminder.
 - **Failure outside a project** is never cryptic: the error names what is

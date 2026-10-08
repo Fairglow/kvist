@@ -252,7 +252,7 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         app.models.len()
     );
     let lines = vec![
-        Line::from(Span::styled("agent-runner help", theme.title)),
+        Line::from(Span::styled("skott help", theme.title)),
         Line::from(""),
         Line::from("  Ctrl+Enter       submit the prompt"),
         Line::from("  Enter            submit on a blank line, else a newline"),
@@ -279,7 +279,7 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from("    Set theme = \"dark\" (default) or \"light\" for the UI palette;"),
         Line::from("    the --theme flag overrides it for one run."),
         Line::from("    Reuse agents declared in Kvist's kvist.toml:"),
-        Line::from("    agent-runner --import-kvist  (prints [[models]] to paste)."),
+        Line::from("    skott --import-kvist  (prints [[models]] to paste)."),
         Line::from(config_hint),
         Line::from(""),
         Line::from("  The stats bar shows: generation speed (t/s, output-only, like"),
@@ -347,7 +347,7 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
 fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
     let theme = &app.theme;
     let mut lines: Vec<Line> = vec![
-        Line::from(Span::styled(" agent-runner menu ", theme.title)),
+        Line::from(Span::styled(" skott menu ", theme.title)),
         Line::from(""),
         Line::from("  up/down or j/k select · enter act · esc / r return"),
         Line::from(""),
@@ -838,13 +838,13 @@ mod tests {
         let mut app = new_app(40, 45);
         app.show_help = true;
         app.config_path = Some(PathBuf::from(
-            "/opt/very/deep/llama/server/path/with/a/long/agent-runner.toml",
+            "/opt/very/deep/llama/server/path/with/a/long/skott.toml",
         ));
         let text = buffer_text(&draw(&app));
         // The path is far longer than the inner width; with soft wrapping its
         // tail stays visible inside the box instead of being truncated.
         assert!(
-            text.contains("agent-runner.toml"),
+            text.contains("skott.toml"),
             "wrapped tail missing:\n{text}"
         );
         for line in text.lines() {
@@ -857,7 +857,7 @@ mod tests {
         let mut app = new_app(40, 12);
         app.show_help = true;
         app.config_path = Some(PathBuf::from(
-            "/opt/very/deep/llama/server/path/with/a/long/agent-runner.toml",
+            "/opt/very/deep/llama/server/path/with/a/long/skott.toml",
         ));
         for _ in 0..20 {
             app.scroll_down(1);
@@ -935,7 +935,7 @@ mod tests {
             &["local".to_owned()],
             Some("local"),
             ReasoningEffort::Medium,
-            Some(std::path::PathBuf::from("/cfg/agent-runner.toml")),
+            Some(std::path::PathBuf::from("/cfg/skott.toml")),
             60,
             52,
             Theme::dark(),
@@ -949,7 +949,7 @@ mod tests {
         let text = buffer_text(&backend);
         assert!(text.contains("Ctrl+Enter"), "help lists the send key:");
         assert!(
-            text.contains("/cfg/agent-runner.toml"),
+            text.contains("/cfg/skott.toml"),
             "help names the config path:"
         );
         assert!(
@@ -970,7 +970,7 @@ mod tests {
             &["local".to_owned()],
             Some("local"),
             ReasoningEffort::Medium,
-            Some(std::path::PathBuf::from("/cfg/agent-runner.toml")),
+            Some(std::path::PathBuf::from("/cfg/skott.toml")),
             60,
             20,
             Theme::dark(),
@@ -981,7 +981,7 @@ mod tests {
         ));
         // Top of the help is visible without scrolling.
         assert!(
-            buffer_text(&draw(&app)).contains("agent-runner help"),
+            buffer_text(&draw(&app)).contains("skott help"),
             "top of help visible at scroll 0"
         );
         // Scrolling down several pages reaches the bottom of the help.

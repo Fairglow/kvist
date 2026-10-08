@@ -1,7 +1,7 @@
 //! Importing agent profiles declared in a Kvist `kvist.toml`.
 //!
 //! Kvist declares reusable agent profiles under `[agent.profiles]`. This module
-//! derives ready-to-paste `[[models]]` entries for the agent-runner
+//! derives ready-to-paste `[[models]]` entries for the skott
 //! configuration from those profiles, so a Kvist project's agents can be
 //! reused without retyping them. The mapping is conservative: the provider and
 //! the provider-facing model name are taken from the profile, the base URL
@@ -85,7 +85,7 @@ pub fn import_models(path: &Path) -> Result<String> {
 
     let mut out = String::from(
         "# models imported from kvist.toml [agent.profiles]\n\
-         # paste these entries into your agent-runner configuration\n",
+         # paste these entries into your skott configuration\n",
     );
     for (id, profile) in profiles {
         let provider_name = profile.provider.as_deref().ok_or_else(|| Error::Config {

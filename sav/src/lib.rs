@@ -10,7 +10,7 @@
 //! are not a general proof of signal safety.
 
 #[cfg(not(target_os = "linux"))]
-compile_error!("agent-runtime currently supports Linux only");
+compile_error!("sav currently supports Linux only");
 
 mod catalog;
 mod command;

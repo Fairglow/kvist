@@ -11,7 +11,7 @@ use kvist::vendoring::VendorManifest;
 fn enforces_vendoring_for_the_real_project_when_vendored() {
     let project = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
-        .expect("workspace root is the parent of the engine crate");
+        .expect("workspace root is the parent of the maerg crate");
     if !project.join("Cargo.lock").is_file() {
         return;
     }

@@ -108,7 +108,7 @@ fn commit_commit_policy(project: &Path, signing: &str) {
 }
 
 fn find_acceptance_journal(project: &Path, acceptance_id: &str) -> PathBuf {
-    let mut pending = vec![project.join("engine")];
+    let mut pending = vec![project.join("maerg")];
     while let Some(directory) = pending.pop() {
         for entry in fs::read_dir(&directory)
             .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
@@ -186,12 +186,12 @@ fn component_accept_commit_preserves_unrelated_state_and_commits_only_reported_p
     )
     .expect("make hook executable");
 
-    let requirements = project.path().join("engine/REQUIREMENTS.md");
+    let requirements = project.path().join("maerg/REQUIREMENTS.md");
     let mut accepted = fs::read_to_string(&requirements).expect("read requirements");
     accepted.push_str("\nAccepted fixture clarification.\n");
     fs::write(&requirements, accepted).expect("write accepted document");
     fs::write(
-        project.path().join("engine/src/lib.rs"),
+        project.path().join("maerg/src/lib.rs"),
         "pub fn unrelated_unstaged() {}\n",
     )
     .expect("write unrelated unstaged change");
@@ -227,8 +227,8 @@ fn component_accept_commit_preserves_unrelated_state_and_commits_only_reported_p
         .and_then(Value::as_str)
         .expect("commit_oid");
     let expected_accepted_paths = BTreeSet::from([
-        "engine/REQUIREMENTS.md".to_owned(),
-        "engine/TODOS.yaml".to_owned(),
+        "maerg/REQUIREMENTS.md".to_owned(),
+        "maerg/TODOS.yaml".to_owned(),
     ]);
     let accepted_paths = string_set(&result, "/accepted_paths");
     assert_eq!(
@@ -242,7 +242,7 @@ fn component_accept_commit_preserves_unrelated_state_and_commits_only_reported_p
     );
     let committed_paths = changed_paths(project.path(), &old_head, new_head);
     for unrelated in [
-        "engine/src/lib.rs",
+        "maerg/src/lib.rs",
         "docs/staged-note.md",
         "untracked-note.txt",
     ] {
@@ -257,7 +257,7 @@ fn component_accept_commit_preserves_unrelated_state_and_commits_only_reported_p
         "isolated commit creation must preserve the real Git index byte-for-byte"
     );
     assert_eq!(
-        fs::read_to_string(project.path().join("engine/src/lib.rs"))
+        fs::read_to_string(project.path().join("maerg/src/lib.rs"))
             .expect("read unrelated unstaged path"),
         "pub fn unrelated_unstaged() {}\n"
     );
@@ -270,9 +270,9 @@ fn component_accept_commit_preserves_unrelated_state_and_commits_only_reported_p
             "list unstaged paths"
         ),
         BTreeSet::from([
-            "engine/REQUIREMENTS.md".to_owned(),
-            "engine/TODOS.yaml".to_owned(),
-            "engine/src/lib.rs".to_owned()
+            "maerg/REQUIREMENTS.md".to_owned(),
+            "maerg/TODOS.yaml".to_owned(),
+            "maerg/src/lib.rs".to_owned()
         ]),
         "the unrelated unstaged change must remain unstaged against the new HEAD"
     );
@@ -284,8 +284,8 @@ fn component_accept_commit_preserves_unrelated_state_and_commits_only_reported_p
         ),
         BTreeSet::from([
             "docs/staged-note.md".to_owned(),
-            "engine/REQUIREMENTS.md".to_owned(),
-            "engine/TODOS.yaml".to_owned()
+            "maerg/REQUIREMENTS.md".to_owned(),
+            "maerg/TODOS.yaml".to_owned()
         ]),
         "the unrelated staged change must remain staged against the new HEAD"
     );
@@ -320,12 +320,12 @@ fn accepted_path_overlap_refuses_without_changing_head_or_index() {
     let project = create_target_project("pending");
     append_commit_policy(project.path(), "off");
     fs::write(
-        project.path().join("engine/REQUIREMENTS.md"),
+        project.path().join("maerg/REQUIREMENTS.md"),
         "overlapping accepted change\n",
     )
     .expect("write overlap");
     assert_success(
-        &git(project.path(), &["add", "engine/REQUIREMENTS.md"]),
+        &git(project.path(), &["add", "maerg/REQUIREMENTS.md"]),
         "stage overlapping path",
     );
     let old_head = head(project.path());
@@ -357,12 +357,12 @@ fn detached_head_refuses_acceptance_commit_without_mutation() {
         &git(project.path(), &["checkout", "--detach", "--quiet"]),
         "detach HEAD",
     );
-    let requirements = project.path().join("engine/REQUIREMENTS.md");
+    let requirements = project.path().join("maerg/REQUIREMENTS.md");
     let mut contents = fs::read_to_string(&requirements).expect("read requirements");
     contents.push_str("\nDetached-head refusal fixture.\n");
     fs::write(requirements, contents).expect("write accepted candidate");
     let queue_before =
-        fs::read(project.path().join("engine/TODOS.yaml")).expect("read queue before refusal");
+        fs::read(project.path().join("maerg/TODOS.yaml")).expect("read queue before refusal");
     let index_before = fs::read(project.path().join(".git/index")).expect("read index");
     let status_before = git(project.path(), &["status", "--porcelain=v1", "-z"]).stdout;
 
@@ -388,7 +388,7 @@ fn detached_head_refuses_acceptance_commit_without_mutation() {
         "refusal must not attach HEAD to a branch"
     );
     assert_eq!(
-        fs::read(project.path().join("engine/TODOS.yaml")).expect("read queue after refusal"),
+        fs::read(project.path().join("maerg/TODOS.yaml")).expect("read queue after refusal"),
         queue_before
     );
     assert_eq!(
@@ -412,13 +412,13 @@ fn invalid_or_oversized_commit_messages_refuse_before_acceptance_mutation() {
     for (name, message) in cases {
         let project = create_target_project("pending");
         commit_commit_policy(project.path(), "off");
-        let requirements = project.path().join("engine/REQUIREMENTS.md");
+        let requirements = project.path().join("maerg/REQUIREMENTS.md");
         let mut contents = fs::read_to_string(&requirements).expect("read requirements");
         contents.push_str("\nCommit-message refusal fixture.\n");
         fs::write(requirements, contents).expect("write accepted candidate");
         let head_before = head(project.path());
         let queue_before =
-            fs::read(project.path().join("engine/TODOS.yaml")).expect("read queue before refusal");
+            fs::read(project.path().join("maerg/TODOS.yaml")).expect("read queue before refusal");
         let index_before = fs::read(project.path().join(".git/index")).expect("read index");
         let status_before = git(project.path(), &["status", "--porcelain=v1", "-z"]).stdout;
 
@@ -454,7 +454,7 @@ fn invalid_or_oversized_commit_messages_refuse_before_acceptance_mutation() {
         );
         assert_eq!(head(project.path()), head_before);
         assert_eq!(
-            fs::read(project.path().join("engine/TODOS.yaml"))
+            fs::read(project.path().join("maerg/TODOS.yaml"))
                 .expect("read queue after message refusal"),
             queue_before
         );
@@ -476,14 +476,14 @@ fn tampered_attempt_evidence_cannot_be_finalized_and_committed() {
     commit_commit_policy(project.path(), "off");
     write_finalizable_attempt(project.path(), true);
     fs::write(
-        project.path().join("engine/tests/generated.rs"),
+        project.path().join("maerg/tests/generated.rs"),
         "#[test]\nfn tampered_before_commit() {}\n",
     )
     .expect("tamper with scoped change before commit finalization");
     let head_before = head(project.path());
     let journal_path = project
         .path()
-        .join(format!("engine/.kvist-attempts/{TASK_ID}.jsonl"));
+        .join(format!("maerg/.kvist-attempts/{TASK_ID}.jsonl"));
     let index_before = fs::read(project.path().join(".git/index")).expect("read index");
 
     let output = run_kvist(
@@ -505,7 +505,7 @@ fn tampered_attempt_evidence_cannot_be_finalized_and_committed() {
         output_text(&output)
     );
     assert_eq!(head(project.path()), head_before);
-    let queue = fs::read_to_string(project.path().join("engine/TODOS.yaml"))
+    let queue = fs::read_to_string(project.path().join("maerg/TODOS.yaml"))
         .expect("read queue after refusal");
     let task = task_block(&queue, TASK_ID);
     assert!(task.contains("status: in-progress"));
@@ -543,44 +543,44 @@ fn task_finalization_commit_handles_creations_deletions_and_renames_exactly() {
         "commit policy",
     );
     let old_head = head(project.path());
-    let old_source = project.path().join("engine/src/lib.rs");
+    let old_source = project.path().join("maerg/src/lib.rs");
     let old_digest = sha256_file(&old_source);
-    fs::rename(&old_source, project.path().join("engine/src/renamed.rs"))
+    fs::rename(&old_source, project.path().join("maerg/src/renamed.rs"))
         .expect("rename accepted source");
     write_finalizable_attempt(project.path(), true);
     fs::write(
-        project.path().join("engine/src/created.rs"),
+        project.path().join("maerg/src/created.rs"),
         "pub fn created() {}\n",
     )
     .expect("write accepted creation");
-    let queue_path = project.path().join("engine/TODOS.yaml");
+    let queue_path = project.path().join("maerg/TODOS.yaml");
     let journal_path = project
         .path()
-        .join(format!("engine/.kvist-attempts/{TASK_ID}.jsonl"));
+        .join(format!("maerg/.kvist-attempts/{TASK_ID}.jsonl"));
     let changes = json!([
         {
-            "path": "engine/src/lib.rs",
+            "path": "maerg/src/lib.rs",
             "operation": "delete",
             "pre_digest": old_digest,
             "post_digest": Value::Null
         },
         {
-            "path": "engine/src/renamed.rs",
+            "path": "maerg/src/renamed.rs",
             "operation": "create",
             "pre_digest": Value::Null,
-            "post_digest": sha256_file(&project.path().join("engine/src/renamed.rs"))
+            "post_digest": sha256_file(&project.path().join("maerg/src/renamed.rs"))
         },
         {
-            "path": "engine/src/created.rs",
+            "path": "maerg/src/created.rs",
             "operation": "create",
             "pre_digest": Value::Null,
-            "post_digest": sha256_file(&project.path().join("engine/src/created.rs"))
+            "post_digest": sha256_file(&project.path().join("maerg/src/created.rs"))
         },
         {
-            "path": "engine/tests/generated.rs",
+            "path": "maerg/tests/generated.rs",
             "operation": "create",
             "pre_digest": Value::Null,
-            "post_digest": sha256_file(&project.path().join("engine/tests/generated.rs"))
+            "post_digest": sha256_file(&project.path().join("maerg/tests/generated.rs"))
         }
     ]);
     let events = [
@@ -617,12 +617,12 @@ fn task_finalization_commit_handles_creations_deletions_and_renames_exactly() {
         .and_then(Value::as_str)
         .expect("commit_oid");
     let expected_accepted_paths = BTreeSet::from([
-        "engine/.kvist-attempts/implement-code.jsonl".to_owned(),
-        "engine/TODOS.yaml".to_owned(),
-        "engine/src/created.rs".to_owned(),
-        "engine/src/lib.rs".to_owned(),
-        "engine/src/renamed.rs".to_owned(),
-        "engine/tests/generated.rs".to_owned(),
+        "maerg/.kvist-attempts/implement-code.jsonl".to_owned(),
+        "maerg/TODOS.yaml".to_owned(),
+        "maerg/src/created.rs".to_owned(),
+        "maerg/src/lib.rs".to_owned(),
+        "maerg/src/renamed.rs".to_owned(),
+        "maerg/tests/generated.rs".to_owned(),
     ]);
     let accepted_paths = string_set(&result, "/accepted_paths");
     assert_eq!(accepted_paths, expected_accepted_paths);
@@ -636,7 +636,7 @@ fn task_finalization_commit_handles_creations_deletions_and_renames_exactly() {
     );
     let committed_queue = git(
         project.path(),
-        &["show", &format!("{new_head}:engine/TODOS.yaml")],
+        &["show", &format!("{new_head}:maerg/TODOS.yaml")],
     );
     assert_success(&committed_queue, "read committed queue");
     assert!(
@@ -687,7 +687,7 @@ fn required_signing_failure_keeps_acceptance_pending_for_exact_retry() {
         "commit signing policy",
     );
     let old_head = head(project.path());
-    let requirements = project.path().join("engine/REQUIREMENTS.md");
+    let requirements = project.path().join("maerg/REQUIREMENTS.md");
     let mut contents = fs::read_to_string(&requirements).expect("read requirements");
     contents.push_str("\nSigning recovery fixture.\n");
     fs::write(requirements, contents).expect("write accepted change");
@@ -784,7 +784,7 @@ fn pending_commit_refuses_concurrent_head_movement() {
         ),
         "commit policy",
     );
-    let requirements = project.path().join("engine/REQUIREMENTS.md");
+    let requirements = project.path().join("maerg/REQUIREMENTS.md");
     let mut contents = fs::read_to_string(&requirements).expect("read requirements");
     contents.push_str("\nConcurrent head fixture.\n");
     fs::write(requirements, contents).expect("write accepted change");
@@ -861,14 +861,14 @@ fn jujutsu_commit_automation_is_explicitly_unsupported() {
         .expect("read config")
         .replace("kind = \"git\"", "kind = \"jj\"");
     fs::write(config_path, config).expect("select Jujutsu");
-    let requirements = project.path().join("engine/REQUIREMENTS.md");
+    let requirements = project.path().join("maerg/REQUIREMENTS.md");
     let mut contents = fs::read_to_string(&requirements).expect("read requirements");
     contents.push_str("\nUnsupported Jujutsu commit fixture.\n");
     fs::write(requirements, contents).expect("write accepted change");
     let git_head_before = head(project.path());
     let index_before = fs::read(project.path().join(".git/index")).expect("read index");
     let queue_before =
-        fs::read(project.path().join("engine/TODOS.yaml")).expect("read queue before rejection");
+        fs::read(project.path().join("maerg/TODOS.yaml")).expect("read queue before rejection");
     let status_before = git(project.path(), &["status", "--porcelain=v1", "-z"]).stdout;
     let controlled_path = PathBuf::from(format!(
         "{}:/usr/bin:/bin",
@@ -893,7 +893,7 @@ fn jujutsu_commit_automation_is_explicitly_unsupported() {
         index_before
     );
     assert_eq!(
-        fs::read(project.path().join("engine/TODOS.yaml")).expect("read unchanged queue"),
+        fs::read(project.path().join("maerg/TODOS.yaml")).expect("read unchanged queue"),
         queue_before
     );
     assert_eq!(

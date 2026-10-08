@@ -1,6 +1,6 @@
 //! Host-resolved, read-only Rust resources for the workspace authoring sandbox.
 //!
-//! This is not the engine's provisioning or Cargo verification authority. It
+//! This is not the maerg provisioning or Cargo verification authority. It
 //! never installs anything, reads Cargo credentials, or trusts manifest paths.
 //! The existing System/Authoring protocol grants the compiler, fixed Cargo shim
 //! and dependency snapshot as read-only Toolchain build resources at disjoint
@@ -430,7 +430,7 @@ fn query_rustup(
     )?;
     if result.failed() {
         return Err(failure(
-            "installed Rust selection is unavailable; provision the project pin on the host before starting agent-runner (no installation or fallback is performed)",
+            "installed Rust selection is unavailable; provision the project pin on the host before starting skott (no installation or fallback is performed)",
         ));
     }
     String::from_utf8(result.stdout).map_err(|_| failure("rustup selection output must be UTF-8"))
@@ -605,7 +605,7 @@ impl RustEnvironment {
             .as_bytes(),
         );
         let staging = tempfile::Builder::new()
-            .prefix(".agent-runner-rust-")
+            .prefix(".skott-rust-")
             .tempdir_in(
                 workspace
                     .parent()
