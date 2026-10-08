@@ -404,9 +404,7 @@ mod tests {
             &FeedbackTarget::Latest,
         );
         manager.print_result_stage(
-            &Err(crate::KvistError::Sav(
-                sav::Error::Cancelled,
-            )),
+            &Err(crate::KvistError::Sav(sav::Error::Cancelled)),
             &FeedbackTarget::None,
         );
     }
@@ -416,9 +414,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let manager = StreamManager::new(dir.path(), Theme::plain());
         let rows = manager.result_stage_rows(
-            &Err(crate::KvistError::Sav(
-                sav::Error::Cancelled,
-            )),
+            &Err(crate::KvistError::Sav(sav::Error::Cancelled)),
             &FeedbackTarget::None,
         );
         assert_eq!(rows.len(), 1);

@@ -14,12 +14,12 @@ use std::process::Command;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use sav::CancellationToken;
 use galla::protocol::{
     Access, BackendIdentity, BackendKind, Grant, Identities, Network, NetworkMode, Phase, Purpose,
     Resources, SandboxRequest, Toolchain,
 };
 use galla::validation;
+use sav::CancellationToken;
 use sha2::{Digest, Sha256};
 
 use crate::config::SandboxPaths;

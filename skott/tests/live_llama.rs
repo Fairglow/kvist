@@ -5,13 +5,13 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use skott::{
-    Skott, AgentSession, ContextManager, Event, EventSink, Model, ModelProvider, RunLimits,
-    SandboxExecutor, SandboxPaths, SessionLog, ToolPolicy, ToolRegistry,
-};
 use sav::{
     CancellationToken, ModelMessage, ModelRequest, ModelStreamEvent, ModelTransport,
     ReasoningEffort, ToolChoice, ToolIntent,
+};
+use skott::{
+    AgentSession, ContextManager, Event, EventSink, Model, ModelProvider, RunLimits,
+    SandboxExecutor, SandboxPaths, SessionLog, Skott, ToolPolicy, ToolRegistry,
 };
 
 #[test]

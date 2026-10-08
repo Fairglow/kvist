@@ -24,8 +24,8 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sav::CancellationToken;
 use galla::protocol::{Access, Grant, Purpose};
+use sav::CancellationToken;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 

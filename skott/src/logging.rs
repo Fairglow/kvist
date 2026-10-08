@@ -42,13 +42,12 @@ pub fn init_test_logging() {
 /// Initializes the global tracing subscriber with a specific default level.
 pub fn init_logging_with_default(default_level: &str) {
     INIT.call_once(|| {
-        let filter =
-            match std::env::var(SKOTT_LOG_ENV).or_else(|_| std::env::var(RUST_LOG_ENV)) {
-                Ok(env_val) if !env_val.trim().is_empty() => EnvFilter::builder()
-                    .with_default_directive(tracing::level_filters::LevelFilter::WARN.into())
-                    .parse_lossy(env_val),
-                _ => EnvFilter::new(default_level),
-            };
+        let filter = match std::env::var(SKOTT_LOG_ENV).or_else(|_| std::env::var(RUST_LOG_ENV)) {
+            Ok(env_val) if !env_val.trim().is_empty() => EnvFilter::builder()
+                .with_default_directive(tracing::level_filters::LevelFilter::WARN.into())
+                .parse_lossy(env_val),
+            _ => EnvFilter::new(default_level),
+        };
 
         let is_terminal = std::io::stderr().is_terminal();
 

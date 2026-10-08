@@ -4,13 +4,11 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
 
-use skott::session::ToolExecutor;
-use skott::toolchain::HostProbe;
-use skott::{
-    ProfileSetting, SandboxExecutor, SandboxPaths, ToolPolicy, ToolProfile, ToolRegistry,
-};
 use sav::{CancellationToken, ToolIntent};
 use serde_json::json;
+use skott::session::ToolExecutor;
+use skott::toolchain::HostProbe;
+use skott::{ProfileSetting, SandboxExecutor, SandboxPaths, ToolPolicy, ToolProfile, ToolRegistry};
 
 fn fixture() -> tempfile::TempDir {
     tempfile::Builder::new()

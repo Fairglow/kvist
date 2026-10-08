@@ -8,12 +8,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use sav::load_profile;
 use nix::{
     errno::Errno,
     sys::signal::{Signal, kill},
     unistd::Pid,
 };
+use sav::load_profile;
 use tempfile::TempDir;
 
 #[test]

@@ -10,11 +10,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+use nix::{errno::Errno, sys::signal::kill, unistd::Pid};
 use sav::{
     CancellationToken, CatalogProvider, ModelCatalog, ModelDiscoveryOptions, ProviderModel,
     discover_models,
 };
-use nix::{errno::Errno, sys::signal::kill, unistd::Pid};
 use tempfile::TempDir;
 
 static ACP_CLEANUP_TEST_LOCK: Mutex<()> = Mutex::new(());

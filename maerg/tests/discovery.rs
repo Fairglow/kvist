@@ -235,10 +235,7 @@ fn discovers_top_level_peer_components_when_root_is_dot() {
             .iter()
             .map(|c| c.relative_path.as_path())
             .collect::<Vec<_>>(),
-        [
-            std::path::Path::new("maerg"),
-            std::path::Path::new("sav")
-        ]
+        [std::path::Path::new("maerg"), std::path::Path::new("sav")]
     );
     assert!(
         discovery

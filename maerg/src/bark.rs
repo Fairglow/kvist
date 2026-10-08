@@ -915,8 +915,7 @@ impl Shell {
                 Err(error) => {
                     if matches!(
                         error,
-                        KvistError::AgentSetupCancelled
-                            | KvistError::Sav(sav::Error::Cancelled)
+                        KvistError::AgentSetupCancelled | KvistError::Sav(sav::Error::Cancelled)
                     ) {
                         println!("Operation cancelled.");
                     } else {

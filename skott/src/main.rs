@@ -7,10 +7,10 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use clap::Parser;
 use skott::{
     Cli, Error, RunLimits, ToolProfile, config::Config, init_logging, tui, tui::Overrides,
 };
-use clap::Parser;
 
 fn main() -> ExitCode {
     init_logging();
@@ -46,13 +46,11 @@ fn run() -> skott::Result<ExitCode> {
     let config = Config::load(&config_path)?;
 
     let effort = match &cli.effort {
-        Some(value) => {
-            Some(
-                skott::parse_effort(value).map_err(|_| Error::InvalidEffort {
-                    value: value.clone(),
-                })?,
-            )
-        }
+        Some(value) => Some(
+            skott::parse_effort(value).map_err(|_| Error::InvalidEffort {
+                value: value.clone(),
+            })?,
+        ),
         None => None,
     };
     let profile = match &cli.profile {

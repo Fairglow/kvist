@@ -1760,15 +1760,12 @@ fn merge_agent_config_from_table(
                         &format!("`agent.roles.{name}.thinking_effort` must be a string"),
                     )
                 })?;
-                let effort =
-                    sav::ReasoningEffort::parse_effort(effort_str).ok_or_else(|| {
-                        invalid_configuration(
-                            config_path,
-                            &format!(
-                                "invalid `agent.roles.{name}.thinking_effort`: `{effort_str}`"
-                            ),
-                        )
-                    })?;
+                let effort = sav::ReasoningEffort::parse_effort(effort_str).ok_or_else(|| {
+                    invalid_configuration(
+                        config_path,
+                        &format!("invalid `agent.roles.{name}.thinking_effort`: `{effort_str}`"),
+                    )
+                })?;
                 role_cfg.thinking_effort = Some(effort);
             }
 

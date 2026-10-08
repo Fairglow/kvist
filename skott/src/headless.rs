@@ -11,7 +11,7 @@ use serde_json::json;
 use crate::config::Config;
 use crate::error::{Error, Result, io_error};
 use crate::executor::SandboxExecutor;
-use crate::session::{Skott, AgentSession, Event, EventSink, RunSummary};
+use crate::session::{AgentSession, Event, EventSink, RunSummary, Skott};
 use crate::session_log::SessionLog;
 use crate::tools::ToolRegistry;
 use crate::tui::Overrides;

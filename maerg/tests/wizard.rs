@@ -15,10 +15,10 @@ use std::{
 };
 use tempfile::TempDir;
 
-use sav::{ModelProfile, upsert_profile};
 use kvist::config;
 use kvist::init::initialize;
 use kvist::wizard::{run_wizard, run_wizard_with_force, run_wizard_with_profile_config};
+use sav::{ModelProfile, upsert_profile};
 
 #[test]
 fn test_wizard_ollama_local_config() {

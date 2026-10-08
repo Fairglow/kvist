@@ -868,6 +868,7 @@ printf verified > /workspace/scratch/verification
 // -- Host-independent planning coverage (additive; not a substitute) ----------
 
 mod planning {
+    use galla::validation;
     use kvist::{
         acquisition::{
             ContentIdentity, HostPath, build_acquisition_plan, build_verification_plan,
@@ -875,7 +876,6 @@ mod planning {
         },
         config::{AcquisitionCacheBounds, AcquisitionConfig, PackageSource},
     };
-    use galla::validation;
 
     fn source_config() -> AcquisitionConfig {
         AcquisitionConfig {

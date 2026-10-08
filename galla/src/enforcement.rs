@@ -388,9 +388,7 @@ fn count_processes_in_pgid(child_pid: u32) -> u64 {
 /// and reaps the child process.
 pub fn run(request: SandboxRequest) -> ExitCode {
     let Some(bwrap_path) = locate_backend() else {
-        eprintln!(
-            "galla-runner: no Bubblewrap backend found on PATH or standard locations"
-        );
+        eprintln!("galla-runner: no Bubblewrap backend found on PATH or standard locations");
         return ExitCode::from(3);
     };
 

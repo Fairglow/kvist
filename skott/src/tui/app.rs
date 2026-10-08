@@ -5,10 +5,10 @@ use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Instant;
 
-use sav::ReasoningEffort;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
+use sav::ReasoningEffort;
 use tui_textarea::TextArea;
 
 use crate::error::Result;
@@ -2178,9 +2178,9 @@ mod tests {
     };
     use crate::session::Event;
     use crate::tui::theme::Theme;
-    use sav::ReasoningEffort;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use ratatui::text::Span;
+    use sav::ReasoningEffort;
 
     fn models() -> Vec<String> {
         vec!["local".to_owned(), "ollama".to_owned()]

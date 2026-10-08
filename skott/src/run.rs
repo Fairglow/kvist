@@ -18,9 +18,7 @@ use sav::{CancellationToken, ModelTransport};
 use crate::context::ContextManager;
 use crate::error::{Error, Result};
 use crate::retry::RetryPolicy;
-use crate::session::{
-    Skott, AgentSession, Event, EventSink, Recorder, RunLimits, ToolExecutor,
-};
+use crate::session::{AgentSession, Event, EventSink, Recorder, RunLimits, Skott, ToolExecutor};
 
 /// Receives [`Event`]s from the worker; implements [`EventSink`].
 struct ChannelSink {
@@ -463,11 +461,7 @@ mod tests {
     struct FloodTransport(Arc<std::sync::atomic::AtomicUsize>);
 
     impl ModelTransport for FloodTransport {
-        fn complete(
-            &self,
-            _: &ModelRequest,
-            _: &CancellationToken,
-        ) -> sav::Result<ModelTurn> {
+        fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {
             Err(AgentError::ModelTransportCancelled)
         }
         fn stream(

@@ -1,11 +1,9 @@
+use sav::{ModelMessage, ModelRequest, ReasoningEffort, ToolChoice, ToolDefinition, ToolIntent};
+use serde_json::json;
 use skott::{
     Error,
     context::{ContextManager, estimate_request, estimate_tokens},
 };
-use sav::{
-    ModelMessage, ModelRequest, ReasoningEffort, ToolChoice, ToolDefinition, ToolIntent,
-};
-use serde_json::json;
 
 fn request(messages: Vec<ModelMessage>) -> ModelRequest {
     ModelRequest {

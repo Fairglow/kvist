@@ -910,9 +910,7 @@ fn source_identities_use_golden_vectors_and_reject_substitutions() {
 
 #[test]
 fn production_sources_reject_loopback_aliases_duplicates_and_overlap() {
-    assert!(
-        galla::origin::parse_production("http://127.0.0.1:8080/index/").is_err()
-    );
+    assert!(galla::origin::parse_production("http://127.0.0.1:8080/index/").is_err());
 
     let mut alias = cargo_acquisition_request();
     alias["network"]["allowed_sources"] = json!([{

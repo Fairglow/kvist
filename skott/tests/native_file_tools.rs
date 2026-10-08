@@ -4,14 +4,12 @@ use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 use std::path::Path;
 
-use skott::file_tools::{FileRequest, MAX_FILE_BYTES, execute_file_request};
-use skott::session::ToolExecutor;
-use skott::{
-    ExecContext, HostExecutor, SandboxExecutor, SandboxPaths, ToolPolicy, ToolRegistry,
-};
 use sav::{CancellationToken, ToolIntent};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use skott::file_tools::{FileRequest, MAX_FILE_BYTES, execute_file_request};
+use skott::session::ToolExecutor;
+use skott::{ExecContext, HostExecutor, SandboxExecutor, SandboxPaths, ToolPolicy, ToolRegistry};
 use tempfile::{Builder, TempDir};
 
 fn fixture() -> TempDir {
@@ -436,11 +434,7 @@ fn helper_must_be_regular_nonlink_and_outside_write_scope() {
     let dir = fixture();
     let root = dir.path().canonicalize().unwrap();
     fs::write(root.join("helper"), b"fake").unwrap();
-    symlink(
-        env!("CARGO_BIN_EXE_skott-file-tool"),
-        root.join("link"),
-    )
-    .unwrap();
+    symlink(env!("CARGO_BIN_EXE_skott-file-tool"), root.join("link")).unwrap();
     let intent = ToolIntent {
         id: "test".to_owned(),
         provider_id: None,

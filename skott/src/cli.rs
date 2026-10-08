@@ -389,11 +389,7 @@ mod tests {
         let local = root.path().join("local");
         let user = root.path().join("xdg-user");
         let system = root.path().join("xdg-sys");
-        for dir in [
-            &local,
-            &user.join("skott"),
-            &system.join("skott"),
-        ] {
+        for dir in [&local, &user.join("skott"), &system.join("skott")] {
             std::fs::create_dir_all(dir).expect("create dir");
         }
         let local_file = local.join(LOCAL_CONFIG_FILE);
@@ -451,10 +447,7 @@ mod tests {
         let (root, _, user_file, _) = config_tree();
         let _ = std::fs::remove_file(user_file);
         let home = root.path().join("home");
-        let home_config = home
-            .join(".config")
-            .join("skott")
-            .join("config.toml");
+        let home_config = home.join(".config").join("skott").join("config.toml");
         std::fs::create_dir_all(home_config.parent().expect("parent")).expect("create");
         std::fs::write(&home_config, "").expect("seed");
         let empty = root.path().join("empty");
@@ -472,10 +465,7 @@ mod tests {
         let (root, _, user_file, _) = config_tree();
         let _ = std::fs::remove_file(user_file);
         let home = root.path().join("home");
-        let home_config = home
-            .join(".config")
-            .join("skott")
-            .join("config.toml");
+        let home_config = home.join(".config").join("skott").join("config.toml");
         std::fs::create_dir_all(home_config.parent().expect("parent")).expect("create");
         std::fs::write(&home_config, "").expect("seed");
         let empty = root.path().join("empty");

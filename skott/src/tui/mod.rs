@@ -13,7 +13,6 @@ use std::process::ExitCode;
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
-use sav::ReasoningEffort;
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyEventKind,
     MouseEventKind,
@@ -24,6 +23,7 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
+use sav::ReasoningEffort;
 
 use self::app::{App, KeyAction};
 use crate::config::{Config, Model};

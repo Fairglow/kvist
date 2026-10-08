@@ -578,11 +578,11 @@ mod tests {
     use crate::session::Event;
     use crate::tui::app::{App, Overlay};
     use crate::tui::theme::Theme;
-    use sav::ReasoningEffort;
     use crossterm::event::KeyCode;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::text::Line;
+    use sav::ReasoningEffort;
     use std::path::PathBuf;
 
     /// Draws one frame and returns the test backend for inspection.
@@ -843,10 +843,7 @@ mod tests {
         let text = buffer_text(&draw(&app));
         // The path is far longer than the inner width; with soft wrapping its
         // tail stays visible inside the box instead of being truncated.
-        assert!(
-            text.contains("skott.toml"),
-            "wrapped tail missing:\n{text}"
-        );
+        assert!(text.contains("skott.toml"), "wrapped tail missing:\n{text}");
         for line in text.lines() {
             assert!(line.chars().count() <= 40, "line overflows: {line:?}");
         }

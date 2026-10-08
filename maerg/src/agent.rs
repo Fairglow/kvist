@@ -904,9 +904,7 @@ impl TurnFailure {
                 | sav::Error::TtftTimedOut { .. }
                 | sav::Error::InterTokenCadenceTimedOut { .. } => (true, false, false),
                 sav::Error::ModelResponseLimitExceeded { .. } => (false, true, false),
-                sav::Error::ModelTransportCancelled | sav::Error::Cancelled => {
-                    (false, false, true)
-                }
+                sav::Error::ModelTransportCancelled | sav::Error::Cancelled => (false, false, true),
                 _ => (false, false, false),
             },
             _ => (false, false, false),
@@ -2192,10 +2190,7 @@ mod tests {
         )
         .expect_err("retries must be bounded");
         assert!(
-            matches!(
-                error,
-                KvistError::Sav(ModelError::ModelTransportIo { .. })
-            ),
+            matches!(error, KvistError::Sav(ModelError::ModelTransportIo { .. })),
             "the last transient error must be surfaced: {error:?}"
         );
         assert_eq!(transport.attempt_count(), MODEL_TURN_MAX_ATTEMPTS);
@@ -2242,10 +2237,7 @@ mod tests {
         )
         .expect_err("an exhausted budget must fail closed");
         assert!(
-            matches!(
-                error,
-                KvistError::Sav(ModelError::ModelTransportTimedOut)
-            ),
+            matches!(error, KvistError::Sav(ModelError::ModelTransportTimedOut)),
             "unexpected error: {error:?}"
         );
         assert_eq!(transport.attempt_count(), 0);
@@ -2445,15 +2437,13 @@ mod tests {
 
     #[test]
     fn turn_failure_classifies_deadlines_limits_and_cancellation() {
-        let timeout = TurnFailure::from_kvist_error(&KvistError::Sav(
-            ModelError::ModelTransportTimedOut,
-        ));
+        let timeout =
+            TurnFailure::from_kvist_error(&KvistError::Sav(ModelError::ModelTransportTimedOut));
         assert!(timeout.timed_out);
         assert!(!timeout.cancelled);
 
-        let cancelled = TurnFailure::from_kvist_error(&KvistError::Sav(
-            ModelError::ModelTransportCancelled,
-        ));
+        let cancelled =
+            TurnFailure::from_kvist_error(&KvistError::Sav(ModelError::ModelTransportCancelled));
         assert!(cancelled.cancelled);
         assert!(!cancelled.timed_out);
 
@@ -2462,9 +2452,10 @@ mod tests {
         ));
         assert!(oversized.output_limit_exceeded);
 
-        let other = TurnFailure::from_kvist_error(&KvistError::Sav(
-            ModelError::ModelProviderStatus { status: 500 },
-        ));
+        let other =
+            TurnFailure::from_kvist_error(&KvistError::Sav(ModelError::ModelProviderStatus {
+                status: 500,
+            }));
         assert!(!other.timed_out && !other.output_limit_exceeded && !other.cancelled);
         assert!(other.reason.contains("500"));
     }

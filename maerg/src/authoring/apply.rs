@@ -12,8 +12,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use sav::ToolIntent;
 use hex::encode as hex_encode;
+use sav::ToolIntent;
 use sha2::{Digest, Sha256};
 
 use crate::{KvistError, Result, file_io};

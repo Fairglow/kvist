@@ -7,8 +7,8 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use sav::{CancellationToken, ToolIntent};
 use galla::protocol::{NetworkMode, Phase};
+use sav::{CancellationToken, ToolIntent};
 use serde_json::json;
 use tempfile::tempdir;
 

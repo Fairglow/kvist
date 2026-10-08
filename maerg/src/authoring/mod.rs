@@ -45,8 +45,8 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
-use sav::{ModelTurn, ToolDefinition, ToolIntent};
 use hex::encode as hex_encode;
+use sav::{ModelTurn, ToolDefinition, ToolIntent};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

@@ -4729,8 +4729,7 @@ pub fn task_log(project_dir: &Path, component_path: &Path, task_id: &str) -> Res
 
 /// Replays an agent execution session from a structured JSONL journal file.
 pub fn replay_task_session(session_file: &Path, max_turns: Option<usize>) -> Result<String> {
-    let report = sav::replay_trajectory(session_file, max_turns)
-        .map_err(KvistError::Sav)?;
+    let report = sav::replay_trajectory(session_file, max_turns).map_err(KvistError::Sav)?;
 
     let mut out = String::new();
     out.push_str(&format!(

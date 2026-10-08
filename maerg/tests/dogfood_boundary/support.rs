@@ -474,8 +474,7 @@ pub fn create_target_project(status: &str) -> TargetProject {
     for artifact in ["REQUIREMENTS.md", "CONTRACT.md", "DESIGN.md", "IMPL.md"] {
         copy_maerg_artifact(&maerg, artifact);
     }
-    fs::write(maerg.join("TODOS.yaml"), queue(&maerg, status, "null"))
-        .expect("write maerg queue");
+    fs::write(maerg.join("TODOS.yaml"), queue(&maerg, status, "null")).expect("write maerg queue");
     fs::write(
         maerg.join("Cargo.toml"),
         r#"[package]
@@ -747,13 +746,7 @@ fn resolve_runner_path() -> PathBuf {
     // build it automatically so the boundary test can stage and execute it.
     if !candidates.iter().any(|p| p.is_file()) {
         let _ = Command::new("cargo")
-            .args([
-                "build",
-                "-p",
-                "galla-runner",
-                "--bin",
-                "galla-runner",
-            ])
+            .args(["build", "-p", "galla-runner", "--bin", "galla-runner"])
             .current_dir(repository_root())
             .status();
     }

@@ -20,11 +20,11 @@
 use std::io::{self, Read};
 use std::os::unix::io::{AsFd, AsRawFd};
 
-use sav::take_interrupted;
 use nix::errno::Errno;
 use nix::sys::select::{FdSet, select};
 use nix::sys::time::TimeVal;
 use nix::unistd::read;
+use sav::take_interrupted;
 
 /// How long a single read waits on stdin before re-checking for an interrupt.
 ///

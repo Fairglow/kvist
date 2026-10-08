@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use sav::{
     CancellationToken, CatalogProvider, CommandSpec, DirectModelTransport, Error,
     LocalModelProvider, ModelDiscoveryOptions, ModelMessage, ModelRequest, ModelStreamEvent,
@@ -16,7 +17,6 @@ use sav::{
     render_command_with_reasoning_effort, resolve_prompt, run_setup_wizard_with_options,
     run_supervised, run_supervised_capture,
 };
-use clap::{Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -651,10 +651,7 @@ fn write_stderr(bytes: &[u8]) -> sav::Result<()> {
         })
 }
 
-fn write_json(
-    writer: &mut impl Write,
-    turn: &sav::ModelTurn,
-) -> sav::Result<()> {
+fn write_json(writer: &mut impl Write, turn: &sav::ModelTurn) -> sav::Result<()> {
     serde_json::to_writer(&mut *writer, turn).map_err(|source| Error::Io {
         operation: "write JSON model output",
         path: PathBuf::from("<stdout>"),

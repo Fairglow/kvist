@@ -5,11 +5,7 @@ use std::time::Duration;
 use sav::{CancellationToken, DirectModelTransport, LocalModelProvider};
 use serde_json::{Value, json};
 
-fn capacity(
-    provider: LocalModelProvider,
-    model: &str,
-    body: Value,
-) -> sav::Result<Option<usize>> {
+fn capacity(provider: LocalModelProvider, model: &str, body: Value) -> sav::Result<Option<usize>> {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let model_id = model.to_owned();

@@ -1100,10 +1100,7 @@ mod tests {
             values(&complete(&c, "task run . ")),
             vec!["write-tests", "implement-code"]
         );
-        assert_eq!(
-            values(&complete(&c, "task run maerg ")),
-            vec!["build-tree"]
-        );
+        assert_eq!(values(&complete(&c, "task run maerg ")), vec!["build-tree"]);
     }
 
     #[test]
@@ -1167,10 +1164,7 @@ mod tests {
     fn dynamic_values_do_not_leak_across_components() {
         let c = completer_with_state(fixture_state());
         // The root's tasks must not appear when completing maerg tasks.
-        assert_eq!(
-            values(&complete(&c, "task run maerg ")),
-            vec!["build-tree"]
-        );
+        assert_eq!(values(&complete(&c, "task run maerg ")), vec!["build-tree"]);
         // The root's attempts must not appear under tasks.
         assert!(complete(&c, "task finalize maerg build-tree ").is_empty());
     }

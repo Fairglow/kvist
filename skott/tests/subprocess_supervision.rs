@@ -4,13 +4,11 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use skott::sandbox::{BuildRequest, build_request, default_resources, execute};
-use skott::{
-    HostExecutor, SandboxPaths, ToolExecutor, ToolOutcome, ToolPolicy, ToolRegistry,
-};
-use sav::{CancellationToken, ToolIntent};
 use galla::protocol::SandboxRequest;
+use sav::{CancellationToken, ToolIntent};
 use serde_json::json;
+use skott::sandbox::{BuildRequest, build_request, default_resources, execute};
+use skott::{HostExecutor, SandboxPaths, ToolExecutor, ToolOutcome, ToolPolicy, ToolRegistry};
 use tempfile::{Builder, TempDir};
 
 fn fixture(script: &str, limit: u64) -> (TempDir, SandboxPaths, SandboxRequest) {
@@ -381,10 +379,7 @@ fn missing_installed_runner_remains_a_fail_closed_spawn_error() {
     let (dir, mut paths, request) = fixture("exit 0", 1000);
     paths.runner = dir.path().join("missing-runner");
     let error = execute(&paths, &request, &CancellationToken::new()).unwrap_err();
-    assert!(matches!(
-        error,
-        skott::Error::SandboxUnavailable { .. }
-    ));
+    assert!(matches!(error, skott::Error::SandboxUnavailable { .. }));
 }
 
 struct OwnedFixtureCleanup(PathBuf);

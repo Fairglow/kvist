@@ -999,12 +999,7 @@ pub fn check_agents<R: BufRead, W: Write>(
                     provider,
                     command,
                 };
-                match sav::verify_profile(
-                    &profile,
-                    sav::SETUP_TEST_PROMPT,
-                    project_dir,
-                    true,
-                ) {
+                match sav::verify_profile(&profile, sav::SETUP_TEST_PROMPT, project_dir, true) {
                     Ok(()) => {
                         write_output(writer, &format!("{name} ... ok\n"))?;
                         None

@@ -3577,10 +3577,7 @@ mod tests {
         // Network-allow, allowlisted package sources only.
         assert_eq!(request.network.mode, NetworkMode::PackageSources);
         assert_eq!(request.network.allowed_sources.len(), 1);
-        assert_eq!(
-            request.phase,
-            galla::protocol::Phase::DependencyAcquisition
-        );
+        assert_eq!(request.phase, galla::protocol::Phase::DependencyAcquisition);
 
         // The closed acquisition topology is exactly four grants: toolchain,
         // writable dependency-cache, writable scratch, and writable lockfile.

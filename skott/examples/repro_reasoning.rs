@@ -1,7 +1,7 @@
+use sav::ReasoningEffort;
 use skott::session::Event;
 use skott::tui::app::{App, LineKind, REASONING_EDGE_CONT, REASONING_EDGE_FIRST};
 use skott::tui::theme::Theme;
-use sav::ReasoningEffort;
 
 fn build(width: u16) -> App {
     App::new(
