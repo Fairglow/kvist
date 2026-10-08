@@ -2111,7 +2111,7 @@ pub(crate) fn cargo_toolchain_from_path(
 pub fn resolve_cargo_toolchain(runner: &str) -> Result<ResolvedCargoToolchain> {
     let mut command = std::process::Command::new("rustup");
     command.args(["which", "cargo"]);
-    command.env("RUSTUP_TOOLCHAIN", "/rust/toolchain");
+    command.env("RUSTUP_AUTO_INSTALL", "0");
     command.env("RUSTUP_OFFLINE", "true");
     let output = command
         .output()
