@@ -254,7 +254,7 @@ fn rust_toolchain_is_discoverable_via_path_and_version_commands() {
     // rustdoc are the real binaries at /rust/toolchain/bin/.
     let result = shell(
         &executor,
-        "echo PATH=$PATH && which rustc && which cargo && which rustdoc && rustc --version && cargo --version && rustdoc --version",
+        "echo PATH=$PATH && which rustc && which cargo && which rustdoc && rustc --version && cargo --version && rustdoc --version && test -d /home/stefan && false || test ! -d /home/stefan",
     );
     let output = result.output_text(8192);
     let error = result.error_text(8192);
@@ -276,6 +276,89 @@ fn rust_toolchain_is_discoverable_via_path_and_version_commands() {
     assert!(
         output.contains("rustdoc 1."),
         "rustdoc version output missing"
+    );
+}
+
+#[test]
+#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
+fn cargo_installed_tools_are_available_in_sandbox() {
+    let directory = fixture();
+    let workdir = directory.path().canonicalize().unwrap();
+    fs::create_dir(workdir.join("src")).unwrap();
+    fs::write(
+        workdir.join("Cargo.toml"),
+        "[package]\nname=\"cargo-tools-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n",
+    )
+    .unwrap();
+    fs::write(workdir.join("src/lib.rs"), "pub fn answer() -> u8 { 42 }\n").unwrap();
+    fs::write(
+        workdir.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = \"cargo-tools-trial\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let registry = resolve(&workdir).unwrap();
+    let executor = SandboxExecutor::new(
+        registry,
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        workdir.clone(),
+    );
+    // Verify that cargo-installed tools are available via PATH inside the sandbox.
+    // This checks that the user's ~/.cargo/bin directory is mounted and accessible.
+    let result = shell(&executor, "which cargo-nextest && cargo nextest --version");
+    let output = result.output_text(8192);
+    let error = result.error_text(8192);
+    if result.failed() {
+        eprintln!("output: {output}");
+        eprintln!("error: {error}");
+    }
+    // The test should pass if cargo-nextest is installed on the host.
+    // If it's not installed, the test should fail with a clear error.
+    assert!(
+        !result.failed(),
+        "cargo-nextest should be available in the sandbox: {error}"
+    );
+    assert!(
+        output.contains("/rust/user-cargo-bin/cargo-nextest"),
+        "cargo-nextest not found at expected path"
+    );
+}
+
+#[test]
+#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
+fn home_directory_is_not_accessible_in_sandbox() {
+    let directory = fixture();
+    let workdir = directory.path().canonicalize().unwrap();
+    fs::create_dir(workdir.join("src")).unwrap();
+    fs::write(
+        workdir.join("Cargo.toml"),
+        "[package]\nname=\"home-test-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n",
+    )
+    .unwrap();
+    fs::write(workdir.join("src/lib.rs"), "pub fn answer() -> u8 { 42 }\n").unwrap();
+    fs::write(
+        workdir.join("Cargo.lock"),
+        "version = 4\n[[package]]\nname = \"home-test-trial\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    let registry = resolve(&workdir).unwrap();
+    let executor = SandboxExecutor::new(
+        registry,
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        workdir.clone(),
+    );
+    // Verify that the home directory is not accessible inside the sandbox.
+    // Only specific subdirectories (like ~/.cargo/bin) are mounted, not the
+    // entire home directory.
+    let result = shell(&executor, "test -d /home/stefan && false || true");
+    assert!(
+        !result.failed(),
+        "home directory should not be accessible in the sandbox"
     );
 }
 

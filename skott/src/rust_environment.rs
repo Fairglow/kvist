@@ -79,6 +79,7 @@ struct Resources {
     has_vendor: bool,
     pin_identity: String,
     pinned: bool,
+    user_cargo_bin: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -597,10 +598,25 @@ impl RustEnvironment {
                 fingerprint: file_fingerprint,
             });
         }
+        // Resolve the user's cargo bin directory for cargo-installed tools
+        // like cargo-nextest, cargo-deny, etc. These are not part of the
+        // rustup toolchain but are commonly needed for Rust development.
+        let user_cargo_bin = home.join(".cargo").join("bin");
+        let has_user_cargo_bin = match fs::symlink_metadata(&user_cargo_bin) {
+            Ok(metadata) => metadata.is_dir(),
+            Err(_) => false,
+        };
+
+        let user_cargo_bin_path = if has_user_cargo_bin {
+            user_cargo_bin.to_string_lossy().into_owned()
+        } else {
+            "none".to_owned()
+        };
         let identity = label(
             format!(
-                "kvist/authoring-rust/v1\0{selected}\0{}\0{executables:?}",
-                root.display()
+                "kvist/authoring-rust/v1\0{selected}\0{}\0{}\0{executables:?}",
+                root.display(),
+                user_cargo_bin_path
             )
             .as_bytes(),
         );
@@ -672,6 +688,11 @@ impl RustEnvironment {
                 has_vendor,
                 pin_identity,
                 pinned,
+                user_cargo_bin: if has_user_cargo_bin {
+                    Some(user_cargo_bin)
+                } else {
+                    None
+                },
             }),
         })
     }
@@ -739,32 +760,51 @@ impl RustEnvironment {
     }
 
     pub(crate) fn grants(&self) -> Vec<Grant> {
-        [
-            (
-                self.resources.root.clone(),
-                TOOLCHAIN_DEST,
-                self.resources.identity.clone(),
-            ),
-            (
-                self.resources.staging.path().join("runtime"),
-                RUNTIME_DEST,
-                self.resources.identity.clone(),
-            ),
-            (
-                self.resources.staging.path().join("vendor"),
-                VENDOR_DEST,
-                self.resources.vendor_identity.clone(),
-            ),
-        ]
-        .into_iter()
-        .map(|(source, destination, identity)| Grant {
-            source: source.to_string_lossy().into_owned(),
-            destination: destination.into(),
-            access: Access::ReadOnly,
-            purpose: Purpose::Toolchain,
-            identity,
-        })
-        .collect()
+        let mut grants = vec![
+            Grant {
+                source: self.resources.root.to_string_lossy().into_owned(),
+                destination: TOOLCHAIN_DEST.into(),
+                access: Access::ReadOnly,
+                purpose: Purpose::Toolchain,
+                identity: self.resources.identity.clone(),
+            },
+            Grant {
+                source: self
+                    .resources
+                    .staging
+                    .path()
+                    .join("runtime")
+                    .to_string_lossy()
+                    .into_owned(),
+                destination: RUNTIME_DEST.into(),
+                access: Access::ReadOnly,
+                purpose: Purpose::Toolchain,
+                identity: self.resources.identity.clone(),
+            },
+            Grant {
+                source: self
+                    .resources
+                    .staging
+                    .path()
+                    .join("vendor")
+                    .to_string_lossy()
+                    .into_owned(),
+                destination: VENDOR_DEST.into(),
+                access: Access::ReadOnly,
+                purpose: Purpose::Toolchain,
+                identity: self.resources.vendor_identity.clone(),
+            },
+        ];
+        if let Some(user_cargo_bin) = &self.resources.user_cargo_bin {
+            grants.push(Grant {
+                source: user_cargo_bin.to_string_lossy().into_owned(),
+                destination: "/rust/user-cargo-bin".into(),
+                access: Access::ReadOnly,
+                purpose: Purpose::Toolchain,
+                identity: self.resources.identity.clone(),
+            });
+        }
+        grants
     }
 
     pub(crate) fn identity(&self) -> &str {
@@ -772,11 +812,13 @@ impl RustEnvironment {
     }
 
     pub(crate) fn environment(&self) -> BTreeMap<String, String> {
+        let path = if self.resources.user_cargo_bin.is_some() {
+            "/rust/runtime/bin:/rust/toolchain/bin:/rust/user-cargo-bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        } else {
+            "/rust/runtime/bin:/rust/toolchain/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+        };
         [
-            (
-                "PATH",
-                "/rust/runtime/bin:/rust/toolchain/bin:/usr/bin:/bin:/usr/sbin:/sbin",
-            ),
+            ("PATH", path),
             ("HOME", "/tmp"),
             ("CARGO_HOME", "/tmp/cargo-home"),
             ("CARGO_TARGET_DIR", "/tmp/target"),

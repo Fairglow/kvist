@@ -351,24 +351,24 @@ impl fmt::Display for ProjectInspection {
             writeln!(formatter, "  vcs diagnostic: {diagnostic}")?;
         }
 
-        if let Some(toolchain) = &self.toolchain {
-            if toolchain.is_rust_project {
-                writeln!(formatter, "\n[Rust Toolchain]")?;
-                if let Some(channel) = &toolchain.channel {
-                    writeln!(formatter, "  channel: {}", channel)?;
+        if let Some(toolchain) = &self.toolchain
+            && toolchain.is_rust_project
+        {
+            writeln!(formatter, "\n[Rust Toolchain]")?;
+            if let Some(channel) = &toolchain.channel {
+                writeln!(formatter, "  channel: {}", channel)?;
+            }
+            if !toolchain.manifest_exists {
+                writeln!(formatter, "  manifest: missing")?;
+            } else if let Some(available) = toolchain.available {
+                if available {
+                    writeln!(formatter, "  available: yes")?;
+                } else {
+                    writeln!(formatter, "  available: no")?;
                 }
-                if !toolchain.manifest_exists {
-                    writeln!(formatter, "  manifest: missing")?;
-                } else if let Some(available) = toolchain.available {
-                    if available {
-                        writeln!(formatter, "  available: yes")?;
-                    } else {
-                        writeln!(formatter, "  available: no")?;
-                    }
-                }
-                if let Some(diagnostic) = &toolchain.diagnostic {
-                    writeln!(formatter, "  diagnostic: {}", diagnostic)?;
-                }
+            }
+            if let Some(diagnostic) = &toolchain.diagnostic {
+                writeln!(formatter, "  diagnostic: {}", diagnostic)?;
             }
         }
 

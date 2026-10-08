@@ -128,7 +128,7 @@ fn git_worktree_root() -> Option<PathBuf> {
 }
 
 #[test]
-#[ignore = "expected to run inside sandbox"]
+#[ignore = "requires live sandbox environment and network access"]
 fn offline_cargo_verification_builds_tested_project_denied_network() {
     let Some(runner) = locate_runner() else {
         eprintln!("skip: no built sandbox runner; build it first");
@@ -249,7 +249,7 @@ fn offline_cargo_verification_builds_tested_project_denied_network() {
 }
 
 #[test]
-#[ignore = "expected to run inside sandbox"]
+#[ignore = "requires live sandbox environment and network access"]
 fn acquisition_sandbox_provisions_vendored_registry_before_verification() {
     // End-to-end: a stale registry is re-provisioned by the in-sandbox
     // acquisition phase (network-allow `cargo fetch`), repacked into the
