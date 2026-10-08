@@ -139,6 +139,8 @@ pub struct ProjectInspection {
     pub root_diagnostic: Option<String>,
     /// Read-only durable-artifact tracking inspection.
     pub vcs: VcsInspection,
+    /// Read-only toolchain inspection (when the project uses Rust).
+    pub toolchain: Option<ToolchainInspection>,
     /// Action the owner can take without Kvist rewriting project content.
     pub guidance: String,
     /// Configured component root when the root project is current.
@@ -147,6 +149,21 @@ pub struct ProjectInspection {
     pub components: Vec<ComponentInspection>,
     /// Discovery failure captured without changing root-artifact classification.
     pub discovery_error: Option<String>,
+}
+
+/// The inspected state of the project's Rust toolchain.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolchainInspection {
+    /// Whether the project uses Rust (has Cargo.toml).
+    pub is_rust_project: bool,
+    /// Whether a toolchain manifest exists.
+    pub manifest_exists: bool,
+    /// The toolchain channel (from manifest or pin).
+    pub channel: Option<String>,
+    /// Whether the toolchain is available and matches the manifest.
+    pub available: Option<bool>,
+    /// Diagnostic message when the toolchain is not available.
+    pub diagnostic: Option<String>,
 }
 
 /// The inspected state of one discovered component.
@@ -333,8 +350,93 @@ impl fmt::Display for ProjectInspection {
         if let Some(diagnostic) = &self.vcs.diagnostic {
             writeln!(formatter, "  vcs diagnostic: {diagnostic}")?;
         }
+
+        if let Some(toolchain) = &self.toolchain {
+            if toolchain.is_rust_project {
+                writeln!(formatter, "\n[Rust Toolchain]")?;
+                if let Some(channel) = &toolchain.channel {
+                    writeln!(formatter, "  channel: {}", channel)?;
+                }
+                if !toolchain.manifest_exists {
+                    writeln!(formatter, "  manifest: missing")?;
+                } else if let Some(available) = toolchain.available {
+                    if available {
+                        writeln!(formatter, "  available: yes")?;
+                    } else {
+                        writeln!(formatter, "  available: no")?;
+                    }
+                }
+                if let Some(diagnostic) = &toolchain.diagnostic {
+                    writeln!(formatter, "  diagnostic: {}", diagnostic)?;
+                }
+            }
+        }
+
         write!(formatter, "\nguidance: {}", self.guidance)
     }
+}
+
+/// Inspects the project's Rust toolchain state without mutating anything.
+fn inspect_toolchain(project_dir: &Path) -> Option<ToolchainInspection> {
+    // Check if this is a Rust project (has Cargo.toml).
+    let cargo_toml = project_dir.join("Cargo.toml");
+    if !cargo_toml.is_file() {
+        return None;
+    }
+
+    let manifest_path = project_dir.join(".kvist/rust-toolchain.json");
+    let manifest_exists = manifest_path.is_file();
+
+    let channel = if manifest_exists {
+        match crate::toolchain::load_manifest(project_dir) {
+            Ok(Some(manifest)) => Some(manifest.channel),
+            Ok(None) => None,
+            Err(_) => None,
+        }
+    } else {
+        // Check for a pin file.
+        match crate::toolchain::read_toolchain_pin(project_dir) {
+            Ok(pin) => Some(pin.channel),
+            Err(_) => None,
+        }
+    };
+
+    // Lightweight availability check: verify the cargo binary is accessible.
+    let available = if manifest_exists {
+        match crate::toolchain::load_manifest(project_dir) {
+            Ok(Some(manifest)) => {
+                let cargo_path = project_dir.join(&manifest.cargo_path);
+                if cargo_path.is_file() {
+                    Some(true)
+                } else {
+                    Some(false)
+                }
+            }
+            Ok(None) => None,
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    let diagnostic = match (manifest_exists, available) {
+        (false, _) => {
+            Some("no toolchain manifest found; run `kvist toolchain` to provision".to_owned())
+        }
+        (true, Some(false)) => {
+            Some("toolchain manifest exists but cargo binary is not accessible; re-run `kvist toolchain`".to_owned())
+        }
+        (true, Some(true)) => None,
+        _ => None,
+    };
+
+    Some(ToolchainInspection {
+        is_rust_project: true,
+        manifest_exists,
+        channel,
+        available,
+        diagnostic,
+    })
 }
 
 /// Inspects a project without creating, modifying, or following root artifact
@@ -371,6 +473,7 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
             vcs: VcsInspection::not_checked(
                 "root artifacts do not exist yet; initialize and validate the project first",
             ),
+            toolchain: None,
             guidance: "run `kvist init` to create the Phase 1 root artifacts".to_owned(),
             component_root: None,
             components: Vec::new(),
@@ -385,10 +488,12 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         .collect::<Result<Vec<_>>>()?;
     let state = classify(&artifacts);
     let (component_root, components, discovery_error) = inspect_components(project_dir, state)?;
+    let toolchain = inspect_toolchain(project_dir);
     tracing::debug!(
         project_dir = %project_dir.display(),
         state = state.name(),
         components_count = components.len(),
+        has_toolchain = toolchain.is_some(),
         "inspected project state"
     );
     Ok(ProjectInspection {
@@ -397,6 +502,7 @@ pub fn inspect(project_dir: &Path) -> Result<ProjectInspection> {
         artifacts,
         root_diagnostic: None,
         vcs: inspect_vcs(project_dir, state),
+        toolchain,
         guidance: guidance(state).to_owned(),
         component_root,
         components,
@@ -525,6 +631,7 @@ fn invalid_root_inspection(project_dir: &Path) -> ProjectInspection {
         vcs: VcsInspection::not_checked(
             "project root is not a real directory, so durable artifact paths cannot be inspected",
         ),
+        toolchain: None,
         guidance: guidance(ProjectState::Invalid).to_owned(),
         component_root: None,
         components: Vec::new(),

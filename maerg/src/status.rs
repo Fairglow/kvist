@@ -825,6 +825,7 @@ mod tests {
                 summary: String::new(),
                 diagnostic: None,
             },
+            toolchain: None,
             guidance: String::new(),
             component_root: None,
             components: vec![component],
