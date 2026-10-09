@@ -135,10 +135,9 @@ fn durable_source_present(vendored: &Path, pkg: &LockPackage) -> bool {
 
     // Check flat layout first (newer cargo)
     let flat_dir = vendored.join(flat);
-    if flat_dir.is_dir()
-        && version_matches(&flat_dir, &pkg.version) {
-            return true;
-        }
+    if flat_dir.is_dir() && version_matches(&flat_dir, &pkg.version) {
+        return true;
+    }
 
     // Check numbered layout (older cargo)
     let numbered_dir = vendored.join(numbered);
