@@ -12,7 +12,7 @@ use crate::config::Config;
 use crate::error::{Error, Result, io_error};
 use crate::executor::SandboxExecutor;
 use crate::session::{AgentSession, Event, EventSink, RunSummary, Skott};
-use crate::session_log::SessionLog;
+use crate::session_transcript::SessionTranscript;
 use crate::tools::ToolRegistry;
 use crate::tui::Overrides;
 
@@ -219,7 +219,7 @@ pub fn run(config: Config, overrides: Overrides, json_output: bool) -> Result<Ru
     let resource_notes = registry.diagnostics().to_vec();
     let definitions = registry.tool_definitions();
     let executor = SandboxExecutor::new(registry, config.sandbox.clone(), workdir.clone());
-    let mut log = SessionLog::open(&logs, format!("skott-{}", model.id))
+    let mut log = SessionTranscript::open(&logs, format!("skott-{}", model.id), Some(&model.id))
         .map_err(|source| {
             io_error(
                 "open private headless journal",

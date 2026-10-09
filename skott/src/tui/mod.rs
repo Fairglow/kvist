@@ -33,7 +33,7 @@ use crate::executor::SandboxExecutor;
 use crate::host::HostExecutor;
 use crate::run::{self, start};
 use crate::session::{AgentSession, MAX_TURNS, Recorder, ToolExecutor};
-use crate::session_log::SessionLog;
+use crate::session_transcript::SessionTranscript;
 use crate::tools::ToolRegistry;
 
 /// User-selected overrides applied over a loaded configuration.
@@ -452,7 +452,7 @@ impl SessionBuilder {
                     .join(crate::session_log::DEFAULT_LOG_DIR)
             });
             Some(Box::new(
-                SessionLog::open(&dir, format!("skott-{}", model.id))
+                SessionTranscript::open(&dir, format!("skott-{}", model.id), Some(&model.id))
                     .map_err(|source| {
                         crate::error::io_error(
                             "open private session log directory",

@@ -286,6 +286,10 @@ impl SessionLog {
     pub fn transcript_path(&self) -> &Path {
         &self.transcript_path
     }
+    /// The session identifier.
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
     /// Caller-supplied descriptive label; not a maerg approval identity.
     pub fn task_id(&self) -> &str {
         &self.task_id

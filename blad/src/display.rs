@@ -1,68 +1,107 @@
-//! Session display.
+//! Session and file display for Blad.
 
-use std::fs;
-use std::path::Path;
+use std::io::{self, Write};
 
-/// Run the show session command.
-pub fn run_show_session(session_id: &str, message: Option<usize>) {
-    let base_dir = Path::new(".blad/sessions");
-    let session_path = base_dir.join(session_id);
+use crate::session::{Message, Session, load_messages};
 
-    if !session_path.exists() {
-        println!("Session not found: {}", session_id);
-        return;
+/// Show a completed session transcript.
+pub fn show_session(session: &Session) {
+    println!("Session: {}", session.id);
+    if let Some(model) = &session.model {
+        println!("Model: {}", model);
     }
-
-    // Read manifest
-    let manifest_path = session_path.join("manifest.json");
-    let json = fs::read_to_string(&manifest_path).unwrap();
-    let manifest: serde_json::Value = serde_json::from_str(&json).unwrap();
-
-    let session_id = manifest["session_id"].as_str().unwrap();
-    let status = manifest["status"].as_str().unwrap();
-    let created_at = manifest["created_at"].as_str().unwrap();
-    let entry_count = manifest["entry_count"].as_u64().unwrap() as usize;
-
-    println!("Session: {}", session_id);
-    println!("Status: {}", status);
-    println!("Created: {}", created_at);
-    println!("Messages: {}", entry_count);
+    if let Some(created_at) = &session.created_at {
+        println!("Started: {}", created_at);
+    }
+    println!("Messages: {}", session.message_count);
     println!();
 
-    // Show messages
-    let entries = manifest["entries"].as_array().unwrap();
-    let mut shown = 0;
+    let messages = load_messages(session);
+    for msg in &messages {
+        print_message(msg);
+    }
+}
 
-    for entry in entries {
-        let sequence = entry["sequence"].as_u64().unwrap() as usize;
-        let kind = entry["kind"].as_str().unwrap();
-        let complete = entry["complete"].as_bool().unwrap();
-
-        if let Some(msg_num) = message {
-            if sequence != msg_num {
-                continue;
-            }
-        }
-
-        let path = session_path.join(entry["path"].as_str().unwrap());
-        let content = fs::read_to_string(&path).unwrap();
-
-        println!(
-            "--- Message {} ({}{}) ---",
-            sequence,
-            kind,
-            if complete { "" } else { " (streaming)" }
-        );
-        println!("{}", content);
-        println!();
-
-        shown += 1;
-        if let Some(_) = message {
-            break;
-        }
+/// Stream a live or recently-completed session.
+pub fn stream_session(session: &Session) {
+    let messages = load_messages(session);
+    for msg in &messages {
+        print_message(msg);
     }
 
-    if message.is_some() && shown == 0 {
-        println!("Message not found: {}", message.unwrap());
+    if !session.completed {
+        println!("\n(session still active - re-run to see updates)");
     }
+}
+
+/// View a standalone markdown file.
+pub fn view_markdown(content: &str) {
+    print!("{}", content);
+}
+
+/// Export a session to a combined markdown document.
+pub fn export_session(session: &Session, output: Option<&std::path::Path>) {
+    let mut doc = String::new();
+    doc.push_str("# Session Transcript\n\n");
+    doc.push_str(&format!("Session: {}\n", session.id));
+    if let Some(model) = &session.model {
+        doc.push_str(&format!("Model: {}\n", model));
+    }
+    if let Some(created_at) = &session.created_at {
+        doc.push_str(&format!("Started: {}\n", created_at));
+    }
+    doc.push_str("\n---\n\n");
+
+    let messages = load_messages(session);
+    for msg in &messages {
+        let kind_label = match msg.kind.as_str() {
+            "user" => "User",
+            "assistant" => "Assistant",
+            "reasoning" => "Thinking",
+            "tool_dispatch" => "Tool Call",
+            "tool_result" => "Tool Result",
+            "notice" => "Notice",
+            _ => &msg.kind,
+        };
+        doc.push_str(&format!("## {}\n\n", kind_label));
+        doc.push_str(&msg.content);
+        doc.push_str("\n\n---\n\n");
+    }
+
+    match output {
+        Some(path) => {
+            let mut file = std::fs::File::create(path).expect("failed to create output file");
+            file.write_all(doc.as_bytes())
+                .expect("failed to write output file");
+            println!("Exported to {}", path.display());
+        }
+        None => {
+            io::stdout()
+                .write_all(doc.as_bytes())
+                .expect("failed to write output");
+        }
+    }
+}
+
+/// Print a single message with its label.
+fn print_message(msg: &Message) {
+    let kind_label = match msg.kind.as_str() {
+        "user" => "User",
+        "assistant" => "Assistant",
+        "reasoning" => "Thinking",
+        "tool_dispatch" => "Tool Call",
+        "tool_result" => "Tool Result",
+        "notice" => "Notice",
+        _ => &msg.kind,
+    };
+
+    let disposition = match &msg.disposition {
+        Some(d) if d == "final" => " (final)",
+        Some(d) if d == "interim" => " (interim)",
+        _ => "",
+    };
+
+    println!("--- {}{} ---", kind_label, disposition);
+    println!("{}", msg.content);
+    println!();
 }
