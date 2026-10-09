@@ -4,6 +4,7 @@ members = [
     "sav",
     "galla",
     "skott",
+    "blad",
 ]
 default-members = ["maerg"]
 resolver = "3"
