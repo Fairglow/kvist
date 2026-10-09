@@ -273,7 +273,27 @@ impl Shell {
         line: &str,
         history: &dyn reedline::History,
     ) -> LoopAction {
-        let line = line.trim();
+        // Pasted content arrives as a single Signal::Success with embedded
+        // newlines. Split it into individual commands so each line is
+        // processed separately rather than treating the whole paste as one
+        // command (which would fail to parse or run partial commands).
+        if line.contains('\n') {
+            let mut result = LoopAction::Continue;
+            for part in line.split('\n') {
+                let part_line = part.trim().to_owned();
+                if part_line.is_empty() {
+                    continue;
+                }
+                // Recurse to handle each line; if any says exit, propagate.
+                if self.handle_line(&part_line, history) == LoopAction::Exit {
+                    result = LoopAction::Exit;
+                    break;
+                }
+            }
+            return result;
+        }
+
+        let line = line.trim().to_owned();
         if line.is_empty() {
             return LoopAction::Continue;
         }
@@ -391,11 +411,11 @@ impl Shell {
                     self.handle_prompt_authoring(line, &arguments[0]);
                 }
                 _ => {
-                    self.dispatch(line);
+                    self.dispatch(&line);
                 }
             },
             _ => {
-                self.dispatch(line);
+                self.dispatch(&line);
             }
         }
         LoopAction::Continue
@@ -1596,7 +1616,8 @@ fn build_editor(
         }))
         .with_menu(ReedlineMenu::EngineCompleter(completion_menu))
         .with_edit_mode(edit_mode)
-        .with_quick_completions(true);
+        .with_quick_completions(true)
+        .use_bracketed_paste(true);
     Ok(editor)
 }
 
@@ -1708,6 +1729,25 @@ pub fn run_shell(project_dir: &Path) -> Result<()> {
                 break;
             }
             Signal::Success(line) => {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                // Pasted content arrives as a single Signal::Success with embedded
+                // newlines. Split it into individual commands so each line is
+                // processed separately rather than treating the whole paste as one
+                // command (which would fail to parse or run partial commands).
+                if line.contains('\n') {
+                    for part in line.split('\n') {
+                        let part_line = part.trim().to_owned();
+                        if part_line.is_empty() {
+                            continue;
+                        }
+                        if shell.handle_line(&part_line, editor.history()) == LoopAction::Exit {
+                            break;
+                        }
+                    }
+                    continue;
+                }
                 if shell.handle_line(&line, editor.history()) == LoopAction::Exit {
                     break;
                 }
