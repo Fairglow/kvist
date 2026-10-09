@@ -557,7 +557,7 @@ mod tests {
     fn host_prompt_does_not_claim_sandbox_confinement() {
         let prompt = host_system_prompt("/workspace", std::path::Path::new("/tmp/project"));
         assert!(prompt.contains("HOST UNCONFINED") && prompt.contains("/tmp/project"));
-        assert!(prompt.contains("NOT sandbox constrained"));
+        assert!(prompt.contains("NOT Kvist's protected task broker"));
         assert!(!prompt.contains("running inside a sandbox"));
     }
 
