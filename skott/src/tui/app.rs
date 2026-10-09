@@ -194,23 +194,28 @@ pub enum Overlay {
     ModelPicker,
     /// The thinking effort picker, reached from the menu's "Thinking effort" item.
     EffortPicker,
+    /// The about dialog showing version and build info.
+    About,
 }
 
 /// The `Esc` menu actions, in display order, with their single-letter hotkeys.
-/// The cancel item is conditionally shown only when a session is running.
-pub const MENU_ITEMS: [&str; 7] = [
+/// The cancel/quit item at index 5 is shown as "Cancel" when running, "Quit" when idle.
+pub const MENU_ITEMS: [&str; 8] = [
     "Select model",
     "Thinking effort",
     "New session",
     "Session history",
     "Theme",
     "Quit",
+    "About",
     "Back",
 ];
-pub const MENU_HOTKEYS: [char; 7] = ['m', 'e', 'n', 'h', 't', 'q', 'b'];
+pub const MENU_HOTKEYS: [char; 8] = ['m', 'e', 'n', 'h', 't', 'q', 'a', 'b'];
 
-/// The index of the cancel item (shown conditionally).
+/// The index of the cancel/quit item.
 pub const MENU_CANCEL_INDEX: usize = 5;
+/// The index of the about item.
+pub const MENU_ABOUT_INDEX: usize = 6;
 
 /// The interactive application state driven by events and key input.
 pub struct App {
@@ -892,6 +897,15 @@ impl App {
             Overlay::ThemePicker => return self.handle_theme_picker_key(key),
             Overlay::ModelPicker => return self.handle_model_picker_key(key),
             Overlay::EffortPicker => return self.handle_effort_picker_key(key),
+            Overlay::About => {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Enter => {
+                        self.overlay = Overlay::None;
+                    }
+                    _ => {}
+                }
+                return KeyAction::Idle;
+            }
             Overlay::None => {}
         }
         if self.show_help {
@@ -1615,6 +1629,11 @@ impl App {
                     KeyAction::Quit
                 }
             }
+            MENU_ABOUT_INDEX => {
+                // About
+                self.overlay = Overlay::About;
+                KeyAction::Idle
+            }
             _ => {
                 // Back
                 self.overlay = Overlay::None;
@@ -1634,6 +1653,14 @@ impl App {
                 self.should_quit = true;
                 KeyAction::Quit
             }
+            KeyCode::Char('c') => {
+                if self.running {
+                    self.status = "cancelling".to_owned();
+                    KeyAction::Cancel
+                } else {
+                    KeyAction::Idle
+                }
+            }
             KeyCode::Char('n') => {
                 self.new_session();
                 self.overlay = Overlay::None;
@@ -1645,6 +1672,10 @@ impl App {
             }
             KeyCode::Char('t') => {
                 self.open_theme_picker();
+                KeyAction::Idle
+            }
+            KeyCode::Char('a') => {
+                self.overlay = Overlay::About;
                 KeyAction::Idle
             }
             KeyCode::Down | KeyCode::Char('j') => {

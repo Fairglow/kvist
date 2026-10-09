@@ -121,6 +121,10 @@ pub fn render(f: &mut ratatui::Frame, app: &App) {
             render_transcript(f, app, transcript_area);
             render_theme_picker(f, app, transcript_area);
         }
+        (false, Overlay::About) => {
+            render_transcript(f, app, transcript_area);
+            render_about(f, app, transcript_area);
+        }
         (false, Overlay::None) => render_transcript(f, app, transcript_area),
     }
     render_input(f, app, input_area);
@@ -379,7 +383,7 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
 /// single-letter hotkeys; Esc or `b` returns to the prompt.
 fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
     let theme = &app.theme;
-    // Build the menu lines with conditional cancel item.
+    // Build the menu lines with conditional cancel/quit item.
     let mut lines: Vec<Line> = vec![
         Line::from(Span::styled(" skott menu ", theme.title)),
         Line::from(""),
@@ -387,10 +391,12 @@ fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from(""),
     ];
     for (index, item) in MENU_ITEMS.iter().enumerate() {
-        // Skip the cancel item if not running.
-        if index == MENU_CANCEL_INDEX && !app.running {
-            continue;
-        }
+        // The cancel/quit item is shown as "Cancel" when running, "Quit" when idle.
+        let item_text = if index == MENU_CANCEL_INDEX {
+            if app.running { "Cancel" } else { "Quit" }
+        } else {
+            *item
+        };
         let selected = index == app.menu_selection;
         let style = if selected {
             theme.menu_selected
@@ -400,7 +406,7 @@ fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
         let marker = if selected { "> " } else { "  " };
         let hotkey = MENU_HOTKEYS[index];
         lines.push(Line::from(Span::styled(
-            format!("  {marker}{item} ({hotkey})"),
+            format!("  {marker}{item_text} ({hotkey})"),
             style,
         )));
     }
@@ -430,9 +436,73 @@ fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
         .style(Style::default().bg(theme.panel_bg));
     let paragraph = Paragraph::new(Text::from(lines))
         .block(block)
+        .style(Style::default().bg(theme.panel_bg))
         .alignment(Alignment::Left)
         .wrap(Wrap { trim: false });
     f.render_widget(paragraph, menu_area);
+}
+
+/// The about dialog: shows version, build date, commit SHA, and repository.
+fn render_about(f: &mut ratatui::Frame, app: &App, area: Rect) {
+    let theme = &app.theme;
+    let version = env!("CARGO_PKG_VERSION");
+    let git_sha = env!("GIT_SHA");
+    let git_dirty = env!("GIT_DIRTY");
+    let build_date = env!("BUILD_DATE");
+    let repo = "https://github.com/Fairglow/kvist";
+
+    let dirty_suffix = if git_dirty == "true" { " (dirty)" } else { "" };
+
+    let lines: Vec<Line> = vec![
+        Line::from(Span::styled(" skott ", theme.title)),
+        Line::from(""),
+        Line::from(format!(
+            "  Version:   {}",
+            Span::styled(version, theme.title)
+        )),
+        Line::from(format!(
+            "  Build:     {}",
+            Span::styled(build_date, theme.title)
+        )),
+        Line::from(format!(
+            "  Commit:    {}{}",
+            Span::styled(git_sha, theme.title),
+            Span::from(dirty_suffix)
+        )),
+        Line::from(format!("  Repo:      {}", Span::styled(repo, theme.title))),
+        Line::from(""),
+        Line::from("  Esc or Enter to close"),
+    ];
+
+    let about_height = lines.len() as u16 + 2;
+    let about_width = 50;
+    let y_offset = if area.height >= about_height + 2 {
+        (area.height - about_height) / 2
+    } else {
+        1
+    };
+    let x_offset = if area.width >= about_width + 4 {
+        (area.width - about_width) / 2
+    } else {
+        2
+    };
+    let about_area = Rect::new(
+        area.x + x_offset,
+        area.y + y_offset,
+        about_width.min(area.width - x_offset * 2),
+        about_height.min(area.height - y_offset),
+    );
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme.panel_border))
+        .title(Span::styled(" about", theme.title))
+        .style(Style::default().bg(theme.panel_bg));
+    let paragraph = Paragraph::new(Text::from(lines))
+        .block(block)
+        .style(Style::default().bg(theme.panel_bg))
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: false });
+    f.render_widget(paragraph, about_area);
 }
 
 /// The model picker: a pop-up list of configured model ids. Enter selects
