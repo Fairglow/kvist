@@ -28,8 +28,10 @@ pub mod retry;
 pub mod sandbox;
 pub mod session;
 pub mod session_log;
+pub mod session_transcript;
 pub mod toolchain;
 pub mod tools;
+pub mod transcript_writer;
 pub mod tui;
 
 pub use cli::{Cli, parse_effort, resolve_config_path};
