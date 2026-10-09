@@ -115,13 +115,12 @@ impl Recorder for SessionTranscript {
 
     fn turn_start(&mut self, turn: &ModelTurn) -> Result<usize> {
         let idx = self.log.turn_start(turn)?;
-        if let Some(reasoning) = turn.reasoning.as_deref() {
-            if !reasoning.is_empty() {
+        if let Some(reasoning) = turn.reasoning.as_deref()
+            && !reasoning.is_empty() {
                 self.transcript
                     .record_reasoning(reasoning)
                     .map_err(|e| crate::error::io_error("record transcript reasoning", None, e))?;
             }
-        }
         Ok(idx)
     }
 

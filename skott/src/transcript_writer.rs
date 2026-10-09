@@ -45,13 +45,11 @@ pub struct ManifestEntry {
 
 /// TranscriptWriter accumulates session events and writes them to the structured format.
 pub struct TranscriptWriter {
-    session_id: String,
     base_dir: PathBuf,
     messages_dir: PathBuf,
     manifest_path: PathBuf,
     manifest: SessionManifest,
     sequence: u64,
-    model: Option<String>,
 }
 
 impl TranscriptWriter {
@@ -78,13 +76,11 @@ impl TranscriptWriter {
         let manifest_path = base.join("session.json");
 
         Ok(Self {
-            session_id: session_id.to_string(),
             base_dir: base,
             messages_dir,
             manifest_path,
             manifest,
             sequence: 0,
-            model: model.map(|s| s.to_string()),
         })
     }
 
