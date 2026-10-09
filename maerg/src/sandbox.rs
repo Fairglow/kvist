@@ -543,12 +543,10 @@ fn digest_label(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
-/// The canonical, content-addressed identity of a resolved argv[0] executable.
+/// The canonical identity of a resolved argv[0] executable.
 struct ResolvedProgram {
     /// The canonical absolute normalized UTF-8 path of the executable.
     canonical_path: String,
-    /// The `sha256:` digest of the executable's exact on-disk bytes.
-    digest: String,
 }
 
 /// Resolves argv[0] to an exact executable before the request is serialized.
@@ -648,16 +646,52 @@ fn resolve_program(
             ))
         })?
         .to_owned();
-    let bytes = fs::read(&canonical).map_err(|source| {
-        unavailable(format!(
-            "cannot read argv[0] executable `{}` for its content identity: {source}",
-            canonical.display()
-        ))
-    })?;
-    Ok(ResolvedProgram {
-        canonical_path,
-        digest: digest_label(&bytes),
-    })
+    Ok(ResolvedProgram { canonical_path })
+}
+
+/// Determines the toolchain root directory from an executable path.
+///
+/// For executables in a `bin/` subdirectory (e.g., `/home/user/.cargo/bin/cargo`),
+/// the toolchain root is the parent of `bin/`. This ensures the full toolchain
+/// including supporting binaries, standard libraries, and linkers is mounted.
+///
+/// If the executable is not in a `bin/` subdirectory, the parent directory is
+/// used as the toolchain root (e.g., `/usr` for `/usr/bin/cargo` or `/opt/toolchain`
+/// for `/opt/toolchain/rustc`).
+fn toolchain_root_for_executable(config: &SandboxConfig, executable_path: &str) -> Result<String> {
+    let path = Path::new(executable_path);
+    let parent = path
+        .parent()
+        .ok_or_else(|| KvistError::SandboxUnavailable {
+            runner: config.runner.clone(),
+            reason: format!(
+                "cannot determine parent of executable `{}` for toolchain root",
+                executable_path
+            ),
+        })?;
+
+    // If the executable is in a 'bin/' subdirectory, the toolchain root is the
+    // parent of that 'bin/' directory. This covers user installations like
+    // ~/.cargo/bin/cargo (toolchain root: ~/.cargo) and rustup installations.
+    if parent.file_name().and_then(|n| n.to_str()) == Some("bin") {
+        let toolchain_root = parent
+            .parent()
+            .ok_or_else(|| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!(
+                    "cannot determine toolchain root for executable in `{}`/bin",
+                    parent.display()
+                ),
+            })?
+            .to_string_lossy()
+            .into_owned();
+        return Ok(toolchain_root);
+    }
+
+    // Not in a 'bin/' subdirectory — use the parent directory as the toolchain
+    // root. This covers system-wide installations (e.g., /usr/bin/cargo -> /usr)
+    // and custom toolchain layouts (e.g., /opt/rust/rustc -> /opt/rust).
+    Ok(parent.to_string_lossy().into_owned())
 }
 
 /// Resolves a bare program name against an explicit `PATH` value, returning the
@@ -1173,15 +1207,21 @@ pub fn execute_with_timeout(
         }
         None => None,
     };
-    // The toolchain identity is derived from the exact resolved argv[0] bytes,
-    // and the conservative toolchain grant exposes exactly that executable at
-    // its canonical path. This is a narrow, internally consistent toolchain
-    // approval for the exact command executable; a full immutable
-    // toolchain-set approval is deferred to the later runner integration.
-    let toolchain_identity = resolved_program.digest.clone();
+    // Mount the full toolchain root so that supporting binaries and libraries
+    // (e.g., rustc invoked by cargo, the standard library, the linker) are
+    // accessible. Derive the toolchain root from the resolved executable path.
+    let toolchain_root = toolchain_root_for_executable(config, &resolved_program.canonical_path)?;
+    let toolchain_identity = digest_label(
+        serde_json::to_string(&toolchain_root)
+            .map_err(|error| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!("cannot canonicalize toolchain identity: {error}"),
+            })?
+            .as_bytes(),
+    );
     grants.push(SandboxGrant {
-        source: resolved_program.canonical_path.clone(),
-        destination: resolved_program.canonical_path.clone(),
+        source: toolchain_root.clone(),
+        destination: toolchain_root.clone(),
         access: "read-only",
         purpose: "toolchain",
         identity: toolchain_identity.clone(),
