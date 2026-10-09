@@ -1,0 +1,89 @@
+- id: blad-component-setup
+  title: "Blad component scaffolding"
+  requirements: []
+  status: done
+  description: "Create blad/ directory with Cargo.toml and basic structure"
+
+- id: blad-cli-framework
+  title: "Blad CLI framework"
+  requirements: []
+  status: done
+  description: "Implement CLI parsing for new, continue, list, show, export commands"
+
+- id: blad-session-manager
+  title: "Blad session manager"
+  requirements: [R-011, R-012, R-023]
+  status: done
+  description: "Implement session directory creation, manifest writing, atomic updates"
+
+- id: blad-transcript-writer
+  title: "Blad transcript writer"
+  requirements: [R-013, R-014, R-015, R-024, R-026]
+  status: done
+  description: "Implement streaming message writes with truncation state management"
+
+- id: blad-interactive-session
+  title: "Blad interactive session"
+  requirements: [R-001, R-006, R-007, R-008, R-009, R-010]
+  status: done
+  description: "Implement interactive TUI with live streaming and navigation"
+
+- id: blad-session-continuation
+  title: "Blad session continuation"
+  requirements: [R-002, R-016, R-017, R-018, R-019]
+  status: done
+  description: "Implement continue command with context import"
+
+- id: blad-session-listing
+  title: "Blad session listing"
+  requirements: [R-003]
+  status: done
+  description: "Implement list command with metadata"
+
+- id: blad-session-display
+  title: "Blad session display"
+  requirements: [R-004]
+  status: done
+  description: "Implement show command with message navigation"
+
+- id: blad-session-export
+  title: "Blad session export"
+  requirements: [R-005, R-021]
+  status: done
+  description: "Implement export command producing combined Markdown"
+
+- id: blad-format-compliance
+  title: "Blad format compliance"
+  requirements: [R-020, R-022]
+  status: done
+  description: "Verify new format only, manifest schema version"
+
+- id: blad-filesystem-safety
+  title: "Blad filesystem safety"
+  requirements: [R-025, R-027]
+  status: done
+  description: "Validate paths, handle symlinks, report I/O errors"
+
+- id: blad-write_tests
+  title: "Write tests"
+  requirements: []
+  status: done
+  description: "Unit and integration tests for all components"
+
+- id: blad-implement_code
+  title: "Implement code"
+  requirements: []
+  status: done
+  description: "Complete implementation of all components"
+
+- id: blad-security_audit
+  title: "Security audit"
+  requirements: []
+  status: done
+  description: "Review for security issues"
+
+- id: blad-compliance_review
+  title: "Compliance review"
+  requirements: []
+  status: done
+  description: "Verify all requirements are met"
