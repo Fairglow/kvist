@@ -27,20 +27,20 @@ fn get_git_dirty() -> bool {
 
 fn get_build_date() -> String {
     // Use SOURCE_DATE_EPOCH if set (reproducible builds), otherwise use `date`
-    if let Ok(epoch) = std::env::var("SOURCE_DATE_EPOCH") {
-        if let Ok(secs) = epoch.parse::<i64>() {
-            // Convert to ISO format using the `date` command
-            let output = Command::new("date")
-                .args(["-u", "-d", "@", &secs.to_string(), "+%Y-%m-%d %H:%M:%S UTC"])
-                .output();
-            if let Ok(o) = output {
-                if o.status.success() {
-                    return String::from_utf8(o.stdout)
-                        .unwrap_or_default()
-                        .trim()
-                        .to_owned();
-                }
-            }
+    if let Ok(epoch) = std::env::var("SOURCE_DATE_EPOCH")
+        && let Ok(secs) = epoch.parse::<i64>()
+    {
+        // Convert to ISO format using the `date` command
+        let output = Command::new("date")
+            .args(["-u", "-d", "@", &secs.to_string(), "+%Y-%m-%d %H:%M:%S UTC"])
+            .output();
+        if let Ok(o) = output
+            && o.status.success()
+        {
+            return String::from_utf8(o.stdout)
+                .unwrap_or_default()
+                .trim()
+                .to_owned();
         }
     }
 
