@@ -282,6 +282,11 @@ pub fn enforce_offline_readiness(
             LockSource::Path => path += 1,
         }
         if package.source.needs_durable_source() && !durable_source_present(vendored_dir, package) {
+            tracing::debug!(
+                name = %package.name,
+                version = %package.version,
+                "package not found in vendored directory"
+            );
             missing.push(format!("{}-{}", package.name, package.version));
         }
     }
@@ -342,30 +347,90 @@ pub fn find_stale_vendored_packages(
         })?;
         let name = entry.file_name().to_string_lossy().to_string();
 
-        // Determine the actual version by checking the vendored Cargo.toml
-        let version = if let Some(v) = extract_version_from_vendored_entry(&entry.path()) {
-            v
-        } else {
-            // For numbered layout, extract version from directory name
-            if let Some(pos) = name.rfind('-') {
-                name[pos + 1..].to_string()
-            } else {
-                continue;
+        // Only process directories
+        if !entry.path().is_dir() {
+            continue;
+        }
+
+        // Try to extract version from Cargo.toml (works for both flat and numbered layouts)
+        let version = extract_version_from_vendored_entry(&entry.path());
+
+        if let Some(version) = version {
+            // Determine package name: use Cargo.toml name if available, otherwise
+            // parse from directory name
+            let package_name =
+                extract_name_from_vendored_entry(&entry.path()).unwrap_or_else(|| {
+                    // Fall back to parsing directory name
+                    if let Some(pos) = name.rfind('-') {
+                        let possible_version = &name[pos + 1..];
+                        if possible_version
+                            .chars()
+                            .next()
+                            .is_some_and(|c| c.is_ascii_digit())
+                        {
+                            name[..pos].to_string()
+                        } else {
+                            name.clone()
+                        }
+                    } else {
+                        name.clone()
+                    }
+                });
+
+            if !expected.contains(&(package_name, version)) {
+                stale.push(name);
             }
-        };
-
-        let package_name = if let Some(pos) = name.rfind('-') {
-            name[..pos].to_string()
         } else {
-            name.clone()
-        };
-
-        if !expected.contains(&(package_name, version)) {
-            stale.push(name);
+            // Can't determine version, fall back to parsing directory name
+            if let Some(pos) = name.rfind('-') {
+                let possible_version = &name[pos + 1..];
+                if possible_version
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_digit())
+                {
+                    let package_name = &name[..pos];
+                    if !expected.contains(&(package_name.to_string(), possible_version.to_string()))
+                    {
+                        stale.push(name);
+                    }
+                }
+            }
         }
     }
 
     Ok(stale)
+}
+
+/// Extract the package name from a vendored package's Cargo.toml.
+fn extract_name_from_vendored_entry(vendored_pkg_dir: &Path) -> Option<String> {
+    let cargo_toml = vendored_pkg_dir.join("Cargo.toml");
+    let cargo_toml_orig = vendored_pkg_dir.join("Cargo.toml.orig");
+
+    let content = if cargo_toml.is_file() {
+        std::fs::read_to_string(&cargo_toml).ok()
+    } else if cargo_toml_orig.is_file() {
+        std::fs::read_to_string(&cargo_toml_orig).ok()
+    } else {
+        return None;
+    };
+
+    match content {
+        Some(text) => {
+            for line in text.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("name = \"") {
+                    let name = trimmed
+                        .trim_start_matches("name = \"")
+                        .trim_end_matches("\"")
+                        .to_string();
+                    return Some(name);
+                }
+            }
+            None
+        }
+        None => None,
+    }
 }
 
 /// Extract the version string from a vendored package's Cargo.toml.
