@@ -126,11 +126,63 @@ fn vendored_entry_candidates(pkg: &LockPackage) -> (PathBuf, PathBuf) {
     (flat, numbered)
 }
 
-/// Whether a registry or Git dependency is present in the vendored directory,
-/// under either the flat or classic directory layout.
+/// Whether a registry or Git dependency is present in the vendored directory
+/// with the exact version locked in Cargo.lock. The version is checked by
+/// parsing the vendored package's Cargo.toml to ensure the vendored material
+/// actually matches the locked version, not just that the crate name exists.
 fn durable_source_present(vendored: &Path, pkg: &LockPackage) -> bool {
     let (flat, numbered) = vendored_entry_candidates(pkg);
-    vendored.join(flat).is_dir() || vendored.join(numbered).is_dir()
+
+    // Check flat layout first (newer cargo)
+    let flat_dir = vendored.join(flat);
+    if flat_dir.is_dir() {
+        if version_matches(&flat_dir, &pkg.version) {
+            return true;
+        }
+    }
+
+    // Check numbered layout (older cargo)
+    let numbered_dir = vendored.join(numbered);
+    if numbered_dir.is_dir() {
+        // For numbered layout, the version is in the directory name, which
+        // we already know matches because we constructed the path from pkg.version.
+        return true;
+    }
+
+    false
+}
+
+/// Check if the version in a vendored package's Cargo.toml matches the expected version.
+fn version_matches(vendored_pkg_dir: &Path, expected_version: &str) -> bool {
+    // Try Cargo.toml first, fall back to Cargo.toml.orig
+    let cargo_toml = vendored_pkg_dir.join("Cargo.toml");
+    let cargo_toml_orig = vendored_pkg_dir.join("Cargo.toml.orig");
+
+    let content = if cargo_toml.is_file() {
+        std::fs::read_to_string(&cargo_toml).ok()
+    } else if cargo_toml_orig.is_file() {
+        std::fs::read_to_string(&cargo_toml_orig).ok()
+    } else {
+        return false;
+    };
+
+    match content {
+        Some(text) => {
+            // Parse version from Cargo.toml
+            for line in text.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("version = \"") {
+                    let version = trimmed
+                        .trim_start_matches("version = \"")
+                        .trim_end_matches("\"")
+                        .to_string();
+                    return version == expected_version;
+                }
+            }
+            false
+        }
+        None => false,
+    }
 }
 
 /// The outcome of checking that a locked project can build offline.
