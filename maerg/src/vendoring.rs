@@ -667,8 +667,23 @@ checksum = \"41ed3c71d68f1f04ad7790f37911905f10320b73714c9c6f7e6f6b92\"\n\n\
         let project = tmp.path();
         write_lock(project, lock);
         let vendored = project.join("vendored");
+        // Map package names to their locked versions for version checking
+        let version_map: std::collections::HashMap<&str, &str> =
+            [("serde_json", "1.0.151"), ("itoa", "1.0.11")]
+                .iter()
+                .cloned()
+                .collect();
         for entry in present {
-            std::fs::create_dir_all(vendored.join(entry)).expect("vendored dir");
+            let pkg_dir = vendored.join(entry);
+            std::fs::create_dir_all(&pkg_dir).expect("vendored dir");
+            // Write a minimal Cargo.toml with the version for version checking
+            if let Some(version) = version_map.get(entry) {
+                std::fs::write(
+                    pkg_dir.join("Cargo.toml"),
+                    format!("[package]\nname = \"{}\"\nversion = \"{}\"", entry, version),
+                )
+                .expect("write Cargo.toml");
+            }
         }
         enforce_offline_readiness(project, &vendored).expect("readiness check")
     }
@@ -741,8 +756,15 @@ checksum = \"41ed3c71d68f1f04ad7790f37911905f10320b73714c9c6f7e6f6b92\"\n\n\
         // The registry lives at `.kvist/vendored`; resolution derives from the
         // project root (not the manifest's recorded absolute path).
         let vendored = project.join(".kvist").join("vendored");
-        std::fs::create_dir_all(vendored.join("serde_json")).expect("vendored dir");
-        std::fs::create_dir_all(vendored.join("itoa")).expect("vendored dir");
+        for (name, version) in [("serde_json", "1.0.151"), ("itoa", "1.0.11")] {
+            let pkg_dir = vendored.join(name);
+            std::fs::create_dir_all(&pkg_dir).expect("vendored dir");
+            std::fs::write(
+                pkg_dir.join("Cargo.toml"),
+                format!("[package]\nname = \"{}\"\nversion = \"{}\"", name, version),
+            )
+            .expect("write Cargo.toml");
+        }
         let digest = digest_of(LOCK_WITH_MISSING);
         let manifest = VendorManifest {
             schema_version: VENDOR_SCHEMA_VERSION,
