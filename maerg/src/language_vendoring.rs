@@ -1230,8 +1230,13 @@ mod tests {
         let strategy = detect_language_strategy(project).unwrap();
         // Complete vendored material (the locked registry dep present), but no
         // recorded manifest: enforcement must still fail closed.
-        fs::create_dir_all(project.join(".kvist").join("vendored").join("serde_json"))
-            .expect("vendored package");
+        let pkg_dir = project.join(".kvist").join("vendored").join("serde_json");
+        fs::create_dir_all(&pkg_dir).expect("vendored package");
+        fs::write(
+            pkg_dir.join("Cargo.toml"),
+            "[package]\nname = \"serde_json\"\nversion = \"1.0.151\"",
+        )
+        .expect("Cargo.toml");
         assert!(matches!(
             strategy.enforce(project),
             Err(KvistError::VendoringUnavailable { .. })
@@ -1248,8 +1253,13 @@ mod tests {
         let strategy = detect_language_strategy(project).unwrap();
 
         // Provision the material under the CURRENT root.
-        fs::create_dir_all(project.join(".kvist").join("vendored").join("serde_json"))
-            .expect("vendored package");
+        let pkg_dir = project.join(".kvist").join("vendored").join("serde_json");
+        fs::create_dir_all(&pkg_dir).expect("vendored package");
+        fs::write(
+            pkg_dir.join("Cargo.toml"),
+            "[package]\nname = \"serde_json\"\nversion = \"1.0.151\"",
+        )
+        .expect("Cargo.toml");
 
         // Record a manifest whose absolute paths name a DIFFERENT host root
         // (the path the manifest recorded on the machine that produced it).
