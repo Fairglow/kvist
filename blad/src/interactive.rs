@@ -1,13 +1,8 @@
 //! Interactive agent session with live streaming and navigation.
 
+use sav::ReasoningEffort;
 use std::io::{self, Write};
 use std::path::PathBuf;
-use std::sync::mpsc;
-use std::time::Instant;
-
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use crossterm::terminal::disable_raw_mode;
-use sav::ReasoningEffort;
 
 use crate::session_manager::SessionManager;
 use crate::transcript_writer::TranscriptWriter;

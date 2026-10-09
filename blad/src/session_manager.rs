@@ -54,7 +54,6 @@ pub struct SessionManager {
     session_dir: PathBuf,
     manifest_path: PathBuf,
     manifest: SessionManifest,
-    messages_dir: PathBuf,
 }
 
 impl SessionManager {
@@ -85,7 +84,6 @@ impl SessionManager {
             session_dir,
             manifest_path,
             manifest,
-            messages_dir,
         })
     }
 
@@ -111,10 +109,9 @@ impl SessionManager {
         let elapsed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time before Unix epoch");
-        let time = chrono::DateTime::from_timestamp(elapsed.as_secs() as i64, 0)
+        chrono::DateTime::from_timestamp(elapsed.as_secs() as i64, 0)
             .expect("invalid timestamp")
-            .to_rfc3339();
-        time
+            .to_rfc3339()
     }
 
     /// Write the manifest atomically.
@@ -265,10 +262,9 @@ impl SessionManager {
 
         Ok(Self {
             session_id: session_id.to_string(),
-            session_dir: session_dir.clone(),
+            session_dir,
             manifest_path,
             manifest,
-            messages_dir: session_dir.join("messages"),
         })
     }
 }

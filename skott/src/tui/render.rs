@@ -738,7 +738,7 @@ fn visible_overlay_rows<'a>(
 mod tests {
     use super::render;
     use crate::session::Event;
-    use crate::tui::app::{App, MENU_CANCEL_INDEX, Overlay};
+    use crate::tui::app::{App, Overlay};
     use crate::tui::theme::Theme;
     use crossterm::event::KeyCode;
     use ratatui::Terminal;
