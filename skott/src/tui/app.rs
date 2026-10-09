@@ -199,23 +199,27 @@ pub enum Overlay {
 }
 
 /// The `Esc` menu actions, in display order, with their single-letter hotkeys.
-/// The cancel/quit item at index 5 is shown as "Cancel" when running, "Quit" when idle.
-pub const MENU_ITEMS: [&str; 8] = [
+/// The cancel item at index 5 is conditionally shown only when running.
+/// Quit is always available at index 6 (or index 5 when not running).
+pub const MENU_ITEMS: [&str; 9] = [
     "Select model",
     "Thinking effort",
     "New session",
     "Session history",
     "Theme",
+    "Cancel",
     "Quit",
     "About",
     "Back",
 ];
-pub const MENU_HOTKEYS: [char; 8] = ['m', 'e', 'n', 'h', 't', 'q', 'a', 'b'];
+pub const MENU_HOTKEYS: [char; 9] = ['m', 'e', 'n', 'h', 't', 'c', 'q', 'a', 'b'];
 
-/// The index of the cancel/quit item.
+/// The index of the cancel item (shown conditionally when running).
 pub const MENU_CANCEL_INDEX: usize = 5;
+/// The index of the quit item (always shown).
+pub const MENU_QUIT_INDEX: usize = 6;
 /// The index of the about item.
-pub const MENU_ABOUT_INDEX: usize = 6;
+pub const MENU_ABOUT_INDEX: usize = 7;
 
 /// The interactive application state driven by events and key input.
 pub struct App {
@@ -1618,16 +1622,16 @@ impl App {
                 self.open_theme_picker();
                 KeyAction::Idle
             }
-            5 => {
-                // Cancel (if running) or Quit
-                if self.running {
-                    self.quit_running();
-                    self.overlay = Overlay::None;
-                    KeyAction::Idle
-                } else {
-                    self.should_quit = true;
-                    KeyAction::Quit
-                }
+            MENU_CANCEL_INDEX => {
+                // Cancel running turn
+                self.quit_running();
+                self.overlay = Overlay::None;
+                KeyAction::Idle
+            }
+            MENU_QUIT_INDEX => {
+                // Quit
+                self.should_quit = true;
+                KeyAction::Quit
             }
             MENU_ABOUT_INDEX => {
                 // About
@@ -1679,14 +1683,30 @@ impl App {
                 KeyAction::Idle
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.menu_selection = self
-                    .menu_selection
-                    .saturating_add(1)
-                    .min(MENU_ITEMS.len() - 1);
+                // Skip the cancel item if not running.
+                loop {
+                    self.menu_selection = self
+                        .menu_selection
+                        .saturating_add(1)
+                        .min(MENU_ITEMS.len() - 1);
+                    if self.menu_selection != MENU_CANCEL_INDEX || self.running {
+                        break;
+                    }
+                }
                 KeyAction::Idle
             }
             KeyCode::Up | KeyCode::Char('k') => {
-                self.menu_selection = self.menu_selection.saturating_sub(1);
+                // Skip the cancel item if not running.
+                loop {
+                    self.menu_selection = self.menu_selection.saturating_sub(1);
+                    if self.menu_selection != MENU_CANCEL_INDEX || self.running {
+                        break;
+                    }
+                    // If we wrap around to the end, stop.
+                    if self.menu_selection == MENU_CANCEL_INDEX {
+                        break;
+                    }
+                }
                 KeyAction::Idle
             }
             KeyCode::Enter => self.dispatch_menu(),
@@ -4134,11 +4154,11 @@ table_sep = { fg = "gray" }
     fn menu_enter_on_quit_selection_quits() {
         let mut app = app();
         app.open_menu();
-        // Move to the Quit action (index 5 in the new menu layout) and activate with Enter.
+        // Move to the Quit action (index 6, after skipping hidden Cancel at index 5).
         for _ in 0..5 {
             app.on_key(ch(KeyCode::Down));
         }
-        assert_eq!(app.menu_selection, 5);
+        assert_eq!(app.menu_selection, 6);
         app.on_key(ch(KeyCode::Enter));
         assert!(app.should_quit);
     }

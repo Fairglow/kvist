@@ -383,7 +383,7 @@ fn render_help(f: &mut ratatui::Frame, app: &App, area: Rect) {
 /// single-letter hotkeys; Esc or `b` returns to the prompt.
 fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
     let theme = &app.theme;
-    // Build the menu lines with conditional cancel/quit item.
+    // Build the menu lines with conditional cancel item.
     let mut lines: Vec<Line> = vec![
         Line::from(Span::styled(" skott menu ", theme.title)),
         Line::from(""),
@@ -391,12 +391,10 @@ fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
         Line::from(""),
     ];
     for (index, item) in MENU_ITEMS.iter().enumerate() {
-        // The cancel/quit item is shown as "Cancel" when running, "Quit" when idle.
-        let item_text = if index == MENU_CANCEL_INDEX {
-            if app.running { "Cancel" } else { "Quit" }
-        } else {
-            *item
-        };
+        // Skip the cancel item if not running.
+        if index == MENU_CANCEL_INDEX && !app.running {
+            continue;
+        }
         let selected = index == app.menu_selection;
         let style = if selected {
             theme.menu_selected
@@ -406,7 +404,7 @@ fn render_menu(f: &mut ratatui::Frame, app: &App, area: Rect) {
         let marker = if selected { "> " } else { "  " };
         let hotkey = MENU_HOTKEYS[index];
         lines.push(Line::from(Span::styled(
-            format!("  {marker}{item_text} ({hotkey})"),
+            format!("  {marker}{item} ({hotkey})"),
             style,
         )));
     }
