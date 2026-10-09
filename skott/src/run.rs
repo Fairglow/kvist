@@ -209,6 +209,7 @@ pub fn system_prompt(write_root: &str) -> String {
          does not supply it as a tool argument. Use directory or regular-file search scopes and \
          bounded source filters; binary executables are not source text. \
          Tools return process status; check failures. Prefer small, reversible steps. State what you did. \
+         Continue iterating with tools until the task is complete. \
          {MARKDOWN_OUTPUT_GUIDANCE}"
     )
 }

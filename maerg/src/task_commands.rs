@@ -3265,7 +3265,7 @@ const DEFAULT_GENERIC_TEMPLATE: &str = r#"Task Details:
 Instructions:
 You are the developer agent tasked with executing the task above.
 Satisfy REQUIREMENTS.md and CONTRACT.md using the approved DESIGN.md.
-Fulfill all task requirements. When finished, write your results.
+Fulfill all task requirements.
 "#;
 
 const ATTEMPT_SCHEMA_VERSION: u32 = 1;
