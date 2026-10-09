@@ -301,11 +301,11 @@ impl Shell {
             return LoopAction::Exit;
         }
 
-        let (program, arguments) = match split_raw_command(line) {
+        let (program, arguments) = match split_raw_command(&line) {
             Ok(split) => split,
             Err(error) => {
                 report_error(self.theme, &error.to_string());
-                self.journal.append(journal_entry(line, "syntax error"));
+                self.journal.append(journal_entry(&line, "syntax error"));
                 self.note(true);
                 return LoopAction::Continue;
             }
@@ -314,47 +314,47 @@ impl Shell {
         match program.as_str() {
             "journal" => {
                 display_session_status(self.theme, &self.journal);
-                self.journal.append(journal_entry(line, "shown"));
+                self.journal.append(journal_entry(&line, "shown"));
                 self.note(false);
             }
             "history" => {
-                self.handle_history(&arguments, line, history);
+                self.handle_history(&arguments, &line, history);
             }
             "help" => match arguments.len() {
                 0 => {
                     display_output(&render_help(self.theme));
-                    self.journal.append(journal_entry(line, "shown"));
+                    self.journal.append(journal_entry(&line, "shown"));
                     self.note(false);
                 }
                 1 => {
                     let (text, failed) = crate::help::render_named(&arguments[0]);
                     if failed {
                         report_error(self.theme, &text);
-                        self.journal.append(journal_entry(line, "usage hint"));
+                        self.journal.append(journal_entry(&line, "usage hint"));
                         self.note(true);
                     } else {
                         display_output(&text);
-                        self.journal.append(journal_entry(line, "shown"));
+                        self.journal.append(journal_entry(&line, "shown"));
                         self.note(false);
                     }
                 }
                 _ => {
                     report_error(self.theme, "usage: help [concepts|lifecycle|task-states]");
-                    self.journal.append(journal_entry(line, "usage hint"));
+                    self.journal.append(journal_entry(&line, "usage hint"));
                     self.note(true);
                 }
             },
             "cd" => {
-                self.handle_cd(&arguments, line);
+                self.handle_cd(&arguments, &line);
             }
             "tasks" => {
-                self.handle_tasks(&arguments, line);
+                self.handle_tasks(&arguments, &line);
             }
             "run" => {
-                self.handle_run(&arguments, line);
+                self.handle_run(&arguments, &line);
             }
             "last" => {
-                self.handle_last(&arguments, line);
+                self.handle_last(&arguments, &line);
             }
             "locks" if arguments.is_empty() || arguments == ["clean"] => {
                 handle_locks(self.theme, !arguments.is_empty(), &self.journal);
@@ -362,7 +362,7 @@ impl Shell {
             }
             "locks" => {
                 report_error(self.theme, "usage: locks [clean]");
-                self.journal.append(journal_entry(line, "usage hint"));
+                self.journal.append(journal_entry(&line, "usage hint"));
                 self.note(true);
             }
             "theme" => {
@@ -373,18 +373,18 @@ impl Shell {
                             .map(|(width, _)| width)
                             .unwrap_or(100);
                         display_output(&theme::render_theme_overview(self.theme, width));
-                        self.journal.append(journal_entry(line, "shown"));
+                        self.journal.append(journal_entry(&line, "shown"));
                         self.note(false);
                     }
                     ["set", name] => {
-                        self.handle_theme_set(name, line);
+                        self.handle_theme_set(name, &line);
                     }
                     _ => {
                         report_error(
                             self.theme,
                             "usage: theme | theme list | theme set <NAME|PATH> — previews all themes",
                         );
-                        self.journal.append(journal_entry(line, "usage hint"));
+                        self.journal.append(journal_entry(&line, "usage hint"));
                         self.note(true);
                     }
                 }
@@ -393,7 +393,7 @@ impl Shell {
             // display the human-friendly project overview; anything with
             // arguments is the real CLI command.
             "status" | "overview" if arguments.is_empty() => {
-                self.handle_overview(line);
+                self.handle_overview(&line);
             }
             // `prompt` is an explicit, high-signal authoring action and never
             // falls through to the CLI parser (an unknown task must not run
@@ -404,11 +404,11 @@ impl Shell {
                         self.theme,
                         "usage: prompt <TASK_ID> — opens your editor seeded with the task context",
                     );
-                    self.journal.append(journal_entry(line, "usage hint"));
+                    self.journal.append(journal_entry(&line, "usage hint"));
                     self.note(true);
                 }
                 1 => {
-                    self.handle_prompt_authoring(line, &arguments[0]);
+                    self.handle_prompt_authoring(&line, &arguments[0]);
                 }
                 _ => {
                     self.dispatch(&line);
