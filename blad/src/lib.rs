@@ -1,4 +1,6 @@
 //! Blad: first-class Markdown-native transcripts for agent sessions.
+//!
+//! Blad reads and displays Skott's structured session transcripts.
 
-pub mod session_manager;
-pub mod transcript_writer;
+pub mod display;
+pub mod session;
