@@ -25,7 +25,7 @@ tempfile = "3.27"
 thiserror = "2.0"
 hex = "0.4"
 toml = "1.1"
-toml_edit = "0.25.15"
+toml_edit = "=0.25.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["env-filter", "fmt", "ansi"] }
 sav = { version = "=0.3.0", path = "../sav" }
