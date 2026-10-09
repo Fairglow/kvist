@@ -34,7 +34,7 @@ fn test_message_addition() {
 
     writer.start_message("user", None).unwrap();
     writer.append("Hello, world!").unwrap();
-    writer.flush_message(true).unwrap();
+    writer.complete_session().unwrap();
 
     let manifest = writer.session().manifest();
     assert_eq!(manifest.entry_count, 1);
