@@ -759,8 +759,9 @@ fn parse_language(info: &str) -> Option<String> {
 
 fn find_syntax<'a>(ss: &'a SyntaxSet, info: &str) -> Option<&'a SyntaxReference> {
     let lang = parse_language(info)?;
-    const ALIASES: [(&str, &str); 24] = [
+    const ALIASES: [(&str, &str); 25] = [
         ("rs", "Rust"),
+        ("rust", "Rust"),
         ("py", "Python"),
         ("py3", "Python"),
         ("js", "JavaScript"),
@@ -1190,5 +1191,70 @@ mod tests {
         for line in render_document(&word, 20) {
             assert!(line.line.width() <= 20, "line too wide: {}", line.line);
         }
+    }
+
+    #[test]
+    fn rust_code_block_has_syntax_highlighting() {
+        let out = render_document("```rust\nlet x = 42;\n```", 40);
+        // Find the code line (second line, after the lang label)
+        let code_line = &out[1];
+        assert!(code_line.is_code);
+        // Collect unique styles from content spans (skip gutter)
+        let mut styles = std::collections::HashSet::new();
+        for span in code_line.line.spans.iter() {
+            if !span.content.starts_with('\u{258f}') {
+                styles.insert(span.style);
+            }
+        }
+        // Syntax highlighting should produce multiple distinct styles
+        assert!(
+            styles.len() > 1,
+            "Rust code block should have syntax highlighting with multiple styles, got {styles:?}"
+        );
+    }
+
+    #[test]
+    fn python_code_block_has_syntax_highlighting() {
+        let out = render_document("```python\nif True: return 1\n```", 40);
+        let code_line = &out[1];
+        assert!(code_line.is_code);
+        let mut styles = std::collections::HashSet::new();
+        for span in code_line.line.spans.iter() {
+            if !span.content.starts_with('\u{258f}') {
+                styles.insert(span.style);
+            }
+        }
+        assert!(
+            styles.len() > 1,
+            "Python code block should have syntax highlighting, got {styles:?}"
+        );
+    }
+
+    #[test]
+    fn js_code_block_has_syntax_highlighting() {
+        let out = render_document("```js\nconst x = 1;\n```", 40);
+        let code_line = &out[1];
+        assert!(code_line.is_code);
+        let mut styles = std::collections::HashSet::new();
+        for span in code_line.line.spans.iter() {
+            if !span.content.starts_with('\u{258f}') {
+                styles.insert(span.style);
+            }
+        }
+        assert!(
+            styles.len() > 1,
+            "JavaScript code block should have syntax highlighting, got {styles:?}"
+        );
+    }
+
+    #[test]
+    fn hemlock_code_block_falls_back_gracefully() {
+        // Hemlock is not a supported language; should render but not crash
+        let out = render_document("```hemlock\nlet x = 1;\n```", 40);
+        assert!(out.iter().any(|rl| rl.is_code));
+        assert!(
+            out.iter()
+                .any(|rl| rl.line.to_string().contains("let x = 1;"))
+        );
     }
 }
