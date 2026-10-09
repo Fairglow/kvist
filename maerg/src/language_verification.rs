@@ -56,7 +56,8 @@ pub fn run_offline_language_verification(
     test_command: Option<Vec<String>>,
     options: ExecutionOptions,
 ) -> Result<ExecutionResult> {
-    let enforcement = crate::language_vendoring::enforce_vendoring(project_root)?;
+    let enforcement =
+        crate::language_vendoring::enforce_vendoring(project_root, true, Some(config))?;
     if enforcement.language == "rust" {
         return Err(KvistError::SandboxUnavailable {
             runner: config.runner.clone(),
