@@ -11,11 +11,9 @@
 //!   blad export <session-id>      - export session to combined markdown
 //!   blad <session-id|file.md>     - smart shortcut (show or view)
 
+use blad::{display, session};
 use clap::Parser;
 use std::path::PathBuf;
-
-mod display;
-mod session;
 
 const DEFAULT_LOG_DIR: &str = ".skott/runs";
 

@@ -1,7 +1,12 @@
 //! Session and file display for Blad.
+//!
+//! Parses Markdown message bodies and applies syntax highlighting to fenced
+//! code blocks. Unsupported languages (e.g. hemlock) fall back to plain text
+//! without crashing.
 
 use std::io::{self, Write};
 
+use crate::markdown::render_markdown;
 use crate::session::{Message, Session, load_messages};
 
 /// Show a completed session transcript.
@@ -17,16 +22,18 @@ pub fn show_session(session: &Session) {
     println!();
 
     let messages = load_messages(session);
+    let mut stdout = io::stdout();
     for msg in &messages {
-        print_message(msg);
+        print_message(msg, &mut stdout).unwrap();
     }
 }
 
 /// Stream a live or recently-completed session.
 pub fn stream_session(session: &Session) {
     let messages = load_messages(session);
+    let mut stdout = io::stdout();
     for msg in &messages {
-        print_message(msg);
+        print_message(msg, &mut stdout).unwrap();
     }
 
     if !session.completed {
@@ -36,7 +43,8 @@ pub fn stream_session(session: &Session) {
 
 /// View a standalone markdown file.
 pub fn view_markdown(content: &str) {
-    print!("{}", content);
+    let mut stdout = io::stdout();
+    render_markdown(content, &mut stdout).unwrap();
 }
 
 /// Export a session to a combined markdown document.
@@ -84,7 +92,7 @@ pub fn export_session(session: &Session, output: Option<&std::path::Path>) {
 }
 
 /// Print a single message with its label.
-fn print_message(msg: &Message) {
+fn print_message(msg: &Message, w: &mut impl Write) -> std::io::Result<()> {
     let kind_label = match msg.kind.as_str() {
         "user" => "User",
         "assistant" => "Assistant",
@@ -101,7 +109,11 @@ fn print_message(msg: &Message) {
         _ => "",
     };
 
-    println!("--- {}{} ---", kind_label, disposition);
-    println!("{}", msg.content);
-    println!();
+    writeln!(w, "--- {}{} ---", kind_label, disposition)?;
+    // Parse markdown and highlight fenced code blocks
+    render_markdown(&msg.content, w)?;
+    if !msg.content.ends_with('\n') {
+        writeln!(w)?;
+    }
+    Ok(())
 }
