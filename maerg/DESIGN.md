@@ -377,13 +377,11 @@ the run.
 the dependency policy in [`evaluate_dependency_request`](src/authoring/mod.rs).
 An in-policy request (an exact, pinned registry revision, or a public VCS origin
 with an exact pinned revision; never a private, link-local, loopback, or
-unverified production address, and never a wildcard or unpinned range) is
-recorded and accepted so the agent continues without interruption; the existing
-build/verification step acquires the exact revision. An out-of-policy request is
-surfaced as a decision and stops the run in `AwaitingDecision`. A dedicated
-in-run acquisition phase (fetching before the next turn) is a documented
-follow-up, so a request within policy is recorded and surfaced for acquisition
-rather than fetched inline in this tier.
+unverified production address, and never a wildcard or unpinned range) immediately
+triggers the dependency acquisition phase. The acquisition sandbox (`cargo fetch`
+with allowlisted package sources) runs before the effect sandbox executes, then
+the fetched material is repacked into the vendored registry. An out-of-policy
+request is surfaced as a decision and stops the run in `AwaitingDecision`.
 
 The model is advertised exactly these tools, with schemas and the scope and
 protected-document notice, by [`authoring_tool_definitions`](src/authoring/mod.rs)

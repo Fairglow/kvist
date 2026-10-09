@@ -31,7 +31,8 @@ use std::process::Command;
 use crate::error::{KvistError, Result};
 use crate::sandbox::SandboxAllowedSource;
 use crate::vendoring::{
-    VendorManifest, enforce_offline_readiness, now_unix_secs, offline_cargo_config,
+    VendorManifest, enforce_offline_readiness, find_stale_vendored_packages, now_unix_secs,
+    offline_cargo_config, remove_stale_vendored_packages,
 };
 
 /// The readiness outcome of a `kvist vendor` pass, per language.
@@ -223,7 +224,20 @@ fn vendor_rust_project(
     // This is the only step that may touch the network: it resolves crate sources
     // into an attempt-local, content-addressed-on-disk registry.
     let mut report = enforce_offline_readiness(project_dir, &vendored_dir)?;
-    if options.populate && !report.ready() {
+
+    // Check for stale packages (present in vendored dir but not in Cargo.lock).
+    // If any are found, we need to re-vendor to ensure the vendored directory
+    // exactly matches the locked dependencies.
+    let stale = find_stale_vendored_packages(project_dir, &vendored_dir)?;
+    if !stale.is_empty() {
+        tracing::info!(
+            project = %project_dir.to_string_lossy(),
+            stale_count = stale.len(),
+            "found stale vendored packages, will re-vendor"
+        );
+    }
+
+    if options.populate && (!report.ready() || !stale.is_empty()) {
         if let Some(sandbox) = &options.sandbox {
             let in_sandbox =
                 provision_rust_via_acquisition_sandbox(project_dir, sandbox, &vendored_dir)?;
@@ -244,6 +258,14 @@ fn vendor_rust_project(
         } else {
             populate_with_cargo_vendor(project_dir, &vendored_dir)?;
             report = enforce_offline_readiness(project_dir, &vendored_dir)?;
+        }
+
+        // After populating, check for and remove any remaining stale packages.
+        // This handles the case where a dependency was removed or its version
+        // changed, leaving an old vendored copy behind.
+        let stale_after = find_stale_vendored_packages(project_dir, &vendored_dir)?;
+        if !stale_after.is_empty() {
+            remove_stale_vendored_packages(&vendored_dir, &stale_after)?;
         }
     }
     report.enforce()?;
@@ -1177,6 +1199,8 @@ fn canonical_or(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::vendoring::{find_stale_vendored_packages, remove_stale_vendored_packages};
+    use tempfile::tempdir;
 
     fn locked_rust_project(tmp: &Path) {
         std::fs::write(
@@ -1184,6 +1208,26 @@ mod tests {
             "version = 4\n\n[[package]]\nname = \"serde_json\"\nversion = \"1.0.151\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n",
         )
         .expect("write lock");
+    }
+
+    fn write_vendored_package(vendored: &Path, name: &str, version: &str) {
+        let pkg_dir = vendored.join(name);
+        std::fs::create_dir_all(&pkg_dir).expect("create vendored pkg dir");
+        let cargo_toml = format!(
+            "[package]\nname = \"{}\"\nversion = \"{}\"\n\n[dependencies]\n",
+            name, version
+        );
+        std::fs::write(pkg_dir.join("Cargo.toml"), cargo_toml).expect("write Cargo.toml");
+    }
+
+    fn write_vendored_package_numbered(vendored: &Path, name: &str, version: &str) {
+        let pkg_dir = vendored.join(format!("{}-{}", name, version));
+        std::fs::create_dir_all(&pkg_dir).expect("create vendored pkg dir");
+        let cargo_toml = format!(
+            "[package]\nname = \"{}\"\nversion = \"{}\"\n\n[dependencies]\n",
+            name, version
+        );
+        std::fs::write(pkg_dir.join("Cargo.toml"), cargo_toml).expect("write Cargo.toml");
     }
 
     /// The in-sandbox acquisition path must degrade to a `Fallback` (not a hard
@@ -1211,6 +1255,124 @@ mod tests {
             matches!(outcome, ProvisionOutcome::Fallback(_)),
             "without a resolvable toolchain the in-sandbox path must fall back to \
              the host cargo vendor pass"
+        );
+    }
+
+    /// Stale packages (present in vendored dir but not in Cargo.lock) should
+    /// be detected and reported.
+    #[test]
+    fn stale_packages_are_detected() {
+        let project = tempdir().expect("project");
+        let vendored = project.path().join("vendored");
+        std::fs::create_dir_all(&vendored).expect("vendored dir");
+
+        // Lockfile only has serde_json 1.0.151
+        locked_rust_project(project.path());
+
+        // Vendor serde_json (expected) and a stale package
+        write_vendored_package(&vendored, "serde_json", "1.0.151");
+        write_vendored_package(&vendored, "stale-pkg", "2.0.0");
+
+        let stale = find_stale_vendored_packages(project.path(), &vendored).expect("find stale");
+        assert!(
+            stale.contains(&"stale-pkg".to_string()),
+            "stale package should be detected"
+        );
+        assert!(
+            !stale.contains(&"serde_json".to_string()),
+            "expected package should not be detected as stale"
+        );
+    }
+
+    /// Stale packages with numbered layout should be detected.
+    #[test]
+    fn stale_numbered_packages_are_detected() {
+        let project = tempdir().expect("project");
+        let vendored = project.path().join("vendored");
+        std::fs::create_dir_all(&vendored).expect("vendored dir");
+
+        locked_rust_project(project.path());
+
+        write_vendored_package(&vendored, "serde_json", "1.0.151");
+        write_vendored_package_numbered(&vendored, "stale-numbered", "1.5.0");
+
+        let stale = find_stale_vendored_packages(project.path(), &vendored).expect("find stale");
+        assert!(
+            stale.contains(&"stale-numbered-1.5.0".to_string()),
+            "stale numbered package should be detected"
+        );
+    }
+
+    /// Packages with the same name but different versions: only the locked
+    /// version should be kept, others should be detected as stale.
+    #[test]
+    fn wrong_version_detected_as_stale() {
+        let project = tempdir().expect("project");
+        let vendored = project.path().join("vendored");
+        std::fs::create_dir_all(&vendored).expect("vendored dir");
+
+        locked_rust_project(project.path());
+
+        // Correct version
+        write_vendored_package(&vendored, "serde_json", "1.0.151");
+        // Wrong version (same name, different version)
+        write_vendored_package_numbered(&vendored, "serde_json", "1.0.140");
+
+        let stale = find_stale_vendored_packages(project.path(), &vendored).expect("find stale");
+        assert!(
+            stale.contains(&"serde_json-1.0.140".to_string()),
+            "wrong version should be detected as stale"
+        );
+        assert!(
+            !stale.contains(&"serde_json".to_string()),
+            "correct version should not be stale"
+        );
+    }
+
+    /// Multiple versions of the same package (both in Cargo.lock) should not
+    /// be detected as stale.
+    #[test]
+    fn multiple_locked_versions_not_stale() {
+        let project = tempdir().expect("project");
+        let vendored = project.path().join("vendored");
+        std::fs::create_dir_all(&vendored).expect("vendored dir");
+
+        // Lockfile has two versions of base64
+        std::fs::write(
+            project.path().join("Cargo.lock"),
+            "version = 4\n\n[[package]]\nname = \"base64\"\nversion = \"0.22.1\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n\n[[package]]\nname = \"base64\"\nversion = \"0.23.1\"\nsource = \"registry+https://github.com/rust-lang/crates.io-index\"\n",
+        ).expect("write lock");
+
+        // Vendor both versions
+        write_vendored_package(&vendored, "base64", "0.23.1");
+        write_vendored_package_numbered(&vendored, "base64", "0.22.1");
+
+        let stale = find_stale_vendored_packages(project.path(), &vendored).expect("find stale");
+        assert!(stale.is_empty(), "both locked versions should not be stale");
+    }
+
+    /// Removing stale packages should clean up the vendored directory.
+    #[test]
+    fn removing_stale_packages_works() {
+        let project = tempdir().expect("project");
+        let vendored = project.path().join("vendored");
+        std::fs::create_dir_all(&vendored).expect("vendored dir");
+
+        locked_rust_project(project.path());
+
+        write_vendored_package(&vendored, "serde_json", "1.0.151");
+        write_vendored_package(&vendored, "stale-pkg", "2.0.0");
+
+        let stale = find_stale_vendored_packages(project.path(), &vendored).expect("find stale");
+        remove_stale_vendored_packages(&vendored, &stale).expect("remove stale");
+
+        assert!(
+            !vendored.join("stale-pkg").exists(),
+            "stale package should be removed"
+        );
+        assert!(
+            vendored.join("serde_json").exists(),
+            "expected package should remain"
         );
     }
 }

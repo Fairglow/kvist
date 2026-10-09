@@ -47,13 +47,20 @@ model transport:
   outside the effect sandbox, so there is no host-subprocess fallback and no
   double execution.
 
-The turn advertises the closed authoring tool set (`write_file`, `edit_file`).
-Each intent the model proposes is reduced by the broker to a `CheckedIntent`
-under a deny-by-default policy; a dropped intent fails the turn. Every
-authorized effect is applied by the kvist binary itself inside the effect
-sandbox (`kvist authoring-apply`) against a read-only staged-intent mount at
-`/workspace/authoring/intent.json`; the host never writes component state for
-an effect.
+The turn advertises the closed authoring tool set (`write_file`, `edit_file`,
+`propose_decision`, `request_dependency`). Each intent the model proposes is
+reduced by the broker to a `CheckedIntent` under a deny-by-default policy; a
+dropped intent fails the turn. Every authorized effect is applied by the kvist
+binary itself inside the effect sandbox (`kvist authoring-apply`) against a
+read-only staged-intent mount at `/workspace/authoring/intent.json`; the host
+never writes component state for an effect.
+
+`request_dependency` is routed to the dependency acquisition phase rather than
+executed inline. An in-policy request (exact, pinned revision from a public
+source) triggers the acquisition sandbox (`cargo fetch` with allowlisted package
+sources) before the effect sandbox executes; the fetched material is then
+repacked into the vendored registry. An out-of-policy request is surfaced as a
+decision worthy of intervention, placing the run in an awaiting-decision state.
 
 The model phase runs under one shared wall-clock budget (`TurnBudget`, the
 profile timeout) covering the liveness probe, every turn attempt, and retry

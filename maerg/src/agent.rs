@@ -1137,9 +1137,9 @@ pub fn execute_agent(
             );
         }
 
-        // 2b. In-policy dependency requests are recorded as durable evidence for
-        //     the later acquisition step; they do not stop the run, so the agent
-        //     continues without interruption.
+        // 2b. In-policy dependency requests are recorded as durable evidence and
+        //     immediately trigger the acquisition phase. The agent continues
+        //     without interruption after the new dependency is available.
         let mut accepted_requests = Vec::with_capacity(plan.dependency_requests.len());
         for dep_request in &plan.dependency_requests {
             let path = record_dependency_evidence(request.target_dir, dep_request, &redactions)?;
@@ -1150,6 +1150,38 @@ pub fn execute_agent(
                 "accepted an in-policy dependency request for acquisition"
             );
             accepted_requests.push(dep_request.clone());
+        }
+
+        // Trigger the acquisition phase if there were accepted dependency requests.
+        if !accepted_requests.is_empty() {
+            tracing::info!(
+                task_id = %request.task_id,
+                dependency_count = accepted_requests.len(),
+                "triggering dependency acquisition phase"
+            );
+            match crate::vendor_command::vendor_project(
+                request.project_root,
+                crate::vendor_command::VendorOptions {
+                    vendored_dir: None,
+                    populate: true,
+                    sandbox: Some(sandbox_config.clone()),
+                },
+            ) {
+                Ok(report) => {
+                    tracing::info!(
+                        task_id = %request.task_id,
+                        ready = report.ready(),
+                        "dependency acquisition phase completed"
+                    );
+                }
+                Err(source) => {
+                    tracing::warn!(
+                        task_id = %request.task_id,
+                        error = %source,
+                        "dependency acquisition phase failed; continuing without new dependencies"
+                    );
+                }
+            }
         }
 
         // 3. A dropped intent fails the turn before any effect runs: partial

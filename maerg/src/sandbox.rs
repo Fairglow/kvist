@@ -2258,7 +2258,8 @@ pub fn run_offline_cargo_verification(
     // Enforce vendoring readiness against the manifest and lock file. This fails
     // closed with a clear message when the project is not vendored, the lockfile
     // has drifted since vendoring, or a registry or Git dependency is absent.
-    let enforcement = crate::language_vendoring::enforce_vendoring(project_root)?;
+    let enforcement =
+        crate::language_vendoring::enforce_vendoring(project_root, true, Some(config))?;
     if enforcement.language != "rust" {
         return Err(KvistError::SandboxUnavailable {
             runner: config.runner.clone(),
