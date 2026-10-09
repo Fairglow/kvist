@@ -34,8 +34,8 @@ impl TranscriptWriter {
     /// Start a new message entry.
     pub fn start_message(&mut self, kind: &str, disposition: Option<&str>) -> io::Result<usize> {
         // Flush any pending message
-        if self.current_sequence.is_some() {
-            self.flush_message(false)?;
+        if let Some(sequence) = self.current_sequence {
+            self.flush_message(sequence, false)?;
         }
 
         self.current_kind = kind.to_string();
@@ -48,7 +48,12 @@ impl TranscriptWriter {
 
     /// Append streaming content to the current message.
     pub fn append(&mut self, content: &str) -> io::Result<()> {
-        if self.current_sequence.is_none() {
+        if let Some(sequence) = self.current_sequence {
+            // Subsequent chunks: append to existing entry
+            self.current_content.push_str(content);
+            self.session
+                .update_message(sequence, &self.current_content, false)?;
+        } else {
             // First chunk: create the entry
             self.current_content.push_str(content);
             let sequence = self.session.add_message(
@@ -58,12 +63,6 @@ impl TranscriptWriter {
                 false,
             )?;
             self.current_sequence = Some(sequence);
-        } else {
-            // Subsequent chunks: append to existing entry
-            self.current_content.push_str(content);
-            let sequence = self.current_sequence.unwrap();
-            self.session
-                .update_message(sequence, &self.current_content, false)?;
         }
 
         // Periodic flush to terminal
@@ -75,13 +74,9 @@ impl TranscriptWriter {
     }
 
     /// Flush the current message as complete.
-    pub fn flush_message(&mut self, complete: bool) -> io::Result<()> {
-        if let Some(sequence) = self.current_sequence {
-            let content = &self.current_content;
-            let kind = &self.current_kind;
-            let disposition = self.current_disposition.clone();
-            self.session.update_message(sequence, content, complete)?;
-        }
+    pub fn flush_message(&mut self, sequence: usize, complete: bool) -> io::Result<()> {
+        let content = &self.current_content;
+        self.session.update_message(sequence, content, complete)?;
 
         self.current_sequence = None;
         self.current_content.clear();
@@ -98,13 +93,17 @@ impl TranscriptWriter {
 
     /// Complete the session.
     pub fn complete_session(&mut self) -> io::Result<()> {
-        self.flush_message(true)?;
+        if let Some(sequence) = self.current_sequence {
+            self.flush_message(sequence, true)?;
+        }
         self.session.complete()
     }
 
     /// Cancel the session.
     pub fn cancel_session(&mut self) -> io::Result<()> {
-        self.flush_message(true)?;
+        if let Some(sequence) = self.current_sequence {
+            self.flush_message(sequence, true)?;
+        }
         self.session.cancel()
     }
 }
