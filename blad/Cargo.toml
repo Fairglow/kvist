@@ -27,3 +27,5 @@ tracing = "0.1"
 tempfile = "3.27"
 chrono = "0.4"
 crossterm = "0.29"
+pulldown-cmark = "0.13"
+syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
