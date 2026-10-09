@@ -5847,7 +5847,9 @@ fn vendored_language_verification(
     // builds: fall back to the generic approved-test-command path (host system
     // toolchains, no vendored mounts), which is the documented support state
     // for non-vendored projects.
-    let vendored = crate::language_vendoring::enforce_vendoring(project_dir).is_ok();
+    let vendored =
+        crate::language_vendoring::enforce_vendoring(project_dir, true, Some(sandbox_config))
+            .is_ok();
     if !vendored {
         return Ok(None);
     }

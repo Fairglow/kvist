@@ -201,17 +201,51 @@ pub struct VendoringEnforcement {
 }
 
 /// Enforce that a project's vendored material satisfies its lock file and return
-/// what verification must mount for an offline build. Fails closed when vendoring
-/// is missing, incomplete, or stale.
-pub fn enforce_vendoring(project_dir: &Path) -> Result<VendoringEnforcement> {
+/// what verification must mount for an offline build. If `auto_vendor` is true and
+/// vendoring is not ready, automatically runs the vendor command to fix it.
+pub fn enforce_vendoring(
+    project_dir: &Path,
+    auto_vendor: bool,
+    sandbox_config: Option<&crate::config::SandboxConfig>,
+) -> Result<VendoringEnforcement> {
     let strategy = detect_language_strategy(project_dir)?;
     let report = strategy.enforce(project_dir)?;
     if !report.ready() {
-        return Err(KvistError::VendoringIncomplete {
-            path: report.project_root.clone(),
-            count: report.missing_dependencies.len(),
-            missing: report.missing_human_readable(),
-        });
+        if auto_vendor {
+            tracing::warn!(
+                project = %project_dir.to_string_lossy(),
+                missing = report.missing_human_readable(),
+                "vendoring is out of date, running `kvist vendor` to fix"
+            );
+            // Run the vendor command to fix vendoring
+            crate::vendor_command::vendor_project(
+                project_dir,
+                crate::vendor_command::VendorOptions {
+                    vendored_dir: None,
+                    populate: true,
+                    sandbox: sandbox_config.cloned(),
+                },
+            )
+            .map_err(|source| KvistError::VendoringUnavailable {
+                path: project_dir.to_string_lossy().into_owned(),
+                reason: format!("automatic vendoring failed: {source}"),
+            })?;
+            // Re-check after vendoring
+            let report = strategy.enforce(project_dir)?;
+            if !report.ready() {
+                return Err(KvistError::VendoringIncomplete {
+                    path: report.project_root.clone(),
+                    count: report.missing_dependencies.len(),
+                    missing: report.missing_human_readable(),
+                });
+            }
+        } else {
+            return Err(KvistError::VendoringIncomplete {
+                path: report.project_root.clone(),
+                count: report.missing_dependencies.len(),
+                missing: report.missing_human_readable(),
+            });
+        }
     }
     let mounts = strategy.mounts(project_dir, &report.lockfile_digest)?;
     Ok(VendoringEnforcement {
@@ -1309,7 +1343,7 @@ mod tests {
         let project = tmp.path();
         seed_vendored(project, "vendored-python");
         seed_venv(project);
-        let enforcement = enforce_vendoring(project).expect("enforce");
+        let enforcement = enforce_vendoring(project, false, None).expect("enforce");
         assert_eq!(enforcement.language, "python");
         assert!(enforcement.lockfile_digest.starts_with(DIGEST_PREFIX));
         // Wheels, the pip config, and the provisioned virtualenv.

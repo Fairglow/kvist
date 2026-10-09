@@ -224,14 +224,13 @@ policy, it MUST NOT be applied automatically. It is instead surfaced to the huma
 as a blocking decision and placed the component in an awaiting-decision state
 until the human approves it, rejects it, or narrows the policy.
 
-Current implementation status (phase 4): the broker accepts the
-`request_dependency` tool, evaluates each origin against the dependency policy,
-records an in-policy request as durable evidence so the agent continues without
-interruption, and surfaces an out-of-policy request as a decision that places the
-component in an awaiting-decision state. The distinct acquisition phase that
-auto-fetches an in-policy revision and promotes an immutable generation remains a
-documented follow-up, so an in-policy request is recorded for acquisition rather
-than fetched inline.
+Current implementation status: the broker accepts the `request_dependency` tool,
+evaluates each origin against the dependency policy, and for in-policy requests
+immediately triggers the dependency acquisition phase. The acquisition sandbox
+(`cargo fetch` with allowlisted package sources) runs before the effect sandbox
+executes, then the fetched material is repacked into the vendored registry. An
+out-of-policy request is surfaced as a decision that places the component in an
+awaiting-decision state.
 
 ### REQ-RUST-TOOLCHAIN
 
@@ -673,10 +672,10 @@ explicitly draft rather than inferred truth.
 - Multi-turn agent execution, bounded whole-project reading, decision-driven
   awaiting-decision states, and the `propose_decision`/`request_dependency`
   tools (request, policy evaluation, and run-harness pause) are implemented and
-  claimed by the current CLI. Whole-component-minus-exclusions writing scope
-  (write at the component root for `Cargo.toml`/`deny.toml`) and agent-driven
-  dependency requests that auto-fetch an in-policy revision remain target
-  requirements, not claims about the current CLI.
+  claimed by the current CLI. Agent-driven dependency requests that auto-fetch
+  an in-policy revision (the dependency acquisition phase) are implemented.
+  Whole-component-minus-exclusions writing scope (write at the component root
+  for `Cargo.toml`/`deny.toml`) remains a target requirement.
 - Configuration is limited to 64 KiB. Component Markdown and YAML artifacts
   read by the maerg are limited to 1 MiB.
 - Traversal depth, directory count, component count, entries per directory,

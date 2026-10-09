@@ -20,13 +20,13 @@ fixed sandbox path. This allows Kvist to:
 
 The mount layout is:
 
-| Sandbox Path | Source | Purpose |
-|---|---|---|
-| `/rust/toolchain` | Host toolchain directory (e.g., `~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu`) | Read-only access to the Rust compiler, standard library, and targets |
-| `/rust/runtime/bin/cargo` | Kvist-provided Cargo shim | A wrapper that forces `--offline --locked` and the vendored sources configuration |
-| `/rust/vendor` | Snapshot of `.kvist/vendored` | Read-only snapshot of the vendored dependency registry |
-| `/tmp/cargo-home` | Private tmpfs | Private, sandbox-local Cargo home (cache, registry metadata) |
-| `/tmp/target` | Private tmpfs | Private, sandbox-local build target directory |
+| Sandbox Path              | Source                                                                                  | Purpose                                                                           |
+| ------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `/rust/toolchain`         | Host toolchain directory (e.g., `~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu`) | Read-only access to the Rust compiler, standard library, and targets              |
+| `/rust/runtime/bin/cargo` | Kvist-provided Cargo shim                                                               | A wrapper that forces `--offline --locked` and the vendored sources configuration |
+| `/rust/vendor`            | Snapshot of `.kvist/vendored`                                                           | Read-only snapshot of the vendored dependency registry                            |
+| `/tmp/cargo-home`         | Private tmpfs                                                                           | Private, sandbox-local Cargo home (cache, registry metadata)                      |
+| `/tmp/target`             | Private tmpfs                                                                           | Private, sandbox-local build target directory                                     |
 
 The Cargo shim at `/rust/runtime/bin/cargo` is essential: it ensures that
 every Cargo invocation inside the sandbox uses offline mode with the vendored
@@ -54,6 +54,7 @@ the sandbox mounts those locations read-only. Discovery is via PATH, not
 fixed mount paths.
 
 The sandbox mounts the following host system directories read-only:
+
 - `/usr`
 - `/lib`
 - `/lib64`
@@ -64,9 +65,9 @@ Additionally, for toolchains that live in user home directories, Kvist
 mounts those locations when the corresponding profile is enabled:
 
 | Toolchain | User Home Directories Mounted |
-|---|---|
-| Rust | `~/.cargo/bin` |
-| Go | `~/go/bin`, `~/.local/bin` |
+| --------- | ----------------------------- |
+| Rust      | `~/.cargo/bin`                |
+| Go        | `~/go/bin`, `~/.local/bin`    |
 
 **PATH and environment variables:** The sandbox sets `PATH` to include the
 sandbox-local directories first, then the system directories. For Rust, this
@@ -108,12 +109,15 @@ Rust vendoring is enforced exactly through `Cargo.lock`. The workflow is:
 
 1. **Provision dependencies on the host:** Run `kvist vendor .` from the
    project root. This reconciles the vendored registry against `Cargo.lock`,
-   downloading any missing crates into `.kvist/vendored/`.
+   downloading any missing crates into `.kvist/vendored/`. **Note:** This is now
+   automatic for sandbox builds — `kvist build`, `kvist test`, and `kvist verify`
+   will run `kvist vendor` if the vendored registry is out of sync.
 2. **Build in the sandbox:** The sandbox mounts `.kvist/vendored` at
    `/rust/vendor` and uses the Cargo shim to force offline, locked builds
    against the vendored sources.
 
 **To add or change dependencies:**
+
 1. Edit `Cargo.toml` to add or change dependency specifications.
 2. Run `cargo update` or `cargo add` on the host to update `Cargo.lock`.
 3. Run `kvist vendor .` to synchronize the vendored registry.
@@ -123,12 +127,32 @@ The sandbox build will then use the updated dependencies. No network access
 is needed inside the sandbox.
 
 **Key constraints:**
+
 - `Cargo.lock` must exist and be up-to-date. Sandboxed builds use `--locked`,
   which fails if `Cargo.lock` is stale or missing.
 - The vendored registry must contain all dependencies listed in `Cargo.lock`.
   Run `kvist vendor .` to ensure this.
 - Sandbox builds never download crates. If a dependency is missing from the
   vendored registry, the build fails.
+
+### Agent dependency requests (`request_dependency`)
+
+The Kvist agent runtime provides a `request_dependency` tool that agents can
+use to request new or changed dependencies mid-task. When an agent calls this
+tool:
+
+1. The dependency origin is validated against the dependency policy (exact,
+   pinned revision from a public source)
+2. An in-policy request immediately triggers the dependency acquisition phase
+3. The acquisition sandbox runs `cargo fetch` with allowlisted package sources
+4. The fetched material is repacked into the vendored registry
+5. The agent continues without interruption
+
+Out-of-policy requests (unpinned, private, or untrusted origins) are surfaced
+as decisions that pause the run for human review.
+
+This means agents can autonomously request dependencies they need, without
+requiring manual intervention to run `kvist vendor`.
 
 ### Python (uv)
 
@@ -141,6 +165,7 @@ Python vendoring uses `uv`'s lock files. The workflow is:
    dependencies from the vendored package cache.
 
 **To add or change dependencies:**
+
 1. Edit `pyproject.toml` or `requirements.txt` to add or change dependency
    specifications.
 2. Run `uv lock` or `uv sync` on the host to update `uv.lock`.
@@ -159,6 +184,7 @@ The workflow is:
    mode to install dependencies from the vendored cache.
 
 **To add or change dependencies:**
+
 1. Edit `package.json` to add or change dependency specifications.
 2. Run `npm install` or `pnpm install` on the host to update the lock file.
 3. Run `kvist vendor .` to synchronize the vendored cache.
@@ -175,6 +201,7 @@ Go vendoring uses the module cache. The workflow is:
    cache and builds in offline mode.
 
 **To add or change dependencies:**
+
 1. Edit `go.mod` or run `go get` on the host to add or change dependencies.
 2. Run `go mod tidy` to update `go.sum`.
 3. Run `kvist vendor .` to synchronize the vendored module cache.
@@ -191,6 +218,7 @@ C/C++ vendoring uses Conan's lock files. The workflow is:
    dependencies from the vendored cache.
 
 **To add or change dependencies:**
+
 1. Edit `conanfile.txt` or `conanfile.py` to add or change dependencies.
 2. Run `conan lock` on the host to update `conan.lock`.
 3. Run `kvist vendor .` to synchronize the vendored cache.
@@ -212,6 +240,7 @@ workflow is:
    manifest is current and the toolchain is available.
 
 **To upgrade or downgrade the toolchain:**
+
 1. Update the `channel` field in `rust-toolchain.toml` (or edit the plain
    `rust-toolchain` file).
 2. Run `kvist toolchain .` to install the new toolchain and update the manifest.
