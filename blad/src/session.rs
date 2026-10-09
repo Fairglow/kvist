@@ -169,7 +169,11 @@ pub fn load_messages(session: &Session) -> Vec<Message> {
 }
 
 /// A single message from a session.
+///
+/// The sequence field is reserved for potential future display of message
+/// ordering but is not currently used in the default display mode.
 pub struct Message {
+    #[allow(dead_code)]
     pub sequence: usize,
     pub kind: String,
     pub disposition: Option<String>,

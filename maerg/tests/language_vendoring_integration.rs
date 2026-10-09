@@ -23,7 +23,7 @@ fn enforces_vendoring_for_the_real_project_when_vendored() {
         return;
     }
 
-    let enforcement = enforce_vendoring(project).expect("vendoring enforced");
+    let enforcement = enforce_vendoring(project, false, None).expect("vendoring enforced");
     assert_eq!(enforcement.language, "rust");
     assert!(
         enforcement.lockfile_digest.starts_with("sha256:"),
