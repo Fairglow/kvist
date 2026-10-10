@@ -42,6 +42,7 @@ const REQUEST_PROTOCOL: &str = "kvist-sandbox-request-v1";
 const PROBE_PROTOCOL: &str = "kvist-sandbox-probe-v1";
 const PROBE_ARGUMENT: &str = "--kvist-sandbox-probe-v1";
 const EXECUTE_ARGUMENT: &str = "--kvist-sandbox-request-v1";
+const RUSTUP_HOME_DEST: &str = "/rust/rustup-home";
 const MAX_PROBE_BYTES: usize = 64 * 1024;
 /// These producer bounds mirror `galla::protocol`: both sides accept
 /// at most 1024 argv entries and 4096 bytes per argv/environment value.
@@ -1046,6 +1047,59 @@ fn validate_probe_digest(config: &SandboxConfig, value: &str, label: &str) -> Re
 }
 
 /// Runs one program through the configured runner. The runner receives a JSON
+/// Creates a rustup-managed toolchain directory with symlinks to the actual
+/// toolchain binaries. This makes rustup aware of the installed toolchain
+/// without requiring network access or rustup's own management.
+fn create_rustup_toolchain_dir(toolchain_root: &Path) -> Result<tempfile::TempDir> {
+    let rustup_home = tempfile::Builder::new()
+        .prefix(".kvist-rustup-")
+        .tempdir()
+        .map_err(|e| KvistError::SandboxUnavailable {
+            runner: String::new(),
+            reason: format!("cannot create rustup home: {e}"),
+        })?;
+
+    let toolchain_dir = rustup_home
+        .path()
+        .join("toolchains")
+        .join("stable-x86_64-unknown-linux-gnu");
+    let toolchain_bin = toolchain_dir.join("bin");
+    let toolchain_lib = toolchain_dir.join("lib");
+
+    fs::create_dir_all(&toolchain_bin).map_err(|e| KvistError::SandboxUnavailable {
+        runner: String::new(),
+        reason: format!("cannot create rustup toolchain bin directory: {e}"),
+    })?;
+    fs::create_dir_all(&toolchain_lib).map_err(|e| KvistError::SandboxUnavailable {
+        runner: String::new(),
+        reason: format!("cannot create rustup toolchain lib directory: {e}"),
+    })?;
+
+    // Create symlinks to the actual toolchain binaries
+    for name in ["cargo", "rustc", "rustdoc", "rustfmt", "clippy-driver"] {
+        let src = toolchain_root.join("bin").join(name);
+        if src.exists() {
+            symlink(src, toolchain_bin.join(name)).map_err(|e| KvistError::SandboxUnavailable {
+                runner: String::new(),
+                reason: format!("cannot symlink {name} for rustup: {e}"),
+            })?;
+        }
+    }
+
+    // Symlink the lib/rustlib directory
+    let src_rustlib = toolchain_root.join("lib").join("rustlib");
+    if src_rustlib.exists() {
+        symlink(src_rustlib, toolchain_lib.join("rustlib")).map_err(|e| {
+            KvistError::SandboxUnavailable {
+                runner: String::new(),
+                reason: format!("cannot symlink rustlib for rustup: {e}"),
+            }
+        })?;
+    }
+
+    Ok(rustup_home)
+}
+
 /// request on standard input and must proxy the contained program's exit code
 /// and output without host fallback.
 pub fn execute(
@@ -1227,6 +1281,29 @@ pub fn execute_with_timeout(
         identity: toolchain_identity.clone(),
     });
 
+    // Create a rustup-managed toolchain directory so that rustup recognizes
+    // the installed toolchain. This prevents the agent from being confused
+    // by rustup reporting "no installed toolchains". Only done for authoring
+    // phase because verification phase only allows read-only grants.
+    if matches!(request.phase, ExecutionPhase::Authoring) {
+        let rustup_home = create_rustup_toolchain_dir(Path::new(&toolchain_root))?;
+        let rustup_identity = digest_label(
+            serde_json::to_string(&rustup_home.path())
+                .map_err(|error| KvistError::SandboxUnavailable {
+                    runner: config.runner.clone(),
+                    reason: format!("cannot canonicalize rustup home identity: {error}"),
+                })?
+                .as_bytes(),
+        );
+        grants.push(SandboxGrant {
+            source: rustup_home.path().to_string_lossy().into_owned(),
+            destination: RUSTUP_HOME_DEST.to_owned(),
+            access: "read-write",
+            purpose: "scratch",
+            identity: rustup_identity,
+        });
+    }
+
     let resources = SandboxResources {
         wall_time_ms: match options.timeout {
             Some(limit) => bounded_millis(config, limit)?,
@@ -1267,13 +1344,21 @@ pub fn execute_with_timeout(
             .as_bytes(),
     );
 
+    // Add rustup environment variables to make rustup aware of the installed toolchain.
+    // Only done for authoring phase where the rustup home is mounted.
+    let mut environment = request.environment.clone();
+    if matches!(request.phase, ExecutionPhase::Authoring) {
+        environment.insert("RUSTUP_HOME".to_owned(), RUSTUP_HOME_DEST.to_owned());
+        environment.insert("HOME".to_owned(), "/workspace".to_owned());
+    }
+
     let sandbox_request = SandboxRequest {
         protocol: REQUEST_PROTOCOL,
         protocol_version: PROTOCOL_VERSION,
         phase: request.phase.wire(),
         argv: &argv,
         working_directory: "/workspace/component",
-        environment: &request.environment,
+        environment: &environment,
         network,
         resources,
         identities: SandboxIdentities {
