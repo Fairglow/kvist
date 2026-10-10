@@ -108,6 +108,62 @@ pub fn list_sessions(log_dir: &Path, limit: usize) -> Vec<Session> {
     sessions
 }
 
+/// Load a session by path.
+pub fn load_session_by_path(path: &Path) -> Option<Session> {
+    if !path.is_dir() {
+        return None;
+    }
+
+    let manifest_path = path.join("session.json");
+    if !manifest_path.exists() {
+        return None;
+    }
+
+    let json = match fs::read_to_string(&manifest_path) {
+        Ok(content) => content,
+        Err(_) => return None,
+    };
+
+    let manifest: Value = match serde_json::from_str(&json) {
+        Ok(m) => m,
+        Err(_) => return None,
+    };
+
+    let id = manifest
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let model = manifest
+        .get("model")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let status = manifest
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let created_at = manifest
+        .get("created_at")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let entry_count = manifest
+        .get("entries")
+        .and_then(|v| v.as_array())
+        .map(|v| v.len())
+        .unwrap_or(0);
+
+    Some(Session {
+        id,
+        path: path.to_path_buf(),
+        manifest,
+        model,
+        completed: status == "completed",
+        created_at,
+        message_count: entry_count,
+    })
+}
+
 /// Load a session by ID prefix or full ID.
 pub fn load_session(log_dir: &Path, session_id: &str) -> Option<Session> {
     let sessions = list_sessions(log_dir, 1000);
