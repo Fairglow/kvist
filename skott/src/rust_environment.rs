@@ -681,10 +681,30 @@ impl RustEnvironment {
         // Create a rustup-managed toolchain directory with symlinks to the
         // actual toolchain binaries. This makes rustup aware of the installed
         // toolchain without requiring network access or rustup's own management.
+        // The toolchain directory name is detected from the active toolchain
+        // channel and the host target triple.
         let rustup_home = staging.path().join("rustup-home");
-        let toolchain_dir = rustup_home
-            .join("toolchains")
-            .join(format!("stable-x86_64-unknown-linux-gnu"));
+        let installed_targets = query_rustup(
+            &rustup,
+            &home,
+            &["target", "list", "--installed"],
+            &preparation,
+        )?;
+        let target = installed_targets
+            .lines()
+            .find(|line| line.ends_with("(default)"))
+            .map(|line| {
+                line.split_whitespace()
+                    .next()
+                    .unwrap_or("x86_64-unknown-linux-gnu")
+            })
+            .unwrap_or("x86_64-unknown-linux-gnu");
+        let toolchain_dir_name = if selected.ends_with(&format!("-{}", target)) {
+            selected.clone()
+        } else {
+            format!("{}-{}", selected, target)
+        };
+        let toolchain_dir = rustup_home.join("toolchains").join(toolchain_dir_name);
         let toolchain_bin = toolchain_dir.join("bin");
         let toolchain_lib = toolchain_dir.join("lib");
 
@@ -832,7 +852,7 @@ impl RustEnvironment {
             Grant {
                 source: self.resources.rustup_home.to_string_lossy().into_owned(),
                 destination: RUSTUP_HOME_DEST.into(),
-                access: Access::ReadWrite,
+                access: Access::ReadOnly,
                 purpose: Purpose::Toolchain,
                 identity: self.resources.identity.clone(),
             },
