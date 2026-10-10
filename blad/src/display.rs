@@ -62,27 +62,32 @@ pub fn stream_session(session: &Session) {
 
 /// View a standalone markdown file interactively.
 pub fn view_markdown(content: &str) {
-    // Render markdown to a string first, then display interactively
-    let mut output = String::new();
+    // Render markdown to a buffer first, then display interactively
+    let mut output = Vec::new();
     render_markdown(content, &mut output).unwrap();
+    let rendered = String::from_utf8(output).unwrap();
 
     // Display interactively with navigation
-    interactive_viewer(&output);
+    interactive_viewer(&rendered);
 }
 
 /// Dump a standalone markdown file to plain text (no ANSI).
 pub fn dump_markdown(content: &str) {
-    // Render markdown to a string, output directly
-    let mut output = String::new();
+    // Render markdown to a buffer, output directly
+    let mut output = Vec::new();
     render_markdown(content, &mut output).unwrap();
-    print!("{}", output);
+    let rendered = String::from_utf8(output).unwrap();
+    print!("{}", rendered);
 }
 
 /// Interactive viewer with navigation (up/down arrows, page up/down).
 fn interactive_viewer(content: &str) {
     use crossterm::event::{self, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
     use crossterm::execute;
-    use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+    use crossterm::terminal::{
+        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+        enable_raw_mode,
+    };
 
     // Split content into lines
     let lines: Vec<&str> = content.lines().collect();
@@ -107,26 +112,23 @@ fn interactive_viewer(content: &str) {
         let end = (scroll_offset + visible_lines).min(total_lines);
 
         // Clear and redraw
-        execute!(io::stdout(), crossterm::Clear(crossterm::ClearType::All)).expect("failed to clear");
+        execute!(io::stdout(), Clear(ClearType::All)).expect("failed to clear");
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, 0)).expect("failed to move cursor");
 
         // Header
         println!("=== Blad Markdown Viewer ===");
 
         // Render visible lines with soft wrapping
-        for i in start..end {
-            if i < total_lines {
-                let line = lines[i];
-                // Soft wrap: split line at terminal width
-                let remaining = cols as usize - 1;
-                if line.len() > remaining {
-                    let wrapped = soft_wrap(line, remaining);
-                    for wline in wrapped {
-                        println!("{}", wline);
-                    }
-                } else {
-                    println!("{}", line);
+        let visible = &lines[start..end];
+        let remaining = cols as usize - 1;
+        for line in visible {
+            if line.len() > remaining {
+                let wrapped = soft_wrap(line, remaining);
+                for wline in wrapped {
+                    println!("{}", wline);
                 }
+            } else {
+                println!("{}", line);
             }
         }
 
@@ -142,16 +144,19 @@ fn interactive_viewer(content: &str) {
         match event::read() {
             Ok(Event::Key(KeyEvent { code, .. })) => match code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    if scroll_offset > 0 { scroll_offset -= 1; }
+                    scroll_offset = scroll_offset.saturating_sub(1);
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    if scroll_offset < total_lines.saturating_sub(1) { scroll_offset += 1; }
+                    if scroll_offset < total_lines.saturating_sub(1) {
+                        scroll_offset += 1;
+                    }
                 }
                 KeyCode::PageUp | KeyCode::Char('u') => {
                     scroll_offset = scroll_offset.saturating_sub(visible_lines);
                 }
                 KeyCode::PageDown | KeyCode::Char('d') => {
-                    scroll_offset = (scroll_offset + visible_lines).min(total_lines.saturating_sub(1));
+                    scroll_offset =
+                        (scroll_offset + visible_lines).min(total_lines.saturating_sub(1));
                 }
                 KeyCode::Char('g') | KeyCode::Char('H') => {
                     scroll_offset = 0;
@@ -166,10 +171,10 @@ fn interactive_viewer(content: &str) {
             },
             Ok(Event::Mouse(MouseEvent { kind, .. })) => match kind {
                 MouseEventKind::ScrollUp => {
-                    if scroll_offset > 0 { scroll_offset -= 1; }
+                    scroll_offset = scroll_offset.saturating_sub(1);
                 }
-                MouseEventKind::ScrollDown => {
-                    if scroll_offset < total_lines.saturating_sub(1) { scroll_offset += 1; }
+                MouseEventKind::ScrollDown if scroll_offset < total_lines.saturating_sub(1) => {
+                    scroll_offset += 1;
                 }
                 _ => {}
             },
