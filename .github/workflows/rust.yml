@@ -84,6 +84,9 @@ jobs:
         run: cargo build --locked --workspace --all-targets --all-features
 
       - name: Test workspace
+        env:
+          KVIST_GALLA: /home/runner/kvist-target/debug/galla-runner
+          KVIST_RUST_TEST_RUNNER: /home/runner/kvist-target/debug/galla-runner
         run: cargo test --locked --workspace --all-features
 
       - name: Test the native Rust sandbox chain
@@ -96,15 +99,12 @@ jobs:
             --skip native_repository_tests_execute_inside_the_workspace_sandbox
           KVIST_GALLA="$CARGO_TARGET_DIR/debug/galla-runner" \
             cargo test --locked -p kvist --test sandbox_toolchain -- \
-            --include-ignored --test-threads=1 --nocapture
+            --ignored --test-threads=1 --nocapture
 
-      - name: Test native Galla toolchain execution and rustup inventory parity
+      - name: Test native Galla toolchain execution
         run: |
           KVIST_GALLA="$CARGO_TARGET_DIR/debug/galla-runner" \
             cargo test --locked -p galla --test toolchain_e2e -- \
-            --ignored --test-threads=1 --nocapture
-          KVIST_RUST_TEST_RUNNER="$CARGO_TARGET_DIR/debug/galla-runner" \
-            cargo test --locked -p skott --test rustup_inventory -- \
             --ignored --test-threads=1 --nocapture
 
   audit:
@@ -145,6 +145,14 @@ jobs:
       - name: Install Rust 1.95.0
         uses: dtolnay/rust-toolchain@1.95.0
 
+      - name: Provision native Rust inventory prerequisites on the host
+        run: |
+          if [ ! -x /usr/bin/rustup ]; then
+            sudo install -m 0755 "$(command -v rustup)" /usr/bin/rustup
+          fi
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup target add wasm32-unknown-unknown --toolchain stable
+
       - name: Install system Go toolchain
         run: |
           # The offline language e2e tests verify against a go toolchain whose
@@ -167,6 +175,9 @@ jobs:
         run: cargo build --locked --workspace --all-targets --all-features
 
       - name: Test workspace
+        env:
+          KVIST_GALLA: /home/runner/kvist-target/debug/galla-runner
+          KVIST_RUST_TEST_RUNNER: /home/runner/kvist-target/debug/galla-runner
         run: cargo test --locked --workspace --all-features
 
   vcs:

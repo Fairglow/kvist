@@ -197,12 +197,355 @@ fn run_sandboxed(
 }
 
 #[test]
-#[ignore = "requires an installed runner and native Bubblewrap"]
+fn rust_authoring_has_host_inventory_private_defaults_and_offline_builds() {
+    use sha2::{Digest, Sha256};
+    use std::collections::BTreeMap;
+    use std::fs;
+    use std::io::Read;
+    use std::os::unix::fs::MetadataExt;
+
+    type State = BTreeMap<PathBuf, (u32, u64, i64, i64, i64, i64, String)>;
+    fn snapshot(path: &Path, state: &mut State) {
+        let metadata = fs::symlink_metadata(path).unwrap();
+        let content = if metadata.is_symlink() {
+            format!("{:?}", fs::read_link(path).unwrap())
+        } else if metadata.is_file() {
+            let mut hash = Sha256::new();
+            let mut file = fs::File::open(path).unwrap();
+            let mut buffer = [0; 65536];
+            loop {
+                let count = file.read(&mut buffer).unwrap();
+                if count == 0 {
+                    break;
+                }
+                hash.update(&buffer[..count]);
+            }
+            hex::encode(hash.finalize())
+        } else {
+            assert!(metadata.is_dir());
+            "directory".into()
+        };
+        state.insert(
+            path.into(),
+            (
+                metadata.mode(),
+                metadata.len(),
+                metadata.mtime(),
+                metadata.mtime_nsec(),
+                metadata.ctime(),
+                metadata.ctime_nsec(),
+                content,
+            ),
+        );
+        if metadata.is_dir() {
+            for entry in fs::read_dir(path).unwrap() {
+                snapshot(&entry.unwrap().path(), state);
+            }
+        }
+    }
+    fn host(args: &[&str]) -> Vec<u8> {
+        let output = Command::new("/usr/bin/rustup")
+            .args(args)
+            .current_dir("/")
+            .env_clear()
+            .env("HOME", std::env::var_os("HOME").unwrap())
+            .env("PATH", "/usr/bin:/bin")
+            .env("RUSTUP_AUTO_INSTALL", "0")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    }
+    let home = PathBuf::from(std::env::var_os("HOME").unwrap()).join(".rustup");
+    let mut before = State::new();
+    snapshot(&home, &mut before);
+    let runner = locate_runner().expect("build galla-runner outside the worktree");
+    let backend = locate_backend().expect("install Bubblewrap on the host");
+    let worktree = git_worktree_root().expect("run inside a worktree");
+    let container = tempfile::tempdir_in(&worktree).unwrap();
+    let project = tempfile::tempdir_in(container.path()).unwrap();
+    fs::create_dir(project.path().join("src")).unwrap();
+    fs::create_dir_all(project.path().join("tests/expected")).unwrap();
+    for name in [
+        "REQUIREMENTS.md",
+        "CONTRACT.md",
+        "DESIGN.md",
+        "TODOS.yaml",
+        "IMPL.md",
+    ] {
+        fs::write(project.path().join(name), "protected context").unwrap();
+    }
+    fs::write(
+        project.path().join("Cargo.toml"),
+        "[package]\nname=\"maerg_rust_trial\"\nversion=\"0.1.0\"\nedition=\"2021\"\n",
+    )
+    .unwrap();
+    fs::write(
+        project.path().join("Cargo.lock"),
+        "version = 3\n[[package]]\nname = \"maerg_rust_trial\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(project.path().join("src/lib.rs"),
+            "/// ```\n/// assert_eq!(maerg_rust_trial::answer(), 42);\n/// ```\npub fn answer() -> u8 { 42 }\n#[test] fn works() { assert_eq!(answer(), 42); }\n").unwrap();
+    let installed = String::from_utf8(host(&["toolchain", "list"])).unwrap();
+    let names: Vec<_> = installed
+        .lines()
+        .map(|line| line.split_whitespace().next().unwrap())
+        .collect();
+    assert!(
+        names.len() >= 2,
+        "provision multiple host toolchains separately"
+    );
+    let expected = project.path().join("tests/expected");
+    fs::write(expected.join("names"), format!("{}\n", names.join("\n"))).unwrap();
+    fs::write(expected.join("default"), host(&["default"])).unwrap();
+    for name in &names {
+        assert!(
+            name.bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+        );
+        for (suffix, args) in [
+            ("version", vec!["run", name, "rustc", "--version"]),
+            ("doc", vec!["run", name, "rustdoc", "--version"]),
+            (
+                "targets",
+                vec!["target", "list", "--installed", "--toolchain", name],
+            ),
+            ("catalogue", vec!["target", "list", "--toolchain", name]),
+            (
+                "components",
+                vec!["component", "list", "--installed", "--toolchain", name],
+            ),
+        ] {
+            fs::write(expected.join(format!("{name}.{suffix}")), host(&args)).unwrap();
+        }
+    }
+    let script = project.path().join("rust-proof.sh");
+    fs::write(&script, r#"set -eu
+    test "$RUSTUP_HOME" = /tmp/rustup-home
+    test "$HOME" = /tmp && test "$CARGO_HOME" = /tmp/cargo-home
+    test "$CARGO_TARGET_DIR" = /tmp/target && test "$CARGO_NET_OFFLINE" = true
+    test "$RUSTUP_AUTO_INSTALL" = 0 && test ! -e /home && test ! -e /root
+    test ! -w "$RUSTUP_HOME/toolchains" && test ! -w Cargo.toml && test ! -w Cargo.lock
+    rustup default | cmp - tests/expected/default
+    rustup toolchain list | cut -d' ' -f1 | sort > /tmp/names
+    sort tests/expected/names | cmp - /tmp/names
+    rustup default stable
+    for name in $(cat tests/expected/names); do
+      rustup default "$name"
+      rustc --version | cmp - "tests/expected/$name.version"
+      rustdoc --version | cmp - "tests/expected/$name.doc"
+      rustup target list --toolchain "$name" | cmp - "tests/expected/$name.catalogue"
+      rustup target list --installed --toolchain "$name" | cmp - "tests/expected/$name.targets"
+      rustup component list --installed --toolchain "$name" | cmp - "tests/expected/$name.components"
+      for target in $(cat "tests/expected/$name.targets"); do
+        rustc --crate-type lib --target "$target" src/lib.rs -o /tmp/trial.rlib
+      done
+      cargo test --lib
+      cargo test --doc
+      test ! -w "$(rustup which rustc)"
+      if rustup toolchain uninstall "$name"; then exit 1; fi
+    done
+    if cargo +9.99.99 --version; then exit 1; fi
+    if touch /rust/rustup-home/settings.toml; then exit 1; fi
+    printf offline-maerg-proof
+    "#).unwrap();
+    let config = resolve_sandbox_config(&runner, &backend);
+    let expected_runner = runner_identity(&config, project.path(), VcsSelection::Auto).unwrap();
+    let expected_backend = backend_identity(&config, project.path(), VcsSelection::Auto).unwrap();
+    ensure_available(
+        &config,
+        project.path(),
+        VcsSelection::Auto,
+        &expected_runner,
+        &expected_backend,
+    )
+    .unwrap();
+    let result = execute_with_timeout(
+        &config,
+        ExecutionRequest {
+            project_root: container.path(),
+            vcs_selection: VcsSelection::Auto,
+            component_dir: project.path(),
+            phase: ExecutionPhase::Authoring,
+            program: "/usr/bin/bash",
+            arguments: &["/workspace/context/rust-proof.sh".into()],
+            environment: [("PATH".into(), "/usr/bin:/bin".into())].into(),
+            read_only_mounts: &[kvist::sandbox::ReadOnlyMount::file(
+                &script,
+                "/workspace/context/rust-proof.sh",
+            )],
+            scratch_host_dir: None,
+            backend: &expected_backend,
+            policy_identity: POLICY_IDENTITY,
+        },
+        ExecutionOptions {
+            timeout: Some(Duration::from_secs(120)),
+            output_limit: Some(65536),
+            live_stdout: None,
+        },
+        &expected_runner,
+    )
+    .unwrap();
+    let direct = execute_with_timeout(
+        &config,
+        ExecutionRequest {
+            project_root: container.path(),
+            vcs_selection: VcsSelection::Auto,
+            component_dir: project.path(),
+            phase: ExecutionPhase::Authoring,
+            program: "cargo",
+            arguments: &["--version".into()],
+            environment: [("PATH".into(), "/usr/bin:/bin".into())].into(),
+            read_only_mounts: &[],
+            scratch_host_dir: None,
+            backend: &expected_backend,
+            policy_identity: POLICY_IDENTITY,
+        },
+        ExecutionOptions {
+            timeout: Some(Duration::from_secs(30)),
+            output_limit: Some(8192),
+            live_stdout: None,
+        },
+        &expected_runner,
+    )
+    .unwrap();
+    assert!(
+        direct.output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&direct.output.stderr)
+    );
+    let default = String::from_utf8(host(&["default"])).unwrap();
+    assert_eq!(
+        direct.output.stdout,
+        host(&[
+            "run",
+            default.split_whitespace().next().unwrap(),
+            "cargo",
+            "--version"
+        ])
+    );
+    let mut after = State::new();
+    snapshot(&home, &mut after);
+    assert_eq!(before, after, "host Rust state changed");
+    assert!(
+        result.output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&result.output.stdout),
+        String::from_utf8_lossy(&result.output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.output.stdout).ends_with("offline-maerg-proof"));
+}
+
+#[test]
+fn rust_authoring_builds_workspace_members_with_readonly_provider_context() {
+    use std::fs;
+    let runner = locate_runner().expect("build galla-runner outside the worktree");
+    let backend = locate_backend().expect("install Bubblewrap on the host");
+    let worktree = git_worktree_root().unwrap();
+    let project = tempfile::tempdir_in(&worktree).unwrap();
+    let component = project.path().join("member");
+    let provider = project.path().join("provider");
+    fs::create_dir_all(component.join("src")).unwrap();
+    fs::create_dir_all(component.join("tests")).unwrap();
+    fs::write(component.join("tests/CONTRACT.md"), "local test context").unwrap();
+    fs::create_dir_all(provider.join("src")).unwrap();
+    for name in [
+        "REQUIREMENTS.md",
+        "CONTRACT.md",
+        "DESIGN.md",
+        "TODOS.yaml",
+        "IMPL.md",
+    ] {
+        fs::write(component.join(name), "protected intent").unwrap();
+        fs::write(provider.join(name), "excluded provider intent").unwrap();
+    }
+    fs::create_dir(provider.join(".kvist")).unwrap();
+    fs::write(provider.join(".kvist/private"), "excluded state").unwrap();
+    fs::write(provider.join("src/CONTRACT.md"), "excluded nested intent").unwrap();
+    fs::create_dir(provider.join("src/.kvist")).unwrap();
+    fs::write(provider.join("src/.kvist/private"), "excluded nested state").unwrap();
+    fs::write(project.path().join("Cargo.toml"),
+            "[workspace]\nresolver=\"2\"\nmembers=[\"member\",\"provider\"]\n[workspace.package]\nedition=\"2021\"\n[workspace.dependencies]\nprovider={path=\"provider\"}\n").unwrap();
+    fs::write(component.join("Cargo.toml"),
+            "[package]\nname=\"member\"\nversion=\"0.1.0\"\nedition.workspace=true\n[dependencies]\nprovider.workspace=true\n").unwrap();
+    fs::write(
+        provider.join("Cargo.toml"),
+        "[package]\nname=\"provider\"\nversion=\"0.1.0\"\nedition.workspace=true\n",
+    )
+    .unwrap();
+    fs::write(component.join("src/lib.rs"),
+            "pub fn answer() -> u8 { provider::answer() }\n#[test] fn works() { assert_eq!(answer(), 42); }\n").unwrap();
+    fs::write(
+        provider.join("src/lib.rs"),
+        "pub fn answer() -> u8 { 42 }\n",
+    )
+    .unwrap();
+    let lock = "version = 3\n[[package]]\nname=\"member\"\nversion=\"0.1.0\"\ndependencies=[\"provider\"]\n[[package]]\nname=\"provider\"\nversion=\"0.1.0\"\n";
+    fs::write(project.path().join("Cargo.lock"), lock).unwrap();
+    let config = resolve_sandbox_config(&runner, &backend);
+    let expected_runner = runner_identity(&config, project.path(), VcsSelection::Auto).unwrap();
+    let expected_backend = backend_identity(&config, project.path(), VcsSelection::Auto).unwrap();
+    let default = Command::new("/usr/bin/rustup")
+        .arg("default")
+        .current_dir("/")
+        .env_clear()
+        .env("HOME", std::env::var_os("HOME").unwrap())
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    assert!(default.status.success());
+    let default = String::from_utf8(default.stdout).unwrap();
+    let has_formatter = PathBuf::from(std::env::var_os("HOME").unwrap())
+        .join(".rustup/toolchains")
+        .join(default.split_whitespace().next().unwrap())
+        .join("bin/rustfmt")
+        .is_file();
+    let formatting = if has_formatter {
+        "cargo fmt; cargo fmt --check;"
+    } else {
+        ""
+    };
+    let result = execute_with_timeout(&config, ExecutionRequest {
+            project_root: project.path(), vcs_selection: VcsSelection::Auto, component_dir: &component,
+            phase: ExecutionPhase::Authoring, program: "/usr/bin/bash",
+            arguments: &["-c".into(), format!("set -eu; {formatting} cargo test --lib; printf '\\n#[test] fn edited_source() {{ assert_eq!(answer(), 42); }}\\n' >> src/lib.rs; printf '#[test] fn newly_authored_integration() {{ assert_eq!(member::answer(), 42); }}\\n' > tests/new.rs; cargo test; test \"$(pwd)\" = /workspace/component; test ! -w /rust/project/provider/src/lib.rs; test ! -w /rust/project/Cargo.lock; test ! -e /rust/project/provider/CONTRACT.md; test ! -e /rust/project/provider/.kvist; test ! -e /rust/project/provider/src/CONTRACT.md; test ! -e /rust/project/provider/src/.kvist; if printf forbidden >> /rust/project/provider/src/lib.rs; then exit 1; fi; printf workspace-proof")],
+            environment: [("PATH".into(), "/usr/bin:/bin".into())].into(), read_only_mounts: &[],
+            scratch_host_dir: None, backend: &expected_backend, policy_identity: POLICY_IDENTITY,
+        }, ExecutionOptions { timeout: Some(Duration::from_secs(30)), output_limit: Some(16384),
+            live_stdout: None }, &expected_runner).unwrap();
+    assert!(
+        result.output.status.success(),
+        "{}\n{}",
+        String::from_utf8_lossy(&result.output.stdout),
+        String::from_utf8_lossy(&result.output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&result.output.stdout).ends_with("workspace-proof"));
+    assert_eq!(
+        fs::read_to_string(project.path().join("Cargo.lock")).unwrap(),
+        lock
+    );
+    assert!(!provider.join("src/forbidden").exists());
+    assert_eq!(
+        fs::read_to_string(provider.join("src/lib.rs")).unwrap(),
+        "pub fn answer() -> u8 { 42 }\n"
+    );
+    assert!(String::from_utf8_lossy(&result.output.stdout).contains("edited_source"));
+    assert!(String::from_utf8_lossy(&result.output.stdout).contains("newly_authored_integration"));
+}
+
+#[test]
 fn generic_authoring_preserves_environment_without_rustup_state() {
     let runner = locate_runner().expect("install galla-runner outside the worktree");
     let backend = locate_backend().expect("install Bubblewrap");
     let worktree = git_worktree_root().expect("run inside a git worktree");
-    let project = tempfile::tempdir_in(&worktree).unwrap();
+    let container = tempfile::tempdir_in(&worktree).unwrap();
+    std::fs::write(container.path().join("Cargo.toml"), "[workspace]\n").unwrap();
+    let project = tempfile::tempdir_in(container.path()).unwrap();
     std::fs::create_dir(project.path().join("src")).unwrap();
     std::fs::write(project.path().join("src/input"), "input").unwrap();
     for name in [
@@ -232,7 +575,7 @@ fn generic_authoring_preserves_environment_without_rustup_state() {
     let result = execute_with_timeout(
         &config,
         ExecutionRequest {
-            project_root: project.path(),
+            project_root: container.path(),
             vcs_selection: VcsSelection::Auto,
             component_dir: project.path(),
             phase: ExecutionPhase::Authoring,

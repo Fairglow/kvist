@@ -430,18 +430,25 @@ system rustup. Require bounded, non-link roots outside the writable workspace
 and validate each compiler/Cargo/rustdoc, native layout and present companions.
 Register every name in a private staged rustup home. The initial selection links
 to `/rust/toolchain`; other names link to disjoint `/rust/toolchains/N` mounts.
-Generated `settings.toml` selects the initial name. All remain read-only.
+Generated `settings.toml` selects the initial name. These templates remain read-only.
+Before executing a shell command, initialize `/tmp/rustup-home` with a copy of
+the settings and a link to the read-only registration directory. Rustup may
+change invocation-local selection/profile settings, but cannot write installations
+or registrations. Setup runs inside the sandbox, not against host scratch.
 Track inventory membership and bin/lib/rustlib metadata recursively to detect
 additions, removals, target changes and non-selected installation drift before
 dispatch. Fail on invalid entries, limits or drift, never silently truncate.
 Set
-`RUSTUP_TOOLCHAIN` to the same name, `RUSTUP_AUTO_INSTALL=0`, and retain
+`RUSTUP_TOOLCHAIN` only for a project pin, `RUSTUP_AUTO_INSTALL=0`, and retain
 `HOME=/tmp`; direct PATH Cargo still enters the offline/locked shim.
 Track all present formatter/Clippy executables and the generated settings.
 Validate every generated link and the complete registration set before each
 dispatch. Fixed runtime wrappers consume an optional leading `+<name>` and
-otherwise use `RUSTUP_TOOLCHAIN`, then invoke trusted system rustup's `run`
+otherwise resolve rustup's active selection (environment/pin/default), then invoke
+trusted system rustup's `run`
 without installation. Cargo retains its fixed offline/locked vendor flags.
+Formatter/Clippy/analyzer wrappers use the same selection. `rustup default`
+uses the real system rustup and private settings, never an emulated response.
 Set `RUSTC` and `RUSTDOC` to the selection-aware runtime wrappers so an alternate
 Cargo never compiles or documents using the initially selected version.
 Optional user Cargo

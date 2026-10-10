@@ -6,12 +6,14 @@ add or change vendored dependencies for each supported toolchain.
 
 ## Toolchain Mount Architecture
 
-The `/rust/*` layout below belongs to **Skott workspace authoring**, not every
+The `/rust/*` layout below belongs to **Skott workspace authoring** and
+**maerg Rust authoring**, not every
 Galla request. **Maerg task verification** uses its separate closed Cargo
 topology under `/workspace`, with enforced vendoring and approved identities.
-**Maerg generic authoring** is a protected effect path: it neither queries rustup
-nor stages a rustup home, and preserves its approved environment. Finding only
-system rustup proxies in that path does not establish a usable Rust toolchain.
+**Maerg non-Rust authoring** preserves its approved environment and requires no
+Rust installation. For components with a local Cargo manifest, its protected
+authoring path prepares the installed Rust inventory without granting write
+access to protected component files or peer implementations.
 
 Kvist mounts toolchains into the sandbox in two different ways depending on
 the toolchain:
@@ -35,6 +37,7 @@ The mount layout is:
 | `/rust/vendor`            | Snapshot of `.kvist/vendored`                                                           | Read-only snapshot of the vendored dependency registry                            |
 | `/rust/runtime/bin/rustc`, `/rust/runtime/bin/rustdoc` | Fixed selection-aware wrappers | Compiler and documentation selection follows Cargo or a leading `+name` |
 | `/rust/rustup-home`       | Private generated settings and sandbox-native registrations for every installed name | Read-only complete installed inventory discovery |
+| `/tmp/rustup-home`        | Settings copied inside the sandbox; link to the read-only registration directory | Invocation-local selection/profile state; never host settings |
 | `/rust/user-cargo-bin`    | Validated optional host `~/.cargo/bin` directory | Read-only host-provisioned Cargo extensions; no host Cargo config or credentials |
 | `/tmp/cargo-home`         | Private tmpfs                                                                           | Private, sandbox-local Cargo home (cache, registry metadata)                      |
 | `/tmp/target`             | Private tmpfs                                                                           | Private, sandbox-local build target directory                                     |
@@ -54,8 +57,8 @@ the toolchain discoverable:
 - `CARGO_TARGET_DIR` is set to `/tmp/target`
 - `CARGO_NET_OFFLINE` is set to `true`
 - `HOME=/tmp` names writable private invocation scratch
-- `RUSTUP_HOME=/rust/rustup-home` contains generated settings, never host settings
-- `RUSTUP_TOOLCHAIN` names the exact selected installed channel
+- `RUSTUP_HOME=/tmp/rustup-home` contains private settings, never host settings
+- `RUSTUP_TOOLCHAIN` names the exact selected installed channel only for a pin
 - `RUSTUP_AUTO_INSTALL=0` disables automatic toolchain installation
 
 Generated `toolchains/<name>` links target `/rust/toolchain` for the initial
@@ -63,15 +66,44 @@ selection and `/rust/toolchains/N` for other versions, never host paths.
 `rustup toolchain list` and per-version installed-target/component queries see
 the complete validated host inventory. Use `cargo +<name>`, `rustc +<name>`,
 `rustdoc +<name>`, `rustup run <name> ...`, or invocation-local
-`RUSTUP_TOOLCHAIN=<name>` to select another installed version. Compiler and
+`RUSTUP_TOOLCHAIN=<name>` to select another installed version. Without a pin,
+`rustup default <installed-name>` changes the default for the current shell
+invocation; `rustup default stable` succeeds offline when stable is installed.
+Each new sandbox invocation starts from the resolved host default or pin.
+Compiler and
 rustdoc wrappers follow Cargo selection; PATH Cargo retains offline/locked
 vendored resolution. Explicit concrete Cargo paths remain unwrapped.
-All toolchains and generated settings are read-only; installation is disabled.
+All toolchains and registration templates are read-only; private selection
+settings are writable in tmpfs. Installation is disabled.
 Inventory/target drift requires restart after host provisioning. Invalid,
 custom-linked or over-bound installations fail preparation rather than being
 silently omitted. Host Cargo/rustup overrides are still ignored at startup.
 Missing requested formatter/Clippy components fail before effects; provision
 them separately on the host.
+
+Maerg uses the same Sav runtime scripts but mounts all installations under
+`/rust/toolchains/N` (without Skott's initial `/rust/toolchain` alias or optional
+user Cargo-bin mount). It exposes local Cargo metadata read-only and uses the
+read-only project vendor registry, or an empty registry if absent. Under the
+explicit approval recorded in ADR-0014, it automatically discovers declared
+workspace members and local path dependencies and exposes their build resources
+at `/rust/project`, preserving original Cargo manifests, workspace inheritance
+and project-relative paths. Provider intent documents, hidden state and build
+output/cache directories are excluded recursively. Synthesized ancestors are
+sandbox-local directories, not writable host resources.
+
+PATH Cargo runs from the component's build-view directory. Compiler, rustdoc
+and formatter wrappers redirect component `src`/`tests` paths to the writable
+authoring view; those local roots remain live for Cargo target discovery and
+source edits. Provider files and root Cargo metadata remain read-only; providers
+nested inside writable component roots are rejected rather than retaining a
+writable alias. Discovery is bounded to 128 crates, 100000 source entries,
+32 MiB of path state, depth 128 and 30 seconds, with the runner's 256-grant
+limit applying to the final resource plan. Workspace-member patterns support
+literal paths and whole-directory `*` segments, not recursive/extended globs.
+Links and out-of-project resources fail explicitly. This build context is not
+implicit prompt context and never grants peer writes. The closed Cargo
+verification topology is unchanged.
 
 An agent running inside the sandbox can use Rust without knowing the mount
 path — standard PATH discovery works: `which rustc`, `which cargo`, and
@@ -365,7 +397,29 @@ runs these otherwise ignored tests. `skott/tests/rustup_inventory.rs` additional
 drives actual automatic Skott preparation, compares every installed version and
 target, verifies compiler/doc selection under all three Cargo selection forms,
 and checks denied mutations and unchanged host installations. CI explicitly
-runs it using the same separately provisioned multi-version/cross-target
-prerequisites. Maerg's closed Cargo topology remains unchanged.
+runs it in ordinary workspace tests using the same separately provisioned
+multi-version/cross-target prerequisites. This inventory test and maerg's
+`rust_authoring_has_host_inventory_private_defaults_and_offline_builds` are
+**non-ignored**: ordinary `cargo test` runs them and missing runner/backend/
+Rust prerequisites fail rather than skip. Both compare the host default and
+inventory, exercise offline selection/builds, and snapshot host content and
+metadata excluding access times. Build `galla-runner` outside the worktree first,
+then run:
+
+```bash
+KVIST_RUST_TEST_RUNNER=/opt/target/debug/galla-runner \
+  cargo test --offline --locked -p skott --test rustup_inventory
+KVIST_GALLA=/opt/target/debug/galla-runner \
+  cargo test --offline --locked -p kvist --test sandbox_toolchain
+```
+
+Quality and MSRV CI provision these prerequisites on the host before ordinary
+workspace tests. Tests never install anything or acquire dependencies.
+Maerg's ordinary
+`rust_authoring_builds_workspace_members_with_readonly_provider_context`
+also builds an inherited workspace with a sibling provider, formats the
+authored crate when the host default includes rustfmt, recompiles edited source,
+executes a newly authored integration test, checks nested provider intent/state
+exclusion and verifies that provider source/root lockfile are unchanged.
 See [Galla toolchain testing review](galla-toolchain-testing-review.md) for
 findings, limitations, recorded results and reproduction instructions.

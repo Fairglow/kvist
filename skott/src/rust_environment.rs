@@ -728,22 +728,24 @@ impl RustEnvironment {
             .map_err(|e| io_error("create private Rust runtime", None, e))?;
         fs::create_dir(staging.path().join("runtime/bin"))
             .map_err(|e| io_error("create private Rust wrappers", None, e))?;
-        for executable in ["cargo", "rustc", "rustdoc"] {
-            let wrapper = staging.path().join("runtime/bin").join(executable);
+        let initialization = staging.path().join("runtime/initialize");
+        fs::write(&initialization, sav::offline_rust::INITIALIZE)
+            .map_err(|e| io_error("write sandbox-only Rust initialization", None, e))?;
+        let (identity, fingerprint) = hash_file(&initialization, &preparation)?;
+        executables.push(TrackedExecutable {
+            path: initialization,
+            identity,
+            fingerprint,
+        });
+        for executable in sav::offline_rust::TOOLS {
+            let wrapper = staging.path().join("runtime/bin").join(executable.name());
             let mut file = OpenOptions::new()
                 .write(true)
                 .create_new(true)
                 .mode(0o500)
                 .open(&wrapper)
                 .map_err(|e| io_error("create trusted Rust runtime wrapper", None, e))?;
-            let arguments = if executable == "cargo" {
-                " --offline --locked --config 'source.crates-io.replace-with=\"vendored-sources\"' --config 'source.vendored-sources.directory=\"/rust/vendor\"'"
-            } else {
-                ""
-            };
-            let script = format!(
-                "#!/usr/bin/bash\nset -eu\nselected=\"$RUSTUP_TOOLCHAIN\"\nif [[ \"${{1-}}\" == +* ]]; then selected=\"${{1:1}}\"; shift; fi\nexec /usr/bin/rustup run -- \"$selected\" {executable}{arguments} \"$@\"\n"
-            );
+            let script = sav::offline_rust::wrapper(*executable);
             file.write_all(script.as_bytes())
                 .map_err(|e| io_error("write fixed Rust runtime wrapper", None, e))?;
             file.sync_all()
@@ -828,7 +830,7 @@ impl RustEnvironment {
     /// An inspectable exact selection, identity and offline-material diagnostic.
     pub fn diagnostic(&self) -> String {
         format!(
-            "Rust authoring: {} initially selects installed `{}` at `{}`; identity {}; pin digest {}; network denied, Cargo explicitly offline and locked, private HOME/cache/target; {}; vendor snapshot {}. Rustup exposes {} installed toolchains and their targets through read-only sandbox-native registrations; choose with cargo +<name> or rustup run. Automatic installation disabled. Provision a matching Cargo.lock separately. No host home/Cargo credentials mounted; ambient Cargo/Rust overrides ignored.",
+            "Rust authoring: {} initially selects installed `{}` at `{}`; identity {}; pin digest {}; network denied, Cargo explicitly offline and locked, private HOME/cache/target; {}; vendor snapshot {}. Rustup exposes {} installed toolchains and their targets through read-only sandbox-native registrations; choose with cargo +<name>, rustup run or invocation-local rustup default (a project pin takes precedence). Automatic installation disabled. Provision a matching Cargo.lock separately. No host home/Cargo credentials mounted; ambient Cargo/Rust overrides ignored.",
             if self.resources.pinned {
                 "project pin"
             } else {
@@ -994,11 +996,10 @@ impl RustEnvironment {
         } else {
             "/rust/runtime/bin:/rust/toolchain/bin:/usr/bin:/bin:/usr/sbin:/sbin"
         };
-        [
+        let mut environment: BTreeMap<String, String> = [
             ("PATH", path),
             ("HOME", "/tmp"),
-            ("RUSTUP_HOME", RUSTUP_HOME_DEST),
-            ("RUSTUP_TOOLCHAIN", self.resources.channel.as_str()),
+            ("RUSTUP_HOME", "/tmp/rustup-home"),
             ("RUSTUP_AUTO_INSTALL", "0"),
             ("CARGO_HOME", "/tmp/cargo-home"),
             ("CARGO_TARGET_DIR", "/tmp/target"),
@@ -1008,7 +1009,11 @@ impl RustEnvironment {
         ]
         .into_iter()
         .map(|(k, v)| (k.into(), v.into()))
-        .collect()
+        .collect();
+        if self.resources.pinned {
+            environment.insert("RUSTUP_TOOLCHAIN".into(), self.resources.channel.clone());
+        }
+        environment
     }
 }
 
@@ -1363,8 +1368,8 @@ mod tests {
         let environment = synthetic_environment(directory.path());
         let variables = environment.environment();
         assert_eq!(variables["HOME"], "/tmp");
-        assert_eq!(variables["RUSTUP_HOME"], RUSTUP_HOME_DEST);
-        assert_eq!(variables["RUSTUP_TOOLCHAIN"], environment.resources.channel);
+        assert_eq!(variables["RUSTUP_HOME"], "/tmp/rustup-home");
+        assert!(!variables.contains_key("RUSTUP_TOOLCHAIN"));
         assert_eq!(variables["RUSTUP_AUTO_INSTALL"], "0");
         let link = environment.resources.rustup_home.join("toolchains/stable");
         fs::remove_file(&link).unwrap();

@@ -260,7 +260,7 @@ the host provisioning step (`kvist toolchain`), the durable manifest,
 and channel-explicit, fail-closed enforcement on use are implemented and
 evidenced by unit tests plus end-to-end tests, including a pinned
 `nightly` toolchain built and tested offline in the sandbox. The authoring
-phase still receives no usable Rust toolchain (see `REQ-LANGUAGE-SUPPORT`).
+path also consumes installed-only resources as described below.
 
 ### REQ-LANGUAGE-SUPPORT
 
@@ -268,8 +268,8 @@ Language support in the build flow MUST be declared, evidenced, and bounded
 per language. A language is supported for a phase only when an end-to-end
 integration test vendors (or otherwise provisions) a small real project on the
 host and runs its real build/test offline inside the Bubblewrap sandbox,
-asserting a successful run; tests MUST self-skip on hosts without the live
-sandbox. Supported languages and their limitations MUST be documented in the
+asserting a successful run; legacy language tests MAY self-skip on hosts without
+the live sandbox. Supported languages and their limitations MUST be documented in the
 root README and this component's contract.
 
 The current support state is: Rust first-class for verification (exact
@@ -295,13 +295,34 @@ scratch at the fixed Cargo scratch destination, network denied, and the
 language's canonical offline test command (or, for C/C++ only, the approved
 `[test_policy]` command). Go, JavaScript, Python, and C/C++ are vendored-supported and evidenced end to
 end by `language_offline_e2e` (`go_offline_verification_builds_and_tests_denied_network`, `javascript_offline_verification_builds_and_tests_denied_network`, `javascript_pnpm_offline_verification_builds_and_tests_denied_network`, `python_offline_verification_builds_and_tests_denied_network`, `c_offline_verification_builds_and_tests_denied_network`, `c_vcpkg_offline_verification_builds_and_tests_denied_network`, `python_uv_lock_offline_verification_builds_and_tests_denied_network`). JavaScript is vendored-supported for npm (`package-lock.json`), yarn (`yarn.lock`), and pnpm (`pnpm-lock.yaml`); the pnpm path vendors the content-addressable store. Both `requirements.lock.txt` (pip) and `uv.lock` (uv) locked Python projects vendoring and verify offline; a `uv.lock` project is provisioned by exporting its exact resolved graph with `uv export --locked` before the locked wheels are vendored and installed into the venv. C/C++ is vendored-supported for Conan (`conanfile`) and for vcpkg (`vcpkg.json`); the vcpkg path vendors the whole vendored vcpkg root. The
-authoring phase exposes no usable Rust toolchain (the shared runner contract
-permits the Cargo toolchain and the vendored-registry/config/runtime purposes
-only in verification phases); extending that contract is a tracked follow-up.
-Generic authoring MUST NOT enumerate rustup installations, synthesize a mutable
-rustup home, replace the approved environment, or require Rust to execute
-non-Rust tools. Rust authoring resources in the standalone Skott workspace
-agent are a distinct boundary, not implicit maerg task authority.
+Rust authoring MUST expose the complete validated standard-layout installed
+Rust inventory and its targets read-only through System/Toolchain grants.
+For Rust projects, it MUST initialize sandbox-private selection settings from
+generated templates, preserve the project pin or otherwise host default and
+support invocation-local `rustup default` without host mutation, installation
+or network access. PATH tools MUST agree on selection and Cargo MUST default
+to offline/locked vendored resolution. Non-Rust authoring MUST retain its
+approved environment and MUST NOT require Rust. Protected component artifacts
+and peers MUST NOT gain write authority. Staged resources MUST remain owned
+through execution and be included before mount-plan hashing.
+An ordinary, non-ignored native test MUST verify installed inventory/default
+parity, selection, offline builds and host non-mutation; missing prerequisites
+MUST fail explicitly, not skip or install anything.
+The requested repair has a per-bundle advisory exception while receipts are
+unimplemented; independent observation and comparison are not acceptance.
+
+For Rust authoring, declared workspace members and local path dependencies
+inside the approved project MUST be available as read-only build resources,
+with original workspace metadata and lockfiles at a consistent sandbox-native
+topology. This is explicit human-approved build context, not implicit peer
+prompt context. Provider intent/state, user homes and operational caches MUST
+remain excluded. No peer write authority may be added. Out-of-project,
+linked, unsupported or over-bound declarations MUST fail explicitly.
+PATH Cargo MUST build through this view; formatting/compiler source paths for
+the authored component MUST resolve back to its existing writable scope.
+Non-ignored tests MUST build a real multi-crate workspace with inherited
+package/dependency fields, verify immutable provider source/metadata and
+unchanged host locks, and cover invalid dependency paths.
 
 ### REQ-SUPERVISED-EXECUTION
 

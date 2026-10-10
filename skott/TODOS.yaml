@@ -14,6 +14,65 @@ component:
         expected_revision: "sha256:d820c13d62d03274f739359a9d8a813f4b5942729d6a646934ce697bcd49f097"
         observed_revision: "sha256:d8be7616a3dd68b68c9560717683f62ce54aea6ac23a91010c7139d84566fd6f"
 tasks:
+  - id: "offline-rust-default-write-tests"
+    title: "Pin ordinary native inventory and default evidence"
+    description: "Make the complete installed-inventory trial non-ignored and fail on missing prerequisites; reproduce default selection failure and verify unpinned host parity, invocation-local switching, compiler/Cargo/doc agreement and host non-mutation."
+    context: "Human explicitly requires offline installed toolchains in Skott first and Kvist/maerg subsequently. No sandbox installation or networking is authorized."
+    purpose: "Define failing native evidence before repairing private selection state."
+    expected_outcome: "The ordinary test detects missing inventory, broken default selection, writable installations or host changes."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "offline-rust-default-implement-code"
+    title: "Initialize sandbox-local Rust selection state"
+    description: "Copy generated settings into invocation scratch inside the sandbox; retain read-only registrations and installations, honor host default without a pin and keep explicit selection coherent across tools."
+    context: "Per-bundle advisory exception: requested offline repair; advisory receipt enforcement is not implemented. No host settings are mounted."
+    purpose: "Make rustup default work without installation or host mutation."
+    expected_outcome: "Installed defaults can be selected offline and reset between invocations."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "offline-rust-default-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "offline-rust-default-security-audit"
+    title: "Audit private Rust state authority"
+    description: "Independently inspect scratch initialization, read-only installation/registration grants, selection argument handling and host non-mutation."
+    context: "Scoped independent audits inspected final selection/scratch wrappers and found no additional Skott finding. Native inventory/default/host snapshots passed. No broader certification."
+    purpose: "Retain independent authority findings."
+    expected_outcome: "Findings are corrected or retained explicitly."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "offline-rust-default-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: "offline-rust-default-compliance-review"
+    title: "Compare observed offline defaults with intent"
+    description: "Derive a scoped IMPL supplement without intent/history and compare that evidence with the local intent in a separate source-blind context."
+    context: "Final clean-slate observer independently ran non-ignored inventory/default/native coverage; separate source-blind comparator found no new scoped mismatch. Inventory-helper reading and exhaustive isolation limits remain explicit. No acceptance or blanket compliance claim."
+    purpose: "Prevent implementer self-certification."
+    expected_outcome: "Scoped discrepancies and verification limits remain explicit."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "offline-rust-default-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:53:41Z", completed_at: "2026-10-10T20:53:41Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: "runner-rust-inventory-write-tests"
     title: "Define automatic installed Rust inventory evidence"
     description: "Reproduce missing non-selected registrations; compare all installed versions, targets and components through actual Skott preparation, exercise alternate Cargo/compiler/doc selection, and snapshot host state around denied mutations."

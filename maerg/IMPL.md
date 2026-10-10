@@ -2,6 +2,33 @@
 
 # Component Implementation Record
 
+## Scoped installed-Rust authoring observation - 2026-10-10
+
+Clean-slate `offline-rust-final-observer` inspected current sandbox preparation,
+Cargo build context and native tests without intent, queues, prior
+records/reviews or history. This supplement supersedes older generic-authoring
+statements below only for components with a local Cargo manifest.
+
+Authoring adds Rust preparation only for a regular component `Cargo.toml`;
+generic authoring remains unchanged. Standard installed inventories receive
+read-only sandbox-native grants and generated private settings; ambient
+Rust/Cargo overrides are replaced. Bare known Rust tools route through wrappers.
+Bounded Cargo context follows workspace members and declared local dependencies
+inside the approved project, excluding provider intent/hidden/generated roots,
+rejecting links/escapes and writable-provider overlap. Build context is
+read-only; source-path remapping retains component src/tests editing. Unlike
+Skott, existing vendor material is a read-only host-directory grant, not an
+independent snapshot.
+
+The observer independently ran three ordinary native tests: all passed.
+They exercised private-default inventory/offline builds with unchanged host
+Rust snapshot, workspace/provider builds including formatting when installed
+and newly edited/authored tests with unchanged provider/lock, and generic
+authoring without Rust state. Four older generic-verification tests remained
+ignored, including dedicated Clippy coverage. Unit tests, exhaustive rejection
+paths and non-Linux behavior were not executed by this observer. These
+observations are not compliance certification.
+
 ## Scoped generic-authoring observation - 2026-10-10
 
 Clean-slate observer `rust-chain-observer` inspected current sandbox source,

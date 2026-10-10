@@ -17,6 +17,9 @@ constraint set injected into component work.
 - Keep component context limited to local artifacts, explicitly required
   provider contracts, the immediate parent `CONTRACT.md`, and this root
   contract. Exclude peer and parent designs and implementations by default.
+  Explicitly approved Rust workspace/path-dependency build resources may expose
+  source read-only for authoring builds, without adding peer intent to prompts
+  or any peer write authority (ADR 0014).
 - Treat agent configuration, prompts, and output as untrusted input. External
   commands must be resolved without a shell and covered by an explicit,
   human-approved execution policy before they run. A one-off host command may

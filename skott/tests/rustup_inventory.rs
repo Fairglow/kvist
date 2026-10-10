@@ -76,6 +76,27 @@ fn checked(executor: &SandboxExecutor, script: &str) -> Vec<u8> {
 
 type HostState = BTreeMap<PathBuf, (u32, u64, i64, i64, i64, i64, String)>;
 
+fn runner() -> PathBuf {
+    if let Some(path) = std::env::var_os("KVIST_RUST_TEST_RUNNER") {
+        return PathBuf::from(path);
+    }
+    let mut roots = Vec::new();
+    if let Some(path) = std::env::var_os("CARGO_TARGET_DIR") {
+        roots.push(PathBuf::from(path));
+    }
+    roots.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target"));
+    roots.push(PathBuf::from("/opt/target"));
+    roots
+        .iter()
+        .flat_map(|root| {
+            ["debug", "release"].map(|profile| root.join(profile).join("galla-runner"))
+        })
+        .find(|path| path.is_file())
+        .expect(
+            "build galla-runner first or set KVIST_RUST_TEST_RUNNER; native coverage must not skip",
+        )
+}
+
 fn snapshot(path: &Path, state: &mut HostState) {
     let meta = fs::symlink_metadata(path).unwrap();
     let content = if meta.is_symlink() {
@@ -116,7 +137,6 @@ fn snapshot(path: &Path, state: &mut HostState) {
 }
 
 #[test]
-#[ignore = "requires KVIST_RUST_TEST_RUNNER, native Bubblewrap and multiple installed Rust toolchains/targets"]
 fn skott_discovers_and_uses_all_installed_versions_and_targets_read_only() {
     let home = PathBuf::from(std::env::var_os("HOME").unwrap());
     let rustup_home = home.join(".rustup");
@@ -127,7 +147,6 @@ fn skott_discovers_and_uses_all_installed_versions_and_targets_read_only() {
         .tempdir_in(env!("CARGO_MANIFEST_DIR"))
         .unwrap();
     let workspace = directory.path().canonicalize().unwrap();
-    fs::write(workspace.join("rust-toolchain"), "stable").unwrap();
     fs::write(
         workspace.join("Cargo.toml"),
         "[package]\nname=\"inventory_trial\"\nversion=\"0.1.0\"\nedition=\"2021\"\n",
@@ -156,6 +175,7 @@ fn skott_discovers_and_uses_all_installed_versions_and_targets_read_only() {
     let lock = fs::read(workspace.join("Cargo.lock")).unwrap();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let installed = names(&host(&home, &["toolchain", "list"]));
+        let default = names(&host(&home, &["default"]))[0].clone();
         assert!(
             installed.len() >= 2,
             "provision multiple installed toolchains separately"
@@ -184,10 +204,7 @@ fn skott_discovers_and_uses_all_installed_versions_and_targets_read_only() {
         let executor = SandboxExecutor::new(
             registry,
             SandboxPaths {
-                runner: PathBuf::from(
-                    std::env::var_os("KVIST_RUST_TEST_RUNNER")
-                        .expect("select a real outside-worktree runner"),
-                ),
+                runner: runner(),
                 backend: "/usr/bin/bwrap".into(),
             },
             workspace.clone(),
@@ -198,10 +215,15 @@ fn skott_discovers_and_uses_all_installed_versions_and_targets_read_only() {
         );
         checked(
             &executor,
-            "test \"$HOME\" = /tmp && test \"$CARGO_HOME\" = /tmp/cargo-home && test \"$CARGO_TARGET_DIR\" = /tmp/target && test \"$RUSTUP_HOME\" = /rust/rustup-home && test \"$RUSTUP_AUTO_INSTALL\" = 0 && test \"$CARGO_NET_OFFLINE\" = true && test ! -e /home && test ! -e /root && touch /tmp/private-scratch",
+            "test \"$HOME\" = /tmp && test \"$CARGO_HOME\" = /tmp/cargo-home && test \"$CARGO_TARGET_DIR\" = /tmp/target && test \"$RUSTUP_HOME\" = /tmp/rustup-home && test \"$RUSTUP_AUTO_INSTALL\" = 0 && test \"$CARGO_NET_OFFLINE\" = true && test ! -e /home && test ! -e /root && touch /tmp/private-scratch",
         );
         let selected = checked(&executor, "rustup show active-toolchain");
-        assert!(String::from_utf8(selected).unwrap().starts_with("stable-"));
+        assert!(String::from_utf8(selected).unwrap().starts_with(&default));
+        assert_eq!(
+            checked(&executor, "rustup default"),
+            host(&home, &["default"])
+        );
+        checked(&executor, "rustup default stable");
         let mut cross_target = false;
         for name in &installed {
             assert!(
@@ -227,6 +249,38 @@ fn skott_discovers_and_uses_all_installed_versions_and_targets_read_only() {
             }
             let version = host(&home, &["run", name, "rustc", "--version"]);
             let doc_version = host(&home, &["run", name, "rustdoc", "--version"]);
+            assert_eq!(
+                checked(
+                    &executor,
+                    &format!("rustup default {name} >&2 && rustc --version")
+                ),
+                version
+            );
+            assert_eq!(
+                checked(
+                    &executor,
+                    &format!("rustup default {name} >&2 && rustdoc --version")
+                ),
+                doc_version
+            );
+            for tool in ["rustfmt", "clippy-driver", "rust-analyzer"] {
+                if home
+                    .join(".rustup/toolchains")
+                    .join(name)
+                    .join("bin")
+                    .join(tool)
+                    .is_file()
+                {
+                    assert_eq!(
+                        checked(
+                            &executor,
+                            &format!("rustup default {name} >&2 && {tool} --version")
+                        ),
+                        host(&home, &["run", name, tool, "--version"]),
+                        "{name}: companion {tool} follows the invocation-local default"
+                    );
+                }
+            }
             assert_eq!(
                 checked(&executor, &format!("rustc +{name} --version")),
                 version
@@ -267,6 +321,7 @@ fn skott_discovers_and_uses_all_installed_versions_and_targets_read_only() {
                 b"rust-inventory=42\n"
             );
             for command in [
+                format!("rustup default {name} && cargo test"),
                 format!("cargo +{name} test"),
                 format!("RUSTUP_TOOLCHAIN={name} cargo test"),
                 format!("rustup run {name} cargo test --offline --locked"),
@@ -300,18 +355,37 @@ fn skott_discovers_and_uses_all_installed_versions_and_targets_read_only() {
             }
             let denied = shell(&executor, &format!("rustup toolchain uninstall {name}"));
             assert!(denied.failed());
-            assert!(denied.error_text(8192).contains("Read-only file system"));
+            assert!(
+                denied.error_text(8192).contains("Read-only file system"),
+                "{}",
+                denied.error_text(8192)
+            );
             let denied = shell(
                 &executor,
                 &format!("rustup target remove --toolchain {name} {}", targets[0]),
             );
             assert!(denied.failed());
-            assert!(denied.error_text(8192).contains("Read-only file system"));
+            assert!(
+                denied.error_text(8192).contains("Read-only file system")
+                    || denied
+                        .error_text(8192)
+                        .contains("Invalid cross-device link"),
+                "{}",
+                denied.error_text(8192)
+            );
+            checked(
+                &executor,
+                &format!(
+                    "test ! -w \"$RUSTUP_HOME/toolchains\" && test ! -w \"$(rustup which --toolchain {name} rustc)\""
+                ),
+            );
         }
         assert!(cross_target, "provision a non-host target separately");
-        let denied = shell(&executor, "rustup set profile complete");
-        assert!(denied.failed());
-        assert!(denied.error_text(8192).contains("Read-only file system"));
+        checked(&executor, "rustup set profile complete");
+        assert_eq!(
+            checked(&executor, "rustup default"),
+            host(&home, &["default"])
+        );
         let absent = shell(&executor, "cargo +9.99.99 --version");
         assert!(absent.failed());
         let option = shell(&executor, "cargo +--install --version");

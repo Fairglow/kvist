@@ -69,6 +69,20 @@ conditions, enforce cancellation and wall/output limits, terminate and reap
 the Linux process group before return or retry, and treat unknown side effects
 as potentially retained.
 
+### AR-REQ-OFFLINE-RUST-RUNTIME
+
+The library MUST provide fixed offline Rust runtime scripts reusable by Skott
+and maerg without owning mount authority or discovering host installations.
+The scripts MUST initialize private sandbox selection settings from read-only
+templates, preserve installed-only selection and align Cargo/compiler/doc and
+companion selection. Cargo wrappers MUST retain offline/locked vendor flags.
+Callers MUST validate and mount the resources; scripts confer no isolation.
+When the embedding host supplies a private component build-view directory,
+Cargo MUST use that directory and compiler/formatter source arguments MUST
+map back to the existing writable component namespace, without writable peers.
+The requested repair has an explicit advisory exception while receipts are
+unimplemented. Tests precede implementation; independent review remains required.
+
 ### AR-REQ-PROFILES
 
 Named provider profiles MUST use strict bounded TOML, preserve unrelated

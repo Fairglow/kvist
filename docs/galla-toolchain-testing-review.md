@@ -12,15 +12,41 @@ Following explicit human approval, **Skott now automatically exposes every
 validated standard-layout installed Rust toolchain and target read-only**.
 Its project pin or host default remains the initial selection; the agent can
 choose another installed version. Maerg's closed Cargo verification path
-remains intentionally single-toolchain.
+remains intentionally single-toolchain. Maerg Rust authoring now exposes the
+installed inventory using separate read-only System/Toolchain resources.
+Both authoring paths initialize invocation-local writable selection settings;
+`rustup default stable` uses the real installed rustup offline, never host settings.
+With explicit human approval in ADR-0014, maerg authoring also selects declared
+Cargo workspace/path-dependency build context read-only. Its ordinary workspace
+trial exercises inheritance, formatting when installed, edited source and newly
+authored test discovery, nested provider intent/state exclusion and denied
+provider mutation. Writable peer aliases are rejected. This is build context,
+not implicit prompt propagation; closed verification is unchanged.
+
+The final repair was independently source-observed and its ordinary native
+tests re-executed: Skott inventory **1 passed**, maerg authoring **3 passed**,
+with four older verification trials ignored in that ordinary invocation.
+A subsequent explicit native chain ran **7 maerg and 11 Skott tests**, all
+passing with none ignored. Affected library tests reported **670 passed**
+(one unrelated ignored test); the complete Sav suite reported **147 passed**.
+Strict affected all-target Clippy and formatting checks passed. No remote CI
+run is claimed.
+
+A separate source-blind comparison found no new scoped Rust/build-context
+mismatch. It retained the pre-existing **MAERG-WRITE-SCOPE** discrepancy:
+broader component-root writing is deferred despite broader contract wording;
+this repair permits only existing source/test-root writes and does not make
+Cargo metadata writable. Case-level coverage limits and the final observer's
+uninspected Skott inventory-helper internals remain explicit. This is not
+acceptance or blanket compliance certification.
 
 Skott's separate native `rustup_inventory` test drives its real registry and
 executor, not manually authored Galla grants. It compares names, compiler/
 Cargo/rustdoc versions and target/component listings; compiles all installed
 targets; runs native programs and Cargo unit/doctests with `cargo +name`,
 invocation-local `RUSTUP_TOOLCHAIN` and `rustup run`; and checks the compiler/
-rustdoc actually used by build scripts. It also verifies read-only uninstall,
-target removal and settings errors, rejects unavailable/option-like selectors,
+rustdoc actually used by build scripts. It also verifies read-only uninstall/
+target-removal failures and private settings changes, rejects unavailable/option-like selectors,
 and compares before/after host rustup content and metadata. It passed locally
 for the same eight toolchains and 14 installed-target combinations.
 
@@ -41,9 +67,9 @@ observation. This is not component acceptance or unconditional certification.
 | Coverage | What it establishes | Gap or limitation |
 | --- | --- | --- |
 | `galla/tests/conformance.rs` | Protocol validation, Cargo grant/environment rules, native probe and a successful simple request | No comprehensive tool discovery, multi-version inventory comparison or real language builds. Its introductory comment still incorrectly says executable enforcement is outside the file. |
-| `skott/tests/rust_build_environment.rs` and `rustup_inventory.rs` | Selected-toolchain full build chain plus automatic full-inventory discovery, every installed target and alternate-version compiler/Cargo/doc execution | Native cases require explicit opt-in and are enabled in CI. Minimal installations, Cargo extensions and repository-in-sandbox tests retain separate prerequisites. |
+| `skott/tests/rust_build_environment.rs` and `rustup_inventory.rs` | Selected-toolchain full build chain plus automatic full-inventory/default discovery, every installed target and alternate-version compiler/Cargo/doc execution | Inventory/default coverage is non-ignored and fails on missing prerequisites. Other native cases remain opt-in. |
 | `skott/tests/toolchain_discoverability.rs` | Ignored PATH/version probes for Python, Node, Go, C and combined profiles | Version output is not execution evidence. Node's “contains a dot” assertion is weak; GCC's literal `(GCC)` assertion is distribution-sensitive. The combined case has no `rustup` inventory comparison. These tests are not explicitly enabled in the current native CI chain. |
-| `maerg/tests/sandbox_toolchain.rs` | Explicit native compiler/Cargo/Clippy grants, a real isolated build, and generic authoring environment preservation | Ignored native trials are distinct from the vendoring-enforced Cargo verification authority path. Generic authoring intentionally does not prepare rustup state. |
+| `maerg/tests/sandbox_toolchain.rs` | Ordinary Rust authoring inventory/default parity, target compilation, offline builds and host snapshots; non-Rust environment preservation; explicit native verification grants | Authoring/non-Rust regressions are non-ignored. Verification trials remain opt-in and distinct from the closed Cargo topology. |
 | `maerg/tests/language_offline_e2e.rs` | Language-aware host provisioning and real network-denied vendored verification | Missing runner/backend/toolchains or unavailable provisioning can return early and appear as passing tests. Provisioning may use the host network; these are not read-only host-inventory tests. They do not prove all toolchains are available in every consumer profile. |
 | `docs/sandbox-toolchains-and-vendoring.md` | Describes the different consumer mount topologies | Its prior blanket assurance that discoverability tests establish all tooling is functional was too strong. PATH visibility, compiler operation, dependency provisioning and consumer profile selection need separate evidence. |
 
@@ -193,11 +219,14 @@ KVIST_GALLA=/opt/target/debug/galla-runner \
 Adjust the runner path to the configured target directory; it must be outside
 the repository. No model/provider, dependency download or pre-existing vendor
 tree is required. Passing this command establishes the explicit-grant
-enforcement behavior described above, not automatic full-inventory exposure
-by Maerg. For actual automatic Skott preparation, additionally run:
+enforcement behavior described above, not consumer preparation. For actual
+automatic Skott and maerg preparation, additionally run:
 
 ```bash
 KVIST_RUST_TEST_RUNNER=/opt/target/debug/galla-runner \
   cargo test --locked -p skott --test rustup_inventory -- \
-  --ignored --test-threads=1 --nocapture
+  --test-threads=1 --nocapture
+KVIST_GALLA=/opt/target/debug/galla-runner \
+  cargo test --offline --locked -p kvist --test sandbox_toolchain -- \
+  --test-threads=1 --nocapture
 ```

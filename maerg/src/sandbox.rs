@@ -37,6 +37,11 @@ use crate::{
     vcs,
 };
 
+#[path = "sandbox/cargo_context.rs"]
+mod cargo_context;
+#[path = "sandbox/rust_environment.rs"]
+mod rust_environment;
+
 pub const PROTOCOL_VERSION: u32 = 1;
 const REQUEST_PROTOCOL: &str = "kvist-sandbox-request-v1";
 const PROBE_PROTOCOL: &str = "kvist-sandbox-probe-v1";
@@ -1080,7 +1085,48 @@ pub fn execute_with_timeout(
         request.arguments,
         &request.environment,
     )?;
-    let resolved_program = resolve_program(config, request.program, &request.environment)?;
+    // Retain the staging owner until the supervised runner has returned.
+    let rust = if request.phase == ExecutionPhase::Authoring {
+        match fs::symlink_metadata(request.component_dir.join("Cargo.toml")) {
+            Ok(metadata) if metadata.is_file() && !metadata.is_symlink() => {
+                Some(rust_environment::RustEnvironment::prepare(
+                    config,
+                    project_root,
+                    request.component_dir,
+                )?)
+            }
+            Ok(_) => {
+                return Err(invalid_request_input(
+                    config,
+                    "project Cargo.toml must be a regular non-link file",
+                ));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => {
+                return Err(sandbox_error(
+                    config,
+                    "inspect project Rust manifest",
+                    error,
+                ));
+            }
+        }
+    } else {
+        None
+    };
+    let rust_tool = rust.as_ref().and_then(|_| {
+        sav::offline_rust::TOOLS
+            .iter()
+            .find(|tool| tool.name() == request.program)
+    });
+    let resolved_program = resolve_program(
+        config,
+        if rust_tool.is_some() {
+            "/usr/bin/bash"
+        } else {
+            request.program
+        },
+        &request.environment,
+    )?;
     let argv_capacity = request
         .arguments
         .len()
@@ -1088,6 +1134,13 @@ pub fn execute_with_timeout(
         .ok_or_else(|| invalid_request_input(config, "argv entry count overflows"))?;
     let mut argv = Vec::with_capacity(argv_capacity);
     argv.push(resolved_program.canonical_path.clone());
+    if let Some(tool) = rust_tool {
+        argv.extend([
+            "-c".into(),
+            format!("exec /rust/runtime/bin/{} \"$@\"", tool.name()),
+            "maerg-tool".into(),
+        ]);
+    }
     argv.extend_from_slice(request.arguments);
     // Canonicalization can lengthen argv[0], so validate its final wire value
     // before creating the runner launch.
@@ -1225,6 +1278,20 @@ pub fn execute_with_timeout(
         identity: toolchain_identity.clone(),
     });
 
+    let mut environment = request.environment;
+    if let Some(rust) = &rust {
+        rust.apply(config, &mut grants, &mut environment, &mut argv)?;
+        if !Path::new("/usr/bin/bash").starts_with(&toolchain_root) {
+            grants.push(SandboxGrant {
+                source: "/usr/bin/bash".into(),
+                destination: "/usr/bin/bash".into(),
+                access: "read-only",
+                purpose: "toolchain",
+                identity: toolchain_identity.clone(),
+            });
+        }
+    }
+
     let resources = SandboxResources {
         wall_time_ms: match options.timeout {
             Some(limit) => bounded_millis(config, limit)?,
@@ -1271,7 +1338,7 @@ pub fn execute_with_timeout(
         phase: request.phase.wire(),
         argv: &argv,
         working_directory: "/workspace/component",
-        environment: &request.environment,
+        environment: &environment,
         network,
         resources,
         identities: SandboxIdentities {
@@ -1291,7 +1358,7 @@ pub fn execute_with_timeout(
         grants: &grants,
         toolchain: SandboxToolchain::System {
             identity: toolchain_identity,
-            root: resolved_program.canonical_path.clone(),
+            root: argv[0].clone(),
         },
         cache: None,
         scratch,

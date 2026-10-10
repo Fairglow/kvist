@@ -515,13 +515,14 @@ mounts the host system layout read-only (`/usr`, `/lib`, `/lib64`, `/bin`,
 for verification), with writable `/tmp` and `/run` tmpfs. Any toolchain
 installed as a host system package is therefore visible inside the sandbox;
 anything installed under the user's home (`rustup` homes, `~/.m2`, `~/.npm`,
-`~/.cargo`) is not.
+`~/.cargo`) is not implicitly exposed. Rust authoring selectively mounts
+validated installed toolchains read-only, not the user's home/settings.
 
 ### Current state
 
 | Language                  | Authoring (agent)                                                                | Verification (`kvist task verify`)                                                                                                                                                                  | Vendoring                                                                                                                                                                                                      |
 | ------------------------- | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Rust**                  | Writes only; no usable toolchain in the authoring sandbox (known gap, see below) | **First-class**: closed offline Cargo topology, `cargo test --locked`, enforced, validated end-to-end in CI (stable + MSRV)                                                                         | Exact and automated: `kvist vendor` + per-dependency fail-closed manifest                                                                                                                                      |
+| **Rust**                  | Installed toolchains/targets read-only; private offline Cargo and rustup selection in Skott and maerg | **First-class**: closed offline Cargo topology, `cargo test --locked`, enforced, validated end-to-end in CI (stable + MSRV) | Exact and automated: `kvist vendor` + per-dependency fail-closed manifest |
 | **C/C++**                 | System `gcc`/`cc` available                                                      | **First-class** for vendored projects: shared offline language topology, `make` network-denied against the mounted Conan home or vendored vcpkg root, validated end-to-end (`language_offline_e2e`) | Automated: `kvist vendor` runs `conan install` (Conan) or `vcpkg install` (vcpkg) into the project-local package-manager root                                                                                  |
 | **Go**                    | System `go` available                                                            | **First-class** for vendored projects: shared offline language topology, `go test -mod=vendor ./...` network-denied, validated end-to-end (`language_offline_e2e`)                                  | Automated: `kvist vendor` runs `go mod vendor`; the committed `vendor/` travels inside the component mount                                                                                                     |
 | **Python**                | System `python3` available                                                       | **First-class** for vendored projects: shared offline language topology, `python3 -m unittest` network-denied against the mounted provisioned venv, validated end-to-end (`language_offline_e2e`)   | Automated: `kvist vendor` downloads the locked wheels and provisions an offline virtualenv                                                                                                                     |
@@ -541,8 +542,7 @@ npm/yarn/pnpm, Python, C/Conan and vcpkg); per-language end-to-end evidence is t
 
 ### Intended support order and evidence
 
-1. **Rust** (complete for verification; authoring toolchain is the active gap
-   below).
+1. **Rust** (installed-only offline authoring and pinned verification).
 2. **Go and JavaScript** (complete with end-to-end evidence; the easy
    languages): their offline stories fit the shared language topology with
    little new machinery (Go `vendor/`; Node with a vendored package cache).
@@ -561,8 +561,11 @@ Declared limitations for currently supported languages:
 
 - **Rust**: verification builds from the vendored registry with the pinned
   host toolchain; dependency build scripts never run in the sandbox. The
-  authoring sandbox has no working Rust toolchain, so agents cannot compile
-  while authoring (verification only).
+  authoring sandbox uses the validated host inventory, private selection state,
+  and offline/locked Cargo. Dependencies must already be vendored. Protected
+  maerg authoring automatically exposes declared workspace/path-dependency
+  build resources read-only (ADR-0014), excluding provider intent/state.
+  It never grants peer writes or adds peer implementations to the prompt.
 - **Go**: requires the `vendor/` directory to be present in the component
   (`go mod vendor` on the host); `GOCACHE` must point at the writable `/tmp`
   via the test-policy environment allowlist.
@@ -591,11 +594,19 @@ validates the toolchain layout, and records a durable manifest under
 install or modify toolchains: toolchain changes are a visible, host-authorized
 step, never an in-build side effect.
 
-Known gap: the authoring phase cannot yet receive the Rust toolchain, because
-the shared runner contract permits the Cargo toolchain and the vendored
-registry/config/runtime purposes only in verification phases. Extending that
-contract (protocol change) is tracked in `maerg/TODOS.yaml` and documented in
-`maerg/DESIGN.md`.
+Rust authoring uses read-only System/Toolchain resources without changing
+the closed Cargo verification protocol. Skott and maerg expose the complete
+validated standard-layout installed inventory. The project pin takes precedence;
+otherwise the host default is preserved. `rustup default stable` works offline
+when stable is installed, changing only the current invocation's private
+settings. Installations and host settings remain unchanged. Ordinary,
+non-ignored native tests verify inventory/default parity, installed-target
+compilation, offline builds and host non-mutation; missing prerequisites fail.
+Maerg's read-only `/rust/project` build view preserves workspace inheritance
+and path dependencies. Formatting and newly authored tests use the writable
+component source/test roots; provider sources and root Cargo metadata stay
+read-only. Declared providers inside writable component roots are rejected.
+See [sandbox toolchains and vendoring](docs/sandbox-toolchains-and-vendoring.md).
 
 ### Explicitly unsupported
 

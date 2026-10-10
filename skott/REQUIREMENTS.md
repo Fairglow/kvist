@@ -10,8 +10,13 @@ never dangling host-path links. The project pin or host default remains the
 initial selection; the agent MAY explicitly select another installed version
 using `cargo +<name>`, `rustc +<name>`, `rustup run`, or invocation-local
 `RUSTUP_TOOLCHAIN`. Compiler and rustdoc selection MUST agree with Cargo.
-Generated rustup settings are private,
-read-only resources, not the user's settings. `HOME` MUST name writable private
+Generated initial rustup settings and registrations are read-only templates,
+not the user's settings. Each shell invocation MUST initialize private writable
+rustup selection settings in scratch, preserving the host default when unpinned.
+`rustup default <installed-name>` (including `stable` when installed) MUST work
+offline and affect subsequent tools in that invocation without changing host
+state or installation mounts. A project pin retains precedence over the default.
+`HOME` MUST name writable private
 invocation scratch. Requested compiler, formatter and Clippy resources MUST be
 regular executable files; missing requested resources MUST fail before effects.
 
@@ -33,6 +38,10 @@ invalid, unsafe or over-bound installation. Host inventory, executable,
 registration and target-layout drift MUST fail before dispatch and require
 restart after host provisioning; no install/update or ambient host home mount
 is authorized.
+
+The native inventory/default regression MUST be non-ignored and MUST fail
+explicitly when its installed runner, Bubblewrap or host Rust prerequisites
+are missing; tests MUST NOT acquire dependencies or install toolchains.
 
 Opt-in structured diagnostics MUST expose preparation stages and durations,
 selected channel and resource identities, validated mount destinations/access,
