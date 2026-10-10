@@ -17,6 +17,13 @@ limit; per-field, message/tool count and response bounds remain independent.
 
 ## Design overview
 
+`offline_rust` contains fixed sandbox-only initialization and runtime script
+generation shared by Skott and maerg. Initialization copies generated settings
+into tmpfs and links the read-only registration directory. Wrappers resolve
+the active toolchain through system rustup or consume an explicit `+name`;
+Cargo invokes `rustup run` with offline/locked vendor flags. No host paths or
+untrusted script fragments are interpolated.
+
 The crate separates command rendering, prompt acquisition, profile storage and
 setup, process supervision, direct model transport, and canonical
 provider-neutral types. Reusable mechanisms remain independent of

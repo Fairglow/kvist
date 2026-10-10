@@ -408,11 +408,35 @@ together, then re-tests the dogfood boundary suite. See
 
 ### Pinned Rust toolchains and host provisioning (ADR-0012)
 
-The generic authoring executor must not query rustup or generate a rustup-home
-grant. It serializes the explicitly approved environment unchanged; read-only
-Rust build resources belong to the separate verification topology, not this
-protected effect path. In particular no temporary rustup grant may outlive its
-staging owner or be appended after calculating the mount-plan identity.
+Non-Rust generic authoring serializes the approved environment unchanged.
+Rust components (a local Cargo manifest) prepare bounded standard-layout installed
+resources in `sandbox/rust_environment.rs`. Trusted system rustup is queried
+without ambient overrides; no installation occurs. Every validated installation
+is mounted read-only with sandbox-native registrations and generated settings.
+The shared Sav runtime scripts initialize private selection state before the
+original argv executes, preserve pin/default precedence and force PATH Cargo
+offline/locked. Local build metadata and the vendor registry stay read-only.
+The staged owner survives until the runner returns; all grants and final argv
+are constructed before command/mount identity hashing. Reject overlap between
+Rust resources and writable grants except read-only build aliases of the authored
+component's already-approved source/test roots. Declared providers inside those
+roots are rejected. No peer or protected-file write authority is introduced.
+
+`sandbox/cargo_context.rs` traverses declared Cargo workspace members and
+local dependency tables (including target-specific and workspace-inherited
+dependencies and local patches), bounding and validating every project-local
+root. Read-only grants preserve the original directory topology under
+`/rust/project`; metadata is not rewritten. Grant ordinary source/assets
+selectively, excluding hidden operational data, generated directories and
+provider intent documents recursively; deduplicate covered destinations by
+mounting maximal clean subtrees and splitting only filtered directories.
+Apply the mount bound after clean-subtree collapse. The authored component's
+source/test roots remain live directory aliases, not filtered file snapshots,
+so Cargo discovers files created during the invocation. Synthetic ancestor
+directories have only sandbox-local backing. Cargo wrappers
+change to the component's build-view directory, while compiler/formatter
+source arguments under that view map back to the existing component destination.
+No writable provider alias or peer source write grant is introduced.
 
 The offline Cargo verification topology needs an immutable toolchain. The
 toolchain is a pinned, host-provisioned artifact with durable state, managed
@@ -456,22 +480,14 @@ list` (the supported upgrade/downgrade path; bounded output capture, host
   A pinned channel that is not installed fails closed with an actionable
   message naming `kvist toolchain`.
 
-**Authoring-phase toolchain gap.** The authoring phase cannot receive the
+**Authoring-phase topology.** The authoring phase cannot receive the
 offline Cargo topology under the current shared runner contract: the runner's
 phase-purpose validation permits only `Context`, `Authoring`, `Toolchain`,
 and `Scratch` purposes in authoring, rejects `Toolchain::Cargo` outside Cargo
 phases, and rejects a declared Cargo cache in authoring. The vendored
-registry, sandbox cargo config, and runtime bin therefore cannot be mounted
-for authoring. Two paths exist: (a) extend the runner contract (protocol
-change plus conformance updates in `galla` and the `skott`
-serialization) to permit the read-only Cargo purposes in authoring, or (b)
-carry the vendored registry, cargo config, and runtime bin under the already
-permitted `Context` purpose with a `Toolchain::System` toolchain block rooted
-at the toolchain destination and a writable `Scratch` serving as
-`CARGO_HOME`/`CARGO_TARGET_DIR` — no protocol change, but the request builder
-must be maerg-side and the resulting topology is a documented variant of the
-verification topology. Path (b) is the first candidate because it reuses the
-existing closed purposes and the pinned-toolchain manifest.
+registry and runtime therefore use read-only `Toolchain` resources with a
+`Toolchain::System` block and private tmpfs HOME/cache/target, as in Skott.
+No protocol change, cache authority or acquisition phase is introduced.
 
 ### Language support, per-language provisioning, and evidence (ADR-0013)
 

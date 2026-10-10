@@ -14,6 +14,58 @@ component:
         expected_revision: "sha256:3d971935e8b59ab1d977550b5c2146caff46dc7af0dc6c15c7b18d414d0ccae5"
         observed_revision: "sha256:e27ae1c3224da961bd30030a6a838b9da2c0f52f58524f5a59fe273fde2445f5"
 tasks:
+  - id: offline-rust-authoring-write-tests
+    title: "Pin ordinary native Rust authoring parity"
+    description: "Reproduce missing authoring Rust state and workspace-root context; compare host inventory/default and targets, build locked local/workspace fixtures offline, format authored source, execute newly authored tests and check host/provider non-mutation."
+    context: "Human requires Kvist/maerg parity after Skott, without installation or networking."
+    purpose: "Define native evidence before implementation."
+    expected_outcome: "Ordinary tests fail on missing resources, default drift or unsafe mounts."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"]
+    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: offline-rust-authoring-implement-code
+    title: "Prepare installed Rust for protected authoring"
+    description: "Stage read-only installed resources, share Sav runtime scripts, initialize private selection and automatically materialize approved declared Cargo build context read-only; retain protected write scopes and separate Cargo verification."
+    context: "Per-bundle advisory exception for requested repair; human explicitly approved automatic read-only declared dependencies (ADR-0014). Ordinary native suites, affected library suites and strict all-target Clippy pass. No fabricated receipts or acceptance."
+    purpose: "Make installed Rust usable in Kvist/maerg authoring."
+    expected_outcome: "Rust authoring runs offline without host mutation; non-Rust behavior is preserved."
+    kind: implementation
+    status: completed
+    depends_on: [offline-rust-authoring-write-tests]
+    requirements: ["REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"]
+    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: offline-rust-authoring-security-audit
+    title: "Audit installed authoring resource authority"
+    description: "Independently inspect mount scope, private settings, host non-mutation, argument boundaries and staging lifetime."
+    context: "Independent audits found root-only activation, omitted workspace metadata, nested writable provider aliases, premature subtree mount bounds and local target-discovery omissions. Repairs use local activation, approved declared context, alias rejection, post-collapse limits and live local roots; native/unit regressions pass. No blanket certification."
+    purpose: "Retain independent authority findings."
+    expected_outcome: "Findings corrected or retained explicitly."
+    kind: security-audit
+    status: completed
+    depends_on: [offline-rust-authoring-implement-code]
+    requirements: ["REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"]
+    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: offline-rust-authoring-compliance-review
+    title: "Compare independently observed authoring parity"
+    description: "Derive clean-slate observations and perform a separate source-blind intent comparison."
+    context: "Final clean-slate observer independently ran all three ordinary authoring tests; source-blind comparator found no new scoped Rust/build-context mismatch. Existing MAERG-WRITE-SCOPE discrepancy remains: broader component-root writes promised elsewhere are deferred; this repair retains src/tests-only writes and read-only Cargo metadata. Coverage limits retained, no acceptance. Subsequent native chain explicitly ran all four older verification trials successfully."
+    purpose: "Prevent self-certification."
+    expected_outcome: "Discrepancies and scope limits retained."
+    kind: compliance-review
+    status: completed
+    depends_on: [offline-rust-authoring-security-audit]
+    requirements: ["REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"]
+    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:53:41Z", completed_at: "2026-10-10T20:53:41Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: "sandbox-rust-state-write-tests"
     title: "Pin generic authoring environment isolation"
     description: "Reproduce broken generated rustup-home grants and assert generic authoring preserves the approved environment without Rust state."

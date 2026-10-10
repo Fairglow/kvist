@@ -449,8 +449,13 @@ arbitrary external writers are not locked transactionally.
   are mounted at disjoint `/rust/toolchains/N` destinations, with all installed
   targets and manifests retained. Every name is registered by a sandbox-native
   link in a generated read-only
-  `/rust/rustup-home`; no host rustup settings are mounted. `RUSTUP_TOOLCHAIN`
-  names that exact installed selection, automatic installation is disabled,
+  `/rust/rustup-home`; no host rustup settings are mounted. Before shell effects,
+  shared `sav::offline_rust` scripts initialize writable selection settings at
+  `RUSTUP_HOME=/tmp/rustup-home`, with read-only registrations. Without a pin
+  the generated default matches the host; `rustup default <installed-name>`
+  (including installed `stable`) changes only the current invocation. A project
+  pin sets `RUSTUP_TOOLCHAIN` and retains precedence over default changes.
+  Automatic installation is disabled,
   and `HOME=/tmp` is writable private scratch. Requested formatter/Clippy
   executables are checked and drift-tracked along with the compiler.
   `cargo +<name>`, `rustc +<name>`, `rustdoc +<name>`, `rustup run <name> ...`

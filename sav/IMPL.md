@@ -4,6 +4,29 @@
 
 ## Observed implementation: sav
 
+## Scoped offline Rust runtime observation - 2026-10-10
+
+Clean-slate `offline-rust-final-observer` derived this supplement from source
+and consumer tests only, excluding intent, queues, prior records/reviews and
+history. It supersedes older observations only for this runtime mechanism,
+not unrelated behavior.
+
+The publicly exported `offline_rust` module supplies initialization text and
+eight enum-bounded wrappers: cargo, rustc, rustdoc, rustfmt, cargo-fmt,
+cargo-clippy, clippy-driver and rust-analyzer. Initialization copies generated
+settings into private sandbox scratch and symlinks read-only registrations.
+Wrappers consume a leading +selection or query rustup's active selection, then
+execute `rustup run --` without requesting installation. Cargo adds
+offline/locked flags and `/rust/vendor` source configuration. Optional Cargo
+working-directory and compiler/doc/formatter/Clippy source-path remapping
+support maerg's build context. This module supplies scripts, not validation
+or sandbox enforcement.
+
+The observer independently ran ordinary Skott/maerg native tests: 4 passed,
+0 failed, 4 older verification trials ignored, exit 0. The module's unit test
+was inspected, not separately executed by that observer. These are scoped
+observations, not compliance certification.
+
 ## Observation basis and package
 
 This replacement record was independently derived on 2026-10-02 from
