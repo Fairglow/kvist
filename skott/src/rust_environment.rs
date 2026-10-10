@@ -881,7 +881,7 @@ impl RustEnvironment {
         };
         [
             ("PATH", path),
-            ("HOME", "/workspace"),
+            ("HOME", "/workspace/home"),
             ("RUSTUP_HOME", RUSTUP_HOME_DEST),
             ("RUSTUP_TOOLCHAIN", "stable"),
             ("CARGO_HOME", "/tmp/cargo-home"),
