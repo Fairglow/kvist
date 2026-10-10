@@ -165,22 +165,36 @@ fn main() {
                 None => eprintln!("Session not found: {}", session_id),
             }
         }
-        Some(Command::View { path }) => {
-            match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    if cli.dump {
-                        display::dump_markdown(&content);
-                    } else {
-                        display::view_markdown(&content);
-                    }
+        Some(Command::View { path }) => match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                if cli.dump {
+                    display::dump_markdown(&content);
+                } else {
+                    display::view_markdown(&content);
                 }
-                Err(e) => eprintln!("Error reading file: {}", e),
             }
-        }
+            Err(e) => eprintln!("Error reading file: {}", e),
+        },
         Some(Command::Export { session_id, output }) => {
             match session::load_session(&log_dir, &session_id) {
-                Some(s) => display::export_session(&s, output.as_ref()),
+                Some(s) => display::export_session(&s, output.as_deref()),
                 None => eprintln!("Session not found: {}", session_id),
+            }
+        }
+        None => {
+            // Default: list recent sessions
+            let sessions = session::list_sessions(&log_dir, 20);
+            if sessions.is_empty() {
+                println!("No sessions found in {}", log_dir.display());
+            } else {
+                for s in &sessions {
+                    let model = s.model.as_deref().unwrap_or("unknown");
+                    let status = if s.completed { "completed" } else { "active" };
+                    println!(
+                        "{} - {} - {} messages - {}",
+                        s.id, model, s.message_count, status
+                    );
+                }
             }
         }
     }
