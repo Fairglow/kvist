@@ -1059,10 +1059,31 @@ fn create_rustup_toolchain_dir(toolchain_root: &Path) -> Result<tempfile::TempDi
             reason: format!("cannot create rustup home: {e}"),
         })?;
 
+    // Detect the target triple from rustc -vV output
+    let rustc = toolchain_root.join("bin").join("rustc");
+    let target = if rustc.exists() {
+        let output = Command::new(&rustc).arg("-vV").output().map_err(|e| {
+            KvistError::SandboxUnavailable {
+                runner: String::new(),
+                reason: format!("cannot query rustc for target: {e}"),
+            }
+        })?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout
+            .lines()
+            .find(|line| line.starts_with("host: "))
+            .map(|line| line.trim_start_matches("host: ").to_owned())
+            .unwrap_or_else(|| "x86_64-unknown-linux-gnu".to_owned())
+    } else {
+        "x86_64-unknown-linux-gnu".to_owned()
+    };
+
+    // Use the detected target to construct the toolchain directory name
+    // The channel is assumed to be "stable" for the generic system-toolchain path
     let toolchain_dir = rustup_home
         .path()
         .join("toolchains")
-        .join("stable-x86_64-unknown-linux-gnu");
+        .join(format!("stable-{}", target));
     let toolchain_bin = toolchain_dir.join("bin");
     let toolchain_lib = toolchain_dir.join("lib");
 
