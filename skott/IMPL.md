@@ -4,6 +4,51 @@
 
 ## Observed implementation: skott
 
+## Scoped installed-inventory observation - 2026-10-10
+
+Clean-slate `rust-inventory-observer` derived this scoped supplement from
+`src/rust_environment.rs`, `src/rust_environment/inventory.rs`, `src/tools.rs`,
+`src/sandbox.rs`, `tests/rustup_inventory.rs` and
+`tests/rust_build_environment.rs` only. It excluded intent, queues, this record,
+prior reviews, chat and Git history, and executed nothing. These observations
+supersede older single-registration statements below, not unrelated behavior.
+
+- Trusted system rustup queries enumerate and sort 1..128 distinct installed
+  names and require the initial selection to be present. Each standard-layout
+  installation is validated; an invalid additional installation can prevent
+  preparation of an otherwise usable default.
+- Initial selection remains at `/rust/toolchain`; other versions receive
+  disjoint `/rust/toolchains/N` destinations. All installations, generated
+  sandbox-native registration links/settings, wrappers, vendor material and
+  optional user Cargo bin receive read-only grants.
+- Cargo/rustc/rustdoc wrappers consume a leading `+name` or use
+  `RUSTUP_TOOLCHAIN`, then delegate executable selection to trusted rustup.
+  PATH Cargo prepends offline/locked/vendor flags. `RUSTC` and `RUSTDOC` point
+  to selection-aware wrappers. Direct concrete Cargo paths remain unwrapped;
+  no selection-aware wrapper is generated for direct rustfmt or extensions.
+- Inventory runtime files/directories under `bin` and `lib` have bounded
+  recursive fingerprint tracking; native executables/libraries and present
+  companions are also byte-hashed at preparation. Validation checks pin,
+  directory/file fingerprints and registration count/targets before dispatch,
+  without rehashing full toolchain contents. This is not a digest of every
+  subtree of a mounted installation.
+- Private staging remains beside the writable workspace and is removed by
+  shared ownership cleanup. HOME/cache/target defaults use `/tmp` invocation
+  scratch. The source requests denied network and read-only installation
+  mounts; actual tmpfs and enforcement are supplied by the external runner.
+- The ignored native inventory trial defines host/sandbox name/version/
+  target/component comparisons, compilation for all installed targets, native
+  program and Cargo unit/doctest execution, build-script compiler/doc version
+  assertions, denied toolchain/target/settings changes and before/after host
+  snapshots excluding access time. Source inspection is not a passing result.
+
+The observer pass preceded final defensive installation-directory membership
+rechecking and option separation in wrapper dispatch. Those final guards were
+covered by the scoped independent authority audit and executable regressions,
+not represented as an additional clean-slate observation. Optional Cargo-bin
+children remain directory-bound rather than individually inventoried, and
+staged vendor drift is not newly revalidated per dispatch.
+
 ## Scoped Rust sandbox observation - 2026-10-10
 
 Clean-slate observer `rust-chain-observer` derived this supplement from the

@@ -103,6 +103,9 @@ jobs:
           KVIST_GALLA="$CARGO_TARGET_DIR/debug/galla-runner" \
             cargo test --locked -p galla --test toolchain_e2e -- \
             --ignored --test-threads=1 --nocapture
+          KVIST_RUST_TEST_RUNNER="$CARGO_TARGET_DIR/debug/galla-runner" \
+            cargo test --locked -p skott --test rustup_inventory -- \
+            --ignored --test-threads=1 --nocapture
 
   audit:
     name: Dependencies and licenses

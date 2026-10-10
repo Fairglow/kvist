@@ -444,12 +444,24 @@ arbitrary external writers are not locked transactionally.
   A bounded `.kvist/vendored` snapshot uses sandbox-native paths rather than
   trusting host-absolute paths in project configuration. Pin drift fails closed;
   restart after legitimate pin/vendor changes. Old `resolve` remains System-only.
-  Rustup queries see only the selected installed toolchain, registered by a
-  sandbox-native link to `/rust/toolchain` in a generated read-only
+  Rustup queries see every validated installed toolchain in the standard host
+  layout. The initial selection is mounted at `/rust/toolchain`; other versions
+  are mounted at disjoint `/rust/toolchains/N` destinations, with all installed
+  targets and manifests retained. Every name is registered by a sandbox-native
+  link in a generated read-only
   `/rust/rustup-home`; no host rustup settings are mounted. `RUSTUP_TOOLCHAIN`
   names that exact installed selection, automatic installation is disabled,
   and `HOME=/tmp` is writable private scratch. Requested formatter/Clippy
   executables are checked and drift-tracked along with the compiler.
+  `cargo +<name>`, `rustc +<name>`, `rustdoc +<name>`, `rustup run <name> ...`
+  and invocation-local `RUSTUP_TOOLCHAIN` may select another installed version.
+  PATH Cargo retains offline/locked vendored resolution for those selections;
+  its compiler and rustdoc follow the selected version rather than a fixed
+  default compiler. PATH rustc/rustdoc and `RUSTC`/`RUSTDOC` use trusted
+  selection-aware wrappers under `/rust/runtime/bin`.
+  Unsafe/custom-linked or malformed installations are rejected, not omitted.
+  Inventory is resolved at startup: installation/target/registration drift
+  requires restart after host provisioning. No host updates are performed.
   `SKOTT_LOG` (or fallback `RUST_LOG`) enables stderr diagnostics: debug
   records preparation/dispatch/completion, trace records grant metadata and
   environment names, never command text, environment values or tool output.
