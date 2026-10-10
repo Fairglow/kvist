@@ -24,6 +24,10 @@ pub struct Cli {
     #[clap(long, global = true, value_name = "PATH")]
     log_dir: Option<PathBuf>,
 
+    /// Output plain text without interactive viewer
+    #[clap(long, global = true)]
+    dump: bool,
+
     /// Session ID or file path (smart shortcut for show/view)
     target: Option<String>,
 
@@ -69,18 +73,43 @@ fn main() {
             if target.ends_with(".md") || target.ends_with(".markdown") {
                 // Treat as a file path
                 match std::fs::read_to_string(target) {
-                    Ok(content) => display::view_markdown(&content),
+                    Ok(content) => {
+                        if cli.dump {
+                            display::dump_markdown(&content);
+                        } else {
+                            display::view_markdown(&content);
+                        }
+                    }
                     Err(e) => eprintln!("Error reading file: {}", e),
+                }
+                return;
+            }
+
+            // Try as a session directory path
+            if PathBuf::from(target).is_dir() {
+                match session::load_session_by_path(&PathBuf::from(target)) {
+                    Some(s) => {
+                        if cli.dump {
+                            display::dump_session(&s);
+                        } else {
+                            display::show_session(&s);
+                        }
+                    }
+                    None => eprintln!("Error loading session from path: {}", target),
                 }
                 return;
             }
 
             // Try as a session ID
             match session::load_session(&log_dir, target) {
-                Some(s) => display::show_session(&s),
-                None => {
-                    eprintln!("Session not found: {}", target);
+                Some(s) => {
+                    if cli.dump {
+                        display::dump_session(&s);
+                    } else {
+                        display::show_session(&s);
+                    }
                 }
+                None => eprintln!("Session not found: {}", target),
             }
         } else {
             eprintln!("Usage: blad [OPTIONS] <command> [ARGS]");
@@ -104,34 +133,55 @@ fn main() {
                 );
             }
         }
-        Some(Command::Show { session_id }) => match session::load_session(&log_dir, &session_id) {
-            Some(s) => display::show_session(&s),
-            None => {
-                eprintln!("Session not found: {}", session_id);
+        Some(Command::Show { session_id }) => {
+            // Try as a path first, then as an ID
+            if PathBuf::from(&session_id).is_dir() {
+                match session::load_session_by_path(&PathBuf::from(&session_id)) {
+                    Some(s) => {
+                        if cli.dump {
+                            display::dump_session(&s);
+                        } else {
+                            display::show_session(&s);
+                        }
+                    }
+                    None => eprintln!("Error loading session from path: {}", session_id),
+                }
+            } else {
+                match session::load_session(&log_dir, &session_id) {
+                    Some(s) => {
+                        if cli.dump {
+                            display::dump_session(&s);
+                        } else {
+                            display::show_session(&s);
+                        }
+                    }
+                    None => eprintln!("Session not found: {}", session_id),
+                }
             }
-        },
+        }
         Some(Command::Stream { session_id }) => {
             match session::load_session(&log_dir, &session_id) {
                 Some(s) => display::stream_session(&s),
-                None => {
-                    eprintln!("Session not found: {}", session_id);
-                }
+                None => eprintln!("Session not found: {}", session_id),
             }
         }
-        Some(Command::View { path }) => match std::fs::read_to_string(&path) {
-            Ok(content) => display::view_markdown(&content),
-            Err(e) => {
-                eprintln!("Error reading file: {}", e);
+        Some(Command::View { path }) => {
+            match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    if cli.dump {
+                        display::dump_markdown(&content);
+                    } else {
+                        display::view_markdown(&content);
+                    }
+                }
+                Err(e) => eprintln!("Error reading file: {}", e),
             }
-        },
+        }
         Some(Command::Export { session_id, output }) => {
             match session::load_session(&log_dir, &session_id) {
-                Some(s) => display::export_session(&s, output.as_deref()),
-                None => {
-                    eprintln!("Session not found: {}", session_id);
-                }
+                Some(s) => display::export_session(&s, output.as_ref()),
+                None => eprintln!("Session not found: {}", session_id),
             }
         }
-        None => {}
     }
 }
