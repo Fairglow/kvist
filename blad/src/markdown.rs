@@ -202,6 +202,27 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
+    /// Strip ANSI escape sequences from a string for testing purposes.
+    fn strip_ansi(s: &str) -> String {
+        let mut result = String::new();
+        let mut chars = s.chars().peekable();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                // Skip until 'm' (end of CSI sequence)
+                while let Some(&next) = chars.peek() {
+                    if next == 'm' {
+                        chars.next();
+                        break;
+                    }
+                    chars.next();
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        result
+    }
+
     #[test]
     fn test_find_syntax_rust() {
         let ss = SyntaxSet::load_defaults_newlines();
@@ -246,7 +267,8 @@ mod tests {
         let output = String::from_utf8(buf.into_inner()).unwrap();
         // Should contain ANSI escapes for syntax highlighting
         assert!(output.contains("\x1b[38;2;"));
-        assert!(output.contains("let x = 42;"));
+        let plain = strip_ansi(&output);
+        assert!(plain.contains("let x = 42;"));
     }
 
     #[test]
@@ -255,8 +277,9 @@ mod tests {
         let mut buf = Cursor::new(Vec::new());
         render_markdown(md, &mut buf).unwrap();
         let output = String::from_utf8(buf.into_inner()).unwrap();
-        assert!(output.contains("fn main()"));
-        assert!(output.contains("x = 1"));
+        let plain = strip_ansi(&output);
+        assert!(plain.contains("fn main()"));
+        assert!(plain.contains("x = 1"));
         assert!(output.contains("\x1b[38;2;"));
     }
 }
