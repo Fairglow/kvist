@@ -2,6 +2,34 @@
 
 # Skott — Requirements
 
+## RUN-REQ-RUST-SANDBOX-CHAIN
+
+Rust workspace preparation MUST expose exactly the selected installed toolchain
+to rustup through sandbox-native paths, never dangling host-path links or an
+ambient/hard-coded alternate channel. Generated rustup settings are private,
+read-only resources, not the user's settings. `HOME` MUST name writable private
+invocation scratch. Requested compiler, formatter and Clippy resources MUST be
+regular executable files; missing requested resources MUST fail before effects.
+
+Native tests MUST exercise selection, PATH discovery, rustup queries, compilation,
+linking, executable execution, unit/integration/doctests, formatting, Clippy,
+documentation, vendored resolution, missing/stale locks, pin drift, credential
+exclusion, read-only mounts and network denial inside the actual sandbox.
+Isolation assertions MUST fail on a violation, not mask it with shell fallbacks.
+Optional Cargo-installed tools remain host-provisioned; tests MUST NOT silently
+claim their presence.
+
+Opt-in structured diagnostics MUST expose preparation stages and durations,
+selected channel and resource identities, validated mount destinations/access,
+environment names, execution limits and observed completion/failure flags.
+They MUST NOT log command text, environment values, credentials or captured
+tool output. Normal operation MUST remain quiet at the default warning level.
+
+This repair has an explicit per-bundle advisory-review exception: the human
+requested investigation and repair of the sandbox chain; current acceptance
+does not enforce advisory receipts. Independent observations and comparisons
+remain separate evidence, not acceptance or implementer certification.
+
 ## RUN-REQ-HISTORY-NAVIGATION
 
 Read-only session replay MUST support Ctrl+Home and Ctrl+End to reach the first

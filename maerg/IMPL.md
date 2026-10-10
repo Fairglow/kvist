@@ -2,6 +2,31 @@
 
 # Component Implementation Record
 
+## Scoped generic-authoring observation - 2026-10-10
+
+Clean-slate observer `rust-chain-observer` inspected current sandbox source,
+native tests, manifests, runner source and CI only, without intent, queues,
+prior records, reviews, chat or Git history. This supplement supersedes earlier
+observations only for generic authoring; it is not certification.
+
+- `execute_with_timeout` validates/resolves the requested program, rechecks
+  runner/backend identities and serializes a denied-network System request
+  with the supplied environment unchanged. It does not create Skott `/rust`
+  resources, query rustup or add generated rustup state. Cache is absent;
+  separately supplied scratch remains optional. The generic toolchain-root
+  identity derives from its path, not a complete tree content digest.
+- Authoring requires the five protected document files as separate read-only
+  context grants, and grants write access only to existing real `src`/`tests`
+  directories, not the component root.
+- The observer independently executed
+  `generic_authoring_preserves_environment_without_rustup_state`: 1 passed,
+  exit 0. It observed preserved PATH/HOME, absent `RUSTUP_HOME` and `/rust`,
+  and successful source output creation. This trial does not exhaustively test
+  protected-document writes.
+- Offline Cargo verification/acquisition remain separate executors/topologies.
+  The observer source-inspected, but did not execute, their pinned/native
+  trials. Stable CI explicitly enables the generic authoring regression.
+
 > Historical evidence notice: this record predates the one-way move from the
 > repository-root Rust layout to `maerg/`. Its original evidence paths are
 > retained rather than rewritten as a new clean-slate derivation.

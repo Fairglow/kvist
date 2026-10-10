@@ -117,6 +117,27 @@ protocol and acquisition boundaries. It wires the source origin matcher and
 cache promotion primitives to real network namespaces and resolved mounts
 rather than reinventing them.
 
+### SR-REQ-TOOLCHAIN-E2E
+
+Explicit native toolchain trials MUST execute the real runner and Bubblewrap
+with denied network and fail, not self-skip, on missing prerequisites.
+System-toolchain trials MUST discover Python, Node, Go, C and C++ through
+sandbox PATH and execute real dependency-free programs. Rust inventory trials
+MUST explicitly grant every host-installed toolchain read-only through a
+private, sandbox-native rustup registration, compare installed toolchain names,
+compiler/Cargo/rustdoc versions, target catalogues and installed targets and
+components with host query evidence, compile for every installed target, and
+execute native Rust and locked offline Cargo tests for every toolchain.
+Rustup mutation attempts MUST fail, and before/after content and metadata
+snapshots MUST detect changes to the host rustup installation, including
+externally linked toolchain roots. Tests MUST NOT install or update host tools.
+These trials establish enforcement of explicit grants, not automatic
+full-inventory discovery by a consumer's selected-toolchain profile.
+
+The Rust inventory fixture MUST include at least two installed toolchains
+and at least one installed non-host target, so its multi-version and
+cross-target obligations cannot pass vacuously.
+
 ## Quality requirements and constraints
 
 - Rust stable edition 2024 is required. Prefer safe Rust; necessary, minimally

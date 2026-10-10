@@ -6,6 +6,13 @@ add or change vendored dependencies for each supported toolchain.
 
 ## Toolchain Mount Architecture
 
+The `/rust/*` layout below belongs to **Skott workspace authoring**, not every
+Galla request. **Maerg task verification** uses its separate closed Cargo
+topology under `/workspace`, with enforced vendoring and approved identities.
+**Maerg generic authoring** is a protected effect path: it neither queries rustup
+nor stages a rustup home, and preserves its approved environment. Finding only
+system rustup proxies in that path does not establish a usable Rust toolchain.
+
 Kvist mounts toolchains into the sandbox in two different ways depending on
 the toolchain:
 
@@ -25,12 +32,15 @@ The mount layout is:
 | `/rust/toolchain`         | Host toolchain directory (e.g., `~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu`) | Read-only access to the Rust compiler, standard library, and targets              |
 | `/rust/runtime/bin/cargo` | Kvist-provided Cargo shim                                                               | A wrapper that forces `--offline --locked` and the vendored sources configuration |
 | `/rust/vendor`            | Snapshot of `.kvist/vendored`                                                           | Read-only snapshot of the vendored dependency registry                            |
+| `/rust/rustup-home`       | Private generated settings and one sandbox-native toolchain registration | Read-only rustup discovery of only the selected installation |
+| `/rust/user-cargo-bin`    | Validated optional host `~/.cargo/bin` directory | Read-only host-provisioned Cargo extensions; no host Cargo config or credentials |
 | `/tmp/cargo-home`         | Private tmpfs                                                                           | Private, sandbox-local Cargo home (cache, registry metadata)                      |
 | `/tmp/target`             | Private tmpfs                                                                           | Private, sandbox-local build target directory                                     |
 
 The Cargo shim at `/rust/runtime/bin/cargo` is essential: it ensures that
-every Cargo invocation inside the sandbox uses offline mode with the vendored
-sources, regardless of what the agent or build scripts request.
+normal PATH Cargo invocations default to offline/locked vendored resolution.
+Explicit alternate Cargo paths are not rewritten; network isolation is enforced
+independently by Galla, not by this convenience wrapper.
 
 **PATH and environment variables:** The sandbox sets the following to make
 the toolchain discoverable:
@@ -41,6 +51,16 @@ the toolchain discoverable:
 - `CARGO_HOME` is set to `/tmp/cargo-home`
 - `CARGO_TARGET_DIR` is set to `/tmp/target`
 - `CARGO_NET_OFFLINE` is set to `true`
+- `HOME=/tmp` names writable private invocation scratch
+- `RUSTUP_HOME=/rust/rustup-home` contains generated settings, never host settings
+- `RUSTUP_TOOLCHAIN` names the exact selected installed channel
+- `RUSTUP_AUTO_INSTALL=0` disables automatic toolchain installation
+
+The single generated `toolchains/<selected-name>` link targets
+`/rust/toolchain`, never an inaccessible host path. Rustup queries and the
+normal compiler therefore agree on selection, including alternate pins.
+Missing requested formatter/Clippy components fail before effects; provision
+them separately on the host.
 
 An agent running inside the sandbox can use Rust without knowing the mount
 path — standard PATH discovery works: `which rustc`, `which cargo`, and
@@ -61,13 +81,11 @@ The sandbox mounts the following host system directories read-only:
 - `/bin`
 - `/sbin`
 
-Additionally, for toolchains that live in user home directories, Kvist
-mounts those locations when the corresponding profile is enabled:
-
-| Toolchain | User Home Directories Mounted |
-| --------- | ----------------------------- |
-| Rust      | `~/.cargo/bin`                |
-| Go        | `~/go/bin`, `~/.local/bin`    |
+Skott's prepared Rust profile also exposes the optional `~/.cargo/bin` directory
+at `/rust/user-cargo-bin`, after the Cargo shim and concrete compiler in PATH.
+The host home itself, Cargo credentials/configuration and rustup settings are
+not mounted. System-profile detection alone does not authorize home-directory
+mounts for other languages.
 
 **PATH and environment variables:** The sandbox sets `PATH` to include the
 sandbox-local directories first, then the system directories. For Rust, this
@@ -109,9 +127,9 @@ Rust vendoring is enforced exactly through `Cargo.lock`. The workflow is:
 
 1. **Provision dependencies on the host:** Run `kvist vendor .` from the
    project root. This reconciles the vendored registry against `Cargo.lock`,
-   downloading any missing crates into `.kvist/vendored/`. **Note:** This is now
-   automatic for sandbox builds — `kvist build`, `kvist test`, and `kvist verify`
-   will run `kvist vendor` if the vendored registry is out of sync.
+   downloading any missing crates into `.kvist/vendored/`. Skott does not
+   provision dependencies or update locks while building. Maerg verification
+   enforces its vendoring manifest through its own approved lifecycle.
 2. **Build in the sandbox:** The sandbox mounts `.kvist/vendored` at
    `/rust/vendor` and uses the Cargo shim to force offline, locked builds
    against the vendored sources.
@@ -270,6 +288,52 @@ If the toolchain manifest is missing or stale, the doctor will report:
 
 ## Testing Toolchain Availability
 
+Run the self-contained native chain with a runner built outside the worktree:
+
+```bash
+cargo build --locked -p galla --bin galla-runner
+KVIST_RUST_TEST_RUNNER=/opt/target/debug/galla-runner \
+  cargo test --locked -p skott --test rust_build_environment -- \
+  --include-ignored --test-threads=1 --nocapture \
+  --skip cargo_installed_tools_are_available_in_sandbox \
+  --skip installed_minimal_pin_builds_without_optional_components \
+  --skip native_repository_tests_execute_inside_the_workspace_sandbox
+```
+
+Replace `/opt/target` if using a different outside-worktree target directory.
+The host must provide `/usr/bin/rustup`, an installed standard-layout toolchain,
+its requested rustfmt/Clippy components, system cc/ar/as, and working Bubblewrap.
+The CI quality job supplies these prerequisites and runs this chain explicitly.
+No provider, network acquisition or pre-existing vendor tree is needed for the
+self-contained fixture tests.
+
+Run every maerg native toolchain trial with
+`KVIST_GALLA=/opt/target/debug/galla-runner cargo test --locked -p kvist --test sandbox_toolchain -- --include-ignored --test-threads=1 --nocapture`.
+Its generic verification trials explicitly grant concrete installed executables,
+and the build trial compiles a real isolated locked fixture. The separate
+`offline_cargo_verification_e2e` covers manifest-enforced vendoring and pinned
+toolchains; do not conflate those authority paths.
+
+For alternate installed channels, set `KVIST_RUST_TEST_CHANNEL=nightly` and run
+`selected_toolchain_runs_the_complete_native_chain -- --ignored --nocapture`.
+For a minimal installation without rustfmt, set
+`KVIST_RUST_TEST_MINIMAL_CHANNEL=1.95.0` and run
+`installed_minimal_pin_builds_without_optional_components`; this also verifies
+that subsequently requesting the absent formatter fails actionably.
+Run `native_repository_tests_execute_inside_the_workspace_sandbox` only after
+provisioning this repository's `.kvist/vendored`; it compiles and executes the
+actual Galla library tests inside the workspace sandbox. The Cargo-extension
+trial additionally requires host-provisioned cargo-nextest. Explicit native
+trials fail rather than silently claiming missing prerequisites.
+
+Use `SKOTT_LOG=skott::toolchain::rust_environment=debug,skott::sandbox=trace skott ...`
+for selection queries, preparation timings/counts/identities, validated grant
+metadata and environment names, runner dispatch and observed exit/timeout/
+cancellation/output-bound flags. Diagnostics go to stderr, not model-facing
+stdout. They exclude command text, environment values and captured output.
+`diagnostics_cover_the_chain_without_command_or_output_payloads` checks both
+successful/nonzero completion and payload exclusion using a real runner.
+
 Kvist includes tests that verify toolchain discoverability inside the sandbox:
 
 - `skott/tests/rust_build_environment.rs` — Rust toolchain mounting, resolution,
@@ -279,5 +343,14 @@ Kvist includes tests that verify toolchain discoverability inside the sandbox:
 - `maerg/tests/language_offline_e2e.rs` — End-to-end offline build verification
   for all supported languages
 
-These tests ensure that toolchains are available, discoverable, and functional
-inside the sandbox before any agent uses them.
+These suites cover different consumer profiles and authority paths; version
+probes alone do not establish functional tooling, and ignored or self-skipping
+trials do not establish availability unless they actually execute.
+
+`galla/tests/toolchain_e2e.rs` adds strict native system-language execution and
+full installed-rustup inventory parity for explicit read-only grants, including
+per-version target compilation and host non-mutation snapshots. CI explicitly
+runs these otherwise ignored tests. This does not change Skott's intentional
+single-selected-toolchain rustup registration or Maerg's closed Cargo topology.
+See [Galla toolchain testing review](galla-toolchain-testing-review.md) for
+findings, limitations, recorded results and reproduction instructions.

@@ -356,6 +356,32 @@ pub(crate) fn build_request_with_rust(
     })?;
 
     preflight.check()?;
+    tracing::debug!(
+        phase = ?request.phase,
+        runner_identity = %request.identities.runner,
+        backend_identity = %request.identities.backend.digest,
+        toolchain_identity = %request.identities.toolchain,
+        mount_plan_identity = %request.identities.mount_plan,
+        grants = request.grants.len(),
+        wall_time_ms = request.resources.wall_time_ms,
+        max_output_bytes = request.resources.max_output_bytes,
+        network = ?request.network.mode,
+        elapsed_ms = preflight.started.elapsed().as_millis() as u64,
+        "sandbox request validated"
+    );
+    for grant in &request.grants {
+        tracing::trace!(
+            source = %grant.source,
+            destination = %grant.destination,
+            access = ?grant.access,
+            purpose = ?grant.purpose,
+            identity = %grant.identity,
+            "sandbox grant"
+        );
+    }
+    for name in request.environment.keys() {
+        tracing::trace!(name, "sandbox environment entry");
+    }
     Ok(request)
 }
 
@@ -732,7 +758,16 @@ pub fn execute(
         })?;
     let mut command = Command::new(&sandbox.runner);
     command.arg(REQUEST_ARGUMENT);
-    crate::process::run(
+    let started = Instant::now();
+    tracing::debug!(
+        runner = %sandbox.runner.display(),
+        backend = %sandbox.backend.display(),
+        request_bytes = json.len(),
+        wall_time_ms = request.resources.wall_time_ms,
+        max_output_bytes = output_limit,
+        "dispatching sandbox runner"
+    );
+    let outcome = crate::process::run(
         &mut command,
         Some(&json),
         Duration::from_millis(request.resources.wall_time_ms),
@@ -743,6 +778,25 @@ pub fn execute(
             reason: format!("spawn sandbox runner: {source}"),
         },
     )
+    .inspect_err(|_| {
+        tracing::error!(
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "sandbox runner supervision failed"
+        );
+    })?;
+    tracing::debug!(
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        exited = outcome.exited,
+        status = ?outcome.status,
+        stdout_bytes = outcome.stdout.len(),
+        stderr_bytes = outcome.stderr.len(),
+        timed_out = outcome.timed_out,
+        output_limit_exceeded = outcome.output_limit_exceeded,
+        cancelled = outcome.cancelled,
+        failed = outcome.failed(),
+        "sandbox runner completed"
+    );
+    Ok(outcome)
 }
 
 /// Resolves a bare program name to an absolute executable path by searching

@@ -144,6 +144,12 @@ implemented.
 
 ## Compatibility and verification
 
+Native inventory tests may supply multiple explicit read-only toolchain grants
+and a private generated rustup home whose registrations refer to sandbox paths.
+Galla does not discover host toolchains or synthesize that home for consumers.
+Visibility is determined by the submitted grants and environment; a
+single-toolchain request does not promise full host inventory visibility.
+
 Kvist is pre-release and retains no legacy protocol compatibility. Current
 tests cover strict accepted shape, canonical serialization, malformed,
 oversized, unknown, and legacy rejection, fail-closed unavailability, the

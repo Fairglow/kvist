@@ -136,14 +136,40 @@ fn run_sandboxed(
     expected_runner: &kvist::sandbox::RunnerIdentity,
     expected_backend: &kvist::sandbox::BackendIdentity,
 ) -> Option<kvist::sandbox::ExecutionResult> {
-    let env = kvist::sandbox::allowed_environment(config, None);
+    let selected = Command::new("/usr/bin/rustup")
+        .args(["which", program])
+        .current_dir("/")
+        .env_remove("RUSTUP_TOOLCHAIN")
+        .output()
+        .expect("resolve a concrete installed tool for the native trial");
+    assert!(
+        selected.status.success(),
+        "provision {program} on the host: {}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    let concrete = String::from_utf8(selected.stdout).unwrap();
+    let concrete = concrete.trim();
+    let bin = Path::new(concrete).parent().unwrap();
+    let mut env = kvist::sandbox::allowed_environment(config, None);
+    env.insert("PATH".into(), format!("{}:/usr/bin:/bin", bin.display()));
+    env.insert("HOME".into(), "/tmp".into());
+    env.insert("CARGO_HOME".into(), "/tmp/cargo-home".into());
+    env.insert("CARGO_TARGET_DIR".into(), "/tmp/target".into());
+    env.insert("CARGO_NET_OFFLINE".into(), "true".into());
+    env.insert(
+        "RUSTC".into(),
+        bin.join("rustc").to_string_lossy().into_owned(),
+    );
 
+    // These generic verification trials explicitly grant the concrete
+    // executable. They do not rely on ambient rustup proxies or demonstrate
+    // the separate pinned/vendor-manifest Cargo authority.
     let request = ExecutionRequest {
         project_root: worktree,
         vcs_selection: VcsSelection::Auto,
         component_dir: worktree,
         phase: ExecutionPhase::Verification,
-        program,
+        program: concrete,
         arguments,
         environment: env,
         read_only_mounts: &[],
@@ -168,6 +194,77 @@ fn run_sandboxed(
             None
         }
     }
+}
+
+#[test]
+#[ignore = "requires an installed runner and native Bubblewrap"]
+fn generic_authoring_preserves_environment_without_rustup_state() {
+    let runner = locate_runner().expect("install galla-runner outside the worktree");
+    let backend = locate_backend().expect("install Bubblewrap");
+    let worktree = git_worktree_root().expect("run inside a git worktree");
+    let project = tempfile::tempdir_in(&worktree).unwrap();
+    std::fs::create_dir(project.path().join("src")).unwrap();
+    std::fs::write(project.path().join("src/input"), "input").unwrap();
+    for name in [
+        "REQUIREMENTS.md",
+        "CONTRACT.md",
+        "DESIGN.md",
+        "TODOS.yaml",
+        "IMPL.md",
+    ] {
+        std::fs::write(project.path().join(name), "protected context").unwrap();
+    }
+    let config = resolve_sandbox_config(&runner, &backend);
+    let expected_runner = runner_identity(&config, project.path(), VcsSelection::Auto).unwrap();
+    let expected_backend = backend_identity(&config, project.path(), VcsSelection::Auto).unwrap();
+    ensure_available(
+        &config,
+        project.path(),
+        VcsSelection::Auto,
+        &expected_runner,
+        &expected_backend,
+    )
+    .unwrap();
+    let arguments = vec![
+        "-c".into(),
+        "test \"$PATH\" = /usr/bin:/bin && test \"$HOME\" = /tmp && test -z \"$RUSTUP_HOME\" && test ! -e /rust && printf repaired > src/output".into(),
+    ];
+    let result = execute_with_timeout(
+        &config,
+        ExecutionRequest {
+            project_root: project.path(),
+            vcs_selection: VcsSelection::Auto,
+            component_dir: project.path(),
+            phase: ExecutionPhase::Authoring,
+            program: "/usr/bin/bash",
+            arguments: &arguments,
+            environment: [
+                ("PATH".into(), "/usr/bin:/bin".into()),
+                ("HOME".into(), "/tmp".into()),
+            ]
+            .into(),
+            read_only_mounts: &[],
+            scratch_host_dir: None,
+            backend: &expected_backend,
+            policy_identity: POLICY_IDENTITY,
+        },
+        ExecutionOptions {
+            timeout: Some(Duration::from_secs(30)),
+            output_limit: Some(16384),
+            live_stdout: None,
+        },
+        &expected_runner,
+    )
+    .unwrap();
+    assert!(
+        result.output.status.success(),
+        "generic authoring failed: {}",
+        String::from_utf8_lossy(&result.output.stderr)
+    );
+    assert_eq!(
+        std::fs::read(project.path().join("src/output")).unwrap(),
+        b"repaired"
+    );
 }
 
 #[test]
@@ -446,13 +543,8 @@ fn sandbox_cargo_build_with_rustc() {
         return;
     }
 
-    // Create a temporary directory for the sandbox execution
-    let temp_dir = std::env::temp_dir().join(format!("kvist-sandbox-test-{}", std::process::id()));
-    std::fs::create_dir_all(&temp_dir).expect("failed to create temp dir");
-
-    // Create a minimal Cargo project
-    let project_dir = temp_dir.join("hello-world");
-    std::fs::create_dir_all(&project_dir).expect("failed to create project dir");
+    let project = tempfile::tempdir_in(&worktree).expect("create isolated native Cargo fixture");
+    let project_dir = project.path();
     let src_dir = project_dir.join("src");
     std::fs::create_dir_all(&src_dir).expect("failed to create src dir");
 
@@ -463,6 +555,11 @@ version = "0.1.0"
 edition = "2024"
 "#;
     std::fs::write(project_dir.join("Cargo.toml"), cargo_toml).expect("failed to write Cargo.toml");
+    std::fs::write(
+        project_dir.join("Cargo.lock"),
+        "version=4\n[[package]]\nname=\"hello-world\"\nversion=\"0.1.0\"\n",
+    )
+    .expect("write the separately provisioned lock");
 
     let main_rs = r#"
 fn main() {
@@ -473,15 +570,16 @@ fn main() {
 
     let result = run_sandboxed(
         &config,
-        &worktree,
+        project_dir,
         "cargo",
-        &["build".to_owned()],
+        &[
+            "build".to_owned(),
+            "--offline".to_owned(),
+            "--locked".to_owned(),
+        ],
         &expected_runner,
         &expected_backend,
     );
-
-    // Clean up
-    let _ = std::fs::remove_dir_all(&temp_dir);
 
     let result = match result {
         Some(r) => r,

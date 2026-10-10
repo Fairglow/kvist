@@ -62,6 +62,28 @@ If neither is set, Kvist defaults to `warn` to keep CLI execution quiet and clea
 
 ---
 
+## Skott Rust sandbox diagnostics
+
+Skott uses `SKOTT_LOG`, falling back to `RUST_LOG`, with the same quiet warning
+default and stderr-only tracing. For the prepared Rust workspace path:
+
+```bash
+SKOTT_LOG=skott::toolchain::rust_environment=debug,skott::sandbox=trace skott ...
+```
+
+Debug marks host selection queries, concrete channel resolution, bounded vendor
+enumeration/copy, resource preparation/validation, request validation, dispatch
+and runner completion. Fields include elapsed milliseconds, identities/counts,
+execution/output bounds, exit status and timeout/cancellation/output-limit flags.
+Trace adds grant source/destination/access/purpose/identity and environment
+**names**, not values. These chain events do not include command text, credentials
+or captured output. Paths are diagnostic metadata, not a secret-free evidence
+claim; private transcripts have separate privacy rules.
+
+Native diagnostic tests exercise both success and nonzero exit through the real
+runner and assert that a command/output sentinel is absent from tracing.
+See [sandbox toolchains](sandbox-toolchains-and-vendoring.md) for native commands.
+
 ## Anti-Spamming Guidelines
 
 To prevent overwhelming logs and retain high signal-to-noise ratio:
