@@ -1385,18 +1385,13 @@ pub fn execute_with_timeout(
         });
 
         environment.insert("RUSTUP_HOME".to_owned(), RUSTUP_HOME_DEST.to_owned());
-        environment.insert("HOME".to_owned(), "/workspace".to_owned());
-        // Ensure rustup-managed toolchain is first in PATH
-        let existing_path = environment
-            .get("PATH")
-            .cloned()
-            .unwrap_or_else(|| "/usr/bin:/bin".to_owned());
+        environment.insert("HOME".to_owned(), "/workspace/home".to_owned());
+        // Ensure rustup-managed toolchain is first in PATH. Exclude /usr/sbin
+        // and /sbin to limit the available tools to the essential Unix utilities
+        // and the Rust toolchain.
         let target = get_detected_target(Path::new(&toolchain_root))?;
         let rustup_bin = format!("{}/toolchains/stable-{}/bin", RUSTUP_HOME_DEST, target);
-        environment.insert(
-            "PATH".to_owned(),
-            format!("{}:{}", rustup_bin, existing_path),
-        );
+        environment.insert("PATH".to_owned(), format!("{}/usr/bin:/bin", rustup_bin));
     }
 
     let sandbox_request = SandboxRequest {
