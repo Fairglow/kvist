@@ -34,6 +34,7 @@ use crate::error::{Error, Result, io_error};
 const TOOLCHAIN_DEST: &str = "/rust/toolchain";
 const RUNTIME_DEST: &str = "/rust/runtime";
 const VENDOR_DEST: &str = "/rust/vendor";
+const RUSTUP_HOME_DEST: &str = "/rust/rustup-home";
 const MAX_FILE_BYTES: u64 = 256 << 20;
 const MAX_VENDOR_BYTES: u64 = 1 << 30;
 const MAX_ENTRIES: usize = 100_000;
@@ -80,6 +81,7 @@ struct Resources {
     pin_identity: String,
     pinned: bool,
     user_cargo_bin: Option<PathBuf>,
+    rustup_home: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -675,6 +677,38 @@ impl RustEnvironment {
             identity: file_identity,
             fingerprint: file_fingerprint,
         });
+
+        // Create a rustup-managed toolchain directory with symlinks to the
+        // actual toolchain binaries. This makes rustup aware of the installed
+        // toolchain without requiring network access or rustup's own management.
+        let rustup_home = staging.path().join("rustup-home");
+        let toolchain_dir = rustup_home
+            .join("toolchains")
+            .join(format!("stable-x86_64-unknown-linux-gnu"));
+        let toolchain_bin = toolchain_dir.join("bin");
+        let toolchain_lib = toolchain_dir.join("lib");
+
+        fs::create_dir_all(&toolchain_bin)
+            .map_err(|e| io_error("create rustup toolchain bin directory", None, e))?;
+        fs::create_dir_all(&toolchain_lib)
+            .map_err(|e| io_error("create rustup toolchain lib directory", None, e))?;
+
+        // Create symlinks to the actual toolchain binaries
+        for name in ["cargo", "rustc", "rustdoc", "rustfmt", "clippy-driver"] {
+            let src = root.join("bin").join(name);
+            if src.exists() {
+                std::os::unix::fs::symlink(src, toolchain_bin.join(name))
+                    .map_err(|e| io_error(&format!("symlink {} for rustup", name), None, e))?;
+            }
+        }
+
+        // Symlink the lib/rustlib directory
+        let src_rustlib = root.join("lib").join("rustlib");
+        if src_rustlib.exists() {
+            std::os::unix::fs::symlink(src_rustlib, toolchain_lib.join("rustlib"))
+                .map_err(|e| io_error("symlink rustlib for rustup", None, e))?;
+        }
+
         Ok(Self {
             resources: Arc::new(Resources {
                 workspace,
@@ -693,6 +727,7 @@ impl RustEnvironment {
                 } else {
                     None
                 },
+                rustup_home,
             }),
         })
     }
@@ -794,6 +829,13 @@ impl RustEnvironment {
                 purpose: Purpose::Toolchain,
                 identity: self.resources.vendor_identity.clone(),
             },
+            Grant {
+                source: self.resources.rustup_home.to_string_lossy().into_owned(),
+                destination: RUSTUP_HOME_DEST.into(),
+                access: Access::ReadWrite,
+                purpose: Purpose::Toolchain,
+                identity: self.resources.identity.clone(),
+            },
         ];
         if let Some(user_cargo_bin) = &self.resources.user_cargo_bin {
             grants.push(Grant {
@@ -819,7 +861,9 @@ impl RustEnvironment {
         };
         [
             ("PATH", path),
-            ("HOME", "/tmp"),
+            ("HOME", "/workspace"),
+            ("RUSTUP_HOME", RUSTUP_HOME_DEST),
+            ("RUSTUP_TOOLCHAIN", "stable"),
             ("CARGO_HOME", "/tmp/cargo-home"),
             ("CARGO_TARGET_DIR", "/tmp/target"),
             ("CARGO_NET_OFFLINE", "true"),
@@ -1059,6 +1103,11 @@ mod tests {
     }
 
     fn synthetic_environment(directory: &Path) -> RustEnvironment {
+        let rustup_home = tempfile::Builder::new()
+            .prefix(".rust-rustup-")
+            .tempdir_in(directory)
+            .unwrap()
+            .keep();
         let directory = directory.canonicalize().unwrap();
         let workspace = directory.join("workspace");
         let root = directory.join("toolchain");
@@ -1096,6 +1145,7 @@ mod tests {
                 has_vendor: false,
                 pinned: false,
                 user_cargo_bin: None,
+                rustup_home,
             }),
         }
     }
