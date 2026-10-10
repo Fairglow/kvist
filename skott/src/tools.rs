@@ -244,7 +244,9 @@ impl ToolRegistry {
             .collect::<Vec<_>>()
             .join(", ");
         let rust_scope = if self.rust_environment.is_some() {
-            " Rust uses an already installed read-only concrete toolchain; cargo is explicitly \
+            " Rust exposes all validated installed toolchains and targets read-only. Discover \
+              them with rustup toolchain list and rustup target list --installed --toolchain <name>; \
+              select with cargo +<name>, rustc +<name>, or rustup run <name>. Cargo is explicitly \
               offline with a private read-only vendor snapshot, HOME/cache/target are scratch. \
               Missing dependencies require host provisioning; sandbox builds never download."
         } else {

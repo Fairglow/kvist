@@ -413,7 +413,8 @@ can update them. Flags also apply to metadata and checks; version/help remain
 usable without a project lock. Explicit alternate executable paths are not
 rewritten. This is a locked-build default, not an artifact write-protection
 mechanism for the standalone writable workspace. Concrete compiler,
-rustdoc and native libraries remain under `/rust/toolchain`; the trusted shim
+rustdoc and native libraries for the initial selection remain under
+`/rust/toolchain`; the trusted wrappers
 is under `/rust/runtime`. `HOME=/tmp`, `CARGO_HOME=/tmp/cargo-home` and
 `CARGO_TARGET_DIR=/tmp/target` are private invocation scratch, not host caches.
 Selection uses the standard host rustup layout, ignoring ambient overrides and
@@ -424,14 +425,26 @@ with the registry/executor and removed when the final owner drops. Pin/root
 substitution and tracked executable/library/shim drift fail before dispatch;
 the identity is not a complete toolchain-tree digest.
 
-Register only the root's validated installed channel name in a private staged
-rustup home: `toolchains/<name>` links to `/rust/toolchain`, and generated
-`settings.toml` selects that name. Both remain read-only for the registry's
-lifetime. Never enumerate or advertise other host installations. Set
+Enumerate and sort every standard-layout installed name reported by the trusted
+system rustup. Require bounded, non-link roots outside the writable workspace
+and validate each compiler/Cargo/rustdoc, native layout and present companions.
+Register every name in a private staged rustup home. The initial selection links
+to `/rust/toolchain`; other names link to disjoint `/rust/toolchains/N` mounts.
+Generated `settings.toml` selects the initial name. All remain read-only.
+Track inventory membership and bin/lib/rustlib metadata recursively to detect
+additions, removals, target changes and non-selected installation drift before
+dispatch. Fail on invalid entries, limits or drift, never silently truncate.
+Set
 `RUSTUP_TOOLCHAIN` to the same name, `RUSTUP_AUTO_INSTALL=0`, and retain
 `HOME=/tmp`; direct PATH Cargo still enters the offline/locked shim.
 Track all present formatter/Clippy executables and the generated settings.
-Validate the generated link target before each dispatch. Optional user Cargo
+Validate every generated link and the complete registration set before each
+dispatch. Fixed runtime wrappers consume an optional leading `+<name>` and
+otherwise use `RUSTUP_TOOLCHAIN`, then invoke trusted system rustup's `run`
+without installation. Cargo retains its fixed offline/locked vendor flags.
+Set `RUSTC` and `RUSTDOC` to the selection-aware runtime wrappers so an alternate
+Cargo never compiles or documents using the initially selected version.
+Optional user Cargo
 bin remains a validated non-link directory outside the workspace; it is not a
 credential/configuration mount.
 

@@ -29,10 +29,12 @@ The mount layout is:
 
 | Sandbox Path              | Source                                                                                  | Purpose                                                                           |
 | ------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `/rust/toolchain`         | Host toolchain directory (e.g., `~/.rustup/toolchains/stable-x86_64-unknown-linux-gnu`) | Read-only access to the Rust compiler, standard library, and targets              |
+| `/rust/toolchain`         | Initially selected host toolchain directory | Read-only default compiler, standard library, and targets |
+| `/rust/toolchains/N`      | Other validated installed toolchains, sorted by name | Read-only access to every other installed version and its targets |
 | `/rust/runtime/bin/cargo` | Kvist-provided Cargo shim                                                               | A wrapper that forces `--offline --locked` and the vendored sources configuration |
 | `/rust/vendor`            | Snapshot of `.kvist/vendored`                                                           | Read-only snapshot of the vendored dependency registry                            |
-| `/rust/rustup-home`       | Private generated settings and one sandbox-native toolchain registration | Read-only rustup discovery of only the selected installation |
+| `/rust/runtime/bin/rustc`, `/rust/runtime/bin/rustdoc` | Fixed selection-aware wrappers | Compiler and documentation selection follows Cargo or a leading `+name` |
+| `/rust/rustup-home`       | Private generated settings and sandbox-native registrations for every installed name | Read-only complete installed inventory discovery |
 | `/rust/user-cargo-bin`    | Validated optional host `~/.cargo/bin` directory | Read-only host-provisioned Cargo extensions; no host Cargo config or credentials |
 | `/tmp/cargo-home`         | Private tmpfs                                                                           | Private, sandbox-local Cargo home (cache, registry metadata)                      |
 | `/tmp/target`             | Private tmpfs                                                                           | Private, sandbox-local build target directory                                     |
@@ -46,8 +48,8 @@ independently by Galla, not by this convenience wrapper.
 the toolchain discoverable:
 
 - `PATH` includes `/rust/runtime/bin:/rust/toolchain/bin` (before system paths)
-- `RUSTC` is set to `/rust/toolchain/bin/rustc`
-- `RUSTDOC` is set to `/rust/toolchain/bin/rustdoc`
+- `RUSTC` is set to `/rust/runtime/bin/rustc`
+- `RUSTDOC` is set to `/rust/runtime/bin/rustdoc`
 - `CARGO_HOME` is set to `/tmp/cargo-home`
 - `CARGO_TARGET_DIR` is set to `/tmp/target`
 - `CARGO_NET_OFFLINE` is set to `true`
@@ -56,9 +58,18 @@ the toolchain discoverable:
 - `RUSTUP_TOOLCHAIN` names the exact selected installed channel
 - `RUSTUP_AUTO_INSTALL=0` disables automatic toolchain installation
 
-The single generated `toolchains/<selected-name>` link targets
-`/rust/toolchain`, never an inaccessible host path. Rustup queries and the
-normal compiler therefore agree on selection, including alternate pins.
+Generated `toolchains/<name>` links target `/rust/toolchain` for the initial
+selection and `/rust/toolchains/N` for other versions, never host paths.
+`rustup toolchain list` and per-version installed-target/component queries see
+the complete validated host inventory. Use `cargo +<name>`, `rustc +<name>`,
+`rustdoc +<name>`, `rustup run <name> ...`, or invocation-local
+`RUSTUP_TOOLCHAIN=<name>` to select another installed version. Compiler and
+rustdoc wrappers follow Cargo selection; PATH Cargo retains offline/locked
+vendored resolution. Explicit concrete Cargo paths remain unwrapped.
+All toolchains and generated settings are read-only; installation is disabled.
+Inventory/target drift requires restart after host provisioning. Invalid,
+custom-linked or over-bound installations fail preparation rather than being
+silently omitted. Host Cargo/rustup overrides are still ignored at startup.
 Missing requested formatter/Clippy components fail before effects; provision
 them separately on the host.
 
@@ -350,7 +361,11 @@ trials do not establish availability unless they actually execute.
 `galla/tests/toolchain_e2e.rs` adds strict native system-language execution and
 full installed-rustup inventory parity for explicit read-only grants, including
 per-version target compilation and host non-mutation snapshots. CI explicitly
-runs these otherwise ignored tests. This does not change Skott's intentional
-single-selected-toolchain rustup registration or Maerg's closed Cargo topology.
+runs these otherwise ignored tests. `skott/tests/rustup_inventory.rs` additionally
+drives actual automatic Skott preparation, compares every installed version and
+target, verifies compiler/doc selection under all three Cargo selection forms,
+and checks denied mutations and unchanged host installations. CI explicitly
+runs it using the same separately provisioned multi-version/cross-target
+prerequisites. Maerg's closed Cargo topology remains unchanged.
 See [Galla toolchain testing review](galla-toolchain-testing-review.md) for
 findings, limitations, recorded results and reproduction instructions.

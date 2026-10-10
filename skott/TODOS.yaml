@@ -14,6 +14,77 @@ component:
         expected_revision: "sha256:d820c13d62d03274f739359a9d8a813f4b5942729d6a646934ce697bcd49f097"
         observed_revision: "sha256:d8be7616a3dd68b68c9560717683f62ce54aea6ac23a91010c7139d84566fd6f"
 tasks:
+  - id: "runner-rust-inventory-write-tests"
+    title: "Define automatic installed Rust inventory evidence"
+    description: "Reproduce missing non-selected registrations; compare all installed versions, targets and components through actual Skott preparation, exercise alternate Cargo/compiler/doc selection, and snapshot host state around denied mutations."
+    context: "The native regression failed before implementation: eight host installations versus one sandbox registration."
+    purpose: "Define complete installed-inventory and read-only behavior before production changes."
+    expected_outcome: "Tests fail on incomplete inventory, wrong compiler/doc selection, host mutations or writable installation state."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps:
+      created_at: "2026-10-10T16:22:19Z"
+      updated_at: "2026-10-10T17:55:28Z"
+      completed_at: "2026-10-10T17:55:28Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runner-rust-inventory-implement-code"
+    title: "Expose all validated installed Rust versions read-only"
+    description: "Enumerate bounded standard-layout inventory, generate sandbox-native registrations and read-only grants, preserve the initial pin/default and make Cargo/compiler/doc selection-aware with drift checks and CI evidence."
+    context: "No host installation/update or broader Maerg authority is introduced. Native inventory, selected-chain and synthetic alternate-target/registration drift tests pass; strict all-target Clippy passes."
+    purpose: "Let the sandboxed agent discover and choose the installed version/target it needs."
+    expected_outcome: "Rustup reports the complete validated startup inventory and explicitly selected Cargo uses matching compiler/doc tools."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "runner-rust-inventory-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps:
+      created_at: "2026-10-10T16:22:19Z"
+      updated_at: "2026-10-10T17:55:28Z"
+      completed_at: "2026-10-10T17:55:28Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runner-rust-inventory-security-audit"
+    title: "Audit automatic inventory authority independently"
+    description: "Independently inspect host non-mutation, read-only non-selected grants, writable-workspace overlap, selector option separation and inventory/registration drift."
+    context: "Independent rust-inventory-authority-audit found no high-confidence scoped finding. Static review does not certify enforcement; custom links, atime, concurrent host races, direct concrete Cargo and pre-existing alias limits remain explicit."
+    purpose: "Keep host installations protected when exposing more versions."
+    expected_outcome: "Scoped authority findings are corrected or retained with explicit limits."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "runner-rust-inventory-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps:
+      created_at: "2026-10-10T16:22:19Z"
+      updated_at: "2026-10-10T17:55:28Z"
+      completed_at: "2026-10-10T17:55:28Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runner-rust-inventory-compliance-review"
+    title: "Compare independent inventory observations with intent"
+    description: "Compare local requirements/contract/design with the clean-slate inventory observation, scoped authority audit and actual native test evidence in a separate source-blind context."
+    context: "Clean-slate rust-inventory-observer supplied the scoped IMPL supplement. Source-blind rust-inventory-comparator found no concrete blocking mismatch for the eight-toolchain/fourteen-target demonstrated scope. Final membership/option guards have audit/regression evidence, not refreshed clean-slate observation; broader chain/diagnostic obligations are not individually established by aggregate counts. Direct Cargo, custom links, bounds, atime and concurrent-host-change limits remain explicit. No acceptance or blanket certification."
+    purpose: "Retain independent comparison and scope limits, not implementer certification."
+    expected_outcome: "Every scoped discrepancy or unsupported claim is retained for explicit human arbitration."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "runner-rust-inventory-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps:
+      created_at: "2026-10-10T16:22:19Z"
+      updated_at: "2026-10-10T17:55:28Z"
+      completed_at: "2026-10-10T17:55:28Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "runner-rust-chain-write-tests"
     title: "Pin the native Rust sandbox chain"
     description: "Reproduce dangling rustup links, wrong selected channel and HOME; exercise compiler/linker, test kinds, fmt/Clippy/docs/vendor and negative isolation/lock/pin cases."

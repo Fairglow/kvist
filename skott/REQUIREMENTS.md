@@ -4,9 +4,13 @@
 
 ## RUN-REQ-RUST-SANDBOX-CHAIN
 
-Rust workspace preparation MUST expose exactly the selected installed toolchain
-to rustup through sandbox-native paths, never dangling host-path links or an
-ambient/hard-coded alternate channel. Generated rustup settings are private,
+Rust workspace preparation MUST expose every safely validated installed
+toolchain and its installed targets to rustup through sandbox-native paths,
+never dangling host-path links. The project pin or host default remains the
+initial selection; the agent MAY explicitly select another installed version
+using `cargo +<name>`, `rustc +<name>`, `rustup run`, or invocation-local
+`RUSTUP_TOOLCHAIN`. Compiler and rustdoc selection MUST agree with Cargo.
+Generated rustup settings are private,
 read-only resources, not the user's settings. `HOME` MUST name writable private
 invocation scratch. Requested compiler, formatter and Clippy resources MUST be
 regular executable files; missing requested resources MUST fail before effects.
@@ -18,6 +22,17 @@ exclusion, read-only mounts and network denial inside the actual sandbox.
 Isolation assertions MUST fail on a violation, not mask it with shell fallbacks.
 Optional Cargo-installed tools remain host-provisioned; tests MUST NOT silently
 claim their presence.
+
+Native inventory tests MUST compare all installed names, versions, target
+catalogues and installed targets/components against host queries, compile
+every installed target, execute each installed compiler and Cargo test runner,
+and verify denied mutations and unchanged host content/metadata excluding
+access times. All installations remain read-only, including non-selected
+versions. Preparation MUST fail explicitly rather than silently omit an
+invalid, unsafe or over-bound installation. Host inventory, executable,
+registration and target-layout drift MUST fail before dispatch and require
+restart after host provisioning; no install/update or ambient host home mount
+is authorized.
 
 Opt-in structured diagnostics MUST expose preparation stages and durations,
 selected channel and resource identities, validated mount destinations/access,

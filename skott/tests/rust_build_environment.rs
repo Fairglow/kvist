@@ -392,7 +392,7 @@ fn rust_toolchain_is_discoverable_via_path_and_version_commands() {
     // This ensures an agent can find and use the toolchain without
     // needing to know the exact mount path. Note that cargo is the
     // offline/locked shim at /rust/runtime/bin/cargo, while rustc and
-    // rustdoc are the real binaries at /rust/toolchain/bin/.
+    // rustdoc use selection-aware wrappers at /rust/runtime/bin/.
     let result = shell(
         &executor,
         "which rustc && which cargo && which rustdoc && rustc --version && cargo --version && rustdoc --version && test ! -d /home/stefan",
@@ -401,7 +401,7 @@ fn rust_toolchain_is_discoverable_via_path_and_version_commands() {
     let error = result.error_text(8192);
     assert!(!result.failed(), "{}", error);
     assert!(
-        output.contains("/rust/toolchain/bin/rustc"),
+        output.contains("/rust/runtime/bin/rustc"),
         "rustc not found at expected path"
     );
     assert!(
@@ -409,7 +409,7 @@ fn rust_toolchain_is_discoverable_via_path_and_version_commands() {
         "cargo shim not found at expected path"
     );
     assert!(
-        output.contains("/rust/toolchain/bin/rustdoc"),
+        output.contains("/rust/runtime/bin/rustdoc"),
         "rustdoc not found at expected path"
     );
     assert!(output.contains("rustc 1."), "rustc version output missing");

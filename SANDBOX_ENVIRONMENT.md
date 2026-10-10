@@ -51,9 +51,12 @@ Native reproduction found four wiring defects:
    before Bubblewrap mounted it; it also changed the approved environment and
    added a grant after calculating the mount-plan identity.
 
-Skott now registers only the selected installation using a sandbox-native link
-to the read-only `/rust/toolchain`, with generated read-only rustup settings,
-the exact selected channel and automatic installation disabled. Normal PATH
+Skott now automatically registers every validated installed version and target.
+The initial selection uses `/rust/toolchain`; other versions use read-only
+`/rust/toolchains/N` mounts, with sandbox-native links and generated read-only
+rustup settings. The project pin remains the initial selection; the agent can
+choose another version using `cargo +<name>` or `rustup run`. Compiler/rustdoc
+wrappers follow that selection. Automatic installation remains disabled. Normal PATH
 Cargo resolves through `/rust/runtime/bin/cargo`, enforcing offline/locked
 defaults and the immutable `/rust/vendor` snapshot. `HOME=/tmp`, Cargo home and
 build output are private invocation scratch. Host credentials/settings remain
