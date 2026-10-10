@@ -678,55 +678,70 @@ impl RustEnvironment {
             fingerprint: file_fingerprint,
         });
 
-        // Create a rustup-managed toolchain directory with symlinks to the
-        // actual toolchain binaries. This makes rustup aware of the installed
-        // toolchain without requiring network access or rustup's own management.
-        // The toolchain directory name is detected from the active toolchain
-        // channel and the host target triple.
+        // Create rustup-managed toolchain directories for all installed toolchains
+        // so that rustup recognizes them. This prevents the agent from being confused
+        // by rustup reporting "no installed toolchains".
         let rustup_home = staging.path().join("rustup-home");
-        let installed_targets = query_rustup(
-            &rustup,
-            &home,
-            &["target", "list", "--installed"],
-            &preparation,
-        )?;
-        let target = installed_targets
-            .lines()
-            .find(|line| line.ends_with("(default)"))
-            .map(|line| {
-                line.split_whitespace()
-                    .next()
-                    .unwrap_or("x86_64-unknown-linux-gnu")
-            })
-            .unwrap_or("x86_64-unknown-linux-gnu");
-        let toolchain_dir_name = if selected.ends_with(&format!("-{}", target)) {
-            selected.clone()
-        } else {
-            format!("{}-{}", selected, target)
-        };
-        let toolchain_dir = rustup_home.join("toolchains").join(toolchain_dir_name);
-        let toolchain_bin = toolchain_dir.join("bin");
-        let toolchain_lib = toolchain_dir.join("lib");
+        fs::create_dir_all(&rustup_home)
+            .map_err(|e| io_error("create rustup home directory", None, e))?;
 
-        fs::create_dir_all(&toolchain_bin)
-            .map_err(|e| io_error("create rustup toolchain bin directory", None, e))?;
-        fs::create_dir_all(&toolchain_lib)
-            .map_err(|e| io_error("create rustup toolchain lib directory", None, e))?;
-
-        // Create symlinks to the actual toolchain binaries
-        for name in ["cargo", "rustc", "rustdoc", "rustfmt", "clippy-driver"] {
-            let src = root.join("bin").join(name);
-            if src.exists() {
-                std::os::unix::fs::symlink(src, toolchain_bin.join(name))
-                    .map_err(|e| io_error(&format!("symlink {} for rustup", name), None, e))?;
+        // List all installed toolchains
+        let toolchain_list = query_rustup(&rustup, &home, &["toolchain", "list"], &preparation)?;
+        for line in toolchain_list.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
             }
-        }
+            // Parse toolchain name (before any whitespace or annotation)
+            let name = line
+                .split_whitespace()
+                .next()
+                .ok_or_else(|| failure("rustup toolchain list returned malformed line"))?;
+            // Find the toolchain root using rustup which
+            let which_output = query_rustup(
+                &rustup,
+                &home,
+                &["which", "--toolchain", name, "cargo"],
+                &preparation,
+            )?;
+            let cargo_path = PathBuf::from(which_output.trim());
+            if let Some(root) = cargo_path.parent().and_then(|p| p.parent()) {
+                let toolchain_dir = rustup_home.join("toolchains").join(name);
+                let toolchain_bin = toolchain_dir.join("bin");
+                let toolchain_lib = toolchain_dir.join("lib");
 
-        // Symlink the lib/rustlib directory
-        let src_rustlib = root.join("lib").join("rustlib");
-        if src_rustlib.exists() {
-            std::os::unix::fs::symlink(src_rustlib, toolchain_lib.join("rustlib"))
-                .map_err(|e| io_error("symlink rustlib for rustup", None, e))?;
+                fs::create_dir_all(&toolchain_bin).map_err(|e| {
+                    io_error(
+                        &format!("create rustup toolchain bin directory for {name}"),
+                        None,
+                        e,
+                    )
+                })?;
+                fs::create_dir_all(&toolchain_lib).map_err(|e| {
+                    io_error(
+                        &format!("create rustup toolchain lib directory for {name}"),
+                        None,
+                        e,
+                    )
+                })?;
+
+                // Create symlinks to the actual toolchain binaries
+                for binary_name in ["cargo", "rustc", "rustdoc", "rustfmt", "clippy-driver"] {
+                    let src = root.join("bin").join(binary_name);
+                    if src.exists() {
+                        std::os::unix::fs::symlink(src, toolchain_bin.join(binary_name)).map_err(
+                            |e| io_error(&format!("symlink {binary_name} for {name}"), None, e),
+                        )?;
+                    }
+                }
+
+                // Symlink the lib/rustlib directory
+                let src_rustlib = root.join("lib").join("rustlib");
+                if src_rustlib.exists() {
+                    std::os::unix::fs::symlink(src_rustlib, toolchain_lib.join("rustlib"))
+                        .map_err(|e| io_error(&format!("symlink rustlib for {name}"), None, e))?;
+                }
+            }
         }
 
         Ok(Self {

@@ -1047,96 +1047,52 @@ fn validate_probe_digest(config: &SandboxConfig, value: &str, label: &str) -> Re
 }
 
 /// Runs one program through the configured runner. The runner receives a JSON
-/// Creates a rustup-managed toolchain directory with symlinks to the actual
-/// toolchain binaries. This makes rustup aware of the installed toolchain
-/// without requiring network access or rustup's own management.
-fn get_detected_target(toolchain_root: &Path) -> Result<String> {
-    let rustc = toolchain_root.join("bin").join("rustc");
-    if rustc.exists() {
-        let output = std::process::Command::new(&rustc)
-            .arg("-vV")
+/// request on standard input and must proxy the contained program's exit code
+/// and output without host fallback.
+
+/// List all installed rustup toolchains and their root directories.
+fn list_rustup_toolchains() -> Result<Vec<(String, PathBuf)>> {
+    let output = std::process::Command::new("rustup")
+        .arg("toolchain")
+        .arg("list")
+        .output()
+        .map_err(|e| KvistError::SandboxUnavailable {
+            runner: String::new(),
+            reason: format!("cannot list rustup toolchains: {e}"),
+        })?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut toolchains = Vec::new();
+    for line in stdout.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        // Parse toolchain name (before any whitespace or annotation)
+        let name = line.split_whitespace().next().unwrap_or(line).to_owned();
+        // Skip override annotations like "(active)" or "(default)"
+        let name = name.split(' ').next().unwrap_or(&name).to_owned();
+        // Find the toolchain root using rustup which
+        let which_output = std::process::Command::new("rustup")
+            .arg("which")
+            .arg("--toolchain")
+            .arg(&name)
+            .arg("cargo")
             .output()
             .map_err(|e| KvistError::SandboxUnavailable {
                 runner: String::new(),
-                reason: format!("cannot query rustc for target: {e}"),
+                reason: format!("cannot resolve toolchain root for {name}: {e}"),
             })?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        if let Some(line) = stdout.lines().find(|line| line.starts_with("host: ")) {
-            return Ok(line.trim_start_matches("host: ").to_owned());
+        let which_stdout = String::from_utf8_lossy(&which_output.stdout)
+            .trim()
+            .to_owned();
+        if which_output.status.success() && !which_stdout.is_empty() {
+            let cargo_path = PathBuf::from(which_stdout);
+            if let Some(root) = cargo_path.parent().and_then(|p| p.parent()) {
+                toolchains.push((name, root.to_owned()));
+            }
         }
     }
-    Ok("x86_64-unknown-linux-gnu".to_owned())
-}
-
-fn create_rustup_toolchain_dir(toolchain_root: &Path) -> Result<tempfile::TempDir> {
-    let rustup_home = tempfile::Builder::new()
-        .prefix(".kvist-rustup-")
-        .tempdir()
-        .map_err(|e| KvistError::SandboxUnavailable {
-            runner: String::new(),
-            reason: format!("cannot create rustup home: {e}"),
-        })?;
-
-    // Detect the target triple from rustc -vV output
-    let rustc = toolchain_root.join("bin").join("rustc");
-    let target = if rustc.exists() {
-        let output = Command::new(&rustc).arg("-vV").output().map_err(|e| {
-            KvistError::SandboxUnavailable {
-                runner: String::new(),
-                reason: format!("cannot query rustc for target: {e}"),
-            }
-        })?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        stdout
-            .lines()
-            .find(|line| line.starts_with("host: "))
-            .map(|line| line.trim_start_matches("host: ").to_owned())
-            .unwrap_or_else(|| "x86_64-unknown-linux-gnu".to_owned())
-    } else {
-        "x86_64-unknown-linux-gnu".to_owned()
-    };
-
-    // Use the detected target to construct the toolchain directory name
-    // The channel is assumed to be "stable" for the generic system-toolchain path
-    let toolchain_dir = rustup_home
-        .path()
-        .join("toolchains")
-        .join(format!("stable-{}", target));
-    let toolchain_bin = toolchain_dir.join("bin");
-    let toolchain_lib = toolchain_dir.join("lib");
-
-    fs::create_dir_all(&toolchain_bin).map_err(|e| KvistError::SandboxUnavailable {
-        runner: String::new(),
-        reason: format!("cannot create rustup toolchain bin directory: {e}"),
-    })?;
-    fs::create_dir_all(&toolchain_lib).map_err(|e| KvistError::SandboxUnavailable {
-        runner: String::new(),
-        reason: format!("cannot create rustup toolchain lib directory: {e}"),
-    })?;
-
-    // Create symlinks to the actual toolchain binaries
-    for name in ["cargo", "rustc", "rustdoc", "rustfmt", "clippy-driver"] {
-        let src = toolchain_root.join("bin").join(name);
-        if src.exists() {
-            symlink(src, toolchain_bin.join(name)).map_err(|e| KvistError::SandboxUnavailable {
-                runner: String::new(),
-                reason: format!("cannot symlink {name} for rustup: {e}"),
-            })?;
-        }
-    }
-
-    // Symlink the lib/rustlib directory
-    let src_rustlib = toolchain_root.join("lib").join("rustlib");
-    if src_rustlib.exists() {
-        symlink(src_rustlib, toolchain_lib.join("rustlib")).map_err(|e| {
-            KvistError::SandboxUnavailable {
-                runner: String::new(),
-                reason: format!("cannot symlink rustlib for rustup: {e}"),
-            }
-        })?;
-    }
-
-    Ok(rustup_home)
+    Ok(toolchains)
 }
 
 /// request on standard input and must proxy the contained program's exit code
@@ -1364,10 +1320,65 @@ pub fn execute_with_timeout(
     // Only done for authoring phase where the rustup home is mounted.
     let mut environment = request.environment.clone();
     if matches!(request.phase, ExecutionPhase::Authoring) {
-        // Set up rustup-managed toolchain directory so that rustup recognizes
-        // the installed toolchain. This prevents the agent from being confused
+        // Set up rustup-managed toolchain directories for all installed toolchains
+        // so that rustup recognizes them. This prevents the agent from being confused
         // by rustup reporting "no installed toolchains".
-        let rustup_home = create_rustup_toolchain_dir(Path::new(&toolchain_root))?;
+        let installed_toolchains = list_rustup_toolchains()?;
+        // Always include the currently resolved toolchain even if not in rustup list
+        let toolchains_to_mount: Vec<(String, PathBuf)> = if installed_toolchains.is_empty() {
+            vec![("stable".to_owned(), PathBuf::from(&toolchain_root))]
+        } else {
+            installed_toolchains
+        };
+
+        let rustup_home = tempfile::Builder::new()
+            .prefix(".kvist-rustup-")
+            .tempdir()
+            .map_err(|e| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!("cannot create rustup home: {e}"),
+            })?;
+
+        // Create rustup-managed directories for each toolchain
+        for (name, root) in &toolchains_to_mount {
+            let toolchain_dir = rustup_home.path().join("toolchains").join(name.clone());
+            let toolchain_bin = toolchain_dir.join("bin");
+            let toolchain_lib = toolchain_dir.join("lib");
+
+            fs::create_dir_all(&toolchain_bin).map_err(|e| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!("cannot create rustup toolchain bin directory for {name}: {e}"),
+            })?;
+            fs::create_dir_all(&toolchain_lib).map_err(|e| KvistError::SandboxUnavailable {
+                runner: config.runner.clone(),
+                reason: format!("cannot create rustup toolchain lib directory for {name}: {e}"),
+            })?;
+
+            // Create symlinks to the actual toolchain binaries
+            for binary_name in ["cargo", "rustc", "rustdoc", "rustfmt", "clippy-driver"] {
+                let src = root.join("bin").join(binary_name);
+                if src.exists() {
+                    std::os::unix::fs::symlink(src, toolchain_bin.join(binary_name)).map_err(
+                        |e| KvistError::SandboxUnavailable {
+                            runner: config.runner.clone(),
+                            reason: format!("cannot symlink {binary_name} for {name}: {e}"),
+                        },
+                    )?;
+                }
+            }
+
+            // Symlink the lib/rustlib directory
+            let src_rustlib = root.join("lib").join("rustlib");
+            if src_rustlib.exists() {
+                std::os::unix::fs::symlink(src_rustlib, toolchain_lib.join("rustlib")).map_err(
+                    |e| KvistError::SandboxUnavailable {
+                        runner: config.runner.clone(),
+                        reason: format!("cannot symlink rustlib for {name}: {e}"),
+                    },
+                )?;
+            }
+        }
+
         let rustup_identity = digest_label(
             serde_json::to_string(&rustup_home.path())
                 .map_err(|error| KvistError::SandboxUnavailable {
@@ -1386,12 +1397,16 @@ pub fn execute_with_timeout(
 
         environment.insert("RUSTUP_HOME".to_owned(), RUSTUP_HOME_DEST.to_owned());
         environment.insert("HOME".to_owned(), "/workspace/home".to_owned());
-        // Ensure rustup-managed toolchain is first in PATH. Exclude /usr/sbin
-        // and /sbin to limit the available tools to the essential Unix utilities
-        // and the Rust toolchain.
-        let target = get_detected_target(Path::new(&toolchain_root))?;
-        let rustup_bin = format!("{}/toolchains/stable-{}/bin", RUSTUP_HOME_DEST, target);
-        environment.insert("PATH".to_owned(), format!("{}/usr/bin:/bin", rustup_bin));
+
+        // Build PATH with all toolchain bin directories
+        let mut path_parts = Vec::new();
+        for name in &toolchains_to_mount {
+            path_parts.push(format!("{}/toolchains/{}/bin", RUSTUP_HOME_DEST, name.0));
+        }
+        // Add standard Unix paths
+        path_parts.push("/usr/bin".to_owned());
+        path_parts.push("/bin".to_owned());
+        environment.insert("PATH".to_owned(), path_parts.join(":"));
     }
 
     let sandbox_request = SandboxRequest {
