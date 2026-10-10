@@ -1050,6 +1050,24 @@ fn validate_probe_digest(config: &SandboxConfig, value: &str, label: &str) -> Re
 /// Creates a rustup-managed toolchain directory with symlinks to the actual
 /// toolchain binaries. This makes rustup aware of the installed toolchain
 /// without requiring network access or rustup's own management.
+fn get_detected_target(toolchain_root: &Path) -> Result<String> {
+    let rustc = toolchain_root.join("bin").join("rustc");
+    if rustc.exists() {
+        let output = std::process::Command::new(&rustc)
+            .arg("-vV")
+            .output()
+            .map_err(|e| KvistError::SandboxUnavailable {
+                runner: String::new(),
+                reason: format!("cannot query rustc for target: {e}"),
+            })?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Some(line) = stdout.lines().find(|line| line.starts_with("host: ")) {
+            return Ok(line.trim_start_matches("host: ").to_owned());
+        }
+    }
+    Ok("x86_64-unknown-linux-gnu".to_owned())
+}
+
 fn create_rustup_toolchain_dir(toolchain_root: &Path) -> Result<tempfile::TempDir> {
     let rustup_home = tempfile::Builder::new()
         .prefix(".kvist-rustup-")
@@ -1302,29 +1320,6 @@ pub fn execute_with_timeout(
         identity: toolchain_identity.clone(),
     });
 
-    // Create a rustup-managed toolchain directory so that rustup recognizes
-    // the installed toolchain. This prevents the agent from being confused
-    // by rustup reporting "no installed toolchains". Only done for authoring
-    // phase because verification phase only allows read-only grants.
-    if matches!(request.phase, ExecutionPhase::Authoring) {
-        let rustup_home = create_rustup_toolchain_dir(Path::new(&toolchain_root))?;
-        let rustup_identity = digest_label(
-            serde_json::to_string(&rustup_home.path())
-                .map_err(|error| KvistError::SandboxUnavailable {
-                    runner: config.runner.clone(),
-                    reason: format!("cannot canonicalize rustup home identity: {error}"),
-                })?
-                .as_bytes(),
-        );
-        grants.push(SandboxGrant {
-            source: rustup_home.path().to_string_lossy().into_owned(),
-            destination: RUSTUP_HOME_DEST.to_owned(),
-            access: "read-write",
-            purpose: "scratch",
-            identity: rustup_identity,
-        });
-    }
-
     let resources = SandboxResources {
         wall_time_ms: match options.timeout {
             Some(limit) => bounded_millis(config, limit)?,
@@ -1369,8 +1364,39 @@ pub fn execute_with_timeout(
     // Only done for authoring phase where the rustup home is mounted.
     let mut environment = request.environment.clone();
     if matches!(request.phase, ExecutionPhase::Authoring) {
+        // Set up rustup-managed toolchain directory so that rustup recognizes
+        // the installed toolchain. This prevents the agent from being confused
+        // by rustup reporting "no installed toolchains".
+        let rustup_home = create_rustup_toolchain_dir(Path::new(&toolchain_root))?;
+        let rustup_identity = digest_label(
+            serde_json::to_string(&rustup_home.path())
+                .map_err(|error| KvistError::SandboxUnavailable {
+                    runner: config.runner.clone(),
+                    reason: format!("cannot canonicalize rustup home identity: {error}"),
+                })?
+                .as_bytes(),
+        );
+        grants.push(SandboxGrant {
+            source: rustup_home.path().to_string_lossy().into_owned(),
+            destination: RUSTUP_HOME_DEST.to_owned(),
+            access: "read-write",
+            purpose: "scratch",
+            identity: rustup_identity,
+        });
+
         environment.insert("RUSTUP_HOME".to_owned(), RUSTUP_HOME_DEST.to_owned());
         environment.insert("HOME".to_owned(), "/workspace".to_owned());
+        // Ensure rustup-managed toolchain is first in PATH
+        let existing_path = environment
+            .get("PATH")
+            .cloned()
+            .unwrap_or_else(|| "/usr/bin:/bin".to_owned());
+        let target = get_detected_target(Path::new(&toolchain_root))?;
+        let rustup_bin = format!("{}/toolchains/stable-{}/bin", RUSTUP_HOME_DEST, target);
+        environment.insert(
+            "PATH".to_owned(),
+            format!("{}:{}", rustup_bin, existing_path),
+        );
     }
 
     let sandbox_request = SandboxRequest {
