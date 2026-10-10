@@ -482,10 +482,9 @@ default), provisioned by `kvist toolchain` on the host, and recorded in
 the `.kvist/` toolchain manifest. Verification resolves the toolchain
 channel-explicitly, independent of the process working directory, and fails
 closed with an actionable message when the pinned toolchain is absent or the
-manifest no longer matches the on-disk toolchain. The authoring phase currently
-receives no usable Rust toolchain (the shared runner contract permits the Cargo
-toolchain and the vendored-registry/config/runtime purposes only in
-verification phases); this is a documented, tracked limitation.
+manifest no longer matches the on-disk toolchain. Rust authoring uses the
+System/Toolchain grant variant described below, not the closed Cargo cache
+or dependency-acquisition topology.
 
 The target supervised tier requires one explicit task and produces a pending
 human disposition after agent and verification results are recorded. A
@@ -575,10 +574,38 @@ effect grants, policy approval, or output redaction.
 
 ## Errors and failure semantics
 
-Generic authoring preserves the explicitly approved request environment and
-does not query rustup or mount a generated rustup home. Rust builds use the
-separate offline verification topology; Skott workspace authoring has its own
-explicit read-only Rust resources.
+For components with a local `Cargo.toml`, authoring prepares every validated
+standard-layout host Rust installation read-only at `/rust/toolchains/N`.
+Generated registrations/settings are mounted at `/rust/rustup-home`; shared
+`sav::offline_rust` scripts initialize `RUSTUP_HOME=/tmp/rustup-home` in
+invocation scratch. The project pin takes precedence; otherwise the host default
+is preserved and `rustup default <installed-name>` changes only that invocation.
+Cargo/compiler/doc and companions share selection; PATH Cargo is offline/locked
+against the read-only project vendor registry (empty if absent). Local Cargo
+metadata is mounted read-only, not exposed as a writable component ancestor.
+No user Cargo config/credentials or host settings are mounted. Invalid/unsafe
+or over-bound installations fail explicitly. Non-Rust generic authoring retains
+the explicitly approved environment and requires no Rust. Verification retains
+its separate pinned, vendoring-enforced Cargo topology.
+
+Rust authoring also materializes read-only build context at `/rust/project`,
+preserving project-relative workspace paths, root/local Cargo metadata and
+declared local dependency source. Workspace members and local path dependencies
+must be regular, non-link Cargo roots inside the project. Preparation is bounded
+to 128 crates, 100,000 source entries, 32 MiB path state, depth 128 and 30 seconds.
+Members may use literal paths or a whole-directory `*` segment; other member
+glob syntax fails explicitly. Hidden/operational roots, generated caches and
+provider component intent/state are excluded recursively. Providers nested in
+writable component implementation/test roots fail preparation rather than
+retaining writable host aliases. This is explicitly approved
+build-resource context (ADR 0014), not additional prompt context or peer writes.
+PATH Cargo selects the authored component's build-view directory. Compiler/
+formatter wrappers map its source arguments back to `/workspace/component`,
+retaining normal source writes there. Existing writable source/test directories
+remain live in the build view so newly authored targets are discovered. Synthetic
+ancestor directories are private sandbox backing, never writable host ancestors.
+Explicit concrete Cargo paths are not
+rewritten. External dependencies still require pre-provisioned vendoring.
 
 Invalid, oversized, unsupported, non-UTF-8, missing, non-regular, or link-like
 artifacts fail or are reported according to the read-only command contract.

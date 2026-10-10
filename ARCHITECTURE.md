@@ -90,6 +90,9 @@ when created, are nested directly within their parent component directory.
    mounts for `ROOT_CONTRACT.md` and the immediate parent `CONTRACT.md`.
    Explicit provider contracts are the only additional cross-component
    behavioral context; provider designs and implementations remain excluded.
+   Explicitly human-approved Rust build-resource context may expose declared
+   workspace/path dependency source read-only without adding it to implicit
+   agent prompts or granting peer writes (ADR 0014).
    Verification is a separate request and may read approved provider source
    and workspace metadata needed by build tools without adding it to agent
    context or write authority.

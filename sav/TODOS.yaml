@@ -22,6 +22,58 @@ component:
         expected_revision: "sha256:b629358ac60133fe3b5ed12150e4f6f6bfbd47a78d1a3db5ddbe7c44c0321943"
         observed_revision: "sha256:fbdbd8bea631741dc443154617e3d940346059b2a3492164eb4fe17749f21167"
 tasks:
+  - id: offline-rust-write-tests
+    title: "Pin shared offline Rust runtime scripts"
+    description: "Verify fixed scratch initialization, closed tools, active selection and Cargo offline flags through ordinary tests and consumer native regressions."
+    context: "Human requests Skott first and maerg parity; no sandbox installation."
+    purpose: "Define shared runtime evidence before implementation."
+    expected_outcome: "Tests detect unsafe paths, wrong selection or missing offline flags."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
+    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: offline-rust-implement-code
+    title: "Share fixed offline Rust runtime scripts"
+    description: "Provide sandbox-local initialization and selection-aware wrappers without owning host preparation or grants."
+    context: "Per-bundle advisory exception for the requested repair; receipt enforcement is unimplemented."
+    purpose: "Keep Skott and maerg behavior consistent."
+    expected_outcome: "Consumers use the same private selection and offline wrappers."
+    kind: implementation
+    status: completed
+    depends_on: [offline-rust-write-tests]
+    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
+    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: offline-rust-security-audit
+    title: "Audit shared offline script authority"
+    description: "Independently inspect fixed paths, selection arguments and installation non-mutation."
+    context: "Independent final audit found local target-discovery omissions; live source/test aliases and a native newly-authored integration-test regression address them. No blanket certification."
+    purpose: "Retain independent findings."
+    expected_outcome: "Findings corrected or explicitly retained."
+    kind: security-audit
+    status: completed
+    depends_on: [offline-rust-implement-code]
+    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
+    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: offline-rust-compliance-review
+    title: "Compare observed runtime with intended behavior"
+    description: "Derive a clean-slate observation and conduct a separate source-blind comparison."
+    context: "Final clean-slate observer independently ran ordinary native suites; separate source-blind comparator found no new scoped runtime mismatch. Coverage limits remain explicit. No acceptance or broader certification."
+    purpose: "Prevent self-certification."
+    expected_outcome: "Scoped discrepancies remain explicit."
+    kind: compliance-review
+    status: completed
+    depends_on: [offline-rust-security-audit]
+    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
+    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:53:41Z", completed_at: "2026-10-10T20:53:41Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: model-capacity-write-tests
     title: "Pin serving capacity and streaming usage"
     description: "Test model-qualified capacity, absent/malformed values, bounded discovery and requested streaming usage before code."

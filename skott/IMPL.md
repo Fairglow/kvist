@@ -4,6 +4,32 @@
 
 ## Observed implementation: skott
 
+## Scoped private-default observation - 2026-10-10
+
+Clean-slate `offline-rust-final-observer` inspected current preparation, shell
+rendering and native inventory tests without intent, queues, prior
+records/reviews or history. This supplement supersedes older read-only-settings,
+selection-wrapper and ignored-inventory statements below.
+
+Workspace resolution parses bounded pins, resolves system rustup and standard
+installed roots, validates selected tools/libraries and delegates complete
+inventory resolution/revalidation. Generated read-only registrations and
+wrappers use private HOME, rustup settings, Cargo cache and target; pins set
+`RUSTUP_TOOLCHAIN`. Vendor material is independently copied and digested under
+byte/entry/path/depth/time bounds. Rust On fails on preparation failure; Auto
+records unavailability without advertising Rust; Off omits preparation. Both
+inline and staged shell rendering initialize private selection.
+
+The observer independently executed the non-ignored native inventory trial:
+1 passed, 0 failed, 0 ignored, exit 0. Host/sandbox inventory,
+target/component queries and tool versions agreed; every installed target
+compiled a library; native execution, unit/doc tests and build-script
+compiler/doc selection succeeded across selection forms; installation removal
+failed and host Rust snapshots and lock bytes matched. The fixture requires
+multiple installed versions and a non-host target. Inventory helper internals
+were outside this observer's reading scope; older inventory observations remain
+separate. No general platform or sandbox certification follows.
+
 ## Scoped installed-inventory observation - 2026-10-10
 
 Clean-slate `rust-inventory-observer` derived this scoped supplement from

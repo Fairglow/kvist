@@ -23,6 +23,21 @@ compliance evidence.
 
 ## Provided interfaces
 
+`sav::offline_rust` supplies `INITIALIZE` (a shell fragment for private
+`/tmp/rustup-home` settings and read-only `/rust/rustup-home/toolchains`
+registrations), the closed `RustTool` enum and `TOOLS`, plus `wrapper(tool)`.
+Callers stage returned scripts read-only at `/rust/runtime`, initialize before
+effects and mount validated installations and vendor at `/rust/*`. Unknown
+names are not exposed by `TOOLS`; the caller is responsible for using that
+closed set. No host discovery, installation, shell execution or grant decision
+is performed by this module. The typed executable set prevents interpolation
+of untrusted script fragments.
+
+Optional host-owned `KVIST_CARGO_WORKDIR` selects the Cargo build-view directory;
+`KVIST_COMPONENT_BUILD_DIR` maps source argument paths in that view back to
+`/workspace/component` for compiler/doc/formatter tools. Callers must provide
+validated sandbox-native directories; neither variable grants filesystem access.
+
 The Rust library exposes bounded prompt acquisition, command-template
 rendering, typed supervision policy and attempt context, supervised host
 execution, named profile storage and setup operations, provider-neutral model

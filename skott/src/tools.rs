@@ -37,6 +37,8 @@ const MAX_INLINE_SHELL_COMMAND_BYTES: usize = MAX_VALUE_BYTES;
 /// inline form. A bare `$(cat /context/0)` as the `-c` script would be wrong:
 /// the exec'd bash would run `cat` and word-split its output into a command.
 const STAGED_SCRIPT_WRAPPER: &str = "exec bash -c \"$(cat /context/0)\" skott";
+const RUST_SHELL_WRAPPER: &str =
+    "source /rust/runtime/initialize; exec /usr/bin/bash -c \"$1\" skott";
 
 pub(crate) fn default_file_helper_path() -> crate::error::Result<PathBuf> {
     std::env::current_exe()
@@ -246,7 +248,8 @@ impl ToolRegistry {
         let rust_scope = if self.rust_environment.is_some() {
             " Rust exposes all validated installed toolchains and targets read-only. Discover \
               them with rustup toolchain list and rustup target list --installed --toolchain <name>; \
-              select with cargo +<name>, rustc +<name>, or rustup run <name>. Cargo is explicitly \
+              select with cargo +<name>, rustc +<name>, rustup run <name>, or invocation-local \
+              rustup default <installed-name> (a project pin takes precedence). Cargo is explicitly \
               offline with a private read-only vendor snapshot, HOME/cache/target are scratch. \
               Missing dependencies require host provisioning; sandbox builds never download."
         } else {
@@ -417,13 +420,24 @@ impl ToolRegistry {
                 reason: "command matches the forbidden-command policy".to_owned(),
             })
         } else if command.len() <= MAX_INLINE_SHELL_COMMAND_BYTES {
-            Ok(RenderedTool {
-                argv: vec![
+            let argv = if self.rust_environment.is_some() {
+                vec![
+                    self.bash.to_string_lossy().into_owned(),
+                    "-c".to_owned(),
+                    RUST_SHELL_WRAPPER.to_owned(),
+                    "skott".to_owned(),
+                    command.clone(),
+                ]
+            } else {
+                vec![
                     self.bash.to_string_lossy().into_owned(),
                     "-c".to_owned(),
                     command.clone(),
                     "skott".to_owned(),
-                ],
+                ]
+            };
+            Ok(RenderedTool {
+                argv,
                 summary: describe_tool_call(intent),
                 file_request: None,
                 file_helper: None,
@@ -440,7 +454,11 @@ impl ToolRegistry {
                 argv: vec![
                     self.bash.to_string_lossy().into_owned(),
                     "-c".to_owned(),
-                    STAGED_SCRIPT_WRAPPER.to_owned(),
+                    if self.rust_environment.is_some() {
+                        format!("source /rust/runtime/initialize; {STAGED_SCRIPT_WRAPPER}")
+                    } else {
+                        STAGED_SCRIPT_WRAPPER.to_owned()
+                    },
                 ],
                 summary: describe_tool_call(intent),
                 file_request: None,
