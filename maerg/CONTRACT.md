@@ -575,6 +575,11 @@ effect grants, policy approval, or output redaction.
 
 ## Errors and failure semantics
 
+Generic authoring preserves the explicitly approved request environment and
+does not query rustup or mount a generated rustup home. Rust builds use the
+separate offline verification topology; Skott workspace authoring has its own
+explicit read-only Rust resources.
+
 Invalid, oversized, unsupported, non-UTF-8, missing, non-regular, or link-like
 artifacts fail or are reported according to the read-only command contract.
 Kvist does not silently migrate, truncate, repair, overwrite, stage, commit, or

@@ -1,0 +1,177 @@
+# Galla sandbox toolchain testing review
+
+## Conclusion
+
+Full end-to-end coverage was **not already present**. It is possible to test
+real tool discovery, execution and complete **installed** rustup inventory
+visibility without modifying the host installation. New strict native tests
+now demonstrate this for explicitly constructed Galla requests.
+
+That is not the same as making every current consumer expose every host
+toolchain. In particular, Skott's prepared Rust environment intentionally
+registers only its selected installation. This change adds tests, CI coverage
+and verification intent; it does not broaden production mount authority.
+Making Skott expose every installed version would require a separately
+approved change to its selection, grants, identities and generated
+registrations. Maerg's closed Cargo verification path is also intentionally
+single-toolchain.
+
+## Existing coverage and findings
+
+| Coverage | What it establishes | Gap or limitation |
+| --- | --- | --- |
+| `galla/tests/conformance.rs` | Protocol validation, Cargo grant/environment rules, native probe and a successful simple request | No comprehensive tool discovery, multi-version inventory comparison or real language builds. Its introductory comment still incorrectly says executable enforcement is outside the file. |
+| `skott/tests/rust_build_environment.rs` | Selected installed Rust tooling, offline locked compilation, linking, documentation, unit/integration tests, formatter/Clippy, vendor isolation and host-state exclusions | Native cases require explicit opt-in. Alternate versions, minimal installations, Cargo extensions and repository-in-sandbox tests have separate prerequisites; the CI chain excludes some of these. This is selected-toolchain coverage, not full inventory coverage. |
+| `skott/tests/toolchain_discoverability.rs` | Ignored PATH/version probes for Python, Node, Go, C and combined profiles | Version output is not execution evidence. Node's “contains a dot” assertion is weak; GCC's literal `(GCC)` assertion is distribution-sensitive. The combined case has no `rustup` inventory comparison. These tests are not explicitly enabled in the current native CI chain. |
+| `maerg/tests/sandbox_toolchain.rs` | Explicit native compiler/Cargo/Clippy grants, a real isolated build, and generic authoring environment preservation | Ignored native trials are distinct from the vendoring-enforced Cargo verification authority path. Generic authoring intentionally does not prepare rustup state. |
+| `maerg/tests/language_offline_e2e.rs` | Language-aware host provisioning and real network-denied vendored verification | Missing runner/backend/toolchains or unavailable provisioning can return early and appear as passing tests. Provisioning may use the host network; these are not read-only host-inventory tests. They do not prove all toolchains are available in every consumer profile. |
+| `docs/sandbox-toolchains-and-vendoring.md` | Describes the different consumer mount topologies | Its prior blanket assurance that discoverability tests establish all tooling is functional was too strong. PATH visibility, compiler operation, dependency provisioning and consumer profile selection need separate evidence. |
+
+Existing independent Galla security/compliance re-verification remains
+blocked/pending in `galla/TODOS.yaml`; completed placeholder-era receipts are
+not reliable evidence. This testing review is not a security audit, an
+independent `IMPL.md` derivation, or compliance certification.
+The new test-specific queue likewise records independent audit and compliance
+review as pending; updated intent is not represented as newly accepted.
+
+## Implemented native tests
+
+New file: [`../galla/tests/toolchain_e2e.rs`](../galla/tests/toolchain_e2e.rs).
+Both tests invoke the actual independently built `galla-runner`, transmit a
+validated version-one JSON request, and execute through real Bubblewrap with
+the network denied. They are ignored in the portable/default test invocation
+but **explicitly executed in the Linux quality CI job**. Once invoked,
+missing prerequisites and any execution/query failure are failures, not skips.
+
+### System toolchains
+
+`system_toolchains_are_found_and_execute_real_programs`:
+
+- Finds `python3`, `node`, `go`, `gcc` and `g++` through sandbox PATH.
+- Runs Python assertions and a JavaScript assertion/program.
+- Compiles and executes a Go program, with local-only toolchain selection,
+  dependency proxy and checksum service disabled and private caches.
+- Compiles and executes C and C++ programs, exercising compiler, assembler,
+  linker, system headers and runtime libraries.
+- Requires exact execution-output markers, not loose version substrings.
+
+These dependency-free fixtures do not download anything or provision host
+tools. They test the system binaries actually available in the mounted
+system layout, not every installation discoverable through the host's PATH.
+Home-managed Python environments, Node managers, Go toolcache installations,
+package managers (`uv`, npm/pnpm, Conan/vcpkg), and third-party dependencies
+still need their own approved mounts and provisioning tests.
+
+### Full installed Rust inventory
+
+`rustup_reports_and_uses_every_host_toolchain_without_host_mutation`:
+
+- Reads the host `rustup toolchain list`, resolves every installed compiler
+  root and registers every name in a private generated rustup home.
+- Creates sandbox-native registration links, mounts each resolved installation
+  and the generated home read-only, and does not mount the ambient host home,
+  Cargo configuration/credentials or host rustup settings.
+- Compares the complete name set, not just the selected installation.
+- For **every** installation, compares `rustc -Vv`, Cargo and rustdoc versions,
+  `rustup target list`, `rustup target list --installed` and
+  `rustup component list --installed` against successful host queries.
+- Compiles a library for **every installed target**, including cross targets.
+  This checks that the target standard library is usable, not merely listed.
+- Compiles and runs a native executable and runs a real dependency-free
+  `cargo test --offline --locked` fixture for every installed toolchain.
+- Attempts toolchain uninstall, installed-target removal and settings changes;
+  requires explicit read-only-filesystem errors, not arbitrary nonzero exits.
+- Requires at least **two toolchains** and at least **one non-host target**,
+  preventing a trivial single-installation/single-target pass from masquerading
+  as multi-version/cross-target coverage.
+
+Toolchain listing annotations such as `(active, default)` are deliberately
+excluded from the inventory-name comparison. The generated home's default
+and selection are explicit sandbox settings, not copies of host defaults or
+directory overrides. Target/component query lines and version output are
+compared exactly apart from line ordering.
+
+CI separately provisions Rust `1.95.0` alongside stable and adds
+`wasm32-unknown-unknown` to stable **before** tests. System Python, Node, C/C++
+and Go prerequisites are likewise installed by CI setup, not by test bodies.
+
+## Host non-mutation evidence and exact limits
+
+The Rust test streams SHA-256 over regular files and captures directory/file
+paths, modes, sizes, modification/change timestamps and symlink destinations
+before and after execution. It covers the host rustup tree and resolved
+external linked toolchain roots, detecting addition, deletion, replacement,
+content changes and tracked metadata changes. Final comparison runs even
+when sandbox execution assertions fail. There is no restoration that could
+hide a mutation.
+
+Reads may update filesystem **access times**; these are deliberately excluded.
+Therefore “no alteration of any filesystem metadata whatsoever” is not a
+claim these tests can honestly make. The actual guarantee tested is no change
+to installed toolchain content, registrations, settings or tracked metadata.
+Only newly owned temporary fixture directories are written by the tests;
+their cleanup does not remove or rewrite any installed toolchain.
+
+Other limits:
+
+- “Available” means locally installed toolchains and the target catalogue
+  reported by their existing rustup manifests. It does not mean every remote
+  release or target downloadable from Rust servers. Network-denied tests
+  cannot validate remote freshness or install missing versions/targets.
+- Cross targets are compiled as libraries, not linked into or executed as
+  foreign-platform executables. Linkers, SDKs, emulators and native testing are
+  separate prerequisites; this does not expand Kvist's Linux-only support.
+- Custom linked installations are resolved and included in snapshots. Rustup
+  installations without target/component manifests cannot satisfy the rustup
+  query assertions; this fails explicitly rather than omitting them. A
+  separate custom-toolchain test could compare `rustc --print target-list`
+  and compile explicitly known installed targets, but that would not prove
+  rustup can enumerate metadata it does not possess.
+- The fixture uses Cargo lock format 3 and Rust edition 2021. Very old or
+  incomplete installations unable to build it fail explicitly. It is not a
+  promise of support for arbitrary historic Rust releases.
+- Inventory changes concurrently made by another host process are detected as
+  failures, not attributed conclusively to the sandbox. Run without concurrent
+  rustup installation/update activity.
+- The protocol bounds grants and request size. An inventory exceeding those
+  bounds fails validation rather than silently dropping installations.
+- End-to-end execution evidence is not proof of complete sandbox isolation or
+  protection against every possible malicious executable.
+
+## Recorded local result
+
+Both new native tests passed using the real runner and Bubblewrap. The Rust
+trial covered these eight installed registrations:
+
+`stable`, `nightly`, `1.64.0`, `1.67.1`, `1.85.0`, `1.94`, `1.94.0`,
+and `1.95.0` (all with `x86_64-unknown-linux-gnu` installation suffixes).
+
+There were **14 installed toolchain/target combinations** across six distinct
+target triples, including i686 Linux, macOS, Windows GNU/MSVC and WebAssembly.
+All installed-target library compilations, all eight native program runs and
+all eight locked offline Cargo test runs succeeded. Host content/metadata
+comparison found no changes. System Python, Node, Go, C and C++ program
+execution also succeeded.
+
+The existing Galla regression suite passed (26 library tests, 41 conformance
+tests and two scaffold tests); Galla formatting and all-target Clippy checks
+also passed. CI configuration was updated but no remote CI run is claimed.
+
+## Reproduction
+
+Prerequisites: Linux with working Bubblewrap, `/usr/bin/rustup`, at least two
+installed toolchains with a non-host target, and system Python/Node/Go/C/C++.
+Provision missing prerequisites separately on the host; tests never do so.
+
+```bash
+cargo build --locked -p galla --bin galla-runner
+KVIST_GALLA=/opt/target/debug/galla-runner \
+  cargo test --locked -p galla --test toolchain_e2e -- \
+  --ignored --test-threads=1 --nocapture
+```
+
+Adjust the runner path to the configured target directory; it must be outside
+the repository. No model/provider, dependency download or pre-existing vendor
+tree is required. Passing this command establishes the explicit-grant
+enforcement behavior described above, not automatic full-inventory exposure
+by Skott or Maerg.

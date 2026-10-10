@@ -408,6 +408,12 @@ together, then re-tests the dogfood boundary suite. See
 
 ### Pinned Rust toolchains and host provisioning (ADR-0012)
 
+The generic authoring executor must not query rustup or generate a rustup-home
+grant. It serializes the explicitly approved environment unchanged; read-only
+Rust build resources belong to the separate verification topology, not this
+protected effect path. In particular no temporary rustup grant may outlive its
+staging owner or be appended after calculating the mount-plan identity.
+
 The offline Cargo verification topology needs an immutable toolchain. The
 toolchain is a pinned, host-provisioned artifact with durable state, managed
 exactly like the vendored registry:

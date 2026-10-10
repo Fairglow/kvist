@@ -424,6 +424,24 @@ with the registry/executor and removed when the final owner drops. Pin/root
 substitution and tracked executable/library/shim drift fail before dispatch;
 the identity is not a complete toolchain-tree digest.
 
+Register only the root's validated installed channel name in a private staged
+rustup home: `toolchains/<name>` links to `/rust/toolchain`, and generated
+`settings.toml` selects that name. Both remain read-only for the registry's
+lifetime. Never enumerate or advertise other host installations. Set
+`RUSTUP_TOOLCHAIN` to the same name, `RUSTUP_AUTO_INSTALL=0`, and retain
+`HOME=/tmp`; direct PATH Cargo still enters the offline/locked shim.
+Track all present formatter/Clippy executables and the generated settings.
+Validate the generated link target before each dispatch. Optional user Cargo
+bin remains a validated non-link directory outside the workspace; it is not a
+credential/configuration mount.
+
+Debug events mark selection queries, executable/layout validation, vendor
+snapshot completion, resource preparation, preflight and runner completion,
+including elapsed times and bounded counts/identities. Trace emits individual
+grant metadata and environment names only. Neither level emits argv payloads,
+environment values or captured output. Native trials use stage-labelled shell
+steps so a failing assertion identifies the stage without dumping secrets.
+
 The vendor snapshot is two-phase: a serial enumeration validates every entry,
 enforces the bounds, creates destination directories and schedules files in a
 deterministic order, then a bounded pool (minimum of 8 and host parallelism)

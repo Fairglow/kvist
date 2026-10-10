@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use sav::{CancellationToken, ToolIntent};
 use serde_json::json;
@@ -144,6 +145,124 @@ fn shell(executor: &SandboxExecutor, command: &str) -> skott::ToolOutcome {
         .unwrap()
 }
 
+fn checked_shell(executor: &SandboxExecutor, command: &str) -> skott::ToolOutcome {
+    let result = shell(
+        executor,
+        &format!(
+            "stage() {{ label=\"$1\"; shift; printf 'stage: %s\\n' \"$label\"; \"$@\" || {{ printf 'FAILED stage: %s\\n' \"$label\" >&2; exit 1; }}; }}\n{command}"
+        ),
+    );
+    assert!(
+        !result.failed(),
+        "stdout:\n{}\nstderr:\n{}",
+        result.output_text(16384),
+        result.error_text(16384)
+    );
+    result
+}
+
+#[derive(Clone)]
+struct LogCapture(Arc<Mutex<Vec<u8>>>);
+
+impl std::io::Write for LogCapture {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
+fn diagnostics_cover_the_chain_without_command_or_output_payloads() {
+    let directory = fixture();
+    let workdir = directory.path().canonicalize().unwrap();
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let capture = LogCapture(bytes.clone());
+    let subscriber = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .without_time()
+        .with_max_level(tracing::Level::TRACE)
+        .with_writer(move || capture.clone())
+        .finish();
+    tracing::subscriber::with_default(subscriber, || {
+        let executor = SandboxExecutor::new(
+            resolve(&workdir).unwrap(),
+            SandboxPaths {
+                runner: runner(),
+                backend: "/usr/bin/bwrap".into(),
+            },
+            workdir,
+        );
+        let result = shell(&executor, "printf PRIVATE_COMMAND_OUTPUT_SENTINEL");
+        assert!(!result.failed());
+        assert_eq!(result.stdout, b"PRIVATE_COMMAND_OUTPUT_SENTINEL");
+        let failed = shell(&executor, "exit 7");
+        assert_eq!(failed.status, Some(7));
+    });
+    let logs = String::from_utf8(bytes.lock().unwrap().clone()).unwrap();
+    for stage in [
+        "preparing offline Rust resources",
+        "querying installed Rust selection",
+        "installed Rust selection query completed",
+        "resolved concrete installed Rust toolchain",
+        "offline vendor snapshot prepared",
+        "offline Rust resources prepared",
+        "offline Rust resources validated",
+        "sandbox request validated",
+        "sandbox grant",
+        "sandbox environment entry",
+        "dispatching sandbox runner",
+        "sandbox runner completed",
+        "destination=/rust/toolchain",
+        "status=Some(7)",
+        "failed=true",
+    ] {
+        assert!(logs.contains(stage), "missing diagnostic {stage}: {logs}");
+    }
+    assert!(!logs.contains("PRIVATE_COMMAND_OUTPUT_SENTINEL"));
+    assert!(!logs.contains("exit 7"));
+    assert!(!logs.contains("RUSTUP_TOOLCHAIN=stable"));
+}
+
+#[test]
+#[ignore = "requires this repository's host-provisioned vendor tree and native Bubblewrap"]
+fn native_repository_tests_execute_inside_the_workspace_sandbox() {
+    let subscriber = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::new(
+            std::env::var("SKOTT_LOG").unwrap_or_else(|_| "warn".into()),
+        ))
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .finish();
+    let _guard = tracing::subscriber::set_default(subscriber);
+    let workdir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .canonicalize()
+        .unwrap();
+    assert!(
+        workdir.join(".kvist/vendored").is_dir(),
+        "provision repository dependencies on the host"
+    );
+    let executor = SandboxExecutor::new(
+        resolve(&workdir).unwrap(),
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        workdir,
+    );
+    let result = checked_shell(
+        &executor,
+        "stage metadata cargo metadata --format-version=1 --no-deps >/dev/null\nstage repository-tests cargo test -p galla --lib -- --test-threads=2",
+    );
+    assert!(result.output_text(16384).contains("test result: ok"));
+}
+
 #[test]
 #[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation() {
@@ -152,28 +271,39 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
     fs::create_dir_all(workdir.join("src")).unwrap();
     fs::create_dir_all(workdir.join(".cargo")).unwrap();
     fs::create_dir_all(workdir.join(".kvist/vendored")).unwrap();
-    let crate_source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.kvist/vendored/hex");
-    fn copy_tree(source: &std::path::Path, destination: &std::path::Path) {
-        fs::create_dir(destination).unwrap();
-        for entry in fs::read_dir(source).unwrap() {
-            let entry = entry.unwrap();
-            let target = destination.join(entry.file_name());
-            if entry.file_type().unwrap().is_dir() {
-                copy_tree(&entry.path(), &target);
-            } else {
-                assert!(entry.file_type().unwrap().is_file());
-                fs::copy(entry.path(), target).unwrap();
-            }
-        }
-    }
-    copy_tree(&crate_source, &workdir.join(".kvist/vendored/hex"));
-    fs::write(workdir.join("Cargo.toml"), "[package]\nname=\"vendor-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[dependencies]\nhex=\"=0.4.3\"\n").unwrap();
+    let dependency = workdir.join(".kvist/vendored/kvist-sandbox-dependency");
+    fs::create_dir(&dependency).unwrap();
+    let files = [
+        (
+            "Cargo.toml",
+            "[package]\nname=\"kvist-sandbox-dependency\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[lib]\npath=\"lib.rs\"\n",
+        ),
+        ("lib.rs", "pub fn answer() -> u8 { 42 }\n"),
+    ];
+    let checksums: BTreeMap<_, _> = files
+        .iter()
+        .map(|(name, text)| {
+            use sha2::{Digest, Sha256};
+            fs::write(dependency.join(name), text).unwrap();
+            (*name, hex::encode(Sha256::digest(text.as_bytes())))
+        })
+        .collect();
     fs::write(
-        workdir.join("src/lib.rs"),
-        "#[test] fn dependency() { assert_eq!(hex::encode(b\"ok\"), \"6f6b\"); }\n",
+        dependency.join(".cargo-checksum.json"),
+        json!({"files": checksums, "package": "0".repeat(64)}).to_string(),
     )
     .unwrap();
-    fs::write(workdir.join("Cargo.lock"), "version=4\n[[package]]\nname=\"vendor-trial\"\nversion=\"0.1.0\"\ndependencies=[\"hex\"]\n[[package]]\nname=\"hex\"\nversion=\"0.4.3\"\nsource=\"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum=\"7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70\"\n").unwrap();
+    fs::write(workdir.join("Cargo.toml"), "[package]\nname=\"vendor-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n[dependencies]\nkvist-sandbox-dependency=\"=0.1.0\"\n").unwrap();
+    fs::write(
+        workdir.join("src/lib.rs"),
+        "#[test] fn dependency() { assert_eq!(kvist_sandbox_dependency::answer(), 42); }\n",
+    )
+    .unwrap();
+    let lock = format!(
+        "version=4\n[[package]]\nname=\"vendor-trial\"\nversion=\"0.1.0\"\ndependencies=[\"kvist-sandbox-dependency\"]\n[[package]]\nname=\"kvist-sandbox-dependency\"\nversion=\"0.1.0\"\nsource=\"registry+https://github.com/rust-lang/crates.io-index\"\nchecksum=\"{}\"\n",
+        "0".repeat(64)
+    );
+    fs::write(workdir.join("Cargo.lock"), &lock).unwrap();
     // Neither this repository path nor a forged maerg manifest authorizes a
     // host bind. The shim replaces the source with its private sandbox path.
     fs::write(workdir.join(".cargo/config.toml"), "[source.crates-io]\nreplace-with=\"vendored-sources\"\n[source.vendored-sources]\ndirectory=\"/home/stefan/.cargo/credentials.toml\"\n").unwrap();
@@ -187,11 +317,7 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
     assert!(diagnostics.contains("read-only snapshot"));
     assert!(diagnostics.contains("vendor snapshot sha256:"));
     // Changes through the writable workspace alias cannot mutate the resource.
-    fs::write(
-        workdir.join(".kvist/vendored/hex/Cargo.toml"),
-        "malicious replacement",
-    )
-    .unwrap();
+    fs::write(dependency.join("Cargo.toml"), "malicious replacement").unwrap();
     let executor = SandboxExecutor::new(
         registry,
         SandboxPaths {
@@ -212,13 +338,28 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
         !network_trial.failed(),
         "host networking must remain unreachable"
     );
-    let result = shell(
+    let result = checked_shell(
         &executor,
-        "test \"$CARGO_NET_OFFLINE\" = true && test \"$CARGO_HOME\" = /tmp/cargo-home && test \"$CARGO_TARGET_DIR\" = /tmp/target && test \"$HOME\" = /tmp && test ! -e /home/stefan/.cargo/credentials.toml && test ! -e /home/stefan/.rustup/settings.toml && test ! -e /root/.cargo && test ! -e /etc/resolv.conf && test -z \"$CARGO_REGISTRY_TOKEN\" && test -z \"$RUSTUP_HOME\" && test -z \"$RUSTUP_TOOLCHAIN\" && ! test -w /rust/runtime/bin/cargo && ! test -w /rust/toolchain/bin/rustc && ! test -w /rust/vendor/hex/Cargo.toml && cargo metadata --offline --locked --format-version=1 >/dev/null && cargo test --offline --locked && cargo doc --offline --locked --no-deps",
+        "stage offline test \"$CARGO_NET_OFFLINE\" = true\nstage cargo-home test \"$CARGO_HOME\" = /tmp/cargo-home\nstage target test \"$CARGO_TARGET_DIR\" = /tmp/target\nstage home test \"$HOME\" = /tmp\nstage home-write touch \"$HOME/scratch-proof\"\nstage credentials test ! -e /home/stefan/.cargo/credentials.toml\nstage host-settings test ! -e /home/stefan/.rustup/settings.toml\nstage root-home test ! -e /root/.cargo\nstage dns test ! -e /etc/resolv.conf\nstage token test -z \"$CARGO_REGISTRY_TOKEN\"\nstage rustup-home test \"$RUSTUP_HOME\" = /rust/rustup-home\nstage shim-readonly test ! -w /rust/runtime/bin/cargo\nstage compiler-readonly test ! -w /rust/toolchain/bin/rustc\nstage vendor-readonly test ! -w /rust/vendor/kvist-sandbox-dependency/Cargo.toml\nstage metadata cargo metadata --format-version=1\nstage tests cargo test\nstage docs cargo doc --no-deps",
     );
     assert!(!result.failed(), "{}", result.error_text(8192));
     assert!(result.output_text(8192).contains("test result: ok"));
+    assert_eq!(
+        fs::read_to_string(workdir.join("Cargo.lock")).unwrap(),
+        lock
+    );
     assert!(!workdir.join("target").exists());
+
+    let without_vendor = SandboxExecutor::new(
+        ToolRegistry::new(ToolPolicy::default()),
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        workdir,
+    );
+    let result = shell(&without_vendor, "test ! -e /rust/vendor");
+    assert!(!result.failed());
 }
 
 #[test]
@@ -254,7 +395,7 @@ fn rust_toolchain_is_discoverable_via_path_and_version_commands() {
     // rustdoc are the real binaries at /rust/toolchain/bin/.
     let result = shell(
         &executor,
-        "echo PATH=$PATH && which rustc && which cargo && which rustdoc && rustc --version && cargo --version && rustdoc --version && test -d /home/stefan && false || test ! -d /home/stefan",
+        "which rustc && which cargo && which rustdoc && rustc --version && cargo --version && rustdoc --version && test ! -d /home/stefan",
     );
     let output = result.output_text(8192);
     let error = result.error_text(8192);
@@ -282,6 +423,11 @@ fn rust_toolchain_is_discoverable_via_path_and_version_commands() {
 #[test]
 #[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn cargo_installed_tools_are_available_in_sandbox() {
+    let nextest = PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cargo/bin/cargo-nextest");
+    assert!(
+        nextest.is_file(),
+        "this optional native trial requires host-provisioned cargo-nextest"
+    );
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
     fs::create_dir(workdir.join("src")).unwrap();
@@ -352,13 +498,153 @@ fn home_directory_is_not_accessible_in_sandbox() {
         },
         workdir.clone(),
     );
-    // Verify that the home directory is not accessible inside the sandbox.
-    // Only specific subdirectories (like ~/.cargo/bin) are mounted, not the
-    // entire home directory.
-    let result = shell(&executor, "test -d /home/stefan && false || true");
+    let host_home = std::env::var("HOME").unwrap();
+    assert!(host_home.starts_with("/home/") || host_home == "/root");
+    let result = shell(
+        &executor,
+        &format!("test ! -e '{host_home}' && test -d \"$HOME\" && test -w \"$HOME\""),
+    );
     assert!(
         !result.failed(),
         "home directory should not be accessible in the sandbox"
+    );
+}
+
+#[test]
+#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
+fn selected_toolchain_runs_the_complete_native_chain() {
+    let directory = fixture();
+    let workdir = directory.path().canonicalize().unwrap();
+    let channel = std::env::var("KVIST_RUST_TEST_CHANNEL").unwrap_or_else(|_| "stable".into());
+    fs::write(
+        workdir.join("rust-toolchain.toml"),
+        format!("[toolchain]\nchannel = \"{channel}\"\ncomponents = [\"rustfmt\", \"clippy\"]\n"),
+    )
+    .unwrap();
+    fs::create_dir(workdir.join("src")).unwrap();
+    fs::create_dir(workdir.join("tests")).unwrap();
+    fs::write(
+        workdir.join("Cargo.toml"),
+        "[package]\nname=\"chain-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n",
+    )
+    .unwrap();
+    fs::write(
+        workdir.join("Cargo.lock"),
+        "version=4\n[[package]]\nname=\"chain-trial\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        workdir.join("src/lib.rs"),
+        "/// ```\n/// assert_eq!(chain_trial::answer(), 42);\n/// ```\npub fn answer() -> u8 {\n    42\n}\n#[test]\nfn unit() {\n    assert_eq!(answer(), 42);\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        workdir.join("src/main.rs"),
+        "fn main() {\n    println!(\"answer={}\", chain_trial::answer());\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        workdir.join("tests/integration.rs"),
+        "#[test]\nfn integration() {\n    assert_eq!(chain_trial::answer(), 42);\n}\n",
+    )
+    .unwrap();
+    let expected = std::process::Command::new("/usr/bin/rustup")
+        .args(["which", "--toolchain", &channel, "rustc"])
+        .current_dir("/")
+        .env_remove("RUSTUP_TOOLCHAIN")
+        .output()
+        .unwrap();
+    assert!(expected.status.success(), "provision {channel} on the host");
+    let expected = std::process::Command::new(String::from_utf8(expected.stdout).unwrap().trim())
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(expected.status.success());
+    let executor = SandboxExecutor::new(
+        resolve(&workdir).unwrap(),
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        workdir.clone(),
+    );
+    let result = checked_shell(
+        &executor,
+        "stage home test -w \"$HOME\"\nstage rustup-selection rustup show active-toolchain\nstage rustup-list rustup toolchain list\nstage rustup-cargo rustup which cargo\nstage rustup-rustc rustup which rustc\nstage rustup-sysroot test \"$(rustup run \"$RUSTUP_TOOLCHAIN\" rustc --print sysroot)\" = /rust/toolchain\nstage compiler rustc --version\nstage cargo cargo --version\nstage sysroot test \"$(rustc --print sysroot)\" = /rust/toolchain\nstage formatter cargo fmt --check\nstage check cargo check --all-targets\nstage build cargo build\nstage binary /tmp/target/debug/chain-trial\nstage unit-tests cargo test --lib\nstage integration-tests cargo test --test integration\nstage doctests cargo test --doc\nstage clippy cargo clippy --all-targets -- -D warnings\nstage documentation cargo doc --no-deps\nstage isolated-target test ! -e target",
+    );
+    let output = result.output_text(16384);
+    assert!(output.contains(String::from_utf8(expected.stdout).unwrap().trim()));
+    assert!(output.contains("answer=42"));
+    assert_eq!(output.matches("test result: ok").count(), 3, "{output}");
+    assert!(
+        !output.contains("/home/"),
+        "rustup must report sandbox-native paths"
+    );
+    let failure = shell(
+        &executor,
+        "printf '#[test] fn fails() { assert!(false); }\\n' > tests/fails.rs; cargo test --test fails",
+    );
+    assert!(failure.failed(), "a failing test must propagate a failure");
+    assert!(failure.output_text(8192).contains("test result: FAILED"));
+    let failure = shell(
+        &executor,
+        "printf 'not rust syntax\\n' > src/main.rs; cargo build",
+    );
+    assert!(
+        failure.failed(),
+        "a compiler failure must propagate a failure"
+    );
+}
+
+#[test]
+#[ignore = "requires an explicitly selected installed minimal toolchain and native Bubblewrap"]
+fn installed_minimal_pin_builds_without_optional_components() {
+    let channel = std::env::var("KVIST_RUST_TEST_MINIMAL_CHANNEL")
+        .expect("set KVIST_RUST_TEST_MINIMAL_CHANNEL to a host-provisioned minimal installation");
+    let directory = fixture();
+    let workdir = directory.path().canonicalize().unwrap();
+    fs::write(workdir.join("rust-toolchain"), &channel).unwrap();
+    fs::create_dir(workdir.join("src")).unwrap();
+    fs::write(
+        workdir.join("Cargo.toml"),
+        "[package]\nname=\"minimal-trial\"\nversion=\"0.1.0\"\nedition=\"2024\"\n",
+    )
+    .unwrap();
+    fs::write(
+        workdir.join("Cargo.lock"),
+        "version=4\n[[package]]\nname=\"minimal-trial\"\nversion=\"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::write(
+        workdir.join("src/lib.rs"),
+        "#[test] fn works() { assert_eq!(2 + 2, 4); }\n",
+    )
+    .unwrap();
+    let executor = SandboxExecutor::new(
+        resolve(&workdir).unwrap(),
+        SandboxPaths {
+            runner: runner(),
+            backend: "/usr/bin/bwrap".into(),
+        },
+        workdir.clone(),
+    );
+    let result = checked_shell(
+        &executor,
+        "stage selection rustup show active-toolchain\nstage compiler rustc --version\nstage build cargo build\nstage tests cargo test\nstage docs cargo doc --no-deps",
+    );
+    assert!(result.output_text(8192).contains(&channel));
+    assert!(result.output_text(8192).contains("test result: ok"));
+
+    fs::remove_file(workdir.join("rust-toolchain")).unwrap();
+    fs::write(
+        workdir.join("rust-toolchain.toml"),
+        format!("[toolchain]\nchannel=\"{channel}\"\ncomponents=[\"rustfmt\"]\n"),
+    )
+    .unwrap();
+    let error = resolve(&workdir).unwrap_err().to_string();
+    assert!(
+        error.contains("rustfmt") && error.contains("host"),
+        "{error}"
     );
 }
 

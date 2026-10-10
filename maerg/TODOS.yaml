@@ -14,6 +14,77 @@ component:
         expected_revision: "sha256:3d971935e8b59ab1d977550b5c2146caff46dc7af0dc6c15c7b18d414d0ccae5"
         observed_revision: "sha256:e27ae1c3224da961bd30030a6a838b9da2c0f52f58524f5a59fe273fde2445f5"
 tasks:
+  - id: "sandbox-rust-state-write-tests"
+    title: "Pin generic authoring environment isolation"
+    description: "Reproduce broken generated rustup-home grants and assert generic authoring preserves the approved environment without Rust state."
+    context: "Native pre-repair failure reproduced Bubblewrap mounting a deleted temporary rustup home. The repaired actual authoring trial preserves PATH/HOME, has no rustup state and writes only source output."
+    purpose: "Define native regression evidence before removing invalid Rust setup."
+    expected_outcome: "The native authoring trial fails before repair and passes afterward."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+    timestamps:
+      created_at: "2026-10-10T15:13:28Z"
+      updated_at: "2026-10-10T15:31:09Z"
+      completed_at: "2026-10-10T15:31:09Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sandbox-rust-state-implement-code"
+    title: "Remove invalid generic rustup staging"
+    description: "Remove unapproved environment replacement, host-install enumeration and expired temporary rustup grants while retaining the separate offline Cargo verification topology."
+    context: "All five native toolchain trials pass; generic verification trials now explicitly grant concrete tools and build the actual isolated locked fixture, not the repository root. Three default/pinned/nightly offline verification e2e trials, 424 library tests, 14 protocol and 19 acquisition-boundary tests pass. Wider dogfood suite retains an unrelated bare-Git fixture failure: expected remote refs/heads/main absent. No authority expansion or acceptance."
+    purpose: "Preserve the approved generic execution boundary."
+    expected_outcome: "Non-Rust authoring needs no Rust installation and approved environments remain unchanged."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "sandbox-rust-state-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+    timestamps:
+      created_at: "2026-10-10T15:13:28Z"
+      updated_at: "2026-10-10T15:31:09Z"
+      completed_at: "2026-10-10T15:31:09Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sandbox-rust-state-security-audit"
+    title: "Audit generic authoring authority preservation"
+    description: "Independently inspect the removed rustup path and unchanged approved environment and grant topology."
+    context: "Independent rust-chain-audit found no security vulnerabilities in the scoped changes. Existing unrelated runner reviews remain separate."
+    purpose: "Retain independent authority evidence."
+    expected_outcome: "Scoped findings are corrected or retained explicitly."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "sandbox-rust-state-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+    timestamps:
+      created_at: "2026-10-10T15:13:28Z"
+      updated_at: "2026-10-10T15:31:09Z"
+      completed_at: "2026-10-10T15:31:09Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "sandbox-rust-state-compliance-review"
+    title: "Compare generic authoring repair with intent"
+    description: "Derive a scoped source-only observation and compare it with local intent in a separate source-blind context."
+    context: "Clean-slate rust-chain-observer supplied the scoped IMPL supplement and independently ran generic authoring. Source-blind rust-chain-comparator found no generic-authoring discrepancy. Native authoring and all three default/pinned/nightly offline verification trials passed against the rebuilt release runner. Read-only validation confirms changed maerg intent/queue/IMPL validity; unrelated project artifact failures remain. The human repair request is the advisory exception for this scoped bundle; no receipt, acceptance or policy renewal."
+    purpose: "Avoid implementer certification."
+    expected_outcome: "Independent comparison records any discrepancy for arbitration."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "sandbox-rust-state-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"
+    timestamps:
+      created_at: "2026-10-10T15:13:28Z"
+      updated_at: "2026-10-10T15:31:09Z"
+      completed_at: "2026-10-10T15:31:09Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "p2-01-write-tests"
     title: "Define TODO queue schema tests"
     description: "Write focused parser, serialization, dependency-graph, and task-state transition tests for the version-1 TODO queue contract before production implementation."

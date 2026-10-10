@@ -444,6 +444,15 @@ arbitrary external writers are not locked transactionally.
   A bounded `.kvist/vendored` snapshot uses sandbox-native paths rather than
   trusting host-absolute paths in project configuration. Pin drift fails closed;
   restart after legitimate pin/vendor changes. Old `resolve` remains System-only.
+  Rustup queries see only the selected installed toolchain, registered by a
+  sandbox-native link to `/rust/toolchain` in a generated read-only
+  `/rust/rustup-home`; no host rustup settings are mounted. `RUSTUP_TOOLCHAIN`
+  names that exact installed selection, automatic installation is disabled,
+  and `HOME=/tmp` is writable private scratch. Requested formatter/Clippy
+  executables are checked and drift-tracked along with the compiler.
+  `SKOTT_LOG` (or fallback `RUST_LOG`) enables stderr diagnostics: debug
+  records preparation/dispatch/completion, trace records grant metadata and
+  environment names, never command text, environment values or tool output.
 
 ### `ToolPolicy`
 

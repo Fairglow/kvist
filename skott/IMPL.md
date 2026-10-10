@@ -4,6 +4,47 @@
 
 ## Observed implementation: skott
 
+## Scoped Rust sandbox observation - 2026-10-10
+
+Clean-slate observer `rust-chain-observer` derived this supplement from the
+current Rust preparation, request/executor source, native tests, manifests,
+runner source and CI definition only. It did not read intent, queues, prior
+records, reviews, chat or Git history. This supplement supersedes older
+observations only for the repaired Rust chain; it is not certification.
+
+- Trusted system rustup queries use cleared environment and disabled automatic
+  installation. A project pin, or the host default resolved once, selects an
+  exact standard-layout installation. Missing selections are not installed.
+- Private outside-workspace staging contains the fixed offline/locked Cargo
+  shim, independent vendor snapshot and generated rustup settings. Exactly one
+  registration links the concrete installed name to sandbox `/rust/toolchain`.
+  Resources receive disjoint read-only `/rust/*` grants; shared RAII ownership
+  removes staging when its final owner drops. HOME/cache/target use private
+  `/tmp` scratch, not host home/Cargo configuration or credentials.
+- Startup hashes tracked compiler/Cargo/rustdoc, available formatter/Clippy
+  companions, native manifest/libcore/libstd, cc/ar/as, shim and settings.
+  Per-call validation checks pin bytes, directory identities, tracked
+  fingerprints and registration target, without rehashing full binaries.
+  Vendor copying/hashing is independently bounded and uses up to eight workers;
+  request preflight separately bounds identity reads and writable-scope scans.
+- The identity is not a digest of the entire installed toolchain tree. Requested
+  targets receive directory checks. Optional user Cargo bin receives directory
+  identity checks, not per-extension content validation. Explicit alternate
+  Cargo executables are not rewritten by the normal PATH shim.
+- Debug/trace records query/preparation timing, counts and identities, grant
+  metadata, environment names, dispatch limits and completion/interruption
+  flags. Inspected chain events exclude command bodies, environment values and
+  output contents; this is not a universal UI/transcript-redaction claim.
+- The observer independently executed the complete selected-toolchain chain and
+  diagnostic trial: 2 passed, exit 0. These exercise rustup queries, formatting,
+  checking, compilation/linking/binary execution, unit/integration/doctests,
+  Clippy, documentation, target isolation, expected test/compiler failures and
+  diagnostic sentinel exclusion. Other native trials were source-observed,
+  not executed by that observer.
+- Stable Linux CI explicitly enables native fixture trials. Optional Cargo
+  extensions, minimal-install and repository-vendor trials are excluded from
+  that job; the ordinary workspace/MSRV runs do not enable ignored trials.
+
 ## Observation basis
 
 This replacement record was derived on 2026-10-02 from this package's Rust

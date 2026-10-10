@@ -246,6 +246,22 @@ fn hash_file(path: &Path, preparation: &Preparation<'_>) -> Result<(String, Fing
     ))
 }
 
+fn track_executable(path: PathBuf, preparation: &Preparation<'_>) -> Result<TrackedExecutable> {
+    if inspect_path(&path)?.permissions().mode() & 0o111 == 0 {
+        return Err(failure(format!(
+            "installed Rust executable `{}` is not executable",
+            path.display()
+        )));
+    }
+    let (identity, fingerprint) = hash_file(&path, preparation)?;
+    tracing::trace!(path = %path.display(), %identity, "Rust executable validated");
+    Ok(TrackedExecutable {
+        path,
+        identity,
+        fingerprint,
+    })
+}
+
 fn token(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
@@ -415,6 +431,8 @@ fn query_rustup(
     preparation: &Preparation<'_>,
 ) -> Result<String> {
     preparation.check()?;
+    let started = Instant::now();
+    tracing::debug!(operation = args[0], "querying installed Rust selection");
     let mut command = Command::new(rustup);
     command
         .args(args)
@@ -431,6 +449,15 @@ fn query_rustup(
         preparation.cancellation,
         |e| io_error("query installed Rust toolchain (never installs)", None, e),
     )?;
+    tracing::debug!(
+        operation = args[0],
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        status = ?result.status,
+        timed_out = result.timed_out,
+        output_limit_exceeded = result.output_limit_exceeded,
+        cancelled = result.cancelled,
+        "installed Rust selection query completed"
+    );
     if result.failed() {
         return Err(failure(
             "installed Rust selection is unavailable; provision the project pin on the host before starting skott (no installation or fallback is performed)",
@@ -455,6 +482,7 @@ impl RustEnvironment {
         if !inspect_path(&workspace)?.is_dir() {
             return Err(failure("Rust workspace must be a regular directory"));
         }
+        tracing::debug!(workspace = %workspace.display(), "preparing offline Rust resources");
         let pin = project_pin(&workspace)?;
         let pinned = pin.is_some();
         let pin_identity = pin_identity(&workspace)?;
@@ -508,6 +536,12 @@ impl RustEnvironment {
             .and_then(Path::parent)
             .ok_or_else(|| failure("rustup returned an invalid concrete cargo path"))?
             .to_owned();
+        let installed_name = root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| failure("installed Rust selection name must be UTF-8"))?
+            .to_owned();
+        channel(&installed_name)?;
         let installations = home.join(".rustup/toolchains");
         if root.parent() != Some(installations.as_path())
             || cargo != root.join("bin/cargo")
@@ -517,6 +551,13 @@ impl RustEnvironment {
                 "Rust root must be an exact installed toolchain outside the writable workspace, not a custom linked or substituted root",
             ));
         }
+        tracing::debug!(
+            requested_channel = %selected,
+            installed_channel = %installed_name,
+            root = %root.display(),
+            pinned,
+            "resolved concrete installed Rust toolchain"
+        );
         let mut directories = Vec::new();
         for path in [
             &root,
@@ -560,17 +601,26 @@ impl RustEnvironment {
         let mut executables = Vec::new();
         for name in ["cargo", "rustc", "rustdoc"] {
             let path = root.join("bin").join(name);
-            if inspect_path(&path)?.permissions().mode() & 0o111 == 0 {
-                return Err(failure(format!(
-                    "installed Rust `{name}` is not executable"
-                )));
-            }
-            let (file_identity, file_fingerprint) = hash_file(&path, &preparation)?;
-            executables.push(TrackedExecutable {
-                path: path.clone(),
-                identity: file_identity,
-                fingerprint: file_fingerprint,
+            executables.push(track_executable(path, &preparation)?);
+        }
+        for name in ["rustfmt", "cargo-fmt", "cargo-clippy", "clippy-driver"] {
+            let path = root.join("bin").join(name);
+            let required = pin.as_ref().is_some_and(|pin| {
+                pin.components.iter().any(|component| match name {
+                    "rustfmt" | "cargo-fmt" => component == "rustfmt",
+                    _ => component == "clippy",
+                })
             });
+            match fs::symlink_metadata(&path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound && !required => continue,
+                Err(error) => {
+                    return Err(failure(format!(
+                        "Rust companion `{name}` is unavailable; provision it on the host: {error}"
+                    )));
+                }
+                Ok(_) => {}
+            }
+            executables.push(track_executable(path, &preparation)?);
         }
         for path in native_library_layout(&root)? {
             let (file_identity, file_fingerprint) = hash_file(&path, &preparation)?;
@@ -600,13 +650,20 @@ impl RustEnvironment {
                 fingerprint: file_fingerprint,
             });
         }
-        // Resolve the user's cargo bin directory for cargo-installed tools
-        // like cargo-nextest, cargo-deny, etc. These are not part of the
-        // rustup toolchain but are commonly needed for Rust development.
         let user_cargo_bin = home.join(".cargo").join("bin");
         let has_user_cargo_bin = match fs::symlink_metadata(&user_cargo_bin) {
-            Ok(metadata) => metadata.is_dir(),
-            Err(_) => false,
+            Ok(_) => {
+                let metadata = inspect_path(&user_cargo_bin)?;
+                if !metadata.is_dir() || user_cargo_bin.starts_with(&workspace) {
+                    return Err(failure(
+                        "user Cargo bin must be a non-link directory outside the workspace",
+                    ));
+                }
+                directories.push((user_cargo_bin.clone(), (metadata.dev(), metadata.ino())));
+                true
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            Err(error) => return Err(io_error("inspect optional user Cargo bin", None, error)),
         };
 
         let user_cargo_bin_path = if has_user_cargo_bin {
@@ -614,14 +671,6 @@ impl RustEnvironment {
         } else {
             "none".to_owned()
         };
-        let identity = label(
-            format!(
-                "kvist/authoring-rust/v1\0{selected}\0{}\0{}\0{executables:?}",
-                root.display(),
-                user_cargo_bin_path
-            )
-            .as_bytes(),
-        );
         let staging = tempfile::Builder::new()
             .prefix(".skott-rust-")
             .tempdir_in(
@@ -656,6 +705,12 @@ impl RustEnvironment {
                 .map_err(|e| io_error("create empty offline vendor resource", None, e))?;
             label(b"empty offline authoring vendor")
         };
+        tracing::debug!(
+            has_vendor,
+            vendor_identity = %vendor_identity,
+            elapsed_ms = preparation.started.elapsed().as_millis() as u64,
+            "offline vendor snapshot prepared"
+        );
         fs::create_dir(staging.path().join("runtime"))
             .map_err(|e| io_error("create private Rust runtime", None, e))?;
         fs::create_dir(staging.path().join("runtime/bin"))
@@ -678,77 +733,50 @@ impl RustEnvironment {
             fingerprint: file_fingerprint,
         });
 
-        // Create rustup-managed toolchain directories for all installed toolchains
-        // so that rustup recognizes them. This prevents the agent from being confused
-        // by rustup reporting "no installed toolchains".
         let rustup_home = staging.path().join("rustup-home");
-        fs::create_dir_all(&rustup_home)
-            .map_err(|e| io_error("create rustup home directory", None, e))?;
-
-        // List all installed toolchains
-        let toolchain_list = query_rustup(&rustup, &home, &["toolchain", "list"], &preparation)?;
-        for line in toolchain_list.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            // Parse toolchain name (before any whitespace or annotation)
-            let name = line
-                .split_whitespace()
-                .next()
-                .ok_or_else(|| failure("rustup toolchain list returned malformed line"))?;
-            // Find the toolchain root using rustup which
-            let which_output = query_rustup(
-                &rustup,
-                &home,
-                &["which", "--toolchain", name, "cargo"],
-                &preparation,
-            )?;
-            let cargo_path = PathBuf::from(which_output.trim());
-            if let Some(root) = cargo_path.parent().and_then(|p| p.parent()) {
-                let toolchain_dir = rustup_home.join("toolchains").join(name);
-                let toolchain_bin = toolchain_dir.join("bin");
-                let toolchain_lib = toolchain_dir.join("lib");
-
-                fs::create_dir_all(&toolchain_bin).map_err(|e| {
-                    io_error(
-                        &format!("create rustup toolchain bin directory for {name}"),
-                        None,
-                        e,
-                    )
-                })?;
-                fs::create_dir_all(&toolchain_lib).map_err(|e| {
-                    io_error(
-                        &format!("create rustup toolchain lib directory for {name}"),
-                        None,
-                        e,
-                    )
-                })?;
-
-                // Create symlinks to the actual toolchain binaries
-                for binary_name in ["cargo", "rustc", "rustdoc", "rustfmt", "clippy-driver"] {
-                    let src = root.join("bin").join(binary_name);
-                    if src.exists() {
-                        std::os::unix::fs::symlink(src, toolchain_bin.join(binary_name)).map_err(
-                            |e| io_error(&format!("symlink {binary_name} for {name}"), None, e),
-                        )?;
-                    }
-                }
-
-                // Symlink the lib/rustlib directory
-                let src_rustlib = root.join("lib").join("rustlib");
-                if src_rustlib.exists() {
-                    std::os::unix::fs::symlink(src_rustlib, toolchain_lib.join("rustlib"))
-                        .map_err(|e| io_error(&format!("symlink rustlib for {name}"), None, e))?;
-                }
-            }
+        let toolchains = rustup_home.join("toolchains");
+        fs::create_dir_all(&toolchains)
+            .map_err(|e| io_error("create private rustup registration", None, e))?;
+        // The target deliberately names the sandbox mount, never the host root.
+        std::os::unix::fs::symlink(TOOLCHAIN_DEST, toolchains.join(&installed_name))
+            .map_err(|e| io_error("register selected sandbox toolchain", None, e))?;
+        let settings = rustup_home.join("settings.toml");
+        fs::write(
+            &settings,
+            format!("version = \"12\"\ndefault_toolchain = \"{installed_name}\"\nprofile = \"minimal\"\n"),
+        )
+        .map_err(|e| io_error("write private rustup selection", None, e))?;
+        let (identity, fingerprint) = hash_file(&settings, &preparation)?;
+        executables.push(TrackedExecutable {
+            path: settings,
+            identity,
+            fingerprint,
+        });
+        for path in [&rustup_home, &toolchains] {
+            let metadata = inspect_path(path)?;
+            directories.push((path.to_owned(), (metadata.dev(), metadata.ino())));
         }
-
+        let identity = label(
+            format!(
+                "kvist/authoring-rust/v1\0{installed_name}\0{}\0{}\0{executables:?}",
+                root.display(),
+                user_cargo_bin_path
+            )
+            .as_bytes(),
+        );
+        tracing::debug!(
+            channel = %installed_name,
+            identity = %identity,
+            tracked_files = executables.len(),
+            user_cargo_bin = has_user_cargo_bin,
+            elapsed_ms = preparation.started.elapsed().as_millis() as u64,
+            "offline Rust resources prepared"
+        );
         Ok(Self {
             resources: Arc::new(Resources {
                 workspace,
                 root,
-                channel: selected,
+                channel: installed_name,
                 identity,
                 executables,
                 directories,
@@ -770,7 +798,7 @@ impl RustEnvironment {
     /// An inspectable exact selection, identity and offline-material diagnostic.
     pub fn diagnostic(&self) -> String {
         format!(
-            "Rust authoring: {} selects installed `{}` at `{}`; identity {}; pin digest {}; network denied, Cargo explicitly offline and locked, private HOME/cache/target; {}; vendor snapshot {}. Provision a matching Cargo.lock separately. No host home/Cargo credentials mounted; ambient Cargo/Rust overrides ignored.",
+            "Rust authoring: {} selects installed `{}` at `{}`; identity {}; pin digest {}; network denied, Cargo explicitly offline and locked, private HOME/cache/target; {}; vendor snapshot {}. Rustup exposes only this selection through read-only sandbox-native registration; automatic installation disabled. Provision a matching Cargo.lock separately. No host home/Cargo credentials mounted; ambient Cargo/Rust overrides ignored.",
             if self.resources.pinned {
                 "project pin"
             } else {
@@ -826,6 +854,25 @@ impl RustEnvironment {
                 ));
             }
         }
+        let link = self
+            .resources
+            .rustup_home
+            .join("toolchains")
+            .join(&self.resources.channel);
+        let target = fs::read_link(&link)
+            .map_err(|e| io_error("recheck sandbox Rust registration", None, e))?;
+        if target != Path::new(TOOLCHAIN_DEST) {
+            return Err(failure(
+                "sandbox Rust registration drifted since startup; restart",
+            ));
+        }
+        tracing::debug!(
+            channel = %self.resources.channel,
+            identity = %self.resources.identity,
+            tracked_files = self.resources.executables.len(),
+            elapsed_ms = preparation.started.elapsed().as_millis() as u64,
+            "offline Rust resources validated"
+        );
         Ok(())
     }
 
@@ -896,9 +943,10 @@ impl RustEnvironment {
         };
         [
             ("PATH", path),
-            ("HOME", "/workspace/home"),
+            ("HOME", "/tmp"),
             ("RUSTUP_HOME", RUSTUP_HOME_DEST),
-            ("RUSTUP_TOOLCHAIN", "stable"),
+            ("RUSTUP_TOOLCHAIN", self.resources.channel.as_str()),
+            ("RUSTUP_AUTO_INSTALL", "0"),
             ("CARGO_HOME", "/tmp/cargo-home"),
             ("CARGO_TARGET_DIR", "/tmp/target"),
             ("CARGO_NET_OFFLINE", "true"),
@@ -1064,6 +1112,14 @@ fn snapshot_vendor(
             });
         }
     }
+    tracing::debug!(
+        entries = count,
+        files = files.len(),
+        directories = directories.len(),
+        bytes = total,
+        elapsed_ms = preparation.started.elapsed().as_millis() as u64,
+        "vendor snapshot enumeration completed"
+    );
     // Parallel copy phase: contiguous index ranges keep scheduling simple and
     // deterministic; a single worker handles small trees without thread setup.
     let workers = copy_worker_count().min(files.len());
@@ -1102,6 +1158,11 @@ fn snapshot_vendor(
             results[index] = Some(copy_vendor_file(&files[index], preparation));
         }
     }
+    tracing::debug!(
+        workers,
+        elapsed_ms = preparation.started.elapsed().as_millis() as u64,
+        "vendor snapshot copy completed"
+    );
     for (path, before) in directories {
         preparation.check()?;
         if fingerprint(&inspect_path(&path)?) != before {
@@ -1138,11 +1199,6 @@ mod tests {
     }
 
     fn synthetic_environment(directory: &Path) -> RustEnvironment {
-        let rustup_home = tempfile::Builder::new()
-            .prefix(".rust-rustup-")
-            .tempdir_in(directory)
-            .unwrap()
-            .keep();
         let directory = directory.canonicalize().unwrap();
         let workspace = directory.join("workspace");
         let root = directory.join("toolchain");
@@ -1156,6 +1212,13 @@ mod tests {
             cancellation: &cancellation,
         };
         let metadata = inspect_path(&root).unwrap();
+        let staging = tempfile::Builder::new()
+            .prefix(".rust-staging-")
+            .tempdir_in(&directory)
+            .unwrap();
+        let rustup_home = staging.path().join("rustup-home");
+        fs::create_dir_all(rustup_home.join("toolchains")).unwrap();
+        symlink(TOOLCHAIN_DEST, rustup_home.join("toolchains/stable")).unwrap();
         RustEnvironment {
             resources: Arc::new(Resources {
                 pin_identity: pin_identity(&workspace).unwrap(),
@@ -1172,10 +1235,7 @@ mod tests {
                     }
                 }],
                 directories: vec![(root, (metadata.dev(), metadata.ino()))],
-                staging: tempfile::Builder::new()
-                    .prefix(".rust-staging-")
-                    .tempdir_in(directory)
-                    .unwrap(),
+                staging,
                 vendor_identity: label(b"empty"),
                 has_vendor: false,
                 pinned: false,
@@ -1234,6 +1294,52 @@ mod tests {
         assert!(staging.exists());
         drop(clone);
         assert!(!staging.exists());
+    }
+
+    #[test]
+    fn registration_uses_exact_selection_and_private_home_and_rejects_drift() {
+        let directory = fixture();
+        let environment = synthetic_environment(directory.path());
+        let variables = environment.environment();
+        assert_eq!(variables["HOME"], "/tmp");
+        assert_eq!(variables["RUSTUP_HOME"], RUSTUP_HOME_DEST);
+        assert_eq!(variables["RUSTUP_TOOLCHAIN"], environment.resources.channel);
+        assert_eq!(variables["RUSTUP_AUTO_INSTALL"], "0");
+        let link = environment.resources.rustup_home.join("toolchains/stable");
+        fs::remove_file(&link).unwrap();
+        symlink("/home/hidden/toolchain", &link).unwrap();
+        assert!(
+            environment
+                .validate(&environment.resources.workspace, &CancellationToken::new())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn companion_executables_reject_missing_nonexecutable_links_and_directories() {
+        let directory = fixture();
+        let cancellation = CancellationToken::new();
+        let preparation = Preparation {
+            started: Instant::now(),
+            cancellation: &cancellation,
+        };
+        let path = directory
+            .path()
+            .canonicalize()
+            .unwrap()
+            .join("cargo-clippy");
+        assert!(track_executable(path.clone(), &preparation).is_err());
+        fs::write(&path, b"binary").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(track_executable(path.clone(), &preparation).is_err());
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(track_executable(path.clone(), &preparation).is_ok());
+        fs::remove_file(&path).unwrap();
+        symlink("/usr/bin/true", &path).unwrap();
+        assert!(track_executable(path.clone(), &preparation).is_err());
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(track_executable(path, &preparation).is_err());
     }
 
     #[test]
