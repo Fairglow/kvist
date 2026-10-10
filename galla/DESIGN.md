@@ -96,6 +96,18 @@ ADR 0004.
 
 ## Verification strategy
 
+`tests/toolchain_e2e.rs` exercises the executable protocol with real
+Bubblewrap, system PATH discovery and dependency-free execution. Its opt-in
+Rust trial enumerates the host inventory without installation, creates
+private settings and sandbox-native registration links, mounts every resolved
+installation read-only, compares per-toolchain query output and builds and
+runs fixtures. Streaming content hashes, link destinations and filesystem
+metadata (excluding access time, which reads may update) are compared before
+and after queries, execution and denied mutation attempts, even when the
+execution assertions fail. External custom toolchain roots are also covered.
+No consumer implementation is imported. CI explicitly enables these otherwise
+ignored native trials; missing tools or enforcement cause failure.
+
 Current tests assert strict shape and legacy rejection, exact Cargo argv,
 environment, toolchain/grant, cache, scratch, and lockfile topology, source
 identities and substitutions, production-origin rejection, schema shape, and

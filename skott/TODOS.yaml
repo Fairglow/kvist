@@ -5,11 +5,86 @@ component:
   design_revision: "sha256:899857bce034b999c6d3aed48d41827915a45803360175ef0327748c5e96d1fe"
   parent_contract: null
   revalidation:
-    state: current
-    checked_at: "2026-10-06T22:30:54Z"
-    stale_since: null
-    causes: []
+    state: stale
+    checked_at: "2026-10-10T15:13:28Z"
+    stale_since: "2026-10-10T15:13:28Z"
+    causes:
+      - kind: component-requirements-revision-changed
+        path: REQUIREMENTS.md
+        expected_revision: "sha256:d820c13d62d03274f739359a9d8a813f4b5942729d6a646934ce697bcd49f097"
+        observed_revision: "sha256:d8be7616a3dd68b68c9560717683f62ce54aea6ac23a91010c7139d84566fd6f"
 tasks:
+  - id: "runner-rust-chain-write-tests"
+    title: "Pin the native Rust sandbox chain"
+    description: "Reproduce dangling rustup links, wrong selected channel and HOME; exercise compiler/linker, test kinds, fmt/Clippy/docs/vendor and negative isolation/lock/pin cases."
+    context: "Native pre-repair failures reproduced nonexistent scratch HOME and expired maerg rustup grants. After repair all 14 native Rust-environment tests passed, including actual repository Galla tests in Bubblewrap; five other-language discovery trials and a separate nightly complete-chain trial passed."
+    purpose: "Establish actual sandbox evidence before repairing wiring."
+    expected_outcome: "Stage-labelled regressions fail before repair and pass afterward."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps:
+      created_at: "2026-10-10T15:13:28Z"
+      updated_at: "2026-10-10T15:31:09Z"
+      completed_at: "2026-10-10T15:31:09Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runner-rust-chain-implement-code"
+    title: "Repair selected Rust resources and diagnostics"
+    description: "Register only the selected installed toolchain using sandbox-native paths, restore scratch HOME, validate companions and emit non-secret stage/mount/completion diagnostics."
+    context: "No installation, network access or broader maerg authority introduced. All Skott ordinary tests passed; 231 Skott and 424 maerg library tests and strict all-target Clippy passed. Initial full-tree preparation hit the 30-second fail-closed bound; measured later preparation was about six seconds."
+    purpose: "Make the installed Rust authoring chain reliable and inspectable."
+    expected_outcome: "Native tests pass with exact selection and preserved isolation."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "runner-rust-chain-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps:
+      created_at: "2026-10-10T15:13:28Z"
+      updated_at: "2026-10-10T15:31:09Z"
+      completed_at: "2026-10-10T15:31:09Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runner-rust-chain-security-audit"
+    title: "Audit repaired Rust resource authority"
+    description: "Independently inspect exact selection, generated read-only registration, companion drift checks, private scratch, credential exclusion and diagnostic disclosure."
+    context: "Independent rust-chain-audit found no security vulnerabilities in the scoped changes. This is not unconditional component certification or renewed policy approval."
+    purpose: "Retain independent authority findings."
+    expected_outcome: "Scoped findings are corrected or retained explicitly."
+    kind: security-audit
+    status: completed
+    depends_on:
+      - "runner-rust-chain-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps:
+      created_at: "2026-10-10T15:13:28Z"
+      updated_at: "2026-10-10T15:31:09Z"
+      completed_at: "2026-10-10T15:31:09Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "runner-rust-chain-compliance-review"
+    title: "Compare independently observed Rust chain with intent"
+    description: "Derive a scoped IMPL supplement from source/tests in a clean context, then compare intent and observed evidence in a separate source-blind context."
+    context: "Clean-slate rust-chain-observer supplied the scoped IMPL supplement and independently ran complete-chain/diagnostic trials. Source-blind rust-chain-comparator found no repaired-scope discrepancy. All 14 native Rust trials passed against the rebuilt release runner. Read-only artifact validation confirms intent/IMPL validity but queue parsing is still blocked by six pre-existing unsorted requirement sets, confirmed unchanged against HEAD. No acceptance, policy renewal or blanket compliance."
+    purpose: "Avoid implementer certification."
+    expected_outcome: "Independent comparison records discrepancies for human arbitration."
+    kind: compliance-review
+    status: completed
+    depends_on:
+      - "runner-rust-chain-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps:
+      created_at: "2026-10-10T15:13:28Z"
+      updated_at: "2026-10-10T15:31:09Z"
+      completed_at: "2026-10-10T15:31:09Z"
+    blocked_reason: null
+    recovery_state: null
   - id: "runner-history-navigation-write-tests"
     title: "Pin replay boundary keys and shared scrollbar behavior"
     description: "Reproduce Ctrl+Home/Ctrl+End replay and live-start failures, wrapped tail reachability, empty and short replay, resize clamps, themed scrollbar geometry and Markdown instructions in both execution scopes."

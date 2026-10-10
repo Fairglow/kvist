@@ -298,6 +298,10 @@ end by `language_offline_e2e` (`go_offline_verification_builds_and_tests_denied_
 authoring phase exposes no usable Rust toolchain (the shared runner contract
 permits the Cargo toolchain and the vendored-registry/config/runtime purposes
 only in verification phases); extending that contract is a tracked follow-up.
+Generic authoring MUST NOT enumerate rustup installations, synthesize a mutable
+rustup home, replace the approved environment, or require Rust to execute
+non-Rust tools. Rust authoring resources in the standalone Skott workspace
+agent are a distinct boundary, not implicit maerg task authority.
 
 ### REQ-SUPERVISED-EXECUTION
 

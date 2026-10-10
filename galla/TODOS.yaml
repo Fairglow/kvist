@@ -135,3 +135,79 @@ tasks:
       completed_at: null
     blocked_reason: null
     recovery_state: null
+  - id: "galla-toolchain-write-tests"
+    title: "Define native toolchain execution and inventory tests"
+    description: "Define real runner trials for system-language execution, all installed rustup versions, target and component parity, installed-target compilation, denied mutations and host state snapshots."
+    context: "Version-only and selected-toolchain consumer tests do not establish full installed inventory visibility."
+    purpose: "Make tool availability and host non-mutation measurable through explicit read-only grants."
+    expected_outcome: "Native trials fail on unavailable prerequisites, incomplete inventory, unusable tools, writable installations or host changes."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+      - "DESIGN.md#Verification-strategy"
+    timestamps:
+      created_at: "2026-10-10T16:09:07Z"
+      updated_at: "2026-10-10T16:15:17Z"
+      completed_at: "2026-10-10T16:15:17Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "galla-toolchain-implement-code"
+    title: "Implement native toolchain fixtures and CI execution"
+    description: "Implement the test harness and private multi-toolchain rustup registrations, wire strict native trials into CI, and document tested coverage and consumer-profile limitations without changing production mount authority."
+    context: "Tests use the real independently built executable and Bubblewrap; no host installation is performed by a test."
+    purpose: "Provide reproducible end-to-end evidence rather than silently skipped version probes."
+    expected_outcome: "System-language fixtures execute, all installed Rust versions and targets match host evidence, and snapshots remain unchanged."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "galla-toolchain-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+      - "CONTRACT.md#Compatibility-and-verification"
+      - "DESIGN.md#Verification-strategy"
+    timestamps:
+      created_at: "2026-10-10T16:09:07Z"
+      updated_at: "2026-10-10T16:15:17Z"
+      completed_at: "2026-10-10T16:15:17Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "galla-toolchain-security-audit"
+    title: "Audit native toolchain test authority"
+    description: "Independently review private registration construction, read-only mount scope, host queries, mutation attempts, snapshot coverage and temporary fixture cleanup."
+    context: "Successful test execution is not independent security evidence."
+    purpose: "Check that the new native tests do not provision or mutate host installations."
+    expected_outcome: "Independent findings and remaining limits are retained for human disposition."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "galla-toolchain-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+      - "DESIGN.md#Security-and-resource-design"
+    timestamps:
+      created_at: "2026-10-10T16:09:07Z"
+      updated_at: "2026-10-10T16:15:17Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "galla-toolchain-compliance-review"
+    title: "Review native toolchain evidence independently"
+    description: "Derive observed test behavior in a clean-slate context and separately compare the implementation record and executable evidence against local intent without reading source."
+    context: "This testing review does not certify runner compliance or replace existing blocked re-verification."
+    purpose: "Retain independent discrepancies rather than having the test implementer certify its own work."
+    expected_outcome: "Coverage, unsupported installation shapes, host non-mutation limits and consumer-profile distinctions receive an independent disposition."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "galla-toolchain-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-10T16:09:07Z"
+      updated_at: "2026-10-10T16:15:17Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
