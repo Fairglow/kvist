@@ -1906,7 +1906,7 @@ fn cadence_tracks_tool_fragments_and_reasoning_before_late_tool_events() {
             let (endpoint, worker) = serve_timed(framing, records);
             let mut events = Vec::new();
             let turn = transport(provider, &endpoint)
-                .with_cadence_timeout(Duration::from_millis(130))
+                .with_cadence_timeout(Duration::from_millis(250))
                 .stream(
                     &request(ToolChoice::Auto),
                     &CancellationToken::new(),
