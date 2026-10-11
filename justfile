@@ -16,6 +16,11 @@ vendor:
 
 build:
     cargo build --locked --workspace --all-features
+    install -D -m 755 target/debug/kvist ~/.kvist/bin/kvist
+    install -D -m 755 target/debug/galla-runner ~/.kvist/bin/galla-runner
+    install -D -m 755 target/debug/sav-run ~/.kvist/bin/sav-run
+    install -D -m 755 target/debug/skott ~/.kvist/bin/skott
+    install -D -m 755 target/debug/skott-file-tool ~/.kvist/bin/skott-file-tool
 
 fix:
     cargo clippy --fix --locked --workspace --all-targets --all-features
@@ -34,36 +39,20 @@ reformat:
 
 release:
     cargo build --locked --workspace --release --all-features
-
-# Install debug binaries to user-specific Kvist location (~/.kvist/bin)
-install:
-    cargo build --locked --workspace --all-features
-    mkdir -p ~/.kvist/bin
-    cp target/debug/kvist ~/.kvist/bin/
-    cp target/debug/galla-runner ~/.kvist/bin/
-    chmod +x ~/.kvist/bin/kvist ~/.kvist/bin/galla-runner
-
-# Install release binaries to user-specific Kvist location (~/.kvist/bin)
-install-release:
-    cargo build --locked --workspace --release --all-features
-    mkdir -p ~/.kvist/bin
-    cp target/release/kvist ~/.kvist/bin/
-    cp target/release/galla-runner ~/.kvist/bin/
-    chmod +x ~/.kvist/bin/kvist ~/.kvist/bin/galla-runner
-
-# Install debug binaries to system-wide location (/usr/local/bin)
-install-system:
-    cargo build --locked --workspace --all-features
-    sudo cp target/debug/kvist /usr/local/bin/
-    sudo cp target/debug/galla-runner /usr/local/bin/
-    sudo chmod +x /usr/local/bin/kvist /usr/local/bin/galla-runner
+    install -D -m 755 target/release/kvist ~/.kvist/bin/kvist
+    install -D -m 755 target/release/galla-runner ~/.kvist/bin/galla-runner
+    install -D -m 755 target/release/sav-run ~/.kvist/bin/sav-run
+    install -D -m 755 target/release/skott ~/.kvist/bin/skott
+    install -D -m 755 target/release/skott-file-tool ~/.kvist/bin/skott-file-tool
 
 # Install release binaries to system-wide location (/usr/local/bin)
-install-release-system:
-    cargo build --locked --workspace --release --all-features
-    sudo cp target/release/kvist /usr/local/bin/
-    sudo cp target/release/galla-runner /usr/local/bin/
-    sudo chmod +x /usr/local/bin/kvist /usr/local/bin/galla-runner
+install:
+    just release
+    sudo install -D -m 755 target/release/kvist /usr/local/bin/kvist
+    sudo install -D -m 755 target/release/galla-runner /usr/local/bin/galla-runner
+    sudo install -D -m 755 target/release/sav-run /usr/local/bin/sav-run
+    sudo install -D -m 755 target/release/skott /usr/local/bin/skott
+    sudo install -D -m 755 target/release/skott-file-tool /usr/local/bin/skott-file-tool
 
 test:
     kvist vendor
