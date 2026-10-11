@@ -19,9 +19,25 @@ fn fixture() -> tempfile::TempDir {
 }
 
 fn runner() -> PathBuf {
-    std::env::var_os("KVIST_RUST_TEST_RUNNER")
-        .map(PathBuf::from)
-        .expect("set KVIST_RUST_TEST_RUNNER to an independently built runner outside the fixture")
+    if let Some(path) = std::env::var_os("KVIST_GALLA") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return path;
+        }
+    }
+    let mut roots = Vec::new();
+    if let Some(path) = std::env::var_os("CARGO_TARGET_DIR") {
+        roots.push(PathBuf::from(path));
+    }
+    roots.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target"));
+    roots.push(PathBuf::from("/opt/target"));
+    roots
+        .iter()
+        .flat_map(|root| {
+            ["debug", "release"].map(|profile| root.join(profile).join("galla-runner"))
+        })
+        .find(|path| path.is_file())
+        .expect("build galla-runner first or set KVIST_GALLA; native coverage must not skip")
 }
 
 /// Whether the trusted system rustup that `RustEnvironment::resolve` requires is
@@ -176,7 +192,6 @@ impl std::io::Write for LogCapture {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn diagnostics_cover_the_chain_without_command_or_output_payloads() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -229,7 +244,6 @@ fn diagnostics_cover_the_chain_without_command_or_output_payloads() {
 }
 
 #[test]
-#[ignore = "requires this repository's host-provisioned vendor tree and native Bubblewrap"]
 fn native_repository_tests_execute_inside_the_workspace_sandbox() {
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new(
@@ -264,7 +278,6 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -363,7 +376,6 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn rust_toolchain_is_discoverable_via_path_and_version_commands() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -421,7 +433,6 @@ fn rust_toolchain_is_discoverable_via_path_and_version_commands() {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn cargo_installed_tools_are_available_in_sandbox() {
     let nextest = PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cargo/bin/cargo-nextest");
     assert!(
@@ -473,7 +484,6 @@ fn cargo_installed_tools_are_available_in_sandbox() {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn home_directory_is_not_accessible_in_sandbox() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -511,7 +521,6 @@ fn home_directory_is_not_accessible_in_sandbox() {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn selected_toolchain_runs_the_complete_native_chain() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -597,10 +606,9 @@ fn selected_toolchain_runs_the_complete_native_chain() {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected installed minimal toolchain and native Bubblewrap"]
 fn installed_minimal_pin_builds_without_optional_components() {
-    let channel = std::env::var("KVIST_RUST_TEST_MINIMAL_CHANNEL")
-        .expect("set KVIST_RUST_TEST_MINIMAL_CHANNEL to a host-provisioned minimal installation");
+    let channel =
+        std::env::var("KVIST_RUST_TEST_MINIMAL_CHANNEL").unwrap_or_else(|_| "1.94.0".into());
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
     fs::write(workdir.join("rust-toolchain"), &channel).unwrap();
@@ -649,7 +657,6 @@ fn installed_minimal_pin_builds_without_optional_components() {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn changing_project_pin_after_resolution_fails_before_effects() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -681,7 +688,6 @@ fn changing_project_pin_after_resolution_fails_before_effects() {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn native_installed_rust_compiles_links_and_documents_offline() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -728,7 +734,6 @@ fn native_installed_rust_compiles_links_and_documents_offline() {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn normal_cargo_requires_matching_lock_without_creating_or_updating_it() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();

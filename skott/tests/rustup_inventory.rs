@@ -77,8 +77,11 @@ fn checked(executor: &SandboxExecutor, script: &str) -> Vec<u8> {
 type HostState = BTreeMap<PathBuf, (u32, u64, i64, i64, i64, i64, String)>;
 
 fn runner() -> PathBuf {
-    if let Some(path) = std::env::var_os("KVIST_RUST_TEST_RUNNER") {
-        return PathBuf::from(path);
+    if let Some(path) = std::env::var_os("KVIST_GALLA") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return path;
+        }
     }
     let mut roots = Vec::new();
     if let Some(path) = std::env::var_os("CARGO_TARGET_DIR") {
@@ -92,9 +95,7 @@ fn runner() -> PathBuf {
             ["debug", "release"].map(|profile| root.join(profile).join("galla-runner"))
         })
         .find(|path| path.is_file())
-        .expect(
-            "build galla-runner first or set KVIST_RUST_TEST_RUNNER; native coverage must not skip",
-        )
+        .expect("build galla-runner first or set KVIST_GALLA; native coverage must not skip")
 }
 
 fn snapshot(path: &Path, state: &mut HostState) {

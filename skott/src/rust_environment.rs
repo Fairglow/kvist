@@ -41,7 +41,7 @@ const RUSTUP_HOME_DEST: &str = "/rust/rustup-home";
 const MAX_FILE_BYTES: u64 = 256 << 20;
 const MAX_VENDOR_BYTES: u64 = 1 << 30;
 const MAX_ENTRIES: usize = 100_000;
-const PREPARATION_BUDGET: Duration = Duration::from_secs(30);
+const PREPARATION_BUDGET: Duration = Duration::from_secs(120);
 
 /// A complete installed inventory, initial selection and private sandbox resources.
 ///
