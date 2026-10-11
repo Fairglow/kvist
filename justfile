@@ -15,12 +15,9 @@ vendor:
     cargo run --locked -p kvist -- vendor .
 
 build:
-    cargo build --locked --workspace --all-features
-    install -D -m 755 target/debug/kvist ~/.kvist/bin/kvist
-    install -D -m 755 target/debug/galla-runner ~/.kvist/bin/galla-runner
-    install -D -m 755 target/debug/sav-run ~/.kvist/bin/sav-run
-    install -D -m 755 target/debug/skott ~/.kvist/bin/skott
-    install -D -m 755 target/debug/skott-file-tool ~/.kvist/bin/skott-file-tool
+    cargo build --locked --workspace --all-features \
+                --message-format=json-diagnostic-rendered-ansi > .kvist/cargo-build.log
+    python3 tools/cargo_install_binaries.py .kvist/cargo-build.log
 
 fix:
     cargo clippy --fix --locked --workspace --all-targets --all-features
@@ -34,16 +31,16 @@ lint:
 msrv:
     cargo +1.95.0 test --locked --workspace --all-features
 
+old:
+    cargo outdated --depth=1
+
 reformat:
     cargo fmt
 
 release:
-    cargo build --locked --workspace --release --all-features
-    install -D -m 755 target/release/kvist ~/.kvist/bin/kvist
-    install -D -m 755 target/release/galla-runner ~/.kvist/bin/galla-runner
-    install -D -m 755 target/release/sav-run ~/.kvist/bin/sav-run
-    install -D -m 755 target/release/skott ~/.kvist/bin/skott
-    install -D -m 755 target/release/skott-file-tool ~/.kvist/bin/skott-file-tool
+    cargo build --locked --workspace --release --all-features \
+                --message-format=json-diagnostic-rendered-ansi > .kvist/cargo-release.log
+    python3 tools/cargo_install_binaries.py .kvist/cargo-release.log
 
 # Install release binaries to system-wide location (/usr/local/bin)
 install:
@@ -53,6 +50,10 @@ install:
     sudo install -D -m 755 target/release/sav-run /usr/local/bin/sav-run
     sudo install -D -m 755 target/release/skott /usr/local/bin/skott
     sudo install -D -m 755 target/release/skott-file-tool /usr/local/bin/skott-file-tool
+
+# Print the target directory on the host
+target:
+    cargo metadata --format-version 1 --no-deps | python3 -c "import sys, json; print(json.load(sys.stdin)['target_directory'])"
 
 test:
     kvist vendor
