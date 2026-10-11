@@ -86,17 +86,13 @@ jobs:
       - name: Test workspace
         env:
           KVIST_GALLA: /home/runner/kvist-target/debug/galla-runner
-          KVIST_RUST_TEST_RUNNER: /home/runner/kvist-target/debug/galla-runner
         run: cargo test --locked --workspace --all-features
 
       - name: Test the native Rust sandbox chain
         run: |
-          KVIST_RUST_TEST_RUNNER="$CARGO_TARGET_DIR/debug/galla-runner" \
+          KVIST_GALLA="$CARGO_TARGET_DIR/debug/galla-runner" \
             cargo test --locked -p skott --test rust_build_environment -- \
-            --include-ignored --test-threads=1 --nocapture \
-            --skip cargo_installed_tools_are_available_in_sandbox \
-            --skip installed_minimal_pin_builds_without_optional_components \
-            --skip native_repository_tests_execute_inside_the_workspace_sandbox
+            --test-threads=1 --nocapture
           KVIST_GALLA="$CARGO_TARGET_DIR/debug/galla-runner" \
             cargo test --locked -p kvist --test sandbox_toolchain -- \
             --ignored --test-threads=1 --nocapture
@@ -177,7 +173,6 @@ jobs:
       - name: Test workspace
         env:
           KVIST_GALLA: /home/runner/kvist-target/debug/galla-runner
-          KVIST_RUST_TEST_RUNNER: /home/runner/kvist-target/debug/galla-runner
         run: cargo test --locked --workspace --all-features
 
   vcs:

@@ -29,18 +29,18 @@ fixed sandbox path. This allows Kvist to:
 
 The mount layout is:
 
-| Sandbox Path              | Source                                                                                  | Purpose                                                                           |
-| ------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| `/rust/toolchain`         | Initially selected host toolchain directory | Read-only default compiler, standard library, and targets |
-| `/rust/toolchains/N`      | Other validated installed toolchains, sorted by name | Read-only access to every other installed version and its targets |
-| `/rust/runtime/bin/cargo` | Kvist-provided Cargo shim                                                               | A wrapper that forces `--offline --locked` and the vendored sources configuration |
-| `/rust/vendor`            | Snapshot of `.kvist/vendored`                                                           | Read-only snapshot of the vendored dependency registry                            |
-| `/rust/runtime/bin/rustc`, `/rust/runtime/bin/rustdoc` | Fixed selection-aware wrappers | Compiler and documentation selection follows Cargo or a leading `+name` |
-| `/rust/rustup-home`       | Private generated settings and sandbox-native registrations for every installed name | Read-only complete installed inventory discovery |
-| `/tmp/rustup-home`        | Settings copied inside the sandbox; link to the read-only registration directory | Invocation-local selection/profile state; never host settings |
-| `/rust/user-cargo-bin`    | Validated optional host `~/.cargo/bin` directory | Read-only host-provisioned Cargo extensions; no host Cargo config or credentials |
-| `/tmp/cargo-home`         | Private tmpfs                                                                           | Private, sandbox-local Cargo home (cache, registry metadata)                      |
-| `/tmp/target`             | Private tmpfs                                                                           | Private, sandbox-local build target directory                                     |
+| Sandbox Path                                           | Source                                                                               | Purpose                                                                           |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `/rust/toolchain`                                      | Initially selected host toolchain directory                                          | Read-only default compiler, standard library, and targets                         |
+| `/rust/toolchains/N`                                   | Other validated installed toolchains, sorted by name                                 | Read-only access to every other installed version and its targets                 |
+| `/rust/runtime/bin/cargo`                              | Kvist-provided Cargo shim                                                            | A wrapper that forces `--offline --locked` and the vendored sources configuration |
+| `/rust/vendor`                                         | Snapshot of `.kvist/vendored`                                                        | Read-only snapshot of the vendored dependency registry                            |
+| `/rust/runtime/bin/rustc`, `/rust/runtime/bin/rustdoc` | Fixed selection-aware wrappers                                                       | Compiler and documentation selection follows Cargo or a leading `+name`           |
+| `/rust/rustup-home`                                    | Private generated settings and sandbox-native registrations for every installed name | Read-only complete installed inventory discovery                                  |
+| `/tmp/rustup-home`                                     | Settings copied inside the sandbox; link to the read-only registration directory     | Invocation-local selection/profile state; never host settings                     |
+| `/rust/user-cargo-bin`                                 | Validated optional host `~/.cargo/bin` directory                                     | Read-only host-provisioned Cargo extensions; no host Cargo config or credentials  |
+| `/tmp/cargo-home`                                      | Private tmpfs                                                                        | Private, sandbox-local Cargo home (cache, registry metadata)                      |
+| `/tmp/target`                                          | Private tmpfs                                                                        | Private, sandbox-local build target directory                                     |
 
 The Cargo shim at `/rust/runtime/bin/cargo` is essential: it ensures that
 normal PATH Cargo invocations default to offline/locked vendored resolution.
@@ -335,12 +335,9 @@ Run the self-contained native chain with a runner built outside the worktree:
 
 ```bash
 cargo build --locked -p galla --bin galla-runner
-KVIST_RUST_TEST_RUNNER=/opt/target/debug/galla-runner \
+KVIST_GALLA=/opt/target/debug/galla-runner \
   cargo test --locked -p skott --test rust_build_environment -- \
-  --include-ignored --test-threads=1 --nocapture \
-  --skip cargo_installed_tools_are_available_in_sandbox \
-  --skip installed_minimal_pin_builds_without_optional_components \
-  --skip native_repository_tests_execute_inside_the_workspace_sandbox
+  --test-threads=1 --nocapture
 ```
 
 Replace `/opt/target` if using a different outside-worktree target directory.
@@ -407,7 +404,7 @@ metadata excluding access times. Build `galla-runner` outside the worktree first
 then run:
 
 ```bash
-KVIST_RUST_TEST_RUNNER=/opt/target/debug/galla-runner \
+KVIST_GALLA=/opt/target/debug/galla-runner \
   cargo test --offline --locked -p skott --test rustup_inventory
 KVIST_GALLA=/opt/target/debug/galla-runner \
   cargo test --offline --locked -p kvist --test sandbox_toolchain

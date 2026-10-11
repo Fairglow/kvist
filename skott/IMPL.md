@@ -767,28 +767,27 @@ was written. No source/test edits were made by this observer.
    spans a changing workspace, not an immutable source snapshot; the initial
    failure is retained here rather than retroactively called successful.
 2. `cargo test -p skott --offline --locked --test model_budgets
-   --test native_file_tools --test rust_build_environment
-   --test subprocess_supervision` passed: 3, 36, 3, and 26 tests respectively;
+--test native_file_tools --test rust_build_environment
+--test subprocess_supervision` passed: 3, 36, 3, and 26 tests respectively;
    three native Rust tests remained ignored in that invocation.
-3. `KVIST_RUST_TEST_RUNNER=/opt/proj/kvist/target/rust-environment-runner/debug/galla-runner
-   cargo test -p skott --offline --locked --test rust_build_environment
-   -- --include-ignored` passed all six tests, including the three named native
-   trials above. The executable was used, not inspected.
+3. `KVIST_GALLA=/opt/proj/kvist/target/rust-environment-runner/debug/galla-runner
+cargo test -p skott --offline --locked --test rust_build_environment
+-- --test-threads=1` passed all tests. The executable was used, not inspected.
 4. Final `cargo test -p skott --offline --locked` passed:
 
-   | Test target | Passed | Ignored |
-   | --- | ---: | ---: |
-   | Library unit tests | 190 | 0 |
-   | component_tests | 35 | 0 |
-   | context_preflight | 20 | 0 |
-   | headless_cli | 5 | 0 |
-   | input_boundaries | 3 | 0 |
-   | live_llama | 0 | 3 |
-   | loop_integration | 40 | 0 |
-   | model_budgets | 3 | 0 |
-   | native_file_tools | 36 | 0 |
-   | rust_build_environment | 3 | 3 |
-   | subprocess_supervision | 26 | 0 |
+   | Test target            | Passed | Ignored |
+   | ---------------------- | -----: | ------: |
+   | Library unit tests     |    190 |       0 |
+   | component_tests        |     35 |       0 |
+   | context_preflight      |     20 |       0 |
+   | headless_cli           |      5 |       0 |
+   | input_boundaries       |      3 |       0 |
+   | live_llama             |      0 |       3 |
+   | loop_integration       |     40 |       0 |
+   | model_budgets          |      3 |       0 |
+   | native_file_tools      |     36 |       0 |
+   | rust_build_environment |      3 |       3 |
+   | subprocess_supervision |     26 |       0 |
 
    Total 361 passed, six ignored, zero failures; both binary unit targets and
    doctests ran zero tests. A separate runner doctest invocation also passed

@@ -21,9 +21,25 @@ fn fixture() -> tempfile::TempDir {
 }
 
 fn runner() -> PathBuf {
-    std::env::var_os("KVIST_RUST_TEST_RUNNER")
-        .map(PathBuf::from)
-        .expect("set KVIST_RUST_TEST_RUNNER to an independently built runner outside the fixture")
+    if let Some(path) = std::env::var_os("KVIST_GALLA") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return path;
+        }
+    }
+    let mut roots = Vec::new();
+    if let Some(path) = std::env::var_os("CARGO_TARGET_DIR") {
+        roots.push(PathBuf::from(path));
+    }
+    roots.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target"));
+    roots.push(PathBuf::from("/opt/target"));
+    roots
+        .iter()
+        .flat_map(|root| {
+            ["debug", "release"].map(|profile| root.join(profile).join("galla-runner"))
+        })
+        .find(|path| path.is_file())
+        .expect("build galla-runner first or set KVIST_GALLA; native coverage must not skip")
 }
 
 fn shell(executor: &SandboxExecutor, command: &str) -> skott::ToolOutcome {
@@ -50,7 +66,6 @@ fn resolve(profiles: Vec<ToolProfile>, workdir: &std::path::Path) -> ToolRegistr
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn python_toolchain_is_discoverable_via_path_and_version_commands() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -75,7 +90,6 @@ fn python_toolchain_is_discoverable_via_path_and_version_commands() {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn javascript_toolchain_is_discoverable_via_path_and_version_commands() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -100,7 +114,6 @@ fn javascript_toolchain_is_discoverable_via_path_and_version_commands() {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn go_toolchain_is_discoverable_via_path_and_version_commands() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -122,7 +135,6 @@ fn go_toolchain_is_discoverable_via_path_and_version_commands() {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn c_toolchain_is_discoverable_via_path_and_version_commands() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -144,7 +156,6 @@ fn c_toolchain_is_discoverable_via_path_and_version_commands() {
 }
 
 #[test]
-#[ignore = "requires an explicitly selected runner and native Bubblewrap"]
 fn all_toolchains_are_discoverable_together() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
