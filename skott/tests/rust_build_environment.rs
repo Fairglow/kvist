@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use sav::{CancellationToken, ToolIntent};
 use serde_json::json;
+use serial_test::serial;
 use skott::session::ToolExecutor;
 use skott::toolchain::HostProbe;
 use skott::{ProfileSetting, SandboxExecutor, SandboxPaths, ToolPolicy, ToolProfile, ToolRegistry};
@@ -25,6 +26,18 @@ fn runner() -> PathBuf {
             return path;
         }
     }
+    // Check standard installation locations first
+    if let Some(path) = std::env::var_os("HOME") {
+        let user_runner = PathBuf::from(path).join(".kvist/bin/galla-runner");
+        if user_runner.is_file() {
+            return user_runner;
+        }
+    }
+    let system_runner = PathBuf::from("/usr/local/bin/galla-runner");
+    if system_runner.is_file() {
+        return system_runner;
+    }
+    // Fall back to build directories
     let mut roots = Vec::new();
     if let Some(path) = std::env::var_os("CARGO_TARGET_DIR") {
         roots.push(PathBuf::from(path));
@@ -244,6 +257,7 @@ fn diagnostics_cover_the_chain_without_command_or_output_payloads() {
 }
 
 #[test]
+#[serial]
 fn native_repository_tests_execute_inside_the_workspace_sandbox() {
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::new(

@@ -286,7 +286,16 @@ impl Default for SandboxPaths {
 
 impl SandboxPaths {
     /// The default sandbox runner path when not configured.
+    /// Checks standard installation locations in order.
     pub fn default_runner() -> PathBuf {
+        // User-specific Kvist installation location
+        if let Some(home) = std::env::var_os("HOME") {
+            let user_runner = PathBuf::from(home).join(".kvist/bin/galla-runner");
+            if user_runner.is_file() {
+                return user_runner;
+            }
+        }
+        // System-wide installation location
         PathBuf::from("/usr/local/bin/galla-runner")
     }
 
