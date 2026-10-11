@@ -101,6 +101,7 @@ fn interactive_viewer(content: &str) {
 
     let mut scroll_offset = 0;
     let visible_lines = (rows - 2) as usize; // Reserve 2 rows for header/footer
+    let scrollbar_col = cols - 1;
 
     // Enter alternate screen
     enable_raw_mode().expect("failed to enable raw mode");
@@ -120,8 +121,8 @@ fn interactive_viewer(content: &str) {
 
         // Render visible lines with soft wrapping
         let visible = &lines[start..end];
-        let remaining = cols as usize - 1;
-        for line in visible {
+        let remaining = (scrollbar_col - 1) as usize;
+        for (i, line) in visible.iter().enumerate() {
             if line.len() > remaining {
                 let wrapped = soft_wrap(line, remaining);
                 for wline in wrapped {
@@ -130,15 +131,77 @@ fn interactive_viewer(content: &str) {
             } else {
                 println!("{}", line);
             }
+            // Pad empty lines to ensure footer is in fixed position
+            if i == visible.len() - 1 && end < total_lines {
+                for _ in 0..(visible_lines - visible.len()) {
+                    println!();
+                }
+            }
         }
 
-        // Footer with scroll position
-        let pct = if total_lines > 0 {
-            (scroll_offset as f64 / total_lines as f64) * 100.0
+        // Position footer in fixed position at bottom row
+        execute!(io::stdout(), crossterm::cursor::MoveTo(0, rows - 1))
+            .expect("failed to move cursor");
+
+        // Calculate meaningful percentage based on scroll position
+        let pct = if total_lines > visible_lines {
+            ((scroll_offset as f64) / ((total_lines - visible_lines) as f64)) * 100.0
         } else {
-            0.0
+            100.0
         };
-        println!("{}%", pct);
+        // Format as fixed-width for consistent position
+        let _ = write!(
+            io::stdout(),
+            "  [{:5.1}%] {}",
+            pct,
+            if scroll_offset == 0 {
+                "TOP"
+            } else if end >= total_lines {
+                "BOTTOM"
+            } else {
+                "SCROLL"
+            }
+        );
+        execute!(io::stdout(), crossterm::cursor::MoveTo(0, 0)).expect("failed to move cursor");
+
+        // Draw scrollbar on the right
+        if total_lines > visible_lines {
+            let scrollbar_size = visible_lines;
+            let thumb_size = if scrollbar_size > 0 {
+                ((visible_lines as f64) / (total_lines as f64)) * scrollbar_size as f64
+            } else {
+                0.0
+            };
+            let thumb_top = ((scroll_offset as f64) / (total_lines as f64)) * scrollbar_size as f64;
+
+            // Draw scrollbar track
+            for i in 0..scrollbar_size {
+                let y = i + 1; // Row offset (after header)
+                if (i as f64) >= thumb_top && (i as f64) < thumb_top + thumb_size {
+                    // Thumb
+                    execute!(
+                        io::stdout(),
+                        crossterm::style::SetForegroundColor(crossterm::style::Color::White)
+                    )
+                    .expect("failed to set color");
+                    let _ = write!(io::stdout(), "█");
+                    execute!(
+                        io::stdout(),
+                        crossterm::style::SetForegroundColor(crossterm::style::Color::Reset)
+                    )
+                    .expect("failed to reset color");
+                } else {
+                    // Track
+                    let _ = write!(io::stdout(), "░");
+                }
+                // Move to next row of scrollbar
+                execute!(
+                    io::stdout(),
+                    crossterm::cursor::MoveTo(scrollbar_col, (y + 1) as u16)
+                )
+                .expect("failed to move cursor");
+            }
+        }
 
         // Event handling
         match event::read() {
@@ -200,7 +263,7 @@ fn soft_wrap(line: &str, width: usize) -> Vec<String> {
             current.push_str(word);
         } else {
             result.push(current);
-            current = word.to_string();
+            current = "    ".to_string() + word;
         }
     }
 
