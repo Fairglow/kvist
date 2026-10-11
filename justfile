@@ -43,13 +43,14 @@ release:
     python3 tools/cargo_install_binaries.py .kvist/cargo-release.log
 
 # Install release binaries to system-wide location (/usr/local/bin)
-install:
-    just release
-    sudo install -D -m 755 target/release/kvist /usr/local/bin/kvist
-    sudo install -D -m 755 target/release/galla-runner /usr/local/bin/galla-runner
-    sudo install -D -m 755 target/release/sav-run /usr/local/bin/sav-run
-    sudo install -D -m 755 target/release/skott /usr/local/bin/skott
-    sudo install -D -m 755 target/release/skott-file-tool /usr/local/bin/skott-file-tool
+# Uses cargo metadata to detect the actual target directory (supports pooled targets)
+install: release
+    TARGET_DIR=$(cargo metadata --format-version 1 --no-deps | python3 -c "import sys, json; print(json.load(sys.stdin)['target_directory'])") && \
+    sudo install -D -m 755 "${TARGET_DIR}/release/kvist" /usr/local/bin/kvist && \
+    sudo install -D -m 755 "${TARGET_DIR}/release/galla-runner" /usr/local/bin/galla-runner && \
+    sudo install -D -m 755 "${TARGET_DIR}/release/sav-run" /usr/local/bin/sav-run && \
+    sudo install -D -m 755 "${TARGET_DIR}/release/skott" /usr/local/bin/skott && \
+    sudo install -D -m 755 "${TARGET_DIR}/release/skott-file-tool" /usr/local/bin/skott-file-tool
 
 # Print the target directory on the host
 target:
