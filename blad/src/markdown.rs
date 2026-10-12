@@ -18,7 +18,16 @@ use syntect::highlighting::{Color as SColor, FontStyle, Style as SStyle, Theme, 
 use syntect::parsing::SyntaxSet;
 
 /// Render markdown with syntax-highlighted code blocks to the terminal.
+/// If terminal_width is provided, tables will be wrapped to fit within that width.
 pub fn render_markdown(md: &str, w: &mut impl Write) -> std::io::Result<()> {
+    render_markdown_width(md, w, None)
+}
+
+pub fn render_markdown_width(
+    md: &str,
+    w: &mut impl Write,
+    terminal_width: Option<usize>,
+) -> std::io::Result<()> {
     let ss = SyntaxSet::load_defaults_newlines();
     let ts = ThemeSet::load_defaults();
     let theme = get_terminal_theme(&ts);
@@ -226,7 +235,7 @@ pub fn render_markdown(md: &str, w: &mut impl Write) -> std::io::Result<()> {
             }
             Event::End(TagEnd::Table) => {
                 in_table = false;
-                render_table(w, &table_rows)?;
+                render_table(w, &table_rows, terminal_width)?;
                 writeln!(w)?;
                 need_blank = true;
                 table_rows.clear();
@@ -316,15 +325,19 @@ pub fn render_markdown(md: &str, w: &mut impl Write) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Render a table with proper column alignment.
-fn render_table(w: &mut impl Write, rows: &[Vec<String>]) -> std::io::Result<()> {
+/// Render a table with proper column alignment and soft-wrapping.
+fn render_table(
+    w: &mut impl Write,
+    rows: &[Vec<String>],
+    terminal_width: Option<usize>,
+) -> std::io::Result<()> {
     if rows.is_empty() {
         return Ok(());
     }
 
     let num_cols = rows[0].len();
 
-    // Determine column widths
+    // Determine column widths based on content
     let mut col_widths = vec![0; num_cols];
     for row in rows {
         for (i, cell) in row.iter().enumerate() {
@@ -337,16 +350,62 @@ fn render_table(w: &mut impl Write, rows: &[Vec<String>]) -> std::io::Result<()>
         }
     }
 
-    // Render all rows with proper alignment
-    for (row_idx, row) in rows.iter().enumerate() {
-        for (i, cell) in row.iter().enumerate() {
-            if i > 0 {
-                write!(w, " | ")?;
+    // If terminal width is provided, constrain column widths to fit
+    if let Some(term_width) = terminal_width {
+        // Reserve space for separators (2 chars per separator: " | ")
+        let separator_space = (num_cols - 1) * 2;
+        let available_width = term_width.saturating_sub(separator_space);
+
+        // Distribute available width proportionally based on content width
+        let total_content_width: usize = col_widths.iter().sum();
+        if total_content_width > available_width {
+            for i in 0..num_cols {
+                // Give each column proportional share
+                let share = ((col_widths[i] as f64) / (total_content_width as f64))
+                    * available_width as f64;
+                col_widths[i] = share.ceil() as usize;
             }
-            let padded = pad_cell(cell, col_widths[i]);
-            write!(w, "{}", padded)?;
+            // Ensure minimum width of 3 for any column
+            for i in 0..num_cols {
+                if col_widths[i] < 3 {
+                    col_widths[i] = 3;
+                }
+            }
         }
-        writeln!(w)?;
+    }
+
+    // Render all rows with proper alignment and soft-wrapping
+    for (row_idx, row) in rows.iter().enumerate() {
+        // First, wrap all cells in this row
+        let mut wrapped_row: Vec<Vec<String>> = Vec::new();
+        for (i, cell) in row.iter().enumerate() {
+            let wrapped = wrap_cell(cell, col_widths[i]);
+            wrapped_row.push(wrapped);
+        }
+
+        // Find the maximum number of wrapped lines in this row
+        let max_lines = wrapped_row
+            .iter()
+            .map(|lines| lines.len())
+            .max()
+            .unwrap_or(1);
+
+        // Render each line of the wrapped row
+        for line_idx in 0..max_lines {
+            for (i, wrapped_lines) in wrapped_row.iter().enumerate() {
+                if i > 0 {
+                    write!(w, " | ")?;
+                }
+                if line_idx < wrapped_lines.len() {
+                    let padded = pad_cell(&wrapped_lines[line_idx], col_widths[i]);
+                    write!(w, "{}", padded)?;
+                } else {
+                    // Pad with spaces for shorter cells
+                    write!(w, "{}", " ".repeat(col_widths[i]))?;
+                }
+            }
+            writeln!(w)?;
+        }
 
         // Separator after header row
         if row_idx == 0 {
@@ -361,6 +420,34 @@ fn render_table(w: &mut impl Write, rows: &[Vec<String>]) -> std::io::Result<()>
     }
 
     Ok(())
+}
+
+/// Wrap a cell to fit within the given width.
+fn wrap_cell(cell: &str, width: usize) -> Vec<String> {
+    if cell.chars().count() <= width {
+        return vec![cell.to_string()];
+    }
+
+    let mut result = Vec::new();
+    let mut current = String::new();
+
+    for word in cell.split_whitespace() {
+        if current.is_empty() {
+            current = word.to_string();
+        } else if current.len() + 1 + word.len() <= width {
+            current.push(' ');
+            current.push_str(word);
+        } else {
+            result.push(current);
+            current = word.to_string();
+        }
+    }
+
+    if !current.is_empty() {
+        result.push(current);
+    }
+
+    result
 }
 
 /// Pad a cell to the right width.
