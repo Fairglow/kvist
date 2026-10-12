@@ -133,6 +133,9 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
     // Enter alternate screen
     enable_raw_mode().expect("failed to enable raw mode");
     execute!(io::stdout(), EnterAlternateScreen).expect("failed to enter alternate screen");
+    // Hide cursor
+    write!(io::stdout(), "\x1b[?25l").expect("failed to hide cursor");
+    io::stdout().flush().expect("failed to flush output");
 
     fn find_matches(lines: &[&str], query: &str) -> Vec<usize> {
         if query.is_empty() {
@@ -184,7 +187,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
         } else {
             "=== Blad Markdown Viewer ===".to_string()
         };
-        write!(io::stdout(), "{}\r\n", header).expect("failed to write header");
+        writeln!(io::stdout(), "{}", header).expect("failed to write header");
 
         // Render visible lines with search highlighting
         let visible = &lines[start..end];
@@ -201,7 +204,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
             }
 
             // Print line (terminal handles wrapping automatically)
-            write!(io::stdout(), "{}\r\n", line).expect("failed to write line");
+            writeln!(io::stdout(), "{}", line).expect("failed to write line");
 
             execute!(io::stdout(), crossterm::style::ResetColor).expect("failed to reset colors");
 
@@ -406,6 +409,9 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
         }
     }
 
+    // Show cursor before leaving
+    write!(io::stdout(), "\x1b[?25h").expect("failed to show cursor");
+    io::stdout().flush().expect("failed to flush output");
     disable_raw_mode().expect("failed to disable raw mode");
     execute!(io::stdout(), LeaveAlternateScreen).expect("failed to leave alternate screen");
 }

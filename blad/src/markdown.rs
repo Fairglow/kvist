@@ -52,7 +52,6 @@ pub fn render_markdown_width(
     let mut italic = false;
     let mut strikethrough = false;
 
-    let mut list_item_count = 0;
     let mut list_level: usize = 0;
 
     let mut in_table = false;
@@ -211,14 +210,12 @@ pub fn render_markdown_width(
                 writeln!(w)?;
             }
             Event::Start(Tag::Item) => {
-                list_item_count += 1;
-                if list_item_count > 1 {
-                    writeln!(w)?;
-                }
                 let indent = "  ".repeat(list_level - 1);
                 write!(w, "{}\x1b[33m•\x1b[0m ", indent)?;
             }
-            Event::End(TagEnd::Item) => {}
+            Event::End(TagEnd::Item) => {
+                writeln!(w)?;
+            }
             Event::Rule => {
                 if !at_start {
                     writeln!(w)?;
@@ -509,13 +506,24 @@ fn render_table(
             writeln!(w)?;
         }
 
-        // Separator after header row
+        // Separator after header row (dashes)
         if row_idx == 0 {
             for (i, &width) in col_widths.iter().enumerate() {
                 if i > 0 {
                     write!(w, " | ")?;
                 }
                 write!(w, "{}", "-".repeat(width))?;
+            }
+            writeln!(w)?;
+        }
+
+        // Separator after each row (thin line) to distinguish multi-line cells
+        if row_idx < rows.len() - 1 {
+            for (i, &width) in col_widths.iter().enumerate() {
+                if i > 0 {
+                    write!(w, " | ")?;
+                }
+                write!(w, "{}", "─".repeat(width))?;
             }
             writeln!(w)?;
         }
