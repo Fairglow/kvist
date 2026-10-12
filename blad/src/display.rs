@@ -6,7 +6,7 @@
 
 use std::io::{self, Write};
 
-use crate::markdown::render_markdown;
+use crate::markdown::{render_markdown, render_markdown_width};
 use crate::session::{Message, Session, load_messages};
 
 /// Show a completed session transcript.
@@ -76,6 +76,17 @@ pub fn view_markdown_file(path: Option<&std::path::Path>, content: &str) {
     interactive_viewer(path, &rendered);
 }
 
+/// View a markdown file with terminal width awareness.
+pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, terminal_width: usize) {
+    // Render markdown to a buffer with terminal width awareness
+    let mut output = Vec::new();
+    render_markdown_width(content, &mut output, Some(terminal_width)).unwrap();
+    let rendered = String::from_utf8(output).unwrap();
+
+    // Display interactively with navigation
+    interactive_viewer(path, &rendered);
+}
+
 /// Dump a standalone markdown file to plain text (no ANSI).
 pub fn dump_markdown(content: &str) {
     // Render markdown to a buffer, output directly
@@ -94,15 +105,18 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
         enable_raw_mode,
     };
 
-    // Split content into lines
-    let lines: Vec<&str> = content.lines().collect();
-    let total_lines = lines.len();
-
     // Terminal dimensions
     let (cols, rows) = match crossterm::terminal::size() {
         Ok(s) => s,
         Err(_) => return,
     };
+
+    // Re-render with terminal width awareness for proper table wrapping
+    let mut output = Vec::new();
+    render_markdown_width(content, &mut output, Some(cols as usize)).unwrap();
+    let rendered = String::from_utf8(output).unwrap();
+    let lines: Vec<&str> = rendered.lines().collect();
+    let total_lines = lines.len();
 
     let mut scroll_offset = 0;
     let visible_lines = (rows - 2) as usize; // Reserve 2 rows for header/footer
