@@ -2,107 +2,153 @@
 
 ## Version
 
-`blad.contracts/v1`
+`blad.cli/v1`
 
-## Artifact Layout
+## CLI Interface
 
-```
-.blad/sessions/{session-id}/
-├── manifest.json
-└── messages/
-    ├── 000001.md
-    ├── 000002.md
-    └── ...
-```
-
-## Session Identifier
-
-`{utc-timestamp}-{pid}-{counter}`
-
-- `{utc-timestamp}`: Fixed-width UTC microsecond stamp
-- `{pid}`: Process ID
-- `{counter}`: Per-process sequence counter
-
-Example: `20261009T120000Z-12345-0`
-
-## Manifest Schema (`manifest.json`)
-
-```json
-{
-    "schema_version": 1,
-    "session_id": "string",
-    "created_at": "RFC3339 timestamp",
-    "status": "streaming | completed | cancelled | failed",
-    "entry_count": 0,
-    "entries": [
-        {
-            "id": "string",
-            "sequence": 0,
-            "kind": "user | assistant | tool_dispatch | tool_result | system",
-            "disposition": null | "final | interim",
-            "media_type": "text/markdown",
-            "path": "messages/000001.md",
-            "bytes": 0,
-            "complete": true,
-            "truncated": false
-        }
-    ]
-}
-```
-
-## Message File Format
-
-- Path: `messages/{sequence:06}.md`
-- Content: Markdown text
-- Encoding: UTF-8
-- Line endings: Unix (LF)
-
-## Continuation Context
-
-When continuing a session, the new session receives:
+### Commands
 
 ```
-Session continuation context:
-- Original session: {session-id}
-- Original path: {path}
-- Original size: {token-count} tokens
-- Imported: {user-prompt-count} user prompts, {assistant-answer-count} assistant answers
+blad [OPTIONS] <TARGET>
+blad [OPTIONS] <COMMAND> [ARGS]
 ```
 
-## CLI Commands
+### Options
 
-### `blad new`
+| Option             | Description                                                      |
+| ------------------ | ---------------------------------------------------------------- |
+| `--log-dir <PATH>` | Directory containing skott session runs (default: `.skott/runs`) |
+| `--dump`           | Output plain text without interactive viewer                     |
 
-```
-blad new [OPTIONS]
-    --model <id>          Model identifier to use
-    --effort <level>      Thinking effort level
-    --cwd <path>          Working directory for session
-    --no-logs             Skip writing durable artifacts
-```
+### Commands
 
-### `blad continue`
+#### `blad list [--limit <n>]`
 
-```
-blad continue <session-id> [OPTIONS]
-    --model <id>          Model identifier to use
-    --effort <level>      Thinking effort level
+List recent skott sessions with metadata.
+
+```bash
+blad list
+blad list --limit 5
 ```
 
-### `blad list`
+#### `blad show <session-id>`
 
-```
-blad list [--limit <n>]
-```
+View a completed session transcript interactively.
 
-### `blad show`
-
-```
-blad show <session-id> [--message <n>]
+```bash
+blad show 20261012T120000Z-12345
+blad show /path/to/session-dir
 ```
 
-### `blad export`
+#### `blad stream <session-id>`
+
+Follow a session transcript (same as show, but indicates live/active sessions).
+
+```bash
+blad stream 20261012T120000Z-12345
+```
+
+#### `blad view <file.md>`
+
+View a standalone Markdown file interactively.
+
+```bash
+blad view README.md
+blad view /path/to/document.md
+```
+
+#### `blad export <session-id> [OUTPUT.md]`
+
+Export a session to a combined Markdown document.
+
+```bash
+blad export 20261012T120000Z-12345
+blad export 20261012T120000Z-12345 --output transcript.md
+```
+
+#### Smart Shortcut
+
+```bash
+# Treats .md files as file paths
+blad README.md
+
+# Treats session directory paths
+blad /path/to/session-dir
+
+# Treats session IDs (exact or prefix match)
+blad 20261012T120000
+```
+
+## Keyboard Shortcuts (Interactive Viewer)
+
+### Navigation
+
+| Key              | Action               |
+| ---------------- | -------------------- |
+| `↑` / `k`        | Scroll up one line   |
+| `↓` / `j`        | Scroll down one line |
+| `PageUp` / `u`   | Scroll up one page   |
+| `PageDown` / `d` | Scroll down one page |
+| `g` / `H`        | Go to top            |
+| `G` / `L`        | Go to bottom         |
+| Mouse wheel      | Scroll               |
+
+### Search
+
+| Key       | Action               |
+| --------- | -------------------- |
+| `/`       | Enter search mode    |
+| Type text | Search query         |
+| `Enter`   | Exit search mode     |
+| `n`       | Next match           |
+| `p`       | Previous match       |
+| `Esc`     | Exit search / cancel |
+
+### Other
+
+| Key         | Action                       |
+| ----------- | ---------------------------- |
+| `e`         | Edit file (requires $EDITOR) |
+| `q` / `Esc` | Quit viewer                  |
+
+## Input/Output Format
+
+### Session Format (Input)
+
+Blad reads skott's structured session format from `.skott/runs/`:
 
 ```
-blad export <session-id> [OUTPUT.md]
+.skott/runs/
+└── {session-id}/
+    ├── session.json    # Manifest with metadata
+    └── messages/
+        ├── 000001.md
+        ├── 000002.md
+        └── ...
 ```
+
+The session manifest (`session.json`) contains:
+
+- `session_id`: Unique session identifier
+- `model`: Model identifier used
+- `created_at`: ISO 8601 timestamp
+- `status`: "completed" or other status
+- `entries`: Array of message entries with sequence, kind, path, etc.
+
+### Markdown Rendering (Output)
+
+Blad renders Markdown to ANSI-colored terminal output with:
+
+- Syntax-highlighted code blocks (via syntect)
+- Bold, italic, strikethrough formatting
+- Table rendering with column alignment
+- GFM alert blockquotes with color-coded labels
+- Footnote references and definitions
+- Math expressions (inline and display)
+
+## Exit Codes
+
+| Code | Meaning                                   |
+| ---- | ----------------------------------------- |
+| 0    | Success                                   |
+| 1    | Error (file not found, parse error, etc.) |

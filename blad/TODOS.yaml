@@ -8,61 +8,79 @@
   title: "Blad CLI framework"
   requirements: []
   status: done
-  description: "Implement CLI parsing for new, continue, list, show, export commands"
-
-- id: blad-session-manager
-  title: "Blad session manager"
-  requirements: [R-011, R-012, R-023]
-  status: done
-  description: "Implement session directory creation, manifest writing, atomic updates"
-
-- id: blad-transcript-writer
-  title: "Blad transcript writer"
-  requirements: [R-013, R-014, R-015, R-024, R-026]
-  status: done
-  description: "Implement streaming message writes with truncation state management"
-
-- id: blad-interactive-session
-  title: "Blad interactive session"
-  requirements: [R-001, R-006, R-007, R-008, R-009, R-010]
-  status: done
-  description: "Implement interactive TUI with live streaming and navigation"
-
-- id: blad-session-continuation
-  title: "Blad session continuation"
-  requirements: [R-002, R-016, R-017, R-018, R-019]
-  status: done
-  description: "Implement continue command with context import"
+  description: "Implement CLI parsing for list, show, stream, view, export commands"
 
 - id: blad-session-listing
   title: "Blad session listing"
-  requirements: [R-003]
+  requirements: [R-001]
   status: done
   description: "Implement list command with metadata"
 
 - id: blad-session-display
   title: "Blad session display"
-  requirements: [R-004]
+  requirements: [R-002]
   status: done
-  description: "Implement show command with message navigation"
+  description: "Implement show command with markdown rendering"
 
-- id: blad-session-export
+- id: blad-streaming
+  title: "Blad session streaming"
+  requirements: [R-003]
+  status: done
+  description: "Implement stream command for active sessions"
+
+- id: blad-export
   title: "Blad session export"
-  requirements: [R-005, R-021]
+  requirements: [R-004]
   status: done
   description: "Implement export command producing combined Markdown"
 
-- id: blad-format-compliance
-  title: "Blad format compliance"
-  requirements: [R-020, R-022]
+- id: blad-file-viewing
+  title: "Blad file viewing"
+  requirements: [R-006, R-007]
   status: done
-  description: "Verify new format only, manifest schema version"
+  description: "Implement view command with interactive viewer and dump mode"
 
-- id: blad-filesystem-safety
-  title: "Blad filesystem safety"
-  requirements: [R-025, R-027]
+- id: blad-markdown-rendering
+  title: "Blad markdown rendering"
+  requirements: [R-014, R-015, R-016]
   status: done
-  description: "Validate paths, handle symlinks, report I/O errors"
+  description: "Implement CommonMark + GFM rendering with syntax highlighting"
+
+- id: blad-interactive-viewer
+  title: "Blad interactive viewer"
+  requirements: [R-009, R-010, R-012, R-013]
+  status: done
+  description: "Implement interactive viewer with navigation and status bar"
+
+- id: blad-search
+  title: "Blad search functionality"
+  requirements: [R-011]
+  status: done
+  description: "Implement search with / key, highlight, match navigation"
+
+- id: blad-edit-mode
+  title: "Blad edit mode"
+  requirements: [R-008]
+  status: done
+  description: "Implement edit mode with e key to open in $EDITOR"
+
+- id: blad-mermaid
+  title: "Blad mermaid support"
+  requirements: [R-017]
+  status: done
+  description: "Detect and attempt to render mermaid diagrams via mmdc"
+
+- id: blad-math
+  title: "Blad math support"
+  requirements: [R-018]
+  status: done
+  description: "Render inline and display math expressions"
+
+- id: blad-documentation
+  title: "Blad documentation"
+  requirements: []
+  status: done
+  description: "Update REQUIREMENTS.md, CONTRACT.md, DESIGN.md, IMPL.md"
 
 - id: blad-write_tests
   title: "Write tests"

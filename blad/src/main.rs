@@ -77,7 +77,10 @@ fn main() {
                         if cli.dump {
                             display::dump_markdown(&content);
                         } else {
-                            display::view_markdown(&content);
+                            display::view_markdown_file(
+                                Some(&std::path::PathBuf::from(target)),
+                                &content,
+                            );
                         }
                     }
                     Err(e) => eprintln!("Error reading file: {}", e),
@@ -170,7 +173,7 @@ fn main() {
                 if cli.dump {
                     display::dump_markdown(&content);
                 } else {
-                    display::view_markdown(&content);
+                    display::view_markdown_file(Some(&path), &content);
                 }
             }
             Err(e) => eprintln!("Error reading file: {}", e),

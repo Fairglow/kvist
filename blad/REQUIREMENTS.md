@@ -2,107 +2,93 @@
 
 ## Purpose
 
-Blad provides first-class, structured, Markdown-native transcripts for agent
-sessions. Each session produces a durable directory of Markdown message bodies
-and a JSON manifest, replacing the legacy flat JSONL+plain-text log pair with a
-hierarchy that supports streaming updates, selective re-rendering, navigation,
-and context import for session continuation.
+Blad is a first-class terminal Markdown viewer that reads and displays
+skott session transcripts and standalone Markdown files with rich rendering,
+interactive navigation, search, and optional edit support.
 
 ## Functional Requirements
 
-### Session Lifecycle
+### Session Viewing
 
-1. **R-001 Create session:** Users can start a new interactive session that
-   streams assistant output to the terminal in real time and writes durable
-   artifacts under the `.blad/sessions/` directory.
-2. **R-002 Continue session:** Users can select a past session from the history
-   list to "continue as a new session." The new session receives a summarized
-   context import (user prompts and final assistant answers only), the original
-   session identifier and path, and the original size in tokens.
-3. **R-003 List sessions:** Users can list all past sessions with their
-   metadata (ID, timestamp, status, size).
-4. **R-004 Show session:** Users can view the transcript of a specific session,
-   either replaying the full transcript or jumping to a specific message.
-5. **R-005 Export session:** Users can export a session as a single combined
-   Markdown document for sharing or archival.
+1. **R-001 List sessions:** Users can list recent skott sessions with metadata
+   (ID, model, message count, status).
+2. **R-002 Show session:** Users can view a completed session transcript with
+   full Markdown rendering and syntax highlighting.
+3. **R-003 Stream session:** Users can follow a session transcript (live or
+   completed) with the same rendering as show.
+4. **R-004 Export session:** Users can export a session to a combined Markdown
+   document for sharing or archival.
+5. **R-005 Load by path:** Users can load a session by its full directory path
+   as well as by ID or ID prefix.
 
-### Live Streaming and Navigation
+### File Viewing
 
-6. **R-006 Streaming updates:** Assistant output is streamed to the terminal as
-   it arrives. The display updates live, showing partial content while the
-   model is generating.
-7. **R-007 Truncation indicator:** When a block is very long and has not
-   completed streaming, the display shows a truncation indicator (e.g., "…
-   generating") at the cutoff point so the user knows more is coming.
-8. **R-008 Page navigation:** During a session, users can press Page Up and
-   Page Down to scroll through the transcript history while the session is
-   still active.
-9. **R-009 Enter navigation mode:** Users can enter a dedicated navigation mode
-   (e.g., pressing Esc or Ctrl+Home) to scroll through the complete transcript
-   even while streaming continues.
-10. **R-010 Return to live:** From navigation mode, users can return to the
-    live bottom of the transcript (e.g., pressing Ctrl+End or Enter).
+6. **R-006 View file:** Users can view any Markdown file with interactive
+   navigation (up/down arrows, page up/down, scroll wheel).
+7. **R-007 Dump mode:** Users can output rendered content as plain text
+   (no interactive viewer) using `--dump`.
+8. **R-008 Edit mode:** Users can press `e` in the viewer to open the file
+   in their configured editor and re-render after saving.
 
-### Artifact Structure
+### Interactive Viewer
 
-11. **R-011 Session directory:** Each session creates a dedicated directory
-    under `.blad/sessions/{session-id}/`.
-12. **R-012 Manifest:** Each session directory contains a `manifest.json` file
-    that indexes all messages with sequence numbers, roles, paths, sizes, and
-    completion status.
-13. **R-013 Message bodies:** Each message is stored as a separate Markdown
-    file under `messages/{seq:06}.md` within the session directory.
-14. **R-014 Streaming writes:** Messages are written as they stream in; the
-    file grows with each chunk and is marked complete when streaming ends.
-15. **R-015 Truncation state:** The manifest records whether each entry is
-    complete or still being streamed, enabling clients to show truncation
-    indicators.
+9. **R-009 Scroll navigation:** Users can navigate with up/down arrows,
+   Page Up/Down, `g`/`G` for top/bottom, `k`/`j` (vim-style), `u`/`d`
+   (half-page).
+10. **R-010 Mouse wheel:** Users can scroll with mouse wheel in supporting
+    terminals.
+11. **R-011 Search:** Users can press `/` to search, type a query, navigate
+    between matches with `n`/`p`, and see match count in the footer.
+12. **R-012 Status bar:** The viewer shows a footer with scroll percentage
+    and position (TOP/BOTTOM/SCROLL).
+13. **R-013 Scrollbar:** The viewer shows a scrollbar on the right side for
+    long documents.
 
-### Continuation Context Import
+### Markdown Rendering
 
-16. **R-016 Summarized import:** When continuing a session, only user prompts
-    and final assistant answers (not tool calls or intermediate steps) are
-    imported into the new session context.
-17. **R-017 Size reporting:** The continuation context includes the original
-    session's token count so the model can gauge how much history is available
-    without reading everything.
-18. **R-018 Original reference:** The continuation context includes a link
-    (session ID and path) to the original session for lookup.
-19. **R-019 New session:** Continuation creates a new session with a new ID,
-    not an append to the old session.
+14. **R-014 CommonMark:** Support full CommonMark spec.
+15. **R-015 GitHub Flavored Markdown:** Support GFM extensions including
+    tables, strikethrough, task lists, autolinks, footnotes, superscript,
+    subscript, and alert blockquotes ([!NOTE], [!TIP], etc.).
+16. **R-016 Syntax highlighting:** Highlight fenced code blocks using
+    syntect (50+ languages).
+17. **R-017 Mermaid support:** Detect mermaid fenced code blocks and attempt
+    to render using mmdc, with fallback to plain text display.
+18. **R-018 Math support:** Render inline and display math (LaTeX) with
+    distinct styling.
 
-### Format
+### Smart Routing
 
-20. **R-020 New format only:** Blad supports only the new structured format.
-    Legacy JSONL+plain-text log format is not recognized or migrated.
-21. **R-021 Markdown profile:** Message bodies use a GFM subset with fenced
-    code blocks, lists, tables, and inline formatting.
-22. **R-022 Manifest schema version:** The manifest declares a `schema_version`
-    field for future compatibility.
+19. **R-019 Smart shortcut:** `blad <target>` tries to interpret the target
+    as a file path, session path, or session ID automatically.
 
 ## Non-Functional Requirements
 
-23. **R-023 Deterministic IDs:** Session IDs use a timestamp plus a unique
-    suffix (PID + counter) to avoid collisions.
-24. **R-024 Atomic writes:** Message files are written atomically where
-    possible; the manifest is updated after each message completion.
-25. **R-025 Error resilience:** I/O errors are reported clearly; a failure to
-    write an artifact does not crash the interactive session.
-26. **R-026 Performance:** Live updates must not block on disk I/O; writes are
-    buffered and flushed periodically.
-27. **R-027 Filesystem safety:** All paths are validated; symlinks are not
+20. **R-020 Performance:** Rendering must be fast, even for large session
+    transcripts (thousands of messages).
+21. **R-021 Error resilience:** I/O errors are reported clearly; failures
+    to write artifacts do not crash the interactive session.
+22. **R-022 Deterministic:** Session listing is deterministic (sorted by
+    creation time, newest first).
+23. **R-023 Filesystem safety:** All paths are validated; symlinks are not
     followed when reading session artifacts.
+24. **R-024 No network:** All operations are local; no network access
+    required.
+25. **R-025 Platform:** Linux only (uses crossterm for terminal interaction).
 
 ## Constraints
 
-28. **C-001 Dependencies:** Use existing workspace dependencies where
-    possible. Avoid adding new dependencies for this component.
-29. **C-002 Platform:** Linux only for now.
-30. **C-003 No network:** All operations are local; no network access required.
+26. **C-001 Dependencies:** Use existing workspace dependencies where
+    possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).
+27. **C-002 No new state format:** Blad reads skott's structured session
+    format; it does not define its own session storage format.
+28. **C-003 Headless:** No cloud services, telemetry, or runtime daemon
+    required for core commands.
 
 ## Out of Scope
 
-- Backward compatibility with legacy log format
+- Creating or continuing sessions (that is skott's responsibility)
 - Multi-user concurrent editing of sessions
 - Encryption of session files
 - Automatic cleanup or retention policies
+- Backward compatibility with legacy log formats

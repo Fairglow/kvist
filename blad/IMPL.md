@@ -2,70 +2,86 @@
 
 ## Overview
 
-Blad is a first-class Markdown-native transcript system for agent sessions. Each session produces a durable directory of Markdown message bodies and a JSON manifest, enabling streaming updates, selective re-rendering, navigation, and context import for session continuation.
+Blad is a first-class terminal Markdown viewer that reads skott session
+transcripts and standalone Markdown files. It provides interactive viewing
+with search, navigation, and optional edit support.
 
 ## Implementation Details
 
-### Session Manager (`session_manager.rs`)
+### CLI (`main.rs`)
 
-The `SessionManager` struct manages the lifecycle of a session:
-- Generates unique session IDs using UTC timestamp, process ID, and per-process counter
-- Creates session directories with `manifest.json` and `messages/` subdirectory
-- Writes manifests atomically using `serde_json`
-- Tracks message entries with sequence numbers, roles, paths, sizes, and completion status
+The CLI uses clap with a subcommand pattern. Commands are:
 
-### Transcript Writer (`transcript_writer.rs`)
+- `list` - list recent sessions
+- `show` - view a completed session
+- `stream` - follow a session transcript
+- `view` - view a standalone markdown file
+- `export` - export session to combined markdown
 
-The `TranscriptWriter` coordinates streaming writes:
-- Buffers streaming chunks in memory
-- Writes to message files as they arrive (incremental updates)
-- Updates manifest after each message completion
-- Manages truncation state (`complete` and `truncated` fields)
+A smart shortcut allows `blad <target>` to automatically interpret the target
+as a file path, session path, or session ID.
 
-### Interactive Session (`interactive.rs`)
+### Session Management (`session.rs`)
 
-The interactive session provides:
-- Live streaming of assistant output
-- Session persistence via `SessionManager` and `TranscriptWriter`
-- Basic input/output loop (user prompts, assistant responses)
+- `list_sessions`: Reads `.skott/runs/` directory, loads session manifests,
+  sorts by creation time (newest first), returns up to `limit` sessions.
+- `load_session`: Matches session by ID (exact first, then prefix match).
+- `load_session_by_path`: Loads session from a given directory path.
+- `load_messages`: Reads all message files referenced in the session manifest.
 
-### Session Continuation (`continuation.rs`)
+Session data is represented by the `Session` struct with fields: id, path,
+manifest (JSON Value), model, completed, created_at, message_count.
 
-The `import_session_context` function:
-- Loads an original session's manifest and message files
-- Extracts only user prompts and final assistant answers
-- Estimates token count (1 token per 4 bytes)
-- Constructs a continuation context string with original session reference
+### Display (`display.rs`)
 
-### CLI (`cli.rs`)
+- `show_session`: Prints session header, then renders each message with its
+  kind label and markdown content.
+- `dump_session`: Same as show but without ANSI formatting.
+- `stream_session`: Same as show, but notes if session is still active.
+- `view_markdown`/`view_markdown_file`: Renders markdown and opens interactive viewer.
+- `interactive_viewer`: Full-screen viewer with:
+  - Scroll navigation (up/down, page up/down, g/G, k/j, u/d)
+  - Mouse wheel support
+  - Search mode (`/` key) with highlight and match navigation (n/p)
+  - Status bar with scroll position and search info
+  - Scrollbar on right side
+  - Edit mode (`e` key) opens file in $EDITOR
+- `export_session`: Generates combined markdown document with all messages.
 
-Commands implemented:
-- `blad new` - Start new interactive session
-- `blad continue <session-id>` - Continue previous session as new
-- `blad list` - List past sessions with metadata
-- `blad show <session-id>` - View session transcript
-- `blad export <session-id>` - Export session as combined Markdown
+### Markdown Rendering (`markdown.rs`)
 
-## Design Decisions
+Uses `pulldown-cmark` parser with GFM extensions enabled:
 
-1. **Manifest as index:** Manifest is an index pointing to message files, not the source of truth for content.
-2. **Streaming with truncation:** Messages are written incrementally; manifest tracks completion status.
-3. **Continuation as new session:** Creates fresh session with synthetic system message containing context import.
-4. **Reuse sav infrastructure:** Uses `sav::ReasoningEffort` and other sav types where appropriate.
+- ENABLE_TABLES
+- ENABLE_STRIKETHROUGH
+- ENABLE_TASKLISTS
+- ENABLE_HEADING_ATTRIBUTES
+- ENABLE_FOOTNOTES
+- ENABLE_SUPERSCRIPT
+- ENABLE_SUBSCRIPT
+- ENABLE_GFM (alert blockquotes)
 
-## Dependencies
+Syntax highlighting uses `syntect` with the base16-ocean.dark theme. Code
+blocks are highlighted per-line with ANSI escape sequences.
 
-- `sav` - Provider-neutral prompt acquisition and model transport
-- `clap` - CLI argument parsing
-- `serde` / `serde_json` - JSON serialization
-- `chrono` - Timestamp formatting
-- `crossterm` - Terminal interaction (for future TUI enhancements)
-- `tempfile` - Temporary directory management
+Special rendering:
+
+- GFM alert blockquotes: Color-coded labels ([NOTE], [TIP], [IMPORTANT],
+  [WARNING], [CAUTION])
+- Footnotes: Blue bracketed references
+- Math: Purple-colored inline and display math
+- Tables: Manual alignment with column width calculation
+- Mermaid: Attempts to render via mmdc subprocess, falls back to plain text
+
+## Error Handling
+
+- All filesystem operations use match/unwrap_or rather than panic.
+- Parser errors are handled gracefully (fallback to plain text).
+- Terminal operations use expect() with clear messages (raw mode, alternate
+  screen are fundamental to the viewer).
+- Editor subprocess errors are reported, not fatal.
 
 ## Testing
 
-Integration tests verify:
-- Session creation and directory structure
-- Message addition and file writing
-- Manifest updates
-- Session completion
+- 13 unit tests in markdown.rs covering all rendering features
+- 4 integration tests in tests/integration.rs covering session operations
