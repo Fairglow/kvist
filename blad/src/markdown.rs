@@ -429,9 +429,8 @@ fn render_table(
                         remaining = remaining.saturating_sub(min_width);
                         any_fitted = true;
                     } else if fitted_width >= col_widths[i] {
-                        // Column fits at natural width
+                        // Column fits at natural width - keep it
                         fitted[i] = true;
-                        col_widths[i] = col_widths[i];
                         remaining = remaining.saturating_sub(col_widths[i]);
                         any_fitted = true;
                     } else {
