@@ -114,9 +114,10 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
     let mut search_matches: Vec<usize> = Vec::new();
     let mut search_index = 0;
 
-    // Enter alternate screen
+    // Enter alternate screen and hide cursor
     enable_raw_mode().expect("failed to enable raw mode");
     execute!(io::stdout(), EnterAlternateScreen).expect("failed to enter alternate screen");
+    execute!(io::stdout(), crossterm::cursor::Hide).expect("failed to hide cursor");
 
     fn find_matches(lines: &[&str], query: &str) -> Vec<usize> {
         if query.is_empty() {
@@ -161,7 +162,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, 0)).expect("failed to move cursor");
 
         // Header
-        let header = if search_mode {
+        let header = if search_mode || (!search_query.is_empty() && !search_matches.is_empty()) {
             format!("=== Search: {} ===", search_query)
         } else if let Some(p) = path {
             format!("=== Blad: {} ===", p.display())
@@ -321,7 +322,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
                             scroll_offset = scroll_offset.saturating_sub(1);
                         }
                         KeyCode::Down | KeyCode::Char('j') => {
-                            if scroll_offset < total_lines.saturating_sub(1) {
+                            if scroll_offset < total_lines.saturating_sub(visible_lines) {
                                 scroll_offset += 1;
                             }
                         }
@@ -329,14 +330,14 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
                             scroll_offset = scroll_offset.saturating_sub(visible_lines);
                         }
                         KeyCode::PageDown | KeyCode::Char('d') => {
-                            scroll_offset =
-                                (scroll_offset + visible_lines).min(total_lines.saturating_sub(1));
+                            scroll_offset = (scroll_offset + visible_lines)
+                                .min(total_lines.saturating_sub(visible_lines));
                         }
                         KeyCode::Char('g') | KeyCode::Char('H') => {
                             scroll_offset = 0;
                         }
                         KeyCode::Char('G') | KeyCode::Char('L') => {
-                            scroll_offset = total_lines.saturating_sub(1);
+                            scroll_offset = total_lines.saturating_sub(visible_lines);
                         }
                         KeyCode::Char('/') => {
                             search_mode = true;
@@ -378,7 +379,9 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
                 MouseEventKind::ScrollUp => {
                     scroll_offset = scroll_offset.saturating_sub(1);
                 }
-                MouseEventKind::ScrollDown if scroll_offset < total_lines.saturating_sub(1) => {
+                MouseEventKind::ScrollDown
+                    if scroll_offset < total_lines.saturating_sub(visible_lines) =>
+                {
                     scroll_offset += 1;
                 }
                 _ => {}
@@ -388,6 +391,8 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
         }
     }
 
+    // Show cursor and exit alternate screen
+    execute!(io::stdout(), crossterm::cursor::Show).expect("failed to show cursor");
     disable_raw_mode().expect("failed to disable raw mode");
     execute!(io::stdout(), LeaveAlternateScreen).expect("failed to leave alternate screen");
 }
