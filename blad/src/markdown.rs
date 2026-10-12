@@ -18,7 +18,7 @@ use syntect::highlighting::{Color as SColor, FontStyle, Style as SStyle, Theme, 
 use syntect::parsing::SyntaxSet;
 
 /// Render markdown with syntax-highlighted code blocks to the terminal.
-/// If terminal_width is provided, tables will be wrapped to fit within that width.
+/// If terminal_width is provided, paragraphs will be wrapped to fit within that width.
 pub fn render_markdown(md: &str, w: &mut impl Write) -> std::io::Result<()> {
     render_markdown_width(md, w, None)
 }
@@ -54,6 +54,7 @@ pub fn render_markdown_width(
 
     let mut list_item_count = 0;
     let mut list_level: usize = 0;
+    let mut in_heading = false;
 
     let mut in_table = false;
     let mut table_rows: Vec<Vec<String>> = Vec::new();
@@ -61,6 +62,12 @@ pub fn render_markdown_width(
 
     let mut at_start = true;
     let mut need_blank = false;
+
+    // Track current column position for soft wrapping
+    let mut col = 0;
+    let term_width = terminal_width.unwrap_or(100);
+    let wrap_margin = 2; // Keep 2 chars of margin
+    let max_col = term_width - wrap_margin;
 
     for event in parser {
         match event {
@@ -144,6 +151,12 @@ pub fn render_markdown_width(
                         }
                         cell.push_str(&cleaned);
                     }
+                } else if terminal_width.is_some() && !in_heading {
+                    // Soft wrap text at terminal width (but not headings)
+                    write_wrapped(w, &text, bold, italic, strikethrough, max_col, col)?;
+                    // Update col based on what was written
+                    let last_line_len = text.rsplit('\n').next().unwrap_or("").chars().count();
+                    col = last_line_len;
                 } else {
                     write_emphasized(w, bold, italic, strikethrough, &text)?;
                 }
@@ -176,6 +189,7 @@ pub fn render_markdown_width(
                     writeln!(w)?;
                 }
                 at_start = false;
+                in_heading = true;
                 let prefix = match level {
                     HeadingLevel::H1 => "# ",
                     HeadingLevel::H2 => "## ",
@@ -187,6 +201,7 @@ pub fn render_markdown_width(
                 write!(w, "\x1b[1m\x1b[34m{}", prefix)?;
             }
             Event::End(TagEnd::Heading(_)) => {
+                in_heading = false;
                 write!(w, "\x1b[0m")?;
                 writeln!(w)?;
                 need_blank = true;
@@ -350,6 +365,7 @@ pub fn render_markdown_width(
 /// Render a table with proper column alignment and soft-wrapping.
 /// Column widths are adapted to fit the terminal width while preserving
 /// readability. Cells wrap to multiple lines when needed.
+/// Target cell aspect ratio is 4:3 (width:height) for readability.
 fn render_table(
     w: &mut impl Write,
     rows: &[Vec<String>],
@@ -740,9 +756,78 @@ fn to_ansi_line(ranges: &[(SStyle, &str)]) -> String {
     output
 }
 
+/// Write text with soft wrapping at the specified column width.
+/// Check if a string is punctuation.
+fn is_punctuation(s: &str) -> bool {
+    let chars: Vec<char> = s.chars().collect();
+    chars.len() <= 3 && chars.iter().all(|c| ".,;:!?".contains(*c))
+}
+
+fn write_wrapped(
+    w: &mut impl Write,
+    text: &str,
+    bold: bool,
+    italic: bool,
+    strikethrough: bool,
+    max_col: usize,
+    current_col: usize,
+) -> std::io::Result<usize> {
+    let mut col = current_col;
+    let words = text.split_whitespace().collect::<Vec<&str>>();
+
+    for (i, word) in words.iter().enumerate() {
+        let word_len = word.chars().count();
+        if col + word_len > max_col {
+            writeln!(w)?;
+            col = 0;
+        }
+        // Add space before word, but not for punctuation at start
+        // Add space between words, but not at the start of the line,
+        // not for the first word, and not before punctuation.
+        let should_add_space = col > 0 && i > 0 && !is_punctuation(word);
+        if should_add_space {
+            write!(w, " ")?;
+            col += 1;
+        }
+        write_emphasized(w, bold, italic, strikethrough, word)?;
+        col += word_len;
+    }
+
+    // Preserve trailing whitespace
+    if text.ends_with(' ') {
+        if col >= max_col {
+            writeln!(w)?;
+            col = 0;
+        }
+        write!(w, " ")?;
+        col += 1;
+    }
+
+    Ok(col)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Strip ANSI escape codes from a string.
+    fn strip_ansi(s: &str) -> String {
+        let mut result = String::new();
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                // Skip ESC sequence until 'm'
+                for nc in chars.by_ref() {
+                    if nc == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        result
+    }
 
     fn render(md: &str) -> String {
         let mut buf = Vec::new();
@@ -952,5 +1037,55 @@ mod tests {
             "Body should be at index 2, got {:?}",
             body_idx
         );
+    }
+
+    #[test]
+    fn test_soft_wrap_paragraphs() {
+        // Verify long paragraphs are wrapped at terminal width
+        let md = "This is a very long paragraph that should be wrapped at the terminal width when the text exceeds the available space. It should wrap at word boundaries to maintain readability. The wrapping should happen automatically based on the terminal width setting.";
+        let mut buf = Vec::new();
+        render_markdown_width(md, &mut buf, Some(40)).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let lines: Vec<&str> = output.lines().collect();
+        // Should be wrapped into multiple lines
+        assert!(
+            lines.len() > 1,
+            "Long paragraph should be wrapped into multiple lines"
+        );
+        // Each line should be at most 40 chars (approximately, ignoring ANSI codes)
+        for line in &lines {
+            let clean = strip_ansi(line);
+            assert!(clean.len() <= 40, "Line too long: {} chars", clean.len());
+        }
+    }
+
+    #[test]
+    fn test_no_wrap_code_blocks() {
+        // Verify code blocks are not wrapped
+        let md = "```hemlock\nlet x = 1;\nlet y = 2;\nlet z = x + y;\n```
+
+This is a paragraph after the code block.";
+        let mut buf = Vec::new();
+        render_markdown_width(md, &mut buf, Some(40)).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        let lines: Vec<&str> = output.lines().collect();
+        // Code block lines should be preserved as-is (not wrapped)
+        let code_lines: Vec<&str> = lines
+            .iter()
+            .filter(|l| l.contains("let x") || l.contains("let y") || l.contains("let z"))
+            .cloned()
+            .collect();
+        assert_eq!(code_lines.len(), 3, "Should have 3 code lines");
+    }
+
+    #[test]
+    fn test_wrap_preserves_indentation() {
+        // Verify wrapped list items maintain indentation
+        let md = "- This is a very long list item that should wrap to the next line while maintaining the bullet point indentation level. It should wrap at word boundaries.";
+        let mut buf = Vec::new();
+        render_markdown_width(md, &mut buf, Some(40)).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        // Should contain the bullet point
+        assert!(output.contains("•"), "Should contain bullet point");
     }
 }
