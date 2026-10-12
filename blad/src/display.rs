@@ -128,10 +128,9 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
     let mut search_matches: Vec<usize> = Vec::new();
     let mut search_index = 0;
 
-    // Enter alternate screen and hide cursor
+    // Enter alternate screen
     enable_raw_mode().expect("failed to enable raw mode");
     execute!(io::stdout(), EnterAlternateScreen).expect("failed to enter alternate screen");
-    execute!(io::stdout(), crossterm::cursor::Hide).expect("failed to hide cursor");
 
     fn find_matches(lines: &[&str], query: &str) -> Vec<usize> {
         if query.is_empty() {
@@ -405,8 +404,6 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
         }
     }
 
-    // Show cursor and exit alternate screen
-    execute!(io::stdout(), crossterm::cursor::Show).expect("failed to show cursor");
     disable_raw_mode().expect("failed to disable raw mode");
     execute!(io::stdout(), LeaveAlternateScreen).expect("failed to leave alternate screen");
 }
