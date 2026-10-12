@@ -169,11 +169,13 @@ pub fn render_markdown_width(
                 need_blank = true;
             }
             Event::Start(Tag::Heading { level, .. }) => {
-                if !at_start {
+                if need_blank {
+                    writeln!(w)?;
+                    need_blank = false;
+                } else if !at_start {
                     writeln!(w)?;
                 }
                 at_start = false;
-                need_blank = false;
                 let prefix = match level {
                     HeadingLevel::H1 => "### ",
                     HeadingLevel::H2 => "## ",
@@ -196,6 +198,12 @@ pub fn render_markdown_width(
                 writeln!(w)?;
             }
             Event::Start(Tag::List(_)) => {
+                if need_blank {
+                    writeln!(w)?;
+                    need_blank = false;
+                } else if !at_start {
+                    writeln!(w)?;
+                }
                 list_level += 1;
             }
             Event::End(TagEnd::List(_)) => {
@@ -224,11 +232,13 @@ pub fn render_markdown_width(
                 need_blank = true;
             }
             Event::Start(Tag::Table(_)) => {
-                if !at_start {
+                if need_blank {
+                    writeln!(w)?;
+                    need_blank = false;
+                } else if !at_start {
                     writeln!(w)?;
                 }
                 at_start = false;
-                need_blank = false;
                 in_table = true;
                 table_rows.clear();
                 table_row_cells.clear();
@@ -306,8 +316,20 @@ pub fn render_markdown_width(
                 writeln!(w)?;
                 need_blank = true;
             }
+            Event::Start(Tag::Paragraph) => {
+                if need_blank {
+                    writeln!(w)?;
+                    need_blank = false;
+                } else if !at_start {
+                    writeln!(w)?;
+                }
+                at_start = false;
+            }
             Event::Start(Tag::BlockQuote(_)) => {
-                if !at_start {
+                if need_blank {
+                    writeln!(w)?;
+                    need_blank = false;
+                } else if !at_start {
                     writeln!(w)?;
                 }
                 at_start = false;
@@ -326,6 +348,8 @@ pub fn render_markdown_width(
 }
 
 /// Render a table with proper column alignment and soft-wrapping.
+/// Column widths are adapted to fit the terminal width while preserving
+/// readability. If columns can't fit, they overflow slightly.
 fn render_table(
     w: &mut impl Write,
     rows: &[Vec<String>],
@@ -337,7 +361,7 @@ fn render_table(
 
     let num_cols = rows[0].len();
 
-    // Determine column widths based on content
+    // Determine natural column widths based on content
     let mut col_widths = vec![0; num_cols];
     for row in rows {
         for (i, cell) in row.iter().enumerate() {
@@ -350,25 +374,104 @@ fn render_table(
         }
     }
 
-    // If terminal width is provided, constrain column widths to fit
+    // If terminal width is provided, adapt column widths to fit
     if let Some(term_width) = terminal_width {
-        // Reserve space for separators (2 chars per separator: " | ")
         let separator_space = (num_cols - 1) * 2;
         let available_width = term_width.saturating_sub(separator_space);
+        let total_natural: usize = col_widths.iter().sum();
 
-        // Distribute available width proportionally based on content width
-        let total_content_width: usize = col_widths.iter().sum();
-        if total_content_width > available_width {
-            for i in 0..num_cols {
-                // Give each column proportional share
-                let share = ((col_widths[i] as f64) / (total_content_width as f64))
-                    * available_width as f64;
-                col_widths[i] = share.ceil() as usize;
+        if total_natural > available_width {
+            // Need to shrink columns. Use iterative proportional fit
+            // with minimum width constraints.
+            let min_width = 3;
+            let mut remaining = available_width;
+            let mut fitted = vec![false; num_cols];
+            let mut iterations = 0;
+
+            loop {
+                iterations += 1;
+                if iterations > num_cols * 2 {
+                    break;
+                }
+
+                // Calculate unfitted total
+                let unfitted_total: usize = col_widths
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !fitted[*i])
+                    .map(|(_, w)| *w)
+                    .sum();
+                let unfitted_count = fitted.iter().filter(|&f| !f).count();
+
+                if unfitted_count == 0 || remaining == 0 {
+                    break;
+                }
+
+                // Try to fit remaining unfitted columns
+                let mut any_fitted = false;
+                for i in 0..num_cols {
+                    if fitted[i] {
+                        continue;
+                    }
+
+                    // Calculate proportional share
+                    let share = if unfitted_total > 0 {
+                        ((col_widths[i] as f64) / (unfitted_total as f64)) * remaining as f64
+                    } else {
+                        (remaining as f64) / (unfitted_count as f64)
+                    };
+                    let fitted_width = share.ceil() as usize;
+
+                    if fitted_width < min_width {
+                        // Can't fit this column with minimum width
+                        fitted[i] = true;
+                        col_widths[i] = min_width;
+                        remaining = remaining.saturating_sub(min_width);
+                        any_fitted = true;
+                    } else if fitted_width >= col_widths[i] {
+                        // Column fits at natural width
+                        fitted[i] = true;
+                        col_widths[i] = col_widths[i];
+                        remaining = remaining.saturating_sub(col_widths[i]);
+                        any_fitted = true;
+                    } else {
+                        // Column needs to be shrunk
+                        fitted[i] = true;
+                        col_widths[i] = fitted_width;
+                        remaining = remaining.saturating_sub(fitted_width);
+                        any_fitted = true;
+                    }
+                }
+
+                if !any_fitted {
+                    break;
+                }
             }
-            // Ensure minimum width of 3 for any column
+
+            // If we still have remaining space, distribute it proportionally
+            if remaining > 0 {
+                let unfitted_total: usize = col_widths
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| !fitted[*i])
+                    .map(|(_, w)| *w)
+                    .sum();
+                if unfitted_total > 0 {
+                    for i in 0..num_cols {
+                        if !fitted[i] {
+                            let share = ((col_widths[i] as f64) / (unfitted_total as f64))
+                                * remaining as f64;
+                            col_widths[i] += share.ceil() as usize;
+                            fitted[i] = true;
+                        }
+                    }
+                }
+            }
+
+            // Any still-unfitted columns get minimum width (will overflow)
             for i in 0..num_cols {
-                if col_widths[i] < 3 {
-                    col_widths[i] = 3;
+                if !fitted[i] {
+                    col_widths[i] = min_width;
                 }
             }
         }
@@ -755,5 +858,71 @@ mod tests {
         let output = render(md);
         // Should render either via mmdc or as plain text fallback
         assert!(output.contains("A") || output.contains("B") || output.contains("Mermaid diagram"));
+    }
+
+    #[test]
+    fn test_heading_blank_line() {
+        // Heading followed by paragraph with blank line in source should have
+        // blank line in output
+        let md = "# Heading\n\nParagraph";
+        let output = render(md);
+        let lines: Vec<&str> = output.lines().collect();
+        // Find heading line
+        let heading_idx = lines.iter().position(|l| l.contains("### Heading"));
+        assert!(heading_idx.is_some());
+        let heading_idx = heading_idx.unwrap();
+        // Next line should be blank
+        assert!(heading_idx + 1 < lines.len());
+        assert!(lines[heading_idx + 1].is_empty());
+    }
+
+    #[test]
+    fn test_paragraph_blank_line() {
+        // Two paragraphs should have blank line between them
+        let md = "Para 1\n\nPara 2";
+        let output = render(md);
+        let lines: Vec<&str> = output.lines().collect();
+        // Find "Para 1" line
+        let para1_idx = lines.iter().position(|l| l.contains("Para 1"));
+        assert!(para1_idx.is_some());
+        let para1_idx = para1_idx.unwrap();
+        // Next line should be blank
+        assert!(para1_idx + 1 < lines.len());
+        assert!(lines[para1_idx + 1].is_empty());
+    }
+
+    #[test]
+    fn test_table_width_adaptive() {
+        // Table should adapt to terminal width
+        let md = "| Col1 | Col2 |\n|------|------|\n| A | B |";
+        let mut buf = Vec::new();
+        render_markdown_width(md, &mut buf, Some(40)).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        // Check that table renders without error
+        assert!(output.contains("Col1"));
+        assert!(output.contains("Col2"));
+    }
+
+    #[test]
+    fn test_table_narrow_terminal() {
+        // Table should wrap cells when terminal is narrow
+        let md = "| Short | Very Long Column Header That Should Wrap |\n|-------|------------------------------------------|\n| A     | B                                        |";
+        let mut buf = Vec::new();
+        render_markdown_width(md, &mut buf, Some(30)).unwrap();
+        let output = String::from_utf8(buf).unwrap();
+        // Check that table renders without error
+        assert!(output.contains("Short"));
+        assert!(output.contains("Very Long"));
+    }
+
+    #[test]
+    fn test_no_extra_blank_at_start() {
+        // No blank line before first heading
+        let md = "# First Heading\n\nContent";
+        let output = render(md);
+        // First line should be the heading, not blank
+        let lines: Vec<&str> = output.lines().collect();
+        assert!(!lines.is_empty());
+        assert!(lines[0].contains("### First Heading"));
     }
 }

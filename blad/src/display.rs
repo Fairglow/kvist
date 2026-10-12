@@ -112,8 +112,10 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
     };
 
     // Re-render with terminal width awareness for proper table wrapping
+    // Subtract 1 for the scrollbar column
+    let render_width = cols.saturating_sub(1) as usize;
     let mut output = Vec::new();
-    render_markdown_width(content, &mut output, Some(cols as usize)).unwrap();
+    render_markdown_width(content, &mut output, Some(render_width)).unwrap();
     let rendered = String::from_utf8(output).unwrap();
     let lines: Vec<&str> = rendered.lines().collect();
     let total_lines = lines.len();
