@@ -187,7 +187,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
         } else {
             "=== Blad Markdown Viewer ===".to_string()
         };
-        writeln!(io::stdout(), "{}", header).expect("failed to write header");
+        write!(io::stdout(), "{}\r\n", header).expect("failed to write header");
 
         // Render visible lines with search highlighting
         let visible = &lines[start..end];
@@ -204,7 +204,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
             }
 
             // Print line (terminal handles wrapping automatically)
-            writeln!(io::stdout(), "{}", line).expect("failed to write line");
+            write!(io::stdout(), "{}\r\n", line).expect("failed to write line");
 
             execute!(io::stdout(), crossterm::style::ResetColor).expect("failed to reset colors");
 
