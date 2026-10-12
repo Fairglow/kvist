@@ -177,12 +177,12 @@ pub fn render_markdown_width(
                 }
                 at_start = false;
                 let prefix = match level {
-                    HeadingLevel::H1 => "### ",
+                    HeadingLevel::H1 => "# ",
                     HeadingLevel::H2 => "## ",
-                    HeadingLevel::H3 => "# ",
-                    HeadingLevel::H4 => "",
-                    HeadingLevel::H5 => "",
-                    HeadingLevel::H6 => "",
+                    HeadingLevel::H3 => "### ",
+                    HeadingLevel::H4 => "#### ",
+                    HeadingLevel::H5 => "##### ",
+                    HeadingLevel::H6 => "###### ",
                 };
                 write!(w, "\x1b[1m\x1b[34m{}", prefix)?;
             }
@@ -349,7 +349,7 @@ pub fn render_markdown_width(
 
 /// Render a table with proper column alignment and soft-wrapping.
 /// Column widths are adapted to fit the terminal width while preserving
-/// readability. If columns can't fit, they overflow slightly.
+/// readability. Cells wrap to multiple lines when needed.
 fn render_table(
     w: &mut impl Write,
     rows: &[Vec<String>],
@@ -516,17 +516,6 @@ fn render_table(
                     write!(w, " | ")?;
                 }
                 write!(w, "{}", "-".repeat(width))?;
-            }
-            writeln!(w)?;
-        }
-
-        // Separator after data rows (thin line) to distinguish multi-line cells
-        if row_idx > 0 && row_idx < rows.len() - 1 {
-            for (i, &width) in col_widths.iter().enumerate() {
-                if i > 0 {
-                    write!(w, " | ")?;
-                }
-                write!(w, "{}", "─".repeat(width))?;
             }
             writeln!(w)?;
         }
@@ -763,10 +752,10 @@ mod tests {
 
     #[test]
     fn test_render_basic() {
-        let md = "# Hello\n\nWorld";
+        let md = "# Hello\n\nThis is **bold** text.";
         let output = render(md);
-        assert!(output.contains("### "));
-        assert!(output.contains("World"));
+        assert!(output.contains("# "));
+        assert!(output.contains("bold"));
     }
 
     #[test]
@@ -803,10 +792,10 @@ mod tests {
     fn test_heading_levels() {
         let md = "# H1\n## H2\n### H3\n#### H4";
         let output = render(md);
-        assert!(output.contains("### H1"));
+        assert!(output.contains("# H1"));
         assert!(output.contains("## H2"));
-        assert!(output.contains("# H3"));
-        assert!(output.contains("H4"));
+        assert!(output.contains("### H3"));
+        assert!(output.contains("#### H4"));
     }
 
     #[test]
@@ -878,7 +867,7 @@ mod tests {
         let output = render(md);
         let lines: Vec<&str> = output.lines().collect();
         // Find heading line
-        let heading_idx = lines.iter().position(|l| l.contains("### Heading"));
+        let heading_idx = lines.iter().position(|l| l.contains("# Heading"));
         assert!(heading_idx.is_some());
         let heading_idx = heading_idx.unwrap();
         // Next line should be blank
@@ -920,6 +909,8 @@ mod tests {
         let mut buf = Vec::new();
         render_markdown_width(md, &mut buf, Some(30)).unwrap();
         let output = String::from_utf8(buf).unwrap();
+        eprintln!("Output:");
+        eprintln!("{}", output);
         // Check that table renders without error
         assert!(output.contains("Short"));
         assert!(output.contains("Very Long"));
@@ -933,6 +924,33 @@ mod tests {
         // First line should be the heading, not blank
         let lines: Vec<&str> = output.lines().collect();
         assert!(!lines.is_empty());
-        assert!(lines[0].contains("### First Heading"));
+        assert!(lines[0].contains("# First Heading"));
+    }
+
+    #[test]
+    fn test_rendered_starts_at_line_one() {
+        // Verify rendered output starts at line 1 with content, not blank lines
+        let md = "# Title\n\nBody paragraph.\n\n- Item 1\n- Item 2\n\n| Col | Val |\n|-----|-----|\n| A | 1 |";
+        let output = render(md);
+        let lines: Vec<&str> = output.lines().collect();
+
+        // First line should be the heading
+        assert!(!lines.is_empty());
+        assert!(
+            lines[0].contains("# Title"),
+            "First line should be heading, got: {}",
+            lines[0]
+        );
+
+        // Find where body content starts
+        let body_idx = lines.iter().position(|l| l.contains("Body paragraph"));
+        assert!(body_idx.is_some(), "Body paragraph not found");
+        // Should be at line index 2 (heading, blank, body)
+        assert_eq!(
+            body_idx.unwrap(),
+            2,
+            "Body should be at index 2, got {:?}",
+            body_idx
+        );
     }
 }

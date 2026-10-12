@@ -5,6 +5,7 @@
 //! without crashing.
 
 use std::io::{self, Write};
+use std::os::linux::fs::MetadataExt;
 
 use crate::markdown::{render_markdown, render_markdown_width};
 use crate::session::{Message, Session, load_messages};
@@ -60,6 +61,22 @@ pub fn stream_session(session: &Session) {
     }
 }
 
+/// Check if stdout is a TTY (interactive terminal).
+fn is_tty() -> bool {
+    match std::fs::metadata("/dev/stdout") {
+        Ok(meta) => meta.st_mode() & 0o170000 == 0o020000,
+        Err(_) => false,
+    }
+}
+
+/// Check if stdin is a TTY (interactive terminal).
+fn is_stdin_tty() -> bool {
+    match std::fs::metadata("/dev/stdin") {
+        Ok(meta) => meta.st_mode() & 0o170000 == 0o020000,
+        Err(_) => false,
+    }
+}
+
 /// View a standalone markdown file interactively.
 pub fn view_markdown(content: &str) {
     view_markdown_file(None, content);
@@ -67,24 +84,36 @@ pub fn view_markdown(content: &str) {
 
 /// View a markdown file with optional edit support.
 pub fn view_markdown_file(path: Option<&std::path::Path>, content: &str) {
-    // Render markdown to a buffer first, then display interactively
-    let mut output = Vec::new();
-    render_markdown(content, &mut output).unwrap();
-    let rendered = String::from_utf8(output).unwrap();
+    // Pass original markdown to interactive viewer - it handles rendering internally
 
-    // Display interactively with navigation
-    interactive_viewer(path, &rendered);
+    if is_tty() && is_stdin_tty() {
+        interactive_viewer(path, content);
+    } else {
+        // Non-interactive: render to stdout and exit
+        dump_markdown(content);
+    }
 }
 
 /// View a markdown file with terminal width awareness.
-pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, terminal_width: usize) {
-    // Render markdown to a buffer with terminal width awareness
-    let mut output = Vec::new();
-    render_markdown_width(content, &mut output, Some(terminal_width)).unwrap();
-    let rendered = String::from_utf8(output).unwrap();
-
-    // Display interactively with navigation
-    interactive_viewer(path, &rendered);
+pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, _terminal_width: usize) {
+    // Pass original markdown to interactive viewer - it handles rendering internally
+    if is_tty() {
+        let (cols, _rows) = match crossterm::terminal::size() {
+            Ok(s) => s,
+            Err(_) => {
+                dump_markdown(content);
+                return;
+            }
+        };
+        let render_width = cols.saturating_sub(1) as usize;
+        let mut output = Vec::new();
+        render_markdown_width(content, &mut output, Some(render_width)).unwrap();
+        let rendered = String::from_utf8(output).unwrap();
+        interactive_viewer(path, &rendered);
+    } else {
+        // Non-interactive: render to stdout and exit
+        dump_markdown(content);
+    }
 }
 
 /// Dump a standalone markdown file to plain text (no ANSI).
@@ -111,7 +140,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
         Err(_) => return,
     };
 
-    // Re-render with terminal width awareness for proper table wrapping
+    // Render markdown with terminal width awareness for proper table wrapping
     // Subtract 1 for the scrollbar column
     let render_width = cols.saturating_sub(1) as usize;
     let mut output = Vec::new();
@@ -121,6 +150,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
     let total_lines = lines.len();
 
     let mut scroll_offset = 0;
+    let mut scroll_x = 0; // Horizontal scroll offset
     let visible_lines = (rows - 2) as usize; // Reserve 2 rows for header/footer
     let scrollbar_col = cols - 1;
 
@@ -178,6 +208,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
         // Clear and redraw
         execute!(io::stdout(), Clear(ClearType::All)).expect("failed to clear");
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, 0)).expect("failed to move cursor");
+        io::stdout().flush().expect("failed to flush after clear");
 
         // Header
         let header = if search_mode || (!search_query.is_empty() && !search_matches.is_empty()) {
@@ -189,11 +220,14 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
         };
         write!(io::stdout(), "{}\r\n", header).expect("failed to write header");
 
-        // Render visible lines with search highlighting
+        // Render visible lines with search highlighting and line numbers
         let visible = &lines[start..end];
+        let max_line_digits = total_lines.to_string().len();
         for (i, line) in visible.iter().enumerate() {
-            let actual_line = start + i;
-            if search_matches.contains(&actual_line) {
+            let actual_line = start + i + 1; // 1-indexed
+            let line_prefix = format!("{:>width$} ", actual_line, width = max_line_digits);
+
+            if search_matches.contains(&(start + i)) {
                 // Highlight matching line
                 execute!(
                     io::stdout(),
@@ -203,8 +237,17 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
                 .expect("failed to set colors");
             }
 
-            // Print line (terminal handles wrapping automatically)
-            write!(io::stdout(), "{}\r\n", line).expect("failed to write line");
+            // Apply horizontal scroll by slicing the line
+            let line_chars: Vec<char> = line.chars().collect();
+            let max_x = line_chars.len().saturating_sub((cols - 5) as usize);
+            if scroll_x > max_x {
+                scroll_x = max_x;
+            }
+            let visible_chars: String = line_chars[scroll_x..].iter().collect();
+
+            // Print line with line number
+            write!(io::stdout(), "{}{}\r\n", line_prefix, visible_chars)
+                .expect("failed to write line");
 
             execute!(io::stdout(), crossterm::style::ResetColor).expect("failed to reset colors");
 
@@ -238,17 +281,19 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
             "".to_string()
         };
 
+        let line_info = format!(" L{}-{} of {}", start + 1, end, total_lines);
         let _ = write!(
             io::stdout(),
-            "  [{:5.1}%] {}{}",
+            "  [{:5.1}%]{}{}{}",
             pct,
+            line_info,
             search_info,
             if scroll_offset == 0 {
-                "TOP"
+                " TOP"
             } else if end >= total_lines {
-                "BOTTOM"
+                " BOTTOM"
             } else {
-                "SCROLL"
+                " SCROLL"
             }
         );
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, 0)).expect("failed to move cursor");
@@ -351,8 +396,22 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
                             scroll_offset = (scroll_offset + visible_lines)
                                 .min(total_lines.saturating_sub(visible_lines));
                         }
+                        KeyCode::Home => {
+                            scroll_offset = 0;
+                            scroll_x = 0;
+                        }
+                        KeyCode::End => {
+                            scroll_offset = total_lines.saturating_sub(visible_lines);
+                        }
+                        KeyCode::Left => {
+                            scroll_x = scroll_x.saturating_sub(1);
+                        }
+                        KeyCode::Right => {
+                            scroll_x += 1;
+                        }
                         KeyCode::Char('g') | KeyCode::Char('H') => {
                             scroll_offset = 0;
+                            scroll_x = 0;
                         }
                         KeyCode::Char('G') | KeyCode::Char('L') => {
                             scroll_offset = total_lines.saturating_sub(visible_lines);
