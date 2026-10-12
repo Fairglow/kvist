@@ -775,16 +775,16 @@ fn write_wrapped(
     let mut col = current_col;
     let words = text.split_whitespace().collect::<Vec<&str>>();
 
-    for (i, word) in words.iter().enumerate() {
+    for word in words.iter() {
         let word_len = word.chars().count();
         if col + word_len > max_col {
             writeln!(w)?;
             col = 0;
         }
         // Add space before word, but not for punctuation at start
-        // Add space between words, but not at the start of the line,
-        // not for the first word, and not before punctuation.
-        let should_add_space = col > 0 && i > 0 && !is_punctuation(word);
+        // Add space between words, but not at the start of the line
+        // and not before punctuation characters.
+        let should_add_space = col > 0 && !is_punctuation(word);
         if should_add_space {
             write!(w, " ")?;
             col += 1;
