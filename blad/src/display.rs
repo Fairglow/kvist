@@ -62,13 +62,18 @@ pub fn stream_session(session: &Session) {
 
 /// View a standalone markdown file interactively.
 pub fn view_markdown(content: &str) {
+    view_markdown_file(None, content);
+}
+
+/// View a markdown file with optional edit support.
+pub fn view_markdown_file(path: Option<&std::path::Path>, content: &str) {
     // Render markdown to a buffer first, then display interactively
     let mut output = Vec::new();
     render_markdown(content, &mut output).unwrap();
     let rendered = String::from_utf8(output).unwrap();
 
     // Display interactively with navigation
-    interactive_viewer(&rendered);
+    interactive_viewer(path, &rendered);
 }
 
 /// Dump a standalone markdown file to plain text (no ANSI).
@@ -80,8 +85,8 @@ pub fn dump_markdown(content: &str) {
     print!("{}", rendered);
 }
 
-/// Interactive viewer with navigation (up/down arrows, page up/down).
-fn interactive_viewer(content: &str) {
+/// Interactive viewer with navigation and search.
+fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
     use crossterm::event::{self, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
     use crossterm::execute;
     use crossterm::terminal::{
@@ -103,9 +108,48 @@ fn interactive_viewer(content: &str) {
     let visible_lines = (rows - 2) as usize; // Reserve 2 rows for header/footer
     let scrollbar_col = cols - 1;
 
+    // Search state
+    let mut search_mode = false;
+    let mut search_query = String::new();
+    let mut search_matches: Vec<usize> = Vec::new();
+    let mut search_index = 0;
+
     // Enter alternate screen
     enable_raw_mode().expect("failed to enable raw mode");
     execute!(io::stdout(), EnterAlternateScreen).expect("failed to enter alternate screen");
+
+    fn find_matches(lines: &[&str], query: &str) -> Vec<usize> {
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let mut matches = Vec::new();
+        for (i, line) in lines.iter().enumerate() {
+            // Strip ANSI escape codes for searching
+            let clean = strip_ansi(line);
+            if clean.to_lowercase().contains(&query.to_lowercase()) {
+                matches.push(i);
+            }
+        }
+        matches
+    }
+
+    fn strip_ansi(s: &str) -> String {
+        let mut result = String::new();
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\x1b' {
+                // Skip ESC sequence until 'm'
+                for nc in chars.by_ref() {
+                    if nc == 'm' {
+                        break;
+                    }
+                }
+            } else {
+                result.push(c);
+            }
+        }
+        result
+    }
 
     loop {
         // Calculate visible range
@@ -117,12 +161,30 @@ fn interactive_viewer(content: &str) {
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, 0)).expect("failed to move cursor");
 
         // Header
-        println!("=== Blad Markdown Viewer ===");
+        let header = if search_mode {
+            format!("=== Search: {} ===", search_query)
+        } else if let Some(p) = path {
+            format!("=== Blad: {} ===", p.display())
+        } else {
+            "=== Blad Markdown Viewer ===".to_string()
+        };
+        println!("{}", header);
 
-        // Render visible lines with soft wrapping
+        // Render visible lines with soft wrapping and search highlighting
         let visible = &lines[start..end];
         let remaining = (scrollbar_col - 1) as usize;
         for (i, line) in visible.iter().enumerate() {
+            let actual_line = start + i;
+            if search_matches.contains(&actual_line) {
+                // Highlight matching line
+                execute!(
+                    io::stdout(),
+                    crossterm::style::SetForegroundColor(crossterm::style::Color::Yellow),
+                    crossterm::style::SetBackgroundColor(crossterm::style::Color::Blue)
+                )
+                .expect("failed to set colors");
+            }
+
             if line.len() > remaining {
                 let wrapped = soft_wrap(line, remaining);
                 for wline in wrapped {
@@ -131,6 +193,9 @@ fn interactive_viewer(content: &str) {
             } else {
                 println!("{}", line);
             }
+
+            execute!(io::stdout(), crossterm::style::ResetColor).expect("failed to reset colors");
+
             // Pad empty lines to ensure footer is in fixed position
             if i == visible.len() - 1 && end < total_lines {
                 for _ in 0..(visible_lines - visible.len()) {
@@ -149,11 +214,23 @@ fn interactive_viewer(content: &str) {
         } else {
             100.0
         };
-        // Format as fixed-width for consistent position
+
+        let search_info = if search_mode && !search_matches.is_empty() {
+            format!(
+                " {}/{}/{} matches ",
+                search_index + 1,
+                search_matches.len(),
+                search_query
+            )
+        } else {
+            "".to_string()
+        };
+
         let _ = write!(
             io::stdout(),
-            "  [{:5.1}%] {}",
+            "  [{:5.1}%] {}{}",
             pct,
+            search_info,
             if scroll_offset == 0 {
                 "TOP"
             } else if end >= total_lines {
@@ -205,33 +282,105 @@ fn interactive_viewer(content: &str) {
 
         // Event handling
         match event::read() {
-            Ok(Event::Key(KeyEvent { code, .. })) => match code {
-                KeyCode::Up | KeyCode::Char('k') => {
-                    scroll_offset = scroll_offset.saturating_sub(1);
-                }
-                KeyCode::Down | KeyCode::Char('j') => {
-                    if scroll_offset < total_lines.saturating_sub(1) {
-                        scroll_offset += 1;
+            Ok(Event::Key(KeyEvent { code, .. })) => {
+                if search_mode {
+                    match code {
+                        KeyCode::Char(c) => {
+                            search_query.push(c);
+                            search_matches = find_matches(&lines, &search_query);
+                            if !search_matches.is_empty() {
+                                search_index = 0;
+                                scroll_to_match(
+                                    scroll_offset,
+                                    search_matches[search_index],
+                                    visible_lines,
+                                );
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            search_query.pop();
+                            search_matches = find_matches(&lines, &search_query);
+                            if !search_matches.is_empty() {
+                                search_index = 0;
+                                scroll_to_match(
+                                    scroll_offset,
+                                    search_matches[search_index],
+                                    visible_lines,
+                                );
+                            }
+                        }
+                        KeyCode::Enter => {
+                            search_mode = false;
+                            if search_matches.is_empty() {
+                                search_query.clear();
+                            }
+                        }
+                        KeyCode::Esc => {
+                            search_mode = false;
+                            search_query.clear();
+                            search_matches.clear();
+                        }
+                        _ => {}
+                    }
+                } else {
+                    match code {
+                        KeyCode::Up | KeyCode::Char('k') => {
+                            scroll_offset = scroll_offset.saturating_sub(1);
+                        }
+                        KeyCode::Down | KeyCode::Char('j') => {
+                            if scroll_offset < total_lines.saturating_sub(1) {
+                                scroll_offset += 1;
+                            }
+                        }
+                        KeyCode::PageUp | KeyCode::Char('u') => {
+                            scroll_offset = scroll_offset.saturating_sub(visible_lines);
+                        }
+                        KeyCode::PageDown | KeyCode::Char('d') => {
+                            scroll_offset =
+                                (scroll_offset + visible_lines).min(total_lines.saturating_sub(1));
+                        }
+                        KeyCode::Char('g') | KeyCode::Char('H') => {
+                            scroll_offset = 0;
+                        }
+                        KeyCode::Char('G') | KeyCode::Char('L') => {
+                            scroll_offset = total_lines.saturating_sub(1);
+                        }
+                        KeyCode::Char('/') => {
+                            search_mode = true;
+                            search_query.clear();
+                            search_matches.clear();
+                        }
+                        KeyCode::Char('n') if !search_matches.is_empty() => {
+                            search_index = (search_index + 1).min(search_matches.len() - 1);
+                            scroll_to_match(
+                                scroll_offset,
+                                search_matches[search_index],
+                                visible_lines,
+                            );
+                        }
+                        KeyCode::Char('p') if !search_matches.is_empty() => {
+                            search_index = search_index.saturating_sub(1);
+                            scroll_to_match(
+                                scroll_offset,
+                                search_matches[search_index],
+                                visible_lines,
+                            );
+                        }
+                        KeyCode::Char('e') if path.is_some() => {
+                            // Edit mode: exit viewer, edit file, re-render
+                            disable_raw_mode().expect("failed to disable raw mode");
+                            execute!(io::stdout(), LeaveAlternateScreen)
+                                .expect("failed to leave alternate screen");
+                            edit_and_rerender(path.unwrap(), &lines);
+                            return;
+                        }
+                        KeyCode::Char('q') | KeyCode::Esc => {
+                            break;
+                        }
+                        _ => {}
                     }
                 }
-                KeyCode::PageUp | KeyCode::Char('u') => {
-                    scroll_offset = scroll_offset.saturating_sub(visible_lines);
-                }
-                KeyCode::PageDown | KeyCode::Char('d') => {
-                    scroll_offset =
-                        (scroll_offset + visible_lines).min(total_lines.saturating_sub(1));
-                }
-                KeyCode::Char('g') | KeyCode::Char('H') => {
-                    scroll_offset = 0;
-                }
-                KeyCode::Char('G') | KeyCode::Char('L') => {
-                    scroll_offset = total_lines.saturating_sub(1);
-                }
-                KeyCode::Char('q') | KeyCode::Esc => {
-                    break;
-                }
-                _ => {}
-            },
+            }
             Ok(Event::Mouse(MouseEvent { kind, .. })) => match kind {
                 MouseEventKind::ScrollUp => {
                     scroll_offset = scroll_offset.saturating_sub(1);
@@ -248,6 +397,42 @@ fn interactive_viewer(content: &str) {
 
     disable_raw_mode().expect("failed to disable raw mode");
     execute!(io::stdout(), LeaveAlternateScreen).expect("failed to leave alternate screen");
+}
+
+fn scroll_to_match(current_offset: usize, target_line: usize, visible_lines: usize) -> usize {
+    if target_line < current_offset {
+        target_line
+    } else if target_line >= current_offset + visible_lines {
+        target_line - visible_lines / 2
+    } else {
+        current_offset
+    }
+}
+
+fn edit_and_rerender(path: &std::path::Path, _lines: &[&str]) {
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nvim".to_string());
+    let args: Vec<&str> = editor.split_whitespace().collect();
+    let result = std::process::Command::new(args[0])
+        .args(&args[1..])
+        .arg(path)
+        .status();
+
+    match result {
+        Ok(status) if status.success() => {
+            // Re-read and re-render
+            match std::fs::read_to_string(path) {
+                Ok(content) => {
+                    let mut output = Vec::new();
+                    render_markdown(&content, &mut output).unwrap();
+                    let rendered = String::from_utf8(output).unwrap();
+                    interactive_viewer(Some(path), &rendered);
+                }
+                Err(e) => eprintln!("Failed to re-read file: {}", e),
+            }
+        }
+        Ok(status) => eprintln!("Editor exited with status: {}", status),
+        Err(e) => eprintln!("Failed to run editor: {}", e),
+    }
 }
 
 /// Soft-wrap a line to fit within the given width.

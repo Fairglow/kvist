@@ -1,52 +1,74 @@
 # Blad
 
-First-class terminal Markdown viewer with streaming and theming.
+First-class terminal Markdown viewer with interactive navigation, search,
+and rich rendering.
 
 ## Features
 
-- Full CommonMark rendering with tables, strikethrough, and task lists
-- Syntax-highlighted code blocks via syntect (50+ languages)
-- Pluggable color themes
-- File streaming for live content (`blad stream`)
-- Stdin piping support (`cat file.md | blad`)
+- **Full CommonMark + GFM rendering:** Headers, bold, italic, strikethrough,
+  links, images, code blocks, tables, blockquotes, task lists, footnotes,
+  superscript/subscript, math expressions
+- **Syntax highlighting:** 50+ languages via syntect
+- **Interactive viewer:** Keyboard navigation, mouse wheel, search with
+  highlight, scrollbar
+- **Edit mode:** Press `e` to edit files in your preferred editor
+- **Session viewing:** Read and display skott agent session transcripts
+- **Export:** Export sessions to combined Markdown documents
+- **Mermaid support:** Detects and attempts to render mermaid diagrams
+- **GFM alerts:** Color-coded [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]
 
 ## Usage
 
 ```bash
-# View a file
-blad document.md
+# List recent sessions
+blad list
 
-# View piped content
-cat document.md | blad
+# View a session
+blad show <session-id>
 
-# Use a specific theme
-blad --theme dracula document.md
+# View a markdown file
+blad view <file.md>
 
-# Stream a live file
-blad stream live.md
+# Export a session
+blad export <session-id> [output.md]
+
+# Plain text output (no interactive viewer)
+blad show <session-id> --dump
 ```
 
-## Themes
+## Keyboard Shortcuts
 
-Blad uses [syntect](https://github.com/trishume/syntect) for syntax highlighting and supports all its built-in themes:
+### Navigation
 
-- base16-ocean.dark (default)
-- dracula
-- monokai
-- gruvbox-dark
-- solarized-dark
-- ...and many more
+- `↑`/`k` - Up, `↓`/`j` - Down
+- `PageUp`/`u` - Page up, `PageDown`/`d` - Page down
+- `g`/`H` - Top, `G`/`L` - Bottom
+- Mouse wheel - Scroll
 
-List available themes programmatically via the syntect API.
+### Search
 
-## Architecture
+- `/` - Enter search
+- `n` - Next match, `p` - Previous match
+- `Enter` - Exit search, `Esc` - Cancel
 
-- `src/main.rs` - CLI entry point
-- `src/lib.rs` - Library exports
-- `src/markdown.rs` - Markdown rendering with syntax highlighting
+### Other
 
-## Dependencies
+- `e` - Edit file
+- `q`/`Esc` - Quit
 
-- pulldown-cmark (Markdown parsing)
-- syntect (syntax highlighting)
-- clap (CLI parsing)
+## Documentation
+
+- [User's Guide](docs/USAGE.md) - Complete usage documentation
+- [Architecture](ARCHITECTURE.md) - System design
+- [Requirements](REQUIREMENTS.md) - Functional and non-functional requirements
+- [Contract](CONTRACT.md) - CLI interface specification
+
+## Development
+
+```bash
+# Build
+cargo build -p blad
+
+# Run tests
+cargo test -p blad
+```
