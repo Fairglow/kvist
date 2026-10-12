@@ -79,15 +79,14 @@ fn is_stdin_tty() -> bool {
 
 /// View a standalone markdown file interactively.
 pub fn view_markdown(content: &str) {
-    view_markdown_file(None, content);
+    view_markdown_file(None, content, false);
 }
 
 /// View a markdown file with optional edit support.
-pub fn view_markdown_file(path: Option<&std::path::Path>, content: &str) {
+pub fn view_markdown_file(path: Option<&std::path::Path>, content: &str, line_numbers: bool) {
     // Pass original markdown to interactive viewer - it handles rendering internally
-
     if is_tty() && is_stdin_tty() {
-        interactive_viewer(path, content);
+        interactive_viewer(path, content, line_numbers);
     } else {
         // Non-interactive: render to stdout and exit
         dump_markdown(content);
@@ -109,7 +108,7 @@ pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, _termi
         let mut output = Vec::new();
         render_markdown_width(content, &mut output, Some(render_width)).unwrap();
         let rendered = String::from_utf8(output).unwrap();
-        interactive_viewer(path, &rendered);
+        interactive_viewer(path, &rendered, false);
     } else {
         // Non-interactive: render to stdout and exit
         dump_markdown(content);
@@ -126,7 +125,7 @@ pub fn dump_markdown(content: &str) {
 }
 
 /// Interactive viewer with navigation and search.
-fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
+fn interactive_viewer(path: Option<&std::path::Path>, content: &str, line_numbers: bool) {
     use crossterm::event::{self, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
     use crossterm::execute;
     use crossterm::terminal::{
@@ -225,7 +224,11 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
         let max_line_digits = total_lines.to_string().len();
         for (i, line) in visible.iter().enumerate() {
             let actual_line = start + i + 1; // 1-indexed
-            let line_prefix = format!("{:>width$} ", actual_line, width = max_line_digits);
+            let line_prefix = if line_numbers {
+                format!("{:>width$} ", actual_line, width = max_line_digits)
+            } else {
+                String::new()
+            };
 
             if search_matches.contains(&(start + i)) {
                 // Highlight matching line
@@ -245,7 +248,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
             }
             let visible_chars: String = line_chars[scroll_x..].iter().collect();
 
-            // Print line with line number
+            // Print line with optional line number
             write!(io::stdout(), "{}{}\r\n", line_prefix, visible_chars)
                 .expect("failed to write line");
 
@@ -501,7 +504,7 @@ fn edit_and_rerender(path: &std::path::Path, _lines: &[&str]) {
                     let mut output = Vec::new();
                     render_markdown(&content, &mut output).unwrap();
                     let rendered = String::from_utf8(output).unwrap();
-                    interactive_viewer(Some(path), &rendered);
+                    interactive_viewer(Some(path), &rendered, false);
                 }
                 Err(e) => eprintln!("Failed to re-read file: {}", e),
             }

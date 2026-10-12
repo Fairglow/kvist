@@ -28,6 +28,10 @@ pub struct Cli {
     #[clap(long, global = true)]
     dump: bool,
 
+    /// Show line numbers in interactive viewer
+    #[clap(long, global = true)]
+    line_numbers: bool,
+
     /// Session ID or file path (smart shortcut for show/view)
     target: Option<String>,
 
@@ -80,6 +84,7 @@ fn main() {
                             display::view_markdown_file(
                                 Some(&std::path::PathBuf::from(target)),
                                 &content,
+                                cli.line_numbers,
                             );
                         }
                     }
@@ -173,7 +178,7 @@ fn main() {
                 if cli.dump {
                     display::dump_markdown(&content);
                 } else {
-                    display::view_markdown_file(Some(&path), &content);
+                    display::view_markdown_file(Some(&path), &content, cli.line_numbers);
                 }
             }
             Err(e) => eprintln!("Error reading file: {}", e),
