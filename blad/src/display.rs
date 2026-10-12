@@ -152,7 +152,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
     }
 
     loop {
-        // Calculate visible range
+        // Calculate visible range (in logical lines)
         let start = scroll_offset;
         let end = (scroll_offset + visible_lines).min(total_lines);
 
@@ -170,9 +170,8 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
         };
         println!("{}", header);
 
-        // Render visible lines with soft wrapping and search highlighting
+        // Render visible lines with search highlighting
         let visible = &lines[start..end];
-        let remaining = (scrollbar_col - 1) as usize;
         for (i, line) in visible.iter().enumerate() {
             let actual_line = start + i;
             if search_matches.contains(&actual_line) {
@@ -185,14 +184,8 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str) {
                 .expect("failed to set colors");
             }
 
-            if line.len() > remaining {
-                let wrapped = soft_wrap(line, remaining);
-                for wline in wrapped {
-                    println!("{}", wline);
-                }
-            } else {
-                println!("{}", line);
-            }
+            // Print line (terminal handles wrapping automatically)
+            println!("{}", line);
 
             execute!(io::stdout(), crossterm::style::ResetColor).expect("failed to reset colors");
 
@@ -433,30 +426,6 @@ fn edit_and_rerender(path: &std::path::Path, _lines: &[&str]) {
         Ok(status) => eprintln!("Editor exited with status: {}", status),
         Err(e) => eprintln!("Failed to run editor: {}", e),
     }
-}
-
-/// Soft-wrap a line to fit within the given width.
-fn soft_wrap(line: &str, width: usize) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut current = String::new();
-
-    for word in line.split_whitespace() {
-        if current.is_empty() {
-            current = word.to_string();
-        } else if current.len() + 1 + word.len() <= width {
-            current.push(' ');
-            current.push_str(word);
-        } else {
-            result.push(current);
-            current = "    ".to_string() + word;
-        }
-    }
-
-    if !current.is_empty() {
-        result.push(current);
-    }
-
-    result
 }
 
 /// Export a session to a combined markdown document.
