@@ -148,13 +148,11 @@ pub fn render_markdown(md: &str, w: &mut impl Write) -> std::io::Result<()> {
                         cell.push_str(&text);
                     }
                 } else {
-                    write_emphasized(
-                        w,
-                        bold,
-                        italic,
-                        strikethrough,
-                        &format!("\x1b[7m{}\x1b[0m", text),
-                    )?;
+                    // Inline code: use reverse video but preserve surrounding formatting
+                    // Use \x1b[27m to turn off reverse video without resetting other attributes
+                    write!(w, "\x1b[7m")?;
+                    write_emphasized(w, bold, italic, strikethrough, &text)?;
+                    write!(w, "\x1b[27m")?;
                 }
             }
             Event::End(TagEnd::Paragraph) => {
