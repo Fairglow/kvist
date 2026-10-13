@@ -401,7 +401,7 @@ impl RustEnvironment {
         };
         grants.push(SandboxGrant {
             source: vendor.to_string_lossy().into_owned(),
-            destination: "/rust/vendor".into(),
+            destination: "/workspace/.kvist/vendored".into(),
             access: "read-only",
             purpose: "toolchain",
             identity: digest_label(b"offline-authoring-vendor"),
@@ -515,7 +515,7 @@ impl RustEnvironment {
             ("RUSTUP_HOME", "/tmp/rustup-home"),
             ("RUSTUP_AUTO_INSTALL", "0"),
             ("CARGO_HOME", "/tmp/cargo-home"),
-            ("CARGO_TARGET_DIR", "/tmp/target"),
+            ("CARGO_TARGET_DIR", "/workspace/target"),
             ("CARGO_NET_OFFLINE", "true"),
             ("RUSTC", "/rust/runtime/bin/rustc"),
             ("RUSTDOC", "/rust/runtime/bin/rustdoc"),
@@ -590,7 +590,7 @@ mod tests {
         let environment = RustEnvironment {
             grants: vec![SandboxGrant {
                 source: resource.to_string_lossy().into_owned(),
-                destination: "/rust/vendor".into(),
+                destination: "/workspace/.kvist/vendored".into(),
                 access: "read-only",
                 purpose: "toolchain",
                 identity: digest_label(b"resource"),
