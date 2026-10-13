@@ -10,10 +10,10 @@ compliance certification.
 
 ## Context
 
-agent-runner and the supervised task path both drive local models over loopback.
+skott and the supervised task path both drive local models over loopback.
 llama-server (llama.cpp, OpenAI-compatible) is the preferred local model server,
 and the user named llama-server integration as the main focus: they asked whether
-agent-runner should start and supervise llama-server ourselves so it could
+skott should start and supervise llama-server ourselves so it could
 collect the server's own progress output.
 
 The two candidate approaches:

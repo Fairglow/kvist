@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (decision in place; implementation tracked in
-`engine/TODOS.yaml`). The decision is that the Rust toolchain used by the
+`maerg/TODOS.yaml`). The decision is that the Rust toolchain used by the
 offline Cargo verification topology is a **pinned, host-provisioned,
 versioned** artifact rather than an ambient default. This document records the
 decision and its rationale; it is not a compliance certification.
@@ -70,7 +70,7 @@ versioned state, mirroring how the vendored registry is treated in ADR-0011.
 | Action                                        | Performs it                    | Network                                              | Boundary    |
 | --------------------------------------------- | ------------------------------ | ---------------------------------------------------- | ----------- |
 | `rustup toolchain install <channel>`          | Host, authorized provisioning step | Rust distribution origins (host-authorized)       | Provisioning |
-| Toolchain manifest record and enforcement     | `kvist` engine (host)          | None                                                 | Authority   |
+| Toolchain manifest record and enforcement     | `kvist` maerg (host)          | None                                                 | Authority   |
 | Mounting the pinned toolchain into a build    | Effect sandbox                 | None (read-only mount)                               | Isolation   |
 
 ## Rationale

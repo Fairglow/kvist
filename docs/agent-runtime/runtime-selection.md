@@ -37,7 +37,7 @@ or changes which durable records are canonical.
 
 Current `kvist.toml` agent profiles contain shell-free external command
 templates. They do not select `RigModelTransport`, `rig-agent`, or `rig-run`
-as typed runtimes. A command can invoke `agent-run model`, but that command
+as typed runtimes. A command can invoke `sav-run model`, but that command
 returns model output and cannot yet perform a complete component task. A future
 profile schema version must model the three axes above explicitly rather than
 overload command strings.

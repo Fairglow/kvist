@@ -1,11 +1,11 @@
 [workspace]
 members = [
-    "engine",
-    "agent_runtime",
-    "sandbox_runner",
-    "agent_runner",
+    "maerg",
+    "sav",
+    "galla",
+    "skott",
 ]
-default-members = ["engine"]
+default-members = ["maerg"]
 resolver = "3"
 
 [profile.release]

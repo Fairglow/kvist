@@ -12,8 +12,8 @@ It used the sandbox public contract/protocol, not enforcement internals.
 
 | # | Severity | File | Lines | Vulnerability | Confidence |
 |---|----------|------|-------|---------------|------------|
-| 1 | 🟡 MEDIUM | `agent_runner/src/headless.rs` | 236-241 at audit snapshot | Raw plain answers/diagnostics allowed terminal-control injection, including clipboard OSC commands | 9/10 |
-| 2 | 🟡 MEDIUM | `agent_runner/src/process.rs` | 287-335 at discovery snapshot | A directly owned unconfined child could leave its original process group and survive cancellation, timeout or overflow | 9/10 |
+| 1 | 🟡 MEDIUM | `skott/src/headless.rs` | 236-241 at audit snapshot | Raw plain answers/diagnostics allowed terminal-control injection, including clipboard OSC commands | 9/10 |
+| 2 | 🟡 MEDIUM | `skott/src/process.rs` | 287-335 at discovery snapshot | A directly owned unconfined child could leave its original process group and survive cancellation, timeout or overflow | 9/10 |
 
 **Resolved:** shared terminal-safe rendering visibly escapes C0/C1 controls
 except LF/tab in plain answers and human diagnostics. JSON and private
@@ -95,14 +95,14 @@ not substituted for the current results.
 
 | Gate | Result |
 | --- | --- |
-| `cargo test --locked -p agent-runner -p agent-runtime` | 467 passed (327 runner, 140 runtime); 3 live tests ignored by default |
+| `cargo test --locked -p skott -p sav` | 467 passed (327 runner, 140 runtime); 3 live tests ignored by default |
 | Full `cargo test --locked --workspace` with the fixture-only Git setting below | 1184 passed; 3 live tests ignored |
-| `cargo clippy --locked -p agent-runner -p agent-runtime --all-targets -- -D warnings` | Passed |
+| `cargo clippy --locked -p skott -p sav --all-targets -- -D warnings` | Passed |
 | `cargo fmt --all --check` | Passed |
-| `cargo build --locked -p agent-runner -p agent-runtime -p kvist` | Passed |
+| `cargo build --locked -p skott -p sav -p kvist` | Passed |
 | Explicit `live_llama -- --ignored --test-threads=1` | 3 passed using the real installed boundary |
 | 20 consecutive `subprocess_supervision` suite runs with the unchanged final process/executor/preflight source | 520 passes; 26 cases per run |
-| `kvist component validate agent_runner` / `agent_runtime` | Passed; structural validation only, not acceptance |
+| `kvist component validate skott` / `sav` | Passed; structural validation only, not acceptance |
 | `kvist doctor` | Project/artifact structure current; all four component queues valid |
 
 Named final logs in the session evidence directory:
@@ -124,7 +124,7 @@ initialization handshakes. No assertion was weakened. The failed run is
 retained as `remediation-final-quality-workspace.log`; the final named workspace
 and both twenty-run stability logs above passed after the fixture-only repair.
 
-The host sets `safe.bareRepository=explicit`. An existing engine acceptance
+The host sets `safe.bareRepository=explicit`. An existing maerg acceptance
 test pushed a bare-remote fixture successfully but then implicitly discovered
 that bare repository during `rev-parse`, producing an empty stdout assertion.
 The isolated test reproduced the same failure. Full workspace verification
@@ -138,7 +138,7 @@ GIT_CONFIG_VALUE_0=all cargo test --locked --workspace
 No production enforcement, test assertion or persistent host Git configuration
 was weakened. Runner/runtime suites require no such override.
 
-Live qualification used `/opt/target/release/kvist-sandbox-runner`,
+Live qualification used `/opt/target/release/galla-runner`,
 `/usr/bin/bwrap`, and the rebuilt native helper. Tests confirmed bounded llama
 streaming, normal Stop classification, real SHA-bound read/edit/verify,
 preserved CRLF and missing final newline, no workspace staging files,
@@ -235,7 +235,7 @@ completion is not acceptance or a successful global compliance verdict.
 
 **Acceptance remains unclaimed.** F4 requires explicit human arbitration of the
 root protected-artifact/shell rules versus the local writable-workspace shell.
-The engine's protected task broker is unchanged. F9 concerns the older runtime
+The maerg's protected task broker is unchanged. F9 concerns the older runtime
 trajectory replay API, not the new runner journal/history format; it remains a
 separate older-scope discrepancy. C4 concerns the older runtime's unsafe signal
 installation versus its unsafe prohibition. Toolchain interpreter probes do not

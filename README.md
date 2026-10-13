@@ -41,10 +41,10 @@ unrestricted autonomy. See [Why Kvist](docs/why-kvist.md) for a grounded
 comparison with coding agents, specification kits, agent frameworks,
 sandboxes, and governance tools.
 
-For a source-backed assessment of what `agent_runner` can reuse or learn from
+For a source-backed assessment of what `skott` can reuse or learn from
 Goose, OpenCode, Codex, and other runtimes, see the
-[upstream agent comparison](docs/agent-runtime/upstream-agent-comparison.md).
-The [security-first runner guide](docs/agent-runtime/runner-hardening.md)
+[upstream agent comparison](docs/sav/upstream-agent-comparison.md).
+The [security-first runner guide](docs/sav/runner-hardening.md)
 documents the implemented improvements, native-helper installation, headless
 llama-server usage, authority limits and independent qualification record.
 
@@ -75,7 +75,7 @@ design lives in [`docs/command-set.md`](docs/command-set.md).
 | `kvist task run [COMPONENT_DIR] [TASK_ID]`                   | Run the configured external agent for one ready task; see the execution boundary below.                                                                                                                                 |
 | `kvist task log [COMPONENT_DIR] TASK_ID`                     | Print the most recent bounded, redacted agent log for a task.                                                                                                                                                           |
 | `kvist task approve-policy [PROJECT_DIR]`                    | Record approval of the complete effective execution policy.                                                                                                                                                             |
-| `kvist prompt [PROMPT] [--allow-host-execution]`             | Run a prompt in the interactive agent-runner shell (sandboxed and multi-turn by default); without a terminal it runs the same shell headless (`--headless --json`), sandbox-only.                                       |
+| `kvist prompt [PROMPT] [--allow-host-execution]`             | Run a prompt in the interactive skott shell (sandboxed and multi-turn by default); without a terminal it runs the same shell headless (`--headless --json`), sandbox-only.                                       |
 | `kvist agent setup [--force]`                                | Collect, qualify, and register a new model profile without assigning roles.                                                                                                                                             |
 | `kvist agent list`                                           | List all configured and standalone model profiles with their active role assignments.                                                                                                                                   |
 | `kvist agent remove <MODEL_NAME> [--all]`                    | Remove configured model profile(s) or clear all agent configuration.                                                                                                                                                    |
@@ -87,7 +87,7 @@ design lives in [`docs/command-set.md`](docs/command-set.md).
 Delivery is organized into phases. The completed, current, and planned phase
 scope, context, and acceptance criteria are maintained in
 [`TODO.md`](TODO.md). The Phase 1 foundation and Phase 2
-queue, status, task-transition, agent-runner, and test-verification mechanics
+queue, status, task-transition, skott, and test-verification mechanics
 are implemented. `task run` requires an approved external sandbox runner and
 enforces the documented timeout, output, redaction, and lifecycle-lock bounds.
 
@@ -166,10 +166,10 @@ kvist prompt --file review-prompt.md
 printf '%s\n' "Review this component contract" | kvist prompt
 ```
 
-`kvist prompt` always runs the standalone `agent-runner` shell: at an
+`kvist prompt` always runs the standalone `skott` shell: at an
 interactive terminal Kvist opens the shell and prefills the model, thinking
 effort, and prompt; the agent does real work under Kvist's supervision. Without
-a terminal the same shell runs headless (`agent-runner --headless --json`),
+a terminal the same shell runs headless (`skott --headless --json`),
 inheriting the NDJSON event stream on standard output. Work is sandboxed
 (Bubblewrap-protected) and multi-turn by default; `--allow-host-execution`
 opts out of the sandbox so the agent runs with the invoking user's host
@@ -184,10 +184,10 @@ Kvist offers to open the editor. These input modes are mutually exclusive,
 limited to 1 MiB, and must produce nonblank UTF-8 text.
 
 Prompt acquisition, command rendering, and host-process supervision are
-provided by the independently usable `agent-runtime` workspace package:
+provided by the independently usable `sav` workspace package:
 
 ```bash
-cargo run --locked -p agent-runtime --bin agent-run -- run \
+cargo run --locked -p sav --bin sav-run -- run \
   --allow-host-execution \
   --command "local-agent --prompt '{prompt}' {context_files}" \
   --file review-prompt.md
@@ -196,8 +196,8 @@ cargo run --locked -p agent-runtime --bin agent-run -- run \
 Create a reusable provider profile interactively, then use it by name:
 
 ```bash
-cargo run --locked -p agent-runtime --bin agent-run -- setup
-cargo run --locked -p agent-runtime --bin agent-run -- run \
+cargo run --locked -p sav --bin sav-run -- setup
+cargo run --locked -p sav --bin sav-run -- run \
   --allow-host-execution \
   --profile local-coder \
   "Review this change"
@@ -207,14 +207,14 @@ Send a text-only request through the Rig-backed local Ollama or llama-server
 transport:
 
 ```bash
-cargo run --locked -p agent-runtime --bin agent-run -- model \
+cargo run --locked -p sav --bin sav-run -- model \
   --provider ollama \
   --endpoint http://127.0.0.1:11434 \
   --model qwen3-coder \
   --stream \
   --file prompt.md
 
-cargo run --locked -p agent-runtime --bin agent-run -- model \
+cargo run --locked -p sav --bin sav-run -- model \
   --provider llama-server \
   --endpoint http://127.0.0.1:9931 \
   --model Qwen3.8-9B-Q4_K_M \
@@ -228,7 +228,7 @@ additionally supports canonical tool descriptors and returns tool calls as
 untrusted `ToolIntent` values; it never executes them.
 
 ```bash
-cargo run --locked -p agent-runtime --bin agent-run -- model \
+cargo run --locked -p sav --bin sav-run -- model \
   --provider ollama \
   --endpoint http://127.0.0.1:11434 \
   --model qwen3-coder \
@@ -244,12 +244,12 @@ automatically replays a failed Rig request through it.
 List provider-advertised model IDs without running inference:
 
 ```bash
-cargo run --locked -p agent-runtime --bin agent-run -- models \
+cargo run --locked -p sav --bin sav-run -- models \
   --provider ollama
-cargo run --locked -p agent-runtime --bin agent-run -- models \
+cargo run --locked -p sav --bin sav-run -- models \
   --provider copilot \
   --allow-host-discovery
-cargo run --locked -p agent-runtime --bin agent-run -- models \
+cargo run --locked -p sav --bin sav-run -- models \
   --provider gemini \
   --allow-host-discovery \
   --json
@@ -264,7 +264,7 @@ returns the ordered descriptors and advertised current model.
 `llama-cli` and custom wrappers have no provider inventory; `models` reports
 that capability as unsupported and their setup paths remain manual.
 
-During `agent-run setup`, each catalog-capable provider presents numbered
+During `sav-run setup`, each catalog-capable provider presents numbered
 choices and uses its advertised current model, or first model, as the default.
 Manual entry is available only through the final `Other model ID...` choice.
 If discovery fails visibly, setup offers the provider fallback (`auto` for
@@ -273,8 +273,8 @@ and the custom choice. The reusable profile name is selected separately from
 the provider model ID.
 
 Standalone profiles are stored at
-`$XDG_CONFIG_HOME/agent-runtime/config.toml`, falling back to
-`$HOME/.config/agent-runtime/config.toml`. Version 1 stores generic profile
+`$XDG_CONFIG_HOME/sav/config.toml`, falling back to
+`$HOME/.config/sav/config.toml`. Version 1 stores generic profile
 names, provider kinds, and command templates:
 
 ```toml
@@ -286,18 +286,18 @@ provider = "ollama"
 command = "ollama run qwen3-coder '{prompt}'"
 ```
 
-The library crate is named `agent_runtime`. Its outcomes and constraints,
+The library crate is named `sav`. Its outcomes and constraints,
 consumer boundary, and private realization live in
-[`agent_runtime/REQUIREMENTS.md`](agent_runtime/REQUIREMENTS.md),
-[`agent_runtime/CONTRACT.md`](agent_runtime/CONTRACT.md), and
-[`agent_runtime/DESIGN.md`](agent_runtime/DESIGN.md).
+[`sav/REQUIREMENTS.md`](sav/REQUIREMENTS.md),
+[`sav/CONTRACT.md`](sav/CONTRACT.md), and
+[`sav/DESIGN.md`](sav/DESIGN.md).
 The layered runtime decision is documented in
-[`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md),
+[`docs/sav/architecture.md`](docs/sav/architecture.md),
 the current and planned runtime choices in
-[`docs/agent-runtime/runtime-selection.md`](docs/agent-runtime/runtime-selection.md),
+[`docs/sav/runtime-selection.md`](docs/sav/runtime-selection.md),
 the direct transport is available for local testing, and the Rig 0.42.0
 adoption decision and contained optional adapter gates are in
-[`docs/agent-runtime/rig-evaluation.md`](docs/agent-runtime/rig-evaluation.md).
+[`docs/sav/rig-evaluation.md`](docs/sav/rig-evaluation.md).
 The current host mode is a reliability aid, not a sandbox. `fakeroot`, retry
 notices, and backups likewise do not restrict an agent's authority.
 
@@ -355,7 +355,7 @@ project must opt in with this versioned, project-local configuration:
 ```toml
 [sandbox]
 schema_version = 1
-runner = "/absolute/path/to/separately-installed-sandbox-runner"
+runner = "/absolute/path/to/separately-installed-galla-runner"
 backend = "/absolute/path/to/bubblewrap-executable"
 network = "deny"
 environment_allowlist = ["PATH"]
@@ -425,7 +425,7 @@ workspace without mounting the user's Cargo home. Its lockfile before/after
 identities and derived source identities are bound to its immutable cache
 generation result. Verification is exactly `cargo test --locked`, offline
 (`CARGO_NET_OFFLINE=true`), with an approved immutable Cargo-home generation
-mounted read-only and separate target scratch. The engine plans and runner
+mounted read-only and separate target scratch. The maerg plans and runner
 validates these semantics; OS mounts, process execution, network transport,
 DNS/address pinning, redirects, live task wiring, and final project-cache
 generation selection remain deferred, so requests still fail closed.
@@ -463,9 +463,9 @@ compiler was 1.94, remains supported on the same toolchain. CI tests Rust 1.95
 and current stable on Linux.
 `Cargo.lock` is committed and every CI build/test command uses
 `--locked`. Kvist's own repository dogfoods the component model: the root Rust
-workspace lives at the repository root (`Cargo.toml`), with `engine/`,
-`agent_runtime/`, and `sandbox_runner/` as complete top-level component boundaries. The
-[`sandbox_runner` intent](sandbox_runner/REQUIREMENTS.md) is present, and
+workspace lives at the repository root (`Cargo.toml`), with `maerg/`,
+`sav/`, and `galla/` as complete top-level component boundaries. The
+[`galla` intent](galla/REQUIREMENTS.md) is present, and
 its package now validates the version-one protocol and mediated-Cargo plan
 semantics, independently derives source identities, and builds immutable
 Cargo-home cache generations with descriptor-relative Linux operations. It
@@ -537,7 +537,7 @@ vendoring is enforced, the language's vendored material is mounted read-only,
 one writable scratch is granted, the network is denied, and the language's
 canonical offline test command runs (C/C++ uses the approved `[test_policy]`
 `command). `kvist vendor`dispatches per detected strategy (Go, JavaScript for
-npm/yarn/pnpm, Python, C/Conan and vcpkg); per-language end-to-end evidence is tracked in`engine/TODOS.yaml` and gates the vendored-supported claim.
+npm/yarn/pnpm, Python, C/Conan and vcpkg); per-language end-to-end evidence is tracked in`maerg/TODOS.yaml` and gates the vendored-supported claim.
 
 ### Intended support order and evidence
 
@@ -554,7 +554,7 @@ Support is never claimed without executable evidence: every supported language
 requires an end-to-end integration test that vendors (or otherwise provisions)
 a small real project on the host and runs its real build/test offline inside
 the Bubblewrap sandbox, asserting a successful run. The existing Rust e2e is
-`engine/tests/offline_cargo_verification_e2e.rs`; per-language e2e tests
+`maerg/tests/offline_cargo_verification_e2e.rs`; per-language e2e tests
 follow the same shape and self-skip on hosts without the live sandbox.
 
 Declared limitations for currently supported languages:
@@ -594,8 +594,8 @@ step, never an in-build side effect.
 Known gap: the authoring phase cannot yet receive the Rust toolchain, because
 the shared runner contract permits the Cargo toolchain and the vendored
 registry/config/runtime purposes only in verification phases. Extending that
-contract (protocol change) is tracked in `engine/TODOS.yaml` and documented in
-`engine/DESIGN.md`.
+contract (protocol change) is tracked in `maerg/TODOS.yaml` and documented in
+`maerg/DESIGN.md`.
 
 ### Explicitly unsupported
 
@@ -831,7 +831,7 @@ Dependency policy is enforced with
 
 ```bash
 cargo install --locked --version 0.20.2 cargo-deny
-cargo deny --manifest-path engine/Cargo.toml --all-features --locked check advisories bans licenses sources
+cargo deny --manifest-path maerg/Cargo.toml --all-features --locked check advisories bans licenses sources
 ```
 
 CI rejects known advisories, wildcard requirements, unknown registries or Git
@@ -978,7 +978,7 @@ implied by the current version marker.
 
 ## License and contributions
 
-Kvist and the in-repository `agent-runtime` crate are copyright (C) 2026
+Kvist and the in-repository `sav` crate are copyright (C) 2026
 Stefan Lindblad and licensed under the
 [GNU Affero General Public License, version 3 or later](LICENSE).
 

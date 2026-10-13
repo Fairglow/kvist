@@ -9,7 +9,7 @@
 ## Review basis, scope, and independence
 
 This is a repeated independent, source-blind compliance pass over the current
-uncommitted artifact-model redesign for `kvist.engine` and `agent-runtime`.
+uncommitted artifact-model redesign for `kvist.maerg` and `sav`.
 The reviewer was separate from implementation, clean-slate implementation
 documentation, and the security audit.
 
@@ -18,10 +18,10 @@ The review used only:
 - `VISION.md`, `ARCHITECTURE.md`, and `ROOT_CONTRACT.md`;
 - root and child `REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`, and fresh
   `IMPL.md` records;
-- `src/TODOS.yaml` and `src/agent_runtime/TODOS.yaml` solely for revisions,
+- `src/TODOS.yaml` and `src/sav/TODOS.yaml` solely for revisions,
   traceability, ordering, and review-state provenance;
 - permitted test sources under `tests/**` and
-  `src/agent_runtime/tests/**`;
+  `src/sav/tests/**`;
 - both Cargo manifests for package, feature, and test-command identity;
 - `docs/standards.md` and ADR 0001; and
 - the previous `COMPLIANCE_REVIEW.md` only to reassess its stable findings and
@@ -197,8 +197,8 @@ rule, and permitted child fixtures use the same heading.
 
 **Current result:** Retained as `WP-AR-001`; outside the redesign
 
-The child record still states that standalone `agent-run run` sets no total
-attempt timeout and standalone `agent-run model` does not bridge process
+The child record still states that standalone `sav-run run` sets no total
+attempt timeout and standalone `sav-run model` does not bridge process
 signals into its cancellation token. Library supervision and embedding-host
 cancellation remain bounded and tested. This is not an artifact-model
 regression, but it prevents an unrestricted whole-product compliance claim.
@@ -229,7 +229,7 @@ providers or replace their pending audits.
 
 ## Material-clause traceability
 
-### `kvist.engine`
+### `kvist.maerg`
 
 | Requirement | Redesign result | Current evidence and disposition |
 | --- | --- | --- |
@@ -244,7 +244,7 @@ providers or replace their pending audits.
 | `REQ-COMPLIANCE` | Compliant for redesign | Fresh clean-slate records, this separate source-blind pass, a completed prior security task, durable discrepancies, and an ordered review chain satisfy the redesign gate. |
 | `REQ-CONVERSION-IMPORT` | Compliant for redesign publication; partial whole product | Existing files are preserved, drafts are explicit, generated artifacts are validated, ambiguous/link-like metadata is refused, and publication is no-clobber. Traversal/source-size bounds remain `WP-REV-001`. |
 
-### `agent-runtime`
+### `sav`
 
 | Requirement | Result | Current evidence and disposition |
 | --- | --- | --- |
@@ -261,7 +261,7 @@ providers or replace their pending audits.
 | Focus area | Result |
 | --- | --- |
 | Artifact hierarchy | Compliant. Candidate discovery and five-file completeness are explicit and consistent. |
-| CLI and package naming | Compliant. Root commands use `component`; the child uses package `agent-runtime`, crate `agent_runtime`, and binary `agent-run`, with deliberate bounded legacy profile fallback. |
+| CLI and package naming | Compliant. Root commands use `component`; the child uses package `sav`, crate `sav`, and binary `sav-run`, with deliberate bounded legacy profile fallback. |
 | Five-artifact discovery | Compliant. Required names, order, incomplete/invalid reporting, lexical traversal, and transparent namespaces agree. |
 | Independent revisions | Compliant. Local requirements, contract, design, and nearest-parent contract revisions remain independently attributable. |
 | Variable-depth parent paths | Compliant. Safe ancestor-only paths and computed `../../CONTRACT.md` repair/status/context behavior are tested. |
@@ -310,8 +310,8 @@ publication is compliant, but it does not resolve unbounded input discovery.
 **Classification:** Partial
 
 The reusable library provides configured wall-time and cooperative
-cancellation mechanisms. The standalone `agent-run run` command sets no total
-attempt timeout, and standalone `agent-run model` does not translate process
+cancellation mechanisms. The standalone `sav-run run` command sets no total
+attempt timeout, and standalone `sav-run model` does not translate process
 signals into its cancellation token.
 
 **Disposition:** Blocks a complete standalone-runtime compliance claim; does
@@ -351,7 +351,7 @@ artifact-model chain and does not reverse this redesign verdict.
   planned and unpromoted.
 - Hosted providers, broader interchange/schema export, and non-Linux execution
   remain deferred.
-- `agent-runtime` intentionally provides host-process supervision, not a
+- `sav` intentionally provides host-process supervision, not a
   sandbox or host-owned durable compliance store.
 - Direct and optional Rig transports intentionally remain loopback HTTP only.
 - Pre-release compatibility and migration are not promised.

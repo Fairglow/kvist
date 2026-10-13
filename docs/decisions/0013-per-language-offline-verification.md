@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (decision in place; per-language implementation and evidence tracked in
-`engine/TODOS.yaml`). The decision is that every supported non-Rust language
+`maerg/TODOS.yaml`). The decision is that every supported non-Rust language
 verifies through **one shared offline topology** — the existing generic
 sandbox path extended with the language's vendored read-only mounts and a
 writable scratch — rather than a bespoke closed topology per language. This
@@ -24,7 +24,7 @@ Implemented:
   manager: a Conan home (`.kvist/vendored-conan`, generating the build files
   under `.kvist/conan-build`) or a vcpkg root (`.kvist/vendored-vcpkg`).
 - **The shared offline language topology**
-  (`engine::language_verification::run_offline_language_verification`):
+  (`maerg::language_verification::run_offline_language_verification`):
   vendoring is enforced before any sandbox work, the language's vendored
   material is mounted read-only with the lock-file digest identity (ADR-0011),
   one disjoint writable scratch absorbs caches, build output, and `HOME`, the
@@ -43,7 +43,7 @@ unittest -v` with `VIRTUAL_ENV` at the
   the approved project test command (the build system is project-defined) with
   `CONAN_HOME` at the Conan home's canonical host path, or `VCPKG_ROOT` at the
   vendored vcpkg root's canonical host path.
-- **Go end-to-end evidence.** `engine/tests/language_offline_e2e.rs` vendors a
+- **Go end-to-end evidence.** `maerg/tests/language_offline_e2e.rs` vendors a
   real small Go module on the host (`kvist vendor` dispatch) and runs
   `go test -mod=vendor ./...` network-denied inside the Bubblewrap sandbox;
   the test self-skips without the live sandbox or the Go toolchain. CI
@@ -63,7 +63,7 @@ Validated live (security-sensitive, requires the bwrap runner environment):
 - **Go, JavaScript (npm/yarn and pnpm), Python (pip and uv), and C/C++ (Conan
   and vcpkg) verify offline under the real bwrap runner.** Each language/package
   manager has a passing end-to-end test in
-  `engine/tests/language_offline_e2e.rs`; the tests self-skip on hosts without
+  `maerg/tests/language_offline_e2e.rs`; the tests self-skip on hosts without
   the live sandbox or the language toolchain.
 
 ## Context
@@ -74,7 +74,7 @@ network, and fail-closed enforcement on every verification. The Rust language
 has a closed verification topology for it (toolchain, vendored registry, cargo
 config, runtime bin, scratch). The other supported languages have no comparable
 closed topology, and a bespoke one per language would multiply the surface that
-the runner validates and the engine plans.
+the runner validates and the maerg plans.
 
 The generic sandbox path already provides what these languages need for the
 toolchain: the runner mounts the host system layout read-only
@@ -140,7 +140,7 @@ the evidence uniform.
 | Action                                                                                               | Performs it                                         | Network                | Boundary     |
 | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ---------------------- | ------------ |
 | `go mod vendor`, `npm ci`, `pip download`, `uv venv`/`pip install`, `conan install`, `vcpkg install` | Host, authorized provisioning step (`kvist vendor`) | Approved sources only  | Provisioning |
-| Vendoring enforcement (lock-file digest, presence, mounts)                                           | `kvist` engine (host)                               | None                   | Authority    |
+| Vendoring enforcement (lock-file digest, presence, mounts)                                           | `kvist` maerg (host)                               | None                   | Authority    |
 | Canonical offline test command (or approved C/C++ test command)                                      | Effect sandbox                                      | None (denied)          | Isolation    |
 | System toolchain (`go`, `node`, `python3`, `gcc`/`make`)                                             | Effect sandbox                                      | None (read-only mount) | Isolation    |
 

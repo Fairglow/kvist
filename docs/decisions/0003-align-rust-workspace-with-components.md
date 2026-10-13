@@ -22,7 +22,7 @@ model it expects from users.
 Move the Rust product workspace beneath one implementation root:
 
 ```text
-engine/
+maerg/
   REQUIREMENTS.md
   CONTRACT.md
   DESIGN.md
@@ -32,13 +32,13 @@ engine/
   Cargo.lock
   src/
   tests/
-  agent_runtime/
-  sandbox_runner/
+  sav/
+  galla/
 ```
 
-Set `component_root = "engine"`. The `kvist.engine` root component owns the
+Set `component_root = "maerg"`. The `kvist.maerg` root component owns the
 workspace manifest, CLI and library source, root integration tests, and
-component-local build configuration. `agent-runtime` and `sandbox-runner` are
+component-local build configuration. `sav` and `galla` are
 complete child components with their own manifests, intent, queues, tests, and
 implementation records. Project intent and governance remain at repository
 root in `VISION.md`, `ARCHITECTURE.md`, `ROOT_CONTRACT.md`, ADRs, licensing,
@@ -66,7 +66,7 @@ as aliases.
 
 ## Consequences
 
-Cargo commands use `engine/Cargo.toml` or run from `engine/`. CI, documentation,
+Cargo commands use `maerg/Cargo.toml` or run from `maerg/`. CI, documentation,
 path dependencies, tests, and status fixtures must change together. The move
 is substantial, but it makes root authoring, verification, child boundaries,
 and future sandbox grants coherent instead of encoding permanent exceptions

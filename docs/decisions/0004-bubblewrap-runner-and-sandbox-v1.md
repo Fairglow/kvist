@@ -15,9 +15,9 @@ backward compatibility.
 
 ## Decision
 
-Create `sandbox-runner` as a child component that produces one Linux
+Create `galla` as a child component that produces one Linux
 Bubblewrap-backed executable. Its installed executable must be a regular,
-non-link file outside the selected project and worktree. The engine communicates
+non-link file outside the selected project and worktree. The maerg communicates
 with it only through canonical bounded JSON and does not import runner
 implementation types.
 

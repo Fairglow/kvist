@@ -4,9 +4,9 @@
 
 ## Scope, stakeholders, and concerns
 
-The system of interest is the local `kvist` CLI, its reusable `agent-runtime`
-component, its independently installed `sandbox-runner` enforcement component,
-its standalone sandboxed workspace-agent `agent-runner` component,
+The system of interest is the local `kvist` CLI, its reusable `sav`
+component, its independently installed `galla` enforcement component,
+its standalone sandboxed workspace-agent `skott` component,
 and the durable project artifacts they read or write. The human architect is
 the approval and arbitration authority. External coding agents, models,
 version-control tools, editors, package sources, and operating-system isolation
@@ -53,18 +53,18 @@ trusted core.
 
 | Stable ID        | Path              | Responsibility                                                                                                                                  | Provides                                                             | Requires                                                                                    |
 | ---------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `kvist.engine`   | `engine/`         | Project artifacts, component discovery, validation, status, queues, policy, task lifecycle, context selection, evidence, and CLI dispatch       | `kvist.cli/v1`, `kvist.artifacts/v1`, `kvist.host-authority/planned` | `agent-runtime.library/v1`, `sandbox-runner.protocol/v1`, operating-system and VCS services |
-| `agent-runtime`  | `agent_runtime/`  | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport, and reusable bounded runtime mechanisms | `agent-runtime.library/v1`, `agent-runtime.cli/v1`                   | Host authority interfaces and operating-system process/network services                     |
-| `sandbox-runner` | `sandbox_runner/` | Strict request validation and Linux Bubblewrap enforcement for approved task grants                                                             | `sandbox-runner.protocol/v1`, `sandbox-runner.cli/v1`                | Bubblewrap, Linux kernel isolation, and operating-system process/filesystem services        |
-| `agent-runner` | `agent_runner/` | Interactive/headless workspace agent, request budgets, native file tools and private operational journals; no task approval or canonical evidence | `agent-runner.library/v1`, `agent-runner.cli/v1` | `agent-runtime.library/v1`, `sandbox-runner.protocol/v1`, installed Linux enforcement |
+| `kvist.maerg`   | `maerg/`         | Project artifacts, component discovery, validation, status, queues, policy, task lifecycle, context selection, evidence, and CLI dispatch       | `kvist.cli/v1`, `kvist.artifacts/v1`, `kvist.host-authority/planned` | `sav.library/v1`, `galla.protocol/v1`, operating-system and VCS services |
+| `sav`  | `sav/`  | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport, and reusable bounded runtime mechanisms | `sav.library/v1`, `sav.cli/v1`                   | Host authority interfaces and operating-system process/network services                     |
+| `galla` | `galla/` | Strict request validation and Linux Bubblewrap enforcement for approved task grants                                                             | `galla.protocol/v1`, `galla.cli/v1`                | Bubblewrap, Linux kernel isolation, and operating-system process/filesystem services        |
+| `skott` | `skott/` | Interactive/headless workspace agent, request budgets, native file tools and private operational journals; no task approval or canonical evidence | `skott.library/v1`, `skott.cli/v1` | `sav.library/v1`, `galla.protocol/v1`, installed Linux enforcement |
 
 The repository layout places the root Rust workspace manifest at the project
-root (`/Cargo.toml`), with `engine/`, `agent_runtime/`, `sandbox_runner/`, and `agent_runner/`
-as top-level peer components. `kvist.engine` depends on `agent-runtime` as a
-Rust library, while `sandbox-runner` is an independent execution boundary.
-Neither child imports Kvist engine types. The engine and installed runner
+root (`/Cargo.toml`), with `maerg/`, `sav/`, `galla/`, and `skott/`
+as top-level peer components. `kvist.maerg` depends on `sav` as a
+Rust library, while `galla` is an independent execution boundary.
+Neither child imports Kvist maerg types. The maerg and installed runner
 communicate only through the versioned protocol. The workspace agent uses that
-boundary but does not replace the engine's narrower protected task broker:
+boundary but does not replace the maerg's narrower protected task broker:
 its selected workspace is writable, its journals are diagnostics, and its
 interactive host opt-out is explicitly unconfined and forbidden headlessly.
 Provider libraries remain
@@ -132,7 +132,7 @@ no-clobber or atomic-replacement behavior.
 
 **Accepted-change commits:** human acceptance and VCS commit creation are
 distinct durable states. An optional local commit contains only the exact
-digest-bound acceptance set and engine-written workflow evidence. It preserves
+digest-bound acceptance set and maerg-written workflow evidence. It preserves
 unrelated worktree and index state, never pushes, and remains recoverable when
 commit creation fails.
 
@@ -184,10 +184,10 @@ exception.
 The component table is the canonical static decomposition view. The lifecycle
 sequence above is the canonical workflow view. Detailed authority and model
 transport views for the child runtime live in
-[`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md).
+[`docs/sav/architecture.md`](docs/sav/architecture.md).
 Selection guidance for native, Rig-run, containerized Rig-agent, and external
 agent drivers lives in
-[`docs/agent-runtime/runtime-selection.md`](docs/agent-runtime/runtime-selection.md).
+[`docs/sav/runtime-selection.md`](docs/sav/runtime-selection.md).
 
 Future diagrams should use C4-compatible context, container, component, and
 dynamic concepts only when they answer a named stakeholder concern. Diagram
@@ -206,7 +206,7 @@ Offline vendored builds are recorded in
 [`0011-vendored-offline-builds.md`](docs/decisions/0011-vendored-offline-builds.md):
 the host provisions a versioned vendored registry and manifest for each supported
 language (Rust enforced exactly through `Cargo.lock`; Python, Node, and
-`Conan` enforced through their respective lock files), and the engine re-enforces
+`Conan` enforced through their respective lock files), and the maerg re-enforces
 that manifest via `enforce_vendoring` before an offline build is allowed. Routing
 Rust verification through the Cargo topology and mounting the read-only vendored
 registry and cargo configuration is the planned, security-sensitive integration.

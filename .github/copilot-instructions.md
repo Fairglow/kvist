@@ -83,7 +83,7 @@ advisory input, not a Kvist receipt.
   justified dependency graph; add dependencies only when their capability,
   maintenance, licensing, and security impact are appropriate for a local,
   single-binary CLI.
-- Keep the engine headless and portable. Do not require cloud services,
+- Keep the maerg headless and portable. Do not require cloud services,
   telemetry, credentials, or a runtime daemon for core commands. External LLM
   tools are optional subprocess integrations and must fail clearly when absent.
 - Model invalid states out of existence with types. Use explicit domain errors
@@ -129,8 +129,18 @@ advisory input, not a Kvist receipt.
 
 ## Conventional wisdom
 
-- When things get complicated, remember the principle of divide and conquer
+If you ever feel stuck in a loop, then remember the principle of divide and conquer. Break down the work ahead of you into a plan of smaller parts. Then continue the work on one smaller part at the time. Keep iterating over this pattern recursively until you've achieved a work item that is simple enough to get unstuck.
+
 - Always maintain a structure with proper separation of concerns
-- Logging and transparency, be honest and informative about what's going on in the system, at all times, but never spamming or repetitive. Do it responsibly and at an appropriate log level
-- Error handling must be robust and resilient, always informative and useful
-- All source code for Rust dependencies can be under `~/.cargo/registry/cache/index.crates.io-*/`.
+- Logging: be transparent, honest and informative about what's going on in the system, at all times, but never spamming or repetitive. Just remember to not leak any sensitive data. Do log responsibly and at an appropriate log level
+- Error handling must be robust, reliable and resilient, always informative and useful. Try to make it actionable
+
+## Filesystem locations
+
+- Rust builds are found in `/opt/target/{debug|release}/`
+- Rust dependency source code is located under `~/.cargo/registry/cache/index.crates.io-*/`
+
+## Source Code Guidelines
+
+- Prefer idiomatic Rust patterns, BKM's and formatting.
+- Lines of code: try to stay below 1000 lines of source code per file.

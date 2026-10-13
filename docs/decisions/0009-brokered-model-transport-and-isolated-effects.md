@@ -16,7 +16,7 @@ agent by spawning its model command (for example
 namespace created with `--unshare-net`. Inside that namespace `127.0.0.1` is
 the sandbox's own empty loopback, so the call failed with curl exit 7 even
 when a local model server was running on the host. Agent registration and
-host-side model calls (`agent-run model`) succeed, but the task-execution path
+host-side model calls (`sav-run model`) succeed, but the task-execution path
 never reaches the model.
 
 The first revision of this decision proposed adopting `rig-core` as a

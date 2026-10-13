@@ -132,7 +132,7 @@ deferred until its durable representation and context-materialization rules
 are designed. In particular, general explicitly declared provider-contract
 materialization is not part of current task execution.
 
-The root engine and reusable `agent-runtime` component have the stable
+The root maerg and reusable `sav` component have the stable
 decomposition recorded in [`ARCHITECTURE.md`](ARCHITECTURE.md). The dependency
 direction remains one way: Kvist consumes the runtime contract, and the runtime
 does not import Kvist types.
@@ -322,7 +322,7 @@ the report's content cannot.
 
 Kvist owns task policy, grants, approved resource and credential bindings,
 execution-tier selection, artifact promotion, and canonical evidence. The
-standalone `agent-runtime` component owns provider-neutral prompt acquisition,
+standalone `sav` component owns provider-neutral prompt acquisition,
 command rendering, process supervision, profiles, model transport, canonical
 tool intent, and reusable bounded runtime mechanisms.
 
@@ -343,8 +343,8 @@ optional Rig adapter is a non-default transport prototype. Live provider
 matrices, independent security audit, and compliance review remain promotion
 gates; optional availability is not a completed interoperability claim.
 Detailed authority and transport decisions live in
-[`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md) and
-[`docs/agent-runtime/rig-evaluation.md`](docs/agent-runtime/rig-evaluation.md).
+[`docs/sav/architecture.md`](docs/sav/architecture.md) and
+[`docs/sav/rig-evaluation.md`](docs/sav/rig-evaluation.md).
 
 ---
 

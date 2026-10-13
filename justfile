@@ -6,6 +6,14 @@
 
 all: audit format lint build test
 
+# `kvist vendor`: reconcile the vendored registry against Cargo.lock. When the
+# registry is stale and a sandbox is configured, a network-allow acquisition
+# sandbox (cargo fetch) provisions it before the effect sandbox executes; the
+# fetched material is repacked into .kvist/vendored offline. A no-op when the
+# registry already satisfies the lock.
+vendor:
+    cargo run --locked -p kvist -- vendor .
+
 build:
     cargo build --locked --workspace --all-features
 
@@ -28,6 +36,7 @@ release:
     cargo build --locked --workspace --release --all-features
 
 test:
+    kvist vendor
     cargo nextest run --locked --workspace --all-features --test-threads num-cpus
 
 audit:

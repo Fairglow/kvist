@@ -5,7 +5,7 @@
 **Reviewed:** Implemented portions through 2026-08-25; partial and planned
 review, onboarding, promotion, and compliance work is tracked below
 **Reviewed by:** Stefan Kvist | 2026-08-25
-**Build:** `cargo build --manifest-path engine/Cargo.toml --release` passes with
+**Build:** `cargo build --manifest-path maerg/Cargo.toml --release` passes with
 0 warnings
 
 ## Status conventions
@@ -25,15 +25,15 @@ review, onboarding, promotion, and compliance work is tracked below
 ### COMPLETED DOG-01 — Recoverable Supervised Bubblewrap Execution
 
 **Context:** Kvist cannot currently use `task run` on its own root component.
-No production runner implements the sandbox protocol, the migrated `engine/`
+No production runner implements the sandbox protocol, the migrated `maerg/`
 component now owns its Cargo manifest and integration tests, version-one
 requests cannot express task-scoped workspace authority, and ambiguous
 prepared attempts have no reconciliation command.
 
 **Acceptance criteria:**
 
-- Migrate the product workspace and root artifacts to `engine/`, with complete
-  `agent_runtime/` and `sandbox_runner/` child components and no aliases for
+- Migrate the product workspace and root artifacts to `maerg/`, with complete
+  `sav/` and `galla/` child components and no aliases for
   retired paths.
 - Write the complete root and runner test plans before production changes.
 - Add explicit digest-bound attempt recovery that never guesses about source
@@ -327,16 +327,16 @@ evidence work remain pending.
 - Ensure all signature validation, approval-policy checks, and serialization structures include the new profile's digests.
 - Write unit/integration tests to verify correct role routing and approval-signature validation when the security reviewer is configured.
 
-### [DONE] TODO AGN-02 — Custom Prompt Execution via the agent-runner shell
+### [DONE] TODO AGN-02 — Custom Prompt Execution via the skott shell
 
-**Context:** `kvist prompt` runs the standalone `agent-runner` shell in every
+**Context:** `kvist prompt` runs the standalone `skott` shell in every
 case: interactively (sandboxed, multi-turn) at a terminal, and headless
-(`agent-runner --headless --json`, sandbox-only) without one. The earlier
-engine-side one-shot host path — with its `--idle-timeout`, `--detect-loops`,
+(`skott --headless --json`, sandbox-only) without one. The earlier
+maerg-side one-shot host path — with its `--idle-timeout`, `--detect-loops`,
 and `--max-restarts` supervision flags — has been retired in favor of
-delegating to the shared agent-runner loop. The underlying idle-timeout,
+delegating to the shared skott loop. The underlying idle-timeout,
 loop-detection, and bounded-retry supervision remain available in the reusable
-`agent-runtime` library (used by `agent-runner` and the `agent-run` binary) but
+`sav` library (used by `skott` and the `sav-run` binary) but
 are no longer surfaced on `kvist prompt`.
 
 **Acceptance criteria:**
@@ -345,7 +345,7 @@ are no longer surfaced on `kvist prompt`.
   `--allow-host-execution` (interactive only), and `--multi-turn`.
 - Accepts bounded nonblank UTF-8 prompts from positional text, `--file`,
   redirected standard input, or an explicitly or interactively selected editor.
-- With a terminal, delegates to the interactive agent-runner shell; without a
+- With a terminal, delegates to the interactive skott shell; without a
   terminal, runs the same shell headless (`--headless --json`) and inherits its
   NDJSON event stream on standard output.
 - Headless execution is sandbox-only and rejects `--allow-host-execution`.
@@ -398,7 +398,7 @@ the deferred isolation, brokering, and platform-restoration queue work remain.
 
 **Acceptance criteria:**
 
-- Create a standalone `agent-runtime` Rust library and `agent-run` CLI in its own
+- Create a standalone `sav` Rust library and `sav-run` CLI in its own
   component directory, consumed by Kvist as a path dependency.
 - Move bounded prompt acquisition, shell-free command rendering, idle
   supervision, loop detection, and retry context into the reusable component.
@@ -431,7 +431,7 @@ includes independent review and closure of deferred provider/bounds cases.
 - Move provider-specific collection, custom-wrapper validation, endpoint
   probing, host-acknowledged verification, and profile persistence into
   reusable library APIs.
-- Add `agent-run setup` and allow `agent-run run --profile NAME`
+- Add `sav-run setup` and allow `sav-run run --profile NAME`
   to use the Linux user profile store.
 - Make `kvist agent setup` reuse profile collection or load an existing
   standalone profile, then materialize the exact selected command into Kvist
@@ -466,7 +466,7 @@ native-loop prerequisites, and deferred hardening remain incomplete.
   lifecycle chain; child loop tests use deterministic fake host services.
 - Rust 1.95 is the supported MSRV.
 - The first private local Ollama/llama-server transport and text-only
-  `agent-run model` command are implemented; complete their independent
+  `sav-run model` command are implemented; complete their independent
   security audit and compliance review before the native loop depends on them.
   Keep the transport seam replaceable.
 - Record an explicit promotion decision for any future provider-transport
@@ -478,9 +478,9 @@ native-loop prerequisites, and deferred hardening remain incomplete.
   processes; provider permission flags are defense in depth, not authorization.
 
 Detailed rationale and task chains are in
-`docs/agent-runtime/architecture.md`,
-`docs/agent-runtime/rig-evaluation.md`, and
-`agent_runtime/TODOS.yaml`.
+`docs/sav/architecture.md`,
+`docs/sav/rig-evaluation.md`, and
+`sav/TODOS.yaml`.
 
 ### TODO AGN-05 — Configurable Log Retention & Monotonic Naming
 
@@ -509,7 +509,7 @@ Detailed rationale and task chains are in
 
 **Implemented (2026-09-13 hardening pass):**
 
-- Durable `REQ-INTERACTIVE-SHELL`, contract coverage for the shell and the drifted CLI surface, design section, and a `shell-hardening-*` queue chain in `engine/TODOS.yaml`.
+- Durable `REQ-INTERACTIVE-SHELL`, contract coverage for the shell and the drifted CLI surface, design section, and a `shell-hardening-*` queue chain in `maerg/TODOS.yaml`.
 - Robustness: non-interactive refusal with an actionable diagnostic; command failures, prompt-editor cancellations, and transient terminal read failures no longer terminate the session; repeated terminal read failures exit with a clear diagnostic.
 - Cancellation: a shared SIGINT/SIGTERM handler terminates the supervised process group (sandbox runner and host supervisor), returns a typed cancelled result, and leaves durable task state for explicit `task finalize` / `task recover`.
 - Live streaming: sandbox output is relayed to the terminal while produced, with the bounded evidence log unchanged; a deferred spinner with elapsed time covers silent commands.
@@ -534,11 +534,11 @@ Detailed rationale and task chains are in
 
 ### [PARTIAL] TODO OBS-01 — Structured Diagnostic Logging & Observability Standard Across All Subsystems
 
-**Context:** Kvist needs a uniform logging discipline where events are classified consistently across all subsystems (engine, agent_runtime, sandbox_runner) to provide enough actionable context without log spamming. Diagnostic logs must never corrupt stdout (reserved for commands/JSON).
+**Context:** Kvist needs a uniform logging discipline where events are classified consistently across all subsystems (maerg, sav, galla) to provide enough actionable context without log spamming. Diagnostic logs must never corrupt stdout (reserved for commands/JSON).
 
 **Acceptance criteria:**
 
-- Integrate `tracing` and `tracing-subscriber` into `engine` and `agent-runtime`.
+- Integrate `tracing` and `tracing-subscriber` into `maerg` and `sav`.
 - Emit all diagnostic logging to `stderr` with level filtering (`KVIST_LOG`, `RUST_LOG`).
 - Enforce log level semantics: `ERROR` for invariant violations, `WARN` for retries/degraded states, `INFO` for operator milestones, `DEBUG` for contextual parameters, and `TRACE` for fine-grained internal steps.
 - Enforce anti-spamming: summarize directory discovery, debounce streaming chunks, rate-limit retries.
@@ -547,11 +547,11 @@ Detailed rationale and task chains are in
 
 ### TODO OBS-02 — Sandbox Runner Wire-Protocol Structured Logging & Diagnostics
 
-**Context:** The standalone Linux `kvist-sandbox-runner` executes in a distinct process boundary and must surface diagnostic insights consistently over `stderr` during Bubblewrap setup, mount validation, resource cap enforcement, and isolation breaches.
+**Context:** The standalone Linux `galla-runner` executes in a distinct process boundary and must surface diagnostic insights consistently over `stderr` during Bubblewrap setup, mount validation, resource cap enforcement, and isolation breaches.
 
 **Acceptance criteria:**
 
-- Ensure `kvist-sandbox-runner` uses structured diagnostics adhering to the log level standards.
+- Ensure `galla-runner` uses structured diagnostics adhering to the log level standards.
 - Provide actionable diagnostic context on exit without leaking confidential data or breaking fail-closed invariants.
 - Cover runner diagnostic outputs with integration tests.
 
@@ -597,4 +597,4 @@ phase, queue chain, review, or promotion gate is complete:
 For detailed strategy and current contracts, refer to
 [`KVIST_Architectural_Specification_Full.md`](KVIST_Architectural_Specification_Full.md),
 [`ARCHITECTURE.md`](ARCHITECTURE.md), and the root component documents under
-`engine/`.
+`maerg/`.

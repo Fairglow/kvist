@@ -85,6 +85,6 @@ constraint set injected into component work.
   remain fenced until explicit recovery and disposition.
 - Keep acceptance distinct from VCS publication. An explicit commit option may
   create a local commit containing only the exact accepted paths and
-  engine-written evidence. It must preserve unrelated worktree and index state,
+  maerg-written evidence. It must preserve unrelated worktree and index state,
   never push, and retain accepted state for explicit recovery if commit
   creation fails.

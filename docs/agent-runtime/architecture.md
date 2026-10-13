@@ -39,22 +39,22 @@ provider-specific switches.
 
 ## Ownership topology
 
-The standalone `agent-runtime` crate owns the reusable runtime mechanism:
+The standalone `sav` crate owns the reusable runtime mechanism:
 backend classification, capability state, canonical model messages and turns,
 tool descriptors, untrusted tool intents and results, bounded loop state,
 broker sequencing, execution-backend interfaces and reusable Linux
 implementations, redacted runtime events, and private provider adapters. These
 types and mechanisms cannot invent authorization or broaden a host grant.
 
-The embedding host owns authority. In Kvist, the root engine owns task
+The embedding host owns authority. In Kvist, the root maerg owns task
 contracts, policy decisions, authorization records, approved resource and
 credential bindings, execution-tier selection, artifact promotion, and
 canonical compliance evidence. The standalone interfaces accept that authority
 through narrow traits; another application may provide its own policy and
 evidence services without depending on Kvist.
 
-The dependency direction is one way: Kvist depends on `agent-runtime`.
-`agent-runtime` never imports Kvist types. Third-party framework types remain
+The dependency direction is one way: Kvist depends on `sav`.
+`sav` never imports Kvist types. Third-party framework types remain
 behind private adapters, so neither side depends on Rig as a public contract.
 
 ## Layers and authority
@@ -259,4 +259,4 @@ Kvist therefore requires:
 8. Add MCP and ACP adapters only after the trusted boundaries exist.
 
 The durable task chains are maintained in
-`agent_runtime/TODOS.yaml`.
+`sav/TODOS.yaml`.

@@ -13,7 +13,7 @@ Evaluation date: 2026-09-01.
 
 Rig was a default-enabled experiment on the `rig-integration` branch, not an
 accepted production preference. Exactly pinned `rig-core` 0.42.0 implements the
-private `agent-runtime` model-transport boundary after Kvist deliberately raised
+private `sav` model-transport boundary after Kvist deliberately raised
 its MSRV to Rust 1.94, the compiler used by that Rig release's repository and
 CI. The direct transport remains an explicit fallback and conformance baseline.
 There is no automatic fallback because replay after an uncertain provider
@@ -43,7 +43,7 @@ review.
 | What improves?            | Rig centralizes provider request/response conversion, SSE/NDJSON assembly, finish reasons, usage, tool-call fragments, and provider evolution. The branch also gains provider-native structured-output requests without exposing Rig types.                                                                                |
 | What remains Kvist-owned? | Canonical messages and turns, endpoint policy, limits, cancellation semantics, schema subset and returned-output validation, retry decisions, tool authorization/execution, redaction, and durable evidence.                                                                                                               |
 | What does it cost?        | The current target-specific normal/build graph is 148 unique packages with Rig versus 49 for the direct-only build, a delta of 99. The private Rig adapter is 1,086 source lines while the hardened direct transport is 1,856; retaining both means the experiment adds code rather than deleting it.                      |
-| Does usage change?        | Normal branch builds include Rig and `agent-run model` defaults to it. `--transport direct` is the explicit fallback. `--output-schema '<object>'` adds a generation constraint. Reasoning effort and provider reasoning still require the direct transport. Project configuration and Kvist task flow do not change.      |
+| Does usage change?        | Normal branch builds include Rig and `sav-run model` defaults to it. `--transport direct` is the explicit fallback. `--output-schema '<object>'` adds a generation constraint. Reasoning effort and provider reasoning still require the direct transport. Project configuration and Kvist task flow do not change.      |
 | Should fallback remain?   | Yes, while Rig is pre-1.0 and live deployment conformance is incomplete. Fallback must be manually selected before a request; automatic replay is unsafe after uncertain acceptance. A later production decision may keep direct only as a test oracle or remove it after multiple stable Rig upgrades.                    |
 | Is Rig robust enough?     | The pinned completion/provider core is robust enough for a contained experiment and fake-provider conformance. It is not yet proven robust enough to be Kvist's sole production transport because upstream warns of breaking changes, declares no MSRV, and exact local model/server/template matrices remain unevaluated. |
 | Best future boundary      | Rig has the better future for provider-wire breadth if its smaller crate split stabilizes. Kvist's own canonical contract and authority layers have the better future for deterministic workflow, security, and evidence. The best implementation is therefore hybrid, not full framework adoption.                        |
@@ -106,7 +106,7 @@ usage/finish metadata, and tool-call identity handling.
 
 A private Kvist adapter can:
 
-1. translate a closed `agent-runtime` model request into a Rig request;
+1. translate a closed `sav` model request into a Rig request;
 2. invoke a selected Rig provider through an approved endpoint;
 3. translate text, structured tool calls, usage, finish reason, model identity,
    provider request identity, and terminal errors into standalone runtime
@@ -226,7 +226,7 @@ The original throwaway experiment and the integrated adapter measured:
 | Gate                       | Result                                                                                                                                                                                                                                                                            |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Rust 1.85                  | Historical fail. `rig-core` itself uses Edition 2024 let-chains stabilized in Rust 1.88.                                                                                                                                                                                          |
-| Rust 1.94                  | Pass for the complete `agent-runtime --all-features` suite. This is the upstream-tested compiler, not a Rig-declared MSRV.                                                                                                                                                        |
+| Rust 1.94                  | Pass for the complete `sav --all-features` suite. This is the upstream-tested compiler, not a Rig-declared MSRV.                                                                                                                                                        |
 | Current Rust 1.98          | Pass for the integrated unary, streaming, tool-intent, bounds, cancellation, CLI, and tracing tests.                                                                                                                                                                              |
 | Locked package count       | Advisory. Current target-specific normal/build count is 148 packages with `rig-transport` versus 49 for the direct-only build: delta 99, above the 75-package review guideline. Package count informs maintenance and supply-chain review but does not block promotion by itself. |
 | Release binary size        | Pass. 6,747,168 bytes with `rig-transport` versus 2,473,416 direct-only bytes: delta 4,273,752 bytes, below the 15 MiB limit.                                                                                                                                                     |
@@ -350,7 +350,7 @@ packages with:
 
 ```sh
 cargo tree --locked --target x86_64-unknown-linux-gnu \
-  -p agent-runtime -e normal,build --prefix none |
+  -p sav -e normal,build --prefix none |
   sed 's/ (\*)$//' | sort -u | wc -l
 ```
 
@@ -403,7 +403,7 @@ essential accepted adapter proves impossible upstream.
 The immediate durable target is:
 
 ```text
-agent-runtime canonical model contract
+sav canonical model contract
     -> pinned Rig adapter (experiment default)
         -> approved local provider
     -> direct local HTTP adapter (explicit fallback/conformance)

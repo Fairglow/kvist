@@ -10,11 +10,11 @@ Kvist currently operates as a stateless command-line tool where every operation 
 
 There is a need for a unified, interactive workspace environment (a REPL shell) to provide real-time feedback, dynamic state visualization, and fluid navigation. In this interface, commands must remain the primary focus. Initiating a command should not require an artificial prefix (like `/`), and raw prompt authoring should be treated as an explicit, high-signal action rather than the default text input to avoid accidental submissions.
 
-Furthermore, building this interactive interface inside a stateless CLI codebase would lead to tightly coupled, hard-to-maintain code. To solve this cleanly, the Kvist engine must be refactored into a reusable core library, allowing the interactive shell to become the primary, first-class application frontend.
+Furthermore, building this interactive interface inside a stateless CLI codebase would lead to tightly coupled, hard-to-maintain code. To solve this cleanly, the Kvist maerg must be refactored into a reusable core library, allowing the interactive shell to become the primary, first-class application frontend.
 
 ## Decision
 
-Relegate the core engine (`kvist`) to a library role (`kvist_core`), separating the domain logic (project state, candidate discovery, task queue management, sandboxed execution, and VCS commits) from command-line presentation. The CLI binary will act as a thin frontend wrapper around this core library, sharing it with the new interactive shell subsystem.
+Relegate the core maerg (`kvist`) to a library role (`kvist_core`), separating the domain logic (project state, candidate discovery, task queue management, sandboxed execution, and VCS commits) from command-line presentation. The CLI binary will act as a thin frontend wrapper around this core library, sharing it with the new interactive shell subsystem.
 
 Introduce an interactive REPL workspace interface, invoked via `kvist shell` (or as the default interactive mode). 
 
@@ -39,7 +39,7 @@ Introduce an interactive REPL workspace interface, invoked via `kvist shell` (or
 
 * **Default to prompt input with slash commands:** Making raw input write prompts directly and requiring `/` for commands (e.g. `/task run`). Rejected because Kvist is an architecture-driven, command-focused workflow engine, not a generic chat assistant. Commands must remain the first-class, un-prefixed focus of the shell interface.
 * **Custom inline multi-line text editor:** Building a custom terminal text editor within the prompt input field. Rejected as terminal line-editors are complex to implement robustly across diverse platforms, terminals, and keybinding configurations. Delegating to the system's `$EDITOR` is idiomatic, robust, and preserves the operator's personal environment preferences (such as Vim/Emacs keys).
-* **Stateless execution wrappers:** Keeping the engine as an independent binary and running shell commands through process spawning. Rejected due to the substantial latency and lack of rich, in-memory caching of workspace state, component configurations, and active sessions.
+* **Stateless execution wrappers:** Keeping the maerg as an independent binary and running shell commands through process spawning. Rejected due to the substantial latency and lack of rich, in-memory caching of workspace state, component configurations, and active sessions.
 
 ## Consequences
 

@@ -7,15 +7,15 @@ defaults, licensing terms or credential store was imported.
 
 ## Authority comes first
 
-`agent-runner` is a workspace coding agent, **not the engine's protected task
+`skott` is a workspace coding agent, **not the maerg's protected task
 broker**. The selected workspace is writable, including its intent documents.
-It exposes no engine authorization, acceptance, canonical-evidence or promotion
+It exposes no maerg authorization, acceptance, canonical-evidence or promotion
 API. That is not protection against changing those files through the workspace
 shell. The independent comparison found a conflict between this local design
 and the root contract's protected-artifact and shell rules
 ([F4](runner-intent-review.md#f4--p1--contradictory-intent-global-protected-artifact-and-shell-rules)).
 Explicit human scope arbitration is required before claiming global conformity;
-no exception or acceptance has been silently recorded. Use the engine's
+no exception or acceptance has been silently recorded. Use the maerg's
 protected broker for governed task authoring.
 
 Default tools run through the separately installed Linux/Bubblewrap runner.
@@ -34,23 +34,23 @@ tools do not grant more authority than that shell.
 Install both runner binaries together:
 
 ```sh
-cargo install --locked --path agent_runner --bins
+cargo install --locked --path skott --bins
 ```
 
-The main executable needs `agent-runner-file-tool` beside it. The helper is a
+The main executable needs `skott-file-tool` beside it. The helper is a
 small filesystem primitive, not a sandbox when invoked directly. Do not place
 either it or the installed enforcement runner inside the writable workspace.
 Configure `[sandbox].runner` and `.backend` for the independently installed
-`kvist-sandbox-runner` and Bubblewrap. Writable workspace parents are required
+`galla-runner` and Bubblewrap. Writable workspace parents are required
 for private temporary payload staging; filesystem-root workspaces are rejected.
 
-Configuration discovery uses `./agent-runner.toml`, then the per-user
-`agent-runner/config.toml`, then `XDG_CONFIG_DIRS` (default `/etc/xdg`).
-The repository example is named **`agent_runner.toml`**, so select it explicitly:
+Configuration discovery uses `./skott.toml`, then the per-user
+`skott/config.toml`, then `XDG_CONFIG_DIRS` (default `/etc/xdg`).
+The repository example is named **`skott.toml`**, so select it explicitly:
 
 ```sh
-agent-runner --config agent_runner.toml --effort none
-agent-runner --config agent_runner.toml --headless --json --effort none \
+skott --config skott.toml --effort none
+skott --config skott.toml --headless --json --effort none \
   --context-limit 8192 --response-reserve 1024 \
   --max-run-secs 180 --max-run-tokens 100000 \
   'Read the relevant file, make one exact preimage-bound edit, then verify it.'
@@ -127,7 +127,7 @@ This is not an atomic filesystem snapshot or a substitute for the installed
 namespace boundary.
 
 File-tool schemas and exact bounds are in
-[the component contract](../../agent_runner/CONTRACT.md#native-file-tool-inputs-and-results).
+[the component contract](../../skott/CONTRACT.md#native-file-tool-inputs-and-results).
 Read digests cover whole bounded files. Native JSON stdout fits 7000 bytes;
 the combined model-facing result with process metadata fits 8 KiB. Prefer
 small pages and the returned continuation offsets. Exact edits reject stale,
@@ -137,18 +137,18 @@ Preimage revalidation is **not atomic CAS against arbitrary external writers**.
 
 ## Records, privacy and interrupted effects
 
-Journals are private local operational records, **not engine evidence**.
+Journals are private local operational records, **not maerg evidence**.
 Argument/output values are represented by hashes/shape in the journal.
 Diagnostic transcripts may contain sensitive user/model/tool text and bound
 each text item to 64 KiB. They are not guaranteed complete or secret-free.
 
-Interactive logs default to `.agent-runner/runs`, which the workspace agent
+Interactive logs default to `.skott/runs`, which the workspace agent
 can modify; held descriptors prevent path redirection, not tamper-proof storage.
 Use an external private `--log-dir` when integrity matters. Interactive
 `--no-logs` is deliberate and visible in help; it is forbidden headlessly.
 Headless logs must be non-linked/private and outside the writable workspace,
-defaulting to `$XDG_STATE_HOME/agent-runner/runs` or
-`$HOME/.local/state/agent-runner/runs`.
+defaulting to `$XDG_STATE_HOME/skott/runs` or
+`$HOME/.local/state/skott/runs`.
 
 History/replay is advisory display only. It rejects nonregular/link paths,
 caps files at 5 MiB before and during reading, and caps directory enumeration.
@@ -172,8 +172,8 @@ A separate model-free trial verified confined native writes/reads, unavailable
 host-private files and denied access to a host-local TCP listener.
 
 ```sh
-KVIST_LIVE_SANDBOX_RUNNER=/path/to/installed/kvist-sandbox-runner \
-  cargo test --locked -p agent-runner --test live_llama \
+KVIST_LIVE_GALLA_RUNNER=/path/to/installed/galla-runner \
+  cargo test --locked -p skott --test live_llama \
   -- --ignored --test-threads=1
 ```
 

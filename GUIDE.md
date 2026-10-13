@@ -28,14 +28,14 @@ Executable releases currently support Linux (`x86_64`). macOS and Windows suppor
 Kvist is built from source using standard Cargo:
 
 ```bash
-cargo build --release -p kvist -p kvist-sandbox-runner -p agent-runtime
+cargo build --release -p kvist -p galla-runner -p sav
 ```
 
 Install the binaries into your `$PATH`:
 
 ```bash
-cargo install --path engine
-cargo install --path sandbox_runner
+cargo install --path maerg
+cargo install --path galla
 ```
 
 Verify the installation:
@@ -67,10 +67,10 @@ The shell provides:
 Typical session:
 
 ```text
-kvist (main) ❯ cd engine          # remember the component
-kvist engine/ (main) ❯ tasks      # status of engine's tasks
-kvist engine/ (main) ❯ run        # execute the next ready task
-kvist engine/ (main) ❯ last       # recent agent runs with log links
+kvist (main) ❯ cd maerg          # remember the component
+kvist maerg/ (main) ❯ tasks      # status of maerg's tasks
+kvist maerg/ (main) ❯ run        # execute the next ready task
+kvist maerg/ (main) ❯ last       # recent agent runs with log links
 ```
 
 ---
@@ -315,7 +315,7 @@ Kvist never executes unconstrained coding agents directly on your host. Agent ex
 +--------------------------------------------------------------------------+
 | HOST SYSTEM                                                              |
 |                                                                          |
-|   kvist engine  ──(request json)──►  kvist-sandbox-runner                |
+|   kvist maerg  ──(request json)──►  galla-runner                |
 |                                             │                            |
 |                                             ▼ (Linux Namespaces)         |
 |   +------------------------------------------------------------------+   |
@@ -420,7 +420,7 @@ For detailed instructions on compliance reviews, refer to [`REVIEW_RUNBOOK.md`](
 
 Every command resolves the project by walking upward from the current
 directory to the nearest `kvist.toml`, and component commands act on the
-component containing the current directory — so `cd engine && kvist task next`
+component containing the current directory — so `cd maerg && kvist task next`
 works without repeating the component. An explicit path argument always wins.
 
 ### In-Shell Builtins
