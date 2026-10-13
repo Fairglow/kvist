@@ -30,3 +30,9 @@ crossterm = "0.29"
 pulldown-cmark = "0.13"
 syntect = { version = "5.3", default-features = false, features = ["default-fancy"] }
 tabled = { version = "0.22.0", features = ["ansi", "ansi-str", "ansitok"] }
+unicode-segmentation = "1.13"
+unicode-width = "0.2"
+
+[dev-dependencies]
+nix = { version = "0.31", default-features = false, features = ["fs", "poll", "process", "signal", "term"] }
+vte = "0.15"

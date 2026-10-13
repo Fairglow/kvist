@@ -76,6 +76,27 @@ interactive navigation, search, and optional edit support.
     required.
 25. **R-025 Platform:** Linux only (uses crossterm for terminal interaction).
 
+### Targeted Layout Corrections
+
+26. **R-026 Viewport retention:** The interactive viewer must retain the first
+    document line at the first content row. Header, footer, content and scrollbar
+    writes must be positioned and clipped so drawing never scrolls the terminal.
+    Empty and tiny viewports must not panic.
+27. **R-027 Prose layout:** Prose and headings wrap at the available terminal
+    display-column width after reserving the scrollbar and optional number
+    gutter, without hidden margins. Markdown event boundaries must not insert
+    spaces, and paragraph/hard-break boundaries must reset line state. Preserve
+    source-contributed soft-break spaces, inline-code whitespace and the existing
+    indented list continuations. Long ordinary words may break at grapheme
+    boundaries; indivisible overwide graphemes and inline code may overflow.
+28. **R-028 Layout refresh:** Resize must reflow prose to the new content width.
+    Code block lines remain unwrapped and horizontally accessible. Horizontal
+    clipping must not cut ANSI controls or Unicode graphemes, and short lines
+    must not reset the shared horizontal offset.
+
+These corrections do not implement the remaining table-ratio/border, search,
+folding or live-follow features proposed in `PLAN.md`.
+
 ## Constraints
 
 26. **C-001 Dependencies:** Use existing workspace dependencies where

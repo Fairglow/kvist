@@ -17,6 +17,8 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color as SColor, FontStyle, Style as SStyle, Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
+use crate::inline::{InlineWriter, Style};
+
 /// Render markdown with syntax-highlighted code blocks to the terminal.
 /// If terminal_width is provided, paragraphs will be wrapped to fit within that width.
 pub fn render_markdown(md: &str, w: &mut impl Write) -> std::io::Result<()> {
@@ -48,9 +50,11 @@ pub fn render_markdown_width(
     let mut code_content = String::new();
     let mut hl: Option<HighlightLines> = None;
 
-    let mut bold = false;
-    let mut italic = false;
-    let mut strikethrough = false;
+    let mut bold = 0_usize;
+    let mut italic = 0_usize;
+    let mut strikethrough = 0_usize;
+    let mut dim = 0_usize;
+    let mut quote_colors = Vec::new();
 
     let mut list_item_count = 0;
     let mut list_level: usize = 0;
@@ -63,15 +67,25 @@ pub fn render_markdown_width(
     let mut at_start = true;
     let mut need_blank = false;
 
-    // Track current column position for soft wrapping
-    let mut col = 0;
-    let term_width = terminal_width.unwrap_or(100);
-    let wrap_margin = 2; // Keep 2 chars of margin
-    let max_col = term_width - wrap_margin;
+    let mut inline = InlineWriter::new(terminal_width);
 
     for event in parser {
+        let style = Style {
+            bold: bold > 0 || in_heading,
+            italic: italic > 0,
+            strike: strikethrough > 0,
+            dim: dim > 0,
+            color: if in_heading {
+                Some(34)
+            } else {
+                quote_colors.last().copied()
+            },
+            ..Style::default()
+        };
         match event {
             Event::Start(Tag::CodeBlock(kind)) => {
+                inline.finish(w)?;
+                inline.reset(0, 0);
                 if need_blank {
                     writeln!(w)?;
                     need_blank = false;
@@ -119,24 +133,25 @@ pub fn render_markdown_width(
                     }
                     writeln!(w)?;
                 }
+                inline.reset(0, 0);
             }
             Event::Start(Tag::Strong) => {
-                bold = true;
+                bold += 1;
             }
             Event::End(TagEnd::Strong) => {
-                bold = false;
+                bold = bold.saturating_sub(1);
             }
             Event::Start(Tag::Emphasis) => {
-                italic = true;
+                italic += 1;
             }
             Event::End(TagEnd::Emphasis) => {
-                italic = false;
+                italic = italic.saturating_sub(1);
             }
             Event::Start(Tag::Strikethrough) => {
-                strikethrough = true;
+                strikethrough += 1;
             }
             Event::End(TagEnd::Strikethrough) => {
-                strikethrough = false;
+                strikethrough = strikethrough.saturating_sub(1);
             }
             Event::Text(text) => {
                 if in_code_block {
@@ -146,42 +161,42 @@ pub fn render_markdown_width(
                     if let Some(cell) = table_row_cells.last_mut()
                         && !cleaned.is_empty()
                     {
-                        if !cell.is_empty() {
-                            cell.push(' ');
-                        }
                         cell.push_str(&cleaned);
                     }
-                } else if terminal_width.is_some() && !in_heading {
-                    // Soft wrap text at terminal width (but not headings)
-                    write_wrapped(w, &text, bold, italic, strikethrough, max_col, col)?;
-                    // Update col based on what was written
-                    let last_line_len = text.rsplit('\n').next().unwrap_or("").chars().count();
-                    col = last_line_len;
                 } else {
-                    write_emphasized(w, bold, italic, strikethrough, &text)?;
+                    inline.text(w, &text, style)?;
                 }
             }
             Event::Code(text) => {
                 if in_table {
                     if let Some(cell) = table_row_cells.last_mut() {
-                        if !cell.is_empty() {
-                            cell.push(' ');
-                        }
                         cell.push_str(&text);
                     }
                 } else {
-                    // Inline code: use reverse video but preserve surrounding formatting
-                    // Use \x1b[27m to turn off reverse video without resetting other attributes
-                    write!(w, "\x1b[7m")?;
-                    write_emphasized(w, bold, italic, strikethrough, &text)?;
-                    write!(w, "\x1b[27m")?;
+                    inline.code(
+                        &text,
+                        Style {
+                            reverse: true,
+                            ..style
+                        },
+                    );
                 }
             }
             Event::End(TagEnd::Paragraph) => {
+                inline.finish(w)?;
                 writeln!(w)?;
+                inline.reset(
+                    0,
+                    if list_level > 0 {
+                        2 * list_level + 2
+                    } else {
+                        0
+                    },
+                );
                 need_blank = true;
             }
             Event::Start(Tag::Heading { level, .. }) => {
+                inline.finish(w)?;
                 if need_blank {
                     writeln!(w)?;
                     need_blank = false;
@@ -198,21 +213,46 @@ pub fn render_markdown_width(
                     HeadingLevel::H5 => "##### ",
                     HeadingLevel::H6 => "###### ",
                 };
-                write!(w, "\x1b[1m\x1b[34m{}", prefix)?;
+                inline.reset(0, 0);
+                inline.text(
+                    w,
+                    prefix,
+                    Style {
+                        bold: true,
+                        color: Some(34),
+                        ..Style::default()
+                    },
+                )?;
             }
             Event::End(TagEnd::Heading(_)) => {
+                inline.finish(w)?;
                 in_heading = false;
                 write!(w, "\x1b[0m")?;
                 writeln!(w)?;
+                inline.reset(0, 0);
                 need_blank = true;
             }
             Event::SoftBreak => {
-                write!(w, " ")?;
+                if in_table {
+                    if let Some(cell) = table_row_cells.last_mut() {
+                        cell.push(' ');
+                    }
+                } else {
+                    inline.soft_break(w)?;
+                }
             }
             Event::HardBreak => {
-                writeln!(w)?;
+                if in_table {
+                    if let Some(cell) = table_row_cells.last_mut() {
+                        cell.push(' ');
+                    }
+                } else {
+                    inline.hard_break(w)?;
+                }
             }
             Event::Start(Tag::List(_)) => {
+                inline.finish(w)?;
+                inline.reset(0, 0);
                 if need_blank {
                     writeln!(w)?;
                     need_blank = false;
@@ -222,24 +262,49 @@ pub fn render_markdown_width(
                 list_level += 1;
             }
             Event::End(TagEnd::List(_)) => {
+                inline.finish(w)?;
                 list_level = list_level.saturating_sub(1);
                 writeln!(w)?;
+                inline.reset(
+                    0,
+                    if list_level > 0 {
+                        2 * list_level + 2
+                    } else {
+                        0
+                    },
+                );
             }
             Event::Start(Tag::Item) => {
+                inline.finish(w)?;
                 list_item_count += 1;
-                let indent = "  ".repeat(list_level - 1);
+                let indent_width = 2 * list_level.saturating_sub(1);
+                let indent_width =
+                    terminal_width.map_or(indent_width, |width| indent_width.min(width.max(1) - 1));
+                let indent = " ".repeat(indent_width);
                 if list_item_count > 1 {
                     write!(w, "\r\n")?;
                 }
-                write!(w, "{}\x1b[33m•\x1b[0m ", indent)?;
+                write!(w, "{indent}")?;
+                inline.reset(indent_width, 0);
+                inline.text(
+                    w,
+                    "• ",
+                    Style {
+                        color: Some(33),
+                        ..Style::default()
+                    },
+                )?;
+                inline.set_indent(2 * list_level + 2);
             }
-            Event::End(TagEnd::Item) => {}
+            Event::End(TagEnd::Item) => inline.finish(w)?,
             Event::Rule => {
+                inline.finish(w)?;
+                inline.reset(0, 0);
                 if !at_start {
                     writeln!(w)?;
                 }
                 write!(w, "\x1b[90m")?;
-                for _ in 0..80 {
+                for _ in 0..terminal_width.unwrap_or(80).max(1) {
                     write!(w, "─")?;
                 }
                 write!(w, "\x1b[0m")?;
@@ -247,6 +312,8 @@ pub fn render_markdown_width(
                 need_blank = true;
             }
             Event::Start(Tag::Table(_)) => {
+                inline.finish(w)?;
+                inline.reset(0, 0);
                 if need_blank {
                     writeln!(w)?;
                     need_blank = false;
@@ -265,6 +332,7 @@ pub fn render_markdown_width(
                 need_blank = true;
                 table_rows.clear();
                 table_row_cells.clear();
+                inline.reset(0, 0);
             }
             Event::Start(Tag::TableRow) => {
                 table_row_cells.clear();
@@ -282,48 +350,76 @@ pub fn render_markdown_width(
                 table_row_cells.push(String::new());
             }
             Event::Start(Tag::BlockQuote(Some(kind))) => {
+                inline.finish(w)?;
                 if !at_start {
                     writeln!(w)?;
                 }
                 at_start = false;
                 let (color, label) = match kind {
-                    pulldown_cmark::BlockQuoteKind::Note => ("\x1b[96m", "NOTE"),
-                    pulldown_cmark::BlockQuoteKind::Tip => ("\x1b[92m", "TIP"),
-                    pulldown_cmark::BlockQuoteKind::Important => ("\x1b[95m", "IMPORTANT"),
-                    pulldown_cmark::BlockQuoteKind::Warning => ("\x1b[93m", "WARNING"),
-                    pulldown_cmark::BlockQuoteKind::Caution => ("\x1b[91m", "CAUTION"),
+                    pulldown_cmark::BlockQuoteKind::Note => (96, "NOTE"),
+                    pulldown_cmark::BlockQuoteKind::Tip => (92, "TIP"),
+                    pulldown_cmark::BlockQuoteKind::Important => (95, "IMPORTANT"),
+                    pulldown_cmark::BlockQuoteKind::Warning => (93, "WARNING"),
+                    pulldown_cmark::BlockQuoteKind::Caution => (91, "CAUTION"),
                 };
-                write!(w, "{}[{}] ", color, label)?;
+                quote_colors.push(color);
+                inline.reset(0, 0);
+                inline.text(
+                    w,
+                    &format!("[{label}] "),
+                    Style {
+                        color: Some(color),
+                        ..Style::default()
+                    },
+                )?;
             }
             Event::Start(Tag::Superscript) => {
-                write!(w, "\x1b[2m")?;
+                dim += 1;
             }
             Event::End(TagEnd::Superscript) => {
-                write!(w, "\x1b[0m")?;
+                dim = dim.saturating_sub(1);
             }
             Event::Start(Tag::Subscript) => {
-                write!(w, "\x1b[2m")?;
+                dim += 1;
             }
             Event::End(TagEnd::Subscript) => {
-                write!(w, "\x1b[0m")?;
+                dim = dim.saturating_sub(1);
             }
             Event::FootnoteReference(id) => {
-                write!(w, "\x1b[96m[{}\x1b[0m]", id)?;
+                inline.code(
+                    &format!("[{id}]"),
+                    Style {
+                        color: Some(96),
+                        ..style
+                    },
+                );
             }
             Event::Start(Tag::FootnoteDefinition(_)) => {
+                inline.finish(w)?;
+                inline.reset(0, 0);
                 if !at_start {
                     writeln!(w)?;
                 }
                 write!(w, "\x1b[90m")?;
             }
             Event::End(TagEnd::FootnoteDefinition) => {
+                inline.finish(w)?;
                 write!(w, "\x1b[0m")?;
                 writeln!(w)?;
+                inline.reset(0, 0);
             }
             Event::InlineMath(tex) => {
-                write!(w, "\x1b[95m${}\x1b[0m", tex)?;
+                inline.code(
+                    &format!("${tex}"),
+                    Style {
+                        color: Some(95),
+                        ..style
+                    },
+                );
             }
             Event::DisplayMath(tex) => {
+                inline.finish(w)?;
+                inline.reset(0, 0);
                 if !at_start {
                     writeln!(w)?;
                 }
@@ -332,7 +428,9 @@ pub fn render_markdown_width(
                 need_blank = true;
             }
             Event::Start(Tag::Paragraph) => {
-                if need_blank {
+                if inline.has_prefix() {
+                    need_blank = false;
+                } else if need_blank {
                     writeln!(w)?;
                     need_blank = false;
                 } else if !at_start {
@@ -341,6 +439,8 @@ pub fn render_markdown_width(
                 at_start = false;
             }
             Event::Start(Tag::BlockQuote(_)) => {
+                inline.finish(w)?;
+                inline.reset(0, 0);
                 if need_blank {
                     writeln!(w)?;
                     need_blank = false;
@@ -349,15 +449,20 @@ pub fn render_markdown_width(
                 }
                 at_start = false;
                 write!(w, "\x1b[90m")?;
+                quote_colors.push(90);
             }
             Event::End(TagEnd::BlockQuote(_)) => {
+                inline.finish(w)?;
+                quote_colors.pop();
                 write!(w, "\x1b[0m")?;
                 writeln!(w)?;
+                inline.reset(0, 0);
                 need_blank = true;
             }
             _ => {}
         }
     }
+    inline.finish(w)?;
 
     Ok(())
 }
@@ -578,31 +683,6 @@ fn pad_cell(cell: &str, width: usize) -> String {
     }
 }
 
-fn write_emphasized(
-    w: &mut impl Write,
-    bold: bool,
-    italic: bool,
-    strikethrough: bool,
-    text: &str,
-) -> std::io::Result<()> {
-    let mut escape = String::new();
-    if bold {
-        escape.push_str("\x1b[1m");
-    }
-    if italic {
-        escape.push_str("\x1b[3m");
-    }
-    if strikethrough {
-        escape.push_str("\x1b[9m");
-    }
-    if !escape.is_empty() {
-        write!(w, "{}{}\x1b[0m", escape, text)?;
-    } else {
-        write!(w, "{}", text)?;
-    }
-    Ok(())
-}
-
 fn find_syntax<'a>(ss: &'a SyntaxSet, lang: &str) -> &'a syntect::parsing::SyntaxReference {
     let lang = lang.trim();
     if lang.is_empty() {
@@ -756,336 +836,6 @@ fn to_ansi_line(ranges: &[(SStyle, &str)]) -> String {
     output
 }
 
-/// Write text with soft wrapping at the specified column width.
-/// Check if a string is punctuation.
-fn is_punctuation(s: &str) -> bool {
-    let chars: Vec<char> = s.chars().collect();
-    chars.len() <= 3 && chars.iter().all(|c| ".,;:!?".contains(*c))
-}
-
-fn write_wrapped(
-    w: &mut impl Write,
-    text: &str,
-    bold: bool,
-    italic: bool,
-    strikethrough: bool,
-    max_col: usize,
-    current_col: usize,
-) -> std::io::Result<usize> {
-    let mut col = current_col;
-    let words = text.split_whitespace().collect::<Vec<&str>>();
-
-    for word in words.iter() {
-        let word_len = word.chars().count();
-        if col + word_len > max_col {
-            writeln!(w)?;
-            col = 0;
-        }
-        // Add space before word, but not for punctuation at start
-        // Add space between words, but not at the start of the line
-        // and not before punctuation characters.
-        let should_add_space = col > 0 && !is_punctuation(word);
-        if should_add_space {
-            write!(w, " ")?;
-            col += 1;
-        }
-        write_emphasized(w, bold, italic, strikethrough, word)?;
-        col += word_len;
-    }
-
-    // Preserve trailing whitespace
-    if text.ends_with(' ') {
-        if col >= max_col {
-            writeln!(w)?;
-            col = 0;
-        }
-        write!(w, " ")?;
-        col += 1;
-    }
-
-    Ok(col)
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Strip ANSI escape codes from a string.
-    fn strip_ansi(s: &str) -> String {
-        let mut result = String::new();
-        let mut chars = s.chars();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' {
-                // Skip ESC sequence until 'm'
-                for nc in chars.by_ref() {
-                    if nc == 'm' {
-                        break;
-                    }
-                }
-            } else {
-                result.push(c);
-            }
-        }
-        result
-    }
-
-    fn render(md: &str) -> String {
-        let mut buf = Vec::new();
-        render_markdown(md, &mut buf).unwrap();
-        String::from_utf8(buf).unwrap()
-    }
-
-    #[test]
-    fn test_render_basic() {
-        let md = "# Hello\n\nThis is **bold** text.";
-        let output = render(md);
-        assert!(output.contains("# "));
-        assert!(output.contains("bold"));
-    }
-
-    #[test]
-    fn test_render_list() {
-        let md = "- Item 1\n- Item 2";
-        let output = render(md);
-        let bullet_count = output.matches("•").count();
-        assert_eq!(bullet_count, 2);
-    }
-
-    #[test]
-    fn test_render_table() {
-        let md = "| Col1 | Col2 |\n|------|------|\n| A | B |\n| C | D |";
-        let output = render(md);
-        assert!(output.contains("Col1"));
-        assert!(output.contains("Col2"));
-        assert!(output.contains("A"));
-        assert!(output.contains("B"));
-        let lines: Vec<&str> = output.lines().collect();
-        assert!(lines.len() >= 4);
-    }
-
-    #[test]
-    fn test_render_table_with_code() {
-        let md = "| File | Count |\n|------|-------|\n| `A` | 1 |\n| `B` | 2 |";
-        let output = render(md);
-        assert!(output.contains("File"));
-        assert!(output.contains("Count"));
-        let lines: Vec<&str> = output.lines().collect();
-        assert!(lines.len() >= 4);
-    }
-
-    #[test]
-    fn test_heading_levels() {
-        let md = "# H1\n## H2\n### H3\n#### H4";
-        let output = render(md);
-        assert!(output.contains("# H1"));
-        assert!(output.contains("## H2"));
-        assert!(output.contains("### H3"));
-        assert!(output.contains("#### H4"));
-    }
-
-    #[test]
-    fn test_horizontal_rule() {
-        let md = "Before\n\n---\n\nAfter";
-        let output = render(md);
-        assert!(output.contains("─"));
-    }
-
-    #[test]
-    fn test_gfm_alerts() {
-        let md = "> [!NOTE]\n> This is a note";
-        let output = render(md);
-        assert!(output.contains("[NOTE]"));
-    }
-
-    #[test]
-    fn test_footnotes() {
-        let md = "Text with footnote[^1].\n\n[^1]: Footnote definition";
-        let output = render(md);
-        // Footnote reference is rendered with ANSI color, check for parts
-        assert!(output.contains("[1"));
-        assert!(output.contains("]"));
-        assert!(output.contains("Footnote definition"));
-    }
-
-    #[test]
-    fn test_superscript() {
-        let md = "H~2~O and E=mc^2^";
-        let output = render(md);
-        assert!(output.contains("2"));
-        assert!(output.contains("mc"));
-    }
-
-    #[test]
-    fn test_inline_math() {
-        let md = "The formula is $E=mc^2$ here";
-        let output = render(md);
-        assert!(output.contains("$E=mc^2$") || output.contains("E=mc^2"));
-    }
-
-    #[test]
-    fn test_display_math() {
-        let md = "$$\\frac{1}{2}$$";
-        let output = render(md);
-        assert!(output.contains("\\frac{1}{2}"));
-    }
-
-    #[test]
-    fn test_autolinks() {
-        let md = "Visit https://example.com for more";
-        let output = render(md);
-        assert!(output.contains("https://example.com"));
-    }
-
-    #[test]
-    fn test_mermaid() {
-        let md = "```mermaid\ngraph TD\n    A --> B\n```";
-        let output = render(md);
-        // Should render either via mmdc or as plain text fallback
-        assert!(output.contains("A") || output.contains("B") || output.contains("Mermaid diagram"));
-    }
-
-    #[test]
-    fn test_heading_blank_line() {
-        // Heading followed by paragraph with blank line in source should have
-        // blank line in output
-        let md = "# Heading\n\nParagraph";
-        let output = render(md);
-        let lines: Vec<&str> = output.lines().collect();
-        // Find heading line
-        let heading_idx = lines.iter().position(|l| l.contains("# Heading"));
-        assert!(heading_idx.is_some());
-        let heading_idx = heading_idx.unwrap();
-        // Next line should be blank
-        assert!(heading_idx + 1 < lines.len());
-        assert!(lines[heading_idx + 1].is_empty());
-    }
-
-    #[test]
-    fn test_paragraph_blank_line() {
-        // Two paragraphs should have blank line between them
-        let md = "Para 1\n\nPara 2";
-        let output = render(md);
-        let lines: Vec<&str> = output.lines().collect();
-        // Find "Para 1" line
-        let para1_idx = lines.iter().position(|l| l.contains("Para 1"));
-        assert!(para1_idx.is_some());
-        let para1_idx = para1_idx.unwrap();
-        // Next line should be blank
-        assert!(para1_idx + 1 < lines.len());
-        assert!(lines[para1_idx + 1].is_empty());
-    }
-
-    #[test]
-    fn test_table_width_adaptive() {
-        // Table should adapt to terminal width
-        let md = "| Col1 | Col2 |\n|------|------|\n| A | B |";
-        let mut buf = Vec::new();
-        render_markdown_width(md, &mut buf, Some(40)).unwrap();
-        let output = String::from_utf8(buf).unwrap();
-        // Check that table renders without error
-        assert!(output.contains("Col1"));
-        assert!(output.contains("Col2"));
-    }
-
-    #[test]
-    fn test_table_narrow_terminal() {
-        // Table should wrap cells when terminal is narrow
-        let md = "| Short | Very Long Column Header That Should Wrap |\n|-------|------------------------------------------|\n| A     | B                                        |";
-        let mut buf = Vec::new();
-        render_markdown_width(md, &mut buf, Some(30)).unwrap();
-        let output = String::from_utf8(buf).unwrap();
-        eprintln!("Output:");
-        eprintln!("{}", output);
-        // Check that table renders without error
-        assert!(output.contains("Short"));
-        assert!(output.contains("Very Long"));
-    }
-
-    #[test]
-    fn test_no_extra_blank_at_start() {
-        // No blank line before first heading
-        let md = "# First Heading\n\nContent";
-        let output = render(md);
-        // First line should be the heading, not blank
-        let lines: Vec<&str> = output.lines().collect();
-        assert!(!lines.is_empty());
-        assert!(lines[0].contains("# First Heading"));
-    }
-
-    #[test]
-    fn test_rendered_starts_at_line_one() {
-        // Verify rendered output starts at line 1 with content, not blank lines
-        let md = "# Title\n\nBody paragraph.\n\n- Item 1\n- Item 2\n\n| Col | Val |\n|-----|-----|\n| A | 1 |";
-        let output = render(md);
-        let lines: Vec<&str> = output.lines().collect();
-
-        // First line should be the heading
-        assert!(!lines.is_empty());
-        assert!(
-            lines[0].contains("# Title"),
-            "First line should be heading, got: {}",
-            lines[0]
-        );
-
-        // Find where body content starts
-        let body_idx = lines.iter().position(|l| l.contains("Body paragraph"));
-        assert!(body_idx.is_some(), "Body paragraph not found");
-        // Should be at line index 2 (heading, blank, body)
-        assert_eq!(
-            body_idx.unwrap(),
-            2,
-            "Body should be at index 2, got {:?}",
-            body_idx
-        );
-    }
-
-    #[test]
-    fn test_soft_wrap_paragraphs() {
-        // Verify long paragraphs are wrapped at terminal width
-        let md = "This is a very long paragraph that should be wrapped at the terminal width when the text exceeds the available space. It should wrap at word boundaries to maintain readability. The wrapping should happen automatically based on the terminal width setting.";
-        let mut buf = Vec::new();
-        render_markdown_width(md, &mut buf, Some(40)).unwrap();
-        let output = String::from_utf8(buf).unwrap();
-        let lines: Vec<&str> = output.lines().collect();
-        // Should be wrapped into multiple lines
-        assert!(
-            lines.len() > 1,
-            "Long paragraph should be wrapped into multiple lines"
-        );
-        // Each line should be at most 40 chars (approximately, ignoring ANSI codes)
-        for line in &lines {
-            let clean = strip_ansi(line);
-            assert!(clean.len() <= 40, "Line too long: {} chars", clean.len());
-        }
-    }
-
-    #[test]
-    fn test_no_wrap_code_blocks() {
-        // Verify code blocks are not wrapped
-        let md = "```hemlock\nlet x = 1;\nlet y = 2;\nlet z = x + y;\n```
-
-This is a paragraph after the code block.";
-        let mut buf = Vec::new();
-        render_markdown_width(md, &mut buf, Some(40)).unwrap();
-        let output = String::from_utf8(buf).unwrap();
-        let lines: Vec<&str> = output.lines().collect();
-        // Code block lines should be preserved as-is (not wrapped)
-        let code_lines: Vec<&str> = lines
-            .iter()
-            .filter(|l| l.contains("let x") || l.contains("let y") || l.contains("let z"))
-            .cloned()
-            .collect();
-        assert_eq!(code_lines.len(), 3, "Should have 3 code lines");
-    }
-
-    #[test]
-    fn test_wrap_preserves_indentation() {
-        // Verify wrapped list items maintain indentation
-        let md = "- This is a very long list item that should wrap to the next line while maintaining the bullet point indentation level. It should wrap at word boundaries.";
-        let mut buf = Vec::new();
-        render_markdown_width(md, &mut buf, Some(40)).unwrap();
-        let output = String::from_utf8(buf).unwrap();
-        // Should contain the bullet point
-        assert!(output.contains("•"), "Should contain bullet point");
-    }
-}
+#[path = "markdown_tests.rs"]
+mod tests;
