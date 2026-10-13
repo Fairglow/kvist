@@ -105,3 +105,34 @@
   requirements: []
   status: done
   description: "Verify all requirements are met"
+
+- id: blad-layout-write-tests
+  title: "Write layout regression tests"
+  kind: write_tests
+  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-027", "REQUIREMENTS.md#R-028"]
+  status: done
+  description: "Exact whitespace/width tests and Linux PTY screen tests for first-line retention, gutter, Unicode, code overflow, resize and tiny dimensions. See DESIGN.md targeted layout correction."
+
+- id: blad-layout-implement-code
+  title: "Implement targeted layout corrections"
+  kind: implement_code
+  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-027", "REQUIREMENTS.md#R-028"]
+  depends_on: [blad-layout-write-tests]
+  status: done
+  description: "Buffer inline words across parser events, use measured width budgets, and position/clip complete frame rows. Preserve existing key semantics and source Markdown on width-aware/edit paths."
+
+- id: blad-layout-security-audit
+  title: "Audit layout boundary changes"
+  kind: security_audit
+  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
+  depends_on: [blad-layout-implement-code]
+  status: done
+  description: "Independent scoped review of control handling, clipping bounds, input-driven layout and terminal painting. Do not claim a whole-component safety audit."
+
+- id: blad-layout-compliance-review
+  title: "Review targeted layout evidence"
+  kind: compliance_review
+  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-027", "REQUIREMENTS.md#R-028"]
+  depends_on: [blad-layout-security-audit]
+  status: done
+  description: "Derive scoped IMPL evidence in a clean-slate context, then compare source-blind against layout intent/test evidence. Retain unrelated historical discrepancies; no whole-component certification."

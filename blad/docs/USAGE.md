@@ -87,6 +87,7 @@ blad export 20261012T120000 --output transcript.md
 |--------|-------------|
 | `--log-dir PATH` | Directory containing skott sessions (default: `.skott/runs`) |
 | `--dump` | Output plain text without interactive viewer |
+| `--line-numbers` | Show rendered-line numbers in the interactive viewer |
 
 ```bash
 # View session without interactive viewer
@@ -99,6 +100,18 @@ blad list --log-dir /path/to/logs
 ## Interactive Viewer
 
 The interactive viewer provides navigation, search, and edit capabilities.
+
+Prose and headings wrap to the available terminal columns after reserving the
+scrollbar and optional line-number gutter. Resize recalculates the layout.
+Paragraphs and hard breaks start without extra leading spaces, and formatting
+boundaries do not add spaces between adjacent characters.
+
+Code block lines retain their whitespace and do not wrap. Use Left/Right to
+read horizontal overflow; short lines no longer reset the horizontal position.
+Header, footer and content rows are clipped independently so long lines cannot
+scroll the first document lines off the screen. Tabs display at eight-column
+stops. Home/End still move vertically; the planned key change, table-ratio
+sizing, folding, occurrence search and live follow are not part of this fix.
 
 ### Navigation
 

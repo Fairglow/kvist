@@ -4,11 +4,12 @@
 //! code blocks. Unsupported languages (e.g. hemlock) fall back to plain text
 //! without crashing.
 
-use std::io::{self, Write};
-use std::os::linux::fs::MetadataExt;
+use std::io::{self, IsTerminal, Write};
 
 use crate::markdown::{render_markdown, render_markdown_width};
 use crate::session::{Message, Session, load_messages};
+use crate::terminal_text::TerminalLine;
+use crate::viewport::{Document, Frame, paint};
 
 /// Show a completed session transcript.
 pub fn show_session(session: &Session) {
@@ -63,18 +64,12 @@ pub fn stream_session(session: &Session) {
 
 /// Check if stdout is a TTY (interactive terminal).
 fn is_tty() -> bool {
-    match std::fs::metadata("/dev/stdout") {
-        Ok(meta) => meta.st_mode() & 0o170000 == 0o020000,
-        Err(_) => false,
-    }
+    io::stdout().is_terminal()
 }
 
 /// Check if stdin is a TTY (interactive terminal).
 fn is_stdin_tty() -> bool {
-    match std::fs::metadata("/dev/stdin") {
-        Ok(meta) => meta.st_mode() & 0o170000 == 0o020000,
-        Err(_) => false,
-    }
+    io::stdin().is_terminal()
 }
 
 /// View a standalone markdown file interactively.
@@ -94,24 +89,18 @@ pub fn view_markdown_file(path: Option<&std::path::Path>, content: &str, line_nu
 }
 
 /// View a markdown file with terminal width awareness.
-pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, _terminal_width: usize) {
-    // Pass original markdown to interactive viewer - it handles rendering internally
-    if is_tty() {
-        let (cols, _rows) = match crossterm::terminal::size() {
-            Ok(s) => s,
-            Err(_) => {
-                dump_markdown(content);
-                return;
-            }
-        };
-        let render_width = cols.saturating_sub(1) as usize;
-        let mut output = Vec::new();
-        render_markdown_width(content, &mut output, Some(render_width)).unwrap();
-        let rendered = String::from_utf8(output).unwrap();
-        interactive_viewer(path, &rendered, false);
+pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, terminal_width: usize) {
+    if is_tty() && is_stdin_tty() {
+        if let Err(error) = run_viewer(path, content, false, Some(terminal_width)) {
+            eprintln!("Failed to display Markdown: {error}");
+        }
     } else {
-        // Non-interactive: render to stdout and exit
-        dump_markdown(content);
+        let mut output = Vec::new();
+        if let Err(error) = render_markdown_width(content, &mut output, Some(terminal_width))
+            .and_then(|()| io::stdout().write_all(&output))
+        {
+            eprintln!("Failed to display Markdown: {error}");
+        }
     }
 }
 
@@ -126,32 +115,85 @@ pub fn dump_markdown(content: &str) {
 
 /// Interactive viewer with navigation and search.
 fn interactive_viewer(path: Option<&std::path::Path>, content: &str, line_numbers: bool) {
+    if let Err(error) = run_viewer(path, content, line_numbers, None) {
+        eprintln!("Failed to display Markdown: {error}");
+    }
+}
+
+struct TerminalGuard {
+    raw: bool,
+    alternate: bool,
+    hidden: bool,
+}
+
+impl TerminalGuard {
+    fn enter() -> io::Result<Self> {
+        let mut guard = Self {
+            raw: false,
+            alternate: false,
+            hidden: false,
+        };
+        crossterm::terminal::enable_raw_mode()?;
+        guard.raw = true;
+        guard.alternate = true;
+        crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
+        guard.hidden = true;
+        crossterm::execute!(io::stdout(), crossterm::cursor::Hide)?;
+        Ok(guard)
+    }
+
+    fn restore(&mut self) -> io::Result<()> {
+        let mut error = None;
+        if self.hidden {
+            match crossterm::execute!(io::stdout(), crossterm::cursor::Show) {
+                Ok(()) => self.hidden = false,
+                Err(failure) => {
+                    error.get_or_insert(failure);
+                }
+            }
+        }
+        if self.alternate {
+            match crossterm::execute!(io::stdout(), crossterm::terminal::LeaveAlternateScreen) {
+                Ok(()) => self.alternate = false,
+                Err(failure) => {
+                    error.get_or_insert(failure);
+                }
+            }
+        }
+        if self.raw {
+            match crossterm::terminal::disable_raw_mode() {
+                Ok(()) => self.raw = false,
+                Err(failure) => {
+                    error.get_or_insert(failure);
+                }
+            }
+        }
+        error.map_or(Ok(()), Err)
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        if let Err(error) = self.restore() {
+            eprintln!("Failed to restore terminal: {error}");
+        }
+    }
+}
+
+fn run_viewer(
+    path: Option<&std::path::Path>,
+    content: &str,
+    line_numbers: bool,
+    width_limit: Option<usize>,
+) -> io::Result<()> {
     use crossterm::event::{self, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
-    use crossterm::execute;
-    use crossterm::terminal::{
-        Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
-        enable_raw_mode,
-    };
 
-    // Terminal dimensions
-    let (cols, rows) = match crossterm::terminal::size() {
-        Ok(s) => s,
-        Err(_) => return,
-    };
+    let (mut cols, mut rows) = crossterm::terminal::size()?;
+    let mut document = Document::render(content, cols, line_numbers, width_limit)?;
 
-    // Render markdown with terminal width awareness for proper table wrapping
-    // Subtract 1 for the scrollbar column
-    let render_width = cols.saturating_sub(1) as usize;
-    let mut output = Vec::new();
-    render_markdown_width(content, &mut output, Some(render_width)).unwrap();
-    let rendered = String::from_utf8(output).unwrap();
-    let lines: Vec<&str> = rendered.lines().collect();
-    let total_lines = lines.len();
-
-    let mut scroll_offset = 0;
-    let mut scroll_x = 0; // Horizontal scroll offset
-    let visible_lines = (rows - 2) as usize; // Reserve 2 rows for header/footer
-    let scrollbar_col = cols - 1;
+    let mut scroll_offset: usize = 0;
+    let mut scroll_x: usize = 0;
+    let mut visible_lines = usize::from(rows.saturating_sub(2));
 
     // Search state
     let mut search_mode = false;
@@ -159,55 +201,28 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str, line_number
     let mut search_matches: Vec<usize> = Vec::new();
     let mut search_index = 0;
 
-    // Enter alternate screen
-    enable_raw_mode().expect("failed to enable raw mode");
-    execute!(io::stdout(), EnterAlternateScreen).expect("failed to enter alternate screen");
-    // Hide cursor
-    write!(io::stdout(), "\x1b[?25l").expect("failed to hide cursor");
-    io::stdout().flush().expect("failed to flush output");
+    let mut terminal = TerminalGuard::enter()?;
 
-    fn find_matches(lines: &[&str], query: &str) -> Vec<usize> {
+    fn find_matches(lines: &[TerminalLine], query: &str) -> Vec<usize> {
         if query.is_empty() {
             return Vec::new();
         }
         let mut matches = Vec::new();
         for (i, line) in lines.iter().enumerate() {
-            // Strip ANSI escape codes for searching
-            let clean = strip_ansi(line);
-            if clean.to_lowercase().contains(&query.to_lowercase()) {
+            if line.plain().to_lowercase().contains(&query.to_lowercase()) {
                 matches.push(i);
             }
         }
         matches
     }
 
-    fn strip_ansi(s: &str) -> String {
-        let mut result = String::new();
-        let mut chars = s.chars();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' {
-                // Skip ESC sequence until 'm'
-                for nc in chars.by_ref() {
-                    if nc == 'm' {
-                        break;
-                    }
-                }
-            } else {
-                result.push(c);
-            }
-        }
-        result
-    }
-
     loop {
-        // Calculate visible range (in logical lines)
+        let lines = &document.lines;
+        let total_lines = lines.len();
+        scroll_offset = scroll_offset.min(total_lines.saturating_sub(visible_lines));
+        scroll_x = scroll_x.min(document.max_x());
         let start = scroll_offset;
-        let end = (scroll_offset + visible_lines).min(total_lines);
-
-        // Clear and redraw
-        execute!(io::stdout(), Clear(ClearType::All)).expect("failed to clear");
-        execute!(io::stdout(), crossterm::cursor::MoveTo(0, 0)).expect("failed to move cursor");
-        io::stdout().flush().expect("failed to flush after clear");
+        let end = scroll_offset.saturating_add(visible_lines).min(total_lines);
 
         // Header
         let header = if search_mode || (!search_query.is_empty() && !search_matches.is_empty()) {
@@ -217,54 +232,6 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str, line_number
         } else {
             "=== Blad Markdown Viewer ===".to_string()
         };
-        write!(io::stdout(), "{}\r\n", header).expect("failed to write header");
-
-        // Render visible lines with search highlighting and line numbers
-        let visible = &lines[start..end];
-        let max_line_digits = total_lines.to_string().len();
-        for (i, line) in visible.iter().enumerate() {
-            let actual_line = start + i + 1; // 1-indexed
-            let line_prefix = if line_numbers {
-                format!("{:>width$} ", actual_line, width = max_line_digits)
-            } else {
-                String::new()
-            };
-
-            if search_matches.contains(&(start + i)) {
-                // Highlight matching line
-                execute!(
-                    io::stdout(),
-                    crossterm::style::SetForegroundColor(crossterm::style::Color::Yellow),
-                    crossterm::style::SetBackgroundColor(crossterm::style::Color::Blue)
-                )
-                .expect("failed to set colors");
-            }
-
-            // Apply horizontal scroll by slicing the line
-            let line_chars: Vec<char> = line.chars().collect();
-            let max_x = line_chars.len().saturating_sub((cols - 5) as usize);
-            if scroll_x > max_x {
-                scroll_x = max_x;
-            }
-            let visible_chars: String = line_chars[scroll_x..].iter().collect();
-
-            // Print line with optional line number
-            write!(io::stdout(), "{}{}\r\n", line_prefix, visible_chars)
-                .expect("failed to write line");
-
-            execute!(io::stdout(), crossterm::style::ResetColor).expect("failed to reset colors");
-
-            // Pad empty lines to ensure footer is in fixed position
-            if i == visible.len() - 1 && end < total_lines {
-                for _ in 0..(visible_lines - visible.len()) {
-                    println!();
-                }
-            }
-        }
-
-        // Position footer in fixed position at bottom row
-        execute!(io::stdout(), crossterm::cursor::MoveTo(0, rows - 1))
-            .expect("failed to move cursor");
 
         // Calculate meaningful percentage based on scroll position
         let pct = if total_lines > visible_lines {
@@ -284,9 +251,13 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str, line_number
             "".to_string()
         };
 
-        let line_info = format!(" L{}-{} of {}", start + 1, end, total_lines);
-        let _ = write!(
-            io::stdout(),
+        let line_info = format!(
+            " L{}-{} of {}",
+            if total_lines == 0 { 0 } else { start + 1 },
+            end,
+            total_lines
+        );
+        let footer = format!(
             "  [{:5.1}%]{}{}{}",
             pct,
             line_info,
@@ -299,46 +270,19 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str, line_number
                 " SCROLL"
             }
         );
-        execute!(io::stdout(), crossterm::cursor::MoveTo(0, 0)).expect("failed to move cursor");
-
-        // Draw scrollbar on the right
-        if total_lines > visible_lines {
-            let scrollbar_size = visible_lines;
-            let thumb_size = if scrollbar_size > 0 {
-                ((visible_lines as f64) / (total_lines as f64)) * scrollbar_size as f64
-            } else {
-                0.0
-            };
-            let thumb_top = ((scroll_offset as f64) / (total_lines as f64)) * scrollbar_size as f64;
-
-            // Draw scrollbar track
-            for i in 0..scrollbar_size {
-                let y = i + 1; // Row offset (after header)
-                if (i as f64) >= thumb_top && (i as f64) < thumb_top + thumb_size {
-                    // Thumb
-                    execute!(
-                        io::stdout(),
-                        crossterm::style::SetForegroundColor(crossterm::style::Color::White)
-                    )
-                    .expect("failed to set color");
-                    let _ = write!(io::stdout(), "█");
-                    execute!(
-                        io::stdout(),
-                        crossterm::style::SetForegroundColor(crossterm::style::Color::Reset)
-                    )
-                    .expect("failed to reset color");
-                } else {
-                    // Track
-                    let _ = write!(io::stdout(), "░");
-                }
-                // Move to next row of scrollbar
-                execute!(
-                    io::stdout(),
-                    crossterm::cursor::MoveTo(scrollbar_col, (y + 1) as u16)
-                )
-                .expect("failed to move cursor");
-            }
-        }
+        paint(
+            &mut io::stdout().lock(),
+            &document,
+            Frame {
+                columns: cols,
+                rows,
+                y: scroll_offset,
+                x: scroll_x,
+                header: &header,
+                footer: &footer,
+                matches: &search_matches,
+            },
+        )?;
 
         // Event handling
         match event::read() {
@@ -347,7 +291,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str, line_number
                     match code {
                         KeyCode::Char(c) => {
                             search_query.push(c);
-                            search_matches = find_matches(&lines, &search_query);
+                            search_matches = find_matches(lines, &search_query);
                             if !search_matches.is_empty() {
                                 search_index = 0;
                                 scroll_to_match(
@@ -359,7 +303,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str, line_number
                         }
                         KeyCode::Backspace => {
                             search_query.pop();
-                            search_matches = find_matches(&lines, &search_query);
+                            search_matches = find_matches(lines, &search_query);
                             if !search_matches.is_empty() {
                                 search_index = 0;
                                 scroll_to_match(
@@ -410,7 +354,7 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str, line_number
                             scroll_x = scroll_x.saturating_sub(1);
                         }
                         KeyCode::Right => {
-                            scroll_x += 1;
+                            scroll_x = scroll_x.saturating_add(1).min(document.max_x());
                         }
                         KeyCode::Char('g') | KeyCode::Char('H') => {
                             scroll_offset = 0;
@@ -441,12 +385,11 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str, line_number
                             );
                         }
                         KeyCode::Char('e') if path.is_some() => {
-                            // Edit mode: exit viewer, edit file, re-render
-                            disable_raw_mode().expect("failed to disable raw mode");
-                            execute!(io::stdout(), LeaveAlternateScreen)
-                                .expect("failed to leave alternate screen");
-                            edit_and_rerender(path.unwrap(), &lines);
-                            return;
+                            terminal.restore()?;
+                            if let Some(path) = path {
+                                edit_and_rerender(path, line_numbers, width_limit);
+                            }
+                            return Ok(());
                         }
                         KeyCode::Char('q') | KeyCode::Esc => {
                             break;
@@ -466,16 +409,20 @@ fn interactive_viewer(path: Option<&std::path::Path>, content: &str, line_number
                 }
                 _ => {}
             },
+            Ok(Event::Resize(columns, height)) => {
+                cols = columns;
+                rows = height;
+                visible_lines = usize::from(rows.saturating_sub(2));
+                document = Document::render(content, cols, line_numbers, width_limit)?;
+                search_matches = find_matches(&document.lines, &search_query);
+                search_index = search_index.min(search_matches.len().saturating_sub(1));
+            }
             Ok(_) => {}
-            Err(_) => break,
+            Err(error) => return Err(error),
         }
     }
 
-    // Show cursor before leaving
-    write!(io::stdout(), "\x1b[?25h").expect("failed to show cursor");
-    io::stdout().flush().expect("failed to flush output");
-    disable_raw_mode().expect("failed to disable raw mode");
-    execute!(io::stdout(), LeaveAlternateScreen).expect("failed to leave alternate screen");
+    terminal.restore()
 }
 
 fn scroll_to_match(current_offset: usize, target_line: usize, visible_lines: usize) -> usize {
@@ -488,10 +435,14 @@ fn scroll_to_match(current_offset: usize, target_line: usize, visible_lines: usi
     }
 }
 
-fn edit_and_rerender(path: &std::path::Path, _lines: &[&str]) {
+fn edit_and_rerender(path: &std::path::Path, line_numbers: bool, width_limit: Option<usize>) {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nvim".to_string());
     let args: Vec<&str> = editor.split_whitespace().collect();
-    let result = std::process::Command::new(args[0])
+    let Some(program) = args.first() else {
+        eprintln!("Cannot open editor: EDITOR is empty");
+        return;
+    };
+    let result = std::process::Command::new(program)
         .args(&args[1..])
         .arg(path)
         .status();
@@ -501,10 +452,10 @@ fn edit_and_rerender(path: &std::path::Path, _lines: &[&str]) {
             // Re-read and re-render
             match std::fs::read_to_string(path) {
                 Ok(content) => {
-                    let mut output = Vec::new();
-                    render_markdown(&content, &mut output).unwrap();
-                    let rendered = String::from_utf8(output).unwrap();
-                    interactive_viewer(Some(path), &rendered, false);
+                    if let Err(error) = run_viewer(Some(path), &content, line_numbers, width_limit)
+                    {
+                        eprintln!("Failed to display edited Markdown: {error}");
+                    }
                 }
                 Err(e) => eprintln!("Failed to re-read file: {}", e),
             }

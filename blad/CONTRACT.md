@@ -19,6 +19,7 @@ blad [OPTIONS] <COMMAND> [ARGS]
 | ------------------ | ---------------------------------------------------------------- |
 | `--log-dir <PATH>` | Directory containing skott session runs (default: `.skott/runs`) |
 | `--dump`           | Output plain text without interactive viewer                     |
+| `--line-numbers`   | Show rendered-line numbers in the interactive viewer             |
 
 ### Commands
 
@@ -145,6 +146,30 @@ Blad renders Markdown to ANSI-colored terminal output with:
 - GFM alert blockquotes with color-coded labels
 - Footnote references and definitions
 - Math expressions (inline and display)
+
+### Width and Viewport Semantics
+
+Interactive prose and headings wrap to the terminal width minus one scrollbar
+column and, when requested, the rendered-line-number gutter. There is no
+additional wrap margin. Resize recalculates that budget. Code block lines and
+atomic inline-code spans are not broken to fit the viewport; the existing
+Left/Right keys reveal horizontal overflow without resetting on shorter lines.
+Home/End retain their current vertical behavior in this correction.
+
+Each screen row is positioned and clipped independently, including header/footer
+text. Wide graphemes intersecting a horizontal clipping edge are represented by
+padding, not partial glyphs. Tabs use eight-column display stops. The first
+logical document line is the first content row; tiny terminals may have no
+content rows, but remain quittable.
+
+The Rust `render_markdown_width` function interprets a supplied width as the
+complete prose width, without an internal margin; zero uses a one-column logical
+layout to avoid invalid arithmetic. With no width it does not wrap. Ordinary
+words may emergency-break at grapheme boundaries; indivisible graphemes wider
+than the budget and atomic inline code retain their content and may overflow.
+`view_markdown_width` caps interactive content width at its supplied width and
+uses that width for noninteractive rendering, without parsing rendered ANSI as
+Markdown a second time.
 
 ## Exit Codes
 

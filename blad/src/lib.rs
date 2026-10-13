@@ -5,3 +5,7 @@
 pub mod display;
 pub mod markdown;
 pub mod session;
+
+mod inline;
+mod terminal_text;
+mod viewport;

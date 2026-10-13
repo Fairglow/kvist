@@ -103,3 +103,40 @@ The interactive viewer provides:
    displayed as plain text with a note.
 5. **No state management:** Blad is stateless; it reads files and displays
    them without maintaining persistent state.
+
+## Targeted Layout Correction Design
+
+This is a bounded correction, not the full document-model redesign in `PLAN.md`.
+Keep the public ANSI rendering API and existing viewer commands/key semantics.
+
+- A private inline writer buffers a contiguous word across parser/style events,
+  with text/style spans and source-contributed pending whitespace. It measures
+  complete words in Unicode display columns, emits spaces only between source
+  words, includes separators/prefixes in fit decisions, resets at block/hard
+  breaks, and keeps inline code atomic. Long prose words break by grapheme.
+- Immutable Unicode segmentation/width support uses versions already present in
+  the workspace lockfile. A private terminal-text helper separates SGR styling
+  from measurable text and clips complete graphemes; other terminal controls
+  are represented visibly rather than executed during painting.
+- A private viewport helper renders original Markdown at the content budget.
+  Number-gutter sizing converges by monotonically reserving enough digits for
+  the resulting rendered-line count. A single global horizontal bound derives
+  from the widest rendered line, not from individual visible lines.
+- The frame painter positions every header/content/footer/scrollbar row
+  explicitly and never writes line endings to advance between screen rows.
+  Scrollbar glyphs are positioned before writing. Tiny dimensions use saturated
+  geometry and leave key handling active even when there is no content area.
+- A terminal guard tracks acquired raw mode, alternate screen and cursor hiding.
+  It explicitly restores them on normal/editor exits and attempts restoration
+  on error/unwind; painting and event failures are reported to the caller.
+- Resize re-renders source and recomputes search's existing line-index matches;
+  scroll offsets are clamped once to the new layout. Full source-anchor/search
+  redesign remains deferred. The width-aware and post-editor entry paths pass
+  original Markdown, not an already-rendered ANSI string.
+- Tests assert exact text, display-column limits, adjacent inline styles,
+  partial constructs, Unicode, gutters and overflow. Linux PTY tests decode
+  terminal output and assert the visible first line and zero unintended screen
+  scrolling, including the tagged compliance document.
+
+No new background work, async runtime, unsafe code, terminal graphics, persistent
+UI state or session-format changes are part of this correction.
