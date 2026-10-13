@@ -8,6 +8,82 @@ use std::{
     time::Duration,
 };
 
+/// Locate the galla-runner executable for integration tests.
+///
+/// Priority order:
+/// 1. KVIST_GALLA_TEST_BIN environment variable (explicit override)
+/// 2. target/debug/galla-runner (local debug build, preferred)
+/// 3. target/release/galla-runner (local release build)
+/// 4. galla-runner on PATH (system-installed)
+#[allow(dead_code)]
+pub fn find_galla_runner() -> Result<PathBuf, String> {
+    // 1. Explicit override via environment variable
+    if let Ok(path) = std::env::var("KVIST_GALLA_TEST_BIN") {
+        let path = PathBuf::from(path);
+        if path.is_file() {
+            return Ok(path);
+        }
+        return Err(format!(
+            "KVIST_GALLA_TEST_BIN set to '{}' but file not found",
+            path.display()
+        ));
+    }
+
+    // Determine the workspace root (parent of maerg/)
+    let workspace_root = match std::env::current_dir() {
+        Ok(p) => p
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from(".")),
+        Err(_) => PathBuf::from("."),
+    };
+
+    // 2. Local debug build (preferred for testing - version-consistent)
+    let debug_path = workspace_root.join("target/debug/galla-runner");
+    if debug_path.is_file() {
+        return Ok(debug_path);
+    }
+
+    // 3. Local release build
+    let release_path = workspace_root.join("target/release/galla-runner");
+    if release_path.is_file() {
+        return Ok(release_path);
+    }
+
+    // 4. On PATH
+    let path_dirs = std::env::var("PATH")
+        .ok()
+        .map(|p| {
+            p.split(':')
+                .map(|s| PathBuf::from(s))
+                .collect::<Vec<PathBuf>>()
+        })
+        .unwrap_or_default();
+
+    for dir in &path_dirs {
+        let candidate = dir.join("galla-runner");
+        if candidate.is_file() {
+            return Ok(candidate);
+        }
+    }
+
+    // Not found anywhere
+    Err(format!(
+        "galla-runner not found in any of the following locations:\n\
+         - KVIST_GALLA_TEST_BIN (not set)\n\
+         - {} (local debug build)\n\
+         - {} (local release build)\n\
+         - PATH: {:?}\n\n\
+         Please either:\n\
+         1. Build it locally: cd /workspace && cargo build -p galla --bin galla-runner\n\
+         2. Install it: sudo install -D -m 755 target/release/galla-runner /usr/local/bin/galla-runner\n\
+         3. Set KVIST_GALLA_TEST_BIN=/path/to/galla-runner",
+        debug_path.display(),
+        release_path.display(),
+        path_dirs
+    ))
+}
+
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tempfile::{Builder, TempDir};
@@ -433,6 +509,11 @@ tasks: []
     fs::create_dir(child.join("tests")).expect("create child tests");
 }
 
+/// Write the controlled test sandbox runner script.
+///
+/// This script handles the probe interface itself (returning a consistent mock
+/// identity) but delegates actual sandbox execution to the real galla-runner
+/// binary. It records the request for test assertions and creates a marker file.
 fn write_controlled_runner(project: &Path, external_tools: &Path) -> PathBuf {
     let runner = external_tools.join("controlled-galla-runner");
     let request_log = external_tools.join("runner-request.json");
