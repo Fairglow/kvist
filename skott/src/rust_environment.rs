@@ -36,7 +36,6 @@ mod inventory;
 
 const TOOLCHAIN_DEST: &str = "/rust/toolchain";
 const RUNTIME_DEST: &str = "/rust/runtime";
-const VENDOR_DEST: &str = "/workspace/.kvist/vendored";
 const RUSTUP_HOME_DEST: &str = "/rust/rustup-home";
 const MAX_FILE_BYTES: u64 = 256 << 20;
 const MAX_VENDOR_BYTES: u64 = 1 << 30;
@@ -941,19 +940,6 @@ impl RustEnvironment {
                 access: Access::ReadOnly,
                 purpose: Purpose::Toolchain,
                 identity: self.resources.identity.clone(),
-            },
-            Grant {
-                source: self
-                    .resources
-                    .staging
-                    .path()
-                    .join("vendor")
-                    .to_string_lossy()
-                    .into_owned(),
-                destination: VENDOR_DEST.into(),
-                access: Access::ReadOnly,
-                purpose: Purpose::Toolchain,
-                identity: self.resources.vendor_identity.clone(),
             },
             Grant {
                 source: self.resources.rustup_home.to_string_lossy().into_owned(),

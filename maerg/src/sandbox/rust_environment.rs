@@ -382,30 +382,6 @@ impl RustEnvironment {
                 ),
             });
         }
-        let vendor = project.join(".kvist/vendored");
-        let vendor = match fs::symlink_metadata(&vendor) {
-            Ok(_) => {
-                if !inspect(config, &vendor)?.is_dir() {
-                    return Err(failure(config, "vendor must be a non-link directory"));
-                }
-                vendor
-            }
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                let empty = staging.path().join("vendor");
-                fs::create_dir(&empty).map_err(|e| {
-                    sandbox_error(config, "create empty offline authoring vendor", e)
-                })?;
-                empty
-            }
-            Err(e) => return Err(sandbox_error(config, "inspect authoring vendor", e)),
-        };
-        grants.push(SandboxGrant {
-            source: vendor.to_string_lossy().into_owned(),
-            destination: "/workspace/.kvist/vendored".into(),
-            access: "read-only",
-            purpose: "toolchain",
-            identity: digest_label(b"offline-authoring-vendor"),
-        });
         for name in [
             "Cargo.toml",
             "Cargo.lock",
@@ -590,7 +566,7 @@ mod tests {
         let environment = RustEnvironment {
             grants: vec![SandboxGrant {
                 source: resource.to_string_lossy().into_owned(),
-                destination: "/workspace/.kvist/vendored".into(),
+                destination: "/rust/test-resource".into(),
                 access: "read-only",
                 purpose: "toolchain",
                 identity: digest_label(b"resource"),
