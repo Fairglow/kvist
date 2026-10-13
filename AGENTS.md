@@ -5,7 +5,7 @@ This is the Kvist workspace. When executing tasks, be aware of these environment
 ## Rust Build Environment
 
 - **Target directory**: `/workspace/target` — persistent, user-expected location
-- **Vendor directory**: `/workspace/.kvist/vendored` — consistent with project vendoring
+- **Vendor directory**: `/workspace/.kvist/vendored` — project vendoring location, mounted via workspace grant
 - **Offline builds**: `cargo` always runs with `--offline --locked` against the vendored sources
 - **Toolchain selection**: Use `rustup show active-toolchain` to discover the active toolchain
 - **Toolchain locations**: The default toolchain is at `/rust/toolchain`. Additional toolchains are under `/rust/toolchains/` (note the singular vs. plural naming).
