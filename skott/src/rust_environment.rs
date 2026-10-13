@@ -36,7 +36,7 @@ mod inventory;
 
 const TOOLCHAIN_DEST: &str = "/rust/toolchain";
 const RUNTIME_DEST: &str = "/rust/runtime";
-const VENDOR_DEST: &str = "/rust/vendor";
+const VENDOR_DEST: &str = "/workspace/.kvist/vendored";
 const RUSTUP_HOME_DEST: &str = "/rust/rustup-home";
 const MAX_FILE_BYTES: u64 = 256 << 20;
 const MAX_VENDOR_BYTES: u64 = 1 << 30;
@@ -1002,7 +1002,7 @@ impl RustEnvironment {
             ("RUSTUP_HOME", "/tmp/rustup-home"),
             ("RUSTUP_AUTO_INSTALL", "0"),
             ("CARGO_HOME", "/tmp/cargo-home"),
-            ("CARGO_TARGET_DIR", "/tmp/target"),
+            ("CARGO_TARGET_DIR", "/workspace/target"),
             ("CARGO_NET_OFFLINE", "true"),
             ("RUSTC", "/rust/runtime/bin/rustc"),
             ("RUSTDOC", "/rust/runtime/bin/rustdoc"),

@@ -1,7 +1,7 @@
 //! Fixed sandbox-native Rust runtime scripts; callers own validation and grants.
 
 /// Initialize private selection state without copying or making installations writable.
-pub const INITIALIZE: &str = "set -eu\nmkdir -p /tmp/rustup-home\ncp /rust/rustup-home/settings.toml /tmp/rustup-home/settings.toml\nln -s /rust/rustup-home/toolchains /tmp/rustup-home/toolchains\n";
+pub const INITIALIZE: &str = "set -eu\nmkdir -p /tmp/rustup-home\ncp /rust/rustup-home/settings.toml /tmp/rustup-home/settings.toml\nln -sf /rust/rustup-home/toolchains /tmp/rustup-home/toolchains\nln -sf /rust/toolchain /rust/toolchains/default\n";
 
 /// Closed runtime executable set, including optional installed companions.
 pub const TOOLS: &[RustTool] = &[
@@ -68,7 +68,7 @@ pub fn wrapper(tool: RustTool) -> String {
         ""
     };
     let arguments = if tool == RustTool::Cargo {
-        " --offline --locked --config 'source.crates-io.replace-with=\"vendored-sources\"' --config 'source.vendored-sources.directory=\"/rust/vendor\"'"
+        " --offline --locked --config 'source.crates-io.replace-with=\"vendored-sources\"' --config 'source.vendored-sources.directory=\"/workspace/.kvist/vendored\"'"
     } else {
         ""
     };
@@ -89,7 +89,7 @@ mod tests {
                 .contains("cp /rust/rustup-home/settings.toml /tmp/rustup-home/settings.toml")
         );
         assert!(
-            INITIALIZE.contains("ln -s /rust/rustup-home/toolchains /tmp/rustup-home/toolchains")
+            INITIALIZE.contains("ln -sf /rust/rustup-home/toolchains /tmp/rustup-home/toolchains")
         );
         for tool in TOOLS {
             let script = wrapper(*tool);
@@ -99,6 +99,6 @@ mod tests {
             assert!(!script.contains("/home/"));
         }
         assert!(wrapper(RustTool::Cargo).contains("--offline --locked"));
-        assert!(wrapper(RustTool::Cargo).contains("/rust/vendor"));
+        assert!(wrapper(RustTool::Cargo).contains("/workspace/.kvist/vendored"));
     }
 }
