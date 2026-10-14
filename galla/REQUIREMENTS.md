@@ -37,6 +37,20 @@ request MUST fail closed.
 
 ## Functional requirements
 
+### SR-REQ-BIN-ONLY-SYSTEM
+
+Every execution phase MUST deny listing, traversal, reads, writes and permission
+changes at `/sbin`, `/usr/sbin` and `/usr/local/sbin`. Host administrative
+directory contents and symlink aliases MUST NOT be exposed at those paths.
+The remaining System directories and `/usr/local/bin` MUST remain usable,
+including on hosts whose `/usr/sbin` is a symlink to `/usr/bin`.
+Host content, permissions and links MUST remain unchanged. Request PATH must
+not select these administrative directories; grants must not cover or recreate
+them. Read-only Toolchain self-grants at `/usr` and `/usr/local` consume the
+filtered System view rather than rebinding the unfiltered host tree.
+This is directory exclusion, not classification of every administrative binary
+or approved resource alias. It does not replace namespace and capability limits.
+
 The protocol-validation boundary and production enforcement have separate,
 explicit requirements so protocol capability cannot be confused with
 enforcement readiness.

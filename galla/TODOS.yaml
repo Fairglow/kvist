@@ -14,6 +14,58 @@ component:
         expected_revision: "sha256:bfd660184d2c7b0fb9d0ccee84cb946cd2f69bf53a33efb40ee1503b0a70b6e1"
         observed_revision: "sha256:1323af464fc004721bafc8fd3a0a524eaafb99fc078ea313570d7a04f46660e8"
 tasks:
+  - id: bin-only-system-write-tests
+    title: "Pin administrative directory exclusion"
+    description: "Test filtered layout, merged-bin aliases, denied PATH and overmounts, native access denial and host non-mutation."
+    context: "Human explicitly approved sbin exclusion; deliberate advisory exception while receipt enforcement is unavailable. Final workspace includes passing layout-boundary, alias, lexical PATH/grant and native host-non-mutation evidence."
+    purpose: "Define exclusion before implementation."
+    expected_outcome: "Native administrative-directory access and overmount regressions fail before repair."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"]
+    timestamps: {created_at: "2026-10-14T06:59:01Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: bin-only-system-implement-code
+    title: "Enforce a filtered bin-only System view"
+    description: "Filter usr and usr/local without following administrative aliases, reserve inaccessible sbin mounts, reject covering grants and retain filtered self-grants."
+    context: "No host mutation, new mount authority or binary-classification claim. Updated the opt-in fixture's retired sbin PATH after validation correctly rejected it; all six opt-in native trials pass."
+    purpose: "Apply exclusion in all execution phases."
+    expected_outcome: "All three standard administrative paths are inaccessible while ordinary bins remain usable."
+    kind: implementation
+    status: completed
+    depends_on: [bin-only-system-write-tests]
+    requirements: ["REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"]
+    timestamps: {created_at: "2026-10-14T06:59:01Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: bin-only-system-security-audit
+    title: "Audit filtered System resource authority"
+    description: "Independently inspect symlink preservation, administrative aliases, read-only roots, reserved overmounts, bounds and errors."
+    context: "Independent bin-policy-observer established no concrete high-confidence scoped regression. Path-based exclusion is not binary classification or race-resistant resolution; limits remain in IMPL.md."
+    purpose: "Retain independent findings."
+    expected_outcome: "Findings are fixed or explicitly retained."
+    kind: security-audit
+    status: completed
+    depends_on: [bin-only-system-implement-code]
+    requirements: ["REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"]
+    timestamps: {created_at: "2026-10-14T06:59:01Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: bin-only-system-compliance-review
+    title: "Compare independent System exclusion evidence"
+    description: "Source-only observation followed by separate source-blind comparison with intent and execution evidence."
+    context: "Separate source-blind bin-policy-comparator found scoped alignment, not exhaustive all-phase proof. Final stable and Rust 1.95 workspace runs each pass 1405 tests with 12 ignored; six opt-in trials subsequently pass. No acceptance or blanket certification."
+    purpose: "Prevent self-certification."
+    expected_outcome: "Scoped discrepancies and limits remain explicit."
+    kind: compliance-review
+    status: completed
+    depends_on: [bin-only-system-security-audit]
+    requirements: ["REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"]
+    timestamps: {created_at: "2026-10-14T06:59:01Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: workspace-vendor-mask-write-tests
     title: "Pin inaccessible workspace vendor evidence"
     description: "Define native alias-read/write/chmod denial, snapshot resolution, host non-mutation and unaffected generic requests."

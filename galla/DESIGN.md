@@ -12,6 +12,20 @@ prerequisites or invalid requests fail closed.
 
 ## Internal structure
 
+`enforcement/system_layout.rs` constructs a namespace-only filtered `/usr`
+view, binding its immediate children read-only except `sbin` and handling
+`local` with the same bounded, sorted one-level enumeration. This avoids
+following a host `/usr/sbin -> bin` link and accidentally masking `/usr/bin`.
+Other child links retain their link text. Missing `/usr/local` uses only
+namespace backing; present `/usr` and `/usr/local` must be non-link directories.
+Each directory is bounded to 1024 children; inspection/read/link errors fail
+explicitly. Mode-000 read-only tmpfs reserves the three administrative paths;
+filtered parent mounts are remounted read-only and payload capabilities are
+dropped. No host mountpoint or permissions are changed. Root and administrative
+overmount grants are rejected; exact read-only Toolchain self-grants for the
+filtered roots are not rebound. Native tests check access denial and successful
+bin execution; unit fixtures include merged-bin aliases and absent local roots.
+
 | Path                   | Responsibility                                                                                                                                                        |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/protocol.rs`      | Closed, `deny_unknown_fields` version-one request and probe types and bounds                                                                                          |

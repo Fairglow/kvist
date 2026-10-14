@@ -264,6 +264,12 @@ path also consumes installed-only resources as described below.
 
 ### REQ-LANGUAGE-SUPPORT
 
+Sandbox language tooling MUST use bin-only search paths, including
+`/usr/local/bin`, and exclude the standard administrative directories before
+and after canonicalization when locating host tools. All authoring and
+verification requests consume Galla's filtered System view; no sbin access or
+additional write authority is granted.
+
 Language support in the build flow MUST be declared, evidenced, and bounded
 per language. A language is supported for a phase only when an end-to-end
 integration test vendors (or otherwise provisions) a small real project on the

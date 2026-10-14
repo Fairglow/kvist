@@ -423,7 +423,7 @@ arbitrary external writers are not locked transactionally.
   `none`, …).
 - `ToolchainProbe` — whether a profile reaches the tool. `HostProbe` is the
   production probe; availability is judged against the sandbox's read-only
-  `MOUNTED_SYSTEM_DIRS` (`/usr`, `/lib`, `/lib64`, `/bin`, `/sbin`), never the
+  `MOUNTED_SYSTEM_DIRS` (`/usr`, `/lib`, `/lib64`, `/bin`), never the
   host `PATH`. `language_available` canonicalises a candidate and ignores any
   interpreter whose path ends in `rustup` (a `rustup` stub is not a real
   compiler), so a stubbed `cargo`/`rustc` cannot be advertised as usable.
@@ -473,6 +473,12 @@ arbitrary external writers are not locked transactionally.
   its compiler and rustdoc follow the selected version rather than a fixed
   default compiler. PATH rustc/rustdoc and `RUSTC`/`RUSTDOC` use trusted
   selection-aware wrappers under `/rust/runtime/bin`.
+  Prepared Rust PATH retains every bin-only System directory, including
+  `/usr/local/bin`. Rust shim, compiler and optional Cargo-extension precedence
+  remain first; remaining bin precedence is preserved and omitted bin
+  directories are appended. Standard sbin directories are excluded from
+  search and profile availability. Host PATH is not inherited, and no additional
+  resource mounts or write authority are granted.
   Unsafe/custom-linked or malformed installations are rejected, not omitted.
   Inventory is resolved at startup: installation/target/registration drift
   requires restart after host provisioning. No host updates are performed.

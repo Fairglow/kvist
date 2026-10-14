@@ -39,9 +39,6 @@ const MAX_SCOPE_DEPTH: usize = 128;
 const MAX_SCOPE_PATH_BYTES: usize = 32 << 20;
 const MAX_PREFLIGHT_TIME: Duration = Duration::from_secs(30);
 
-/// System `PATH` made available inside the sandbox so tools resolve by name.
-const SANDBOX_PATH: &str = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-
 /// Reasonable, well-bounded execution limits for one tool call.
 pub const fn default_resources() -> Resources {
     Resources {
@@ -706,7 +703,10 @@ fn lexical_normalizes_inside(candidate: &Path, scope_root: &Path) -> bool {
 
 fn filter_environment(provided: &BTreeMap<String, String>) -> BTreeMap<String, String> {
     let mut environment = BTreeMap::new();
-    environment.insert("PATH".to_owned(), SANDBOX_PATH.to_owned());
+    environment.insert(
+        "PATH".to_owned(),
+        crate::toolchain::SANDBOX_SYSTEM_PATH.to_owned(),
+    );
     // The runner mounts a private `/tmp` tmpfs in every sandbox, so it is the
     // only scratch area that is guaranteed to exist; tool homes and caches land
     // there and vanish with the short-lived sandbox.
@@ -815,12 +815,15 @@ pub fn resolve_executable(program: &str) -> Result<PathBuf> {
     if let Some(env_path) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&env_path) {
             let candidate = dir.join(program);
+            if galla::validation::is_administrative_path(&candidate) {
+                continue;
+            }
             if candidate.is_file() {
                 return Ok(candidate);
             }
         }
     }
-    for directory in ["/usr/bin", "/bin", "/usr/sbin", "/sbin"] {
+    for directory in ["/usr/bin", "/bin", "/usr/local/bin"] {
         let candidate = Path::new(directory).join(program);
         if candidate.is_file() {
             return Ok(candidate);

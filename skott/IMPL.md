@@ -2,6 +2,61 @@
 
 # Component Implementation Record
 
+## Scoped final bin-only discovery observation - 2026-10-14
+
+Independent clean-slate `bin-policy-observer` read bounded source/tests and CI,
+excluding intent, queues, records, reviews and history. It executed no tests and
+made no acceptance or compliance claim.
+
+System roots are `/usr`, `/lib`, `/lib64` and `/bin`. Language availability
+rejects administrative original and canonical candidates, rustup proxies,
+non-files, nonexecutables, canonicalization errors and paths outside mounted
+roots. Generic PATH defaults to `/usr/local/bin:/usr/bin:/bin`; accepted supplied
+environment variables can override defaults. Prepared Rust preserves runtime,
+compiler and optional Cargo-extension precedence, then uses
+`/usr/bin:/bin:/usr/local/bin`. The synthetic test asserts both extension branches.
+Host-PATH executable resolution excludes administrative candidates, but absolute
+paths and canonical aliases do not receive an equivalent resolver check; that
+resolver alone is not an authority guarantee.
+
+Discovery tests are ordinary nonignored tests without availability skips.
+They require runner/Bubblewrap and enabled profiles; JavaScript explicitly
+enables prepared Rust and checks its Cargo shim and `/usr/local/bin`. GCC
+evidence exactly matches a successful host compiler query's first nonblank
+line; distribution-banner cases reject missing/mismatched output. This
+establishes banner agreement, not compilation or executable identity.
+Quality and MSRV provision tools, Rust inventory and vendors on the host
+before tests; only Quality adds the explicitly ignored native suites.
+
+No concrete high-confidence scoped regression was established. The prior
+observation's weak Node-version predicate remains an explicit pre-existing
+evidence limitation. Administrative exclusion is path-based, not binary
+classification or race-resistant resolution.
+
+## Scoped portable toolchain evidence observation - 2026-10-14
+
+Independent clean-slate `ci-portability-observer` read only
+`tests/toolchain_discoverability.rs` and `.github/workflows/rust.yml`, excluding
+intent, queues, records, reviews and history. It executed no tests and made no
+compliance or acceptance claim.
+
+Discovery trials explicitly enable profiles, assert their presence and run
+version commands through `SandboxExecutor` with `/usr/bin/bwrap`. Missing
+runners fail rather than skip. Commands use `&&`, and tests require successful
+execution before examining up to 8192 characters of output. GCC evidence
+requires an exact line matching the first nonblank stdout line from a
+successful native `/usr/bin/gcc --version` query with UTF-8 output. Matcher
+cases cover distribution banners, unrelated preceding output and mismatches.
+Quality and MSRV provision system language packages, Rust inventory/targets,
+Cargo extensions, system-prefix Go and vendored dependencies on the CI host;
+test bodies do not install prerequisites.
+
+The observer noted that Node's version predicate accepts unrelated dotted
+output, including other version banners in the combined trial; it does not
+independently establish Node-specific version evidence. Enforcement internals,
+actual native execution and historical regression attribution were outside
+the observation scope.
+
 ## Scoped vendor-alias test observation - 2026-10-14
 
 Independent source-only `mask-observer` inspected the updated native test

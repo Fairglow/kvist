@@ -2,6 +2,30 @@
 
 # Component Implementation Record
 
+## Scoped bin-only consumer observation - 2026-10-14
+
+Independent clean-slate `bin-policy-observer` read bounded source/tests and CI,
+excluding intent, queues, records, reviews and history. It executed no tests and
+made no acceptance or compliance claim.
+
+Language selection excludes administrative original and canonical paths,
+prefers component-wise System-prefix candidates, and otherwise retains the
+first nonadministrative outside-System candidate. Tests specify prefix
+boundaries, preference, fallback and administrative rejection. Host lookup
+canonicalizes file/link candidates and reports actionable inspection,
+canonicalization, missing-tool and non-UTF-8 errors; it does not independently
+verify executable permission. The lexical policy is independently mirrored
+without linking the runner library.
+
+Prepared Rust applies `/rust/runtime/bin:/usr/bin:/bin:/usr/local/bin`,
+replacing Rust/Cargo controls and enabling offline/no-auto-install behavior.
+The workflow provisions prerequisites on the host, with Quality additionally
+running ignored native suites. These are source-defined conditions, not
+observed successful execution.
+
+No concrete high-confidence scoped regression was established. The path-based
+policy does not classify every executable copy or establish race resistance.
+
 ## Scoped bare-remote fixture observation - 2026-10-14
 
 Independent source-only `mask-observer` inspected the updated acceptance-test

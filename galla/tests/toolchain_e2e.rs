@@ -71,7 +71,7 @@ impl Sandbox {
             "argv": ["/usr/bin/true"],
             "working_directory": "/workspace/component",
             "environment": {
-                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                "PATH": "/usr/bin:/bin:/usr/local/bin",
                 "HOME": "/tmp",
                 "TMPDIR": "/tmp",
                 "CARGO_HOME": "/tmp/cargo-home",

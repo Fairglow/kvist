@@ -349,7 +349,7 @@ happens on our argv.
 - `shell { command }` → `["<bash>", "-c", "<command>", "skott"]`. The
   command string is the agent's own script. Bash resolves inner tool names via
   the sandbox `PATH` we set (prepared `/rust/runtime/bin` first when available,
-  then `/usr/bin:/bin:/usr/sbin:/sbin`). The `shell`
+  then bin-only System paths). The `shell`
   command string is checked against the denylist before rendering.
   Commands longer than one 4096-byte protocol argv entry render instead as
   `["<bash>", "-c", "exec bash -c \"$(cat /context/0)\" skott"]` with
@@ -501,8 +501,8 @@ combines three inputs:
 - the per-profile `ProfileSetting` from `[tool_profiles]` (default `Auto` for every
   configurable profile, per `Config::from_parts`);
 - a `ToolchainProbe` — `HostProbe` in production, which judges availability against
-  the sandbox's read-only `MOUNTED_SYSTEM_DIRS` (`/usr`, `/lib`, `/lib64`, `/bin`,
-  `/sbin`) rather than the host `PATH`; and
+  the sandbox's filtered read-only `MOUNTED_SYSTEM_DIRS`
+  (`/usr`, `/lib`, `/lib64`, `/bin`) rather than the host `PATH`; and
 - an optional forced profile from `-p`/`--profile`.
 
 `Generic` is always advertised. A configurable profile set to `On` (or forced by
@@ -518,6 +518,23 @@ manifests (`Cargo.toml`, `pyproject.toml`, `package.json`, `go.mod`,
 advertised — availability does. A setting of `on` for a profile the sandbox cannot
 run is treated as an explicit, user-intended request and fails closed, so the model
 never receives a tool list that promises a compiler it cannot invoke.
+
+Native discovery tests query `/usr/bin/gcc --version` successfully on the host
+and require its first non-empty version line as an exact line in sandbox
+output. A shared predicate covers both standalone and combined language trials;
+deterministic regression cases cover Ubuntu, Debian and upstream banners,
+missing output and mismatched versions. Both Rust CI jobs provision Python,
+Node and C/C++ through system packages before native tests; Go and Rust retain
+their existing separate host provisioning.
+
+The fixed bin-only System PATH is shared from `toolchain` by generic and prepared Rust
+environments. Rust preparation keeps its existing shim, optional Cargo-bin and
+System directory precedence, then appends missing shared System directories
+without duplicates. Profile availability rejects administrative path aliases
+before and after canonicalization; executable fallback searches only bin
+directories. It does not inherit host PATH or add mounts. Synthetic
+resource tests cover both optional Cargo-bin branches; the native Node trial
+also checks that `/usr/local/bin` survives the actual request/execution chain.
 
 ## Failure and recovery
 
