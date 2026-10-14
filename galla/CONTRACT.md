@@ -41,6 +41,16 @@ fully implemented and active.
 
 ## Enforcement status
 
+All execution phases exclude `/sbin`, `/usr/sbin` and `/usr/local/sbin`.
+Their directory entries may exist as inaccessible read-only namespace mounts,
+but host contents and aliases are not exposed. PATH entries selecting these
+directories and grants covering or recreating them are rejected. The exception
+is a read-only Toolchain self-grant at `/usr` or `/usr/local`, which uses the
+already-filtered System view. Host state is unchanged; ordinary bin paths,
+including `/usr/local/bin`, remain available. This does not classify binaries
+installed in bin directories or material copied through separately approved
+resource aliases.
+
 Bubblewrap-based namespace enforcement is fully implemented and active. The
 runner constructs a complete Bubblewrap command line that establishes user,
 IPC, PID, UTS, cgroup, and network namespace boundaries. Resource limits are
@@ -50,6 +60,12 @@ Git sources. Immutable cache promotion uses `RENAME_NOREPLACE` to guarantee
 atomicity.
 
 ## Required interfaces
+
+The library query `validation::is_administrative_path(&Path) -> bool`
+recognizes the three standard administrative prefixes after lexical component
+normalization, without following filesystem links. Host executable selectors
+check original and canonical paths separately. The maerg mirrors this contract
+independently rather than depending on the runner as a Rust library.
 
 The production runner will require Linux namespace support and a verified
 Bubblewrap executable. This revision requires the Rust standard library, `nix`

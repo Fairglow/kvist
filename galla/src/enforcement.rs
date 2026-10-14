@@ -14,6 +14,8 @@ use sha2::Digest;
 use crate::probe::locate_backend;
 use crate::protocol::{Access, Grant, NetworkMode, Phase, Purpose, SandboxRequest};
 
+mod system_layout;
+
 fn add_workspace_vendor_mask(
     arguments: &mut Vec<String>,
     phase: Phase,
@@ -336,37 +338,6 @@ fn safe_prlimit(child_pid: u32, limits: crate::protocol::Resources) {
         .output();
 }
 
-/// Helper to replicate standard host directories in the sandbox root.
-/// Specifically, we check for `/lib`, `/lib64`, `/bin`, `/sbin` on the host.
-/// If they are symlinks, we emit `--symlink` flags to preserve layout canonicality.
-/// Otherwise, we `--ro-bind-try` them.
-fn add_host_system_layout(arguments: &mut Vec<String>) {
-    for path in [
-        "/usr",
-        "/lib",
-        "/lib64",
-        "/bin",
-        "/sbin",
-        "/etc/alternatives",
-    ] {
-        let host_path = Path::new(path);
-        if host_path.exists() {
-            if let Ok(metadata) = std::fs::symlink_metadata(host_path)
-                && metadata.file_type().is_symlink()
-                && let Ok(target) = std::fs::read_link(host_path)
-            {
-                arguments.push("--symlink".to_owned());
-                arguments.push(target.to_string_lossy().into_owned());
-                arguments.push(path.to_owned());
-                continue;
-            }
-            arguments.push("--ro-bind-try".to_owned());
-            arguments.push(path.to_owned());
-            arguments.push(path.to_owned());
-        }
-    }
-}
-
 fn check_file_size_exceeded(sources: &[PathBuf], max_file_bytes: u64) -> bool {
     for src in sources {
         if src.is_file() {
@@ -490,7 +461,10 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     bwrap_args.push("/run".to_owned());
 
     // 5. Mount standard host system layout
-    add_host_system_layout(&mut bwrap_args);
+    if let Err(error) = system_layout::add_host_system_layout(&mut bwrap_args) {
+        eprintln!("galla-runner: {error}");
+        return ExitCode::from(3);
+    }
 
     // 6. Mount DNS/host mappings if network is enabled
     let _proxy_guard = if request.network.mode == NetworkMode::PackageSources {
@@ -538,6 +512,26 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     // 7. Establish the required directory layout for all grant destinations
     let mut directories_to_create = std::collections::BTreeSet::new();
     for grant in &request.grants {
+        if crate::validation::is_filtered_system_grant(grant) {
+            match std::fs::symlink_metadata(&grant.source) {
+                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+                Ok(_) => {
+                    eprintln!(
+                        "galla-runner: filtered System grant `{}` requires a non-link directory",
+                        grant.source
+                    );
+                    return ExitCode::from(3);
+                }
+                Err(error) => {
+                    eprintln!(
+                        "galla-runner: cannot inspect filtered System grant `{}`: {error}",
+                        grant.source
+                    );
+                    return ExitCode::from(3);
+                }
+            }
+            continue;
+        }
         let dest_path = Path::new(&grant.destination);
         let mut ancestors = Vec::new();
         let mut current = dest_path.parent();
@@ -564,6 +558,9 @@ pub fn run(request: SandboxRequest) -> ExitCode {
 
     // 8. Bind all grant source and destination paths
     for grant in &request.grants {
+        if crate::validation::is_filtered_system_grant(grant) {
+            continue;
+        }
         match grant.access {
             crate::protocol::Access::ReadOnly => {
                 bwrap_args.push("--ro-bind".to_owned());

@@ -104,7 +104,7 @@ impl ToolProfile {
             ToolProfile::Rust => &["/usr/bin"],
             ToolProfile::JavaScript => &["/usr/bin", "/bin", "/usr/local/bin"],
             ToolProfile::Go => &["/usr/local/go/bin", "/usr/bin", "/usr/local/bin"],
-            ToolProfile::C => &["/usr/bin", "/bin", "/usr/sbin"],
+            ToolProfile::C => &["/usr/bin", "/bin"],
             ToolProfile::Generic => &[],
         }
     }
@@ -210,7 +210,10 @@ impl ToolchainProbe for HostProbe {
 
 /// The directories the sandbox mounts read-only for the authoring phase. A tool
 /// only counts as available when it lives under one of these roots.
-pub const MOUNTED_SYSTEM_DIRS: &[&str] = &["/usr", "/lib", "/lib64", "/bin", "/sbin"];
+pub const MOUNTED_SYSTEM_DIRS: &[&str] = &["/usr", "/lib", "/lib64", "/bin"];
+
+/// Fixed System search directories shared by generic and prepared environments.
+pub(crate) const SANDBOX_SYSTEM_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
 
 /// Whether `profile` has a usable interpreter under one of `search_dirs` that
 /// resolves (after symlink canonicalisation) beneath a `mounted` root.
@@ -226,12 +229,15 @@ pub fn language_available(profile: ToolProfile, search_dirs: &[PathBuf], mounted
     for base in search_dirs {
         for name in binaries {
             let path = base.join(name);
-            if !path.is_file() {
+            if galla::validation::is_administrative_path(&path) || !path.is_file() {
                 continue;
             }
             let Ok(canonical) = std::fs::canonicalize(&path) else {
                 continue;
             };
+            if galla::validation::is_administrative_path(&canonical) {
+                continue;
+            }
             if canonical.file_name().is_some_and(|file| file == "rustup") {
                 continue;
             }

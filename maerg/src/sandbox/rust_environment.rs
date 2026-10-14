@@ -512,7 +512,7 @@ impl RustEnvironment {
                 )
         });
         for (name, value) in [
-            ("PATH", "/rust/runtime/bin:/usr/bin:/bin:/usr/sbin:/sbin"),
+            ("PATH", "/rust/runtime/bin:/usr/bin:/bin:/usr/local/bin"),
             ("HOME", "/tmp"),
             ("RUSTUP_HOME", "/tmp/rustup-home"),
             ("RUSTUP_AUTO_INSTALL", "0"),

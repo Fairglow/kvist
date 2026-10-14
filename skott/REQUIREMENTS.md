@@ -2,6 +2,24 @@
 
 # Skott — Requirements
 
+## RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE
+
+Native language-discovery tests MUST retain successful sandbox execution and
+PATH discovery assertions. GCC version evidence MUST match the successfully
+queried host system compiler's version line, independent of distribution
+branding; missing or different version output MUST fail.
+Prepared Rust environments MUST retain every bin-only System PATH directory,
+including `/usr/local/bin`, so enabling Rust does not hide other advertised
+language tools. Rust shim and remaining bin precedence MUST remain unchanged;
+missing bin directories are appended, not inherited from host PATH. All standard
+`sbin` directories MUST be excluded from search and profile availability, in
+agreement with Galla's enforced exclusion. This MUST NOT expand resource or
+write authority.
+CI jobs running these tests MUST provision the required language tools in
+sandbox-visible system locations on the host. Host toolcache availability
+alone is insufficient. Tests MUST NOT install tools, acquire dependencies,
+skip missing prerequisites or expand sandbox authority.
+
 ## RUN-REQ-RUST-SANDBOX-CHAIN
 
 Rust workspace preparation MUST expose every safely validated installed

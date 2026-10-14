@@ -420,6 +420,12 @@ together, then re-tests the dogfood boundary suite. See
 
 ### Pinned Rust toolchains and host provisioning (ADR-0012)
 
+Prepared authoring PATH is `/rust/runtime/bin:/usr/bin:/bin:/usr/local/bin`,
+without sbin directories. Language verification rejects standard
+administrative path aliases before and after canonicalization and uses
+`/usr/bin:/bin:/usr/local/bin`. Galla supplies the filtered read-only System
+view for all phases; the maerg never adds an administrative overmount.
+
 Non-Rust generic authoring serializes the approved environment unchanged.
 Rust components (a local Cargo manifest) prepare bounded standard-layout installed
 resources in `sandbox/rust_environment.rs`. Trusted system rustup is queried
@@ -518,10 +524,10 @@ lock-file digest identity, one disjoint writable scratch at the Cargo
 topology's fixed destination (`/workspace/scratch`) absorbs caches, build
 output, and `HOME`, the network is denied, and the language's canonical
 offline test command runs against the host system toolchain (the sandbox
-`PATH` is the fixed `/usr/bin:/bin`; the language binary is located on the
+`PATH` is the fixed `/usr/bin:/bin:/usr/local/bin`; the language binary is located on the
 host and canonicalized so the toolchain grant binds a regular, non-symlink
 executable, preferring a PATH candidate under a bound system prefix —
-`/usr`, `/lib`, `/lib64`, `/bin`, `/sbin` — because only those remain
+filtered `/usr`, `/lib`, `/lib64`, `/bin` — because only those remain
 reachable inside the sandbox while toolchain managers frequently put
 installs such as `/opt/hostedtoolcache/...` ahead of the system toolchain
 on `PATH`). For Go, `GOROOT` is the grandparent of `bin/go` and must sit

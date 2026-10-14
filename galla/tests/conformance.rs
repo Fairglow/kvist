@@ -965,6 +965,52 @@ fn executable_rejects_legacy_request_with_actionable_diagnostic() {
 }
 
 #[test]
+fn rejects_administrative_search_and_covering_grants() {
+    for administrative in [
+        "/sbin",
+        "/usr/sbin",
+        "/usr/local/sbin",
+        "/usr/bin/../sbin",
+        "/usr/./sbin",
+    ] {
+        let mut request = valid_request();
+        request["environment"]["PATH"] = json!(format!("/usr/bin:{administrative}"));
+        let error = validation::parse_and_validate(&encode(&request))
+            .expect_err("administrative PATH must fail");
+        assert!(error.to_string().contains("administrative"), "{error}");
+    }
+    for destination in [
+        "/",
+        "/usr",
+        "/usr/local",
+        "/sbin",
+        "/sbin/tool",
+        "/usr/sbin",
+        "/usr/sbin/tool",
+        "/usr/local/sbin",
+    ] {
+        let mut request = valid_request();
+        request["grants"].as_array_mut().unwrap().remove(2);
+        request["grants"].as_array_mut().unwrap().push(json!({
+            "source": "/host/additional",
+            "destination": destination,
+            "access": "read-only",
+            "purpose": "context",
+            "identity": digest(b"additional")
+        }));
+        let error = validation::parse_and_validate(&encode(&request))
+            .expect_err("administrative covering grant must fail");
+        if destination == "/" {
+            assert!(error.to_string().contains("canonical"), "{error}");
+        } else {
+            assert!(error.to_string().contains("administrative"), "{error}");
+        }
+    }
+    validation::parse_and_validate(&encode(&valid_request()))
+        .expect("filtered System self-grants remain valid");
+}
+
+#[test]
 fn executable_executes_successfully_on_valid_request() {
     let probe_output = Command::new(env!("CARGO_BIN_EXE_galla-runner"))
         .arg("--kvist-sandbox-probe-v1")
@@ -997,6 +1043,39 @@ fn executable_executes_successfully_on_valid_request() {
         output.status.success(),
         "runner must succeed: {:?}",
         String::from_utf8_lossy(&output.stderr)
+    );
+    let host_permissions = || {
+        ["/sbin", "/usr/sbin", "/usr/local/sbin"].map(|path| {
+            match std::fs::symlink_metadata(path) {
+                Ok(metadata) => Some(metadata.permissions()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => panic!("cannot inspect host permissions at {path}: {error}"),
+            }
+        })
+    };
+    let before_permissions = host_permissions();
+    request["argv"] = json!([
+        "/usr/bin/bash",
+        "-c",
+        "set -eu; for path in /sbin /usr/sbin /usr/local/sbin; do test ! -r \"$path\"; test ! -w \"$path\"; test ! -x \"$path\"; if ls \"$path\"; then exit 1; fi; if touch \"$path/kvist-forbidden\"; then exit 1; fi; if chmod 755 \"$path\"; then exit 1; fi; done; /usr/bin/true; gcc --version; test -r /usr/local/bin"
+    ]);
+    for phase in ["authoring", "verification"] {
+        request["phase"] = json!(phase);
+        if phase == "verification" {
+            request["grants"][1]["purpose"] = json!("verification");
+            request["grants"][1]["access"] = json!("read-only");
+        }
+        let output = run_runner(&encode(&request));
+        assert!(
+            output.status.success(),
+            "{phase} administrative exclusion failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    assert_eq!(
+        before_permissions,
+        host_permissions(),
+        "namespace exclusions must not change host permissions"
     );
 }
 

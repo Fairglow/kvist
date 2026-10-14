@@ -51,6 +51,7 @@ independently by Galla, not by this convenience wrapper.
 the toolchain discoverable:
 
 - `PATH` includes `/rust/runtime/bin:/rust/toolchain/bin` (before system paths)
+  and retains all bin-only System directories, including `/usr/local/bin`
 - `RUSTC` is set to `/rust/runtime/bin/rustc`
 - `RUSTDOC` is set to `/rust/runtime/bin/rustdoc`
 - `CARGO_HOME` is set to `/tmp/cargo-home`
@@ -129,13 +130,22 @@ are expected to be installed in standard system locations on the host, and
 the sandbox mounts those locations read-only. Discovery is via PATH, not
 fixed mount paths.
 
-The sandbox mounts the following host system directories read-only:
+The sandbox exposes the following System resources read-only:
 
-- `/usr`
+- `/usr`, through a filtered namespace view excluding administrative directories
 - `/lib`
 - `/lib64`
 - `/bin`
-- `/sbin`
+
+`/sbin`, `/usr/sbin` and `/usr/local/sbin` are inaccessible in every execution
+phase, including by absolute path. Their entries may remain visible as empty,
+mode-000 read-only namespace mounts. Galla filters `/usr` and `/usr/local`
+instead of following administrative aliases; a host `/usr/sbin -> bin` does
+not hide `/usr/bin`. Host content, links and permissions are unchanged.
+Overmount grants and administrative PATH entries are rejected; read-only
+Toolchain self-grants at `/usr` or `/usr/local` retain the filtered view.
+This excludes directory paths, not every administrative binary installed in
+ordinary bin directories or copied through explicitly approved resource aliases.
 
 Skott's prepared Rust profile also exposes the optional `~/.cargo/bin` directory
 at `/rust/user-cargo-bin`, after the Cargo shim and concrete compiler in PATH.
@@ -143,10 +153,21 @@ The host home itself, Cargo credentials/configuration and rustup settings are
 not mounted. System-profile detection alone does not authorize home-directory
 mounts for other languages.
 
+Both Rust Quality and MSRV CI jobs explicitly install Python, Node and C/C++
+as system packages before native tests. A tool available only through the
+runner's host toolcache is not necessarily available in the sandbox.
+Native GCC discovery tests compare the sandbox version line with the queried
+host system compiler, accepting distribution-specific branding without
+accepting missing or mismatched version evidence.
+
 **PATH and environment variables:** The sandbox sets `PATH` to include the
-sandbox-local directories first, then the system directories. For Rust, this
-is `/rust/runtime/bin:/rust/toolchain/bin:/usr/bin:/bin:/usr/sbin:/sbin`.
+sandbox-local directories first, then the system directories. For Rust, the core order
+is `/rust/runtime/bin:/rust/toolchain/bin:/usr/bin:/bin:/usr/local/bin`.
 For other toolchains, the system directories are sufficient.
+Prepared Rust retains its remaining bin search precedence and includes
+`/usr/local/bin`, so enabling Rust does not hide Node or other
+already-mounted local system tools. Optional Cargo extensions remain ahead of
+System directories; the host's ambient PATH is never inherited.
 
 ## How Toolchains Are Found Inside the Sandbox
 

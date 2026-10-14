@@ -991,13 +991,17 @@ impl RustEnvironment {
     }
 
     pub(crate) fn environment(&self) -> BTreeMap<String, String> {
-        let path = if self.resources.user_cargo_bin.is_some() {
-            "/rust/runtime/bin:/rust/toolchain/bin:/rust/user-cargo-bin:/usr/bin:/bin:/usr/sbin:/sbin"
-        } else {
-            "/rust/runtime/bin:/rust/toolchain/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-        };
+        let mut path = vec!["/rust/runtime/bin", "/rust/toolchain/bin"];
+        if self.resources.user_cargo_bin.is_some() {
+            path.push("/rust/user-cargo-bin");
+        }
+        path.extend(["/usr/bin", "/bin"]);
+        for directory in crate::toolchain::SANDBOX_SYSTEM_PATH.split(':') {
+            if !path.contains(&directory) {
+                path.push(directory);
+            }
+        }
         let mut environment: BTreeMap<String, String> = [
-            ("PATH", path),
             ("HOME", "/tmp"),
             ("RUSTUP_HOME", "/tmp/rustup-home"),
             ("RUSTUP_AUTO_INSTALL", "0"),
@@ -1010,6 +1014,7 @@ impl RustEnvironment {
         .into_iter()
         .map(|(k, v)| (k.into(), v.into()))
         .collect();
+        environment.insert("PATH".into(), path.join(":"));
         if self.resources.pinned {
             environment.insert("RUSTUP_TOOLCHAIN".into(), self.resources.channel.clone());
         }
@@ -1308,6 +1313,28 @@ mod tests {
                     fingerprints: Vec::new(),
                 },
             }),
+        }
+    }
+
+    #[test]
+    fn prepared_rust_path_preserves_system_discovery_and_existing_precedence() {
+        for with_cargo_extensions in [false, true] {
+            let directory = fixture();
+            let mut environment = synthetic_environment(directory.path());
+            let mut expected = vec!["/rust/runtime/bin", "/rust/toolchain/bin"];
+            if with_cargo_extensions {
+                Arc::get_mut(&mut environment.resources)
+                    .unwrap()
+                    .user_cargo_bin = Some(directory.path().join("cargo-bin"));
+                expected.push("/rust/user-cargo-bin");
+            }
+            expected.extend(["/usr/bin", "/bin", "/usr/local/bin"]);
+            let variables = environment.environment();
+            assert_eq!(
+                variables["PATH"].split(':').collect::<Vec<_>>(),
+                expected,
+                "prepared Rust must preserve System discovery without changing existing precedence"
+            );
         }
     }
 

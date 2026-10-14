@@ -9,7 +9,7 @@
 //! read-only, a disjoint scratch absorbs caches and build output, the network
 //! is denied, and the language's canonical offline test command runs against
 //! the host system toolchain, which the shared runner already binds read-only
-//! (`/usr`, `/lib`, `/lib64`, `/bin`, `/sbin`).
+//! (filtered `/usr`, `/lib`, `/lib64`, `/bin`).
 //!
 //! The same fail-closed, lock-file-digest-identified model the Rust path uses
 //! applies: vendoring is enforced before any sandbox work, and a sandbox
@@ -29,12 +29,12 @@ use crate::sandbox::{
 const PYTHON_VENV_DEST: &str = "/workspace/venv";
 /// The deterministic sandbox `PATH`: the host system toolchains the runner
 /// already binds read-only. No host search path is leaked into the sandbox.
-const SANDBOX_PATH: &str = "/usr/bin:/bin";
+const SANDBOX_PATH: &str = "/usr/bin:/bin:/usr/local/bin";
 /// The host system prefixes the sandbox runner binds read-only (the runner's
-/// system layout: `/usr`, `/lib`, `/lib64`, `/bin`, `/sbin`). A host binary is
+/// system layout: filtered `/usr`, `/lib`, `/lib64`, `/bin`). A host binary is
 /// only usable inside the sandbox — and for Go, so is its standard library
 /// under `GOROOT` — when it lives under one of them.
-const BOUND_SYSTEM_PREFIXES: &[&str] = &["/usr", "/lib", "/lib64", "/bin", "/sbin"];
+const BOUND_SYSTEM_PREFIXES: &[&str] = &["/usr", "/lib", "/lib64", "/bin"];
 /// Sandbox destination of the writable scratch, shared with the Cargo topology.
 const SCRATCH_DEST: &str = crate::sandbox::CARGO_SCRATCH_DEST;
 
@@ -372,12 +372,28 @@ fn venv_site_packages(project_root: &Path) -> Result<String> {
     ))
 }
 
-/// True when `path` is one of the bound system prefixes or inside one of
-/// them (component-wise, so `/usr2` is not inside `/usr`).
-fn under_bound_system_prefix(path: &Path) -> bool {
-    BOUND_SYSTEM_PREFIXES
+fn is_administrative_path(path: &Path) -> bool {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            std::path::Component::CurDir => {}
+            component => normalized.push(component.as_os_str()),
+        }
+    }
+    ["/sbin", "/usr/sbin", "/usr/local/sbin"]
         .iter()
-        .any(|prefix| path.starts_with(prefix))
+        .any(|directory| normalized.starts_with(directory))
+}
+
+/// Whether a path reaches the filtered System view without selecting sbin.
+fn under_bound_system_prefix(path: &Path) -> bool {
+    !is_administrative_path(path)
+        && BOUND_SYSTEM_PREFIXES
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
 }
 
 /// Choose the toolchain candidate to run in the sandbox: the first PATH
@@ -388,7 +404,9 @@ fn under_bound_system_prefix(path: &Path) -> bool {
 /// toolchain than the granted executable (Go's `GOROOT`) fail closed on their
 /// own.
 fn select_toolchain_candidate(candidates: &[PathBuf]) -> Option<&Path> {
-    let first = candidates.first()?;
+    let first = candidates
+        .iter()
+        .find(|candidate| !is_administrative_path(candidate))?;
     Some(
         candidates
             .iter()
@@ -413,6 +431,9 @@ fn locate_host_binary(name: &str) -> Result<String> {
             continue;
         }
         let candidate = Path::new(directory).join(name);
+        if is_administrative_path(&candidate) {
+            continue;
+        }
         let metadata = std::fs::symlink_metadata(&candidate);
         let Ok(metadata) = metadata else {
             continue;
@@ -436,6 +457,9 @@ fn locate_host_binary(name: &str) -> Result<String> {
                     reason: format!("cannot inspect host binary `{name}`: {source}"),
                 }
             })?;
+            if is_administrative_path(&canonical) {
+                continue;
+            }
             if canonical_metadata.file_type().is_file() {
                 candidates.push(canonical);
             }
@@ -528,6 +552,13 @@ mod tests {
 
     #[test]
     fn under_bound_prefix_is_component_wise() {
+        for administrative in ["/sbin/tool", "/usr/sbin/tool", "/usr/local/sbin/tool"] {
+            assert!(!under_bound_system_prefix(Path::new(administrative)));
+            assert!(
+                select_toolchain_candidate(&[PathBuf::from(administrative)]).is_none(),
+                "administrative candidates must not survive the fallback"
+            );
+        }
         assert!(under_bound_system_prefix(Path::new(
             "/usr/lib/go-1.22/bin/go"
         )));

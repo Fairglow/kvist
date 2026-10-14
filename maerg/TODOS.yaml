@@ -14,6 +14,58 @@ component:
         expected_revision: "sha256:3d971935e8b59ab1d977550b5c2146caff46dc7af0dc6c15c7b18d414d0ccae5"
         observed_revision: "sha256:e27ae1c3224da961bd30030a6a838b9da2c0f52f58524f5a59fe273fde2445f5"
 tasks:
+  - id: bin-only-path-write-tests
+    title: "Pin bin-only authoring and verification"
+    description: "Retain native authoring and verification evidence and assert exclusion of administrative candidates."
+    context: "Human approved sbin exclusion; deliberate advisory exception while receipt enforcement is unavailable. Component-wise candidate assertions and native authoring/verification evidence pass."
+    purpose: "Define consumer evidence before implementation."
+    expected_outcome: "Administrative candidates are rejected and native language workflows remain usable."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"]
+    timestamps: {created_at: "2026-10-14T06:59:01Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: bin-only-path-implement-code
+    title: "Align maerg with filtered System policy"
+    description: "Remove sbin search and bound prefixes, include usr/local/bin and reject administrative aliases before and after canonicalization."
+    context: "No additional write authority or runtime provisioning. The maerg independently mirrors lexical administrative classification rather than importing the runner library."
+    purpose: "Consume the revised Galla contract."
+    expected_outcome: "Authoring and verification use bin-only paths."
+    kind: implementation
+    status: completed
+    depends_on: [bin-only-path-write-tests]
+    requirements: ["REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"]
+    timestamps: {created_at: "2026-10-14T06:59:01Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: bin-only-path-security-audit
+    title: "Audit consumer path exclusion"
+    description: "Independently inspect executable selection, fixed environment and unchanged protected write boundaries."
+    context: "Independent bin-policy-observer established no concrete high-confidence scoped regression. Executable-bit and race-resistance limitations remain explicit; no whole-component certification."
+    purpose: "Retain independent findings."
+    expected_outcome: "Findings are fixed or explicitly retained."
+    kind: security-audit
+    status: completed
+    depends_on: [bin-only-path-implement-code]
+    requirements: ["REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"]
+    timestamps: {created_at: "2026-10-14T06:59:01Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: bin-only-path-compliance-review
+    title: "Compare independent bin-only consumer evidence"
+    description: "Source-only observation followed by separate source-blind comparison."
+    context: "Separate source-blind bin-policy-comparator found scoped alignment and an obsolete sbin mount-list statement, corrected under the already approved exclusion policy. Stable and Rust 1.95 each pass 1405 tests; all six opt-in trials subsequently pass. No acceptance or blanket certification."
+    purpose: "Prevent self-certification."
+    expected_outcome: "Scoped discrepancies and limits remain explicit."
+    kind: compliance-review
+    status: completed
+    depends_on: [bin-only-path-security-audit]
+    requirements: ["REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"]
+    timestamps: {created_at: "2026-10-14T06:59:01Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: ci-vendor-write-tests
     title: "Reproduce authoring vendor regressions"
     description: "Run native offline authoring and shared wrapper evidence before restoring the missing provider grant; reproduce the accepted-commit fixture failure under safe.bareRepository=explicit."

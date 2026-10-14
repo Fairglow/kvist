@@ -468,7 +468,7 @@ evidence (`language_offline_e2e`); C/C++ is vendored-supported when its
 end-to-end evidence is tracked and passing. Non-vendored projects
 use the generic approved-test-command path: the per-component `[test_policy]`
 command runs in the network-denied sandbox against host system toolchains
-(the runner mounts `/usr`, `/lib`, `/lib64`, `/bin`, and `/sbin` read-only),
+(the runner exposes filtered `/usr`, `/lib`, `/lib64` and `/bin` read-only),
 with no vendored mounts and no `$HOME`. JVM and Ruby support zero-dependency
 projects only. Container-based builds, toolchains without an offline/locked
 mode, toolchains requiring ambient home/global mutable state, and GPU/
@@ -573,6 +573,10 @@ never retried. None of this retries, weakens, or changes sandbox authorization,
 effect grants, policy approval, or output redaction.
 
 ## Errors and failure semantics
+
+Rust authoring uses a bin-only PATH including `/usr/local/bin`.
+Standard administrative directories are excluded by Galla in every phase;
+language verification does not select tools through sbin aliases.
 
 For components with a local `Cargo.toml`, authoring prepares every validated
 standard-layout host Rust installation read-only at `/rust/toolchains/N`.

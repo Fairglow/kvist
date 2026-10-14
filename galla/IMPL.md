@@ -1,6 +1,36 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped filtered System observation - 2026-10-14
+
+Independent clean-slate `bin-policy-observer` inspected only explicitly bounded
+source/tests and workflow, excluding intent, queues, records, reviews and
+history. It executed no tests and made no acceptance or compliance claim.
+
+Administrative detection lexically normalizes paths and excludes `/sbin`,
+`/usr/sbin`, `/usr/local/sbin` and descendants. Validation rejects
+administrative PATH entries and grants covering or within those directories.
+Only read-only Toolchain self-grants at exactly `/usr` or `/usr/local` receive
+the filtered exemption; enforcement requires non-link directory sources and
+skips ordinary creation/binding for them.
+
+Filtered tmpfs views preserve other immediate children as read-only binds or
+recreated links, without following administrative aliases. The administrative
+destinations are read-only mode-000 tmpfs; payload capabilities are dropped.
+Enumeration is sorted, nonrecursive and limited to 1024 immediate entries per
+filtered directory, including excluded entries. Missing roots use namespace-only
+views; linked roots, unsupported entries, inspection errors and non-UTF-8
+names/targets fail explicitly, with runner exit code 3 on layout failure.
+Unit fixtures cover alias preservation, host non-mutation, missing/linked roots
+and both enumeration boundaries. The native conformance test exercises authoring
+and verification without availability skips, asserting administrative access,
+listing, creation and chmod denial, ordinary bin execution and preserved host
+permissions.
+
+The observer established no concrete high-confidence scoped regression.
+Exclusion is path-based, not binary classification or race-resistant resolution.
+Source-defined tests are not an observed execution result.
+
 ## Scoped workspace-vendor mask observation - 2026-10-14
 
 Independent clean-slate `mask-observer` inspected only enumerated source/tests,

@@ -14,6 +14,58 @@ component:
         expected_revision: "sha256:d820c13d62d03274f739359a9d8a813f4b5942729d6a646934ce697bcd49f097"
         observed_revision: "sha256:d8be7616a3dd68b68c9560717683f62ce54aea6ac23a91010c7139d84566fd6f"
 tasks:
+  - id: ci-portable-tools-write-tests
+    title: "Reproduce distribution-dependent toolchain evidence"
+    description: "Pin valid Ubuntu, Debian and upstream GCC banners, missing version output and mismatched compiler evidence; reproduce omitted System PATH directories in both optional Cargo-bin branches and the native Node chain."
+    context: "Follow-up to failed Quality and MSRV jobs in run 38520819701. Deliberate per-bundle advisory exception while receipt enforcement is unavailable. GCC-banner and prepared-PATH regressions failed before repair; all six discovery tests now pass."
+    purpose: "Define portable evidence before repairing assertions."
+    expected_outcome: "Ubuntu banner and prepared-Rust System PATH regressions fail before repair."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE"]
+    timestamps: {created_at: "2026-10-14T06:22:53Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: ci-portable-tools-implement-code
+    title: "Repair portable compiler assertions and host prerequisites"
+    description: "Compare exact host GCC version evidence in both native trials, preserve shared System PATH directories during Rust preparation and provision sandbox-visible Python, Node and C/C++ in MSRV as in Quality."
+    context: "Rust shim and remaining bin precedence are preserved; the human approved administrative-directory exclusion. No new sandbox grant, authority or runtime installation. Strict Clippy and formatting pass; stable and Rust 1.95 workspace each pass 1405 tests with 12 ignored."
+    purpose: "Fix both pushed CI jobs without accepting missing or wrong tooling."
+    expected_outcome: "Distribution branding does not fail valid compiler evidence, Rust does not hide advertised System tools, and both jobs explicitly install native prerequisites."
+    kind: implementation
+    status: completed
+    depends_on: [ci-portable-tools-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE"]
+    timestamps: {created_at: "2026-10-14T06:22:53Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: ci-portable-tools-security-audit
+    title: "Audit CI-only tool provisioning and test authority"
+    description: "Independently inspect fixed host executable queries, strict evidence matching, shared System PATH preservation, host-only provisioning and unchanged sandbox authority."
+    context: "Independent ci-portability-observer and bin-policy-observer found no concrete high-confidence scoped regression. Pre-existing weak Node version evidence and resolver-only authority limitations remain explicit in IMPL.md; no whole-component certification."
+    purpose: "Retain independent observations."
+    expected_outcome: "Scoped findings are corrected or explicitly retained."
+    kind: security-audit
+    status: completed
+    depends_on: [ci-portable-tools-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE"]
+    timestamps: {created_at: "2026-10-14T06:22:53Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: ci-portable-tools-compliance-review
+    title: "Compare independently observed toolchain repair"
+    description: "Derive a source-only observation, then separately compare scoped intent and test evidence without source access."
+    context: "Separate source-blind bin-policy-comparator found scoped alignment for bin visibility, prepared-Rust Node discovery, GCC matching and host provisioning. Limits remain explicit. Six opt-in native trials subsequently pass; GitHub has not rerun this unpushed repair. No acceptance receipt or blanket compliance claim."
+    purpose: "Prevent implementer self-certification."
+    expected_outcome: "Scoped discrepancies and verification limits remain explicit."
+    kind: compliance-review
+    status: completed
+    depends_on: [ci-portable-tools-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE"]
+    timestamps: {created_at: "2026-10-14T06:22:53Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: ci-regressions-write-tests
     title: "Reproduce native CI failures"
     description: "Retain failing vendor immutability, missing target, locked-build and diagnostic assertions."

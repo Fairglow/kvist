@@ -16,6 +16,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::path::{Component, Path, PathBuf};
 
 use sha2::{Digest, Sha256};
 
@@ -95,6 +96,33 @@ pub fn parse_and_validate(bytes: &[u8]) -> Result<SandboxRequest, ProtocolError>
     Ok(request)
 }
 
+/// Whether a path selects a standard administrative directory or its contents.
+///
+/// This normalizes lexical components, not filesystem symlinks. Callers
+/// selecting host executables check both their original and canonical paths.
+pub fn is_administrative_path(path: &Path) -> bool {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::CurDir => {}
+            component => normalized.push(component.as_os_str()),
+        }
+    }
+    ["/sbin", "/usr/sbin", "/usr/local/sbin"]
+        .iter()
+        .any(|directory| normalized.starts_with(directory))
+}
+
+pub(crate) fn is_filtered_system_grant(grant: &Grant) -> bool {
+    matches!(grant.destination.as_str(), "/usr" | "/usr/local")
+        && grant.source == grant.destination
+        && grant.access == Access::ReadOnly
+        && grant.purpose == Purpose::Toolchain
+}
+
 /// Validates all host-independent protocol invariants.
 pub fn validate(request: &SandboxRequest) -> Result<(), ProtocolError> {
     if request.protocol != REQUEST_PROTOCOL {
@@ -167,6 +195,13 @@ fn validate_environment_shape(environment: &BTreeMap<String, String>) -> Result<
             return Err(invalid(format!(
                 "environment variable `{name}` is not permitted in a sandbox request"
             )));
+        }
+        if name == "PATH"
+            && value
+                .split(':')
+                .any(|entry| is_administrative_path(Path::new(entry)))
+        {
+            return Err(invalid("PATH must not select administrative directories"));
         }
     }
     Ok(())
@@ -302,6 +337,19 @@ fn validate_grants(request: &SandboxRequest) -> Result<(), ProtocolError> {
         let label = format!("grant {index}");
         validate_absolute(&grant.source, &format!("{label} source"))?;
         validate_absolute(&grant.destination, &format!("{label} destination"))?;
+        if !is_filtered_system_grant(grant)
+            && ["/sbin", "/usr/sbin", "/usr/local/sbin"]
+                .iter()
+                .any(|administrative| {
+                    path_contains(&grant.destination, administrative)
+                        || path_contains(administrative, &grant.destination)
+                })
+        {
+            return Err(invalid(format!(
+                "{label} destination `{}` covers an excluded administrative directory",
+                grant.destination
+            )));
+        }
         if grant.destination.contains("/../")
             || grant.destination.contains("/./")
             || grant.destination.ends_with("/..")
