@@ -53,11 +53,7 @@ pub fn find_galla_runner() -> Result<PathBuf, String> {
     // 4. On PATH
     let path_dirs = std::env::var("PATH")
         .ok()
-        .map(|p| {
-            p.split(':')
-                .map(|s| PathBuf::from(s))
-                .collect::<Vec<PathBuf>>()
-        })
+        .map(|p| p.split(':').map(PathBuf::from).collect::<Vec<PathBuf>>())
         .unwrap_or_default();
 
     for dir in &path_dirs {

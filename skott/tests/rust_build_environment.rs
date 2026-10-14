@@ -26,6 +26,16 @@ fn runner() -> PathBuf {
             return path;
         }
     }
+    // Test the current build before a potentially older installed runner.
+    if let Some(path) = std::env::current_exe().ok().and_then(|executable| {
+        executable
+            .parent()
+            .and_then(std::path::Path::parent)
+            .map(|directory| directory.join("galla-runner"))
+    }) && path.is_file()
+    {
+        return path;
+    }
     // Check standard installation locations first
     if let Some(path) = std::env::var_os("HOME") {
         let user_runner = PathBuf::from(path).join(".kvist/bin/galla-runner");
@@ -81,6 +91,7 @@ fn resolve(workdir: &std::path::Path) -> skott::Result<ToolRegistry> {
 }
 
 #[test]
+#[serial]
 fn rejects_malicious_ambiguous_and_oversized_pins() {
     for pin in [
         "[toolchain]\nchannel = \"../../outside\"",
@@ -111,6 +122,7 @@ fn rejects_malicious_ambiguous_and_oversized_pins() {
 }
 
 #[test]
+#[serial]
 fn absent_install_is_actionable_and_auto_is_honest() {
     if !host_rustup_resolves() {
         eprintln!(
@@ -139,6 +151,7 @@ fn absent_install_is_actionable_and_auto_is_honest() {
 }
 
 #[test]
+#[serial]
 fn symlink_pin_and_vendor_roots_cannot_acquire_host_authority() {
     use std::os::unix::fs::symlink;
     let directory = fixture();
@@ -205,7 +218,28 @@ impl std::io::Write for LogCapture {
 }
 
 #[test]
+#[serial]
 fn diagnostics_cover_the_chain_without_command_or_output_payloads() {
+    const CHILD: &str = "SKOTT_DIAGNOSTICS_TEST_CHILD";
+    if std::env::var_os(CHILD).is_none() {
+        // Tracing callsite interests are process-global, even for local subscribers.
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "diagnostics_cover_the_chain_without_command_or_output_payloads",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "diagnostic subprocess failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
     let bytes = Arc::new(Mutex::new(Vec::new()));
@@ -292,6 +326,7 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
 }
 
 #[test]
+#[serial]
 fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -345,6 +380,11 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
     assert!(diagnostics.contains("vendor snapshot sha256:"));
     // Changes through the writable workspace alias cannot mutate the resource.
     fs::write(dependency.join("Cargo.toml"), "malicious replacement").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let host_vendor_mode = fs::metadata(workdir.join(".kvist/vendored"))
+        .unwrap()
+        .permissions()
+        .mode();
     let executor = SandboxExecutor::new(
         registry,
         SandboxPaths {
@@ -365,9 +405,13 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
         !network_trial.failed(),
         "host networking must remain unreachable"
     );
+    checked_shell(
+        &executor,
+        "stage alias-unreadable test ! -r .kvist/vendored\nstage alias-unwritable test ! -w .kvist/vendored\nstage alias-untraversable test ! -x .kvist/vendored\nstage sibling-state test -r .kvist/rust-toolchain.json\nif ls .kvist/vendored; then printf 'vendor alias listing unexpectedly succeeded\\n' >&2; exit 1; fi\nif cat .kvist/vendored/kvist-sandbox-dependency/Cargo.toml; then printf 'vendor alias read unexpectedly succeeded\\n' >&2; exit 1; fi\nif touch .kvist/vendored/forbidden; then printf 'vendor alias write unexpectedly succeeded\\n' >&2; exit 1; fi\nif chmod 755 .kvist/vendored; then printf 'vendor mask permissions unexpectedly changed\\n' >&2; exit 1; fi",
+    );
     let result = checked_shell(
         &executor,
-        "stage offline test \"$CARGO_NET_OFFLINE\" = true\nstage cargo-home test \"$CARGO_HOME\" = /tmp/cargo-home\nstage target test \"$CARGO_TARGET_DIR\" = /tmp/target\nstage home test \"$HOME\" = /tmp\nstage home-write touch \"$HOME/scratch-proof\"\nstage credentials test ! -e /home/stefan/.cargo/credentials.toml\nstage host-settings test ! -e /home/stefan/.rustup/settings.toml\nstage root-home test ! -e /root/.cargo\nstage dns test ! -e /etc/resolv.conf\nstage token test -z \"$CARGO_REGISTRY_TOKEN\"\nstage rustup-home test \"$RUSTUP_HOME\" = /tmp/rustup-home\nstage shim-readonly test ! -w /rust/runtime/bin/cargo\nstage compiler-readonly test ! -w /rust/toolchain/bin/rustc\nstage vendor-readonly test ! -w /rust/vendor/kvist-sandbox-dependency/Cargo.toml\nstage metadata cargo metadata --format-version=1\nstage tests cargo test\nstage docs cargo doc --no-deps",
+        "stage offline test \"$CARGO_NET_OFFLINE\" = true\nstage cargo-home test \"$CARGO_HOME\" = /tmp/cargo-home\nstage target test \"$CARGO_TARGET_DIR\" = /workspace/target\nstage home test \"$HOME\" = /tmp\nstage home-write touch \"$HOME/scratch-proof\"\nstage credentials test ! -e /home/stefan/.cargo/credentials.toml\nstage host-settings test ! -e /home/stefan/.rustup/settings.toml\nstage root-home test ! -e /root/.cargo\nstage dns test ! -e /etc/resolv.conf\nstage token test -z \"$CARGO_REGISTRY_TOKEN\"\nstage rustup-home test \"$RUSTUP_HOME\" = /tmp/rustup-home\nstage shim-readonly test ! -w /rust/runtime/bin/cargo\nstage compiler-readonly test ! -w /rust/toolchain/bin/rustc\nstage vendor-readonly test ! -w /rust/vendor/kvist-sandbox-dependency/Cargo.toml\nstage metadata cargo metadata --format-version=1\nstage tests cargo test\nstage docs cargo doc --no-deps",
     );
     assert!(!result.failed(), "{}", result.error_text(8192));
     assert!(result.output_text(8192).contains("test result: ok"));
@@ -375,7 +419,19 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
         fs::read_to_string(workdir.join("Cargo.lock")).unwrap(),
         lock
     );
-    assert!(!workdir.join("target").exists());
+    assert!(workdir.join("target/doc/vendor_trial/index.html").is_file());
+    assert_eq!(
+        fs::read_to_string(dependency.join("Cargo.toml")).unwrap(),
+        "malicious replacement"
+    );
+    assert_eq!(
+        fs::metadata(workdir.join(".kvist/vendored"))
+            .unwrap()
+            .permissions()
+            .mode(),
+        host_vendor_mode
+    );
+    assert!(!workdir.join(".kvist/vendored/forbidden").exists());
 
     let without_vendor = SandboxExecutor::new(
         ToolRegistry::new(ToolPolicy::default()),
@@ -385,11 +441,15 @@ fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation()
         },
         workdir,
     );
-    let result = shell(&without_vendor, "test ! -e /rust/vendor");
+    let result = shell(
+        &without_vendor,
+        "test ! -e /rust/vendor && test -r .kvist/vendored && test -w .kvist/vendored",
+    );
     assert!(!result.failed());
 }
 
 #[test]
+#[serial]
 fn rust_toolchain_is_discoverable_via_path_and_version_commands() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -447,6 +507,7 @@ fn rust_toolchain_is_discoverable_via_path_and_version_commands() {
 }
 
 #[test]
+#[serial]
 fn cargo_installed_tools_are_available_in_sandbox() {
     let nextest = PathBuf::from(std::env::var_os("HOME").unwrap()).join(".cargo/bin/cargo-nextest");
     assert!(
@@ -498,6 +559,7 @@ fn cargo_installed_tools_are_available_in_sandbox() {
 }
 
 #[test]
+#[serial]
 fn home_directory_is_not_accessible_in_sandbox() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -535,6 +597,7 @@ fn home_directory_is_not_accessible_in_sandbox() {
 }
 
 #[test]
+#[serial]
 fn selected_toolchain_runs_the_complete_native_chain() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -593,7 +656,11 @@ fn selected_toolchain_runs_the_complete_native_chain() {
     );
     let result = checked_shell(
         &executor,
-        "stage home test -w \"$HOME\"\nstage rustup-selection rustup show active-toolchain\nstage rustup-list rustup toolchain list\nstage rustup-cargo rustup which cargo\nstage rustup-rustc rustup which rustc\nstage rustup-sysroot test \"$(rustup run \"$RUSTUP_TOOLCHAIN\" rustc --print sysroot)\" = /rust/toolchain\nstage compiler rustc --version\nstage cargo cargo --version\nstage sysroot test \"$(rustc --print sysroot)\" = /rust/toolchain\nstage formatter cargo fmt --check\nstage check cargo check --all-targets\nstage build cargo build\nstage binary /tmp/target/debug/chain-trial\nstage unit-tests cargo test --lib\nstage integration-tests cargo test --test integration\nstage doctests cargo test --doc\nstage clippy cargo clippy --all-targets -- -D warnings\nstage documentation cargo doc --no-deps\nstage isolated-target test ! -e target",
+        "stage home test -w \"$HOME\"\nstage rustup-selection rustup show active-toolchain\nstage rustup-list rustup toolchain list\nstage rustup-cargo rustup which cargo\nstage rustup-rustc rustup which rustc\nstage rustup-sysroot test \"$(rustup run \"$RUSTUP_TOOLCHAIN\" rustc --print sysroot)\" = /rust/toolchain\nstage compiler rustc --version\nstage cargo cargo --version\nstage sysroot test \"$(rustc --print sysroot)\" = /rust/toolchain\nstage formatter cargo fmt --check\nstage check cargo check --all-targets\nstage build cargo build\nstage binary /workspace/target/debug/chain-trial\nstage unit-tests cargo test --lib\nstage integration-tests cargo test --test integration\nstage doctests cargo test --doc\nstage clippy cargo clippy --all-targets -- -D warnings\nstage documentation cargo doc --no-deps\nstage workspace-target test -x target/debug/chain-trial",
+    );
+    checked_shell(
+        &executor,
+        "stage persisted-binary /workspace/target/debug/chain-trial\nstage persisted-docs test -f target/doc/chain_trial/index.html",
     );
     let output = result.output_text(16384);
     assert!(output.contains(String::from_utf8(expected.stdout).unwrap().trim()));
@@ -620,6 +687,7 @@ fn selected_toolchain_runs_the_complete_native_chain() {
 }
 
 #[test]
+#[serial]
 fn installed_minimal_pin_builds_without_optional_components() {
     let channel =
         std::env::var("KVIST_RUST_TEST_MINIMAL_CHANNEL").unwrap_or_else(|_| "1.94.0".into());
@@ -671,6 +739,7 @@ fn installed_minimal_pin_builds_without_optional_components() {
 }
 
 #[test]
+#[serial]
 fn changing_project_pin_after_resolution_fails_before_effects() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -702,6 +771,7 @@ fn changing_project_pin_after_resolution_fails_before_effects() {
 }
 
 #[test]
+#[serial]
 fn native_installed_rust_compiles_links_and_documents_offline() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -745,9 +815,11 @@ fn native_installed_rust_compiles_links_and_documents_offline() {
         .unwrap();
     assert!(!result.failed(), "{}", result.error_text(8192));
     assert!(result.output_text(8192).contains("test result: ok"));
+    assert!(!directory.path().join(".kvist").exists());
 }
 
 #[test]
+#[serial]
 fn normal_cargo_requires_matching_lock_without_creating_or_updating_it() {
     let directory = fixture();
     let workdir = directory.path().canonicalize().unwrap();
@@ -789,5 +861,5 @@ fn normal_cargo_requires_matching_lock_without_creating_or_updating_it() {
     );
     assert!(!result.failed(), "{}", result.error_text(8192));
     assert_eq!(fs::read(&lock).unwrap(), matching);
-    assert!(!workdir.join("target").exists());
+    assert!(workdir.join("target/debug/deps").is_dir());
 }

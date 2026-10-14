@@ -14,6 +14,58 @@ component:
         expected_revision: "sha256:d820c13d62d03274f739359a9d8a813f4b5942729d6a646934ce697bcd49f097"
         observed_revision: "sha256:d8be7616a3dd68b68c9560717683f62ce54aea6ac23a91010c7139d84566fd6f"
 tasks:
+  - id: ci-regressions-write-tests
+    title: "Reproduce native CI failures"
+    description: "Retain failing vendor immutability, missing target, locked-build and diagnostic assertions."
+    context: "Requested CI repair; explicit advisory exception while receipt enforcement is unavailable."
+    purpose: "Pin failures before implementation."
+    expected_outcome: "Native evidence identifies broken snapshot resolution and stale target assumptions."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"]
+    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T05:23:13Z", completed_at: "2026-10-14T05:23:13Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: ci-regressions-implement-code
+    title: "Restore native sandbox CI parity"
+    description: "Restore the disjoint vendor snapshot grant, hide the mutable workspace vendor alias through the runner's fixed rule, preserve persistent workspace targets in both native suites, isolate tracing capture and provision CI prerequisites."
+    context: "No installation or networking is added to test bodies or the effect sandbox. All 14 native Rust environment tests and the installed inventory trial pass with the current-build runner. Full workspace: 1399 passed, 0 failed, 12 ignored; strict Clippy, formatting and Rust 1.95 check pass. Remote CI has not been rerun."
+    purpose: "Fix the actual native chain without skipping assertions."
+    expected_outcome: "Native tests pass with immutable dependencies and persistent workspace build output."
+    kind: implementation
+    status: completed
+    depends_on: [ci-regressions-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"]
+    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: ci-regressions-security-audit
+    title: "Audit restored Rust resource boundaries"
+    description: "Independently review disjoint read-only grants, mutable aliases, tracing isolation and CI-only provisioning."
+    context: "Independent repair-observer and mask-observer inspected resource and fixture boundaries. Pre-existing snapshot-growth and diagnostic inconsistencies remain explicitly retained in IMPL.md; no whole-component certification."
+    purpose: "Retain independent findings."
+    expected_outcome: "Findings are corrected or explicitly retained."
+    kind: security-audit
+    status: completed
+    depends_on: [ci-regressions-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"]
+    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: ci-regressions-compliance-review
+    title: "Compare independently observed CI repair"
+    description: "Derive source-only observations, then compare intent with evidence in a separate source-blind context."
+    context: "Separate source-blind repair-comparator and mask-comparator reported no new scoped discrepancy. Existing limitations remain explicit; no acceptance receipt or blanket compliance claim."
+    purpose: "Keep implementation observation independent."
+    expected_outcome: "Scoped discrepancies and verification limits remain explicit."
+    kind: compliance-review
+    status: completed
+    depends_on: [ci-regressions-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"]
+    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: "offline-rust-default-write-tests"
     title: "Pin ordinary native inventory and default evidence"
     description: "Make the complete installed-inventory trial non-ignored and fail on missing prerequisites; reproduce default selection failure and verify unpinned host parity, invocation-local switching, compiler/Cargo/doc agreement and host non-mutation."

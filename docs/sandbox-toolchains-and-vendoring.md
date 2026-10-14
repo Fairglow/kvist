@@ -40,7 +40,7 @@ The mount layout is:
 | `/tmp/rustup-home`                                     | Settings copied inside the sandbox; link to the read-only registration directory     | Invocation-local selection/profile state; never host settings                     |
 | `/rust/user-cargo-bin`                                 | Validated optional host `~/.cargo/bin` directory                                     | Read-only host-provisioned Cargo extensions; no host Cargo config or credentials  |
 | `/tmp/cargo-home`                                      | Private tmpfs                                                                        | Private, sandbox-local Cargo home (cache, registry metadata)                      |
-| `/tmp/target`                                          | Private tmpfs                                                                        | Private, sandbox-local build target directory                                     |
+| `/workspace/target`                                    | Writable Skott workspace                                                             | Persistent workspace build target directory                                      |
 
 The Cargo shim at `/rust/runtime/bin/cargo` is essential: it ensures that
 normal PATH Cargo invocations default to offline/locked vendored resolution.
@@ -54,7 +54,9 @@ the toolchain discoverable:
 - `RUSTC` is set to `/rust/runtime/bin/rustc`
 - `RUSTDOC` is set to `/rust/runtime/bin/rustdoc`
 - `CARGO_HOME` is set to `/tmp/cargo-home`
-- `CARGO_TARGET_DIR` is set to `/tmp/target`
+- Skott sets `CARGO_TARGET_DIR=/workspace/target` so build artifacts persist
+  across shell invocations; protected maerg authoring uses `/tmp/target` scratch
+  instead, without granting writes outside the component's approved source roots
 - `CARGO_NET_OFFLINE` is set to `true`
 - `HOME=/tmp` names writable private invocation scratch
 - `RUSTUP_HOME=/tmp/rustup-home` contains private settings, never host settings
@@ -105,6 +107,17 @@ Links and out-of-project resources fail explicitly. This build context is not
 implicit prompt context and never grants peer writes. The closed Cargo
 verification topology is unchanged.
 
+The vendor destination remains `/rust/vendor` for both consumers. The host
+source of truth is `.kvist/vendored`; Skott snapshots it before mounting.
+Resolving directly through `/workspace/.kvist/vendored` would use a mutable
+workspace alias, and a separate grant there would overlap the workspace mount.
+When prepared Rust authoring also mounts the workspace, the runner covers its
+existing `.kvist/vendored` directory with an empty, inaccessible read-only
+mount. The directory entry may be visible, but listing, reading, writing and
+changing permissions fail. Only `/rust/vendor` is usable inside the sandbox.
+Host registry files/permissions and other `.kvist` files are unchanged; an
+absent registry causes no host directory creation.
+
 An agent running inside the sandbox can use Rust without knowing the mount
 path — standard PATH discovery works: `which rustc`, `which cargo`, and
 `which rustdoc` all resolve correctly.
@@ -154,8 +167,8 @@ git, and common Linux tools, cargo, rustc, and the Rust standard toolchain."
 
 When the Rust toolchain is available, the tool description also includes:
 "Rust uses an already installed read-only concrete toolchain; cargo is
-explicitly offline with a private read-only vendor snapshot, HOME/cache/target
-are scratch. Missing dependencies require host provisioning; sandbox builds
+explicitly offline with a private read-only vendor snapshot, HOME/cache are scratch and
+build output persists at /workspace/target. Missing dependencies require host provisioning; sandbox builds
 never download."
 
 ## Vendored Dependencies

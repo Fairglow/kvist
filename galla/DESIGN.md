@@ -31,6 +31,18 @@ Bubblewrap execution — resolved mounts, namespace boundaries, `prlimit`
 resources, the source-aware network guard, and process supervision — without
 importing maerg types.
 
+After binding grants, prepared Rust authoring with writable `/workspace` and
+read-only toolchain `/rust/vendor` inspects the workspace source's `.kvist`
+and `vendored` directories without following links. Existing registry content
+is covered by mode-000 tmpfs, then remounted read-only; drop all child
+capabilities so privileged execution cannot bypass its permissions. Missing
+paths require no overlay and cause no host directory creation. Inspection
+errors and non-directory/link paths fail enforcement explicitly. This fixed
+mask neither hides sibling workflow files nor changes disjoint grant
+validation. Tests check denial of listing, reads, writes and permission
+changes, successful offline resolution, host non-mutation and unaffected
+non-Rust requests.
+
 ## Interactions and state
 
 The runner receives one bounded JSON request on standard input, validates it

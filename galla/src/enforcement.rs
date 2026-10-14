@@ -12,7 +12,64 @@ use std::time::{Duration, Instant};
 use sha2::Digest;
 
 use crate::probe::locate_backend;
-use crate::protocol::{NetworkMode, SandboxRequest};
+use crate::protocol::{Access, Grant, NetworkMode, Phase, Purpose, SandboxRequest};
+
+fn add_workspace_vendor_mask(
+    arguments: &mut Vec<String>,
+    phase: Phase,
+    grants: &[Grant],
+) -> Result<(), String> {
+    if phase != Phase::Authoring
+        || !grants.iter().any(|grant| {
+            grant.destination == "/rust/vendor"
+                && grant.access == Access::ReadOnly
+                && grant.purpose == Purpose::Toolchain
+        })
+    {
+        return Ok(());
+    }
+    let Some(workspace) = grants.iter().find(|grant| {
+        grant.destination == "/workspace"
+            && grant.access == Access::ReadWrite
+            && grant.purpose == Purpose::Authoring
+    }) else {
+        return Ok(());
+    };
+    for relative in [".kvist", ".kvist/vendored"] {
+        let source = Path::new(&workspace.source).join(relative);
+        match std::fs::symlink_metadata(&source) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+            Ok(_) => {
+                return Err(format!(
+                    "workspace vendor mask requires regular non-link directories: `{}`",
+                    source.display()
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                return Err(format!(
+                    "cannot inspect workspace vendor mask path `{}`: {error}",
+                    source.display()
+                ));
+            }
+        }
+    }
+    // Mask only after the workspace bind; never chmod the host directory.
+    arguments.extend(
+        [
+            "--perms",
+            "000",
+            "--tmpfs",
+            "/workspace/.kvist/vendored",
+            "--remount-ro",
+            "/workspace/.kvist/vendored",
+            "--cap-drop",
+            "ALL",
+        ]
+        .map(str::to_owned),
+    );
+    Ok(())
+}
 
 fn start_network_guard_proxy(
     sources: &[crate::protocol::AllowedSource],
@@ -518,6 +575,10 @@ pub fn run(request: SandboxRequest) -> ExitCode {
         bwrap_args.push(grant.source.clone());
         bwrap_args.push(grant.destination.clone());
     }
+    if let Err(error) = add_workspace_vendor_mask(&mut bwrap_args, request.phase, &request.grants) {
+        eprintln!("galla-runner: {error}");
+        return ExitCode::from(3);
+    }
 
     // 9. Map explicitly requested environment variables
     for (name, value) in &request.environment {
@@ -776,4 +837,123 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     }
 
     ExitCode::from(exit_code as u8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    fn grants(workspace: &Path) -> Vec<Grant> {
+        vec![
+            Grant {
+                source: workspace.to_string_lossy().into_owned(),
+                destination: "/workspace".into(),
+                access: Access::ReadWrite,
+                purpose: Purpose::Authoring,
+                identity: "workspace".into(),
+            },
+            Grant {
+                source: "/host/snapshot".into(),
+                destination: "/rust/vendor".into(),
+                access: Access::ReadOnly,
+                purpose: Purpose::Toolchain,
+                identity: "snapshot".into(),
+            },
+        ]
+    }
+
+    #[test]
+    fn mask_requires_existing_registry_and_exact_prepared_authoring_topology() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut grants = grants(workspace.path());
+        let mut arguments = Vec::new();
+        add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &grants).unwrap();
+        assert!(arguments.is_empty());
+        assert!(!workspace.path().join(".kvist").exists());
+        fs::create_dir(workspace.path().join(".kvist")).unwrap();
+        add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &grants).unwrap();
+        assert!(arguments.is_empty());
+        assert!(!workspace.path().join(".kvist/vendored").exists());
+        fs::create_dir(workspace.path().join(".kvist/vendored")).unwrap();
+        add_workspace_vendor_mask(&mut arguments, Phase::Verification, &grants).unwrap();
+        assert!(arguments.is_empty());
+        grants[1].destination = "/rust/other".into();
+        add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &grants).unwrap();
+        assert!(arguments.is_empty());
+        grants[1].destination = "/rust/vendor".into();
+        for (index, access, purpose, destination) in [
+            (1, Access::ReadWrite, Purpose::Toolchain, "/rust/vendor"),
+            (1, Access::ReadOnly, Purpose::Registry, "/rust/vendor"),
+            (0, Access::ReadOnly, Purpose::Authoring, "/workspace"),
+            (0, Access::ReadWrite, Purpose::Scratch, "/workspace"),
+            (
+                0,
+                Access::ReadWrite,
+                Purpose::Authoring,
+                "/workspace/component",
+            ),
+        ] {
+            let mut unrelated = grants.clone();
+            unrelated[index].access = access;
+            unrelated[index].purpose = purpose;
+            unrelated[index].destination = destination.into();
+            add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &unrelated).unwrap();
+            assert!(arguments.is_empty());
+        }
+        arguments.extend([
+            "--bind".into(),
+            grants[0].source.clone(),
+            "/workspace".into(),
+        ]);
+        add_workspace_vendor_mask(&mut arguments, Phase::Authoring, &grants).unwrap();
+        assert_eq!(
+            &arguments[3..],
+            [
+                "--perms",
+                "000",
+                "--tmpfs",
+                "/workspace/.kvist/vendored",
+                "--remount-ro",
+                "/workspace/.kvist/vendored",
+                "--cap-drop",
+                "ALL",
+            ]
+        );
+    }
+
+    #[test]
+    fn mask_rejects_links_and_non_directory_paths() {
+        for relative in [".kvist", ".kvist/vendored"] {
+            let workspace = tempfile::tempdir().unwrap();
+            let outside = tempfile::tempdir().unwrap();
+            if relative != ".kvist" {
+                fs::create_dir(workspace.path().join(".kvist")).unwrap();
+            }
+            let path = workspace.path().join(relative);
+            symlink(outside.path(), &path).unwrap();
+            let mut arguments = Vec::new();
+            assert!(
+                add_workspace_vendor_mask(
+                    &mut arguments,
+                    Phase::Authoring,
+                    &grants(workspace.path()),
+                )
+                .is_err()
+            );
+            assert!(arguments.is_empty());
+            fs::remove_file(&path).unwrap();
+            fs::write(&path, "not a directory").unwrap();
+            assert!(
+                add_workspace_vendor_mask(
+                    &mut arguments,
+                    Phase::Authoring,
+                    &grants(workspace.path()),
+                )
+                .is_err()
+            );
+            assert!(arguments.is_empty());
+        }
+    }
 }

@@ -124,6 +124,16 @@ back to host execution.
 
 ## Errors and failure semantics
 
+Prepared Rust workspace authoring has one resolver view: when an authoring
+request grants writable `/workspace` and read-only toolchain `/rust/vendor`,
+an existing `/workspace/.kvist/vendored` is covered by an empty, mode-000,
+read-only namespace mount. The directory entry can remain visible, but its
+contents cannot be read, traversed or changed; host content/permissions and
+sibling `.kvist` files are unchanged. An absent host registry remains absent
+without creating a host mountpoint. Other request topologies are unaffected.
+This is a fixed restrictive enforcement rule, not a new overlapping grant
+capability or request field.
+
 A rejected, unenforceable, or unknown invocation writes a concise non-secret
 diagnostic to standard error, emits nothing on standard output, and returns a
 nonzero exit status. A parse, validation, or usage failure returns status 2; an

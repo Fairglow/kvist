@@ -2,6 +2,32 @@
 
 # Component Implementation Record
 
+## Scoped bare-remote fixture observation - 2026-10-14
+
+Independent source-only `mask-observer` inspected the updated acceptance-test
+query without intent, queues, records, reviews or history. It executed no
+maerg test and made no compliance claim. The fixture query uses
+`-c safe.bareRepository=explicit --git-dir <fixture> rev-parse refs/heads/main`
+and asserts successful querying and an unchanged previous commit. The query
+itself does not contact a network remote.
+
+## Scoped CI repair observation - 2026-10-14
+
+Independent clean-slate `repair-observer` read only enumerated source/test
+files and build manifests, excluding intent, queues, prior records/reviews and
+history. It executed no tests and made no compliance or acceptance claim.
+
+`src/sandbox/rust_environment.rs` owns staged wrappers/settings and registers
+installed toolchains read-only at `/rust/toolchains/<index>`. Existing project
+vendor material is a live read-only bind at `/rust/vendor`, not Skott's copied
+snapshot; absent vendor material uses a staged empty directory. Authoring uses
+invocation scratch `/tmp/target`, resets Rust/Cargo environment overrides and
+wraps dispatch with shared initialization. Source-defined native tests assert
+installed inventory/targets, private defaults, unchanged host Rust state,
+protected workspace-provider context, edited/new source visibility and
+generic-authoring isolation. CI provisions prerequisites outside sandbox/test
+bodies; ignored verification trials explicitly grant concrete executables.
+
 ## Scoped installed-Rust authoring observation - 2026-10-10
 
 Clean-slate `offline-rust-final-observer` inspected current sandbox preparation,

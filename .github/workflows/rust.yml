@@ -57,7 +57,13 @@ jobs:
         run: |
           # Provision on the CI host, never from a sandbox or test body.
           rustup toolchain install 1.95.0 --profile minimal --no-self-update
+          rustup toolchain install 1.94.0 --profile minimal --no-self-update
           rustup target add wasm32-unknown-unknown --toolchain stable
+
+      - name: Provision Cargo extension test coverage
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2
+        with:
+          tool: cargo-nextest@0.9.148
 
       - name: Install system Go toolchain
         run: |
@@ -82,6 +88,9 @@ jobs:
 
       - name: Build workspace (debug)
         run: cargo build --locked --workspace --all-targets --all-features
+
+      - name: Provision offline native test dependencies
+        run: cargo vendor --locked .kvist/vendored > /dev/null
 
       - name: Test workspace
         env:
@@ -146,8 +155,14 @@ jobs:
           if [ ! -x /usr/bin/rustup ]; then
             sudo install -m 0755 "$(command -v rustup)" /usr/bin/rustup
           fi
-          rustup toolchain install stable --profile minimal --no-self-update
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy --no-self-update
+          rustup toolchain install 1.94.0 --profile minimal --no-self-update
           rustup target add wasm32-unknown-unknown --toolchain stable
+
+      - name: Provision Cargo extension test coverage
+        uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2
+        with:
+          tool: cargo-nextest@0.9.148
 
       - name: Install system Go toolchain
         run: |
@@ -169,6 +184,9 @@ jobs:
 
       - name: Build workspace (debug)
         run: cargo build --locked --workspace --all-targets --all-features
+
+      - name: Provision offline native test dependencies
+        run: cargo vendor --locked .kvist/vendored > /dev/null
 
       - name: Test workspace
         env:

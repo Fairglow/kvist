@@ -36,6 +36,15 @@ toolchain and vendored resolver read-only, with private scratch and denied
 network. It never receives the user's home, rustup settings or credentials.
 These resources are not maerg task approval or compliance evidence.
 
+Prepared PATH Cargo resolves dependencies through the read-only `/rust/vendor`
+snapshot of the host workspace's `.kvist/vendored`. Build output is written to
+`/workspace/target` in the writable workspace and persists across invocations;
+Cargo cache, HOME and rustup selection settings remain invocation-local scratch.
+The runner masks existing `/workspace/.kvist/vendored` contents with an
+inaccessible read-only namespace mount, leaving the snapshot as the only
+usable vendor view. This does not change the host registry or sibling `.kvist`
+files; the masked directory entry itself can remain visible.
+
 Journals retain bounded notices and request estimates, nullable provider usage,
 capacity provenance and terminal failures. Readable terminal records use
 per-prompt turns/time, identify unavailable usage and include the failure.
