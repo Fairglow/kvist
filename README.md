@@ -489,6 +489,12 @@ gate, and `just msrv` runs all-feature tests with Rust 1.95.0. Dependency update
 small, intentional changes with a stated purpose, lockfile update, and passing
 MSRV and stable CI.
 
+For nextest, use `cargo nextest run --offline --locked --workspace --all-features`.
+The checked-in `.config/nextest.toml` runs the repository-wide Skott sandbox
+trial exclusively while leaving other tests parallel. Process-local `#[serial]`
+locks do not coordinate nextest's separate test processes; see
+[native test scheduling](docs/sandbox-toolchains-and-vendoring.md#native-test-scheduling).
+
 ### Filesystem threat model
 
 Read-only discovery supports ordinary local checkouts and malformed or

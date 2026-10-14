@@ -14,6 +14,58 @@ component:
         expected_revision: "sha256:d820c13d62d03274f739359a9d8a813f4b5942729d6a646934ce697bcd49f097"
         observed_revision: "sha256:d8be7616a3dd68b68c9560717683f62ce54aea6ac23a91010c7139d84566fd6f"
 tasks:
+  - id: repository-isolation-write-tests
+    title: "Pin nextest repository trial exclusivity"
+    description: "Assert the exact repository-test selector and dynamic full-pool reservation; reproduce the missing configuration and measure real start/finish overlap."
+    context: "Human requests nextest-only native repository repair; deliberate advisory exception while receipt enforcement is unavailable. Missing-config regression failed first. Eight-way pre-repair native run reproduced the exact peer-registration escape: 20 passed, repository trial failed."
+    purpose: "Define scheduling evidence before the configuration repair."
+    expected_outcome: "Missing scheduling configuration fails; native evidence distinguishes local mutexes from global runner exclusion."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
+    timestamps: {created_at: "2026-10-14T07:53:58Z", updated_at: "2026-10-14T08:06:52Z", completed_at: "2026-10-14T08:06:52Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: repository-isolation-implement-code
+    title: "Reserve every nextest slot for the repository trial"
+    description: "Add one default-profile full-pool override, preserve ordinary parallelism and document libtest, nextest and cross-invocation boundaries."
+    context: "No production changes, hidden fixture exclusions or weakened sandbox validation. Default and inherited CI runs pass 22 tests at eight and three threads; full parallel workspace passes 1406 with 12 ignored. Runnable start/finish events show zero repository overlap and ordinary concurrency peaks of eight, three and eight."
+    purpose: "Coordinate all test binaries in one nextest invocation."
+    expected_outcome: "The repository-wide trial cannot overlap peer tests; inherited profiles retain the same policy."
+    kind: implementation
+    status: completed
+    depends_on: [repository-isolation-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
+    timestamps: {created_at: "2026-10-14T07:53:58Z", updated_at: "2026-10-14T08:06:52Z", completed_at: "2026-10-14T08:06:52Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: repository-isolation-security-audit
+    title: "Inspect the scheduling repair's authority"
+    description: "Independently inspect configuration selection, bounded regression mechanics and unchanged fail-closed production behavior."
+    context: "Independent source-only repository-scheduling-observer established no concrete newly introduced correctness or authority issue. Exact resource-owner lifetime and runtime scheduling are outside its read; external writer and cleanup limitations remain in IMPL.md."
+    purpose: "Retain independent limitations."
+    expected_outcome: "Scoped findings are corrected or explicitly retained."
+    kind: security-audit
+    status: completed
+    depends_on: [repository-isolation-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
+    timestamps: {created_at: "2026-10-14T07:53:58Z", updated_at: "2026-10-14T08:06:52Z", completed_at: "2026-10-14T08:06:52Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: repository-isolation-compliance-review
+    title: "Compare independent scheduling evidence"
+    description: "Compare scoped intent with the clean-slate observation and actual nextest overlap evidence in a separate source-blind context."
+    context: "Separate source-blind repository-scheduling-comparator found no new scoped mismatch. Rust 1.95 libtest target passes 15 tests; formatter and strict Clippy pass. Runtime evidence uses authoritative ignored-test classification because experimental JSON omits some ignored finish events. Custom overrides, separate invocations, external writers and stale scratch remain limits; no acceptance receipt or blanket certification."
+    purpose: "Prevent self-certification."
+    expected_outcome: "Scheduling scope and observed concurrency limits remain explicit."
+    kind: compliance-review
+    status: completed
+    depends_on: [repository-isolation-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
+    timestamps: {created_at: "2026-10-14T07:53:58Z", updated_at: "2026-10-14T08:06:52Z", completed_at: "2026-10-14T08:06:52Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: ci-portable-tools-write-tests
     title: "Reproduce distribution-dependent toolchain evidence"
     description: "Pin valid Ubuntu, Debian and upstream GCC banners, missing version output and mismatched compiler evidence; reproduce omitted System PATH directories in both optional Cargo-bin branches and the native Node chain."

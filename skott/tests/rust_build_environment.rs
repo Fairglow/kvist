@@ -326,6 +326,26 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
 }
 
 #[test]
+fn repository_trial_requires_global_nextest_exclusivity() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.config/nextest.toml");
+    let contents = fs::read_to_string(path).expect("read repository nextest configuration");
+    let config: toml::Value = toml::from_str(&contents).expect("parse nextest configuration");
+    let overrides = config["profile"]["default"]["overrides"]
+        .as_array()
+        .expect("default-profile nextest overrides");
+    let filter = "package(=skott) & binary(=rust_build_environment) & test(=native_repository_tests_execute_inside_the_workspace_sandbox)";
+    let rule = overrides
+        .iter()
+        .find(|rule| rule.get("filter").and_then(toml::Value::as_str) == Some(filter))
+        .expect("exact native repository trial override");
+    assert_eq!(
+        rule["threads-required"].as_str(),
+        Some("num-test-threads"),
+        "the repository trial must reserve the whole pool, not just one serial group"
+    );
+}
+
+#[test]
 #[serial]
 fn native_vendor_snapshot_overrides_host_paths_without_credentials_or_mutation() {
     let directory = fixture();

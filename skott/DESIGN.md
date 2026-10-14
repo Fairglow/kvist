@@ -469,9 +469,19 @@ environment values or captured output. Native trials use stage-labelled shell
 steps so a failing assertion identifies the stage without dumping secrets.
 The diagnostic-capture trial runs alone in a subprocess to avoid process-global
 tracing callsite-interest races with parallel tests using other subscribers.
-Native fixtures in that test binary serialize because its repository-wide
-trial inspects the same tree in which other fixtures temporarily create
-sandbox-only links. Interrupted-test scratch must be removed before rerunning.
+Libtest fixtures in that test binary use process-local `#[serial]` locks.
+Nextest launches each test in a separate process, so those locks cannot
+coordinate its tests. The repository-wide trial inspects the same live tree
+in which fixtures from multiple binaries temporarily create sandbox-only
+links. `.config/nextest.toml` selects its exact package, binary and test and
+sets `threads-required = "num-test-threads"` in a default-profile override.
+It reserves the entire current nextest pool, including when `-j` changes its
+size, without serializing unrelated tests. A one-member serial group would
+not exclude tests outside that group. The configuration regression pins the
+exact selector and full-pool requirement; actual nextest start/finish events
+verify exclusivity and retained ordinary parallelism. Separate invocations and
+unrelated writers remain uncoordinated. Interrupted-test scratch must be
+removed before rerunning; no scope-validation exception is introduced.
 Native runner discovery honors `KVIST_GALLA`, then the current test build's
 sibling runner before older installed binaries, so a workspace test exercises
 the matching enforcement implementation.

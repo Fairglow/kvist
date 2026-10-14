@@ -192,6 +192,41 @@ explicitly offline with a private read-only vendor snapshot, HOME/cache are scra
 build output persists at /workspace/target. Missing dependencies require host provisioning; sandbox builds
 never download."
 
+## Native Test Scheduling
+
+`native_repository_tests_execute_inside_the_workspace_sandbox` grants the actual
+checkout as its writable scope. Other tests create temporary project fixtures
+and `.skott-rust-*` resources under that checkout; their rustup registrations
+deliberately target sandbox-only `/rust/toolchains/N` paths. Those links escape
+the repository on the host, so the repository-wide trial correctly rejects
+them while they exist. Do not bypass or ignore them in sandbox validation.
+
+With `cargo test`, `#[serial]` coordinates marked tests within one test process.
+Nextest starts each test in a separate process, so that attribute does not
+provide nextest-wide exclusion. A serial test group also excludes only its own
+members, not other tests.
+
+The repository's `.config/nextest.toml` selects the exact package, binary and
+repository trial and uses `threads-required = "num-test-threads"` in the default
+profile. This reserves the whole current nextest pool, even when `-j` changes
+its size, and is inherited by the CI profile. Ordinary tests remain parallel.
+Use the same override pattern for future tests that must run alone; change the
+selector to their exact identity. Alternate configs or overriding profile rules
+must retain this policy.
+
+For a one-off isolated run:
+
+```bash
+cargo nextest run --offline --locked -p skott --test rust_build_environment \
+  -E 'test(=native_repository_tests_execute_inside_the_workspace_sandbox)'
+```
+
+`--test-threads 1` instead serializes every selected nextest test. Neither
+approach coordinates another simultaneous runner invocation or unrelated host
+writers. Interrupted tests can leave fixtures behind; exclusivity does not
+remove stale directories. Inspect and clean only known abandoned fixtures
+before rerunning, rather than weakening the scope checks.
+
 ## Vendored Dependencies
 
 Vendored dependencies are the package sources that sandbox builds resolve
