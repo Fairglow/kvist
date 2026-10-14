@@ -56,8 +56,10 @@ jobs:
       - name: Provision native Rust inventory test coverage
         run: |
           # Provision on the CI host, never from a sandbox or test body.
-          rustup toolchain install 1.95.0 --profile minimal --no-self-update
-          rustup toolchain install 1.94.0 --profile minimal --no-self-update
+          # rust-docs is required so the inventory trial's `rustup run <t> rustdoc --version`
+          # comparison succeeds for every enumerated toolchain, matching a full host install.
+          rustup toolchain install 1.95.0 --profile minimal --component rust-docs --no-self-update
+          rustup toolchain install 1.94.0 --profile minimal --component rust-docs --no-self-update
           rustup target add wasm32-unknown-unknown --toolchain stable
 
       - name: Provision Cargo extension test coverage

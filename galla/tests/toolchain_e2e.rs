@@ -474,10 +474,6 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
                     "/tmp/library.rlib",
                 ]);
             }
-            assert!(
-                saw_cross_target,
-                "provision at least one non-host target to exercise installed-target visibility"
-            );
             assert_eq!(
                 sandbox.checked(&[
                     "/usr/bin/rustup",
@@ -524,6 +520,13 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
                 &format!("target removal for {name}"),
             );
         }
+        // "At least one non-host target" is a global fixture property, not a per-toolchain
+        // one; checking it after the loop avoids a false failure when the alphabetically
+        // first toolchain carries only its host target but a later one (e.g. stable) does not.
+        assert!(
+            saw_cross_target,
+            "provision at least one non-host target to exercise installed-target visibility"
+        );
         assert_read_only_failure(
             sandbox.run(&["/usr/bin/rustup", "set", "profile", "complete"]),
             "private rustup settings mutation",
