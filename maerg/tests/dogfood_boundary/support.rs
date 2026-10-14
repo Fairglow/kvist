@@ -589,7 +589,7 @@ kind = "git"
 
 [agent.profiles.developer]
 command_template = '{}'
-timeout_seconds = 5
+timeout_seconds = 15
 max_output_bytes = 65536
 
 [sandbox]

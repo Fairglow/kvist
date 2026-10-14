@@ -490,6 +490,12 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
                 sandbox.checked(&["/workspace/scratch/rust-trial"]),
                 b"rust-e2e=42\n"
             );
+            let toolchain_index = names
+                .iter()
+                .position(|n| n == name)
+                .expect("toolchain name must be in inventory");
+            sandbox.request["environment"]["RUSTC"] =
+                json!(format!("/tooling/toolchains/{toolchain_index}/bin/rustc"));
             let tests = sandbox.checked(&[
                 "/usr/bin/rustup",
                 "run",
@@ -499,6 +505,9 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
                 "--offline",
                 "--locked",
             ]);
+            if let Some(env_obj) = sandbox.request["environment"].as_object_mut() {
+                env_obj.remove("RUSTC");
+            }
             assert!(
                 String::from_utf8(tests)
                     .unwrap()
