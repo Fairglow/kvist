@@ -1,6 +1,31 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped workspace-vendor mask observation - 2026-10-14
+
+Independent clean-slate `mask-observer` inspected only enumerated source/tests,
+excluding intent, queues, records, reviews and history. It executed the two
+`enforcement::tests::mask_` unit tests: 2 passed, 26 filtered out. It did not
+execute native suites or make a compliance or acceptance claim.
+
+`add_workspace_vendor_mask` activates only in authoring with read-only
+Toolchain `/rust/vendor` and read-write Authoring `/workspace`. It inspects the
+workspace's `.kvist` and `vendored` using `symlink_metadata`. Missing paths
+leave arguments unchanged; links, non-directories and other inspection errors
+return errors. Inspection failures produce runner exit code 3 before launch.
+After all grant binds, the runner appends mode-000 tmpfs over
+`/workspace/.kvist/vendored`, remounts it read-only and drops all payload
+capabilities. It constructs arguments rather than changing host permissions.
+The filesystem mask targets the vendor alias; capability dropping is
+command-wide. Unit tests cover missing paths, nonmatching phases/grant
+attributes, links/files and the appended argument sequence.
+
+The observer identified no high-confidence new scoped regression. Inspection
+is pathname-based, not descriptor-pinned; concurrent replacement between
+inspection and mount execution is not excluded. Unit results alone do not
+establish native mount behavior, effective capability removal or
+permission-denied inspection handling.
+
 ## Observed component status
 
 The Rust package builds a library and an executable named `galla-runner`.

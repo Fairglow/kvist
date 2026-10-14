@@ -14,6 +14,58 @@ component:
         expected_revision: "sha256:bfd660184d2c7b0fb9d0ccee84cb946cd2f69bf53a33efb40ee1503b0a70b6e1"
         observed_revision: "sha256:1323af464fc004721bafc8fd3a0a524eaafb99fc078ea313570d7a04f46660e8"
 tasks:
+  - id: workspace-vendor-mask-write-tests
+    title: "Pin inaccessible workspace vendor evidence"
+    description: "Define native alias-read/write/chmod denial, snapshot resolution, host non-mutation and unaffected generic requests."
+    context: "Human explicitly requests hiding .kvist/vendored in the sandbox; per-bundle advisory exception while receipt enforcement is unavailable. Native alias-denial assertion failed before implementation; two mask unit tests, all 14 Skott native environment tests and both opt-in Galla native toolchain trials now pass."
+    purpose: "Define behavior before enforcement."
+    expected_outcome: "Native assertions fail before the mask exists."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"]
+    timestamps: {created_at: "2026-10-14T05:50:27Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: workspace-vendor-mask-implement-code
+    title: "Mask the mutable workspace registry"
+    description: "Add fixed prepared-Rust masking after binds, without changing the protocol or relaxing disjoint grants."
+    context: "No host changes or arbitrary masking capability."
+    purpose: "Expose one usable vendor view."
+    expected_outcome: "The workspace alias is inaccessible while the snapshot remains usable."
+    kind: implementation
+    status: completed
+    depends_on: [workspace-vendor-mask-write-tests]
+    requirements: ["REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"]
+    timestamps: {created_at: "2026-10-14T05:50:27Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: workspace-vendor-mask-security-audit
+    title: "Audit restrictive mount masking"
+    description: "Independently review mask scope, symlinks, mount ordering, privilege denial and host non-mutation."
+    context: "Independent mask-observer reported no high-confidence new scoped regression. Pathname inspection is not descriptor-pinned and does not exclude external replacement races; this limit remains explicit in IMPL.md."
+    purpose: "Retain independent findings."
+    expected_outcome: "Findings are corrected or explicitly retained."
+    kind: security-audit
+    status: completed
+    depends_on: [workspace-vendor-mask-implement-code]
+    requirements: ["REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"]
+    timestamps: {created_at: "2026-10-14T05:50:27Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: workspace-vendor-mask-compliance-review
+    title: "Compare independent mask evidence"
+    description: "Source-only observation followed by separate source-blind comparison."
+    context: "Separate source-blind mask-comparator reported no new scoped discrepancy. Full workspace subsequently passed with 1399 passed, 0 failed and 12 ignored. No acceptance or blanket certification."
+    purpose: "Prevent self-certification."
+    expected_outcome: "Scoped discrepancies and verification limits remain explicit."
+    kind: compliance-review
+    status: completed
+    depends_on: [workspace-vendor-mask-security-audit]
+    requirements: ["REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"]
+    timestamps: {created_at: "2026-10-14T05:50:27Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: "galla-write-tests"
     title: "Define sandbox runner protocol tests"
     description: "Write native failing tests for the redefined version-one probe and request, strict typed grants, Bubblewrap identity and namespace enforcement, resource bounds, process cleanup, and fail-closed behavior."

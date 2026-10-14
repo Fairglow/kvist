@@ -13,7 +13,8 @@
 //! components/targets and executable/layout identities are checked without
 //! installing anything. Missing material must be provisioned separately on the
 //! host. The snapshot is bounded to 1 GiB, 100,000 entries and 30 seconds;
-//! scratch target/cache state is private to each sandbox invocation.
+//! cache/selection state is private to each sandbox invocation; build targets
+//! persist in the writable workspace.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
@@ -948,6 +949,19 @@ impl RustEnvironment {
                 purpose: Purpose::Toolchain,
                 identity: self.resources.identity.clone(),
             },
+            Grant {
+                source: self
+                    .resources
+                    .staging
+                    .path()
+                    .join("vendor")
+                    .to_string_lossy()
+                    .into_owned(),
+                destination: "/rust/vendor".into(),
+                access: Access::ReadOnly,
+                purpose: Purpose::Toolchain,
+                identity: self.resources.vendor_identity.clone(),
+            },
         ];
         if let Some(user_cargo_bin) = &self.resources.user_cargo_bin {
             grants.push(Grant {
@@ -1342,6 +1356,11 @@ mod tests {
             assert!(!Path::new(&grant.source).starts_with(&environment.resources.workspace));
             assert!(!grant.destination.starts_with("/workspace"));
         }
+        assert!(environment.grants().iter().any(|grant| {
+            grant.destination == "/rust/vendor"
+                && grant.source == staging.join("vendor").to_string_lossy()
+                && grant.access == Access::ReadOnly
+        }));
         drop(environment);
         assert!(staging.exists());
         drop(clone);

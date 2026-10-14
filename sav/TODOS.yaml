@@ -22,6 +22,58 @@ component:
         expected_revision: "sha256:b629358ac60133fe3b5ed12150e4f6f6bfbd47a78d1a3db5ddbe7c44c0321943"
         observed_revision: "sha256:fbdbd8bea631741dc443154617e3d940346059b2a3492164eb4fe17749f21167"
 tasks:
+  - id: ci-vendor-write-tests
+    title: "Pin the read-only Cargo vendor path"
+    description: "Assert the shared wrapper uses a disjoint immutable vendor destination."
+    context: "Requested repair; explicit advisory exception while receipt enforcement is unavailable. Wrapper regression failed before repair and passes afterward; full workspace validation reports 1399 passed, 0 failed and 12 ignored."
+    purpose: "Detect mutable workspace vendor resolution."
+    expected_outcome: "The wrapper regression fails before the path repair."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
+    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: ci-vendor-implement-code
+    title: "Restore immutable vendor resolution"
+    description: "Point the fixed Cargo wrapper at the caller-provided /rust/vendor mount."
+    context: "Callers retain all mount authority."
+    purpose: "Share correct offline resolution across both consumers."
+    expected_outcome: "Cargo retains offline and locked flags with a read-only registry."
+    kind: implementation
+    status: completed
+    depends_on: [ci-vendor-write-tests]
+    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
+    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: ci-vendor-security-audit
+    title: "Audit fixed wrapper resource paths"
+    description: "Independently inspect fixed interpolation and consumer grant compatibility."
+    context: "Independent repair-observer inspected fixed wrapper paths and caller authority; scoped observations are retained in IMPL.md, not blanket certification."
+    purpose: "Retain independent findings."
+    expected_outcome: "Findings are corrected or explicitly retained."
+    kind: security-audit
+    status: completed
+    depends_on: [ci-vendor-implement-code]
+    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
+    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: ci-vendor-compliance-review
+    title: "Compare independent wrapper evidence"
+    description: "Source-only observation followed by separate source-blind comparison."
+    context: "Separate source-blind repair-comparator reported no new scoped discrepancy. No acceptance or blanket certification."
+    purpose: "Prevent self-certification."
+    expected_outcome: "Scoped discrepancies and limits are explicit."
+    kind: compliance-review
+    status: completed
+    depends_on: [ci-vendor-security-audit]
+    requirements: ["REQUIREMENTS.md#AR-REQ-OFFLINE-RUST-RUNTIME"]
+    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: offline-rust-write-tests
     title: "Pin shared offline Rust runtime scripts"
     description: "Verify fixed scratch initialization, closed tools, active selection and Cargo offline flags through ordinary tests and consumer native regressions."

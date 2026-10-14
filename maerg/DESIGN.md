@@ -63,6 +63,18 @@ The target dogfooding path splits this into recovery-safe supervised authoring,
 optional mediated dependency acquisition, isolated verification, and explicit
 human finalization. Each phase receives a separately canonicalized grant set.
 
+Rust authoring mounts the validated project vendor registry read-only at
+`/rust/vendor`, outside the writable component grants. An absent registry gets
+an empty staged directory at the same destination, so offline resolution fails
+explicitly without consulting ambient host caches.
+Unlike Skott's fully writable workspace, protected maerg authoring retains
+`/tmp/target` invocation scratch; `/workspace/target` is outside its approved
+writable component source/test roots.
+
+Accepted-commit tests address fixture bare remotes through an explicit
+`--git-dir` and assert query success before comparing remote refs, so
+`safe.bareRepository=explicit` cannot turn a failed query into an empty OID.
+
 ## Algorithms and decisions
 
 Component Markdown validation is intentionally structural rather than a

@@ -74,3 +74,7 @@ cargo build -p blad
 # Run tests
 cargo test -p blad
 ```
+
+The Linux viewer tests need `setsid` and `stty` from util-linux/coreutils.
+They attach each child to its own controlling PTY, so they can run unchanged
+from an interactive terminal or a noninteractive CI runner.

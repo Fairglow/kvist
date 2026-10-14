@@ -2,6 +2,22 @@
 
 # Component Implementation Record
 
+## Scoped CI repair observation - 2026-10-14
+
+Independent clean-slate `repair-observer` read only enumerated source/test
+files and build manifests, excluding intent, queues, prior records/reviews and
+history. It executed no tests and made no compliance or acceptance claim.
+
+`src/offline_rust.rs` provides shared initialization and selection-aware
+executable wrappers. Initialization copies settings into `/tmp/rustup-home`
+while linking registrations to read-only `/rust/rustup-home/toolchains`.
+Wrappers select an explicit `+toolchain` or the active selection, then `exec`
+rustup. Cargo receives offline/locked flags and `/rust/vendor` source
+configuration; optional component-build variables redirect Cargo's working
+directory and compiler/formatter source arguments. Unit assertions verify
+script properties, not executed sandbox behavior; grants and resource
+lifetime remain caller-owned.
+
 ## Observed implementation: sav
 
 ## Scoped offline Rust runtime observation - 2026-10-10

@@ -300,9 +300,20 @@ fn component_accept_commit_preserves_unrelated_state_and_commits_only_reported_p
     );
     assert!(!project.path().join(".git/hook-ran").exists());
     assert!(!project.path().join("hook-ran").exists());
+    let remote_head = git(
+        remote.path(),
+        &[
+            "-c",
+            "safe.bareRepository=explicit",
+            "--git-dir",
+            remote.path().to_str().expect("remote path"),
+            "rev-parse",
+            "refs/heads/main",
+        ],
+    );
+    assert_success(&remote_head, "read fixture remote HEAD");
     assert_eq!(
-        String::from_utf8_lossy(&git(remote.path(), &["rev-parse", "refs/heads/main"]).stdout)
-            .trim(),
+        String::from_utf8_lossy(&remote_head.stdout).trim(),
         old_head,
         "acceptance commit creation must never push"
     );

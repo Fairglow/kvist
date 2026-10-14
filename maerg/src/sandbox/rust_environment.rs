@@ -382,6 +382,32 @@ impl RustEnvironment {
                 ),
             });
         }
+        let vendor = project.join(".kvist/vendored");
+        let vendor = match fs::symlink_metadata(&vendor) {
+            Ok(_) => {
+                if !inspect(config, &vendor)?.is_dir() {
+                    return Err(failure(config, "vendor must be a non-link directory"));
+                }
+                vendor
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let empty = staging.path().join("vendor");
+                fs::create_dir(&empty).map_err(|error| {
+                    sandbox_error(config, "create empty offline authoring vendor", error)
+                })?;
+                empty
+            }
+            Err(error) => {
+                return Err(sandbox_error(config, "inspect authoring vendor", error));
+            }
+        };
+        grants.push(SandboxGrant {
+            source: vendor.to_string_lossy().into_owned(),
+            destination: "/rust/vendor".into(),
+            access: "read-only",
+            purpose: "toolchain",
+            identity: digest_label(b"offline-authoring-vendor"),
+        });
         for name in [
             "Cargo.toml",
             "Cargo.lock",
@@ -491,7 +517,7 @@ impl RustEnvironment {
             ("RUSTUP_HOME", "/tmp/rustup-home"),
             ("RUSTUP_AUTO_INSTALL", "0"),
             ("CARGO_HOME", "/tmp/cargo-home"),
-            ("CARGO_TARGET_DIR", "/workspace/target"),
+            ("CARGO_TARGET_DIR", "/tmp/target"),
             ("CARGO_NET_OFFLINE", "true"),
             ("RUSTC", "/rust/runtime/bin/rustc"),
             ("RUSTDOC", "/rust/runtime/bin/rustdoc"),

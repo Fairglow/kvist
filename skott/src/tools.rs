@@ -250,7 +250,8 @@ impl ToolRegistry {
               them with rustup toolchain list and rustup target list --installed --toolchain <name>; \
               select with cargo +<name>, rustc +<name>, rustup run <name>, or invocation-local \
               rustup default <installed-name> (a project pin takes precedence). Cargo is explicitly \
-              offline with a private read-only vendor snapshot, HOME/cache/target are scratch. \
+              offline with a private read-only vendor snapshot, HOME/cache are scratch and \
+              build output persists at /workspace/target. \
               Missing dependencies require host provisioning; sandbox builds never download."
         } else {
             ""

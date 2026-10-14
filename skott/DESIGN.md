@@ -415,8 +415,14 @@ rewritten. This is a locked-build default, not an artifact write-protection
 mechanism for the standalone writable workspace. Concrete compiler,
 rustdoc and native libraries for the initial selection remain under
 `/rust/toolchain`; the trusted wrappers
-is under `/rust/runtime`. `HOME=/tmp`, `CARGO_HOME=/tmp/cargo-home` and
-`CARGO_TARGET_DIR=/tmp/target` are private invocation scratch, not host caches.
+is under `/rust/runtime`. `HOME=/tmp` and `CARGO_HOME=/tmp/cargo-home` are
+private invocation scratch, not host caches. `CARGO_TARGET_DIR=/workspace/target`
+keeps build output in the writable workspace across invocations. Mount the
+validated vendor snapshot read-only at `/rust/vendor`, outside the writable
+workspace grant, and point the shared Cargo wrapper there.
+The runner's fixed prepared-Rust rule masks existing workspace vendor content
+behind mode-000 read-only tmpfs after binding grants. There is no second usable
+registry inside the sandbox and no generalized overlapping grant exception.
 Selection uses the standard host rustup layout, ignoring ambient overrides and
 custom linked roots; maerg `.kvist/rust-toolchain.json` is not authorization.
 Preparation bounds are 30 seconds, 1 GiB vendor aggregate, 256 MiB/file,
@@ -461,6 +467,16 @@ including elapsed times and bounded counts/identities. Trace emits individual
 grant metadata and environment names only. Neither level emits argv payloads,
 environment values or captured output. Native trials use stage-labelled shell
 steps so a failing assertion identifies the stage without dumping secrets.
+The diagnostic-capture trial runs alone in a subprocess to avoid process-global
+tracing callsite-interest races with parallel tests using other subscribers.
+Native fixtures in that test binary serialize because its repository-wide
+trial inspects the same tree in which other fixtures temporarily create
+sandbox-only links. Interrupted-test scratch must be removed before rerunning.
+Native runner discovery honors `KVIST_GALLA`, then the current test build's
+sibling runner before older installed binaries, so a workspace test exercises
+the matching enforcement implementation.
+CI provisions the vendor registry, Cargo extensions and the full/minimal Rust
+installations on the host before native tests; test bodies never install them.
 
 The vendor snapshot is two-phase: a serial enumeration validates every entry,
 enforces the bounds, creates destination directories and schedules files in a

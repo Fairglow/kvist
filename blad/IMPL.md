@@ -2,6 +2,19 @@
 
 Date: 2026-10-12
 
+## Scoped CI repair observation - 2026-10-14
+
+Independent clean-slate `repair-observer` read only the enumerated source/test
+files and build manifests, excluding intent, queues, prior records/reviews and
+history. It executed no tests and made no compliance or acceptance claim.
+
+`tests/viewer.rs` launches the built viewer through `setsid --ctty --wait`,
+without a forced fork, attaching the PTY slave to stdin/stdout/stderr. Resize
+signals address the retained child PID; quit checks successful termination,
+and `Drop` kills/waits that child. Source-defined assertions cover terminal
+width, scrolling, horizontal offsets, resize, tiny viewports and empty
+documents. These tests require Linux PTYs, `setsid` and `stty`.
+
 ## Scope and evidence boundary
 
 This is an independent, clean-slate record of **current layout, rendering, and

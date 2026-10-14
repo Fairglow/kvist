@@ -2,6 +2,46 @@
 
 # Component Implementation Record
 
+## Scoped vendor-alias test observation - 2026-10-14
+
+Independent source-only `mask-observer` inspected the updated native test
+mechanics without intent, queues, records, reviews or history. It did not
+execute these native suites or make a compliance claim.
+
+The serial snapshot trial modifies the host dependency manifest after
+preparation, then asserts that sandbox builds still succeed. Workspace alias
+checks deny read/write/traversal, listing, file reads, creation and permission
+changes; a sibling `.kvist` file remains readable. Post-execution assertions
+check preserved host permissions/manifest and no attempted file. An executor
+without vendor resources retains ordinary workspace-vendor visibility.
+Diagnostic capture remains a marker-controlled separate process, with serial
+fixture execution; inventory expects `/workspace/target`.
+
+## Scoped CI repair observation - 2026-10-14
+
+Independent clean-slate `repair-observer` read only enumerated source/test
+files and build manifests, excluding intent, queues, prior records/reviews and
+history. It executed no tests and made no compliance or acceptance claim.
+
+`src/rust_environment.rs` retains staged wrappers, registrations and a copied
+vendor snapshot through an `Arc` owner; final-owner drop removes staging.
+Grants expose these read-only under `/rust/*`, including `/rust/vendor`,
+outside the writable workspace. HOME, Cargo cache and selection settings are
+invocation scratch; `/workspace/target` persists. The effective preparation
+budget is 180 seconds, with at most eight copy workers. Source-defined tests
+cover cleanup, resource drift, snapshot independence, persistent
+binaries/documentation and native Rust commands. Diagnostic capture re-executes
+the test in a separate process to isolate global tracing callsites and asserts
+payload exclusion. CI provisions rustup, toolchains/components/targets,
+cargo-nextest, Bubblewrap and vendored dependencies beforehand.
+
+The observer retained pre-existing limits outside this repair: snapshot
+enumeration bounds file sizes, but workers do not aggregate copied sizes after
+concurrent growth; preparation's diagnostic still says 30 seconds despite its
+180-second bound; an older preparation diagnostic describes a private target.
+Inventory/context/backend internals were excluded from this scoped reading.
+These observations are not new repair regressions or blanket safety evidence.
+
 ## Observed implementation: skott
 
 ## Scoped private-default observation - 2026-10-10

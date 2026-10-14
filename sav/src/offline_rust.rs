@@ -68,7 +68,7 @@ pub fn wrapper(tool: RustTool) -> String {
         ""
     };
     let arguments = if tool == RustTool::Cargo {
-        " --offline --locked --config 'source.crates-io.replace-with=\"vendored-sources\"' --config 'source.vendored-sources.directory=\"/workspace/.kvist/vendored\"'"
+        " --offline --locked --config 'source.crates-io.replace-with=\"vendored-sources\"' --config 'source.vendored-sources.directory=\"/rust/vendor\"'"
     } else {
         ""
     };
@@ -99,6 +99,7 @@ mod tests {
             assert!(!script.contains("/home/"));
         }
         assert!(wrapper(RustTool::Cargo).contains("--offline --locked"));
-        assert!(wrapper(RustTool::Cargo).contains("/workspace/.kvist/vendored"));
+        assert!(wrapper(RustTool::Cargo).contains("/rust/vendor"));
+        assert!(!wrapper(RustTool::Cargo).contains("/workspace/.kvist/vendored"));
     }
 }

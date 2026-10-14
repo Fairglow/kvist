@@ -1,3 +1,34 @@
+- id: blad-ci-write-tests
+  title: "Reproduce inherited-terminal viewer failures"
+  kind: write_tests
+  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
+  status: done
+  description: "All four PTY viewer regressions fail under an inherited 120x40 controlling terminal and pass without one; preserve exact screen assertions."
+
+- id: blad-ci-implement-code
+  title: "Give viewer fixtures their own controlling PTY"
+  kind: implement_code
+  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
+  depends_on: [blad-ci-write-tests]
+  status: done
+  description: "Launch through Linux setsid with the PTY slave as controlling terminal, without unsafe code or changing production rendering."
+
+- id: blad-ci-security-audit
+  title: "Audit PTY subprocess ownership"
+  kind: security_audit
+  requirements: ["REQUIREMENTS.md#R-026"]
+  depends_on: [blad-ci-implement-code]
+  status: done
+  description: "Independent scoped review of terminal ownership, signal targeting and child cleanup."
+
+- id: blad-ci-compliance-review
+  title: "Compare independent viewer evidence"
+  kind: compliance_review
+  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
+  depends_on: [blad-ci-security-audit]
+  status: done
+  description: "Clean-slate observed supplement and separate source-blind comparison; no acceptance or blanket certification."
+
 - id: blad-component-setup
   title: "Blad component scaffolding"
   requirements: []

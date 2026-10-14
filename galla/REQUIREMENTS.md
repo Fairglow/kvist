@@ -138,6 +138,17 @@ The Rust inventory fixture MUST include at least two installed toolchains
 and at least one installed non-host target, so its multi-version and
 cross-target obligations cannot pass vacuously.
 
+### SR-REQ-WORKSPACE-VENDOR-MASK
+
+For authoring requests with a writable `/workspace` grant and a read-only
+toolchain grant at `/rust/vendor`, the runner MUST make an existing workspace
+`.kvist/vendored` directory inaccessible in the sandbox. The immutable resolver
+mount MUST remain readable. Masking MUST NOT change host registry content or
+permissions, hide sibling `.kvist` files, relax grant-overlap validation, or
+create host directories when the registry is absent. Unsafe or uninspectable
+mask paths MUST fail explicitly. Requests without this prepared Rust topology
+MUST retain their existing visibility.
+
 ## Quality requirements and constraints
 
 - Rust stable edition 2024 is required. Prefer safe Rust; necessary, minimally

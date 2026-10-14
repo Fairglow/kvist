@@ -14,6 +14,58 @@ component:
         expected_revision: "sha256:3d971935e8b59ab1d977550b5c2146caff46dc7af0dc6c15c7b18d414d0ccae5"
         observed_revision: "sha256:e27ae1c3224da961bd30030a6a838b9da2c0f52f58524f5a59fe273fde2445f5"
 tasks:
+  - id: ci-vendor-write-tests
+    title: "Reproduce authoring vendor regressions"
+    description: "Run native offline authoring and shared wrapper evidence before restoring the missing provider grant; reproduce the accepted-commit fixture failure under safe.bareRepository=explicit."
+    context: "Requested CI repair; explicit advisory exception while receipt enforcement is unavailable. Bare-remote failure reproduced before repair; all 60 dogfood boundary tests and all four opt-in native toolchain trials now pass. Full workspace: 1399 passed, 0 failed, 12 ignored."
+    purpose: "Define consumer evidence before implementation."
+    expected_outcome: "Evidence detects missing disjoint read-only vendor resources."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"]
+    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: ci-vendor-implement-code
+    title: "Restore the authoring vendor grant"
+    description: "Mount the validated project vendor registry or staged empty registry read-only at /rust/vendor; query the fixture bare remote through an explicit Git directory and check query success."
+    context: "Preserve protected component writes and closed verification topology."
+    purpose: "Wire the shared Cargo wrapper for maerg authoring."
+    expected_outcome: "No writable grant overlaps the vendor destination."
+    kind: implementation
+    status: completed
+    depends_on: [ci-vendor-write-tests]
+    requirements: ["REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"]
+    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: ci-vendor-security-audit
+    title: "Audit authoring vendor authority"
+    description: "Independent scoped review of registry validation, grant destinations and unchanged write authority."
+    context: "Independent repair-observer inspected restored read-only grants and protected write topology; mask-observer separately inspected the explicit bare-remote query. Scoped observations are retained in IMPL.md, not whole-component certification."
+    purpose: "Retain independent findings."
+    expected_outcome: "Findings are corrected or explicitly retained."
+    kind: security-audit
+    status: completed
+    depends_on: [ci-vendor-implement-code]
+    requirements: ["REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"]
+    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: ci-vendor-compliance-review
+    title: "Compare independent authoring evidence"
+    description: "Source-only observation followed by separate source-blind comparison."
+    context: "Separate source-blind repair-comparator and mask-comparator reported no new scoped discrepancy. No acceptance or blanket certification."
+    purpose: "Prevent self-certification."
+    expected_outcome: "Scoped discrepancies and verification limits are explicit."
+    kind: compliance-review
+    status: completed
+    depends_on: [ci-vendor-security-audit]
+    requirements: ["REQUIREMENTS.md#REQ-LANGUAGE-SUPPORT"]
+    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: offline-rust-authoring-write-tests
     title: "Pin ordinary native Rust authoring parity"
     description: "Reproduce missing authoring Rust state and workspace-root context; compare host inventory/default and targets, build locked local/workspace fixtures offline, format authored source, execute newly authored tests and check host/provider non-mutation."

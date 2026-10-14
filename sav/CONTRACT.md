@@ -33,6 +33,9 @@ closed set. No host discovery, installation, shell execution or grant decision
 is performed by this module. The typed executable set prevents interpolation
 of untrusted script fragments.
 
+The Cargo wrapper's vendored-source path is `/rust/vendor`; callers must expose
+their validated read-only registry there, outside writable workspace mounts.
+
 Optional host-owned `KVIST_CARGO_WORKDIR` selects the Cargo build-view directory;
 `KVIST_COMPONENT_BUILD_DIR` maps source argument paths in that view back to
 `/workspace/component` for compiler/doc/formatter tools. Callers must provide

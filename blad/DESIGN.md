@@ -136,7 +136,10 @@ Keep the public ANSI rendering API and existing viewer commands/key semantics.
 - Tests assert exact text, display-column limits, adjacent inline styles,
   partial constructs, Unicode, gutters and overflow. Linux PTY tests decode
   terminal output and assert the visible first line and zero unintended screen
-  scrolling, including the tagged compliance document.
+  scrolling, including the tagged compliance document. Each viewer subprocess
+  runs in a new session with the PTY slave as its controlling terminal, so
+  terminal queries and raw mode cannot use the test runner's inherited terminal.
+  Run this coverage both with and without an inherited controlling terminal.
 
 No new background work, async runtime, unsafe code, terminal graphics, persistent
 UI state or session-format changes are part of this correction.

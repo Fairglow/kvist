@@ -83,6 +83,16 @@ fn runner() -> PathBuf {
             return path;
         }
     }
+    // Test the current build before a potentially older installed runner.
+    if let Some(path) = std::env::current_exe().ok().and_then(|executable| {
+        executable
+            .parent()
+            .and_then(Path::parent)
+            .map(|directory| directory.join("galla-runner"))
+    }) && path.is_file()
+    {
+        return path;
+    }
     // Check standard installation locations first
     if let Some(path) = std::env::var_os("HOME") {
         let user_runner = PathBuf::from(path).join(".kvist/bin/galla-runner");
@@ -228,7 +238,7 @@ fn skott_discovers_and_uses_all_installed_versions_and_targets_read_only() {
         );
         checked(
             &executor,
-            "test \"$HOME\" = /tmp && test \"$CARGO_HOME\" = /tmp/cargo-home && test \"$CARGO_TARGET_DIR\" = /tmp/target && test \"$RUSTUP_HOME\" = /tmp/rustup-home && test \"$RUSTUP_AUTO_INSTALL\" = 0 && test \"$CARGO_NET_OFFLINE\" = true && test ! -e /home && test ! -e /root && touch /tmp/private-scratch",
+            "test \"$HOME\" = /tmp && test \"$CARGO_HOME\" = /tmp/cargo-home && test \"$CARGO_TARGET_DIR\" = /workspace/target && test \"$RUSTUP_HOME\" = /tmp/rustup-home && test \"$RUSTUP_AUTO_INSTALL\" = 0 && test \"$CARGO_NET_OFFLINE\" = true && test ! -e /home && test ! -e /root && touch /tmp/private-scratch",
         );
         let selected = checked(&executor, "rustup show active-toolchain");
         assert!(String::from_utf8(selected).unwrap().starts_with(&default));

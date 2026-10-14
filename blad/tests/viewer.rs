@@ -127,8 +127,11 @@ impl Viewer {
         )
         .unwrap();
         fcntl(&pty.master, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)).unwrap();
-        let mut command = Command::new(env!("CARGO_BIN_EXE_blad"));
-        command.arg("view").arg(path);
+        // Crossterm prefers /dev/tty over stdin for terminal state and size.
+        let mut command = Command::new("setsid");
+        command
+            .args(["--ctty", "--wait", env!("CARGO_BIN_EXE_blad"), "view"])
+            .arg(path);
         if numbers {
             command.arg("--line-numbers");
         }
@@ -190,7 +193,6 @@ impl Viewer {
                 .success()
         );
         self.screen = Screen::new(usize::from(columns), usize::from(rows));
-        // This subprocess owns PTY descriptors, not a controlling terminal.
         kill(
             Pid::from_raw(self.child.id().try_into().unwrap()),
             Signal::SIGWINCH,

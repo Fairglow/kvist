@@ -28,6 +28,13 @@ Isolation assertions MUST fail on a violation, not mask it with shell fallbacks.
 Optional Cargo-installed tools remain host-provisioned; tests MUST NOT silently
 claim their presence.
 
+Build output MUST use the writable workspace's `/workspace/target` so it
+survives shell invocations. Cargo cache and selection settings remain private
+invocation scratch. Vendored resolution MUST consume the validated read-only
+snapshot, not the mutable workspace alias of `.kvist/vendored`.
+The workspace alias MUST be inaccessible during prepared sandbox execution
+without changing the host registry or concealing unrelated project state.
+
 Native inventory tests MUST compare all installed names, versions, target
 catalogues and installed targets/components against host queries, compile
 every installed target, execute each installed compiler and Cargo test runner,
