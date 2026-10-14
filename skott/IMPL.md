@@ -2,6 +2,31 @@
 
 # Component Implementation Record
 
+## Scoped repository scheduling observation - 2026-10-14
+
+Independent clean-slate `repository-scheduling-observer` read only bounded
+configuration and source/test snippets, excluding intent, queues, records,
+reviews and history. It executed no tests and made no acceptance claim.
+
+The default nextest override selects the exact `skott` package,
+`rust_build_environment` binary and repository trial and specifies
+`threads-required = "num-test-threads"`. The regression parses TOML and asserts
+the exact selector and setting; it does not itself establish effective override
+precedence or runtime scheduling. `#[serial]` is process-local, whereas nextest
+uses separate test processes.
+
+The native trial resolves the actual repository root, runs sandboxed Cargo
+metadata and the Galla library tests with two internal libtest threads.
+Other fixtures reside beneath `skott`; Rust resource staging is created in
+their workspace parent as mode-0700 `.skott-rust-*`. Generated registration
+links target sandbox-only toolchain destinations. The production scope scan
+still rejects resolved links escaping its writable root.
+
+The observer established no concrete newly introduced correctness or authority
+issue. Fixture `TempDir` cleanup is observed; the exact retained resource-owner
+lifetime was outside the bounded read. External writers remain uncoordinated,
+and source inspection does not establish successful runtime exclusivity.
+
 ## Scoped final bin-only discovery observation - 2026-10-14
 
 Independent clean-slate `bin-policy-observer` read bounded source/tests and CI,

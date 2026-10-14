@@ -20,6 +20,21 @@ sandbox-visible system locations on the host. Host toolcache availability
 alone is insufficient. Tests MUST NOT install tools, acquire dependencies,
 skip missing prerequisites or expand sandbox authority.
 
+## RUN-REQ-REPOSITORY-TEST-ISOLATION
+
+The native repository-wide sandbox trial MUST inspect and execute against the
+actual checkout without relaxing writable-scope symlink validation. It MUST NOT
+overlap other tests in the same nextest invocation, because their temporary
+fixtures and sandbox-only registrations mutate that checkout. Other tests MUST
+retain their normal parallelism.
+
+The checked-in nextest default configuration MUST select the exact package,
+binary and test, reserve the complete configured test-thread pool, and apply to
+profiles inheriting the default. Verification MUST demonstrate both absence of
+overlap for the repository trial and concurrent execution of ordinary tests.
+This scheduling guarantee does not coordinate separate runner invocations or
+unrelated host writers, and it does not excuse stale interrupted-test fixtures.
+
 ## RUN-REQ-RUST-SANDBOX-CHAIN
 
 Rust workspace preparation MUST expose every safely validated installed

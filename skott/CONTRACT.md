@@ -486,6 +486,15 @@ arbitrary external writers are not locked transactionally.
   records preparation/dispatch/completion, trace records grant metadata and
   environment names, never command text, environment values or tool output.
 
+### Native repository test scheduling
+
+The repository's `.config/nextest.toml` reserves all configured nextest slots
+for `skott::rust_build_environment::native_repository_tests_execute_inside_the_workspace_sandbox`.
+The rule is inherited from the default profile; unrelated tests remain parallel.
+`#[serial]` remains the in-process libtest mechanism, not a nextest or
+cross-invocation lock. Alternate configs or explicit overriding profile rules
+must preserve exclusivity when running this repository-wide trial.
+
 ### `ToolPolicy`
 
 ```
