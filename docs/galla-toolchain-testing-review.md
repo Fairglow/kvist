@@ -1,5 +1,75 @@
 # Galla sandbox toolchain testing review
 
+## CI/local portability repair - 2026-10-14
+
+GitHub run
+[38640406411](https://github.com/Fairglow/kvist/actions/runs/38640406411)
+failed only the Galla Rust execution trial: Cargo started through
+`/usr/bin/rustup`, then could not spawn `rustc -vV`. The same run passed the
+Skott installed-inventory and maerg authoring/native verification tests.
+Local `/usr/bin/{cargo,rustc,rustdoc}` are rustup links; CI setup copies only
+rustup there. The trial had relied on local System proxies that its request
+never supplied.
+
+The failure was reproduced locally before repair by removing System bin
+directories from the Cargo subprocess PATH. The repaired trial detects host
+rustup, honors the host inventory location (`RUSTUP_HOME` or `HOME/.rustup`),
+mounts the executable and resolved installations read-only, and generates
+sandbox-native Cargo/compiler/doc proxies. Its Cargo PATH contains only those
+proxies and a private directory of detected linker tools. No System Rust
+proxy can conceal missing runtime resources. The fixture runs unit tests,
+doctests and a build script that queries both compiler and rustdoc for every
+installed version. Canonical `rustup which` and sysroot results must match the
+explicitly granted installation, not merely report a plausible version.
+
+System-language trials select against System search precedence, distinguish
+rejected ambient host/home/toolcache candidates, assert canonical host/sandbox
+executable parity and inspect Go's runtime root before real program execution.
+There are no new consumer grants or runner-side automatic host discovery.
+Fixed `/tooling/*` paths are private **sandbox destinations**, never assumed
+host installation locations.
+
+Successful and failed native commands now emit host locations, System/explicit
+mount mappings, selected path environment, inside resolution and runtime
+evidence. Stable and MSRV CI run the native trials with explicit Bash
+`pipefail` semantics and retain `galla-toolchains-*` diagnostic artifacts for
+seven days, including failed runs. Tests never provision tools or dump the
+whole ambient environment.
+
+Local stable validation passed all **79 Galla tests**, including both native
+trials and two new detection regressions. Rust **1.95.0** also passed all four
+toolchain tests. The Rust trial covered eight installed registrations and 14
+installed-target combinations, including the isolated-PATH Cargo subprocess
+fixture. Skott passed its inventory test, six discovery tests and 15 native
+build-environment tests (including an offline repository build); maerg passed
+all seven authoring/verification trials. Galla all-target strict Clippy and
+workspace formatting checks passed. The final four-test MSRV binary also
+passed with host `HOME=/tmp`, an explicitly detected `RUSTUP_HOME` and minimal
+host PATH, confirming inventory lookup is not tied to `HOME/.rustup`.
+
+The previous local environment report mixed historical observations with
+consumer guarantees. `SANDBOX_ENVIRONMENT.md` now separates Skott, maerg
+authoring, closed verification and this native fixture; corrects the obsolete
+sbin PATH, target-directory and vendor-alias statements; and treats host
+provisioning manifests as host identities rather than invalid sandbox paths.
+Incidental System languages and local version numbers are not portable
+toolchain guarantees.
+
+The failing GitHub evidence was collected, but a passing **remote rerun of
+these changes is not claimed**. Its new diagnostics require publishing and
+rerunning the workflow. Future hosts remain subject to native testing;
+home-managed language runtimes are not automatically authorized by PATH.
+
+Independent source-only observation is recorded in `galla/IMPL.md`, including a
+separate narrow observation of the final mapping assertions and Bash pipeline
+guards. A separate source-blind comparison found no concrete scoped portability
+mismatch against the supplied local evidence and corrected environment guide.
+It retained that the complete 79-test run preceded the final mapping assertions
+(which passed subsequent native reruns), the observers executed no tests, and
+there is no new remote or universal-host evidence. This scoped review does not
+replace the pre-existing blocked runner-wide re-verification or accept the
+component's stale intent revisions.
+
 ## Conclusion
 
 Full end-to-end coverage was **not already present**. It is possible to test
@@ -205,15 +275,17 @@ also passed. CI configuration was updated but no remote CI run is claimed.
 
 ## Reproduction
 
-Prerequisites: Linux with working Bubblewrap, `/usr/bin/rustup`, at least two
+Prerequisites: Linux with working Bubblewrap, host `rustup`, at least two
 installed toolchains with a non-host target, and system Python/Node/Go/C/C++.
 Provision missing prerequisites separately on the host; tests never do so.
 
 ```bash
-cargo build --locked -p galla --bin galla-runner
-KVIST_GALLA=/opt/target/debug/galla-runner \
-  cargo test --locked -p galla --test toolchain_e2e -- \
-  --ignored --test-threads=1 --nocapture
+cargo build --offline --locked -p galla --bin galla-runner
+target_dir="$(cargo metadata --offline --locked --no-deps --format-version 1 |
+  jq -r .target_directory)"
+export KVIST_GALLA="$target_dir/debug/galla-runner"
+cargo test --offline --locked -p galla --test toolchain_e2e -- \
+  --include-ignored --test-threads=1 --nocapture
 ```
 
 Adjust the runner path to the configured target directory; it must be outside
@@ -223,10 +295,8 @@ enforcement behavior described above, not consumer preparation. For actual
 automatic Skott and maerg preparation, additionally run:
 
 ```bash
-KVIST_GALLA=/opt/target/debug/galla-runner \
-  cargo test --locked -p skott --test rustup_inventory -- \
+cargo test --offline --locked -p skott --test rustup_inventory -- \
   --test-threads=1 --nocapture
-KVIST_GALLA=/opt/target/debug/galla-runner \
-  cargo test --offline --locked -p kvist --test sandbox_toolchain -- \
+cargo test --offline --locked -p kvist --test sandbox_toolchain -- \
   --test-threads=1 --nocapture
 ```

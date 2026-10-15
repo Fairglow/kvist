@@ -134,6 +134,19 @@ execution assertions fail. External custom toolchain roots are also covered.
 No consumer implementation is imported. CI explicitly enables these otherwise
 ignored native trials; missing tools or enforcement cause failure.
 
+Host rustup is resolved from executable PATH candidates with System fallbacks;
+`RUSTUP_HOME` or `HOME/.rustup` locates the inventory. Host queries clear ambient
+configuration and disable installation. The fixture mounts the resolved rustup
+file at a private destination and generates a separate read-only bin directory
+with sandbox-native rustup proxy links for Cargo, rustc and rustdoc. A linker-only
+PATH fixture excludes System Rust proxies to reproduce the CI failure locally.
+The repaired runtime must run the same locked offline Cargo unit/doctest and
+build-script fixture there. Every installed version uses that private runtime.
+System language selection searches the namespace's bin paths, records host PATH
+candidates separately and rejects canonical executables or Go roots outside
+the filtered System view. Diagnostics print only selected tool/path settings,
+not the complete ambient environment, credentials or filesystem inventories.
+
 Current tests assert strict shape and legacy rejection, exact Cargo argv,
 environment, toolchain/grant, cache, scratch, and lockfile topology, source
 identities and substitutions, production-origin rejection, schema shape, and

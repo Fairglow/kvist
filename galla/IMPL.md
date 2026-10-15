@@ -1,6 +1,63 @@
 <!-- kvist-implementation-record-version: 1 -->
 # Component Implementation Record
 
+## Scoped portable native runtime observation - 2026-10-14
+
+Independent clean-slate `portable-runtime-observer` inspected the native
+toolchain fixture, workflow and relevant runner enforcement/validation source.
+It excluded intent, queues, existing records, reviews and history. It executed
+no tests; source-defined coverage is not independently observed execution.
+A separate narrow clean-slate `runtime-guard-observer` inspected the final
+mapping assertions and CI shell guards without intent or execution evidence.
+
+The native fixture resolves host executable candidates and canonical paths.
+System selection prioritizes `/usr/local/bin:/usr/bin:/bin`, then absolute
+host PATH entries, rejecting candidates outside permitted System prefixes or
+administrative paths. The inspected Go runtime must also be under System.
+Python, Node, Go, GCC and G++ execute programs with exact output markers.
+Host/sandbox canonical executable selection is compared. This uses substantial
+read-only System trees, not only individual executable mounts; home/toolcache
+language runtimes are not automatically granted.
+
+Host rustup selection uses absolute PATH candidates with System fallbacks.
+`RUSTUP_HOME` or `HOME/.rustup` locates the inventory. Canonical rustup maps
+read-only to `/tooling/rustup`; generated rustup/Cargo/compiler/doc proxy links
+resolve there. Generated settings and named registrations refer to individually
+mounted complete roots at `/tooling/toolchains/<sorted-index>`, not host paths.
+At least two installations and a non-host target are required. These are
+System/authoring requests with network denied, not the closed Cargo phase.
+
+The Cargo subprocess PATH supplied to rustup contains only private proxies and
+the detected `cc`/`ld`/`as`/`ar` linker directory. Rustup's effective managed
+child PATH is not separately asserted. Source-defined trials query versions,
+target catalogues/components, compile every installed target as a library,
+run native programs, and require unit-test and doctest summaries. A build script
+launches compiler/doc queries. The final guard observer verified that canonical
+`which` results for Cargo/rustc/rustdoc and compiler sysroots are asserted against
+the same per-name mount destinations used by registration.
+
+Snapshots compare modes, sizes, modification/change times, content hashes and
+symlink targets across the host rustup home, separately located rustup executable
+and external installation roots. External roots are first captured after
+discovery. Access times, unrelated paths and transient restored changes are not
+covered. Final snapshots run after exercise-block panics, not earlier setup
+failures. Uninstall, target removal and generated-profile mutation must produce
+read-only-filesystem errors. Tests do not provision host tools.
+
+Diagnostics expose selected host path variables, candidates, mount mappings,
+the fixture's configured environment, inside resolution, status/stdout/stderr
+and denied mutations, not a whole ambient environment dump. These outputs are
+unredacted and are not a generic secret-redaction facility. No concrete scoped
+host-mutation or ambient-credential logging regression was identified; this is
+not a full runner security audit or universal safety claim.
+
+Stable and MSRV workflow jobs run ignored native trials serially with
+`--nocapture` and retain separate diagnostic artifacts for seven days using
+`always()`. The final guard observer verified explicit `shell: bash` for both
+tee pipelines; failure propagation relies on GitHub Actions' Bash
+`-e -o pipefail` invocation. Neither observer executed CI or claimed acceptance,
+complete component compliance or remote success.
+
 ## Scoped filtered System observation - 2026-10-14
 
 Independent clean-slate `bin-policy-observer` inspected only explicitly bounded

@@ -160,6 +160,13 @@ Native GCC discovery tests compare the sandbox version line with the queried
 host system compiler, accepting distribution-specific branding without
 accepting missing or mismatched version evidence.
 
+The Galla executable trial separately logs ambient host candidates (including
+unmounted home/toolcache tools), selects against the System namespace's bin
+search order, checks canonical host/sandbox executable parity, inspects runtime
+roots, and runs real Python, Node, Go, C and C++ programs. It does not grant
+arbitrary host PATH directories. A Go binary is insufficient if its `GOROOT`
+is outside the mounted System tree; provision its complete runtime on the host.
+
 **PATH and environment variables:** The sandbox sets `PATH` to include the
 sandbox-local directories first, then the system directories. For Rust, the core order
 is `/rust/runtime/bin:/rust/toolchain/bin:/usr/bin:/bin:/usr/local/bin`.

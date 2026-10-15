@@ -3,18 +3,29 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Write};
-use std::os::unix::fs::{MetadataExt, symlink};
+use std::os::unix::fs::{MetadataExt, PermissionsExt, symlink};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+const SYSTEM_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
+const RUSTUP: &str = "/tooling/rustup";
+const RUST_BIN: &str = "/tooling/runtime/bin";
+const ISOLATED_RUST_PATH: &str = "/tooling/runtime/bin:/tooling/linker-bin";
+
 fn digest(bytes: &[u8]) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(bytes)))
 }
 
 fn successful(output: Output, label: &str) -> Vec<u8> {
+    eprintln!(
+        "{label}: status={}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(
         output.status.success(),
         "{label}: status={}\nstdout:\n{}\nstderr:\n{}",
@@ -23,6 +34,60 @@ fn successful(output: Output, label: &str) -> Vec<u8> {
         String::from_utf8_lossy(&output.stderr)
     );
     output.stdout
+}
+
+fn search_directories() -> Vec<PathBuf> {
+    let mut directories: Vec<_> = std::env::var_os("PATH")
+        .map(|path| {
+            std::env::split_paths(&path)
+                .filter(|p| p.is_absolute())
+                .collect()
+        })
+        .unwrap_or_default();
+    for directory in SYSTEM_PATH.split(':') {
+        let directory = PathBuf::from(directory);
+        if !directories.contains(&directory) {
+            directories.push(directory);
+        }
+    }
+    directories
+}
+
+fn system_path(path: &Path) -> bool {
+    ["/usr", "/bin", "/lib", "/lib64"]
+        .iter()
+        .any(|root| path.starts_with(root))
+        && !galla::validation::is_administrative_path(path)
+}
+
+fn executable(name: &str, directories: &[PathBuf], system_only: bool) -> PathBuf {
+    let mut selected = None;
+    for directory in directories {
+        let candidate = directory.join(name);
+        let metadata = match fs::metadata(&candidate) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => panic!("inspect host tool {}: {error}", candidate.display()),
+        };
+        let resolved = candidate.canonicalize().unwrap();
+        let usable = metadata.is_file()
+            && metadata.permissions().mode() & 0o111 != 0
+            && !galla::validation::is_administrative_path(&candidate)
+            && !galla::validation::is_administrative_path(&resolved)
+            && (!system_only || (system_path(&candidate) && system_path(&resolved)));
+        eprintln!(
+            "host tool {name}: candidate={} resolved={} usable={} system_only={system_only}",
+            candidate.display(),
+            resolved.display(),
+            usable
+        );
+        if usable && selected.is_none() {
+            selected = Some(candidate);
+        }
+    }
+    selected.unwrap_or_else(|| {
+        panic!("no usable host {name}; searched {directories:?}; provision outside the test")
+    })
 }
 
 struct Sandbox {
@@ -58,6 +123,20 @@ impl Sandbox {
             "native enforcement probe",
         );
         let probe: Value = serde_json::from_slice(&probe).unwrap();
+        eprintln!(
+            "host runner={} backend={}",
+            runner.display(),
+            probe["backend"]
+        );
+        for name in [
+            "PATH",
+            "HOME",
+            "RUSTUP_HOME",
+            "CARGO_HOME",
+            "CARGO_TARGET_DIR",
+        ] {
+            eprintln!("host {name}={:?}", std::env::var_os(name));
+        }
         let directory = tempfile::tempdir().unwrap();
         let workspace = directory.path().join("workspace");
         let scratch = directory.path().join("scratch");
@@ -71,7 +150,7 @@ impl Sandbox {
             "argv": ["/usr/bin/true"],
             "working_directory": "/workspace/component",
             "environment": {
-                "PATH": "/usr/bin:/bin:/usr/local/bin",
+                "PATH": SYSTEM_PATH,
                 "HOME": "/tmp",
                 "TMPDIR": "/tmp",
                 "CARGO_HOME": "/tmp/cargo-home",
@@ -130,8 +209,13 @@ impl Sandbox {
     }
 
     fn grant(&mut self, source: &Path, destination: &str) {
+        let source = source.canonicalize().unwrap();
+        eprintln!(
+            "mount read-only toolchain: {} -> {destination}",
+            source.display()
+        );
         self.request["grants"].as_array_mut().unwrap().push(json!({
-            "source": source.canonicalize().unwrap(),
+            "source": source,
             "destination": destination,
             "access": "read-only",
             "purpose": "toolchain",
@@ -163,12 +247,114 @@ impl Sandbox {
     fn shell(&self, script: &str) -> Vec<u8> {
         self.checked(&["/usr/bin/sh", "-ec", script])
     }
+
+    fn diagnostic(&self) {
+        for source in ["/usr", "/bin", "/lib", "/lib64", "/etc/alternatives"] {
+            let path = Path::new(source);
+            match path.canonicalize() {
+                Ok(resolved) => eprintln!(
+                    "System mount read-only: host {source} -> {} -> sandbox {source}{}",
+                    resolved.display(),
+                    if source == "/usr" {
+                        " (filtered: sbin excluded)"
+                    } else {
+                        ""
+                    }
+                ),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    eprintln!("System mount absent on host: {source}");
+                }
+                Err(error) => panic!("inspect System mount {source}: {error}"),
+            }
+        }
+        for grant in self.request["grants"].as_array().unwrap() {
+            eprintln!(
+                "mount {} {}: {} -> {}",
+                grant["access"], grant["purpose"], grant["source"], grant["destination"]
+            );
+        }
+        eprintln!(
+            "sandbox configured environment: {}",
+            self.request["environment"]
+        );
+        self.shell(
+            "printf 'inside sandbox: cwd=%s\\nPATH=%s\\nHOME=%s\\nCARGO_HOME=%s\\nCARGO_TARGET_DIR=%s\\nRUSTUP_HOME=%s\\nRUSTUP_TOOLCHAIN=%s\\n' \
+             \"$PWD\" \"$PATH\" \"$HOME\" \"$CARGO_HOME\" \"$CARGO_TARGET_DIR\" \"${RUSTUP_HOME-unset}\" \"${RUSTUP_TOOLCHAIN-unset}\"",
+        );
+    }
 }
 
 #[test]
 #[ignore = "requires KVIST_GALLA, native Bubblewrap and system Python/Node/Go/C/C++"]
 fn system_toolchains_are_found_and_execute_real_programs() {
-    let sandbox = Sandbox::new();
+    let mut sandbox = Sandbox::new();
+    let mut directories: Vec<_> = SYSTEM_PATH.split(':').map(PathBuf::from).collect();
+    for directory in search_directories() {
+        if !directories.contains(&directory) {
+            directories.push(directory);
+        }
+    }
+    let sandbox_directories: Vec<_> = directories
+        .iter()
+        .filter(|directory| system_path(directory))
+        .cloned()
+        .collect();
+    sandbox.request["environment"]["PATH"] = json!(
+        std::env::join_paths(sandbox_directories)
+            .unwrap()
+            .to_str()
+            .unwrap()
+    );
+    let mut selected = Vec::new();
+    for (name, version) in [
+        ("python3", "--version"),
+        ("node", "--version"),
+        ("go", "version"),
+        ("gcc", "--version"),
+        ("g++", "--version"),
+    ] {
+        let tool = executable(name, &directories, true);
+        successful(
+            Command::new(&tool).arg(version).output().unwrap(),
+            &format!("host selected {name}: {}", tool.display()),
+        );
+        if name == "go" {
+            let root = successful(
+                Command::new(&tool)
+                    .args(["env", "GOROOT"])
+                    .env_remove("GOROOT")
+                    .env("GOTOOLCHAIN", "local")
+                    .output()
+                    .unwrap(),
+                "host selected Go runtime",
+            );
+            let root = PathBuf::from(String::from_utf8(root).unwrap().trim());
+            assert!(
+                system_path(&root.canonicalize().unwrap()),
+                "Go runtime {} is outside System mounts; provision a system Go installation",
+                root.display()
+            );
+        }
+        selected.push((name, tool.canonicalize().unwrap()));
+    }
+    sandbox.diagnostic();
+    for (name, expected) in selected {
+        let resolved = sandbox.shell(&format!("readlink -f \"$(command -v {name})\""));
+        assert_eq!(
+            String::from_utf8(resolved).unwrap().trim(),
+            expected.to_str().unwrap(),
+            "{name}: sandbox PATH must select the host tool whose runtime was inspected"
+        );
+    }
+    sandbox.shell(
+        "for tool in python3 node go gcc g++; do location=\"$(command -v \"$tool\")\"; \
+         printf 'inside tool %s: %s -> ' \"$tool\" \"$location\"; readlink -f \"$location\"; done\n\
+         python3 -c 'import sys; print(\"inside Python executable=\" + sys.executable + \" prefix=\" + sys.prefix)'\n\
+         node -p '\"inside Node executable=\" + process.execPath'\n\
+         go version; go env GOROOT GOTOOLDIR\n\
+         gcc -print-search-dirs\n\
+         g++ -print-file-name=libstdc++.so",
+    );
     for (name, contents) in [
         (
             "trial.py",
@@ -279,9 +465,9 @@ fn snapshot(roots: &[PathBuf]) -> Snapshot {
     state
 }
 
-fn host_rustup(home: &Path, directory: &Path, args: &[&str]) -> Vec<u8> {
+fn host_rustup(rustup: &Path, home: &Path, directory: &Path, args: &[&str]) -> Vec<u8> {
     successful(
-        Command::new("/usr/bin/rustup")
+        Command::new(rustup)
             .args(args)
             .current_dir(directory)
             .env_clear()
@@ -290,7 +476,7 @@ fn host_rustup(home: &Path, directory: &Path, args: &[&str]) -> Vec<u8> {
             .env("RUSTUP_AUTO_INSTALL", "0")
             .output()
             .unwrap(),
-        &format!("host rustup {args:?}"),
+        &format!("host {} {args:?}", rustup.display()),
     )
 }
 
@@ -314,6 +500,11 @@ fn toolchain_names(bytes: &[u8]) -> Vec<String> {
 }
 
 fn assert_read_only_failure(output: Output, label: &str) {
+    eprintln!(
+        "denied mutation {label}: status={}\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(!output.status.success(), "{label} must fail");
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -323,9 +514,12 @@ fn assert_read_only_failure(output: Output, label: &str) {
 }
 
 #[test]
-#[ignore = "requires KVIST_GALLA, native Bubblewrap and installed /usr/bin/rustup toolchains"]
+#[ignore = "requires KVIST_GALLA, native Bubblewrap and installed rustup toolchains"]
 fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
     let mut sandbox = Sandbox::new();
+    let rustup = executable("rustup", &search_directories(), false)
+        .canonicalize()
+        .unwrap();
     let host_home = std::env::var_os("RUSTUP_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
@@ -336,8 +530,13 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
         .unwrap();
     // Capture before even the host inventory queries, not just sandbox execution.
     let mut roots = vec![host_home.clone()];
+    if !rustup.starts_with(&host_home) {
+        roots.push(rustup.clone());
+    }
+    let initial_roots = roots.len();
     let before_home = snapshot(&roots);
     let names = toolchain_names(&host_rustup(
+        &rustup,
         &host_home,
         &sandbox.workspace,
         &["toolchain", "list"],
@@ -358,6 +557,14 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
     .unwrap();
     sandbox.request["environment"]["RUSTUP_HOME"] = json!("/tooling/rustup-home");
     sandbox.request["environment"]["RUSTUP_TOOLCHAIN"] = json!(&names[0]);
+    let runtime = sandbox._directory.path().join("runtime");
+    fs::create_dir_all(runtime.join("bin")).unwrap();
+    for tool in ["rustup", "cargo", "rustc", "rustdoc"] {
+        symlink(RUSTUP, runtime.join("bin").join(tool)).unwrap();
+    }
+    sandbox.grant(&rustup, RUSTUP);
+    sandbox.grant(&runtime, "/tooling/runtime");
+    sandbox.request["environment"]["PATH"] = json!(format!("{RUST_BIN}:{SYSTEM_PATH}"));
     for (index, name) in names.iter().enumerate() {
         assert!(
             name.bytes()
@@ -365,6 +572,7 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
             "unsupported installed toolchain name: {name}"
         );
         let compiler = host_rustup(
+            &rustup,
             &host_home,
             &sandbox.workspace,
             &["which", "--toolchain", name, "rustc"],
@@ -381,14 +589,31 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
             roots.push(root.clone());
         }
         let destination = format!("/tooling/toolchains/{index}");
+        eprintln!(
+            "Rust registration {name}: host compiler={} host root={} sandbox root={destination}",
+            compiler.display(),
+            root.display()
+        );
         symlink(&destination, private_home.join("toolchains").join(name)).unwrap();
         sandbox.grant(&root, &destination);
     }
     let mut before = before_home;
-    for root in roots.iter().skip(1) {
+    for root in roots.iter().skip(initial_roots) {
         snapshot_tree(root, &mut before);
     }
     sandbox.grant(&private_home, "/tooling/rustup-home");
+    let linker_bin = sandbox._directory.path().join("linker-bin");
+    fs::create_dir(&linker_bin).unwrap();
+    for tool in ["cc", "ld", "as", "ar"] {
+        symlink(
+            executable(tool, &search_directories(), true)
+                .canonicalize()
+                .unwrap(),
+            linker_bin.join(tool),
+        )
+        .unwrap();
+    }
+    sandbox.grant(&linker_bin, "/tooling/linker-bin");
     fs::write(
         sandbox.workspace.join("trial.rs"),
         "fn main() { assert_eq!(20 + 22, 42); println!(\"rust-e2e=42\"); }\n",
@@ -412,18 +637,28 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
     .unwrap();
     fs::write(
         sandbox.workspace.join("src/lib.rs"),
-        "#[test] fn real_test() { assert_eq!(20 + 22, 42); }\n",
+        "/// ```\n/// assert_eq!(inventory_trial::answer(), 42);\n/// ```\npub fn answer() -> u8 { 42 }\n#[test] fn real_test() { assert_eq!(answer(), 42); }\n",
+    )
+    .unwrap();
+    fs::write(
+        sandbox.workspace.join("build.rs"),
+        "fn main() { for tool in [\"rustc\", \"rustdoc\"] { let output = std::process::Command::new(tool).arg(\"--version\").output().unwrap(); assert!(output.status.success()); println!(\"cargo:warning=build-script-{}={}\", tool, String::from_utf8(output.stdout).unwrap().trim()); } }\n",
     )
     .unwrap();
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        sandbox.diagnostic();
+        sandbox.shell(
+            "for tool in rustup cargo rustc rustdoc; do location=\"$(command -v \"$tool\")\"; \
+             printf 'inside tool %s: %s -> ' \"$tool\" \"$location\"; readlink -f \"$location\"; done\n\
+             test ! -e /root; test ! -e /home",
+        );
         let mut saw_cross_target = false;
         assert_eq!(
             names,
-            toolchain_names(&sandbox.checked(&["/usr/bin/rustup", "toolchain", "list"]))
+            toolchain_names(&sandbox.checked(&[RUSTUP, "toolchain", "list"]))
         );
-        sandbox.shell("command -v rustup; test ! -e /root; test ! -e /home");
-        for name in &names {
+        for (index, name) in names.iter().enumerate() {
             for arguments in [
                 vec!["run", name, "rustc", "-Vv"],
                 vec!["run", name, "cargo", "--version"],
@@ -432,8 +667,8 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
                 vec!["target", "list", "--installed", "--toolchain", name],
                 vec!["component", "list", "--installed", "--toolchain", name],
             ] {
-                let expected = host_rustup(&host_home, &sandbox.workspace, &arguments);
-                let argv: Vec<_> = std::iter::once("/usr/bin/rustup")
+                let expected = host_rustup(&rustup, &host_home, &sandbox.workspace, &arguments);
+                let argv: Vec<_> = std::iter::once(RUSTUP)
                     .chain(arguments.iter().copied())
                     .collect();
                 assert_eq!(
@@ -443,12 +678,14 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
                 );
             }
             let targets = lines(&host_rustup(
+                &rustup,
                 &host_home,
                 &sandbox.workspace,
                 &["target", "list", "--installed", "--toolchain", name],
             ));
             assert!(!targets.is_empty(), "{name}: no installed targets");
             let compiler = host_rustup(
+                &rustup,
                 &host_home,
                 &sandbox.workspace,
                 &["run", name, "rustc", "-Vv"],
@@ -459,9 +696,28 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
                 .find_map(|line| line.strip_prefix("host: ").map(str::to_owned))
                 .expect("rustc -Vv must report a host target");
             saw_cross_target |= targets.iter().any(|target| target != &native_target);
+            let destination = format!("/tooling/toolchains/{index}");
+            for tool in ["cargo", "rustc", "rustdoc"] {
+                let path = sandbox.checked(&[RUSTUP, "which", "--toolchain", name, tool]);
+                let path = String::from_utf8(path).unwrap();
+                let resolved = sandbox.checked(&["/usr/bin/readlink", "-f", path.trim()]);
+                assert_eq!(
+                    String::from_utf8(resolved).unwrap().trim(),
+                    format!("{destination}/bin/{tool}"),
+                    "{name}: {tool} must use its explicitly granted installation"
+                );
+            }
+            let sysroot = sandbox.checked(&[RUSTUP, "run", name, "rustc", "--print", "sysroot"]);
+            let sysroot = String::from_utf8(sysroot).unwrap();
+            let resolved = sandbox.checked(&["/usr/bin/readlink", "-f", sysroot.trim()]);
+            assert_eq!(
+                String::from_utf8(resolved).unwrap().trim(),
+                destination,
+                "{name}: sysroot must be the explicitly granted installation"
+            );
             for target in &targets {
                 sandbox.checked(&[
-                    "/usr/bin/rustup",
+                    RUSTUP,
                     "run",
                     name,
                     "rustc",
@@ -476,7 +732,7 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
             }
             assert_eq!(
                 sandbox.checked(&[
-                    "/usr/bin/rustup",
+                    RUSTUP,
                     "run",
                     name,
                     "rustc",
@@ -491,7 +747,9 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
                 b"rust-e2e=42\n"
             );
             let tests = sandbox.checked(&[
-                "/usr/bin/rustup",
+                "/usr/bin/env",
+                &format!("PATH={ISOLATED_RUST_PATH}"),
+                RUSTUP,
                 "run",
                 name,
                 "cargo",
@@ -499,24 +757,20 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
                 "--offline",
                 "--locked",
             ]);
-            assert!(
+            assert_eq!(
                 String::from_utf8(tests)
                     .unwrap()
-                    .contains("1 passed; 0 failed")
+                    .matches("1 passed; 0 failed")
+                    .count(),
+                2,
+                "{name}: both the unit test and doctest must execute"
             );
             assert_read_only_failure(
-                sandbox.run(&["/usr/bin/rustup", "toolchain", "uninstall", name]),
+                sandbox.run(&[RUSTUP, "toolchain", "uninstall", name]),
                 &format!("uninstall {name}"),
             );
             assert_read_only_failure(
-                sandbox.run(&[
-                    "/usr/bin/rustup",
-                    "target",
-                    "remove",
-                    "--toolchain",
-                    name,
-                    &targets[0],
-                ]),
+                sandbox.run(&[RUSTUP, "target", "remove", "--toolchain", name, &targets[0]]),
                 &format!("target removal for {name}"),
             );
         }
@@ -528,12 +782,12 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
             "provision at least one non-host target to exercise installed-target visibility"
         );
         assert_read_only_failure(
-            sandbox.run(&["/usr/bin/rustup", "set", "profile", "complete"]),
+            sandbox.run(&[RUSTUP, "set", "profile", "complete"]),
             "private rustup settings mutation",
         );
         assert_eq!(
             names,
-            toolchain_names(&sandbox.checked(&["/usr/bin/rustup", "toolchain", "list"]))
+            toolchain_names(&sandbox.checked(&[RUSTUP, "toolchain", "list"]))
         );
     }));
     let after = snapshot(&roots);
@@ -548,5 +802,45 @@ fn rustup_reports_and_uses_every_host_toolchain_without_host_mutation() {
     );
     if let Err(error) = result {
         std::panic::resume_unwind(error);
+    }
+}
+
+#[test]
+fn host_detection_requires_an_executable_and_retains_search_precedence() {
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("first");
+    let second = directory.path().join("second");
+    fs::create_dir(&first).unwrap();
+    fs::create_dir(&second).unwrap();
+    for base in [&first, &second] {
+        fs::write(base.join("rustup"), b"fixture, never executed").unwrap();
+    }
+    fs::set_permissions(second.join("rustup"), fs::Permissions::from_mode(0o700)).unwrap();
+    let directories = [first.clone(), second.clone()];
+    assert_eq!(
+        executable("rustup", &directories, false),
+        second.join("rustup")
+    );
+    fs::set_permissions(first.join("rustup"), fs::Permissions::from_mode(0o700)).unwrap();
+    assert_eq!(
+        executable("rustup", &directories, false),
+        first.join("rustup")
+    );
+}
+
+#[test]
+fn system_detection_excludes_home_toolcaches_and_administrative_paths() {
+    for path in ["/usr/bin/node", "/usr/local/go/bin/go", "/usr/lib/go"] {
+        assert!(system_path(Path::new(path)), "{path}");
+    }
+    for path in [
+        "/home/runner/toolcache/go/bin/go",
+        "/opt/hostedtoolcache/node",
+        "/home/user/.local/bin/node",
+        "/usr/sbin/tool",
+        "/usr/local/sbin/tool",
+        "/sbin/tool",
+    ] {
+        assert!(!system_path(Path::new(path)), "{path}");
     }
 }

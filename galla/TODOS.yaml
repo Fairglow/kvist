@@ -14,6 +14,58 @@ component:
         expected_revision: "sha256:bfd660184d2c7b0fb9d0ccee84cb946cd2f69bf53a33efb40ee1503b0a70b6e1"
         observed_revision: "sha256:1323af464fc004721bafc8fd3a0a524eaafb99fc078ea313570d7a04f46660e8"
 tasks:
+  - id: portable-toolchain-write-tests
+    title: "Pin host-independent Cargo subprocess execution"
+    description: "Reproduce missing rustc with a linker-only sandbox PATH, then require private proxy execution of Cargo unit/doctests and a build script for every installed version."
+    context: "Human requests CI/local diagnosis and repair. Explicit advisory exception while receipt enforcement is unavailable. Proxy-free Cargo PATH reproduced the exact CI rustc -vV ENOENT locally before repair; final unit/doctest/build-script fixture passes on all eight installed versions."
+    purpose: "Remove reliance on local System Rust proxies."
+    expected_outcome: "The CI failure is reproduced locally before the runtime repair."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"]
+    timestamps: {created_at: "2026-10-14T22:00:00Z", updated_at: "2026-10-14T22:17:30Z", completed_at: "2026-10-14T22:17:30Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: portable-toolchain-implement-code
+    title: "Resolve and expose complete native tool runtimes"
+    description: "Detect host tools, generate read-only sandbox Rust proxies, log host/mount/inside execution evidence and correct consumer-specific environment guidance."
+    context: "Detected host paths and private read-only proxies replace System-proxy assumptions; full host/mount/inside logs are retained locally and wired into both CI jobs. All 79 Galla tests passed; final four native/detection tests pass on stable and MSRV, including alternate HOME and explicit RUSTUP_HOME. Skott 22 and maerg 7 native tests pass. No new consumer authority or remote success claimed."
+    purpose: "Support local and CI layouts without copying assumptions between namespaces."
+    expected_outcome: "All native programs and Rust subprocesses execute with actionable location evidence."
+    kind: implementation
+    status: completed
+    depends_on: [portable-toolchain-write-tests]
+    requirements: ["REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"]
+    timestamps: {created_at: "2026-10-14T22:00:00Z", updated_at: "2026-10-14T22:17:30Z", completed_at: "2026-10-14T22:17:30Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: portable-toolchain-security-audit
+    title: "Inspect explicit native runtime authority"
+    description: "Independently inspect the scoped fixture for host mutation, broad mounts, secret logging and unintended consumer-authority changes."
+    context: "Independent source-only portable-runtime-observer identified no concrete scoped host-mutation, broad-mount-authority or ambient-secret logging regression. Its CI pipefail finding was fixed with explicit Bash and independently observed by runtime-guard-observer. Unredacted tool diagnostics, snapshot/setup-failure limits and existing System visibility remain explicit in IMPL.md; this is not a full runner audit."
+    purpose: "Retain independent authority observations."
+    expected_outcome: "Any scoped discrepancy remains explicit."
+    kind: security-audit
+    status: completed
+    depends_on: [portable-toolchain-implement-code]
+    requirements: ["REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"]
+    timestamps: {created_at: "2026-10-14T22:00:00Z", updated_at: "2026-10-14T22:17:30Z", completed_at: "2026-10-14T22:17:30Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: portable-toolchain-compliance-review
+    title: "Compare independent portable toolchain evidence"
+    description: "Derive a source-only implementation record, then compare it with local intent in a separate source-blind context."
+    context: "Separate source-blind portable-runtime-comparator found no concrete scoped portability mismatch. It retained that whole-suite evidence predates final mapping guards, subsequent final native reruns pass, source observers executed no tests, and remote rerun/future-host coverage remain unverified. Corrected environment-guide scope aligns with explicit grants. No component acceptance, blanket certification or replacement of blocked runner-wide review."
+    purpose: "Avoid self-certification and retain host coverage limits."
+    expected_outcome: "Observed behavior, discrepancies and unverified future hosts are stated honestly."
+    kind: compliance-review
+    status: completed
+    depends_on: [portable-toolchain-security-audit]
+    requirements: ["REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"]
+    timestamps: {created_at: "2026-10-14T22:00:00Z", updated_at: "2026-10-14T22:17:30Z", completed_at: "2026-10-14T22:17:30Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: bin-only-system-write-tests
     title: "Pin administrative directory exclusion"
     description: "Test filtered layout, merged-bin aliases, denied PATH and overmounts, native access denial and host non-mutation."

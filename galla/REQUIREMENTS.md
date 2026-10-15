@@ -152,6 +152,18 @@ The Rust inventory fixture MUST include at least two installed toolchains
 and at least one installed non-host target, so its multi-version and
 cross-target obligations cannot pass vacuously.
 
+Native trials MUST resolve the host rustup executable and installation roots
+from the execution environment rather than assume a distribution-specific
+proxy location. Their explicit read-only runtime MUST supply the Rust proxies
+needed by Cargo subprocesses independently of host System proxies. A native
+regression MUST exercise Cargo with no System Rust proxies on PATH, including
+unit tests, doctests and a build-script compiler query. Diagnostics MUST report
+host executable candidates and resolved paths, source-to-destination grants,
+the selected non-secret sandbox path environment, inside-sandbox executable
+and sysroot resolution, and command results on success and failure. System
+language trials MUST distinguish host-only tools from tools available in the
+filtered System mounts and verify the latter by actual execution.
+
 ### SR-REQ-WORKSPACE-VENDOR-MASK
 
 For authoring requests with a writable `/workspace` grant and a read-only

@@ -176,6 +176,14 @@ Galla does not discover host toolchains or synthesize that home for consumers.
 Visibility is determined by the submitted grants and environment; a
 single-toolchain request does not promise full host inventory visibility.
 
+The native execution fixture resolves host rustup separately from its fixed
+sandbox runtime destination. It supplies read-only Rust proxies and registrations,
+so Cargo's compiler and documentation subprocesses do not depend on System
+Rust proxies. Its diagnostic output includes detected host locations, explicit
+grant mappings, sandbox path/selection settings and observed tool resolution.
+This does not add runner-side automatic discovery, ambient PATH inheritance,
+home-directory mounts or new consumer authority.
+
 Kvist is pre-release and retains no legacy protocol compatibility. Current
 tests cover strict accepted shape, canonical serialization, malformed,
 oversized, unknown, and legacy rejection, fail-closed unavailability, the

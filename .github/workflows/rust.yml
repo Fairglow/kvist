@@ -109,10 +109,20 @@ jobs:
             --ignored --test-threads=1 --nocapture
 
       - name: Test native Galla toolchain execution
+        shell: bash
         run: |
           KVIST_GALLA="$CARGO_TARGET_DIR/debug/galla-runner" \
             cargo test --locked -p galla --test toolchain_e2e -- \
-            --ignored --test-threads=1 --nocapture
+            --ignored --test-threads=1 --nocapture 2>&1 | tee "$RUNNER_TEMP/galla-toolchains.log"
+
+      - name: Retain Galla host and sandbox diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galla-toolchains-stable
+          path: ${{ runner.temp }}/galla-toolchains.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   audit:
     name: Dependencies and licenses
@@ -194,6 +204,22 @@ jobs:
         env:
           KVIST_GALLA: /home/runner/kvist-target/debug/galla-runner
         run: cargo test --locked --workspace --all-features
+
+      - name: Test native Galla toolchain execution
+        shell: bash
+        run: |
+          KVIST_GALLA="$CARGO_TARGET_DIR/debug/galla-runner" \
+            cargo test --locked -p galla --test toolchain_e2e -- \
+            --ignored --test-threads=1 --nocapture 2>&1 | tee "$RUNNER_TEMP/galla-toolchains.log"
+
+      - name: Retain Galla host and sandbox diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: galla-toolchains-msrv
+          path: ${{ runner.temp }}/galla-toolchains.log
+          if-no-files-found: ignore
+          retention-days: 7
 
   vcs:
     name: VCS tracking (Ubuntu)
