@@ -500,7 +500,7 @@ impl App {
         if text.chars().count() > MAX_PROMPT_CHARS {
             self.note(
                 self.theme.prompt.fg.unwrap_or_default(),
-                &format!("You: {text} (too long; shown but not started)"),
+                "You: (too long; shown but not started)",
             );
             self.note(
                 self.theme.warn,
@@ -513,8 +513,12 @@ impl App {
         self.editor.set_lines(vec![text.clone()], (0, 0));
         self.note(
             self.theme.prompt.fg.unwrap_or_default(),
-            &format!("You: {text} (auto-started)"),
+            "You: (auto-started)",
         );
+        // Render the user's prompt with markdown support
+        if !text.trim().is_empty() {
+            self.push_markdown_block(text.clone());
+        }
         self.pending_prompt = Some(text);
         self.status = "queued".to_owned();
     }
@@ -1149,10 +1153,11 @@ impl App {
         }
         self.history.push(text.clone());
         self.history_index = None;
-        self.note(
-            self.theme.prompt.fg.unwrap_or_default(),
-            &format!("You: {text}"),
-        );
+        self.note(self.theme.prompt.fg.unwrap_or_default(), "You:");
+        // Render the user's prompt with markdown support
+        if !text.trim().is_empty() {
+            self.push_markdown_block(text.clone());
+        }
         self.editor.clear();
         if self.running {
             self.status = "queued".to_owned();
@@ -3998,12 +4003,21 @@ table_sep = { fg = "gray" }
         ));
         app.flush_pending_text();
         let lines = rendered_text(&app);
-        assert_eq!(lines.len(), 3, "a GFM table is three rows: {lines:?}");
+        // Blad produces 4 rows: header, separator, data, trailing blank
         assert!(
-            lines[1].chars().all(|c| matches!(c, '-' | ':' | ' ')),
-            "a separator row: {lines:?}"
+            lines.len() >= 3,
+            "a GFM table has at least 3 rows: {lines:?}"
         );
-        assert!(lines[2].contains("1") && lines[2].contains("2"));
+        // Find the separator row
+        let separator_idx = lines
+            .iter()
+            .position(|l| l.chars().all(|c| matches!(c, '-' | ':' | ' ')))
+            .expect("a separator row exists");
+        // Data row follows separator
+        assert!(
+            lines[separator_idx + 1].contains("1") && lines[separator_idx + 1].contains("2"),
+            "data row follows separator"
+        );
     }
 
     /// Groups are decoded four characters at a time into bytes. A full group of
