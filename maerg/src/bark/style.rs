@@ -111,7 +111,11 @@ fn parse_spans(line: &str) -> Vec<Span> {
             }
         }
         // Not a recognized SGR sequence: keep the escape as plain text.
-        let first = after.chars().next().unwrap();
+        // `after` starts with the ESC just found; if it were ever empty
+        // there would be nothing left to parse.
+        let Some(first) = after.chars().next() else {
+            break;
+        };
         spans.push(Span {
             code: None,
             text: first.to_string(),
@@ -285,29 +289,50 @@ fn key_prefix(text: &str) -> Option<&str> {
 /// indents every continuation line to the value's column (the key plus its
 /// separator space), so a wrapped field reads as one aligned block. A line
 /// that already fits (or a width of zero) is returned unchanged.
+/// Pushes `token` onto the last physical line, starting a new line when the
+/// list is empty. The caller keeps `physical` non-empty; the fallback keeps
+/// the placement total regardless.
+fn push_token(physical: &mut Vec<Vec<Token>>, token: Token) {
+    match physical.last_mut() {
+        Some(line) => line.push(token),
+        None => physical.push(vec![token]),
+    }
+}
+
 /// Places `token` onto the current physical line, starting a new line (or
 /// hard-splitting an over-long token) as needed. `used` tracks the current
 /// line's visible width; `physical` is appended in place.
 fn place_token(physical: &mut Vec<Vec<Token>>, used: &mut usize, avail: usize, token: Token) {
     let len = token.text.chars().count();
     let dw = token.decision_width();
-    let current_empty = physical.last().unwrap().is_empty();
+    // A missing last line is treated as an empty line, keeping the
+    // placement total.
+    let current_empty = physical.last().is_none_or(|line| line.is_empty());
     if !current_empty && *used + 1 + dw <= avail {
         // The word prefix fits on the current line.
         if token.suffix().is_none() || *used + 1 + len <= avail {
-            physical.last_mut().unwrap().push(token);
+            push_token(physical, token);
             *used += 1 + len;
             return;
         }
         // The word fits, its trailing punctuation does not: the line ends
         // after the word and the punctuation starts the next line.
-        let (prefix, suffix) = (token.prefix().unwrap(), token.suffix().unwrap());
+        let (Some(prefix), Some(suffix)) = (token.prefix(), token.suffix()) else {
+            // A suffix always implies a prefix; if that ever failed, keep
+            // the whole token on a fresh line rather than dropping it.
+            physical.push(vec![token]);
+            *used = len;
+            return;
+        };
         let suffix_len = suffix.chars().count();
-        physical.last_mut().unwrap().push(Token {
-            code: token.code.clone(),
-            break_width: 0,
-            text: prefix,
-        });
+        push_token(
+            physical,
+            Token {
+                code: token.code.clone(),
+                break_width: 0,
+                text: prefix,
+            },
+        );
         *used += 1 + dw;
         physical.push(vec![Token {
             code: token.code,
@@ -322,19 +347,26 @@ fn place_token(physical: &mut Vec<Vec<Token>>, used: &mut usize, avail: usize, t
         physical.push(Vec::new());
     }
     if len <= avail {
-        physical.last_mut().unwrap().push(token);
+        push_token(physical, token);
         *used = len;
         return;
     }
     if token.suffix().is_some() && dw <= avail {
         // The word prefix fills the new line; the punctuation goes after it.
-        let (prefix, suffix) = (token.prefix().unwrap(), token.suffix().unwrap());
+        let (Some(prefix), Some(suffix)) = (token.prefix(), token.suffix()) else {
+            physical.push(vec![token]);
+            *used = len;
+            return;
+        };
         let suffix_len = suffix.chars().count();
-        physical.last_mut().unwrap().push(Token {
-            code: token.code.clone(),
-            break_width: 0,
-            text: prefix,
-        });
+        push_token(
+            physical,
+            Token {
+                code: token.code.clone(),
+                break_width: 0,
+                text: prefix,
+            },
+        );
         *used = dw;
         physical.push(vec![Token {
             code: token.code,
@@ -357,11 +389,14 @@ fn place_token(physical: &mut Vec<Vec<Token>>, used: &mut usize, avail: usize, t
             .unwrap_or(text.len());
         let (head, tail) = text.split_at(cut);
         if first {
-            physical.last_mut().unwrap().push(Token {
-                code: code.clone(),
-                break_width: 0,
-                text: head.to_owned(),
-            });
+            push_token(
+                physical,
+                Token {
+                    code: code.clone(),
+                    break_width: 0,
+                    text: head.to_owned(),
+                },
+            );
             first = false;
         } else {
             physical.push(vec![Token {
@@ -375,12 +410,15 @@ fn place_token(physical: &mut Vec<Vec<Token>>, used: &mut usize, avail: usize, t
     if text.is_empty() {
         *used = avail;
     } else {
+        // The chunk becomes the sole token of a fresh line: its width is
+        // the line's used width.
+        let used_width = text.chars().count();
         physical.push(vec![Token {
             code,
             break_width: 0,
             text,
         }]);
-        *used = physical.last().unwrap()[0].text.chars().count();
+        *used = used_width;
     }
 }
 
@@ -593,6 +631,28 @@ mod tests {
     #[test]
     fn strip_ansi_keeps_multibyte_text_intact() {
         assert_eq!(strip_ansi("\x1b[1möké\x1b[0m"), "öké");
+    }
+
+    #[test]
+    fn wrap_line_hard_splits_overlong_multibyte_words() {
+        // A word longer than the width, built from multibyte characters,
+        // must split on char boundaries without losing or duplicating text.
+        let word = "é".repeat(30);
+        let wrapped = wrap_line(&word, 10);
+        assert_eq!(wrapped.len(), 3);
+        assert!(wrapped.iter().all(|line| visible_len(line) <= 10));
+        assert_eq!(
+            wrapped.concat(),
+            word,
+            "hard-split must keep every character"
+        );
+    }
+
+    #[test]
+    fn wrap_line_tolerates_degenerate_input() {
+        assert_eq!(wrap_line("", 10), vec![""]);
+        assert_eq!(wrap_line("abc", 0), vec!["abc"]);
+        assert_eq!(wrap_line("a", 1), vec!["a"]);
     }
 
     #[test]

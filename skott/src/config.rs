@@ -971,16 +971,13 @@ pub fn select_active_model(
             }
         }
         if !ambiguous {
-            // A single unique match: reuse it with no switch.
+            // A single unique match: reuse it with no switch. Every matched
+            // entry was only pushed when `active` held exactly `model.model`
+            // for its base_url, so the loaded name is `model.model` itself.
             let model = matched[0];
             return Select::Active {
                 model_id: model.id.clone(),
-                reason: format!(
-                    "using already-loaded model `{}` (no switch)",
-                    active
-                        .get(&model.base_url)
-                        .expect("matched entry has an active model")
-                ),
+                reason: format!("using already-loaded model `{}` (no switch)", model.model),
                 loaded: model.model.clone(),
             };
         }

@@ -1577,16 +1577,17 @@ fn merge_agent_config_from_table(
                 )
             })?;
 
-            // Legacy check: is this table an old role definition like [agent.profiles.architect]?
-            let role_opt = Role::from_str_case_insensitive(name);
-            let is_legacy_role = role_opt.is_some()
-                && (p_table.contains_key("command_template")
-                    || p_table.contains_key("models")
-                    || p_table.contains_key("token_limit")
-                    || p_table.contains_key("timeout_seconds"));
+            // Legacy check: is this table an old role definition like
+            // [agent.profiles.architect]? `filter` keeps the `Some` guard and
+            // the legacy-shape predicate in one place, so the binding below
+            // is total.
+            let is_legacy = p_table.contains_key("command_template")
+                || p_table.contains_key("models")
+                || p_table.contains_key("token_limit")
+                || p_table.contains_key("timeout_seconds");
+            let legacy_role = Role::from_str_case_insensitive(name).filter(|_| is_legacy);
 
-            if is_legacy_role {
-                let role = role_opt.unwrap();
+            if let Some(role) = legacy_role {
                 let role_cfg = config
                     .roles
                     .entry(role)

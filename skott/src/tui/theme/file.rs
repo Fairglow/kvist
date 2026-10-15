@@ -66,15 +66,18 @@ impl StyleSpec {
     /// Builds a style that must declare its own background: used for every
     /// surface the renderer paints as a whole widget (the reasoning strip,
     /// the scrollbar, and the menu rows), so nothing there can fall back to
-    /// the terminal's own default background.
-    fn style_with_required_bg(&self, item: &str) -> Result<Style, String> {
-        if self.bg.is_none() {
-            return Err(format!(
+    /// the terminal's own default background. Returns the parsed background
+    /// alongside the style so callers never need to recover it from the
+    /// `Style` afterward.
+    fn style_with_required_bg(&self, item: &str) -> Result<(Style, ratatui::style::Color), String> {
+        let bg = self.bg.as_deref().ok_or_else(|| {
+            format!(
                 "`{item}.bg` is required: this surface paints its own background, so it must \
-                 be explicit and cannot fall back to the terminal's default"
-            ));
-        }
-        self.style(item)
+                     be explicit and cannot fall back to the terminal's default"
+            )
+        })?;
+        let bg = parse_color(item, "bg", bg)?;
+        Ok((self.style(item)?, bg))
     }
 
     /// Builds a background-only style (the code-block patch): `fg` is not
@@ -202,9 +205,8 @@ impl ThemeSpec {
         let spinner = color_item("colors.spinner", &colors.spinner)?;
         let stats = color_item("colors.stats", &colors.stats)?;
 
-        let reasoning_style = self.reasoning.style_with_required_bg("reasoning")?;
+        let (reasoning_style, reasoning_bg) = self.reasoning.style_with_required_bg("reasoning")?;
         ensure_visible("reasoning", reasoning_style, panel_bg)?;
-        let reasoning_bg = reasoning_style.bg.expect("required above");
 
         let reasoning_placeholder = self.reasoning_placeholder.style("reasoning_placeholder")?;
         ensure_visible("reasoning_placeholder", reasoning_placeholder, panel_bg)?;
@@ -212,12 +214,12 @@ impl ThemeSpec {
         let prompt = self.prompt.style("prompt")?;
         ensure_visible("prompt", prompt, panel_bg)?;
 
-        let scrollbar = self.scrollbar.style_with_required_bg("scrollbar")?;
+        let (scrollbar, _) = self.scrollbar.style_with_required_bg("scrollbar")?;
         ensure_visible("scrollbar", scrollbar, panel_bg)?;
 
-        let menu_selected = self.menu.selected.style_with_required_bg("menu.selected")?;
+        let (menu_selected, _) = self.menu.selected.style_with_required_bg("menu.selected")?;
         ensure_visible("menu.selected", menu_selected, panel_bg)?;
-        let menu_plain = self.menu.plain.style_with_required_bg("menu.plain")?;
+        let (menu_plain, _) = self.menu.plain.style_with_required_bg("menu.plain")?;
         ensure_visible("menu.plain", menu_plain, panel_bg)?;
 
         let md = &self.markdown;

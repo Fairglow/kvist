@@ -408,7 +408,14 @@ where
         }
     }
 
-    unreachable!("validated retry bound always executes at least one attempt")
+    // The loop bound is validated to be at least one attempt, and every
+    // iteration either returns or breaks out; reaching this line means an
+    // invariant was violated. Report it as an exhausted supervision instead
+    // of aborting the process.
+    Err(Error::SupervisionExhausted {
+        attempts: 0,
+        reason: "supervision loop terminated without an attempt result".to_owned(),
+    })
 }
 
 fn run_attempt(

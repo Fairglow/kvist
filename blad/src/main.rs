@@ -67,6 +67,24 @@ fn resolve_log_dir(cli: &Cli) -> PathBuf {
     }
 }
 
+/// Report an I/O failure and exit with the contract's error code (1).
+fn report_io(context: &str, result: std::io::Result<()>) {
+    if let Err(error) = result {
+        eprintln!("Failed to {context}: {error}");
+        std::process::exit(1);
+    }
+}
+
+/// Print an error to stderr and exit with the contract's error code (1).
+///
+/// Every failed lookup (missing file, unknown session, unreadable path) is an
+/// error per the contract, not a soft success: callers of the CLI must be able
+/// to distinguish them from a successful, empty result by the exit status.
+fn fail(message: &str) -> ! {
+    eprintln!("{message}");
+    std::process::exit(1);
+}
+
 fn main() {
     let cli = Cli::parse();
     let log_dir = resolve_log_dir(&cli);
@@ -79,7 +97,7 @@ fn main() {
                 match std::fs::read_to_string(target) {
                     Ok(content) => {
                         if cli.dump {
-                            display::dump_markdown(&content);
+                            report_io("display markdown", display::dump_markdown(&content));
                         } else {
                             display::view_markdown_file(
                                 Some(&std::path::PathBuf::from(target)),
@@ -88,7 +106,7 @@ fn main() {
                             );
                         }
                     }
-                    Err(e) => eprintln!("Error reading file: {}", e),
+                    Err(e) => fail(&format!("Error reading file: {e}")),
                 }
                 return;
             }
@@ -98,12 +116,12 @@ fn main() {
                 match session::load_session_by_path(&PathBuf::from(target)) {
                     Some(s) => {
                         if cli.dump {
-                            display::dump_session(&s);
+                            report_io("dump session", display::dump_session(&s));
                         } else {
-                            display::show_session(&s);
+                            report_io("show session", display::show_session(&s));
                         }
                     }
-                    None => eprintln!("Error loading session from path: {}", target),
+                    None => fail(&format!("Error loading session from path: {target}")),
                 }
                 return;
             }
@@ -112,15 +130,15 @@ fn main() {
             match session::load_session(&log_dir, target) {
                 Some(s) => {
                     if cli.dump {
-                        display::dump_session(&s);
+                        report_io("dump session", display::dump_session(&s));
                     } else {
-                        display::show_session(&s);
+                        report_io("show session", display::show_session(&s));
                     }
                 }
-                None => eprintln!("Session not found: {}", target),
+                None => fail(&format!("Session not found: {target}")),
             }
         } else {
-            eprintln!("Usage: blad [OPTIONS] <command> [ARGS]");
+            fail("Usage: blad [OPTIONS] <command> [ARGS]");
         }
         return;
     }
@@ -147,46 +165,49 @@ fn main() {
                 match session::load_session_by_path(&PathBuf::from(&session_id)) {
                     Some(s) => {
                         if cli.dump {
-                            display::dump_session(&s);
+                            report_io("dump session", display::dump_session(&s));
                         } else {
-                            display::show_session(&s);
+                            report_io("show session", display::show_session(&s));
                         }
                     }
-                    None => eprintln!("Error loading session from path: {}", session_id),
+                    None => fail(&format!("Error loading session from path: {session_id}")),
                 }
             } else {
                 match session::load_session(&log_dir, &session_id) {
                     Some(s) => {
                         if cli.dump {
-                            display::dump_session(&s);
+                            report_io("dump session", display::dump_session(&s));
                         } else {
-                            display::show_session(&s);
+                            report_io("show session", display::show_session(&s));
                         }
                     }
-                    None => eprintln!("Session not found: {}", session_id),
+                    None => fail(&format!("Session not found: {session_id}")),
                 }
             }
         }
         Some(Command::Stream { session_id }) => {
             match session::load_session(&log_dir, &session_id) {
-                Some(s) => display::stream_session(&s),
-                None => eprintln!("Session not found: {}", session_id),
+                Some(s) => report_io("stream session", display::stream_session(&s)),
+                None => fail(&format!("Session not found: {session_id}")),
             }
         }
         Some(Command::View { path }) => match std::fs::read_to_string(&path) {
             Ok(content) => {
                 if cli.dump {
-                    display::dump_markdown(&content);
+                    report_io("display markdown", display::dump_markdown(&content));
                 } else {
                     display::view_markdown_file(Some(&path), &content, cli.line_numbers);
                 }
             }
-            Err(e) => eprintln!("Error reading file: {}", e),
+            Err(e) => fail(&format!("Error reading file: {e}")),
         },
         Some(Command::Export { session_id, output }) => {
             match session::load_session(&log_dir, &session_id) {
-                Some(s) => display::export_session(&s, output.as_deref()),
-                None => eprintln!("Session not found: {}", session_id),
+                Some(s) => report_io(
+                    "export session",
+                    display::export_session(&s, output.as_deref()),
+                ),
+                None => fail(&format!("Session not found: {session_id}")),
             }
         }
         None => {

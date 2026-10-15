@@ -12,7 +12,7 @@ use crate::terminal_text::TerminalLine;
 use crate::viewport::{Document, Frame, paint};
 
 /// Show a completed session transcript.
-pub fn show_session(session: &Session) {
+pub fn show_session(session: &Session) -> io::Result<()> {
     println!("Session: {}", session.id);
     if let Some(model) = &session.model {
         println!("Model: {}", model);
@@ -26,12 +26,13 @@ pub fn show_session(session: &Session) {
     let messages = load_messages(session);
     let mut stdout = io::stdout();
     for msg in &messages {
-        print_message(msg, &mut stdout).unwrap();
+        print_message(msg, &mut stdout)?;
     }
+    Ok(())
 }
 
 /// Dump a completed session transcript to plain text (no ANSI).
-pub fn dump_session(session: &Session) {
+pub fn dump_session(session: &Session) -> io::Result<()> {
     println!("Session: {}", session.id);
     if let Some(model) = &session.model {
         println!("Model: {}", model);
@@ -45,21 +46,23 @@ pub fn dump_session(session: &Session) {
     let messages = load_messages(session);
     let mut stdout = io::stdout();
     for msg in &messages {
-        dump_message(msg, &mut stdout).unwrap();
+        dump_message(msg, &mut stdout)?;
     }
+    Ok(())
 }
 
 /// Stream a live or recently-completed session.
-pub fn stream_session(session: &Session) {
+pub fn stream_session(session: &Session) -> io::Result<()> {
     let messages = load_messages(session);
     let mut stdout = io::stdout();
     for msg in &messages {
-        print_message(msg, &mut stdout).unwrap();
+        print_message(msg, &mut stdout)?;
     }
 
     if !session.completed {
         println!("\n(session still active - re-run to see updates)");
     }
+    Ok(())
 }
 
 /// Check if stdout is a TTY (interactive terminal).
@@ -84,7 +87,9 @@ pub fn view_markdown_file(path: Option<&std::path::Path>, content: &str, line_nu
         interactive_viewer(path, content, line_numbers);
     } else {
         // Non-interactive: render to stdout and exit
-        dump_markdown(content);
+        if let Err(error) = dump_markdown(content) {
+            eprintln!("Failed to display Markdown: {error}");
+        }
     }
 }
 
@@ -105,12 +110,13 @@ pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, termin
 }
 
 /// Dump a standalone markdown file to plain text (no ANSI).
-pub fn dump_markdown(content: &str) {
+pub fn dump_markdown(content: &str) -> io::Result<()> {
     // Render markdown to a buffer, output directly
     let mut output = Vec::new();
-    render_markdown(content, &mut output).unwrap();
-    let rendered = String::from_utf8(output).unwrap();
-    print!("{}", rendered);
+    render_markdown(content, &mut output)?;
+    let rendered = String::from_utf8(output)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    io::stdout().write_all(rendered.as_bytes())
 }
 
 /// Interactive viewer with navigation and search.
@@ -466,7 +472,7 @@ fn edit_and_rerender(path: &std::path::Path, line_numbers: bool, width_limit: Op
 }
 
 /// Export a session to a combined markdown document.
-pub fn export_session(session: &Session, output: Option<&std::path::Path>) {
+pub fn export_session(session: &Session, output: Option<&std::path::Path>) -> io::Result<()> {
     let mut doc = String::new();
     doc.push_str("# Session Transcript\n\n");
     doc.push_str(&format!("Session: {}\n", session.id));
@@ -496,17 +502,15 @@ pub fn export_session(session: &Session, output: Option<&std::path::Path>) {
 
     match output {
         Some(path) => {
-            let mut file = std::fs::File::create(path).expect("failed to create output file");
-            file.write_all(doc.as_bytes())
-                .expect("failed to write output file");
+            let mut file = std::fs::File::create(path)?;
+            file.write_all(doc.as_bytes())?;
             println!("Exported to {}", path.display());
         }
         None => {
-            io::stdout()
-                .write_all(doc.as_bytes())
-                .expect("failed to write output");
+            io::stdout().write_all(doc.as_bytes())?;
         }
     }
+    Ok(())
 }
 
 /// Print a single message with its label.

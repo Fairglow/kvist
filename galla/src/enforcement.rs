@@ -651,59 +651,72 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     // Apply native resource limits to the child process after successful spawn via prlimit
     safe_prlimit(child_pid, limits);
 
-    // Spawn stdout reader thread
-    let total_bytes_stdout = total_bytes.clone();
-    let limit_exceeded_stdout = limit_exceeded.clone();
-    let mut stdout_pipe = child.stdout.take().expect("stdout pipe");
-    let stdout_thread = std::thread::spawn(move || {
-        let mut buf = [0u8; 4096];
-        use std::io::{Read, Write};
-        let host_stdout = std::io::stdout();
-        let mut host_stdout = host_stdout.lock();
-        while let Ok(n) = stdout_pipe.read(&mut buf) {
-            if n == 0 {
-                break;
-            }
-            let cumulative = total_bytes_stdout.fetch_add(n as u64, Ordering::SeqCst) + n as u64;
-            if cumulative > max_output_bytes {
-                limit_exceeded_stdout.store(true, Ordering::SeqCst);
-                let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
-                let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
-                break;
-            }
-            if host_stdout.write_all(&buf[..n]).is_err() {
-                break;
-            }
-            let _ = host_stdout.flush();
+    // Spawn the stdout reader thread. The pipe is always present because
+    // Stdio::piped() was requested; if it were missing there would simply
+    // be no output to forward, not a fatal error.
+    let stdout_thread = match child.stdout.take() {
+        Some(mut stdout_pipe) => {
+            let total_bytes_stdout = total_bytes.clone();
+            let limit_exceeded_stdout = limit_exceeded.clone();
+            Some(std::thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                use std::io::{Read, Write};
+                let host_stdout = std::io::stdout();
+                let mut host_stdout = host_stdout.lock();
+                while let Ok(n) = stdout_pipe.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+                    let cumulative =
+                        total_bytes_stdout.fetch_add(n as u64, Ordering::SeqCst) + n as u64;
+                    if cumulative > max_output_bytes {
+                        limit_exceeded_stdout.store(true, Ordering::SeqCst);
+                        let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
+                        let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
+                        break;
+                    }
+                    if host_stdout.write_all(&buf[..n]).is_err() {
+                        break;
+                    }
+                    let _ = host_stdout.flush();
+                }
+            }))
         }
-    });
+        None => None,
+    };
 
-    // Spawn stderr reader thread
-    let total_bytes_stderr = total_bytes.clone();
-    let limit_exceeded_stderr = limit_exceeded.clone();
-    let mut stderr_pipe = child.stderr.take().expect("stderr pipe");
-    let stderr_thread = std::thread::spawn(move || {
-        let mut buf = [0u8; 4096];
-        use std::io::{Read, Write};
-        let host_stderr = std::io::stderr();
-        let mut host_stderr = host_stderr.lock();
-        while let Ok(n) = stderr_pipe.read(&mut buf) {
-            if n == 0 {
-                break;
-            }
-            let cumulative = total_bytes_stderr.fetch_add(n as u64, Ordering::SeqCst) + n as u64;
-            if cumulative > max_output_bytes {
-                limit_exceeded_stderr.store(true, Ordering::SeqCst);
-                let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
-                let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
-                break;
-            }
-            if host_stderr.write_all(&buf[..n]).is_err() {
-                break;
-            }
-            let _ = host_stderr.flush();
+    // Spawn the stderr reader thread, degrading to no forwarding when the
+    // pipe is absent.
+    let stderr_thread = match child.stderr.take() {
+        Some(mut stderr_pipe) => {
+            let total_bytes_stderr = total_bytes.clone();
+            let limit_exceeded_stderr = limit_exceeded.clone();
+            Some(std::thread::spawn(move || {
+                let mut buf = [0u8; 4096];
+                use std::io::{Read, Write};
+                let host_stderr = std::io::stderr();
+                let mut host_stderr = host_stderr.lock();
+                while let Ok(n) = stderr_pipe.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+                    let cumulative =
+                        total_bytes_stderr.fetch_add(n as u64, Ordering::SeqCst) + n as u64;
+                    if cumulative > max_output_bytes {
+                        limit_exceeded_stderr.store(true, Ordering::SeqCst);
+                        let pgid = nix::unistd::Pid::from_raw(-(child_pid as i32));
+                        let _ = nix::sys::signal::kill(pgid, nix::sys::signal::Signal::SIGKILL);
+                        break;
+                    }
+                    if host_stderr.write_all(&buf[..n]).is_err() {
+                        break;
+                    }
+                    let _ = host_stderr.flush();
+                }
+            }))
         }
-    });
+        None => None,
+    };
 
     // Monitor process execution and timeouts
     let start_time = Instant::now();
@@ -796,8 +809,12 @@ pub fn run(request: SandboxRequest) -> ExitCode {
     let status = child.wait().ok();
 
     // Ensure reading threads are completely drained and finished
-    stdout_thread.join().ok();
-    stderr_thread.join().ok();
+    if let Some(thread) = stdout_thread {
+        thread.join().ok();
+    }
+    if let Some(thread) = stderr_thread {
+        thread.join().ok();
+    }
 
     if let Some(reason) = specific_breach {
         eprintln!("galla-runner: {reason}");

@@ -124,14 +124,12 @@ impl Theme {
 
     /// The default dark theme, parsed from the embedded `themes/dark.toml`.
     pub fn dark() -> Self {
-        file::parse_str(DARK_TOML, "dark")
-            .expect("themes/dark.toml is a valid, checked-in built-in theme")
+        Self::builtin("dark", DARK_TOML)
     }
 
     /// The light alternative, parsed from the embedded `themes/light.toml`.
     pub fn light() -> Self {
-        file::parse_str(LIGHT_TOML, "light")
-            .expect("themes/light.toml is a valid, checked-in built-in theme")
+        Self::builtin("light", LIGHT_TOML)
     }
 
     /// The terminal theme: uses basic ANSI color codes that map to the
@@ -163,6 +161,26 @@ impl Theme {
             menu_selected: Style::default().fg(Color::Yellow).bg(Color::Reset).bold(),
             menu_plain: Style::default().fg(Color::White).bg(Color::Reset),
             markdown: MarkdownStyles::default(),
+        }
+    }
+
+    /// Parses an embedded built-in theme. The files are checked in and
+    /// covered by the test suite, so a parse failure signals a corrupted
+    /// build rather than a user error; degrade to the terminal theme
+    /// (keeping the requested name so the `next()` cycle still works) and
+    /// warn instead of aborting the TUI.
+    fn builtin(name: &str, toml_text: &str) -> Self {
+        match file::parse_str(toml_text, name) {
+            Ok(theme) => theme,
+            Err(error) => {
+                eprintln!(
+                    "warning: built-in `{name}` theme failed to parse ({error}); \
+                     falling back to the terminal theme"
+                );
+                let mut fallback = Self::terminal();
+                fallback.name = name.to_owned();
+                fallback
+            }
         }
     }
 }

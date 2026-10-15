@@ -5,6 +5,8 @@ use blad::markdown::render_markdown_width;
 use ratatui::style::{Color, Modifier, Style as RStyle};
 use ratatui::text::{Line, Span};
 use std::io::Cursor;
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 /// One visual transcript row plus a flag marking whether it is code.
 #[derive(Debug, Clone)]
@@ -130,8 +132,12 @@ fn parse_ansi_line(line: &str) -> Vec<Span<'static>> {
             // Parse the escape sequence
             i = parse_escape_sequence(line, i, &mut current_style);
         } else {
-            current_text.push(line.chars().nth(i).unwrap());
-            i += 1;
+            // `i` is a byte index sitting on a char boundary; consume the
+            // whole character so multibyte text is neither misindexed nor
+            // split across bytes.
+            let ch = line[i..].chars().next().unwrap_or('\u{FFFD}');
+            current_text.push(ch);
+            i += ch.len_utf8();
         }
     }
 
@@ -172,14 +178,16 @@ fn parse_escape_sequence(line: &str, start: usize, style: &mut RStyle) -> usize 
         i += 1;
     }
 
-    // Parse the code
+    // Parse the code. The terminating letter is stripped so its digits
+    // reach the parameter parser; a truncated escape (an empty code, or a
+    // code with no terminating letter) simply sets no style instead of
+    // panicking.
     let params: Vec<&str> = code
-        .trim_end_matches(|c: char| c.is_ascii_uppercase())
+        .trim_end_matches(|c: char| c.is_ascii_alphabetic())
         .split(';')
         .collect();
-    let final_char = code.chars().last().unwrap();
 
-    if final_char == 'm' {
+    if code.ends_with('m') {
         // SGR (Select Graphic Rendition)
         if params.is_empty() || params[0].trim().is_empty() {
             // Reset
@@ -244,23 +252,29 @@ fn ansi_color_to_ratatui(code: u16) -> Color {
     }
 }
 
-/// Split a string into cell-width chunks for terminal display.
+/// Split a string into chunks whose displayed cell width never exceeds
+/// `width`, breaking only on grapheme-cluster boundaries so combining marks,
+/// wide characters, and ZWJ sequences are never split. A single grapheme wider
+/// than the budget still occupies its own chunk: the terminal will clip or
+/// fold it, but a mid-cluster fragment is never emitted. Empty input yields
+/// one empty chunk.
 pub fn split_cell_chunks(text: &str, width: usize) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
+    let width = width.max(1);
     let mut chunks = Vec::new();
-    let mut start = 0;
-
-    while start < chars.len() {
-        let end = std::cmp::min(start + width, chars.len());
-        let chunk: String = chars[start..end].iter().collect();
-        chunks.push(chunk);
-        start = end;
+    let mut current = String::new();
+    let mut current_width = 0usize;
+    for grapheme in text.graphemes(true) {
+        let grapheme_width = grapheme.width();
+        if current_width.saturating_add(grapheme_width) > width && !current.is_empty() {
+            chunks.push(std::mem::take(&mut current));
+            current_width = 0;
+        }
+        current.push_str(grapheme);
+        current_width = current_width.saturating_add(grapheme_width);
     }
-
-    if chunks.is_empty() {
-        chunks.push(String::new());
+    if !current.is_empty() || chunks.is_empty() {
+        chunks.push(current);
     }
-
     chunks
 }
 
@@ -296,5 +310,92 @@ mod tests {
     fn table() {
         let out = render_document("| a | b |\n| --- | --- |\n| 1 | 2 |\n", 40);
         assert!(!out.is_empty());
+    }
+
+    #[test]
+    fn multibyte_text_is_not_misindexed() {
+        // A byte index must not be treated as a char index: 'é' is two
+        // bytes but one character, and must survive parsing intact.
+        let spans = parse_ansi_line("é");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].content.as_ref(), "é");
+        // Multibyte text inside a styled span.
+        let spans = parse_ansi_line("\x1b[1mé\x1b[0m");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].content.as_ref(), "é");
+    }
+
+    #[test]
+    fn truncated_escape_at_end_of_line_is_dropped() {
+        // A line ending right after `\x1b[` has no terminating letter: the
+        // escape is consumed, no style is set, and nothing panics.
+        let spans = parse_ansi_line("\x1b[");
+        assert_eq!(spans.len(), 1);
+        assert!(spans[0].content.as_ref().is_empty());
+        let spans = parse_ansi_line("a\x1b[");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].content.as_ref(), "a");
+    }
+
+    #[test]
+    fn sgr_codes_apply_style_to_the_following_text() {
+        // The terminating `m` must be stripped from the last parameter, or
+        // its digits never parse and the style is silently dropped.
+        let spans = parse_ansi_line("\x1b[31mred\x1b[0m");
+        assert_eq!(spans.len(), 1);
+        assert_eq!(spans[0].content.as_ref(), "red");
+        assert_eq!(spans[0].style.fg, Some(Color::Red));
+        let spans = parse_ansi_line("\x1b[1;31merr\x1b[0m");
+        assert_eq!(spans[0].content.as_ref(), "err");
+        assert_eq!(spans[0].style.fg, Some(Color::Red));
+        assert!(spans[0].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn split_cell_chunks_is_ascii_stable() {
+        assert_eq!(
+            split_cell_chunks("abcdefghij", 4),
+            vec!["abcd", "efgh", "ij"]
+        );
+        assert_eq!(split_cell_chunks("abcd", 4), vec!["abcd"]);
+    }
+
+    #[test]
+    fn split_cell_chunks_empty_yields_one_empty_chunk() {
+        assert_eq!(split_cell_chunks("", 4), vec![""]);
+    }
+
+    #[test]
+    fn split_cell_chunks_never_breaks_grapheme_clusters() {
+        // Combining mark, wide CJK, ZWJ emoji, and a plain ASCII tail: 8
+        // cells in one word. At budget 4 it splits only on cluster edges.
+        let text = "a\u{301}\u{4f60}\u{597d}\u{1f469}\u{200d}\u{1f4bb}b";
+        let chunks = split_cell_chunks(text, 4);
+        assert_eq!(
+            chunks,
+            vec![
+                "a\u{301}\u{4f60}",
+                "\u{597d}\u{1f469}\u{200d}\u{1f4bb}",
+                "b"
+            ]
+        );
+        assert!(chunks.iter().all(|c| Span::raw(c).width() <= 4));
+        assert!(!chunks.iter().any(|c| c.starts_with('\u{301}')));
+    }
+
+    #[test]
+    fn split_cell_chunks_combining_mark_stays_with_its_base() {
+        // A combining mark may not start a chunk, even at a 1-cell budget.
+        assert_eq!(split_cell_chunks("a\u{301}b", 1), vec!["a\u{301}", "b"]);
+    }
+
+    #[test]
+    fn split_cell_chunks_wide_grapheme_wider_than_budget_stays_whole() {
+        // A ZWJ sequence is two cells wide; at a 1-cell budget it cannot be
+        // split without breaking the cluster, so it keeps its own chunk.
+        assert_eq!(
+            split_cell_chunks("\u{1f469}\u{200d}\u{1f4bb}", 1),
+            vec!["\u{1f469}\u{200d}\u{1f4bb}"]
+        );
     }
 }

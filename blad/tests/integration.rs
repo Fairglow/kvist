@@ -140,7 +140,7 @@ fn blad_export_session() {
 
     // Export to file
     let output = temp.path().join("export.md");
-    blad::display::export_session(&loaded, Some(&output));
+    blad::display::export_session(&loaded, Some(&output)).unwrap();
     let exported = fs::read_to_string(&output).unwrap();
 
     assert!(exported.contains("Session Transcript"));

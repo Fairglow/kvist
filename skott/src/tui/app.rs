@@ -2384,7 +2384,10 @@ fn format_number(n: f64) -> String {
             return format!("{text}{suffix}");
         }
     }
-    unreachable!("a finite value of 1000+ matches a divisor")
+    // Any finite value >= 1000 matches the 1000 divisor above; this tail is
+    // defensive, so a future edit that narrows the divisor list degrades to
+    // a plain integer instead of panicking in the TUI render loop.
+    format!("{n:.0}")
 }
 
 /// Formats elapsed session time as `m:ss`, or `h:mm:ss` past an hour.
@@ -2557,9 +2560,12 @@ mod tests {
         let theme = &app.theme;
 
         // Ordinary output sits on the standard panel background with its
-        // foreground colour left intact; the prompt echo keeps the prompt style.
-        assert_eq!(background_for("You: hello world"), Some(theme.panel_bg));
-        assert_eq!(foreground_for("You: hello world"), theme.prompt.fg);
+        // foreground colour left intact. The prompt echo is a "You:" cue line
+        // in the prompt foreground; the prompt text itself is rendered as
+        // markdown on the panel background.
+        assert_eq!(foreground_for("You:"), theme.prompt.fg);
+        assert_eq!(background_for("You:"), Some(theme.panel_bg));
+        assert_eq!(background_for("hello world"), Some(theme.panel_bg));
         assert_eq!(background_for("→ tool: ls"), Some(theme.panel_bg));
         assert_eq!(foreground_for("→ tool: ls"), Some(theme.info));
         assert_eq!(background_for("✓ tool ls finished"), Some(theme.panel_bg));
@@ -2862,14 +2868,16 @@ table_sep = { fg = "gray" }
             "user prompt lines should be plain text"
         );
 
-        // Ctrl+Enter with text stages the prompt as a line and a pending send.
+        // Ctrl+Enter with text stages the prompt as a "You:" cue line plus a
+        // Markdown-rendered prompt line, and a pending send.
         app.editor.insert_str("hello");
         assert_eq!(app.on_key(ctrl(KeyCode::Enter)), KeyAction::Submit);
         assert_eq!(app.take_pending_prompt().as_deref(), Some("hello"));
+        assert!(app.lines.iter().any(|line| line.line.to_string() == "You:"));
         assert!(
             app.lines
                 .iter()
-                .any(|line| line.line.to_string().contains("You: hello"))
+                .any(|line| line.line.to_string().contains("hello"))
         );
     }
 
@@ -3709,20 +3717,16 @@ table_sep = { fg = "gray" }
         app.push_event(Event::Text("```rust\nfn main() {}\n```".to_owned()));
         app.flush_pending_text();
         // A fenced block at the start of the transcript renders without a leading
-        // blank (nothing before it), but with a trailing blank: label, source,
-        // blank. That's 3 rows total.
+        // blank (nothing before it): the highlighted source row and a trailing
+        // blank. Blad does not emit a language-label row. That's 2 rows total.
         let lines = rendered_text(&app);
         assert_eq!(
             lines.len() - before,
-            3,
+            2,
             "a fence block at the start has no leading blank: {lines:?}"
         );
         assert!(
-            lines[0].contains("rust"),
-            "the fence is marked with its language: {lines:?}"
-        );
-        assert!(
-            lines[1].contains("fn main() {}"),
+            lines[0].contains("fn main() {}"),
             "the source is shown: {lines:?}"
         );
     }
@@ -3982,7 +3986,8 @@ table_sep = { fg = "gray" }
         app.push_event(Event::Text("# Title\n\n**bold** text".to_owned()));
         app.flush_pending_text();
         let lines = rendered_text(&app);
-        assert_eq!(lines[0], "Title", "the heading text: {lines:?}");
+        // Blad keeps the ATX marker on heading rows, styled as a heading.
+        assert_eq!(lines[0], "# Title", "the heading row: {lines:?}");
         let bold_row = app
             .lines
             .iter()
@@ -4008,10 +4013,16 @@ table_sep = { fg = "gray" }
             lines.len() >= 3,
             "a GFM table has at least 3 rows: {lines:?}"
         );
-        // Find the separator row
+        // Find the separator row: dashes, pipes, colons and spaces only,
+        // never blank (the table's trailing blank line would satisfy a bare
+        // all-predicate).
         let separator_idx = lines
             .iter()
-            .position(|l| l.chars().all(|c| matches!(c, '-' | ':' | ' ')))
+            .position(|l| {
+                !l.is_empty()
+                    && l.contains('-')
+                    && l.chars().all(|c| matches!(c, '-' | ':' | ' ' | '|'))
+            })
             .expect("a separator row exists");
         // Data row follows separator
         assert!(

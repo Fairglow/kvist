@@ -1238,7 +1238,10 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 let mut buffer = Vec::new();
                 let generator: clap_complete::Shell = shell.into();
                 clap_complete::generate(generator, &mut cmd, "kvist", &mut buffer);
-                let script = String::from_utf8(buffer).expect("valid UTF-8 completion script");
+                // Generated scripts are ASCII; a lossy conversion can only
+                // ever replace bytes that would not round-trip, and it never
+                // panics on a truncated or otherwise malformed buffer.
+                let script = String::from_utf8_lossy(&buffer).into_owned();
                 let mut escaped_script = String::new();
                 json_string_escape(&mut escaped_script, &script);
                 Ok(CommandOutput::message(format!(
@@ -1701,7 +1704,7 @@ pub fn execute(command: Option<Command>, json: bool) -> Result<CommandOutput> {
                 let mut buffer = Vec::new();
                 let generator: clap_complete::Shell = shell.into();
                 clap_complete::generate(generator, &mut cmd, "kvist", &mut buffer);
-                let script = String::from_utf8(buffer).expect("valid UTF-8 completion script");
+                let script = String::from_utf8_lossy(&buffer).into_owned();
                 Ok(CommandOutput::message(script))
             }
             Command::Help { topic } => Ok(CommandOutput::message(crate::help::render(topic))),

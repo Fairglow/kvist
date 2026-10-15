@@ -452,13 +452,15 @@ impl Shell {
     /// preference to `.kvist/theme`. A path loads that spec file; a name
     /// resolves against the built-ins and the user theme file.
     fn handle_theme_set(&mut self, value: &str, line: &str) -> LoopAction {
-        let matched = theme::match_preference(value);
-        let resolved = match matched {
-            Preference::Dark => Some(Theme::dark()),
-            Preference::Light => Some(Theme::light()),
-            Preference::Named(id) => Some(Theme::by_id(id)),
+        // Every preference variant resolves to a theme; a path preference
+        // that cannot be loaded reports the error and continues the loop,
+        // so the match below is total and needs no fallback.
+        let new_theme = match theme::match_preference(value) {
+            Preference::Dark => Theme::dark(),
+            Preference::Light => Theme::light(),
+            Preference::Named(id) => Theme::by_id(id),
             Preference::Path(path) => match theme::load_theme_file(&path) {
-                Ok(id) => Some(Theme::by_id(id)),
+                Ok(id) => Theme::by_id(id),
                 Err(error) => {
                     report_error(self.theme, &error.to_string());
                     self.journal
@@ -467,9 +469,6 @@ impl Shell {
                     return LoopAction::Continue;
                 }
             },
-        };
-        let Some(new_theme) = resolved else {
-            unreachable!("match_preference always resolves to a theme");
         };
         if let Err(error) = theme::save_preference(&self.project_dir, value) {
             report_error(self.theme, &error.to_string());

@@ -92,11 +92,13 @@ pub fn render(f: &mut ratatui::Frame, app: &App) {
         Constraint::Length(INPUT_ROWS),
     ]);
     let areas = vertical.split(area);
-    let mut split = areas.iter();
-    let header_area = *split.next().expect("header area");
-    let stats_area = *split.next().expect("stats area");
-    let transcript_area = *split.next().expect("transcript area");
-    let input_area = *split.next().expect("input area");
+    // A four-constraint layout yields exactly four areas; `first_chunk`
+    // degrades a short split to `None` instead of panicking on an index.
+    let Some([header_area, stats_area, transcript_area, input_area]) =
+        areas.as_ref().first_chunk().copied()
+    else {
+        return;
+    };
 
     render_header(f, app, header_area);
     render_stats(f, app, stats_area);

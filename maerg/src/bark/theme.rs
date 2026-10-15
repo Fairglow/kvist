@@ -113,6 +113,10 @@ pub struct ThemeDef {
     builtin: bool,
 }
 
+/// The process-wide theme registry. A poisoned lock means a prior holder
+/// panicked; the registry holds plain `Vec` data with no invariant a panic
+/// could corrupt, so every accessor recovers the inner data instead of
+/// propagating the panic.
 fn registry() -> &'static Mutex<Vec<ThemeDef>> {
     static REGISTRY: OnceLock<Mutex<Vec<ThemeDef>>> = OnceLock::new();
     REGISTRY.get_or_init(|| {
@@ -134,7 +138,9 @@ fn registry() -> &'static Mutex<Vec<ThemeDef>> {
 /// Registers a custom theme definition, replacing an existing entry with the
 /// same name. Returns the registry id of the theme.
 pub fn register(def: ThemeDef) -> u16 {
-    let mut guard = registry().lock().expect("theme registry poisoned");
+    let mut guard = registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(existing) = guard.iter_mut().find(|d| d.name == def.name) {
         existing.name = def.name.clone();
         existing.palette = def.palette.clone();
@@ -147,7 +153,9 @@ pub fn register(def: ThemeDef) -> u16 {
 
 /// The resolved palette for a theme id, degrading to the dark palette.
 pub fn palette_for(id: u16) -> Palette {
-    let guard = registry().lock().expect("theme registry poisoned");
+    let guard = registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     guard
         .get(id as usize)
         .map(|def| def.palette.clone())
@@ -156,7 +164,9 @@ pub fn palette_for(id: u16) -> Palette {
 
 /// The display name of a theme id, degrading to `dark`.
 pub fn name_for(id: u16) -> String {
-    let guard = registry().lock().expect("theme registry poisoned");
+    let guard = registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     guard
         .get(id as usize)
         .map(|def| def.name.clone())
@@ -165,7 +175,9 @@ pub fn name_for(id: u16) -> String {
 
 /// A snapshot of the registry: (name, id, built-in) in registration order.
 pub fn registered() -> Vec<(String, u16, bool)> {
-    let guard = registry().lock().expect("theme registry poisoned");
+    let guard = registry()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     guard
         .iter()
         .enumerate()
@@ -908,6 +920,22 @@ pub fn parse_osc11(data: &[u8]) -> Option<(u8, u8, u8)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn registry_recovers_from_a_poisoned_lock() {
+        // A panic while holding the registry lock poisons it; the lookups
+        // must recover the inner data instead of re-panicking.
+        std::thread::spawn(|| {
+            let _guard = registry().lock().unwrap();
+            panic!("poison the registry");
+        })
+        .join()
+        .unwrap_err();
+        // Every accessor still works after the poisoning.
+        assert!(!palette_for(0).agent_background.is_empty());
+        assert!(!name_for(0).is_empty());
+        assert!(!registered().is_empty());
+    }
 
     #[test]
     fn dark_and_light_palettes_differ_on_the_agent_surface() {

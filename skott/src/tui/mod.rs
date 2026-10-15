@@ -683,14 +683,20 @@ fn run_ui<M: std::io::Write>(
                                     // An in-flight bootstrap may target a stale
                                     // selection; discard it and start fresh.
                                     *bootstrap = None;
-                                    let model = builder
-                                        .config
-                                        .model(
-                                            app.model
-                                                .as_deref()
-                                                .expect("submit requires a selected model"),
-                                        )
-                                        .ok_or_else(|| {
+                                    // A submission without a selected model
+                                    // is a user error, not a fault: note it
+                                    // in the transcript and keep the TUI
+                                    // alive rather than panicking.
+                                    let Some(model_id) = app.model.as_deref() else {
+                                        app.push_event(crate::session::Event::Note(
+                                            "no model selected — press Tab to choose one \
+                                             before submitting"
+                                                .to_owned(),
+                                        ));
+                                        continue;
+                                    };
+                                    let model =
+                                        builder.config.model(model_id).ok_or_else(|| {
                                             let available = builder
                                                 .config
                                                 .models
@@ -698,7 +704,7 @@ fn run_ui<M: std::io::Write>(
                                                 .map(|model| model.id.clone())
                                                 .collect();
                                             Error::ModelNotFound {
-                                                requested: app.model.clone().unwrap_or_default(),
+                                                requested: model_id.to_owned(),
                                                 available,
                                             }
                                         })?;

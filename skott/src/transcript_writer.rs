@@ -85,9 +85,12 @@ impl TranscriptWriter {
     }
 
     fn now_iso() -> String {
+        // A clock set before the Unix epoch is not a real failure mode for a
+        // local CLI; degrade to a zero timestamp instead of panicking so the
+        // session manifest still gets a well-formed (if ancient) value.
         let elapsed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .expect("system time before Unix epoch");
+            .unwrap_or_default();
         let secs = elapsed.as_secs();
         let days = secs.div_euclid(86_400);
         let rem = secs.rem_euclid(86_400);

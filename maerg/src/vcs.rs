@@ -229,7 +229,13 @@ fn select_explicit(
             "inspection failed",
             reason.clone(),
         )),
-        _ => unreachable!("only supported VCS names are passed to select_explicit"),
+        // An unsupported `vcs.kind` can only reach here with a found
+        // repository, because every detection state is handled above for any
+        // name. Fail closed with an actionable error instead of panicking.
+        (_, Detection::Found(_)) => Err(VcsInspection::unavailable(
+            "unsupported VCS kind",
+            format!("`vcs.kind = \"{name}\"` is not supported; use \"Git\" or \"jj\""),
+        )),
     }
 }
 

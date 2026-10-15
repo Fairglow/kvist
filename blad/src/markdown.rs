@@ -99,9 +99,10 @@ pub fn render_markdown_width(
                 if code_language == "mermaid" {
                     // Mermaid diagrams: collect content, render later
                     // Try to use mmdc if available, fallback to plain text
-                } else {
-                    let syntax = find_syntax(&ss, &code_language);
-                    hl = Some(HighlightLines::new(syntax, &theme));
+                } else if let (Some(syntax), Some(theme)) =
+                    (find_syntax(&ss, &code_language), theme.as_ref())
+                {
+                    hl = Some(HighlightLines::new(syntax, theme));
                 }
             }
             Event::End(TagEnd::CodeBlock) => {
@@ -130,6 +131,13 @@ pub fn render_markdown_width(
                         } else {
                             writeln!(w, "{}", line)?;
                         }
+                    }
+                    writeln!(w)?;
+                } else {
+                    // No highlighter (missing syntax or theme): keep the code
+                    // visible as plain text instead of dropping it.
+                    for line in code_content.lines() {
+                        writeln!(w, "{}", line)?;
                     }
                     writeln!(w)?;
                 }
@@ -480,7 +488,12 @@ fn render_table(
         return Ok(());
     }
 
-    let num_cols = rows[0].len();
+    // Normalize ragged rows: use the widest row so cell access never runs
+    // past a shorter row's actual cell count.
+    let num_cols = rows.iter().map(|row| row.len()).max().unwrap_or(0);
+    if num_cols == 0 {
+        return Ok(());
+    }
 
     // Determine natural column widths based on content
     let mut col_widths = vec![0; num_cols];
@@ -601,8 +614,9 @@ fn render_table(
     for (row_idx, row) in rows.iter().enumerate() {
         // First, wrap all cells in this row
         let mut wrapped_row: Vec<Vec<String>> = Vec::new();
-        for (i, cell) in row.iter().enumerate() {
-            let wrapped = wrap_cell(cell, col_widths[i]);
+        for (i, &width) in col_widths.iter().enumerate() {
+            let cell = row.get(i).map_or("", |cell| cell.as_str());
+            let wrapped = wrap_cell(cell, width);
             wrapped_row.push(wrapped);
         }
 
@@ -683,12 +697,12 @@ fn pad_cell(cell: &str, width: usize) -> String {
     }
 }
 
-fn find_syntax<'a>(ss: &'a SyntaxSet, lang: &str) -> &'a syntect::parsing::SyntaxReference {
+fn find_syntax<'a>(ss: &'a SyntaxSet, lang: &str) -> Option<&'a syntect::parsing::SyntaxReference> {
     let lang = lang.trim();
     if lang.is_empty() {
         return ss
             .find_syntax_by_name("Plain Text")
-            .unwrap_or(ss.syntaxes().first().unwrap());
+            .or_else(|| ss.syntaxes().first());
     }
 
     let aliases = [
@@ -710,28 +724,28 @@ fn find_syntax<'a>(ss: &'a SyntaxSet, lang: &str) -> &'a syntect::parsing::Synta
         if lang == *alias
             && let Some(s) = ss.find_syntax_by_name(name)
         {
-            return s;
+            return Some(s);
         }
     }
 
     if let Some(s) = ss.find_syntax_by_name(lang) {
-        return s;
+        return Some(s);
     }
 
     if let Some(s) = ss.find_syntax_by_extension(lang) {
-        return s;
+        return Some(s);
     }
 
     let upper = lang.to_uppercase();
     if let Some(s) = ss.find_syntax_by_name(&upper) {
-        return s;
+        return Some(s);
     }
 
     ss.find_syntax_by_name("Plain Text")
-        .unwrap_or(ss.syntaxes().first().unwrap())
+        .or_else(|| ss.syntaxes().first())
 }
 
-fn get_terminal_theme(ts: &ThemeSet) -> Theme {
+fn get_terminal_theme(ts: &ThemeSet) -> Option<Theme> {
     let candidates = [
         "base16-ocean.dark",
         "base16-default.dark",
@@ -742,18 +756,15 @@ fn get_terminal_theme(ts: &ThemeSet) -> Theme {
 
     for name in candidates {
         if let Some(theme) = ts.themes.get(name) {
-            return theme.clone();
+            return Some(theme.clone());
         }
     }
 
-    ts.themes.values().next().cloned().unwrap_or_else(|| {
-        ThemeSet::load_defaults()
-            .themes
-            .values()
-            .next()
-            .cloned()
-            .unwrap()
-    })
+    ts.themes
+        .values()
+        .next()
+        .cloned()
+        .or_else(|| ThemeSet::load_defaults().themes.values().next().cloned())
 }
 
 /// Try to render a mermaid diagram to ASCII using mmdc.

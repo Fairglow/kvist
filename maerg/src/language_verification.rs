@@ -285,14 +285,11 @@ fn c_package_manager_profile(
     root_env_var: &str,
     vendored_dirname: &str,
 ) -> Result<LanguageProfile> {
-    let (program, arguments) = match test_command {
-        Some(command) if !command.is_empty() => {
-            let Some((program, arguments)) = command.split_first() else {
-                unreachable!("split_first of a non-empty slice");
-            };
-            (program.to_owned(), arguments.to_vec())
-        }
-        _ => {
+    // A missing or empty test command both fail closed with the same
+    // actionable error; `and_then` folds both cases into one `None`.
+    let (program, arguments) = match test_command.and_then(|command| command.split_first()) {
+        Some((program, arguments)) => (program.to_owned(), arguments.to_vec()),
+        None => {
             return Err(KvistError::SandboxUnavailable {
                 runner: "<language-verification>".to_owned(),
                 reason: "C/C++ verification requires an approved test command from the \
@@ -364,11 +361,19 @@ fn venv_site_packages(project_root: &Path) -> Result<String> {
             ),
         });
     }
+    // The count check above guarantees exactly one entry; the fallback
+    // keeps this total if the check is ever relaxed.
+    let Some(version_dir) = version_dirs.pop() else {
+        return Err(KvistError::SandboxUnavailable {
+            runner: "<language-verification>".to_owned(),
+            reason: format!(
+                "the provisioned venv lib directory `{}` contains no python version directory",
+                lib.display()
+            ),
+        });
+    };
     Ok(format!(
-        "{PYTHON_VENV_DEST}/lib/{}/site-packages",
-        version_dirs
-            .pop()
-            .expect("version_dirs has exactly one entry when the count is checked above")
+        "{PYTHON_VENV_DEST}/lib/{version_dir}/site-packages"
     ))
 }
 

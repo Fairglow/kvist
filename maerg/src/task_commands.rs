@@ -83,7 +83,9 @@ fn transition_locked(
     task.status = target;
     task.timestamps.updated_at = timestamp.clone();
     task.timestamps.completed_at = (target == TaskStatus::Completed).then(|| timestamp.clone());
-    task.blocked_reason = (target == TaskStatus::Blocked).then(|| reason.unwrap().to_owned());
+    // `validate_transition` guarantees a reason for a Blocked target; the
+    // empty-string fallback keeps this total if that invariant ever changes.
+    task.blocked_reason = (target == TaskStatus::Blocked).then(|| reason.unwrap_or("").to_owned());
 
     tracing::info!(
         task_id = %task_id,
@@ -3457,8 +3459,8 @@ fn load_and_interpolate_template(
 
     let template_content = if local_path.is_file() {
         fs::read_to_string(&local_path).unwrap_or_default()
-    } else if global_path.as_ref().map(|p| p.is_file()).unwrap_or(false) {
-        fs::read_to_string(global_path.unwrap()).unwrap_or_default()
+    } else if let Some(global_template) = global_path.as_ref().filter(|p| p.is_file()) {
+        fs::read_to_string(global_template).unwrap_or_default()
     } else {
         match lang {
             "rust" => DEFAULT_RUST_TEMPLATE.to_owned(),
