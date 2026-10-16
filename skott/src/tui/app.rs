@@ -700,9 +700,15 @@ impl App {
     /// row the reasoning tint — the cues that keep thinking distinct from the
     /// black output without a full box.
     fn push_reasoning_lines(&mut self, text: &str) {
-        // Add a blank line before the reasoning block if the transcript isn't
-        // empty and the last line isn't already blank or a reasoning line.
-        if !self.lines.is_empty() {
+        // Check if we're continuing an existing reasoning context (last non-blank
+        // line is reasoning or placeholder). If so, skip the leading blank line
+        // so consecutive reasoning blocks share the same background.
+        let in_reasoning_context = self.lines.iter().rev().find(|l| !l.line.to_string().is_empty())
+            .map(|l| l.kind == LineKind::Reasoning || l.kind == LineKind::Placeholder)
+            .unwrap_or(false);
+
+        if !in_reasoning_context && !self.lines.is_empty() {
+            // Not continuing reasoning: add a blank line before if needed
             let last = &self.lines[self.lines.len() - 1];
             if last.kind != LineKind::Reasoning
                 && last.kind != LineKind::Placeholder
@@ -718,13 +724,9 @@ impl App {
         }
         self.lines
             .extend(self.reasoning_rows(text, self.content_width()));
-        // Add a blank line after the reasoning block.
-        self.lines.push(ScreenLine::plain(
-            "",
-            Style::default(),
-            LineKind::Normal,
-            self.theme.panel_bg,
-        ));
+        // Don't add a trailing blank line yet — wait to see if more reasoning
+        // follows. If the next push is non-reasoning, it will add its own leading
+        // blank line (or the reasoning block will be followed by the answer).
         self.maybe_truncate();
         self.follow();
     }
@@ -1400,6 +1402,20 @@ impl App {
     }
 
     fn push_wrapped(&mut self, color: Color, text: &str) {
+        // If we're exiting a reasoning context (last non-blank line is reasoning),
+        // add a blank line to visually separate the reasoning from the following
+        // non-reasoning content.
+        let in_reasoning_context = self.lines.iter().rev().find(|l| !l.line.to_string().is_empty())
+            .map(|l| l.kind == LineKind::Reasoning || l.kind == LineKind::Placeholder)
+            .unwrap_or(false);
+        if in_reasoning_context && !text.is_empty() {
+            self.lines.push(ScreenLine::plain(
+                "",
+                Style::default(),
+                LineKind::Normal,
+                self.theme.panel_bg,
+            ));
+        }
         let style = Style::default().fg(color);
         for line in wrap(text, self.content_width()) {
             self.lines.push(ScreenLine::plain(
