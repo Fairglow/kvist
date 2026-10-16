@@ -533,12 +533,12 @@ fn render_table(
         return Ok(());
     }
 
-    // Determine natural column widths based on content
-    let mut col_widths = vec![0; num_cols];
+    // Determine natural column widths based on content.
+    let mut col_widths = vec![0usize; num_cols];
     for row in rows {
         for (i, cell) in row.iter().enumerate() {
             if i < num_cols {
-                let width = cell.chars().count();
+                let width = unicode_width::UnicodeWidthStr::width(cell.as_str());
                 if width > col_widths[i] {
                     col_widths[i] = width;
                 }
@@ -546,26 +546,58 @@ fn render_table(
         }
     }
 
+    // Enforce minimum column width: 4:3 width:height ratio means a column
+    // that wraps to H lines must be at least ceil(H * 4/3) columns wide.
+    // Iterate until stable because wrapping changes based on column widths.
+    let mut stable = false;
+    while !stable {
+        stable = true;
+        for row in rows {
+            let mut row_wrapped = Vec::new();
+            for (i, &width) in col_widths.iter().enumerate() {
+                let cell = row.get(i).map_or("", |cell| cell.as_str());
+                row_wrapped.push(wrap_cell(cell, width));
+            }
+            let max_lines = row_wrapped
+                .iter()
+                .map(|lines| lines.len())
+                .max()
+                .unwrap_or(1);
+            for (i, _wrapped_lines) in row_wrapped.iter().enumerate() {
+                let needed = ceil_div(max_lines * 4, 3);
+                if col_widths[i] < needed {
+                    col_widths[i] = needed;
+                    stable = false;
+                }
+            }
+        }
+    }
+
     // If terminal width is provided, adapt column widths to fit
     if let Some(term_width) = terminal_width {
-        let separator_space = (num_cols - 1) * 2;
+        let separator_space = (num_cols - 1) * 3;
         let available_width = term_width.saturating_sub(separator_space);
         let total_natural: usize = col_widths.iter().sum();
 
         if total_natural > available_width {
-            // Need to shrink columns. Use iterative proportional fit
-            // with minimum width constraints.
+            // Need to shrink columns. Strategy:
+            // 1. First, try to fit all columns at their natural width
+            // 2. If that doesn't work, shrink the largest columns first
+            // 3. Use iterative proportional fit with minimum width constraints
             let min_width = 3;
             let mut remaining = available_width;
             let mut fitted = vec![false; num_cols];
-            let mut iterations = 0;
 
-            loop {
-                iterations += 1;
-                if iterations > num_cols * 2 {
-                    break;
+            // First pass: fit columns that can fit at natural width
+            for i in 0..num_cols {
+                if col_widths[i] <= remaining {
+                    fitted[i] = true;
+                    remaining = remaining.saturating_sub(col_widths[i]);
                 }
+            }
 
+            // Second pass: shrink remaining columns proportionally
+            loop {
                 // Calculate unfitted total
                 let unfitted_total: usize = col_widths
                     .iter()
@@ -680,15 +712,26 @@ fn render_table(
                 }
             }
             writeln!(w)?;
+
+            // Add separator between wrapped lines within the same row
+            if line_idx < max_lines - 1 {
+                for (i, &width) in col_widths.iter().enumerate() {
+                    if i > 0 {
+                        write!(w, " | ")?;
+                    }
+                    write!(w, "{}", "─".repeat(width))?;
+                }
+                writeln!(w)?;
+            }
         }
 
-        // Separator after header row (dashes)
+        // Separator after header row (using Unicode box-drawing)
         if row_idx == 0 {
             for (i, &width) in col_widths.iter().enumerate() {
                 if i > 0 {
                     write!(w, " | ")?;
                 }
-                write!(w, "{}", "-".repeat(width))?;
+                write!(w, "{}", "─".repeat(width))?;
             }
             writeln!(w)?;
         }
@@ -698,8 +741,10 @@ fn render_table(
 }
 
 /// Wrap a cell to fit within the given width.
+/// Uses word wrapping, with hard wrapping for words that exceed the width.
 fn wrap_cell(cell: &str, width: usize) -> Vec<String> {
-    if cell.chars().count() <= width {
+    // Quick check: if cell fits, return as-is
+    if unicode_width::UnicodeWidthStr::width(cell) <= width {
         return vec![cell.to_string()];
     }
 
@@ -707,9 +752,30 @@ fn wrap_cell(cell: &str, width: usize) -> Vec<String> {
     let mut current = String::new();
 
     for word in cell.split_whitespace() {
-        if current.is_empty() {
+        let word_width = unicode_width::UnicodeWidthStr::width(word);
+        
+        // If the word itself is wider than the column, hard-wrap it
+        if word_width > width {
+            if !current.is_empty() {
+                result.push(current);
+                current = String::new();
+            }
+            // Split the long word into chunks of the given width
+            let word_chars: Vec<char> = word.chars().collect();
+            let mut i = 0;
+            while i < word_chars.len() {
+                let end = i + width;
+                let chunk: String = if end < word_chars.len() {
+                    word_chars[i..end].iter().collect()
+                } else {
+                    word_chars[i..].iter().collect()
+                };
+                result.push(chunk);
+                i = end;
+            }
+        } else if current.is_empty() {
             current = word.to_string();
-        } else if current.len() + 1 + word.len() <= width {
+        } else if unicode_width::UnicodeWidthStr::width(current.as_str()) + 1 + word_width <= width {
             current.push(' ');
             current.push_str(word);
         } else {
@@ -722,18 +788,27 @@ fn wrap_cell(cell: &str, width: usize) -> Vec<String> {
         result.push(current);
     }
 
+    if result.is_empty() {
+        result.push(String::new());
+    }
+
     result
 }
 
 /// Pad a cell to the right width.
 fn pad_cell(cell: &str, width: usize) -> String {
-    let cell_len = cell.chars().count();
-    if cell_len >= width {
+    let cell_width = unicode_width::UnicodeWidthStr::width(cell);
+    if cell_width >= width {
         cell.to_string()
     } else {
-        format!("{}{}", cell, " ".repeat(width - cell_len))
+        format!("{}{}", cell, " ".repeat(width - cell_width))
     }
 }
+
+fn ceil_div(a: usize, b: usize) -> usize {
+    a / b + if a % b != 0 { 1 } else { 0 }
+}
+
 
 fn find_syntax<'a>(ss: &'a SyntaxSet, lang: &str) -> Option<&'a syntect::parsing::SyntaxReference> {
     let lang = lang.trim();
