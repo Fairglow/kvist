@@ -162,6 +162,15 @@ impl Recorder for SessionTranscript {
     }
 
     fn session_finish(&mut self, summary: &RunSummary) -> Result<()> {
+        // Record the final answer in the transcript so it is visible in Blad
+        if let Some(answer) = summary.answer.as_deref() {
+            match self.transcript.record_assistant(answer, true) {
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::error!(%e, "failed to record final answer in transcript");
+                }
+            }
+        }
         self.log.session_finish(summary)?;
         if let Some(answer) = summary.answer.as_deref() {
             self.transcript
