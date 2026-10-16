@@ -13,7 +13,7 @@ use tui_textarea::TextArea;
 
 use crate::error::Result;
 use crate::history::{self, SessionEntry};
-use crate::markdown::{render_document_styles, split_cell_chunks};
+use crate::markdown::{MarkdownRenderer, split_cell_chunks};
 use crate::session::Event;
 
 use super::theme::{self, Theme};
@@ -1276,7 +1276,10 @@ impl App {
         if md.trim().is_empty() {
             return;
         }
-        let rows = render_document_styles(&md, self.content_width(), &self.theme.markdown);
+        let mut renderer = MarkdownRenderer::new();
+        renderer.set_width(self.content_width());
+        renderer.set_syntax_theme(self.theme.syntax_theme.as_deref());
+        let rows = renderer.render(&md);
         // Determine if this is a code block (starts with a code row).
         let is_code_block = rows.first().is_some_and(|row| row.is_code);
         // Add a blank line before code blocks if the transcript isn't empty and
@@ -2002,7 +2005,10 @@ impl App {
             if let Some(MarkdownRow::Start(source)) = self.lines[index].md.clone() {
                 // Re-render a whole Markdown block at the new width, preserving
                 // its block marker on the first row for any later resize.
-                let rows = render_document_styles(&source, target, &self.theme.markdown);
+                let mut renderer = MarkdownRenderer::new();
+                renderer.set_width(target);
+                renderer.set_syntax_theme(self.theme.syntax_theme.as_deref());
+                let rows = renderer.render(&source);
                 let mut next = index + 1;
                 while next < self.lines.len()
                     && matches!(self.lines[next].md, Some(MarkdownRow::Continuation))

@@ -76,26 +76,72 @@ impl Default for MarkdownStyles {
     }
 }
 
-/// Render markdown and return styled lines for the ratatui transcript.
-pub fn render_document(md: &str, width: usize) -> Vec<RenderedLine> {
-    render_document_styles(md, width, &MarkdownStyles::default())
+/// A configured markdown renderer that holds rendering options.
+///
+/// Configure it once with your theme and width preferences, then call
+/// `render` multiple times with different markdown content. Both theme and
+/// width are configuration that's stable during a session and updated in
+/// centralized handlers (theme picker, resize event).
+#[derive(Debug, Clone)]
+pub struct MarkdownRenderer {
+    syntax_theme: Option<String>,
+    width: usize,
 }
 
-/// Render markdown with custom styles.
-pub fn render_document_styles(
-    md: &str,
-    width: usize,
-    _styles: &MarkdownStyles,
-) -> Vec<RenderedLine> {
-    // Use Blad's markdown rendering, capture the output, and convert to
-    // ratatui-compatible lines.
-    let mut output = Cursor::new(Vec::new());
-    let _ = render_markdown_width(md, &mut output, Some(width));
-    let ansi_bytes = output.into_inner();
-    let ansi_text = String::from_utf8(ansi_bytes).unwrap_or_default();
+impl Default for MarkdownRenderer {
+    fn default() -> Self {
+        Self {
+            syntax_theme: None,
+            width: 80,
+        }
+    }
+}
 
-    // Parse the ANSI output into styled spans for ratatui
-    parse_ansi_to_lines(&ansi_text)
+impl MarkdownRenderer {
+    /// Create a new renderer with default options (no syntax theme, 80 columns).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the syntax highlighting theme (e.g., "Monokai", "Dracula").
+    /// Pass `None` to disable syntax highlighting.
+    pub fn set_syntax_theme(&mut self, theme: Option<&str>) {
+        self.syntax_theme = theme.map(|s| s.to_owned());
+    }
+
+    /// Set the render width. Call this from the centralized resize handler.
+    pub fn set_width(&mut self, width: usize) {
+        self.width = width;
+    }
+
+    /// Render markdown with the renderer's configured options.
+    ///
+    /// Uses the configured width and theme. For one-off rendering with
+    /// different settings, construct a new `MarkdownRenderer` instance.
+    pub fn render(&self, md: &str) -> Vec<RenderedLine> {
+        // Use Blad's markdown rendering, capture the output, and convert to
+        // ratatui-compatible lines.
+        let mut output = Cursor::new(Vec::new());
+        let _ = render_markdown_width(
+            md,
+            &mut output,
+            Some(self.width),
+            self.syntax_theme.as_deref(),
+        );
+        let ansi_bytes = output.into_inner();
+        let ansi_text = String::from_utf8(ansi_bytes).unwrap_or_default();
+
+        // Parse the ANSI output into styled spans for ratatui
+        parse_ansi_to_lines(&ansi_text)
+    }
+}
+
+/// Render markdown with default options (no syntax theme, 80-column width).
+///
+/// For repeated rendering with the same configuration, use a
+/// `MarkdownRenderer` instance instead.
+pub fn render_document(md: &str) -> Vec<RenderedLine> {
+    MarkdownRenderer::new().render(md)
 }
 
 /// Parse ANSI escape sequences into ratatui-compatible styled lines.
@@ -218,14 +264,32 @@ fn parse_escape_sequence(line: &str, start: usize, style: &mut RStyle) -> usize 
                         }
                         49 => *style = style.bg(Color::Reset),
                         90..=97 => {
-                            // Bright foreground
                             let base = ansi_color_to_ratatui(code - 90);
-                            *style = style.fg(base);
+                            *style = style.fg(match base {
+                                Color::Black => Color::DarkGray,
+                                Color::Red => Color::LightRed,
+                                Color::Green => Color::LightGreen,
+                                Color::Yellow => Color::LightYellow,
+                                Color::Blue => Color::LightBlue,
+                                Color::Magenta => Color::LightMagenta,
+                                Color::Cyan => Color::LightCyan,
+                                Color::White => Color::White,
+                                _ => base,
+                            });
                         }
                         100..=107 => {
-                            // Bright background
                             let base = ansi_color_to_ratatui(code - 100);
-                            *style = style.bg(base);
+                            *style = style.bg(match base {
+                                Color::Black => Color::DarkGray,
+                                Color::Red => Color::LightRed,
+                                Color::Green => Color::LightGreen,
+                                Color::Yellow => Color::LightYellow,
+                                Color::Blue => Color::LightBlue,
+                                Color::Magenta => Color::LightMagenta,
+                                Color::Cyan => Color::LightCyan,
+                                Color::White => Color::White,
+                                _ => base,
+                            });
                         }
                         _ => {}
                     }
@@ -237,7 +301,6 @@ fn parse_escape_sequence(line: &str, start: usize, style: &mut RStyle) -> usize 
     i
 }
 
-/// Convert ANSI color code to ratatui Color.
 fn ansi_color_to_ratatui(code: u16) -> Color {
     match code {
         0 => Color::Black,
@@ -248,7 +311,7 @@ fn ansi_color_to_ratatui(code: u16) -> Color {
         5 => Color::Magenta,
         6 => Color::Cyan,
         7 => Color::White,
-        _ => Color::White,
+        _ => Color::Reset,
     }
 }
 
@@ -284,31 +347,31 @@ mod tests {
 
     #[test]
     fn basic_heading() {
-        let out = render_document("# Title\n\nsome text\n", 40);
+        let out = MarkdownRenderer::new().render("# Title\n\nsome text\n");
         assert!(!out.is_empty());
     }
 
     #[test]
     fn inline_bold() {
-        let out = render_document("a **b** c", 40);
+        let out = MarkdownRenderer::new().render("a **b** c");
         assert!(!out.is_empty());
     }
 
     #[test]
     fn inline_code() {
-        let out = render_document("use `cargo build` now", 40);
+        let out = MarkdownRenderer::new().render("use `cargo build` now");
         assert!(!out.is_empty());
     }
 
     #[test]
     fn code_block() {
-        let out = render_document("```rust\nfn main() {}\n```\n", 40);
+        let out = MarkdownRenderer::new().render("```rust\nfn main() {}\n```\n");
         assert!(!out.is_empty());
     }
 
     #[test]
     fn table() {
-        let out = render_document("| a | b |\n| --- | --- |\n| 1 | 2 |\n", 40);
+        let out = MarkdownRenderer::new().render("| a | b |\n| --- | --- |\n| 1 | 2 |\n");
         assert!(!out.is_empty());
     }
 
