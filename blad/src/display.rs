@@ -101,7 +101,7 @@ pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, termin
         }
     } else {
         let mut output = Vec::new();
-        if let Err(error) = render_markdown_width(content, &mut output, Some(terminal_width))
+        if let Err(error) = render_markdown_width(content, &mut output, Some(terminal_width), None)
             .and_then(|()| io::stdout().write_all(&output))
         {
             eprintln!("Failed to display Markdown: {error}");

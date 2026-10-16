@@ -19,6 +19,8 @@
 # `skott --help` / the in-app help overlay for where skott
 # looks for theme files.
 
+syntax_theme = "base16-ocean.dark"
+
 [title]
 fg = "cyan"
 bold = true

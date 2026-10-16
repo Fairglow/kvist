@@ -150,6 +150,9 @@ struct MarkdownSpec {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct ThemeSpec {
+    /// Name of the syntect syntax highlighting theme (e.g. "base16-ocean.dark").
+    /// If omitted, Blad falls back to its default theme.
+    syntax_theme: Option<String>,
     title: StyleSpec,
     colors: ColorsSpec,
     panel: PanelSpec,
@@ -282,6 +285,7 @@ impl ThemeSpec {
             menu_selected,
             menu_plain,
             markdown,
+            syntax_theme: self.syntax_theme,
         })
     }
 }

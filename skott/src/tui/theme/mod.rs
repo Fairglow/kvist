@@ -85,6 +85,8 @@ pub struct Theme {
     pub menu_plain: Style,
     /// Markdown rendering (headings, inline code, code blocks, tables, …).
     pub markdown: MarkdownStyles,
+    /// The syntect syntax theme name for code highlighting (e.g. "base16-ocean.dark").
+    pub syntax_theme: Option<String>,
 }
 
 impl Default for Theme {
@@ -161,6 +163,7 @@ impl Theme {
             menu_selected: Style::default().fg(Color::Yellow).bg(Color::Reset).bold(),
             menu_plain: Style::default().fg(Color::White).bg(Color::Reset),
             markdown: MarkdownStyles::default(),
+            syntax_theme: None,
         }
     }
 

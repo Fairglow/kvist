@@ -4,6 +4,8 @@
 # Module Level 4 named colors or RGB hex values, used interchangeably, and
 # every background-bearing surface sets `bg` explicitly.
 
+syntax_theme = "base16-ocean.light"
+
 [title]
 fg = "#00468c"
 bold = true

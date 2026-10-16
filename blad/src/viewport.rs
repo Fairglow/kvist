@@ -30,7 +30,7 @@ impl Document {
                 limit.min(available.saturating_sub(gutter))
             });
             let mut output = Vec::new();
-            render_markdown_width(source, &mut output, Some(content_width))?;
+            render_markdown_width(source, &mut output, Some(content_width), None)?;
             let rendered = String::from_utf8(output)
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
             let lines: Vec<_> = rendered.lines().map(TerminalLine::new).collect();

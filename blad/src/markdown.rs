@@ -22,17 +22,41 @@ use crate::inline::{InlineWriter, Style};
 /// Render markdown with syntax-highlighted code blocks to the terminal.
 /// If terminal_width is provided, paragraphs will be wrapped to fit within that width.
 pub fn render_markdown(md: &str, w: &mut impl Write) -> std::io::Result<()> {
-    render_markdown_width(md, w, None)
+    render_markdown_theme(md, w, None, None)
+}
+
+/// Render markdown with a specific syntect syntax theme name.
+/// Pass None to use the default theme selection logic.
+pub fn render_markdown_themed(
+    md: &str,
+    w: &mut impl Write,
+    theme_name: Option<&str>,
+) -> std::io::Result<()> {
+    render_markdown_theme(md, w, None, theme_name)
 }
 
 pub fn render_markdown_width(
     md: &str,
     w: &mut impl Write,
     terminal_width: Option<usize>,
+    theme_name: Option<&str>,
+) -> std::io::Result<()> {
+    render_markdown_theme(md, w, terminal_width, theme_name)
+}
+
+fn render_markdown_theme(
+    md: &str,
+    w: &mut impl Write,
+    terminal_width: Option<usize>,
+    theme_name: Option<&str>,
 ) -> std::io::Result<()> {
     let ss = SyntaxSet::load_defaults_newlines();
     let ts = ThemeSet::load_defaults();
-    let theme = get_terminal_theme(&ts);
+    let theme = if let Some(name) = theme_name {
+        ts.themes.get(name).cloned()
+    } else {
+        get_terminal_theme(&ts)
+    };
 
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
