@@ -23,19 +23,10 @@ use crate::inline::{InlineWriter, Style};
 ///
 /// Configure it once with your theme and width preferences, then call
 /// `render_markdown` multiple times with different markdown content.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MarkdownRenderer {
     syntax_theme: Option<String>,
     width: Option<usize>,
-}
-
-impl Default for MarkdownRenderer {
-    fn default() -> Self {
-        Self {
-            syntax_theme: None,
-            width: None,
-        }
-    }
 }
 
 impl MarkdownRenderer {
@@ -57,12 +48,7 @@ impl MarkdownRenderer {
 
     /// Render markdown with the renderer's configured options.
     pub fn render_markdown(&self, md: &str, w: &mut impl Write) -> std::io::Result<()> {
-        render_markdown_theme(
-            md,
-            w,
-            self.width,
-            self.syntax_theme.as_deref(),
-        )
+        render_markdown_theme(md, w, self.width, self.syntax_theme.as_deref())
     }
 }
 

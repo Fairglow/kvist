@@ -1,4 +1,4 @@
-use super::{render_markdown, MarkdownRenderer};
+use super::{MarkdownRenderer, render_markdown};
 
 /// Strip ANSI escape codes from a string.
 fn strip_ansi(s: &str) -> String {

@@ -6,7 +6,7 @@
 
 use std::io::{self, IsTerminal, Write};
 
-use crate::markdown::{render_markdown, MarkdownRenderer};
+use crate::markdown::{MarkdownRenderer, render_markdown};
 use crate::session::{Message, Session, load_messages};
 use crate::terminal_text::TerminalLine;
 use crate::viewport::{Document, Frame, paint};
