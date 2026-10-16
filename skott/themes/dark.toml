@@ -76,8 +76,8 @@ heading = [
     { fg = "dodgerblue" },
     { fg = "magenta" },
 ]
-code_inline = { fg = "#ded6d0", bg = "#14140c" }
-code_bg = { bg = "#14140c" }
+code_inline = { fg = "#cccccc", bg = "#050505" }
+code_bg = { bg = "#050505" }
 code_label = { fg = "dimgray", dim = true }
 code_gutter = { fg = "gray" }
 quote = { fg = "gray" }

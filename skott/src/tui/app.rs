@@ -578,7 +578,8 @@ impl App {
                 self.flush_pending();
                 self.quit_running();
                 self.status = "done".to_owned();
-                self.note(self.theme.ok, &format!("✓ {message}"));
+                // Render the final result with markdown support.
+                self.push_markdown_block(format!("✓ {message}"));
             }
             // The prompt loop exited with no answer. Without this the UI would
             // keep showing "working…" forever once the single-turn cap (or the
@@ -2603,7 +2604,9 @@ mod tests {
         assert_eq!(background_for("✓ tool cat finished"), Some(theme.panel_bg));
         assert_eq!(foreground_for("✓ tool cat finished"), Some(theme.err));
         assert_eq!(background_for("✓ done"), Some(theme.panel_bg));
-        assert_eq!(foreground_for("✓ done"), Some(theme.ok));
+        // The "✓ done" line is rendered as markdown (not a note), so it has no
+        // explicit foreground color (it inherits the panel's default text color).
+        assert_eq!(foreground_for("✓ done"), None);
 
         // Thinking is set apart by its tint and its left edge; everything else
         // stays on the panel background.
