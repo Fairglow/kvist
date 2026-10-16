@@ -19,6 +19,53 @@ use syntect::parsing::SyntaxSet;
 
 use crate::inline::{InlineWriter, Style};
 
+/// A configured markdown renderer that holds rendering options.
+///
+/// Configure it once with your theme and width preferences, then call
+/// `render_markdown` multiple times with different markdown content.
+#[derive(Debug, Clone)]
+pub struct MarkdownRenderer {
+    syntax_theme: Option<String>,
+    width: Option<usize>,
+}
+
+impl Default for MarkdownRenderer {
+    fn default() -> Self {
+        Self {
+            syntax_theme: None,
+            width: None,
+        }
+    }
+}
+
+impl MarkdownRenderer {
+    /// Create a new renderer with default options (no syntax theme, no width limit).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the syntax highlighting theme (e.g., "Monokai", "Dracula").
+    /// Pass `None` to disable syntax highlighting.
+    pub fn set_syntax_theme(&mut self, theme: Option<&str>) {
+        self.syntax_theme = theme.map(|s| s.to_owned());
+    }
+
+    /// Set the render width. Call this from the centralized resize handler.
+    pub fn set_width(&mut self, width: Option<usize>) {
+        self.width = width;
+    }
+
+    /// Render markdown with the renderer's configured options.
+    pub fn render_markdown(&self, md: &str, w: &mut impl Write) -> std::io::Result<()> {
+        render_markdown_theme(
+            md,
+            w,
+            self.width,
+            self.syntax_theme.as_deref(),
+        )
+    }
+}
+
 /// Render markdown with syntax-highlighted code blocks to the terminal.
 /// If terminal_width is provided, paragraphs will be wrapped to fit within that width.
 pub fn render_markdown(md: &str, w: &mut impl Write) -> std::io::Result<()> {
@@ -33,15 +80,6 @@ pub fn render_markdown_themed(
     theme_name: Option<&str>,
 ) -> std::io::Result<()> {
     render_markdown_theme(md, w, None, theme_name)
-}
-
-pub fn render_markdown_width(
-    md: &str,
-    w: &mut impl Write,
-    terminal_width: Option<usize>,
-    theme_name: Option<&str>,
-) -> std::io::Result<()> {
-    render_markdown_theme(md, w, terminal_width, theme_name)
 }
 
 fn render_markdown_theme(

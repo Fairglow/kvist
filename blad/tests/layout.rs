@@ -1,9 +1,13 @@
-use blad::markdown::render_markdown_width;
+use blad::markdown::MarkdownRenderer;
 use unicode_width::UnicodeWidthStr;
 
 fn plain(md: &str, width: Option<usize>) -> String {
     let mut bytes = Vec::new();
-    render_markdown_width(md, &mut bytes, width).unwrap();
+    let mut renderer = MarkdownRenderer::new();
+    if let Some(w) = width {
+        renderer.set_width(Some(w));
+    }
+    renderer.render_markdown(md, &mut bytes).unwrap();
     let rendered = String::from_utf8(bytes).unwrap();
     let mut output = String::new();
     let mut chars = rendered.chars();

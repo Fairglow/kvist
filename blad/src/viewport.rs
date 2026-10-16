@@ -6,7 +6,7 @@ use crossterm::{
     terminal::{Clear, ClearType},
 };
 
-use crate::markdown::render_markdown_width;
+use crate::markdown::MarkdownRenderer;
 use crate::terminal_text::TerminalLine;
 
 pub(crate) struct Document {
@@ -30,7 +30,9 @@ impl Document {
                 limit.min(available.saturating_sub(gutter))
             });
             let mut output = Vec::new();
-            render_markdown_width(source, &mut output, Some(content_width), None)?;
+            let mut renderer = MarkdownRenderer::new();
+            renderer.set_width(Some(content_width));
+            renderer.render_markdown(source, &mut output)?;
             let rendered = String::from_utf8(output)
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
             let lines: Vec<_> = rendered.lines().map(TerminalLine::new).collect();

@@ -1,7 +1,7 @@
 //! Markdown rendering for the transcript using Blad's parsing and rendering.
 //! Wraps Blad's implementation to produce ratatui-compatible output.
 
-use blad::markdown::render_markdown_width;
+use blad::markdown::MarkdownRenderer as BladRenderer;
 use ratatui::style::{Color, Modifier, Style as RStyle};
 use ratatui::text::{Line, Span};
 use std::io::Cursor;
@@ -83,12 +83,12 @@ impl Default for MarkdownStyles {
 /// width are configuration that's stable during a session and updated in
 /// centralized handlers (theme picker, resize event).
 #[derive(Debug, Clone)]
-pub struct MarkdownRenderer {
+pub struct TranscriptRenderer {
     syntax_theme: Option<String>,
     width: usize,
 }
 
-impl Default for MarkdownRenderer {
+impl Default for TranscriptRenderer {
     fn default() -> Self {
         Self {
             syntax_theme: None,
@@ -97,7 +97,7 @@ impl Default for MarkdownRenderer {
     }
 }
 
-impl MarkdownRenderer {
+impl TranscriptRenderer {
     /// Create a new renderer with default options (no syntax theme, 80 columns).
     pub fn new() -> Self {
         Self::default()
@@ -117,17 +117,17 @@ impl MarkdownRenderer {
     /// Render markdown with the renderer's configured options.
     ///
     /// Uses the configured width and theme. For one-off rendering with
-    /// different settings, construct a new `MarkdownRenderer` instance.
+    /// different settings, construct a new `TranscriptRenderer` instance.
     pub fn render(&self, md: &str) -> Vec<RenderedLine> {
         // Use Blad's markdown rendering, capture the output, and convert to
         // ratatui-compatible lines.
         let mut output = Cursor::new(Vec::new());
-        let _ = render_markdown_width(
-            md,
-            &mut output,
-            Some(self.width),
-            self.syntax_theme.as_deref(),
-        );
+        let mut blade = BladRenderer::new();
+        blade.set_width(Some(self.width));
+        if let Some(ref theme) = self.syntax_theme {
+            blade.set_syntax_theme(Some(theme.as_str()));
+        }
+        let _ = blade.render_markdown(md, &mut output);
         let ansi_bytes = output.into_inner();
         let ansi_text = String::from_utf8(ansi_bytes).unwrap_or_default();
 

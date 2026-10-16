@@ -6,7 +6,7 @@
 
 use std::io::{self, IsTerminal, Write};
 
-use crate::markdown::{render_markdown, render_markdown_width};
+use crate::markdown::{render_markdown, MarkdownRenderer};
 use crate::session::{Message, Session, load_messages};
 use crate::terminal_text::TerminalLine;
 use crate::viewport::{Document, Frame, paint};
@@ -101,7 +101,10 @@ pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, termin
         }
     } else {
         let mut output = Vec::new();
-        if let Err(error) = render_markdown_width(content, &mut output, Some(terminal_width), None)
+        let mut renderer = MarkdownRenderer::new();
+        renderer.set_width(Some(terminal_width));
+        if let Err(error) = renderer
+            .render_markdown(content, &mut output)
             .and_then(|()| io::stdout().write_all(&output))
         {
             eprintln!("Failed to display Markdown: {error}");
