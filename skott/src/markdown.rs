@@ -83,12 +83,12 @@ impl Default for MarkdownStyles {
 /// width are configuration that's stable during a session and updated in
 /// centralized handlers (theme picker, resize event).
 #[derive(Debug, Clone)]
-pub struct TranscriptRenderer {
+pub struct MarkdownRenderer {
     syntax_theme: Option<String>,
     width: usize,
 }
 
-impl Default for TranscriptRenderer {
+impl Default for MarkdownRenderer {
     fn default() -> Self {
         Self {
             syntax_theme: None,
@@ -97,7 +97,7 @@ impl Default for TranscriptRenderer {
     }
 }
 
-impl TranscriptRenderer {
+impl MarkdownRenderer {
     /// Create a new renderer with default options (no syntax theme, 80 columns).
     pub fn new() -> Self {
         Self::default()
@@ -117,7 +117,7 @@ impl TranscriptRenderer {
     /// Render markdown with the renderer's configured options.
     ///
     /// Uses the configured width and theme. For one-off rendering with
-    /// different settings, construct a new `TranscriptRenderer` instance.
+    /// different settings, construct a new `MarkdownRenderer` instance.
     pub fn render(&self, md: &str) -> Vec<RenderedLine> {
         // Use Blad's markdown rendering, capture the output, and convert to
         // ratatui-compatible lines.

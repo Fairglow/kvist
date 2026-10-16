@@ -67,19 +67,9 @@ impl MarkdownRenderer {
 }
 
 /// Render markdown with syntax-highlighted code blocks to the terminal.
-/// If terminal_width is provided, paragraphs will be wrapped to fit within that width.
+/// Use a `MarkdownRenderer` for repeated rendering with the same configuration.
 pub fn render_markdown(md: &str, w: &mut impl Write) -> std::io::Result<()> {
-    render_markdown_theme(md, w, None, None)
-}
-
-/// Render markdown with a specific syntect syntax theme name.
-/// Pass None to use the default theme selection logic.
-pub fn render_markdown_themed(
-    md: &str,
-    w: &mut impl Write,
-    theme_name: Option<&str>,
-) -> std::io::Result<()> {
-    render_markdown_theme(md, w, None, theme_name)
+    MarkdownRenderer::new().render_markdown(md, w)
 }
 
 fn render_markdown_theme(
