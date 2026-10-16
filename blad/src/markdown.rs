@@ -753,7 +753,7 @@ fn wrap_cell(cell: &str, width: usize) -> Vec<String> {
 
     for word in cell.split_whitespace() {
         let word_width = unicode_width::UnicodeWidthStr::width(word);
-        
+
         // If the word itself is wider than the column, hard-wrap it
         if word_width > width {
             if !current.is_empty() {
@@ -775,7 +775,8 @@ fn wrap_cell(cell: &str, width: usize) -> Vec<String> {
             }
         } else if current.is_empty() {
             current = word.to_string();
-        } else if unicode_width::UnicodeWidthStr::width(current.as_str()) + 1 + word_width <= width {
+        } else if unicode_width::UnicodeWidthStr::width(current.as_str()) + 1 + word_width <= width
+        {
             current.push(' ');
             current.push_str(word);
         } else {
@@ -806,9 +807,8 @@ fn pad_cell(cell: &str, width: usize) -> String {
 }
 
 fn ceil_div(a: usize, b: usize) -> usize {
-    a / b + if a % b != 0 { 1 } else { 0 }
+    a / b + if !a.is_multiple_of(b) { 1 } else { 0 }
 }
-
 
 fn find_syntax<'a>(ss: &'a SyntaxSet, lang: &str) -> Option<&'a syntect::parsing::SyntaxReference> {
     let lang = lang.trim();

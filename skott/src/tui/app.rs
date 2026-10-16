@@ -703,7 +703,11 @@ impl App {
         // Check if we're continuing an existing reasoning context (last non-blank
         // line is reasoning or placeholder). If so, skip the leading blank line
         // so consecutive reasoning blocks share the same background.
-        let in_reasoning_context = self.lines.iter().rev().find(|l| !l.line.to_string().is_empty())
+        let in_reasoning_context = self
+            .lines
+            .iter()
+            .rev()
+            .find(|l| !l.line.to_string().is_empty())
             .map(|l| l.kind == LineKind::Reasoning || l.kind == LineKind::Placeholder)
             .unwrap_or(false);
 
@@ -1405,7 +1409,11 @@ impl App {
         // If we're exiting a reasoning context (last non-blank line is reasoning),
         // add a blank line to visually separate the reasoning from the following
         // non-reasoning content.
-        let in_reasoning_context = self.lines.iter().rev().find(|l| !l.line.to_string().is_empty())
+        let in_reasoning_context = self
+            .lines
+            .iter()
+            .rev()
+            .find(|l| !l.line.to_string().is_empty())
             .map(|l| l.kind == LineKind::Reasoning || l.kind == LineKind::Placeholder)
             .unwrap_or(false);
         if in_reasoning_context && !text.is_empty() {
@@ -4030,23 +4038,22 @@ table_sep = { fg = "gray" }
         ));
         app.flush_pending_text();
         let lines = rendered_text(&app);
-        // Blad produces 4 rows: header, separator, data, trailing blank
-        assert!(
-            lines.len() >= 3,
-            "a GFM table has at least 3 rows: {lines:?}"
-        );
-        // Find the separator row: dashes, pipes, colons and spaces only,
-        // never blank (the table's trailing blank line would satisfy a bare
-        // all-predicate).
+        // Blad renders a table with a separator row using ── (U+2500),
+        // not ASCII dashes. The separator row is `── | ──`.
         let separator_idx = lines
             .iter()
-            .position(|l| {
-                !l.is_empty()
-                    && l.contains('-')
-                    && l.chars().all(|c| matches!(c, '-' | ':' | ' ' | '|'))
-            })
+            .position(|l| l.contains('─'))
             .expect("a separator row exists");
-        // Data row follows separator
+        assert_eq!(
+            lines[separator_idx], "── | ──",
+            "separator row uses Unicode horizontal lines"
+        );
+        // Header row is above the separator
+        assert!(
+            lines[separator_idx - 1].contains("a") && lines[separator_idx - 1].contains("b"),
+            "header row precedes separator"
+        );
+        // Data row is below the separator
         assert!(
             lines[separator_idx + 1].contains("1") && lines[separator_idx + 1].contains("2"),
             "data row follows separator"
