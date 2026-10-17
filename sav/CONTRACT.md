@@ -23,6 +23,14 @@ compliance evidence.
 
 ## Provided interfaces
 
+`DirectModelTransport::loaded_model` reads `/props` for standalone llama-server
+identity (`model`, `model_alias`, then `model_path`). Router-mode properties
+trigger read-only `/models` discovery, returning an actually loaded entry's
+`id`, never an unloaded/loading entry or the router alias. Both requests share
+the caller's deadline and cancellation; responses are bounded to 1 MiB and
+catalogs to 128 entries. Returned identifiers are nonblank, control-free and
+at most 256 bytes. Ollama continues to use `/api/ps`.
+
 `sav::offline_rust` supplies `INITIALIZE` (a shell fragment for private
 `/tmp/rustup-home` settings and read-only `/rust/rustup-home/toolchains`
 registrations), the closed `RustTool` enum and `TOOLS`, plus `wrapper(tool)`.

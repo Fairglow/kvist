@@ -32,6 +32,17 @@ authority through narrow interfaces.
 
 ## Functional requirements
 
+### AR-REQ-ACTIVE-MODEL
+
+Read-only loaded-model discovery MUST recognize llama-server router metadata:
+`/props` with `role = "router"` requires `/models` status inspection, selecting
+only an entry with `status.value = "loaded"`. Standalone servers MAY advertise
+`model`, `model_alias`, or `model_path`. Discovery MUST retain numeric-loopback
+authority, cancellation, a shared probe deadline, 1-MiB response bounds, and a
+128-model bound, without inference or model loading. Model identifiers MUST be
+nonblank, control-free and at most 256 bytes. A deliberate advisory exception
+covers this human-requested repair while receipts remain unimplemented.
+
 The following stable requirement identifiers define the mandatory behavior of
 the reusable runtime component.
 

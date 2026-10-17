@@ -112,6 +112,36 @@ fn active_model_match_beats_default() {
 }
 
 #[test]
+fn ollama_implicit_latest_matches_the_loaded_provider_name() {
+    let config = config_with(
+        ModelProvider::Ollama,
+        vec![
+            model_on(
+                "fallback",
+                "other",
+                "http://127.0.0.1:11434",
+                ModelProvider::Ollama,
+                true,
+            ),
+            model_on(
+                "chosen",
+                "namespace/chosen",
+                "http://127.0.0.1:11434",
+                ModelProvider::Ollama,
+                false,
+            ),
+        ],
+    );
+    let active = BTreeMap::from([(
+        "http://127.0.0.1:11434".into(),
+        "namespace/chosen:latest".into(),
+    )]);
+    assert!(matches!(select_active_model(&config, None, &active),
+        Select::Active { model_id, .. } if model_id == "chosen"));
+    assert!(unconfigured_active_models(&config, &active).is_empty());
+}
+
+#[test]
 fn active_match_is_by_provider_model_name_not_id() {
     // The configured `id` and the provider-facing `model` differ; matching must
     // be on the provider-facing name.

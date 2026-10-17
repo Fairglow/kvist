@@ -2,6 +2,14 @@
 
 # Sav Design
 
+## Loaded-model metadata
+
+Detect llama-server router mode explicitly from `/props.role` and query
+`/models` with only the remaining discovery budget. Parse `data` as a bounded
+array and consider only `status.value == "loaded"`. Standalone identity uses
+the first valid `model`, `model_alias`, or `model_path`; validate identifiers
+before returning them. No model-qualified GET or inference is used.
+
 ## Selected-model capacity and usage
 
 Direct transport reuses bounded loopback GET for llama-server model-qualified

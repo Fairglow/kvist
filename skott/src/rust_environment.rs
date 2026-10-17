@@ -475,10 +475,16 @@ impl RustEnvironment {
     /// material. Ambient Cargo/Rust configuration and rustup overrides are not
     /// forwarded. Absence is an error for callers that explicitly enable Rust.
     pub fn resolve(workspace: &Path) -> Result<Self> {
-        let cancellation = CancellationToken::new();
+        Self::resolve_cancellable(workspace, &CancellationToken::new())
+    }
+
+    pub(crate) fn resolve_cancellable(
+        workspace: &Path,
+        cancellation: &CancellationToken,
+    ) -> Result<Self> {
         let preparation = Preparation {
             started: Instant::now(),
-            cancellation: &cancellation,
+            cancellation,
         };
         let workspace = workspace
             .canonicalize()
@@ -825,6 +831,32 @@ impl RustEnvironment {
                 inventory,
             }),
         })
+    }
+
+    /// Short, human-readable startup diagnostic suitable for the initial
+    /// transcript. Omits the long SHA-based identity details.
+    pub fn short_diagnostic(&self) -> String {
+        if self.resources.pinned {
+            format!(
+                "Rust: {} (project pin; {})",
+                self.resources.channel,
+                if self.resources.has_vendor {
+                    "vendor snapshot ready"
+                } else {
+                    "no vendor snapshot"
+                }
+            )
+        } else if self.resources.has_vendor {
+            format!(
+                "Rust: {} (offline; vendor snapshot ready)",
+                self.resources.channel
+            )
+        } else {
+            format!(
+                "Rust: {} (offline; no vendor snapshot)",
+                self.resources.channel
+            )
+        }
     }
 
     /// An inspectable exact selection, identity and offline-material diagnostic.

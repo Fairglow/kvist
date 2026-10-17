@@ -158,6 +158,24 @@ impl ToolRegistry {
         forced: Option<ToolProfile>,
         workdir: &std::path::Path,
     ) -> crate::error::Result<Self> {
+        Self::resolve_for_workspace_cancellable(
+            policy,
+            settings,
+            probe,
+            forced,
+            workdir,
+            &sav::CancellationToken::new(),
+        )
+    }
+
+    pub(crate) fn resolve_for_workspace_cancellable(
+        policy: ToolPolicy,
+        settings: &BTreeMap<ToolProfile, ProfileSetting>,
+        probe: &dyn ToolchainProbe,
+        forced: Option<ToolProfile>,
+        workdir: &std::path::Path,
+        cancellation: &sav::CancellationToken,
+    ) -> crate::error::Result<Self> {
         let setting = if forced == Some(ToolProfile::Rust) {
             ProfileSetting::On
         } else {
@@ -175,13 +193,16 @@ impl ToolRegistry {
             forced.filter(|p| *p != ToolProfile::Rust),
         )?;
         if setting != ProfileSetting::Off {
-            match crate::toolchain::rust_environment::RustEnvironment::resolve(workdir) {
+            match crate::toolchain::rust_environment::RustEnvironment::resolve_cancellable(
+                workdir,
+                cancellation,
+            ) {
                 Ok(environment) => {
                     registry.diagnostics.push(environment.diagnostic());
                     registry.profiles.push(ToolProfile::Rust);
                     registry.rust_environment = Some(environment);
                 }
-                Err(error) if setting == ProfileSetting::Auto => {
+                Err(error) if setting == ProfileSetting::Auto && !cancellation.is_cancelled() => {
                     registry
                         .diagnostics
                         .push(format!("Rust unavailable (auto; not advertised): {error}"));

@@ -259,33 +259,24 @@ pub fn language_available(profile: ToolProfile, search_dirs: &[PathBuf], mounted
 /// manifests. This is advisory: it informs logging and recommendations but never
 /// gates use, which is gated solely on tool-chain availability.
 pub fn detect_languages(entries: &[&str]) -> BTreeSet<ToolProfile> {
-    let set: BTreeSet<&str> = entries.iter().copied().collect();
-    let mut found = BTreeSet::new();
-    if set.contains("Cargo.toml") {
-        found.insert(ToolProfile::Rust);
-    }
-    if set
+    LANGUAGE_MANIFESTS
         .iter()
-        .copied()
-        .any(|name| matches!(name, "pyproject.toml" | "setup.py" | "requirements.txt"))
-    {
-        found.insert(ToolProfile::Python);
-    }
-    if set.contains("package.json") {
-        found.insert(ToolProfile::JavaScript);
-    }
-    if set.contains("go.mod") {
-        found.insert(ToolProfile::Go);
-    }
-    if set
-        .iter()
-        .copied()
-        .any(|name| matches!(name, "CMakeLists.txt" | "configure" | "configure.ac"))
-    {
-        found.insert(ToolProfile::C);
-    }
-    found
+        .filter(|(name, _)| entries.contains(name))
+        .map(|(_, profile)| *profile)
+        .collect()
 }
+
+const LANGUAGE_MANIFESTS: [(&str, ToolProfile); 9] = [
+    ("Cargo.toml", ToolProfile::Rust),
+    ("pyproject.toml", ToolProfile::Python),
+    ("setup.py", ToolProfile::Python),
+    ("requirements.txt", ToolProfile::Python),
+    ("package.json", ToolProfile::JavaScript),
+    ("go.mod", ToolProfile::Go),
+    ("CMakeLists.txt", ToolProfile::C),
+    ("configure", ToolProfile::C),
+    ("configure.ac", ToolProfile::C),
+];
 
 /// A minimal, hand-rolled matcher for a subset of `.gitignore` semantics, used
 /// only by the advisory language detection so that the project's own declaration
@@ -369,29 +360,60 @@ fn pattern_matches(pattern: &str, name: &str) -> bool {
 /// project uses, so it must not define the project's language. When no
 /// `.gitignore` is present, or it cannot be read, detection falls back to the
 /// raw manifest scan so a missing ignore file never hides a real language.
+/// Only the fixed manifest names are inspected. Ignore files must be regular,
+/// non-link files of at most 64 KiB; special files never block startup or quit.
 pub fn detect_project_languages(dir: &Path) -> BTreeSet<ToolProfile> {
-    let entries: Vec<String> = match std::fs::read_dir(dir) {
-        Ok(read) => read
-            .flatten()
-            .map(|entry| entry.file_name().to_string_lossy().into_owned())
-            .collect(),
-        Err(_) => return BTreeSet::new(),
-    };
-    let gitignore = match std::fs::read_to_string(dir.join(".gitignore")) {
-        Ok(content) => GitIgnore::parse(&content),
-        // No readable `.gitignore` present, or it cannot be read: fall back to a
-        // raw manifest scan so a missing ignore file never hides a real language.
-        Err(_) => {
-            let names: Vec<&str> = entries.iter().map(String::as_str).collect();
-            return detect_languages(&names);
+    let gitignore = match read_project_ignore(&dir.join(".gitignore")) {
+        Ok(ignore) => ignore,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => GitIgnore::default(),
+        Err(error) => {
+            tracing::warn!(%error, "project ignore unavailable; using raw manifest detection");
+            GitIgnore::default()
         }
     };
-    let names: Vec<&str> = entries
+    LANGUAGE_MANIFESTS
         .iter()
-        .map(String::as_str)
-        .filter(|name| !gitignore.matches(name))
-        .collect();
-    detect_languages(&names)
+        .filter_map(|(name, profile)| {
+            if gitignore.matches(name) {
+                return None;
+            }
+            match std::fs::symlink_metadata(dir.join(name)) {
+                Ok(_) => Some(*profile),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                Err(error) => {
+                    tracing::debug!(%error, manifest = name, "advisory manifest unavailable");
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+fn read_project_ignore(path: &Path) -> std::io::Result<GitIgnore> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    const MAX_IGNORE_BYTES: u64 = 64 * 1024;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags((nix::fcntl::OFlag::O_NOFOLLOW | nix::fcntl::OFlag::O_NONBLOCK).bits())
+        .open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_IGNORE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            ".gitignore must be a regular non-link file of at most 64 KiB",
+        ));
+    }
+    let mut content = String::new();
+    file.take(MAX_IGNORE_BYTES + 1)
+        .read_to_string(&mut content)?;
+    if content.len() as u64 > MAX_IGNORE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            ".gitignore grew beyond 64 KiB",
+        ));
+    }
+    Ok(GitIgnore::parse(&content))
 }
 
 /// Resolves which configurable profiles to advertise from the configured
@@ -614,6 +636,37 @@ mod tests {
     fn detect_project_languages_handles_missing_directory() {
         let used = detect_project_languages(Path::new("/does/not/exist"));
         assert!(used.is_empty());
+    }
+
+    #[test]
+    fn advisory_ignore_reads_are_bounded_and_reject_links_and_special_files() {
+        let root = tempfile::tempdir().unwrap();
+        let ignore = root.path().join(".gitignore");
+        let target = root.path().join("ignore-target");
+        std::fs::write(root.path().join("Cargo.toml"), "").unwrap();
+        std::fs::write(&target, "Cargo.toml\n").unwrap();
+        std::os::unix::fs::symlink(&target, &ignore).unwrap();
+        assert!(read_project_ignore(&ignore).is_err());
+        assert_eq!(
+            detect_project_languages(root.path()),
+            BTreeSet::from([ToolProfile::Rust])
+        );
+        std::fs::remove_file(&ignore).unwrap();
+        nix::unistd::mkfifo(&ignore, nix::sys::stat::Mode::S_IRUSR).unwrap();
+        let started = std::time::Instant::now();
+        assert!(read_project_ignore(&ignore).is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        std::fs::remove_file(&ignore).unwrap();
+        std::fs::write(&ignore, vec![b' '; 65536]).unwrap();
+        assert!(read_project_ignore(&ignore).is_ok());
+        std::fs::write(&ignore, vec![b' '; 65537]).unwrap();
+        assert!(read_project_ignore(&ignore).is_err());
+        std::fs::write(&ignore, [0xff]).unwrap();
+        assert!(read_project_ignore(&ignore).is_err());
+        assert_eq!(
+            detect_project_languages(root.path()),
+            BTreeSet::from([ToolProfile::Rust])
+        );
     }
 
     #[test]

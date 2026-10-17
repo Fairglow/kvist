@@ -2,6 +2,22 @@
 
 # Skott — Contract
 
+## Interactive startup and shutdown
+
+The prompt is editable while model, toolchain and serving-capacity discovery
+run in the background. Submissions wait for validated startup resources and
+model selection. CLI and interactive model choices take precedence over late
+discovery results. Startup shows short toolchain and model/context summaries;
+exact resource identities remain in private journals. Initialization errors
+remain visible without permitting unvalidated execution. Quit restores the
+terminal before joining cancelled work, and queued prompts do not start after
+shutdown. llama-server router discovery uses read-only loaded status from
+`GET /models`, not the router's own identity from `/props`.
+Outstanding discovery never replaces live session status. Initial prompts that
+exceed the dispatch limit remain in the editor for correction. Advisory language
+detection uses bounded root-manifest/ignore inspection; invalid ignore files
+produce a diagnostic and retain raw-manifest advisory detection.
+
 ## Run reliability extension
 
 Models may declare `context_limit` and `response_reserve`. CLI values take
@@ -181,8 +197,9 @@ sandbox request it produces. Private algorithm choices live in `DESIGN.md`.
 `skott` MUST prefer a model that the default provider already has loaded
 over a statically configured one, so an already-active model is used without
 paying a model load/switch. The active model is discovered by a bounded,
-read-only, loopback-only probe of each configured provider endpoint (llama-server
-unqualified `GET /props` for the loaded model; Ollama `GET /api/ps` for the loaded
+read-only, loopback-only probe of each distinct default-provider endpoint (llama-server
+unqualified `GET /props`, then `GET /models` loaded status in router mode;
+Ollama `GET /api/ps` for the loaded
 model and serving context), reusing the existing discovery bounds (5 s, 1 MiB) and
 MUST NOT send inference, modify the provider, or widen endpoint authority. A probe
 failure (provider down, malformed, or no model loaded) MUST NOT fail startup and
@@ -194,6 +211,7 @@ MUST fall through to the next rule. The selection precedence MUST be:
 2. Otherwise, the default provider (`default_provider`) is the provider the
    session resolves. If a probe finds a loaded model on a default-provider
    endpoint whose provider-facing name matches a configured entry's `model` field
+   (including an implicit Ollama `:latest` suffix)
    (matched by provider model name, not the user-facing `id`), that entry MUST be
    selected, and the session MUST announce that it uses the already-active model
    with no switch.

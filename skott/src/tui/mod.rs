@@ -2,6 +2,7 @@
 
 pub mod app;
 mod render;
+mod startup;
 pub mod theme;
 
 pub use theme::file as theme_files;
@@ -26,6 +27,7 @@ use ratatui::backend::CrosstermBackend;
 use sav::ReasoningEffort;
 
 use self::app::{App, KeyAction};
+use self::startup::Job;
 use crate::config::{Config, Model};
 use crate::context::ContextManager;
 use crate::error::{Error, Result};
@@ -114,64 +116,20 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         return ExitCode::from(2);
     }
 
-    // Active-model-first selection: an explicit --model wins, then the default
-    // provider's already-loaded model (matched by provider model name) so no
-    // load/switch is paid, then a single default-provider model, then the
-    // default provider's default model as a fall-back, then defer (no model
-    // selected — the user picks one with Tab). The active probe is bounded,
-    // read-only, and loopback-only; a down provider yields no entry and falls
-    // through.
-    let active = crate::config::probe_active_models(&config);
-    let selection =
-        crate::config::select_active_model(&config, overrides.model.as_deref(), &active);
-    let selected_model_id = match &selection {
-        crate::config::Select::Explicit(id) => Some(id.as_str()),
-        crate::config::Select::Active { model_id, .. } => Some(model_id.as_str()),
-        crate::config::Select::Single { model_id } => Some(model_id.as_str()),
-        crate::config::Select::Default { model_id, .. } => Some(model_id.as_str()),
-        crate::config::Select::NeedsSelection => None,
-    };
-    let selected_model: Option<Model> = match selected_model_id {
-        Some(id) => match config.model(id) {
-            Some(model) => Some(model.clone()),
-            None => {
-                // A selected id that is not a configured model is a hard
-                // configuration error (an active/single/default id always comes
-                // from the config, so this is reachable only for an explicit
-                // --model).
-                let available = config
-                    .models
-                    .iter()
-                    .map(|model| model.id.clone())
-                    .collect::<Vec<_>>();
-                eprintln!(
-                    "{}",
-                    Error::ModelNotFound {
-                        requested: id.to_owned(),
-                        available,
-                    }
-                    .describe()
-                );
-                return ExitCode::from(2);
+    if let Some(id) = overrides.model.as_deref()
+        && config.model(id).is_none()
+    {
+        let available = config.models.iter().map(|model| model.id.clone()).collect();
+        eprintln!(
+            "{}",
+            Error::ModelNotFound {
+                requested: id.to_owned(),
+                available
             }
-        },
-        None => None,
-    };
-
-    if selected_model.is_some() {
-        // Announce a resolved model so the user knows what will run and whether
-        // an already-active model was reused (no switch) or a default is loaded.
-        match &selection {
-            crate::config::Select::Active { reason, .. }
-            | crate::config::Select::Default { reason, .. } => {
-                eprintln!("{}", crate::error::terminal_text(reason))
-            }
-            _ => {}
-        }
+            .describe()
+        );
+        return ExitCode::from(2);
     }
-    let app_model_label = selected_model
-        .as_ref()
-        .map(|model| app_model_id(&config, model));
     if let Err(error) = overrides.limits.validate() {
         eprintln!("{}", error.describe());
         return ExitCode::from(error.exit_code());
@@ -199,52 +157,6 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
             .join(crate::session_log::DEFAULT_LOG_DIR)
     });
 
-    let probe = crate::toolchain::HostProbe;
-    let forced = overrides.profile;
-    // Detect which languages the project *uses* from its root manifests,
-    // excluding any entry the project's `.gitignore` declares as not part of
-    // itself. This is advisory: it informs logging and recommendations but never
-    // gates use. The capability gate (`resolve_profiles` + `HostProbe`) is
-    // independent — manifest-free and gitignore-blind — and is the sole authority
-    // for what is advertised. An explicit/forced profile or a
-    // profile set to `on` that is missing fails here rather than lying.
-    let detected = crate::toolchain::detect_project_languages(&working_directory);
-    if !detected.is_empty() {
-        eprintln!(
-            "detected project language(s): {}",
-            detected
-                .iter()
-                .map(|profile| profile.id())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-    }
-    let resolved = if overrides.allow_host_execution {
-        ToolRegistry::resolve(
-            config.tool_policy.clone(),
-            &config.tool_profiles,
-            &probe,
-            forced,
-        )
-    } else {
-        ToolRegistry::resolve_for_workspace(
-            config.tool_policy.clone(),
-            &config.tool_profiles,
-            &probe,
-            forced,
-            &working_directory,
-        )
-    };
-    let registry = match resolved {
-        Ok(registry) => registry,
-        Err(error) => {
-            eprintln!("{}", error.describe());
-            return ExitCode::from(error.exit_code());
-        }
-    };
-    let resource_notes = registry.diagnostics().to_vec();
-    let tool_defs = registry.tool_definitions();
-
     // Resolve the autonomous turn cap for this session, validating the host cap.
     let max_turns = match resolve_max_turns(overrides.allow_host_execution, overrides.host_turns) {
         Ok(turns) => turns,
@@ -252,54 +164,6 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
             eprintln!("{}", error.describe());
             return ExitCode::from(error.exit_code());
         }
-    };
-
-    let executor: Arc<dyn ToolExecutor> = if overrides.allow_host_execution {
-        eprintln!(
-            "warning: --allow-host-execution runs the agent on the host with real \
-             privileges; a single prompt is single-turn by default (raise --host-turns \
-             to allow more)"
-        );
-        Arc::new(HostExecutor::new(registry, working_directory.clone()))
-    } else {
-        Arc::new(SandboxExecutor::new(
-            registry,
-            config.sandbox.clone(),
-            working_directory.clone(),
-        ))
-    };
-
-    let builder = SessionBuilder {
-        resource_notes,
-        config: config.clone(),
-        executor,
-        tool_defs,
-        context_limit: overrides.context_limit,
-        response_reserve: overrides.response_reserve,
-        log_dir: overrides.log_dir.clone(),
-        no_logs: overrides.no_logs,
-        working_directory,
-        max_turns,
-        limits: overrides.limits,
-        allow_host_execution: overrides.allow_host_execution,
-    };
-
-    // Session setup — budget discovery (a provider round trip), the durable
-    // record, and the worker thread — runs in the background so the terminal
-    // UI appears immediately instead of waiting on the model. The worker is
-    // installed by the UI loop when the bootstrap reports; prompts submitted in
-    // the meantime are held and dispatched when it is ready. When no model is
-    // selected (deferred), no bootstrap starts: the user picks a model first and
-    // the first submit (or a new session) starts it, so no model load is paid.
-    let bootstrap = match &selected_model {
-        Some(model) => match spawn_bootstrap(&builder, model, effort) {
-            Ok(receiver) => Some(receiver),
-            Err(error) => {
-                eprintln!("{}", error.describe());
-                return ExitCode::from(error.exit_code());
-            }
-        },
-        None => None,
     };
 
     let (width, height) = size().unwrap_or((100, 30));
@@ -315,17 +179,15 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         .or_else(theme_files::bundled_themes_dir);
     let mut app = App::new(
         &model_ids,
-        app_model_label.as_deref(),
+        overrides.model.as_deref(),
         effort,
-        overrides.config_path,
+        overrides.config_path.clone(),
         width,
         height,
         theme,
     );
     app.set_theme_catalog(themes_dir);
-    for note in &builder.resource_notes {
-        app.push_event(crate::session::Event::Note(note.clone()));
-    }
+    app.model_discovery_pending = overrides.model.is_none();
     // Point the history overlay at the same directory the worker logs to, so
     // "Session history" lists the transcripts this run contributes to.
     app.set_log_dir(log_dir);
@@ -341,7 +203,20 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
         app.stage_initial_prompt(prompt);
     }
 
-    match ui_loop(app, &builder, bootstrap) {
+    if overrides.allow_host_execution {
+        app.push_event(crate::session::Event::Note(
+            "HOST UNCONFINED: tools run with host privileges".into(),
+        ));
+    }
+    let discovery = match Discovery::start(config.clone(), overrides, working_directory, max_turns)
+    {
+        Ok(discovery) => discovery,
+        Err(error) => {
+            eprintln!("{}", error.describe());
+            return ExitCode::from(error.exit_code());
+        }
+    };
+    match ui_loop(app, &config, discovery) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{}", error.describe());
@@ -351,24 +226,146 @@ pub fn run(config: Config, overrides: Overrides) -> ExitCode {
 }
 
 /// Starts a session worker for `model` with `effort` on a background bootstrap
-/// thread and returns the receiver the UI loop polls for its result. The
-/// thread outlives the call: the UI installs the worker when the result
-/// arrives, and a dropped receiver (a replaced session) simply discards it.
+/// thread. Dropping its owner cancels discovery and joins the bootstrap.
 fn spawn_bootstrap(
     builder: &SessionBuilder,
     model: &Model,
     effort: ReasoningEffort,
-) -> Result<mpsc::Receiver<Result<Worker>>> {
-    let (tx, rx) = mpsc::channel();
+) -> Result<Bootstrap> {
     let builder = builder.clone();
     let model = model.clone();
-    std::thread::Builder::new()
-        .name("agent-bootstrap".into())
-        .spawn(move || {
-            let _ = tx.send(builder.start(&model, effort));
+    let model_id = model.id.clone();
+    let job = Job::spawn("agent-bootstrap", move |token| {
+        builder.start(&model, effort, token)
+    })?;
+    Ok(Bootstrap {
+        job,
+        model_id,
+        effort,
+    })
+}
+
+struct Bootstrap {
+    job: Job<Worker>,
+    model_id: String,
+    effort: ReasoningEffort,
+}
+
+struct Discovery {
+    tools: Option<Job<SessionBuilder>>,
+    model: Option<Job<crate::config::Select>>,
+}
+
+impl Discovery {
+    fn start(
+        config: Config,
+        overrides: Overrides,
+        working_directory: PathBuf,
+        max_turns: u32,
+    ) -> Result<Self> {
+        let model_config = config.clone();
+        let explicit = overrides.model.clone();
+        let model = Job::spawn("model-discovery", move |token| {
+            let active = if explicit.is_some() {
+                std::collections::BTreeMap::new()
+            } else {
+                crate::config::probe_active_models_cancellable(&model_config, token)
+            };
+            crate::executor::check_cancelled(token)?;
+            Ok(crate::config::select_active_model(
+                &model_config,
+                explicit.as_deref(),
+                &active,
+            ))
+        })?;
+        let tools = Job::spawn("toolchain-discovery", move |token| {
+            let detected = crate::toolchain::detect_project_languages(&working_directory);
+            tracing::debug!(?detected, "project language discovery complete");
+            crate::executor::check_cancelled(token)?;
+            let registry = if overrides.allow_host_execution {
+                ToolRegistry::resolve(
+                    config.tool_policy.clone(),
+                    &config.tool_profiles,
+                    &crate::toolchain::HostProbe,
+                    overrides.profile,
+                )?
+            } else {
+                ToolRegistry::resolve_for_workspace_cancellable(
+                    config.tool_policy.clone(),
+                    &config.tool_profiles,
+                    &crate::toolchain::HostProbe,
+                    overrides.profile,
+                    &working_directory,
+                    token,
+                )?
+            };
+            crate::executor::check_cancelled(token)?;
+            let resource_notes = registry.diagnostics().to_vec();
+            let mut summary_notes = vec![format!("Toolchains: {}", registry.profiles().join(", "))];
+            if let Some(rust) = registry.rust_environment() {
+                summary_notes.push(rust.short_diagnostic());
+            } else if !resource_notes.is_empty() {
+                summary_notes.push("Rust unavailable (auto; not advertised)".into());
+            }
+            let tool_defs = registry.tool_definitions();
+            let executor: Arc<dyn ToolExecutor> = if overrides.allow_host_execution {
+                Arc::new(HostExecutor::new(registry, working_directory.clone()))
+            } else {
+                Arc::new(SandboxExecutor::new(
+                    registry,
+                    config.sandbox.clone(),
+                    working_directory.clone(),
+                ))
+            };
+            Ok(SessionBuilder {
+                resource_notes,
+                summary_notes,
+                config,
+                executor,
+                tool_defs,
+                context_limit: overrides.context_limit,
+                response_reserve: overrides.response_reserve,
+                log_dir: overrides.log_dir,
+                no_logs: overrides.no_logs,
+                working_directory,
+                max_turns,
+                limits: overrides.limits,
+                allow_host_execution: overrides.allow_host_execution,
+            })
+        })?;
+        Ok(Self {
+            tools: Some(tools),
+            model: Some(model),
         })
-        .map_err(|source| crate::error::io_error("spawn session bootstrap", None, source))?;
-    Ok(rx)
+    }
+
+    fn cancel(&self) {
+        if let Some(job) = &self.tools {
+            job.cancel();
+        }
+        if let Some(job) = &self.model {
+            job.cancel();
+        }
+    }
+}
+
+fn apply_selection(app: &mut App, selection: crate::config::Select) {
+    app.model_discovery_pending = false;
+    if app.model.is_some() {
+        return;
+    }
+    let (id, state) = match selection {
+        crate::config::Select::Explicit(id) => (Some(id), "selected"),
+        crate::config::Select::Active { model_id, .. } => (Some(model_id), "already active"),
+        crate::config::Select::Single { model_id } => (Some(model_id), "selected"),
+        crate::config::Select::Default { model_id, .. } => (Some(model_id), "default"),
+        crate::config::Select::NeedsSelection => (None, "press Tab to choose"),
+    };
+    let label = id.as_deref().unwrap_or("none");
+    app.push_event(crate::session::Event::Note(format!(
+        "Model: {label} ({state})"
+    )));
+    app.model = id;
 }
 
 /// Builds session workers for the selected model and effort. Each worker owns
@@ -378,6 +375,7 @@ fn spawn_bootstrap(
 /// thread that starts the worker off the UI critical path.
 struct SessionBuilder {
     resource_notes: Vec<String>,
+    summary_notes: Vec<String>,
     config: Config,
     executor: Arc<dyn ToolExecutor>,
     tool_defs: Vec<sav::ToolDefinition>,
@@ -395,6 +393,7 @@ impl Clone for SessionBuilder {
     fn clone(&self) -> Self {
         Self {
             resource_notes: self.resource_notes.clone(),
+            summary_notes: self.summary_notes.clone(),
             config: self.config.clone(),
             executor: Arc::clone(&self.executor),
             tool_defs: self.tool_defs.clone(),
@@ -423,9 +422,20 @@ struct Worker {
 
 impl SessionBuilder {
     /// Starts a session worker for `model` with `effort`.
-    fn start(&self, model: &Model, effort: ReasoningEffort) -> Result<Worker> {
-        let budgets =
-            model.resolve_budgets(self.context_limit, self.response_reserve, self.limits)?;
+    fn start(
+        &self,
+        model: &Model,
+        effort: ReasoningEffort,
+        token: &sav::CancellationToken,
+    ) -> Result<Worker> {
+        crate::executor::check_cancelled(token)?;
+        let budgets = model.resolve_budgets_cancellable(
+            self.context_limit,
+            self.response_reserve,
+            self.limits,
+            token,
+        )?;
+        crate::executor::check_cancelled(token)?;
         let transport = model.transport()?;
         // Derive the retry policy from the model's own settings so a turn that
         // is generation-bound recovers from transient failures with back-off.
@@ -483,6 +493,7 @@ impl SessionBuilder {
                 log.notice(note)?;
             }
         }
+        crate::executor::check_cancelled(token)?;
         let (handle, rx, prompt_tx) = start(
             session,
             transport,
@@ -500,7 +511,7 @@ impl SessionBuilder {
             model_id: model.id.clone(),
             effort,
             budget_note: format!(
-                "model budget: {} context tokens ({}), {} output tokens ({}); context/usage accounting is estimated unless provider usage is available",
+                "Context: {} tokens ({}); output: {} ({})",
                 budgets.context_limit,
                 budgets.context_source,
                 budgets.limits.response_reserve,
@@ -510,57 +521,81 @@ impl SessionBuilder {
     }
 }
 
-fn app_model_id(config: &Config, model: &Model) -> String {
-    config
-        .models
-        .iter()
-        .find(|candidate| candidate.id == model.id)
-        .map(|candidate| candidate.id.clone())
-        .unwrap_or_else(|| model.id.clone())
+struct TerminalRestore(bool);
+
+impl TerminalRestore {
+    fn restore(&mut self) -> std::io::Result<()> {
+        self.0 = false;
+        let raw = disable_raw_mode();
+        let screen = execute!(
+            std::io::stdout(),
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            crossterm::cursor::Show
+        );
+        raw.and(screen)
+    }
 }
 
-fn ui_loop(
-    mut app: App,
-    builder: &SessionBuilder,
-    bootstrap: Option<mpsc::Receiver<Result<Worker>>>,
-) -> Result<()> {
+impl Drop for TerminalRestore {
+    fn drop(&mut self) {
+        if self.0
+            && let Err(error) = self.restore()
+        {
+            tracing::error!(%error, "terminal restoration failed");
+        }
+    }
+}
+
+fn ui_loop(mut app: App, config: &Config, mut discovery: Discovery) -> Result<()> {
     enable_raw_mode()?;
+    let mut terminal_restore = TerminalRestore(true);
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
     let mut worker: Option<Worker> = None;
-    let mut bootstrap = bootstrap;
+    let mut bootstrap: Option<Bootstrap> = None;
+    let mut builder: Option<SessionBuilder> = None;
 
     let result = run_ui(
         &mut terminal,
         &mut app,
-        builder,
+        config,
+        &mut discovery,
+        &mut builder,
         &mut worker,
         &mut bootstrap,
     );
 
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
-    result
+    discovery.cancel();
+    if let Some(job) = &bootstrap {
+        job.job.cancel();
+    }
+    if let Some(current) = &worker {
+        current.handle.shutdown();
+    }
+    let restore = terminal_restore.restore();
+    if let Err(error) = &restore {
+        tracing::error!(%error, "terminal restoration failed");
+    }
+    result.and(restore.map_err(Error::from))
 }
 
 fn run_ui<M: std::io::Write>(
     terminal: &mut Terminal<CrosstermBackend<M>>,
     app: &mut App,
-    builder: &SessionBuilder,
+    config: &Config,
+    discovery: &mut Discovery,
+    builder: &mut Option<SessionBuilder>,
     worker: &mut Option<Worker>,
-    bootstrap: &mut Option<mpsc::Receiver<Result<Worker>>>,
+    bootstrap: &mut Option<Bootstrap>,
 ) -> Result<()> {
     // A prompt held while the session worker is starting (or being replaced
     // after a model/effort change or a new session); dispatched to the worker
     // as soon as it is installed, so a prompt never waits on the UI.
-    let mut pending_submit: Option<String> = None;
+    let mut pending_submit = std::collections::VecDeque::new();
+    let mut start_requested = true;
     // Automatic prompt replay: when a bootstrap (model load/switch) fails and a
     // prompt is held for it, the bootstrap is retried (up to this many times) so
     // the prompt is dispatched to a fresh worker once the model becomes ready —
@@ -574,11 +609,50 @@ fn run_ui<M: std::io::Write>(
     // the same text cannot be submitted again.
     if let Some(text) = app.take_pending_prompt() {
         app.editor.clear();
-        pending_submit = Some(text);
+        pending_submit.push_back(text);
     }
 
     loop {
         terminal.draw(|frame| render::render(frame, app))?;
+
+        if let Some(result) = discovery.model.as_ref().and_then(Job::poll) {
+            discovery.model = None;
+            match result {
+                Ok(selection) => apply_selection(app, selection),
+                Err(error) => {
+                    app.model_discovery_pending = false;
+                    app.push_event(crate::session::Event::Failed(error.describe()));
+                }
+            }
+            if app.model.is_none() {
+                start_requested = !pending_submit.is_empty();
+                app.status = "choose a model (Tab)".into();
+            }
+        }
+        if let Some(result) = discovery.tools.as_ref().and_then(Job::poll) {
+            discovery.tools = None;
+            match result {
+                Ok(prepared) => {
+                    for note in &prepared.summary_notes {
+                        app.push_event(crate::session::Event::Note(note.clone()));
+                    }
+                    *builder = Some(prepared);
+                }
+                Err(error) => {
+                    start_requested = false;
+                    app.push_event(crate::session::Event::Failed(error.describe()));
+                }
+            }
+        }
+        if start_requested
+            && worker.is_none()
+            && bootstrap.is_none()
+            && let Some(prepared) = builder.as_ref()
+            && let Some(model) = app.model.as_deref().and_then(|id| config.model(id))
+        {
+            *bootstrap = Some(spawn_bootstrap(prepared, model, app.effort)?);
+            start_requested = false;
+        }
 
         // Emit any staged OSC 52 clipboard escape before drawing, so the write
         // goes through this loop's stdout handle and the buffer is flushed each
@@ -598,44 +672,52 @@ fn run_ui<M: std::io::Write>(
         // failed bootstrap is reported, not fatal: the app stays usable, and the
         // next submit or new session starts a fresh bootstrap.
         if worker.is_none()
-            && let Some(receiver) = bootstrap.as_ref()
+            && let Some(result) = bootstrap
+                .as_ref()
+                .and_then(|bootstrap| bootstrap.job.poll())
         {
-            match receiver.try_recv() {
-                Ok(Ok(new_worker)) => {
+            match result {
+                Ok(new_worker) => {
                     *bootstrap = None;
+                    if app.model.as_deref() != Some(&new_worker.model_id)
+                        || app.effort != new_worker.effort
+                    {
+                        new_worker.handle.shutdown();
+                        start_requested = true;
+                        continue;
+                    }
                     app.push_event(crate::session::Event::Note(new_worker.budget_note.clone()));
                     *worker = Some(new_worker);
-                    if let Some(text) = pending_submit.take()
-                        && let Some(current) = worker.as_ref()
-                    {
-                        let _ = current.prompt_tx.send(text);
+                    if let Some(current) = worker.as_ref() {
+                        for text in pending_submit.drain(..) {
+                            current
+                                .prompt_tx
+                                .send(text)
+                                .map_err(|_| Error::ChannelClosed)?;
+                        }
                     }
+                    replay_attempts = 0;
+                    app.status = "ready".into();
                 }
-                Ok(Err(error)) => {
+                Err(error) => {
                     // A failed bootstrap is reported, not fatal: the app stays
                     // usable. When a prompt is held for the failed worker, the
-                    // bootstrap is replayed with backoff (up to a few attempts)
+                    // bootstrap is replayed (up to a few attempts)
                     // so the prompt is dispatched to a fresh worker once the
                     // model becomes ready — the prompt is NOT lost and does not
                     // need a manual resubmit. The model selection is unchanged
                     // (a load/switch is retried, not a different model chosen).
                     *bootstrap = None;
                     app.push_event(crate::session::Event::Failed(error.describe()));
-                    if pending_submit.is_some() {
-                        if let Some(selected) = app.model.clone()
-                            && let Some(model) = builder.config.model(&selected)
-                            && replay_attempts < MAX_PROMPT_REPLAYS
-                        {
+                    if !pending_submit.is_empty() {
+                        if replay_attempts < MAX_PROMPT_REPLAYS {
                             replay_attempts += 1;
                             app.push_event(crate::session::Event::Note(format!(
                                 "the model did not become ready in time; replaying the prompt \
                                      (attempt {replay_attempts}/{MAX_PROMPT_REPLAYS}) — the \
                                      prompt is dispatched once the model is ready"
                             )));
-                            if let Ok(receiver) = spawn_bootstrap(builder, model, app.effort) {
-                                *bootstrap = Some(receiver);
-                                app.status = "starting model…".to_owned();
-                            }
+                            start_requested = true;
                         } else {
                             app.push_event(crate::session::Event::Note(
                                 "the model did not become ready in time; the prompt is kept — \
@@ -645,122 +727,83 @@ fn run_ui<M: std::io::Write>(
                         }
                     }
                 }
-                Err(mpsc::TryRecvError::Empty) => {
-                    app.status = "starting model…".to_owned();
-                }
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    *bootstrap = None;
-                }
             }
         }
+        startup::update_status(
+            app,
+            worker.is_some(),
+            bootstrap.is_some(),
+            discovery.tools.is_some() || discovery.model.is_some(),
+        );
 
-        if event::poll(Duration::from_millis(150))? {
+        if event::poll(Duration::from_millis(30))? {
             match event::read()? {
                 CrosstermEvent::Resize(width, height) => app.resize(width, height),
                 CrosstermEvent::Key(key) if key.kind == KeyEventKind::Press => {
                     match app.on_key(key) {
                         KeyAction::Submit => {
+                            if !pending_submit.is_empty() {
+                                replay_attempts = 0;
+                                start_requested = true;
+                            }
                             let text = app.take_pending_prompt();
                             if let Some(text) = text {
-                                let restart = match worker.as_ref() {
-                                    // A model or effort change applies to the
-                                    // next prompt: the old worker is cancelled
-                                    // and joined (dropped), then a fresh
-                                    // session starts for the new selection.
-                                    Some(current) => {
-                                        current.model_id != app.model.clone().unwrap_or_default()
-                                            || current.effort != app.effort
-                                    }
-                                    None => bootstrap.is_none(),
-                                };
-                                if restart {
-                                    if let Some(old) = worker.take() {
-                                        old.handle.cancel();
-                                        drop(old.prompt_tx);
-                                    }
-                                    // A fresh submission gets a full replay budget.
-                                    replay_attempts = 0;
-                                    // An in-flight bootstrap may target a stale
-                                    // selection; discard it and start fresh.
-                                    *bootstrap = None;
-                                    // A submission without a selected model
-                                    // is a user error, not a fault: note it
-                                    // in the transcript and keep the TUI
-                                    // alive rather than panicking.
-                                    let Some(model_id) = app.model.as_deref() else {
-                                        app.push_event(crate::session::Event::Note(
-                                            "no model selected — press Tab to choose one \
-                                             before submitting"
-                                                .to_owned(),
-                                        ));
-                                        continue;
-                                    };
-                                    let model =
-                                        builder.config.model(model_id).ok_or_else(|| {
-                                            let available = builder
-                                                .config
-                                                .models
-                                                .iter()
-                                                .map(|model| model.id.clone())
-                                                .collect();
-                                            Error::ModelNotFound {
-                                                requested: model_id.to_owned(),
-                                                available,
-                                            }
-                                        })?;
-                                    *bootstrap = Some(spawn_bootstrap(builder, model, app.effort)?);
-                                    app.status = "starting model…".to_owned();
-                                    pending_submit = Some(text);
-                                } else if let Some(current) = worker.as_ref() {
-                                    let _ = current.prompt_tx.send(text);
-                                } else {
-                                    // The worker is still starting; the prompt
-                                    // is dispatched when it is installed.
-                                    pending_submit = Some(text);
+                                replay_attempts = 0;
+                                if let Some(current) = worker.as_ref()
+                                    && app.model.as_deref() == Some(&current.model_id)
+                                    && app.effort == current.effort
+                                {
+                                    current
+                                        .prompt_tx
+                                        .send(text)
+                                        .map_err(|_| Error::ChannelClosed)?;
+                                    continue;
                                 }
+                                if let Some(old) = worker.take() {
+                                    old.handle.shutdown();
+                                }
+                                if bootstrap.as_ref().is_some_and(|current| {
+                                    app.model.as_deref() != Some(&current.model_id)
+                                        || app.effort != current.effort
+                                }) {
+                                    *bootstrap = None;
+                                }
+                                pending_submit.push_back(text);
+                                start_requested = true;
                             }
                         }
                         KeyAction::Cancel => {
                             if let Some(current) = worker.as_ref() {
                                 current.handle.cancel();
                             }
+                            if bootstrap.is_some() || !pending_submit.is_empty() {
+                                *bootstrap = None;
+                                pending_submit.clear();
+                                start_requested = false;
+                                app.status = "cancelled".into();
+                            }
                         }
                         KeyAction::NewSession => {
                             // A new session needs a selected model; deferred
                             // (no model) sessions just note that.
-                            let selected = match &app.model {
-                                Some(model) => model.clone(),
-                                None => {
-                                    app.push_event(crate::session::Event::Note(
-                                        "no model selected — press Tab to choose one before \
+                            if app.model.is_none() {
+                                app.push_event(crate::session::Event::Note(
+                                    "no model selected — press Tab to choose one before \
                                          starting a new session"
-                                            .to_owned(),
-                                    ));
-                                    continue;
-                                }
-                            };
+                                        .to_owned(),
+                                ));
+                                continue;
+                            }
                             // Replace whatever is live (a running turn is
                             // cancelled with the old worker) and start a fresh
                             // session for the selected model and effort.
                             if let Some(old) = worker.take() {
-                                old.handle.cancel();
-                                drop(old.prompt_tx);
+                                old.handle.shutdown();
                             }
                             *bootstrap = None;
-                            let model = builder.config.model(&selected).ok_or_else(|| {
-                                let available = builder
-                                    .config
-                                    .models
-                                    .iter()
-                                    .map(|model| model.id.clone())
-                                    .collect();
-                                Error::ModelNotFound {
-                                    requested: selected.clone(),
-                                    available,
-                                }
-                            })?;
-                            *bootstrap = Some(spawn_bootstrap(builder, model, app.effort)?);
-                            app.status = "starting model…".to_owned();
+                            pending_submit.clear();
+                            replay_attempts = 0;
+                            start_requested = true;
                         }
                         KeyAction::Quit => {
                             app.should_quit = true;
@@ -780,19 +823,6 @@ fn run_ui<M: std::io::Write>(
         }
 
         if app.should_quit {
-            // Graceful teardown before the loop exits. The worker blocks on
-            // rx.recv() waiting for the next prompt, so it can only exit once
-            // every prompt sender is dropped. Dropping the session handle first
-            // would join() a thread that can never unblock: the only prompt
-            // sender lives in the worker we are dropping. That ordering made
-            // the TUI hang after it closed and forced Ctrl-C. So cancel the
-            // running turn, then drop the sender to unblock recv(), and let the
-            // handle (which joins) drop last. An in-flight bootstrap is simply
-            // discarded: its thread finishes and drops the worker it built.
-            if let Some(worker) = worker.take() {
-                worker.handle.cancel();
-                drop(worker.prompt_tx);
-            }
             break;
         }
     }

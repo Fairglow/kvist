@@ -281,18 +281,20 @@ impl DirectModelTransport {
     /// This is a read-only probe used for active-model-first selection: it reuses
     /// the loopback restriction and the capacity-discovery bounds, and it never
     /// requests a model load or switch. llama-server's unqualified `/props`
-    /// describes the model that is already served (no `model` query, so no
-    /// switch is requested); Ollama `/api/ps` lists the loaded model(s). A down,
-    /// malformed, or empty provider yields `Ok(None)`, so callers fall through
-    /// to the next selection rule rather than failing startup.
+    /// describes a standalone server's identity. Router mode instead reads
+    /// `/models` and returns an entry whose status is `loaded`; it never uses
+    /// the router alias as a model. Both GETs share one deadline. Ollama
+    /// `/api/ps` lists loaded models. Errors are returned for callers to report
+    /// or deliberately treat as unavailable discovery.
     pub fn loaded_model(&self, cancellation: &CancellationToken) -> Result<Option<String>> {
+        let deadline = Instant::now() + self.deadline.min(MAX_CAPACITY_DISCOVERY);
         let bytes = get_bounded(
             &format!("http://{}", self.endpoint.authority),
             match self.provider {
                 LocalModelProvider::LlamaServer => "/props",
                 LocalModelProvider::Ollama => "/api/ps",
             },
-            self.deadline.min(MAX_CAPACITY_DISCOVERY),
+            deadline.saturating_duration_since(Instant::now()),
             1024 * 1024,
             cancellation,
         )?;
@@ -301,10 +303,42 @@ impl DirectModelTransport {
             return malformed("active model metadata must be an object");
         }
         match self.provider {
-            LocalModelProvider::LlamaServer => Ok(value
-                .get("model")
-                .and_then(Value::as_str)
-                .map(str::to_owned)),
+            LocalModelProvider::LlamaServer => {
+                if value.get("role").and_then(Value::as_str) == Some("router") {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        return Err(Error::ModelTransportTimedOut);
+                    }
+                    let bytes = get_bounded(
+                        &format!("http://{}", self.endpoint.authority),
+                        "/models",
+                        remaining,
+                        1024 * 1024,
+                        cancellation,
+                    )?;
+                    let catalog = parse_json(&bytes)?;
+                    let models =
+                        catalog
+                            .get("data")
+                            .and_then(Value::as_array)
+                            .ok_or_else(|| Error::MalformedModelResponse {
+                                reason: "router metadata must contain a data array".into(),
+                            })?;
+                    if models.len() > 128 {
+                        return malformed("router metadata exceeds 128 models");
+                    }
+                    let loaded = models.iter().find(|entry| {
+                        entry.pointer("/status/value").and_then(Value::as_str) == Some("loaded")
+                    });
+                    return Self::loaded_model_id(loaded.and_then(|entry| entry.get("id")));
+                }
+                for key in ["model", "model_alias", "model_path"] {
+                    if let Some(name) = Self::loaded_model_id(value.get(key))? {
+                        return Ok(Some(name));
+                    }
+                }
+                Ok(None)
+            }
             LocalModelProvider::Ollama => {
                 let models = value
                     .get("models")
@@ -315,19 +349,35 @@ impl DirectModelTransport {
                 if models.len() > 128 {
                     return malformed("loaded model metadata exceeds 128 models");
                 }
-                Ok(models
+                let name = models
                     .iter()
-                    .find_map(|entry| entry.get("name").and_then(Value::as_str).map(str::to_owned))
+                    .find_map(|entry| entry.get("name").filter(|name| name.is_string()))
                     .or_else(|| {
-                        models.iter().find_map(|entry| {
-                            entry
-                                .get("model")
-                                .and_then(Value::as_str)
-                                .map(str::to_owned)
-                        })
-                    }))
+                        models
+                            .iter()
+                            .find_map(|entry| entry.get("model").filter(|name| name.is_string()))
+                    });
+                Self::loaded_model_id(name)
             }
         }
+    }
+
+    fn loaded_model_id(value: Option<&Value>) -> Result<Option<String>> {
+        let Some(value) = value else {
+            return Ok(None);
+        };
+        let Some(name) = value.as_str() else {
+            return malformed("loaded model identity must be a string");
+        };
+        if name.trim().is_empty() {
+            return Ok(None);
+        }
+        if name.len() > 256 || name.chars().any(char::is_control) {
+            return malformed(
+                "loaded model identity exceeds bounds or contains control characters",
+            );
+        }
+        Ok(Some(name.to_owned()))
     }
 
     fn execute_with_body(

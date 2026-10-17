@@ -2,6 +2,68 @@
 
 # Component Implementation Record
 
+## Scoped responsive lifecycle observation - 2026-10-17
+
+Separate source-blind `lifecycle-comparator` compared this new record with scoped
+intent and attributed runtime evidence. It established no concrete unresolved
+scoped discrepancy and made no acceptance claim. Older record entries were
+inadvertently displayed during extraction but excluded from that comparison;
+source blindness remained intact. The initial 602-pass component run preceded
+the three follow-up corrections; final coverage was 54 targeted passes plus
+reported formatting, strict lint and release-build success. Neither independent
+context executed runtime verification. Local timings are not universal bounds.
+
+Independent clean-slate `lifecycle-observer` inspected current source/tests and
+the immediate toolchain dependency, excluding intent, queues, prior records,
+reviews, chat and Git history. It executed no builds or tests. The statements
+below describe inspected behavior and assertions, not independent runtime
+verification or acceptance.
+
+- Model/tool discovery and bootstrap own cancellation tokens and joining handles;
+  result polling uses `try_recv`. Exit requests cancellation/shutdown and restores
+  the terminal before owned-worker teardown. Session workers separately own a
+  permanent-shutdown flag, check event backpressure, wake prompt waits every
+  25 ms and join on handle drop
+  (`src/tui/startup.rs:32-80`, `src/tui/mod.rs:543-582,615-677`,
+  `src/run.rs:28-80,113-192`).
+- Interactive submissions during discovery accumulate FIFO until a matching
+  model/effort worker is ready; stale bootstrap results are shut down. Explicit
+  selection skips active probing and a manual choice survives late results.
+  Default-provider endpoint strings are deduplicated under five-second probes.
+  Matching uses provider names, including implicit Ollama `:latest`. Budget
+  resolution honors CLI, configuration, then provider metadata; missing capacity
+  fails rather than assuming a default
+  (`src/tui/app.rs:1141-1175`, `src/tui/mod.rs:268-279,352-369,597-612,680-697`,
+  `src/config.rs:166-223,887-948,960-1038`).
+- Concise toolchain/Rust summaries go to the UI; detailed resource notices go
+  to the recorder when enabled and budget provenance to metadata. Auto Rust
+  failures suppress advertisement; explicit/forced failures propagate. Host
+  opt-out uses a distinct executor/prompt. Rust hashing, vendor preparation and
+  bounded rustup subprocesses receive cancellation
+  (`src/tui/mod.rs:303-318,446-511,635-637`, `src/tools.rs:179-211`,
+  `src/rust_environment.rs:117-132,219-249,431-469,838-860,1130-1197`).
+
+The observer identified three concrete branches, then inspected their repairs:
+the advisory scan now uses a fixed nine-manifest table and a regular-descriptor,
+no-follow/nonblocking `.gitignore` read bounded to 64 KiB plus one overflow byte;
+nonblank initial prompts enter the editor before the dispatch-length guard;
+and startup status leaves live-worker status untouched
+(`src/toolchain.rs:260-279,360-417`, `src/tui/app.rs:499-526`,
+`src/tui/startup.rs:10-24`, `src/tui/mod.rs:732-737`).
+Inspected tests assert ignore-file size/link/FIFO/UTF-8 boundaries, PTY readiness
+and subsecond quit with a FIFO, overlong prompt preservation, live-status
+precedence, held-prompt ordering, loaded-model reuse and cancellation
+(`src/toolchain.rs:642-670`, `src/tui/startup.rs:182-222`,
+`tests/startup_lifecycle.rs:181-195,279-415`, `src/run.rs:565-629`).
+Their existence does not establish passing results; the observer ran none.
+
+Retained limitations: cancellation is cooperative and cannot interrupt every
+filesystem syscall. Held-prompt retries are count-bounded without timed backoff.
+Earlier source inspection found the pre-existing Rust preparation budget of
+180 seconds paired with a diagnostic saying 30 seconds; the correction-only
+recheck did not re-investigate that discrepancy. No new concrete defect was
+found in the three inspected repairs. This is not blanket compliance.
+
 ## Scoped repository scheduling observation - 2026-10-14
 
 Independent clean-slate `repository-scheduling-observer` read only bounded

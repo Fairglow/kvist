@@ -2,6 +2,38 @@
 
 # Component Implementation Record
 
+## Scoped loaded-model discovery observation - 2026-10-17
+
+Separate source-blind `lifecycle-comparator` established no concrete unresolved
+scoped discrepancy against this new observation and attributed runtime evidence.
+It executed no tests, made no acceptance claim, and excluded older records
+inadvertently displayed during extraction. Aggregate reported tests do not
+independently establish every malformed-metadata or authority branch.
+
+Independent clean-slate `lifecycle-observer` inspected current direct-transport
+source and loaded-model test assertions, excluding intent, queues, prior
+records/reviews, chat and Git history. It executed no builds or tests.
+
+`loaded_model` reads unqualified llama-server `/props`; router role triggers
+read-only `/models`, selecting the first entry with status `loaded`, not the
+router alias or an unloaded default. Standalone identity fallback tries model,
+alias, then path; Ollama uses `/api/ps` (`src/direct_transport.rs:289-363`).
+Both router requests share a deadline; each response is bounded to 1 MiB,
+catalogs to 128 entries and returned identifiers to 256 bytes without controls
+(`src/direct_transport.rs:289-380`). Requests reuse numeric-loopback HTTP
+authority; endpoint parsing excludes userinfo, queries, fragments and provider
+paths, with no DNS/redirect authority expansion. Socket waits use approximately
+100-ms polling and cancellation/deadline checks
+(`src/direct_transport.rs:468-549,632-668,1611-1655`).
+
+Inspected assertions cover loaded-status filtering, standalone alias/path
+fallback, no loaded model, malformed/oversized metadata and stalled-probe
+cancellation (`tests/loaded_model.rs:61-130`). These are source assertions, not
+independently observed passing results. The API still returns only one loaded
+identity per endpoint; catalog order can affect which identity a consumer
+matches when several are loaded. No blanket correctness or acceptance claim
+is made.
+
 ## Scoped CI repair observation - 2026-10-14
 
 Independent clean-slate `repair-observer` read only enumerated source/test

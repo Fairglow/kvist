@@ -14,6 +14,58 @@ component:
         expected_revision: "sha256:d820c13d62d03274f739359a9d8a813f4b5942729d6a646934ce697bcd49f097"
         observed_revision: "sha256:d8be7616a3dd68b68c9560717683f62ce54aea6ac23a91010c7139d84566fd6f"
 tasks:
+  - id: lifecycle-write-tests
+    title: "Pin responsive startup and router selection"
+    description: "Reproduce router metadata failure and test input, held prompts, explicit-choice precedence, cancellation and concise status."
+    kind: test
+    context: "Router/standalone-alias regressions failed before transport repair. Follow-up FIFO and overlong-initial-prompt regressions also failed before correction. Final targeted run passes 54 tests covering lifecycle, discovery, selection, bounded ignore reads and worker teardown."
+    purpose: "Pin observable latency and selection semantics."
+    expected_outcome: "An editable prompt appears before discovery and submitted prompts are retained."
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:37:00Z", completed_at: "2026-10-17T13:37:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: lifecycle-implement-code
+    title: "Move discovery behind the editable prompt"
+    description: "Own concurrent cancellable discovery and bootstrap jobs; retain private identity diagnostics and restore the terminal before joins."
+    kind: implementation
+    context: "Owned concurrent discovery and cancellable bootstraps are implemented. Initial component nextest: 602 passed, 3 pre-existing skipped. After final review corrections, 54 targeted tests, strict Clippy, formatting and release build pass. Final release/configuration: prompt 4.31-4.86 ms, input 10.72-10.74 ms, quit 92.75-99.95 ms; initialization 1.749 s with active reuse and no inference. No universal latency guarantee."
+    purpose: "Remove provider and tool preparation from the input critical path."
+    expected_outcome: "Concise startup status, validated execution and terminal restoration before joins."
+    status: completed
+    depends_on: [lifecycle-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:37:00Z", completed_at: "2026-10-17T13:37:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: lifecycle-security-audit
+    title: "Inspect lifecycle ownership and authority"
+    description: "Independently inspect source and tests for cancellation, stale results and unchanged validated-resource authority."
+    context: "Independent clean-slate lifecycle-observer found a blocking advisory ignore read, overlong initial prompt loss and live-status overwrite; inspected corrections resolve all three. Source assertions only, no observer-run tests or blanket security certification. Retained limitations are in IMPL.md."
+    purpose: "Retain independent findings and limitations."
+    expected_outcome: "Concrete regressions are corrected or explicitly retained."
+    kind: security-audit
+    status: completed
+    depends_on: [lifecycle-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:49:19Z", completed_at: "2026-10-17T13:49:19Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: lifecycle-compliance-review
+    title: "Compare independent lifecycle observations"
+    description: "Derive source-only IMPL evidence, then compare intent and observed evidence in a separate source-blind context."
+    context: "Separate source-blind lifecycle-comparator found no concrete unresolved scoped discrepancy against the new observations and attributed runtime evidence. Older IMPL entries were inadvertently displayed during extraction but excluded; source blindness was retained. Initial 602-pass run preceded final corrections; final targeted coverage is 54 passes. Evidence gaps, cooperative filesystem cancellation, retry timing and the pre-existing Rust timeout-message mismatch remain explicit. No acceptance receipt or blanket compliance claim."
+    purpose: "Prevent implementer self-certification."
+    expected_outcome: "A source-blind comparison records discrepancies and verification limits without accepting the bundle."
+    kind: compliance-review
+    status: completed
+    depends_on: [lifecycle-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"]
+    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:49:19Z", completed_at: "2026-10-17T13:49:19Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: repository-isolation-write-tests
     title: "Pin nextest repository trial exclusivity"
     description: "Assert the exact repository-test selector and dynamic full-pool reservation; reproduce the missing configuration and measure real start/finish overlap."

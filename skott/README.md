@@ -23,6 +23,18 @@ skott --list-models         # print configured models and exit
 Run it from an interactive terminal. It refuses non-interactive input with an
 actionable message.
 
+The prompt is editable immediately while model/toolchain discovery and context
+setup run in the background. You can submit before startup finishes; prompts
+wait for validated tools and model readiness. Without `--model`, Skott reuses
+the default provider's already-loaded model, including llama-server router
+mode. A manual model choice is never overwritten by late discovery.
+
+Startup shows a short toolchain list, Rust selection/vendor status, and model
+context budget. Exact resource identities stay in private session logs rather
+than cluttering the live transcript. **Ctrl+Q** restores the terminal first,
+cancels initialization or active provider work, and then joins owned workers;
+queued prompts do not start during shutdown.
+
 ## Configuration
 
 Configuration is TOML. See [config.example.toml](./config.example.toml) for a

@@ -22,6 +22,58 @@ component:
         expected_revision: "sha256:b629358ac60133fe3b5ed12150e4f6f6bfbd47a78d1a3db5ddbe7c44c0321943"
         observed_revision: "sha256:fbdbd8bea631741dc443154617e3d940346059b2a3492164eb4fe17749f21167"
 tasks:
+  - id: active-model-write-tests
+    title: "Reproduce router loaded-model discovery"
+    description: "Test real router metadata, loaded status, standalone aliases, malformed input and shared cancellation."
+    kind: test
+    context: "Router, standalone alias and malformed-catalog regressions failed before repair. Five loaded-model tests and existing capacity tests now pass."
+    purpose: "Pin actual router wire metadata rather than a synthetic model field."
+    expected_outcome: "Read-only discovery identifies a loaded entry and retains cancellation and metadata bounds."
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#AR-REQ-ACTIVE-MODEL"]
+    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:37:00Z", completed_at: "2026-10-17T13:37:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: active-model-implement-code
+    title: "Discover the router's loaded model"
+    description: "Read bounded router status under one cancellable deadline without inference or switching."
+    kind: implementation
+    context: "Router status discovery and standalone identity fallback are implemented. Initial component nextest: 602 passed, 3 pre-existing skipped; after Skott follow-up corrections, 54 targeted tests, strict Clippy, formatting and release build pass. Actual configured router reuse is observed without inference."
+    purpose: "Reuse an active model without triggering inference or loading."
+    expected_outcome: "Loaded status is read under one cancellable deadline."
+    status: completed
+    depends_on: [active-model-write-tests]
+    requirements: ["REQUIREMENTS.md#AR-REQ-ACTIVE-MODEL"]
+    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:37:00Z", completed_at: "2026-10-17T13:37:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: active-model-security-audit
+    title: "Inspect metadata discovery boundaries"
+    description: "Independently inspect read-only endpoint authority, bounds and cancellation."
+    context: "Independent clean-slate lifecycle-observer inspected metadata bounds, shared deadline, numeric-loopback authority and cancellation without running tests. One loaded identity per endpoint remains a documented limitation; no blanket certification."
+    purpose: "Retain independent resource-boundary observations."
+    expected_outcome: "Concrete regressions are corrected or explicitly retained."
+    kind: security-audit
+    status: completed
+    depends_on: [active-model-implement-code]
+    requirements: ["REQUIREMENTS.md#AR-REQ-ACTIVE-MODEL"]
+    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:49:19Z", completed_at: "2026-10-17T13:49:19Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: active-model-compliance-review
+    title: "Compare independent discovery evidence"
+    description: "Compare intended behavior with source-only observations in a separate source-blind context."
+    context: "Separate source-blind lifecycle-comparator found no concrete unresolved scoped discrepancy against new observations and attributed runtime evidence. Older IMPL entries were inadvertently displayed but excluded; source blindness remained. Aggregate test results do not independently establish every malformed-metadata or authority branch. No acceptance or blanket compliance claim."
+    purpose: "Prevent implementer self-certification."
+    expected_outcome: "A source-blind comparison records discrepancies and verification limits without accepting the bundle."
+    kind: compliance-review
+    status: completed
+    depends_on: [active-model-security-audit]
+    requirements: ["REQUIREMENTS.md#AR-REQ-ACTIVE-MODEL"]
+    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:49:19Z", completed_at: "2026-10-17T13:49:19Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: ci-vendor-write-tests
     title: "Pin the read-only Cargo vendor path"
     description: "Assert the shared wrapper uses a disjoint immutable vendor destination."

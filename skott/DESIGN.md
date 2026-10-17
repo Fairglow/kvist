@@ -2,6 +2,25 @@
 
 # Skott — Design
 
+## Responsive lifecycle
+
+Enter the terminal with only local configuration/override validation complete.
+Run independent model-selection and toolchain-preparation jobs on owned threads,
+each with a cancellation token and result channel. Poll results without blocking
+input; build a session only after resources and a model selection are ready.
+Keep pending prompts outside discovery results and preserve manual selections.
+Bootstrap budget queries share their owner's cancellation token. Discarded jobs
+are cancelled and joined; terminal restoration precedes shutdown joins. Shutdown
+sets the worker stop flag before cancellation and prevents queued prompt dispatch.
+Toolchain summaries list enabled profiles and a short Rust selection/vendor state;
+full identity notes are journal-only. Provider endpoint probes are deduplicated
+even on failure and limited to the default provider.
+Advisory language detection checks a shared fixed manifest table, not a complete
+directory listing. Open `.gitignore` nonblocking/no-follow, validate the descriptor
+as regular and bound the read to 64 KiB plus one overflow byte. Log advisory
+fallbacks. Keep live worker status authoritative over outstanding discovery,
+and place an initial prompt in the editor before applying its dispatch guard.
+
 ## October run remediation
 
 Resolve model budgets in one shared startup helper used by headless and each
@@ -167,22 +186,24 @@ Why a worker thread: the model transport and sandbox are blocking. The UI runs
 on the main thread and would otherwise freeze for the whole turn. `run::start`
 starts a fallibly spawned owned thread and pushes `Event`s over a bounded channel;
 the UI reads events each frame and renders them, showing a status spinner while
-a turn is in flight. Handle drop sets cancellation and a separate shutdown flag,
-then joins. Event sends and prompt waits poll shutdown; retained prompt senders
+a turn is in flight. Shutdown sets the stop flag before cancellation; handle
+drop joins. Event sends and prompt waits poll shutdown; retained prompt senders
 and full event queues cannot prevent teardown. UI worker field order closes both
 channels before joining on quit, errors and model switches.
 
 Startup is lazy so the terminal UI appears immediately instead of waiting on
-the provider: `run` hands the UI loop a receiver from `spawn_bootstrap`, which
-runs `SessionBuilder::start` (transport construction, provider connection,
-model load) on a dedicated `agent-bootstrap` thread. The transcript shows a
+the provider: owned model and toolchain discovery jobs run concurrently, and
+the event loop polls their results after its first draw. `spawn_bootstrap`
+runs `SessionBuilder::start` (transport construction, cancellable capacity
+discovery and journal setup) on a dedicated `agent-bootstrap` thread. The UI shows a
 `starting model…` status in the meantime; a held initial prompt (for example
 one supplied positionally) is dispatched to the worker as soon as it is
 installed. A failed bootstrap is reported as a failure notice, not fatal: the
 UI stays usable and the next submission or new session starts a fresh
 bootstrap. Submitting with a changed model or effort cancels the old worker,
-discards a stale in-flight bootstrap, starts a new one, and holds the prompt
-for it. The transport watchdogs are part of the turn budget: the
+cancels and joins a stale in-flight bootstrap, starts a new one, and holds the
+prompt for it. Quit restores the terminal before any joins or resource cleanup.
+The transport watchdogs are part of the turn budget: the
 slot-allocation phase (provider acceptance, including model load/switch) and
 the time-to-first-token phase (long-prompt prefill) are each granted the full
 per-turn `deadline_secs`, so a slow model switch completes within the turn
@@ -303,8 +324,9 @@ one) or fails fast (headless). The per-provider default model never overrides an
 active model, an explicit selection, or a single default-provider model.
 
 The active provider model is discovered by `config::probe_active_models`, a
-bounded, read-only, loopback-only probe of each distinct configured endpoint
-(llama-server `GET /props`, Ollama `GET /api/ps`). It builds a dedicated
+bounded, read-only, loopback-only probe of each distinct default-provider endpoint
+(llama-server `GET /props` and router `GET /models` loaded status;
+Ollama `GET /api/ps`). Failed endpoints are deduplicated too. It builds a dedicated
 short-deadline transport per endpoint and reuses the transport's numeric-loopback
 authority; it sends no inference and requests no model switch, so a loaded model
 is read without triggering a load. A down, timed-out, malformed, or empty
@@ -312,7 +334,9 @@ provider yields no entry for that endpoint, and selection falls through to the
 next rule rather than failing startup. When at most one model is configured the
 probe is skipped entirely (the single model is independent of active state), so
 a single-model startup performs no provider I/O and keeps its pinned request
-sequence.
+sequence. Interactive explicit selection skips the active probe entirely.
+Ollama implicit `:latest` matching shares one helper with unconfigured-model
+reporting; no other model-name normalization is performed.
 
 `config::select_active_model` returns `Explicit`, `Active` (with an announcement
 reason and the loaded name), `Single`, `Default` (the per-provider fall-back,

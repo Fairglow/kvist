@@ -241,6 +241,8 @@ pub struct App {
     /// the session defers loading until the user picks one (several configured
     /// models, no active match).
     pub model: Option<String>,
+    /// Selection is still being discovered; submissions may wait for its result.
+    pub model_discovery_pending: bool,
     /// The currently selected thinking effort (a valid enum value).
     pub effort: ReasoningEffort,
     pub running: bool,
@@ -349,6 +351,7 @@ impl App {
             history_index: None,
             models: models.to_vec(),
             model: model_id.map(str::to_owned),
+            model_discovery_pending: false,
             effort,
             running: false,
             execution_scope: crate::session_log::ExecutionScope::SandboxedWorkspace,
@@ -497,6 +500,7 @@ impl App {
         if text.trim().is_empty() {
             return;
         }
+        self.editor.set_lines(vec![text.clone()], (0, 0));
         if text.chars().count() > MAX_PROMPT_CHARS {
             self.note(
                 self.theme.prompt.fg.unwrap_or_default(),
@@ -510,7 +514,6 @@ impl App {
             );
             return;
         }
-        self.editor.set_lines(vec![text.clone()], (0, 0));
         self.note(
             self.theme.prompt.fg.unwrap_or_default(),
             "You: (auto-started)",
@@ -1142,7 +1145,7 @@ impl App {
         }
         // Several configured models and no active match: the session defers the
         // load until the user picks a model (Tab), so an unsent prompt is held.
-        if self.model.is_none() {
+        if self.model.is_none() && !self.model_discovery_pending {
             self.note(
                 self.theme.warn,
                 "no model selected — press Tab to choose one (the prompt is kept)",

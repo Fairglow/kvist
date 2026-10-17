@@ -153,7 +153,22 @@ impl Model {
         &self,
         context_override: Option<usize>,
         response_override: Option<u32>,
+        limits: crate::session::RunLimits,
+    ) -> Result<ModelBudgets> {
+        self.resolve_budgets_cancellable(
+            context_override,
+            response_override,
+            limits,
+            &sav::CancellationToken::new(),
+        )
+    }
+
+    pub(crate) fn resolve_budgets_cancellable(
+        &self,
+        context_override: Option<usize>,
+        response_override: Option<u32>,
         mut limits: crate::session::RunLimits,
+        cancellation: &sav::CancellationToken,
     ) -> Result<ModelBudgets> {
         let (context_limit, context_source) = if let Some(limit) = context_override {
             (limit, "CLI")
@@ -161,7 +176,7 @@ impl Model {
             (limit, "configuration")
         } else {
             let discovery = self.transport()?.context_limit(
-                &self.model, &sav::CancellationToken::new(),
+                &self.model, cancellation,
             ).map_err(|error| Error::Config {
                 path: None,
                 reason: format!("could not discover serving capacity for `{}` ({error}); set models.context_limit or --context-limit to the server's actual capacity", self.id),
@@ -866,6 +881,24 @@ pub enum Select {
 /// or empty provider yields no entry for that endpoint, so the caller falls
 /// through to the next selection rule rather than failing startup.
 pub fn probe_active_models(config: &Config) -> std::collections::BTreeMap<String, String> {
+    probe_active_models_cancellable(config, &sav::CancellationToken::new())
+}
+
+fn matches_loaded_model(model: &Model, loaded: &str) -> bool {
+    loaded == model.model
+        || (model.provider == ModelProvider::Ollama
+            && model
+                .model
+                .rsplit('/')
+                .next()
+                .is_some_and(|name| !name.contains([':', '@']))
+            && loaded == format!("{}:latest", model.model))
+}
+
+pub(crate) fn probe_active_models_cancellable(
+    config: &Config,
+    cancellation: &sav::CancellationToken,
+) -> std::collections::BTreeMap<String, String> {
     // A single configured model auto-selects (the default provider's only
     // model) identically whether or not it is active, so no active probe is
     // needed — and skipping it keeps a single-model startup free of provider I/O
@@ -877,10 +910,14 @@ pub fn probe_active_models(config: &Config) -> std::collections::BTreeMap<String
         return std::collections::BTreeMap::new();
     }
     const PROBE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
-    const PROBE_RESPONSE_BYTES: usize = 64 * 1024;
+    const PROBE_RESPONSE_BYTES: usize = 1024 * 1024;
     let mut active = std::collections::BTreeMap::new();
-    for model in config.models.iter() {
-        if active.contains_key(&model.base_url) {
+    let mut visited = std::collections::BTreeSet::new();
+    for model in config.default_provider_models() {
+        if cancellation.is_cancelled() {
+            break;
+        }
+        if !visited.insert(&model.base_url) {
             continue;
         }
         // A dedicated, short-deadline transport bounds the probe so a wedged
@@ -893,10 +930,17 @@ pub fn probe_active_models(config: &Config) -> std::collections::BTreeMap<String
             PROBE_RESPONSE_BYTES,
         ) {
             Ok(transport) => transport,
-            Err(_) => continue,
+            Err(error) => {
+                tracing::debug!(%error, "active-model endpoint unavailable");
+                continue;
+            }
         };
-        if let Ok(Some(loaded)) = probe.loaded_model(&sav::CancellationToken::new()) {
-            active.insert(model.base_url.clone(), loaded);
+        match probe.loaded_model(cancellation) {
+            Ok(Some(loaded)) => {
+                active.insert(model.base_url.clone(), loaded);
+            }
+            Ok(None) => {}
+            Err(error) => tracing::debug!(%error, "active-model discovery unavailable"),
         }
     }
     active
@@ -950,13 +994,13 @@ pub fn select_active_model(
     // grouped by the (base_url, provider model name) they matched. A unique
     // match selects that entry with no switch; more than one candidate is
     // ambiguous and falls to the default-model fall-back.
-    let mut matched: Vec<&Model> = Vec::new();
+    let mut matched: Vec<(&Model, &str)> = Vec::new();
     let mut ambiguous = false;
     for model in default_provider_models.iter() {
         if let Some(loaded) = active.get(&model.base_url)
-            && loaded == &model.model
+            && matches_loaded_model(model, loaded)
         {
-            matched.push(model);
+            matched.push((model, loaded));
         }
     }
     if !matched.is_empty() {
@@ -964,21 +1008,18 @@ pub fn select_active_model(
         // provider model name on one server); that is ambiguous.
         {
             let mut seen = std::collections::BTreeSet::new();
-            for model in &matched {
-                if !seen.insert((model.base_url.as_str(), model.model.as_str())) {
+            for (model, loaded) in &matched {
+                if !seen.insert((model.base_url.as_str(), loaded)) {
                     ambiguous = true;
                 }
             }
         }
         if !ambiguous {
-            // A single unique match: reuse it with no switch. Every matched
-            // entry was only pushed when `active` held exactly `model.model`
-            // for its base_url, so the loaded name is `model.model` itself.
-            let model = matched[0];
+            let (model, loaded) = matched[0];
             return Select::Active {
                 model_id: model.id.clone(),
-                reason: format!("using already-loaded model `{}` (no switch)", model.model),
-                loaded: model.model.clone(),
+                reason: format!("using already-loaded model `{loaded}` (no switch)"),
+                loaded: loaded.to_owned(),
             };
         }
     }
@@ -1008,7 +1049,7 @@ pub fn unconfigured_active_models(
         let configured = config
             .models
             .iter()
-            .any(|model| &model.base_url == base_url && &model.model == loaded);
+            .any(|model| &model.base_url == base_url && matches_loaded_model(model, loaded));
         if !configured {
             unconfigured.push((loaded.clone(), base_url.clone()));
         }

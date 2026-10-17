@@ -56,6 +56,12 @@ impl SessionHandle {
         self.cancellation.cancel();
     }
 
+    /// Stops the session permanently, including queued prompts.
+    pub fn shutdown(&self) {
+        self.shutdown.store(true, Ordering::SeqCst);
+        self.cancel();
+    }
+
     /// Reports whether the owned worker is alive (including idle prompt waits).
     #[allow(dead_code)]
     pub fn is_running(&self) -> bool {
@@ -67,8 +73,7 @@ impl SessionHandle {
 
 impl Drop for SessionHandle {
     fn drop(&mut self) {
-        self.cancel();
-        self.shutdown.store(true, Ordering::SeqCst);
+        self.shutdown();
         if let Some(thread) = self.thread.take()
             && thread.join().is_err()
         {
@@ -122,6 +127,9 @@ where
             // record lifecycle itself. Cancellation re-arms the token after each
             // turn so a cancelled turn does not end the session.
             while let Some(text) = wait_for_prompt(&prompt_rx, &worker_shutdown) {
+                if worker_shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
                 // Label the durable record with the prompt before any turn so
                 // the transcript is findable by its content, then record it.
                 if let Some(recorder) = recorder.as_mut()
@@ -147,6 +155,9 @@ where
                         borrow_recorder(&mut recorder),
                     )
                 });
+                if worker_shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
                 cancellation.reset();
                 if let Err(error) = result {
                     if !worker_shutdown.load(Ordering::SeqCst)
@@ -497,6 +508,65 @@ mod tests {
     }
 
     struct FloodTransport(Arc<std::sync::atomic::AtomicUsize>);
+
+    struct WaitingTransport {
+        started: mpsc::Sender<()>,
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl ModelTransport for WaitingTransport {
+        fn complete(&self, _: &ModelRequest, token: &CancellationToken) -> sav::Result<ModelTurn> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.started.send(()).unwrap();
+            while !token.is_cancelled() {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Err(AgentError::ModelTransportCancelled)
+        }
+
+        fn stream(
+            &self,
+            request: &ModelRequest,
+            token: &CancellationToken,
+            _: &mut dyn FnMut(ModelStreamEvent) -> sav::Result<()>,
+        ) -> sav::Result<ModelTurn> {
+            self.complete(request, token)
+        }
+
+        fn deadline(&self) -> Duration {
+            Duration::from_secs(60)
+        }
+    }
+
+    #[test]
+    fn shutdown_cancels_active_provider_without_starting_queued_prompts() {
+        let (started, ready) = mpsc::channel();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (handle, rx, prompt_tx) = start(
+            test_session(),
+            WaitingTransport {
+                started,
+                calls: calls.clone(),
+            },
+            NoopExecutor,
+            ContextManager::new(DEFAULT_CONTEXT_TOKENS, 6),
+            None,
+            RetryPolicy::new(1, Duration::from_millis(1), Duration::from_millis(1)),
+            1,
+            RunLimits::default(),
+        )
+        .unwrap();
+        prompt_tx.send("active".into()).unwrap();
+        ready.recv_timeout(Duration::from_secs(1)).unwrap();
+        prompt_tx.send("must not start".into()).unwrap();
+        let started = std::time::Instant::now();
+        handle.shutdown();
+        drop(handle);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert!(prompt_tx.send("after shutdown".into()).is_err());
+        drop(rx);
+    }
 
     impl ModelTransport for FloodTransport {
         fn complete(&self, _: &ModelRequest, _: &CancellationToken) -> sav::Result<ModelTurn> {

@@ -2,6 +2,29 @@
 
 # Skott — Requirements
 
+## RUN-REQ-RESPONSIVE-LIFECYCLE
+
+Interactive startup MUST render an editable prompt before provider discovery,
+language/toolchain preparation, or model budget discovery completes. Independent
+model and toolchain discovery MUST run concurrently. Submitted prompts MUST be
+held until validated resources and the selected model are ready; background
+selection MUST NOT override an explicit CLI or interactive model choice.
+Startup MUST report concise toolchain availability and model/context status,
+retaining exact resource identities in the private journal rather than the
+normal transcript. Discovery failures MUST remain visible and MUST NOT enable
+unvalidated tools. Quit MUST restore the terminal before waiting for owned
+workers, cancel discovery and provider waits, and prevent queued prompts from
+starting after shutdown. Tests MUST demonstrate editable input during blocked
+discovery, held-prompt selection, bounded cancellation and router-model reuse.
+Advisory language detection MUST inspect a fixed set of root manifests and
+read at most 64 KiB of a regular, non-link `.gitignore` without blocking on
+special files. Unreadable/invalid ignore files retain the documented advisory
+raw-manifest fallback with a diagnostic. Discovery status MUST NOT replace a
+live worker's status. Overlong initial prompts MUST remain editable, not dispatch.
+
+The human-requested lifecycle repair has a deliberate advisory-review exception
+while receipt enforcement is unavailable; it is not compliance evidence.
+
 ## RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE
 
 Native language-discovery tests MUST retain successful sandbox execution and
@@ -182,10 +205,12 @@ has loaded over a statically configured one, when the user has not explicitly
 selected a model, so an already-active model starts with no load/switch cost.
 The active model MUST be discovered by a bounded, read-only, loopback-only
 provider probe (Ollama `GET /api/ps` for the loaded model and serving context;
-llama-server `GET /props` for the loaded model), reusing the existing discovery
+llama-server `GET /props`, followed by read-only `GET /models` loaded status
+in router mode), reusing the existing discovery
 bounds (5 s, 1 MiB). The probe MUST NOT send inference, modify the provider, or
 widen endpoint authority, and a probe failure (provider down, malformed, or no
 model loaded) MUST NOT fail startup and MUST fall through to the next rule.
+Ollama's implicit `:latest` name MUST match its untagged configured equivalent.
 
 The selection precedence MUST be:
 
