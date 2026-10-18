@@ -1,12 +1,22 @@
+<!-- kvist-requirements-version: 1 -->
+
 # Blad Requirements
 
-## Purpose
+## Purpose and scope
 
 Blad is a first-class terminal Markdown viewer that reads and displays
 skott session transcripts and standalone Markdown files with rich rendering,
 interactive navigation, search, and optional edit support.
 
-## Functional Requirements
+## Stakeholders and concerns
+
+- Human operators who read skott session transcripts need reliable, fast, correct rendering.
+- Users of terminal tools need keyboard-driven navigation and search.
+- Automation needs dump mode for non-interactive consumption.
+
+## Functional requirements
+
+Blad must provide the following capabilities:
 
 ### Session Viewing
 
@@ -62,7 +72,7 @@ interactive navigation, search, and optional edit support.
 19. **R-019 Smart shortcut:** `blad <target>` tries to interpret the target
     as a file path, session path, or session ID automatically.
 
-## Non-Functional Requirements
+## Quality requirements and constraints
 
 20. **R-020 Performance:** Rendering must be fast, even for large session
     transcripts (thousands of messages).
@@ -99,17 +109,23 @@ folding or live-follow features proposed in `PLAN.md`.
 
 ## Constraints
 
-26. **C-001 Dependencies:** Use existing workspace dependencies where
+- **C-001 Dependencies:** Use existing workspace dependencies where
     possible (sav, clap, serde, pulldown-cmark, syntect, crossterm).
-27. **C-002 No new state format:** Blad reads skott's structured session
+- **C-002 No new state format:** Blad reads skott's structured session
     format; it does not define its own session storage format.
-28. **C-003 Headless:** No cloud services, telemetry, or runtime daemon
+- **C-003 Headless:** No cloud services, telemetry, or runtime daemon
     required for core commands.
 
-## Out of Scope
+## Out of scope
 
 - Creating or continuing sessions (that is skott's responsibility)
 - Multi-user concurrent editing of sessions
 - Encryption of session files
 - Automatic cleanup or retention policies
 - Backward compatibility with legacy log formats
+
+## Acceptance and traceability
+
+Each requirement carries an identifier (R-xxx, C-xxx) for traceability.
+Tests and implementation records must reference these identifiers to
+demonstrate fulfillment.

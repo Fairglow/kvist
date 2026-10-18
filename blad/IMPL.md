@@ -1,3 +1,5 @@
+<!-- kvist-implementation-record-version: 1 -->
+
 # Component Implementation Record
 
 Date: 2026-10-12

@@ -1,169 +1,245 @@
-- id: blad-ci-write-tests
-  title: "Reproduce inherited-terminal viewer failures"
-  kind: write_tests
-  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
-  status: done
-  description: "All four PTY viewer regressions fail under an inherited 120x40 controlling terminal and pass without one; preserve exact screen assertions."
-
-- id: blad-ci-implement-code
-  title: "Give viewer fixtures their own controlling PTY"
-  kind: implement_code
-  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
-  depends_on: [blad-ci-write-tests]
-  status: done
-  description: "Launch through Linux setsid with the PTY slave as controlling terminal, without unsafe code or changing production rendering."
-
-- id: blad-ci-security-audit
-  title: "Audit PTY subprocess ownership"
-  kind: security_audit
-  requirements: ["REQUIREMENTS.md#R-026"]
-  depends_on: [blad-ci-implement-code]
-  status: done
-  description: "Independent scoped review of terminal ownership, signal targeting and child cleanup."
-
-- id: blad-ci-compliance-review
-  title: "Compare independent viewer evidence"
-  kind: compliance_review
-  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
-  depends_on: [blad-ci-security-audit]
-  status: done
-  description: "Clean-slate observed supplement and separate source-blind comparison; no acceptance or blanket certification."
-
-- id: blad-component-setup
-  title: "Blad component scaffolding"
-  requirements: []
-  status: done
-  description: "Create blad/ directory with Cargo.toml and basic structure"
-
-- id: blad-cli-framework
-  title: "Blad CLI framework"
-  requirements: []
-  status: done
-  description: "Implement CLI parsing for list, show, stream, view, export commands"
-
-- id: blad-session-listing
-  title: "Blad session listing"
-  requirements: [R-001]
-  status: done
-  description: "Implement list command with metadata"
-
-- id: blad-session-display
-  title: "Blad session display"
-  requirements: [R-002]
-  status: done
-  description: "Implement show command with markdown rendering"
-
-- id: blad-streaming
-  title: "Blad session streaming"
-  requirements: [R-003]
-  status: done
-  description: "Implement stream command for active sessions"
-
-- id: blad-export
-  title: "Blad session export"
-  requirements: [R-004]
-  status: done
-  description: "Implement export command producing combined Markdown"
-
-- id: blad-file-viewing
-  title: "Blad file viewing"
-  requirements: [R-006, R-007]
-  status: done
-  description: "Implement view command with interactive viewer and dump mode"
-
-- id: blad-markdown-rendering
-  title: "Blad markdown rendering"
-  requirements: [R-014, R-015, R-016]
-  status: done
-  description: "Implement CommonMark + GFM rendering with syntax highlighting"
-
-- id: blad-interactive-viewer
-  title: "Blad interactive viewer"
-  requirements: [R-009, R-010, R-012, R-013]
-  status: done
-  description: "Implement interactive viewer with navigation and status bar"
-
-- id: blad-search
-  title: "Blad search functionality"
-  requirements: [R-011]
-  status: done
-  description: "Implement search with / key, highlight, match navigation"
-
-- id: blad-edit-mode
-  title: "Blad edit mode"
-  requirements: [R-008]
-  status: done
-  description: "Implement edit mode with e key to open in $EDITOR"
-
-- id: blad-mermaid
-  title: "Blad mermaid support"
-  requirements: [R-017]
-  status: done
-  description: "Detect and attempt to render mermaid diagrams via mmdc"
-
-- id: blad-math
-  title: "Blad math support"
-  requirements: [R-018]
-  status: done
-  description: "Render inline and display math expressions"
-
-- id: blad-documentation
-  title: "Blad documentation"
-  requirements: []
-  status: done
-  description: "Update REQUIREMENTS.md, CONTRACT.md, DESIGN.md, IMPL.md"
-
-- id: blad-write_tests
-  title: "Write tests"
-  requirements: []
-  status: done
-  description: "Unit and integration tests for all components"
-
-- id: blad-implement_code
-  title: "Implement code"
-  requirements: []
-  status: done
-  description: "Complete implementation of all components"
-
-- id: blad-security_audit
-  title: "Security audit"
-  requirements: []
-  status: done
-  description: "Review for security issues"
-
-- id: blad-compliance_review
-  title: "Compliance review"
-  requirements: []
-  status: done
-  description: "Verify all requirements are met"
-
-- id: blad-layout-write-tests
-  title: "Write layout regression tests"
-  kind: write_tests
-  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-027", "REQUIREMENTS.md#R-028"]
-  status: done
-  description: "Exact whitespace/width tests and Linux PTY screen tests for first-line retention, gutter, Unicode, code overflow, resize and tiny dimensions. See DESIGN.md targeted layout correction."
-
-- id: blad-layout-implement-code
-  title: "Implement targeted layout corrections"
-  kind: implement_code
-  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-027", "REQUIREMENTS.md#R-028"]
-  depends_on: [blad-layout-write-tests]
-  status: done
-  description: "Buffer inline words across parser events, use measured width budgets, and position/clip complete frame rows. Preserve existing key semantics and source Markdown on width-aware/edit paths."
-
-- id: blad-layout-security-audit
-  title: "Audit layout boundary changes"
-  kind: security_audit
-  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
-  depends_on: [blad-layout-implement-code]
-  status: done
-  description: "Independent scoped review of control handling, clipping bounds, input-driven layout and terminal painting. Do not claim a whole-component safety audit."
-
-- id: blad-layout-compliance-review
-  title: "Review targeted layout evidence"
-  kind: compliance_review
-  requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-027", "REQUIREMENTS.md#R-028"]
-  depends_on: [blad-layout-security-audit]
-  status: done
-  description: "Derive scoped IMPL evidence in a clean-slate context, then compare source-blind against layout intent/test evidence. Retain unrelated historical discrepancies; no whole-component certification."
+schema_version: 1
+component:
+  requirements_revision: "sha256:6685311fdea00a81db0411344216fa36014f93416b9e893f5d29ba8a1400f650"
+  contract_revision: "sha256:51b9c61c6ccafe3a2422a5aa20c3856c52fa8a93dec755659212c79bf38ad997"
+  design_revision: "sha256:87a61f983341bdfd9553e0527f0e864627edfa6707a242ebafba53a8e92744d4"
+  parent_contract: null
+  revalidation:
+    state: current
+    checked_at: "2026-10-17T17:30:00Z"
+    causes: []
+tasks:
+  - id: blad-component-structure-test
+    title: "Verify component structure and build"
+    description: "Confirm component directory, Cargo.toml, and basic build work"
+    purpose: "Validate component scaffolding before implementation"
+    expected_outcome: "Component builds successfully with correct dependencies"
+    kind: test
+    context: "Build and dependency resolution validated for initial scaffolding"
+    status: completed
+    depends_on: []
+    requirements: []
+    timestamps: {created_at: "2026-10-10T09:00:00Z", updated_at: "2026-10-10T09:30:00Z", completed_at: "2026-10-10T09:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-component-setup
+    title: "Blad component scaffolding"
+    description: "Create blad/ directory with Cargo.toml and basic structure"
+    purpose: "Establish component structure"
+    expected_outcome: "Working component skeleton with build configuration"
+    kind: implementation
+    context: "Component directory and Cargo.toml created with required dependencies"
+    status: completed
+    depends_on: [blad-component-structure-test]
+    requirements: []
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T10:30:00Z", completed_at: "2026-10-10T10:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-cli-framework
+    title: "Blad CLI framework"
+    description: "Implement CLI parsing for list, show, stream, view, export commands"
+    purpose: "Provide command-line interface"
+    expected_outcome: "Functional CLI with subcommands"
+    kind: implementation
+    context: "Clap-based CLI with all commands implemented"
+    status: completed
+    depends_on: [blad-component-setup]
+    requirements: []
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T11:00:00Z", completed_at: "2026-10-10T11:00:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-session-listing
+    title: "Blad session listing"
+    description: "Implement list command with metadata"
+    purpose: "List recent sessions"
+    expected_outcome: "Users can list sessions with metadata"
+    kind: implementation
+    context: "Session listing reads skott runs directory and displays metadata"
+    status: completed
+    depends_on: [blad-cli-framework]
+    requirements: ["REQUIREMENTS.md#R-001"]
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T11:30:00Z", completed_at: "2026-10-10T11:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-session-display
+    title: "Blad session display"
+    description: "Implement show command with markdown rendering"
+    purpose: "View completed session transcripts"
+    expected_outcome: "Users can view session transcripts interactively"
+    kind: implementation
+    context: "Session display loads and renders all messages with Markdown formatting"
+    status: completed
+    depends_on: [blad-cli-framework]
+    requirements: ["REQUIREMENTS.md#R-002"]
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T12:00:00Z", completed_at: "2026-10-10T12:00:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-streaming
+    title: "Blad session streaming"
+    description: "Implement stream command for active sessions"
+    purpose: "Follow live/active sessions"
+    expected_outcome: "Users can follow active session transcripts"
+    kind: implementation
+    status: completed
+    context: "Streaming polls for new messages in active sessions"
+    depends_on: [blad-session-display]
+    requirements: ["REQUIREMENTS.md#R-003"]
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T12:30:00Z", completed_at: "2026-10-10T12:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-export
+    title: "Blad session export"
+    description: "Implement export command producing combined Markdown"
+    purpose: "Export session transcripts"
+    expected_outcome: "Users can export sessions to Markdown documents"
+    kind: implementation
+    context: "Export combines all messages into a single Markdown document"
+    status: completed
+    depends_on: [blad-session-display]
+    requirements: ["REQUIREMENTS.md#R-004"]
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T13:00:00Z", completed_at: "2026-10-10T13:00:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-file-viewing
+    title: "Blad file viewing"
+    description: "Implement view command with interactive viewer and dump mode"
+    purpose: "View standalone Markdown files"
+    expected_outcome: "Users can view any Markdown file with interactive navigation"
+    kind: implementation
+    context: "File viewing with interactive viewer and non-interactive dump mode"
+    status: completed
+    depends_on: [blad-cli-framework]
+    requirements: ["REQUIREMENTS.md#R-006", "REQUIREMENTS.md#R-007"]
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T13:30:00Z", completed_at: "2026-10-10T13:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-markdown-rendering
+    title: "Blad markdown rendering"
+    description: "Implement CommonMark + GFM rendering with syntax highlighting"
+    purpose: "Rich Markdown rendering"
+    expected_outcome: "Full CommonMark and GFM support with syntax highlighting"
+    kind: implementation
+    context: "Uses pulldown-cmark for parsing and syntect for syntax highlighting"
+    status: completed
+    depends_on: [blad-cli-framework]
+    requirements: ["REQUIREMENTS.md#R-014", "REQUIREMENTS.md#R-015", "REQUIREMENTS.md#R-016"]
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T14:00:00Z", completed_at: "2026-10-10T14:00:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-interactive-viewer
+    title: "Blad interactive viewer"
+    description: "Implement interactive viewer with navigation and status bar"
+    purpose: "Interactive navigation"
+    expected_outcome: "Full interactive viewer with keyboard navigation and status bar"
+    kind: implementation
+    context: "Uses crossterm for terminal interaction with scroll, navigation and status bar"
+    status: completed
+    depends_on: [blad-file-viewing]
+    requirements: ["REQUIREMENTS.md#R-009", "REQUIREMENTS.md#R-010", "REQUIREMENTS.md#R-012", "REQUIREMENTS.md#R-013"]
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T14:30:00Z", completed_at: "2026-10-10T14:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-search
+    title: "Blad search functionality"
+    description: "Implement search with / key, highlight, match navigation"
+    purpose: "Search within documents"
+    expected_outcome: "Users can search and navigate between matches"
+    kind: implementation
+    context: "Search on rendered content with highlight and match navigation"
+    status: completed
+    depends_on: [blad-interactive-viewer]
+    requirements: ["REQUIREMENTS.md#R-011"]
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T15:00:00Z", completed_at: "2026-10-10T15:00:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-edit-mode
+    title: "Blad edit mode"
+    description: "Implement edit mode with e key to open in $EDITOR"
+    purpose: "Edit files from viewer"
+    expected_outcome: "Users can edit files and re-render"
+    kind: implementation
+    context: "Edit mode opens file in $EDITOR and re-renders after save"
+    status: completed
+    depends_on: [blad-interactive-viewer]
+    requirements: ["REQUIREMENTS.md#R-008"]
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T15:30:00Z", completed_at: "2026-10-10T15:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-mermaid
+    title: "Blad mermaid support"
+    description: "Detect and attempt to render mermaid diagrams via mmdc"
+    purpose: "Mermaid diagram rendering"
+    expected_outcome: "Mermaid diagrams render or fall back gracefully"
+    kind: implementation
+    context: "Optional mmdc integration with fallback to plain text"
+    status: completed
+    depends_on: [blad-markdown-rendering]
+    requirements: ["REQUIREMENTS.md#R-017"]
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T16:00:00Z", completed_at: "2026-10-10T16:00:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-math
+    title: "Blad math support"
+    description: "Render inline and display math expressions"
+    purpose: "Math expression rendering"
+    expected_outcome: "Inline and display math renders with distinct styling"
+    kind: implementation
+    context: "LaTeX math expressions rendered with distinct styling"
+    status: completed
+    depends_on: [blad-markdown-rendering]
+    requirements: ["REQUIREMENTS.md#R-018"]
+    timestamps: {created_at: "2026-10-10T10:00:00Z", updated_at: "2026-10-10T16:30:00Z", completed_at: "2026-10-10T16:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-ci-write-tests
+    title: "Reproduce inherited-terminal viewer failures"
+    description: "All four PTY viewer regressions fail under an inherited 120x40 controlling terminal and pass without one; preserve exact screen assertions."
+    purpose: "Reproduce and pin terminal inheritance regressions"
+    expected_outcome: "Reproducible test failures for PTY inheritance issues"
+    kind: test
+    context: "PTY viewer regressions identified and reproduced under inherited 120x40 terminal"
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
+    timestamps: {created_at: "2026-10-14T08:00:00Z", updated_at: "2026-10-14T08:30:00Z", completed_at: "2026-10-14T08:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-ci-implement-code
+    title: "Give viewer fixtures their own controlling PTY"
+    description: "Launch through Linux setsid with the PTY slave as controlling terminal, without unsafe code or changing production rendering."
+    purpose: "Fix PTY inheritance in tests"
+    expected_outcome: "Viewer tests pass with dedicated controlling PTY"
+    kind: implementation
+    context: "Linux setsid approach with PTY slave as controlling terminal"
+    status: completed
+    depends_on: [blad-ci-write-tests]
+    requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
+    timestamps: {created_at: "2026-10-14T08:00:00Z", updated_at: "2026-10-14T09:00:00Z", completed_at: "2026-10-14T09:00:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-ci-security-audit
+    title: "Audit PTY subprocess ownership"
+    description: "Independent scoped review of terminal ownership, signal targeting and child cleanup."
+    purpose: "Verify PTY subprocess handling"
+    expected_outcome: "Security findings documented and addressed"
+    kind: security-audit
+    context: "Independent clean-slate scoped review completed"
+    status: completed
+    depends_on: [blad-ci-implement-code]
+    requirements: ["REQUIREMENTS.md#R-026"]
+    timestamps: {created_at: "2026-10-14T08:00:00Z", updated_at: "2026-10-14T09:30:00Z", completed_at: "2026-10-14T09:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-ci-compliance-review
+    title: "Compare independent viewer evidence"
+    description: "Clean-slate observed supplement and separate source-blind comparison; no acceptance or blanket certification."
+    purpose: "Independent compliance verification"
+    expected_outcome: "Compliance findings documented"
+    kind: compliance-review
+    context: "Clean-slate observed supplement and separate source-blind comparison completed"
+    status: completed
+    depends_on: [blad-ci-security-audit]
+    requirements: ["REQUIREMENTS.md#R-026", "REQUIREMENTS.md#R-028"]
+    timestamps: {created_at: "2026-10-14T08:00:00Z", updated_at: "2026-10-14T10:00:00Z", completed_at: "2026-10-14T10:00:00Z"}
+    blocked_reason: null
+    recovery_state: null
