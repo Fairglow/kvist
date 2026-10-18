@@ -138,8 +138,7 @@ fn test_table_wrapped_rows_have_no_internal_separators() {
     assert_eq!(
         separator_count, 1,
         "Wrapped rows must not add internal separators, got {} separators. Output: {:?}",
-        separator_count,
-        output
+        separator_count, output
     );
 
     // All wrapped lines still fit within the terminal width.
@@ -275,10 +274,7 @@ fn test_table_widest_column_gets_most_width() {
 
     // Column widths from the header.
     let first = lines[0];
-    let cols: Vec<usize> = first
-        .split(" | ")
-        .map(|s| s.chars().count())
-        .collect();
+    let cols: Vec<usize> = first.split(" | ").map(|s| s.chars().count()).collect();
     let (w_commit, w_files, w_desc) = (cols[0], cols[1], cols[2]);
     assert!(
         w_desc > w_commit && w_desc > w_files,
