@@ -546,6 +546,32 @@ fn render_table(
         }
     }
 
+    // Enforce minimum column width: 4:3 width:height ratio means a column
+    // that wraps to H lines must be at least ceil(H * 4/3) columns wide.
+    // Iterate until stable because wrapping changes based on column widths.
+    let mut stable = false;
+    while !stable {
+        stable = true;
+        for row in rows {
+            let mut row_wrapped = Vec::new();
+            for (i, &width) in col_widths.iter().enumerate() {
+                let cell = row.get(i).map_or("", |cell| cell.as_str());
+                row_wrapped.push(wrap_cell(cell, width));
+            }
+            let max_lines = row_wrapped
+                .iter()
+                .map(|lines| lines.len())
+                .max()
+                .unwrap_or(1);
+            for (i, _wrapped_lines) in row_wrapped.iter().enumerate() {
+                let needed = ceil_div(max_lines * 4, 3);
+                if col_widths[i] < needed {
+                    col_widths[i] = needed;
+                    stable = false;
+                }
+            }
+        }
+    }
 
     // If terminal width is provided, adapt column widths to fit
     if let Some(term_width) = terminal_width {
@@ -651,6 +677,10 @@ fn render_table(
 
 /// Wrap a cell to fit within the given width.
 /// Uses word wrapping, with hard wrapping for words that exceed the width.
+fn ceil_div(a: usize, b: usize) -> usize {
+    a / b + if !a.is_multiple_of(b) { 1 } else { 0 }
+}
+
 fn wrap_cell(cell: &str, width: usize) -> Vec<String> {
     // Quick check: if cell fits, return as-is
     if unicode_width::UnicodeWidthStr::width(cell) <= width {
