@@ -16,21 +16,21 @@ For authoritative topology see
 The following language toolchains are expected to be available on any properly
 configured Galla sandbox instance:
 
-| Language | Compiler/Runtime | Package Manager | Build Tool |
-|----------|-----------------|-----------------|------------|
-| **C/C++** | `gcc`, `cc`, `g++`, `clang` | — | `make` |
-| **Go** | `go` | — (stdlib only) | — |
-| **Rust** | `rustc`, `cargo`, `rustup` | Offline Cargo/vendor | `cargo` |
-| **Python** | `python3` | `pip`, `pip3` | — |
-| **Node.js** | `node`, `npm`, `npx` | `npm` | — |
+| Language    | Compiler/Runtime            | Package Manager      | Build Tool |
+| ----------- | --------------------------- | -------------------- | ---------- |
+| **C/C++**   | `gcc`, `cc`, `g++`, `clang` | —                    | `make`     |
+| **Go**      | `go`                        | — (stdlib only)      | —          |
+| **Rust**    | `rustc`, `cargo`, `rustup`  | Offline Cargo/vendor | `cargo`    |
+| **Python**  | `python3`                   | `pip`, `pip3`        | —          |
+| **Node.js** | `node`, `npm`, `npx`        | `npm`                | —          |
 
 Additional build system tools expected:
 
-| Category | Tools |
-|----------|-------|
-| **Build** | `make`, `cmake`, `ninja` |
-| **Autotools** | `autoconf`, `autoreconf`, `aclocal`, `automake` |
-| **Version Control** | `git` |
+| Category            | Tools                                           |
+| ------------------- | ----------------------------------------------- |
+| **Build**           | `make`, `cmake`, `ninja`                        |
+| **Autotools**       | `autoconf`, `autoreconf`, `aclocal`, `automake` |
+| **Version Control** | `git`                                           |
 
 **Note on versions:** Specific versions of these toolchains will vary by host
 and by when the sandbox environment was provisioned. Do not hardcode version
@@ -46,31 +46,32 @@ relying on them.
 
 ### Additional Language Runtimes
 
-| Language | Commands | Typical Use |
-|----------|----------|-------------|
-| **Java** | `java`, `javac`, `jar` | JVM applications |
-| **Ruby** | `ruby`, `gem` | Ruby scripts and gems |
-| **Perl** | `perl` | Perl scripts (CPAN module available, `cpan` command often off-PATH) |
-| **PHP** | `php` | PHP scripts |
-| **Lua** | `lua`, `luac` | Lua scripts |
+| Language | Commands               | Typical Use                                                         |
+| -------- | ---------------------- | ------------------------------------------------------------------- |
+| **Java** | `java`, `javac`, `jar` | JVM applications                                                    |
+| **Ruby** | `ruby`, `gem`          | Ruby scripts and gems                                               |
+| **Perl** | `perl`                 | Perl scripts (CPAN module available, `cpan` command often off-PATH) |
+| **PHP**  | `php`                  | PHP scripts                                                         |
+| **Lua**  | `lua`, `luac`          | Lua scripts                                                         |
 
 ### Development Utilities
 
-| Category | Tools | Notes |
-|----------|-------|-------|
-| **Debug/Inspect** | `gdb`, `valgrind`, `strace`, `ltrace`, `objdump`, `nm`, `readelf` | Binary debugging and inspection |
-| **Compression** | `tar`, `gzip`, `gunzip`, `unzip`, `bzip2`, `xz`, `zip` | Archive operations |
-| **Text Processing** | `sed`, `awk`, `grep`, `cut`, `paste`, `sort`, `uniq`, `wc`, `tr` | GNU core text tools |
-| **JSON** | `jq` | JSON querying and manipulation |
-| **Editors** | `vim`, `nano`, `emacs`, `less`, `more` | Text editing and viewing |
-| **Terminal Multiplexers** | `tmux`, `screen` | Session management |
-| **SQLite** | `sqlite3` | SQLite database CLI |
-| **Network** | `curl`, `wget`, `ssh`, `rsync`, `scp` | Installed but **no actual network** |
-| **Containers** | `docker` | Client often installed, no daemon socket |
+| Category                  | Tools                                                             | Notes                                    |
+| ------------------------- | ----------------------------------------------------------------- | ---------------------------------------- |
+| **Debug/Inspect**         | `gdb`, `valgrind`, `strace`, `ltrace`, `objdump`, `nm`, `readelf` | Binary debugging and inspection          |
+| **Compression**           | `tar`, `gzip`, `gunzip`, `unzip`, `bzip2`, `xz`, `zip`            | Archive operations                       |
+| **Text Processing**       | `sed`, `awk`, `grep`, `cut`, `paste`, `sort`, `uniq`, `wc`, `tr`  | GNU core text tools                      |
+| **JSON**                  | `jq`                                                              | JSON querying and manipulation           |
+| **Editors**               | `vim`, `nano`, `emacs`, `less`, `more`                            | Text editing and viewing                 |
+| **Terminal Multiplexers** | `tmux`, `screen`                                                  | Session management                       |
+| **SQLite**                | `sqlite3`                                                         | SQLite database CLI                      |
+| **Network**               | `curl`, `wget`, `ssh`, `rsync`, `scp`                             | Installed but **no actual network**      |
+| **Containers**            | `docker`                                                          | Client often installed, no daemon socket |
 
 ### Tools That May Be Missing
 
 Some tools that are available on some hosts may be absent on others:
+
 - `kubectl`, `terraform`, `ansible` — infrastructure tools
 - `autogen` — some autotools workflows
 - `pacman` or other package managers — no host provisioning authority
@@ -91,7 +92,7 @@ boundary. Installed incidental tools and missing tools vary by host.
 
 - **Forbidden-command denylist.** The sandbox shell tool applies an advisory
   command denylist. `git commit` is currently on this denylist, while `git
-  add`, `git status`, and `git diff` are permitted. Commands on the denylist
+add`, `git status`, and `git diff` are permitted. Commands on the denylist
   return a policy violation rather than executing. This restriction is global
   to the sandbox, not per-directory or per-component.
 
@@ -140,7 +141,7 @@ artifacts that must survive across invocations.
 
 ### Naming Trap
 
-The default toolchain lives in `/rust/toolchain` (singular) while the *others*
+The default toolchain lives in `/rust/toolchain` (singular) while the _others_
 live in `/rust/toolchains/N` (plural). These are easy to conflate. Always
 use `rustup show active-toolchain` / `rustup toolchain list` rather than
 guessing paths.
@@ -153,53 +154,53 @@ other hosts.
 
 ### Toolchain Versions Observed
 
-| Tool | Version |
-|------|---------|
-| GCC | 16.2.1 |
-| Clang | 23.1.1 |
-| Python | 3.14.8 |
-| pip | 26.2.1 |
-| Node | v20.20.2 |
-| npm | 12.2.0 (warns about Node version compatibility) |
-| Go | go1.27.2-X:nodwarf5 linux/amd64 |
-| Rust stable | 1.99.0 (default) |
-| Rust nightly | Available |
-| Rust other versions | 1.95.0, 1.94.0, 1.94, 1.85.0, 1.67.1, 1.64.0 |
-| make | 4.4.1 |
-| cmake | 4.4.4 |
-| ninja | 1.13.2 |
-| git | 2.56.0 |
-| jq | 1.8.2 |
-| tmux | 3.8 |
-| screen | 5.0.2 |
+| Tool                | Version                                         |
+| ------------------- | ----------------------------------------------- |
+| GCC                 | 16.2.1                                          |
+| Clang               | 23.1.1                                          |
+| Python              | 3.14.8                                          |
+| pip                 | 26.2.1                                          |
+| Node                | v20.20.2                                        |
+| npm                 | 12.2.0 (warns about Node version compatibility) |
+| Go                  | go1.27.2-X:nodwarf5 linux/amd64                 |
+| Rust stable         | 1.99.0 (default)                                |
+| Rust nightly        | Available                                       |
+| Rust other versions | 1.95.0, 1.94.0, 1.94, 1.85.0, 1.67.1, 1.64.0    |
+| make                | 4.4.1                                           |
+| cmake               | 4.4.4                                           |
+| ninja               | 1.13.2                                          |
+| git                 | 2.56.0                                          |
+| jq                  | 1.8.2                                           |
+| tmux                | 3.8                                             |
+| screen              | 5.0.2                                           |
 
 ### Additional Tools Observed
 
-| Tool | Version |
-|------|---------|
-| Java | OpenJDK 27 |
-| Ruby | 3.4.10 |
-| Perl | 5.42.3 |
-| PHP | 8.5.11 |
-| Lua | 5.5.1 |
-| gdb | 18.1 |
-| valgrind | 3.25.1 |
-| strace | 7.2 |
-| autoconf | 2.73 |
-| automake | 1.19 |
-| sed | 4.10 |
-| awk | 5.4.1 |
-| grep | 3.12 |
-| coreutils | 9.12 |
-| tar | 1.35 |
-| gzip | 1.15 |
-| bzip2 | 1.0.8 |
-| xz | 5.8.4 |
+| Tool            | Version            |
+| --------------- | ------------------ |
+| Java            | OpenJDK 27         |
+| Ruby            | 3.4.10             |
+| Perl            | 5.42.3             |
+| PHP             | 8.5.11             |
+| Lua             | 5.5.1              |
+| gdb             | 18.1               |
+| valgrind        | 3.25.1             |
+| strace          | 7.2                |
+| autoconf        | 2.73               |
+| automake        | 1.19               |
+| sed             | 4.10               |
+| awk             | 5.4.1              |
+| grep            | 3.12               |
+| coreutils       | 9.12               |
+| tar             | 1.35               |
+| gzip            | 1.15               |
+| bzip2           | 1.0.8              |
+| xz              | 5.8.4              |
 | docker (client) | 29.9.0 (no daemon) |
-| vim | 9.2 |
-| nano | 9.2 |
-| emacs | 31.1 |
-| sqlite3 | 3.54.0 |
+| vim             | 9.2                |
+| nano            | 9.2                |
+| emacs           | 31.1               |
+| sqlite3         | 3.54.0             |
 
 ### Observed Quirks on This Host
 
@@ -211,6 +212,25 @@ other hosts.
 - **Duplicate rustup binary:** `/usr/bin/rustup` (1.29.1, System) is used by
   wrapper scripts, while `/rust/user-cargo-bin/rustup` (1.26.0, host shim) is
   on PATH. The wrapper's `/usr/bin/rustup` is authoritative.
+- **cargo clippy vendor config mismatch (resolved):** The `cargo` wrapper
+  script at `/rust/runtime/bin/cargo` injects `--offline --locked` and the
+  vendored source configuration (`source.crates-io.replace-with="vendored-sources"`,
+  `source.vendored-sources.directory="/rust/vendor"`). When cargo executes the
+  external `clippy` subcommand it consumes its own flags and then invokes the
+  `cargo-clippy` binary on PATH, passing the subcommand name itself as the
+  first argument followed by the remaining arguments — so the vendor/offline
+  flags never reach `cargo-clippy` on their own. The `cargo-clippy` wrapper at
+  `/rust/runtime/bin/cargo-clippy` therefore strips that leading `clippy`
+  token (cargo-clippy only recognizes it in the leading position and would
+  otherwise forward it to `cargo check` as a stray positional argument) and
+  injects the same `--offline --locked` and vendor source configuration
+  flags, so `cargo clippy` resolves against the vendored snapshot exactly
+  like `cargo build` and needs no explicit vendor flags. (Historically the
+  `cargo-clippy` wrapper omitted these flags and `cargo clippy` failed with
+  "no matching package named `chrono` found" against the empty scratch
+  registry. The explicit-flag workaround
+  `cargo clippy --offline --locked --config 'source.crates-io.replace-with="vendored-sources"' --config 'source.vendored-sources.directory="/rust/vendor"'`
+  remains valid but is no longer required.)
 
 ## Quick Environment Probe
 

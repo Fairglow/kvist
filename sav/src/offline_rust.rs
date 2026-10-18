@@ -67,14 +67,29 @@ pub fn wrapper(tool: RustTool) -> String {
     } else {
         ""
     };
-    let arguments = if tool == RustTool::Cargo {
+    // Cargo and its dependency-resolving companion (cargo-clippy) must force
+    // offline, locked, vendored resolution. cargo consumes its own flags before
+    // delegating to the external clippy subcommand, so the flags must also be
+    // injected here or clippy would resolve against the empty scratch registry.
+    let arguments = if matches!(tool, RustTool::Cargo | RustTool::CargoClippy) {
         " --offline --locked --config 'source.crates-io.replace-with=\"vendored-sources\"' --config 'source.vendored-sources.directory=\"/rust/vendor\"'"
+    } else {
+        ""
+    };
+    // cargo delegates an external subcommand as `cargo-clippy clippy <args>`,
+    // passing the subcommand name as the first argument. cargo-clippy only
+    // recognizes that name in the leading position, so it must be stripped
+    // before the injected flags; with no token left, cargo-clippy treats all
+    // remaining arguments as cargo-check arguments, which is the form its
+    // flag set accepts.
+    let subcommand = if tool == RustTool::CargoClippy {
+        "if [[ \"${1-}\" == clippy ]]; then shift; fi\n"
     } else {
         ""
     };
     let tool = tool.name();
     format!(
-        "#!/usr/bin/bash\nset -eu\n{working_directory}if [[ \"${{1-}}\" == +* ]]; then selected=\"${{1:1}}\"; shift; else active=\"$(/usr/bin/rustup show active-toolchain)\"; selected=\"${{active%% *}}\"; fi\n{source_paths}exec /usr/bin/rustup run -- \"$selected\" {tool}{arguments} \"$@\"\n"
+        "#!/usr/bin/bash\nset -eu\n{working_directory}if [[ \"${{1-}}\" == +* ]]; then selected=\"${{1:1}}\"; shift; else active=\"$(/usr/bin/rustup show active-toolchain)\"; selected=\"${{active%% *}}\"; fi\n{subcommand}{source_paths}exec /usr/bin/rustup run -- \"$selected\" {tool}{arguments} \"$@\"\n"
     )
 }
 
@@ -101,5 +116,21 @@ mod tests {
         assert!(wrapper(RustTool::Cargo).contains("--offline --locked"));
         assert!(wrapper(RustTool::Cargo).contains("/rust/vendor"));
         assert!(!wrapper(RustTool::Cargo).contains("/workspace/.kvist/vendored"));
+        // The clippy companion must force the same vendored resolution as
+        // cargo, because cargo does not forward its own flags to the
+        // external clippy subcommand it delegates to.
+        assert!(wrapper(RustTool::CargoClippy).contains("--offline --locked"));
+        // The delegated subcommand name must be stripped before the injected
+        // flags, or cargo-clippy forwards it to `cargo check` as a stray
+        // positional argument.
+        assert!(
+            wrapper(RustTool::CargoClippy).contains("if [[ \"${1-}\" == clippy ]]; then shift; fi")
+        );
+        assert!(wrapper(RustTool::CargoClippy).contains("/rust/vendor"));
+        assert!(
+            wrapper(RustTool::CargoClippy)
+                .contains("source.crates-io.replace-with=\"vendored-sources\"")
+        );
+        assert!(!wrapper(RustTool::CargoClippy).contains("/workspace/.kvist/vendored"));
     }
 }
