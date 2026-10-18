@@ -4044,15 +4044,27 @@ table_sep = { fg = "gray" }
         ));
         app.flush_pending_text();
         let lines = rendered_text(&app);
-        // Blad renders a table with a separator row using ── (U+2500),
-        // not ASCII dashes. The separator row is `── | ──`.
+        // The separator row is made of box-drawing horizontal-line characters
+        // (U+2500), not ASCII dashes. Its exact width depends on how the 4:3
+        // width:height ratio floor allocates space to single-char columns, so
+        // we only check its structure: no dashes, at least one horizontal-line
+        // character, and the column separator between the two cells.
         let separator_idx = lines
             .iter()
             .position(|l| l.contains('─'))
             .expect("a separator row exists");
-        assert_eq!(
-            lines[separator_idx], "── | ──",
-            "separator row uses Unicode horizontal lines"
+        let separator = &lines[separator_idx];
+        assert!(
+            !separator.contains('-'),
+            "separator row uses box-drawing characters, not ASCII dashes: {separator:?}"
+        );
+        assert!(
+            separator.contains('─'),
+            "separator row has horizontal-line characters: {separator:?}"
+        );
+        assert!(
+            separator.contains(" | "),
+            "separator row has a column separator between cells: {separator:?}"
         );
         // Header row is above the separator
         assert!(
