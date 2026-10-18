@@ -2,6 +2,20 @@
 
 # Skott — Requirements
 
+## RUN-REQ-PROMPT-STEERING
+
+When a user submits a prompt while an autonomous task is running, the submission
+MUST be treated as steering guidance for the active task, not a replacement
+task. The original task objective, conversation context, completed filesystem
+effects, observed tool results, and per-prompt budgets MUST be preserved. The
+steering message MUST be delivered to the model at the next safe interruption
+point during generation, backoff waits, or between tool calls. Tool execution
+itself is not interrupted. The UI MUST report separate acceptance,
+interruption, and model-context-delivery states. Steering during shutdown is
+not delivered. Steering must never create a new session or use the new-session
+replacement path. Rapid consecutive steering submissions MUST be delivered in
+submission order.
+
 ## RUN-REQ-RESPONSIVE-LIFECYCLE
 
 Interactive startup MUST render an editable prompt before provider discovery,

@@ -4,6 +4,8 @@
 //! owned thread and pushes [`Event`]s over a bounded channel. The UI owns the
 //! channel receiver and renders each event. Cancellation flows from a shared
 //! [`CancellationToken`], and new prompts flow from the UI over a prompt channel.
+//! Steering messages flow over a separate steering channel and are injected at
+//! safe interruption points during an active task.
 
 use std::sync::mpsc;
 use std::sync::{
@@ -13,7 +15,8 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use sav::{CancellationToken, ModelTransport};
+use sav::CancellationToken;
+use sav::ModelTransport;
 
 use crate::context::ContextManager;
 use crate::error::{Error, Result};

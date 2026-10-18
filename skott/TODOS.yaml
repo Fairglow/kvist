@@ -1,18 +1,12 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:d820c13d62d03274f739359a9d8a813f4b5942729d6a646934ce697bcd49f097"
-  contract_revision: "sha256:72816afa7c1ae8e7ea71014a81ad72e72fb7a3382b77cdc67f26667cc226225f"
-  design_revision: "sha256:899857bce034b999c6d3aed48d41827915a45803360175ef0327748c5e96d1fe"
+  requirements_revision: "sha256:1b441ae6726b811e6c709a11118d9d8bd8de94eeb47da46474a928541b08211b"
+  contract_revision: "sha256:6e9bf117523d6373e63e644da7dd731135ff21703219bddb0daad0de6dbeb215"
+  design_revision: "sha256:8c93d73b50532e3d881b2eafc0db694548a72a2db0ad75dc66cd2550892dd8f1"
   parent_contract: null
   revalidation:
-    state: stale
-    checked_at: "2026-10-10T15:13:28Z"
-    stale_since: "2026-10-10T15:13:28Z"
-    causes:
-      - kind: component-requirements-revision-changed
-        path: REQUIREMENTS.md
-        expected_revision: "sha256:d820c13d62d03274f739359a9d8a813f4b5942729d6a646934ce697bcd49f097"
-        observed_revision: "sha256:d8be7616a3dd68b68c9560717683f62ce54aea6ac23a91010c7139d84566fd6f"
+    state: current
+    checked_at: "2026-10-17T17:30:00Z"
 tasks:
   - id: lifecycle-write-tests
     title: "Pin responsive startup and router selection"
@@ -64,6 +58,54 @@ tasks:
     depends_on: [lifecycle-security-audit]
     requirements: ["REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"]
     timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:49:19Z", completed_at: "2026-10-17T13:49:19Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: steering-write-tests
+    title: "Write failing steering and continuity tests"
+    description: "Tests for steering during generation, backoff, tool execution, between tools; repeated steering; edit/withdraw vs claim; concurrent final answer; late events; stop; shutdown; recording failure; budget exhaustion. Assert preservation of original goal/context and completed changes, valid tool-call/result pairing, no stale next-tool dispatch, no automatic effect replay, no new session. Verify guidance reaches subsequent model request."
+    kind: test
+    purpose: "Pin steering semantics and interruption bound with deterministic fake transports."
+    expected_outcome: "Tests fail for current FIFO-only behavior and pin exact approved semantics."
+    status: open
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"]
+    timestamps: {created_at: "2026-10-17T17:30:00Z", updated_at: "2026-10-17T17:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: steering-implement-code
+    title: "Implement coordinated immediate steering"
+    description: "Add typed correlated control messages and worker-owned delivery handoff. Use operation-scoped interruption without ending session. Reconcile observed and skipped tool results, append claimed guidance in order, preserve task accounting, resume through context preflight. Expose pending edit/withdraw controls and truthful statuses."
+    kind: implementation
+    purpose: "Enable immediate complementary guidance without resetting the task."
+    expected_outcome: "Steering tests pass, existing lifecycle/context tests remain valid, help explains new default."
+    status: open
+    depends_on: [steering-write-tests]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"]
+    timestamps: {created_at: "2026-10-17T17:30:00Z", updated_at: "2026-10-17T17:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: steering-security-audit
+    title: "Inspect steering control path and execution boundaries"
+    description: "Independently inspect cancellation ownership, stale tool dispatch, effect replay, recording-before-effects, budget preservation, event correlation, shutdown and authority invariants."
+    kind: security-audit
+    purpose: "Retain independent findings and limitations."
+    expected_outcome: "Concrete regressions corrected or explicitly retained."
+    status: open
+    depends_on: [steering-implement-code]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"]
+    timestamps: {created_at: "2026-10-17T17:30:00Z", updated_at: "2026-10-17T17:30:00Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: steering-compliance-review
+    title: "Compare independent steering observations"
+    description: "Derive source-only IMPL evidence, then compare intent and observed evidence in a separate source-blind context."
+    kind: compliance-review
+    purpose: "Prevent implementer self-certification."
+    expected_outcome: "Discrepancies and evidence limits recorded for human arbitration."
+    status: open
+    depends_on: [steering-security-audit]
+    requirements: ["REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"]
+    timestamps: {created_at: "2026-10-17T17:30:00Z", updated_at: "2026-10-17T17:30:00Z"}
     blocked_reason: null
     recovery_state: null
   - id: repository-isolation-write-tests

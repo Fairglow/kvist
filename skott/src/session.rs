@@ -5,6 +5,11 @@
 //! the tool intents via a [`ToolExecutor`], and forwards progress through an
 //! [`EventSink`]. Nothing here performs blocking subprocess I/O directly; the
 //! executor is injected so the loop is unit-testable with fakes.
+//!
+//! Steering: prompts submitted during an active task are delivered as steering
+//! messages at the next safe interruption point (during generation, backoff
+//! waits, or between tool calls). Steering preserves the original task context
+//! and does not create a new session.
 
 use std::collections::HashSet;
 use std::sync::{
@@ -240,6 +245,11 @@ impl AgentSession {
     /// The model selector id for this session.
     pub fn model_selector(&self) -> &str {
         &self.model.id
+    }
+
+    /// The conversation messages. Exposed for context inspection and testing.
+    pub fn messages(&self) -> &[ModelMessage] {
+        &self.messages
     }
 
     /// The tool definitions offered to the model, whose count is used to size
@@ -776,6 +786,7 @@ impl Skott {
                 &mut recorder,
                 &budget,
                 &mut summary,
+                None,
             )
         })();
         summary.budget_exhausted |= budget.expired.load(Ordering::SeqCst)
@@ -832,6 +843,7 @@ impl Skott {
         recorder: &mut Option<&mut dyn Recorder>,
         budget: &PromptBudget,
         summary: &mut RunSummary,
+        steering_rx: Option<&std::sync::mpsc::Receiver<String>>,
     ) -> Result<()> {
         let started_at = Instant::now();
         let mut input = 0_u64;
@@ -843,6 +855,16 @@ impl Skott {
         let mut actions = sav::ActionHashRing::new();
         let mut read_pages = HashSet::new();
         while summary.turns < self.max_turns {
+            // Check for steering messages at the start of each turn - a safe
+            // interruption point before the next model request.
+            if let Some(rx) = steering_rx {
+                while let Ok(steering) = rx.try_recv() {
+                    session.push_user(steering);
+                    sink.send(Event::Note(
+                        "steering delivered to model context".to_string(),
+                    ))?;
+                }
+            }
             if cancellation.is_cancelled() || budget.remaining().is_zero() {
                 break;
             }

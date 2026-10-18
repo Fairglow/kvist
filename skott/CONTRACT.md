@@ -18,6 +18,17 @@ exceed the dispatch limit remain in the editor for correction. Advisory language
 detection uses bounded root-manifest/ignore inspection; invalid ignore files
 produce a diagnostic and retain raw-manifest advisory detection.
 
+## Prompt steering
+
+When a user submits a prompt while an autonomous task is running, the submission
+is treated as steering guidance for the active task rather than a replacement
+task. The original task objective, conversation context, completed filesystem
+effects, and observed tool results are preserved. Steering is delivered by
+appending a user message via `push_user()` at a safe interruption point (turn
+boundary), where it appears in the next model request. The session is not
+replaced. Per-prompt budget exhaustion ends the active task; steering submitted
+after that point starts a new task instead.
+
 ## Run reliability extension
 
 Models may declare `context_limit` and `response_reserve`. CLI values take

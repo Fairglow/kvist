@@ -21,6 +21,20 @@ as regular and bound the read to 64 KiB plus one overflow byte. Log advisory
 fallbacks. Keep live worker status authoritative over outstanding discovery,
 and place an initial prompt in the editor before applying its dispatch guard.
 
+## Prompt steering design
+
+When a prompt arrives while a task is active, it is treated as steering rather
+than a replacement task. The steering message is queued and delivered at the
+next safe interruption point during generation, backoff waits, or between tool
+calls. Tool execution itself is never interrupted. Steering messages are appended
+to the conversation as user messages, preserving the original task objective and
+all completed filesystem effects. The worker loop checks for pending steering
+messages before each model request and before entering backoff. The UI reports
+steering as "interrupting" during delivery and "added to model context" after
+successful delivery. Per-prompt budgets (wall time, tokens) are preserved across
+steering deliveries; steering cannot reset retry accounting or repeated-action
+protection.
+
 ## October run remediation
 
 Resolve model budgets in one shared startup helper used by headless and each

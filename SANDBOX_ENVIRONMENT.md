@@ -89,6 +89,12 @@ These are deliberate sandbox boundaries, not defects:
 Do not attempt to `pacman -S`, `curl`, or `docker run` your way past the
 boundary. Installed incidental tools and missing tools vary by host.
 
+- **Forbidden-command denylist.** The sandbox shell tool applies an advisory
+  command denylist. `git commit` is currently on this denylist, while `git
+  add`, `git status`, and `git diff` are permitted. Commands on the denylist
+  return a policy violation rather than executing. This restriction is global
+  to the sandbox, not per-directory or per-component.
+
 ## Rust Toolchain Layout & Discovery
 
 The Rust toolchain uses a layered discovery mechanism. The following describes
