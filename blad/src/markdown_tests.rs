@@ -190,9 +190,42 @@ fn test_table_narrow_terminal() {
     // Table should wrap cells when terminal is narrow
     let md = "| Short | Very Long Column Header That Should Wrap |\n|-------|------------------------------------------|\n| A     | B                                        |";
     let output = render_width(md, 30);
-    // Check that table renders without error
-    assert!(output.contains("Short"));
-    assert!(output.contains("Very Long"));
+    let plain = strip_ansi(&output);
+    let lines: Vec<&str> = plain.lines().collect();
+
+    // Every line must fit within the terminal width.
+    for line in &lines {
+        let w = unicode_width::UnicodeWidthStr::width(*line);
+        assert!(
+            w <= 30,
+            "Line exceeds terminal width: {:?} ({} chars)",
+            line,
+            w
+        );
+    }
+
+    // The long header must be present in the output, wrapped across lines.
+    assert!(plain.contains("Very Long"));
+    assert!(plain.contains("Header"));
+
+    // The short column must also be present (possibly hard-wrapped if the
+    // proportional allocation gives it less than 5 columns).
+    let joined: String = lines
+        .iter()
+        .map(|l| {
+            // Take the first column of each line.
+            match l.find(" | ") {
+                Some(pos) => &l[..pos],
+                None => l,
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    assert!(
+        joined.contains("Short"),
+        "Short column must be recoverable from wrapped chunks, got {:?}",
+        joined
+    );
 }
 
 #[test]

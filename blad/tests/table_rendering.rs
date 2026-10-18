@@ -125,21 +125,32 @@ fn test_table_no_wrap_when_fits() {
 }
 
 #[test]
-fn test_table_wrapped_rows_have_separators() {
+fn test_table_wrapped_rows_have_no_internal_separators() {
     let md = "| Item | Description |\n|------|-------------|\n| A | This is a very long description that will wrap to multiple lines when the table is rendered |\n| B | Short |";
     let width = 35;
     let output = strip_ansi(&render_width(md, width));
     let lines: Vec<&str> = output.lines().collect();
 
-    // When wrapping occurs, there should be horizontal separator lines
-    // between the wrapped row sections to maintain readability
+    // A wrapped cell spans multiple lines within the SAME cell, so it must not
+    // be broken up by internal row borders. The only separator line is the one
+    // between the header and the body, even when a cell wraps to many lines.
     let separator_count = lines.iter().filter(|l| l.starts_with("─")).count();
-    assert!(
-        separator_count > 1,
-        "Wrapped rows should have multiple separators, got {} separators. Output: {:?}",
+    assert_eq!(
+        separator_count, 1,
+        "Wrapped rows must not add internal separators, got {} separators. Output: {:?}",
         separator_count,
         output
     );
+
+    // All wrapped lines still fit within the terminal width.
+    for line in &lines {
+        assert!(
+            display_width(line) <= width,
+            "Line exceeds terminal width: {:?} ({} chars)",
+            line,
+            display_width(line)
+        );
+    }
 }
 
 #[test]
@@ -178,11 +189,33 @@ fn test_table_hard_wrap_long_words() {
         );
     }
 
-    // The long word should still be fully present in the output (split across lines)
-    // The word is 32 chars, column width is 23 after fitting, so it splits at 23
-    assert!(output.contains("ThisIsAVery"));
-    assert!(output.contains("LongWord"));
-    assert!(output.contains("outSpaces"));
+    // The long word should still be fully present in the output (split across
+    // lines). The exact split point depends on the column width the allocator
+    // chose, so only assert that the whole word is recoverable by removing the
+    // column separators and re-joining the split chunks.
+    // Reconstruct the original long word from the hard-wrapped chunks.
+    let long_word = "ThisIsAVeryLongWordWithoutSpaces";
+    let mut recovered = String::new();
+    for line in &lines {
+        let line = line.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        // The Description column is the last column; take everything after the
+        // last " | " separator.
+        if let Some(pos) = line.rfind(" | ") {
+            recovered.push_str(&line[pos + 3..]);
+        } else if line.starts_with('─') {
+            // separator line; skip
+        } else {
+            recovered.push_str(line);
+        }
+    }
+    assert!(
+        recovered.contains(long_word),
+        "Hard-wrapped chunks must rejoin into the full word, got {:?}",
+        recovered
+    );
 }
 
 #[test]
@@ -229,4 +262,45 @@ fn test_table_no_extra_separator_when_not_wrapped() {
         "Should have exactly 1 separator when no wrapping, got {}",
         separator_count
     );
+}
+
+#[test]
+fn test_table_widest_column_gets_most_width() {
+    // The column with the longest value must be allocated the most width, not
+    // crushed to a stub while short columns keep their full natural width.
+    let md = "| Commit | Files | What it does |\n|--------|-------|--------------|\n| 826f281 Make cargo clippy resolve the vendored snap | sav/src/offline_rust.rs, skott/tests/rust_build_environment.rs, SANDBOX_ENVIRONMENT.md | Fixes the cargo-clippy wrapper so it strips the clippy subcommand token cargo delegates and injects the offline and locked flags plus the vendored-source config. |";
+    let width = 80;
+    let output = strip_ansi(&render_width(md, width));
+    let lines: Vec<&str> = output.lines().collect();
+
+    // Column widths from the header.
+    let first = lines[0];
+    let cols: Vec<usize> = first
+        .split(" | ")
+        .map(|s| s.chars().count())
+        .collect();
+    let (w_commit, w_files, w_desc) = (cols[0], cols[1], cols[2]);
+    assert!(
+        w_desc > w_commit && w_desc > w_files,
+        "Column with the longest value must be the widest, got commit={w_commit} files={w_files} desc={w_desc}"
+    );
+
+    // No internal borders: exactly one separator line (header/body) even
+    // though the wrapped cells span multiple lines.
+    let separator_count = lines.iter().filter(|l| l.starts_with("─")).count();
+    assert_eq!(
+        separator_count, 1,
+        "Wrapped cells must not add internal borders, got {} separators",
+        separator_count
+    );
+
+    // Every line fits the terminal width.
+    for line in &lines {
+        assert!(
+            display_width(line) <= width,
+            "Line exceeds terminal width: {:?} ({} chars)",
+            line,
+            display_width(line)
+        );
+    }
 }

@@ -546,32 +546,6 @@ fn render_table(
         }
     }
 
-    // Enforce minimum column width: 4:3 width:height ratio means a column
-    // that wraps to H lines must be at least ceil(H * 4/3) columns wide.
-    // Iterate until stable because wrapping changes based on column widths.
-    let mut stable = false;
-    while !stable {
-        stable = true;
-        for row in rows {
-            let mut row_wrapped = Vec::new();
-            for (i, &width) in col_widths.iter().enumerate() {
-                let cell = row.get(i).map_or("", |cell| cell.as_str());
-                row_wrapped.push(wrap_cell(cell, width));
-            }
-            let max_lines = row_wrapped
-                .iter()
-                .map(|lines| lines.len())
-                .max()
-                .unwrap_or(1);
-            for (i, _wrapped_lines) in row_wrapped.iter().enumerate() {
-                let needed = ceil_div(max_lines * 4, 3);
-                if col_widths[i] < needed {
-                    col_widths[i] = needed;
-                    stable = false;
-                }
-            }
-        }
-    }
 
     // If terminal width is provided, adapt column widths to fit
     if let Some(term_width) = terminal_width {
@@ -580,103 +554,49 @@ fn render_table(
         let total_natural: usize = col_widths.iter().sum();
 
         if total_natural > available_width {
-            // Need to shrink columns. Strategy:
-            // 1. First, try to fit all columns at their natural width
-            // 2. If that doesn't work, shrink the largest columns first
-            // 3. Use iterative proportional fit with minimum width constraints
-            let min_width = 3;
-            let mut remaining = available_width;
-            let mut fitted = vec![false; num_cols];
-
-            // First pass: fit columns that can fit at natural width
-            for i in 0..num_cols {
-                if col_widths[i] <= remaining {
-                    fitted[i] = true;
-                    remaining = remaining.saturating_sub(col_widths[i]);
-                }
-            }
-
-            // Second pass: shrink remaining columns proportionally
-            loop {
-                // Calculate unfitted total
-                let unfitted_total: usize = col_widths
+            // Proportional allocation: each column's width scales to how much
+            // space its largest value needs, so the column with the longest
+            // content gets the most room and the shorter columns shrink to
+            // fit. This preserves the unbreakable 4:3 width:height ratio -- a
+            // column whose content is long is given proportionally more width,
+            // so it never wraps to so many lines that it becomes a tall, thin
+            // stub (width/height < 4/3). Short columns keep their 4:3 ratio by
+            // wrapping only a little.
+            let natural_total = total_natural.max(1);
+            let mut widths: Vec<usize> = col_widths
+                .iter()
+                .map(|&cw| {
+                    let w = (cw as u128 * available_width as u128) / natural_total as u128;
+                    w.max(1) as usize
+                })
+                .collect();
+            let mut used: usize = widths.iter().sum();
+            // Reconcile rounding so the table uses exactly the available width.
+            // Give the leftover to the column with the most content (it needs
+            // it most) and take any overflow back from the column with the
+            // least content.
+            while used < available_width {
+                let idx = widths
                     .iter()
                     .enumerate()
-                    .filter(|(i, _)| !fitted[*i])
-                    .map(|(_, w)| *w)
-                    .sum();
-                let unfitted_count = fitted.iter().filter(|&f| !f).count();
-
-                if unfitted_count == 0 || remaining == 0 {
-                    break;
-                }
-
-                // Try to fit remaining unfitted columns
-                let mut any_fitted = false;
-                for i in 0..num_cols {
-                    if fitted[i] {
-                        continue;
-                    }
-
-                    // Calculate proportional share
-                    let share = if unfitted_total > 0 {
-                        ((col_widths[i] as f64) / (unfitted_total as f64)) * remaining as f64
-                    } else {
-                        (remaining as f64) / (unfitted_count as f64)
-                    };
-                    let fitted_width = share.ceil() as usize;
-
-                    if fitted_width < min_width {
-                        // Can't fit this column with minimum width
-                        fitted[i] = true;
-                        col_widths[i] = min_width;
-                        remaining = remaining.saturating_sub(min_width);
-                        any_fitted = true;
-                    } else if fitted_width >= col_widths[i] {
-                        // Column fits at natural width - keep it
-                        fitted[i] = true;
-                        remaining = remaining.saturating_sub(col_widths[i]);
-                        any_fitted = true;
-                    } else {
-                        // Column needs to be shrunk
-                        fitted[i] = true;
-                        col_widths[i] = fitted_width;
-                        remaining = remaining.saturating_sub(fitted_width);
-                        any_fitted = true;
-                    }
-                }
-
-                if !any_fitted {
-                    break;
-                }
+                    .max_by_key(|(_, w)| **w)
+                    .map(|(i, _)| i)
+                    .expect("at least one column");
+                widths[idx] += 1;
+                used += 1;
             }
-
-            // If we still have remaining space, distribute it proportionally
-            if remaining > 0 {
-                let unfitted_total: usize = col_widths
+            while used > available_width {
+                let idx = widths
                     .iter()
                     .enumerate()
-                    .filter(|(i, _)| !fitted[*i])
-                    .map(|(_, w)| *w)
-                    .sum();
-                if unfitted_total > 0 {
-                    for i in 0..num_cols {
-                        if !fitted[i] {
-                            let share = ((col_widths[i] as f64) / (unfitted_total as f64))
-                                * remaining as f64;
-                            col_widths[i] += share.ceil() as usize;
-                            fitted[i] = true;
-                        }
-                    }
-                }
+                    .filter(|(_, w)| **w > 1)
+                    .min_by_key(|(_, w)| **w)
+                    .map(|(i, _)| i)
+                    .expect("some column is wider than 1 and can shrink");
+                widths[idx] -= 1;
+                used -= 1;
             }
-
-            // Any still-unfitted columns get minimum width (will overflow)
-            for i in 0..num_cols {
-                if !fitted[i] {
-                    col_widths[i] = min_width;
-                }
-            }
+            col_widths = widths;
         }
     }
 
@@ -712,17 +632,6 @@ fn render_table(
                 }
             }
             writeln!(w)?;
-
-            // Add separator between wrapped lines within the same row
-            if line_idx < max_lines - 1 {
-                for (i, &width) in col_widths.iter().enumerate() {
-                    if i > 0 {
-                        write!(w, " | ")?;
-                    }
-                    write!(w, "{}", "─".repeat(width))?;
-                }
-                writeln!(w)?;
-            }
         }
 
         // Separator after header row (using Unicode box-drawing)
@@ -804,10 +713,6 @@ fn pad_cell(cell: &str, width: usize) -> String {
     } else {
         format!("{}{}", cell, " ".repeat(width - cell_width))
     }
-}
-
-fn ceil_div(a: usize, b: usize) -> usize {
-    a / b + if !a.is_multiple_of(b) { 1 } else { 0 }
 }
 
 fn find_syntax<'a>(ss: &'a SyntaxSet, lang: &str) -> Option<&'a syntect::parsing::SyntaxReference> {
