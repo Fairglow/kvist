@@ -22,6 +22,11 @@ pub struct Session {
 }
 
 /// List recent sessions from the given log directory.
+///
+/// The returned list is deterministic: sorted by `created_at` newest first.
+/// Sessions with equal timestamps are tie-broken by session id descending
+/// (ids are timestamp-named, so a greater id is newer). The order does not
+/// depend on directory enumeration order.
 pub fn list_sessions(log_dir: &Path, limit: usize) -> Vec<Session> {
     let mut sessions = Vec::new();
 
@@ -98,9 +103,12 @@ pub fn list_sessions(log_dir: &Path, limit: usize) -> Vec<Session> {
         sessions.push(session);
     }
 
-    // Sort by created_at (newest first), fall back to id comparison
+    // Sort by created_at (newest first). Equal timestamps are tie-broken by
+    // id descending (ids are timestamp-named, so a greater id is newer),
+    // making the order a total ordering independent of directory
+    // enumeration order.
     sessions.sort_by(|a, b| match (&a.created_at, &b.created_at) {
-        (Some(a_ts), Some(b_ts)) => b_ts.cmp(a_ts),
+        (Some(a_ts), Some(b_ts)) => b_ts.cmp(a_ts).then_with(|| b.id.cmp(&a.id)),
         _ => b.id.cmp(&a.id),
     });
 

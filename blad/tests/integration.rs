@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::Path;
 
-fn create_test_session(base_dir: &Path, id: &str) {
+fn create_test_session(base_dir: &Path, id: &str, created_at: &str) {
     let session_dir = base_dir.join(id);
     fs::create_dir_all(&session_dir).unwrap();
 
@@ -18,7 +18,7 @@ fn create_test_session(base_dir: &Path, id: &str) {
         "status": "completed",
         "markdown_profile": "commonmark-gfm-subset-v1",
         "model": "test-model",
-        "created_at": "2026-10-09T10:00:00Z",
+        "created_at": created_at,
         "completed_at": "2026-10-09T10:05:00Z",
         "entries": [
             {
@@ -72,7 +72,7 @@ fn blad_reads_skott_structured_transcript() {
     fs::create_dir_all(&log_dir).unwrap();
 
     let session_id = "2026-10-09T10-00-00Z-1234-0";
-    create_test_session(&log_dir, session_id);
+    create_test_session(&log_dir, session_id, "2026-10-09T10:00:00Z");
 
     // Test listing
     let sessions = blad::session::list_sessions(&log_dir, 10);
@@ -101,16 +101,63 @@ fn blad_lists_sessions_newest_first() {
     let log_dir = temp.path().join("runs");
     fs::create_dir_all(&log_dir).unwrap();
 
-    create_test_session(&log_dir, "2026-10-09T10-00-00Z-1234-0");
-    create_test_session(&log_dir, "2026-10-09T11-00-00Z-1235-0");
-    create_test_session(&log_dir, "2026-10-09T12-00-00Z-1236-0");
+    // All three sessions share the same created_at; the listing must
+    // therefore deterministically tie-break by id, independent of directory
+    // enumeration order.
+    create_test_session(
+        &log_dir,
+        "2026-10-09T10-00-00Z-1234-0",
+        "2026-10-09T10:00:00Z",
+    );
+    create_test_session(
+        &log_dir,
+        "2026-10-09T11-00-00Z-1235-0",
+        "2026-10-09T10:00:00Z",
+    );
+    create_test_session(
+        &log_dir,
+        "2026-10-09T12-00-00Z-1236-0",
+        "2026-10-09T10:00:00Z",
+    );
 
     let sessions = blad::session::list_sessions(&log_dir, 10);
     assert_eq!(sessions.len(), 3);
-    // Newest first
+    // Newest first (equal timestamps tie-break by id descending)
     assert!(sessions[0].id.starts_with("2026-10-09T12"));
     assert!(sessions[1].id.starts_with("2026-10-09T11"));
     assert!(sessions[2].id.starts_with("2026-10-09T10"));
+}
+
+#[test]
+fn blad_lists_sessions_by_created_at_when_distinct() {
+    let temp = tempfile::tempdir().unwrap();
+    let log_dir = temp.path().join("runs");
+    fs::create_dir_all(&log_dir).unwrap();
+
+    // Distinct created_at values, deliberately not matching the id
+    // timestamps, to prove the primary sort key is created_at.
+    create_test_session(
+        &log_dir,
+        "2026-10-09T10-00-00Z-1234-0",
+        "2026-10-09T08:00:00Z",
+    );
+    create_test_session(
+        &log_dir,
+        "2026-10-09T11-00-00Z-1235-0",
+        "2026-10-09T09:00:00Z",
+    );
+    create_test_session(
+        &log_dir,
+        "2026-10-09T12-00-00Z-1236-0",
+        "2026-10-09T07:00:00Z",
+    );
+
+    let sessions = blad::session::list_sessions(&log_dir, 10);
+    assert_eq!(sessions.len(), 3);
+    // Newest created_at first, regardless of id order
+    assert!(sessions[0].id.starts_with("2026-10-09T11"));
+    assert!(sessions[1].id.starts_with("2026-10-09T10"));
+    assert!(sessions[2].id.starts_with("2026-10-09T12"));
 }
 
 #[test]
@@ -120,7 +167,7 @@ fn blad_loads_session_by_prefix() {
     fs::create_dir_all(&log_dir).unwrap();
 
     let session_id = "2026-10-09T10-00-00Z-1234-0";
-    create_test_session(&log_dir, session_id);
+    create_test_session(&log_dir, session_id, "2026-10-09T10:00:00Z");
 
     // Should match by prefix
     let loaded = blad::session::load_session(&log_dir, "2026-10-09T10").unwrap();
@@ -134,7 +181,7 @@ fn blad_export_session() {
     fs::create_dir_all(&log_dir).unwrap();
 
     let session_id = "2026-10-09T10-00-00Z-1234-0";
-    create_test_session(&log_dir, session_id);
+    create_test_session(&log_dir, session_id, "2026-10-09T10:00:00Z");
 
     let loaded = blad::session::load_session(&log_dir, session_id).unwrap();
 
