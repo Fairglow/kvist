@@ -220,7 +220,12 @@ impl Tui {
         let master = File::from(pty.master);
         let slave = File::from(pty.slave);
         fcntl(&master, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)).unwrap();
-        let mut command = Command::new(env!("CARGO_BIN_EXE_skott"));
+        // Crossterm prefers /dev/tty over stdin for terminal state and size,
+        // so give the child its own controlling terminal (this pty) instead
+        // of inheriting the host's. `--wait` makes setsid exit with the
+        // child's status so try_wait/kill target the right process.
+        let mut command = Command::new("setsid");
+        command.args(["--ctty", "--wait", env!("CARGO_BIN_EXE_skott")]);
         command
             .arg("--config")
             .arg(config)
