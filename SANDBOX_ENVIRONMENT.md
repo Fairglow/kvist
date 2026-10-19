@@ -91,15 +91,53 @@ Do not attempt to `pacman -S`, `curl`, or `docker run` your way past the
 boundary. Installed incidental tools and missing tools vary by host.
 
 - **Forbidden-command denylist.** The sandbox shell tool applies an advisory
-  command denylist. `git commit` is currently on this denylist, while `git
-add`, `git status`, and `git diff` are permitted. Commands on the denylist
-  return a policy violation rather than executing. This restriction is global
-  to the sandbox, not per-directory or per-component.
+  command denylist. It is owned by the `skott` agent component, defined as
+  `ToolPolicy::minimum()` in [`skott/src/config.rs`](skott/src/config.rs), and
+  extended (never reduced) by the `[tool_policy]` table of the active config —
+  `/workspace/skott.toml` currently adds nothing, so only the built-in minimum
+  is enforced. The built-in minimum denies any shell command string containing
+  one of these substrings: `rm -rf`, `rm -fr`, `mkfs`, `dd if=`, `dd bs=`,
+  `> /dev/`, `:() {`, `exec 9<>`, `reboot`, `shutdown`; and any command whose
+  trimmed text starts with the prefix `mknod `. A denied command returns a
+  policy violation (`command matches the forbidden-command policy`) before it
+  reaches the sandbox. This restriction is global to the sandbox, not
+  per-directory or per-component.
+
+  **Correction (verified 2026-10-19):** this denylist does **not** include any
+  `git` or `cargo` subcommand. `git commit`, `git add`, `git status`, `git
+  diff`, and the usual `cargo` subcommands (`build`, `test`, `clean`, `clippy`,
+  `nextest`, `nextest run`) all **execute** — `git commit` was previously
+  misreported as denylisted. The only destructive-command guard is the
+  built-in minimum above. `rm -rf <path>` is still rejected by the denylist;
+  `rm --recursive --force` (separate flags) is not a substring match and is
+  allowed through, so it relies on the sandbox filesystem boundaries rather
+  than the advisory filter.
 
 ## Rust Toolchain Layout & Discovery
 
-The Rust toolchain uses a layered discovery mechanism. The following describes
-the layout and how to work with it.
+### Resolution status (verified 2026-10-19)
+
+**The Rust toolchain is fully resolved.** Every core component is present and
+functional: `rustc`, `cargo`, `rustup`, `rustdoc`, `rustfmt`, `cargo-clippy`,
+`clippy-driver`, `cargo-fmt`, and `cargo-nextest`. The two historical problems
+are both fixed:
+
+- **`default` toolchain resolution — working.** A `/rust/toolchains/default`
+  symlink now exists and points at `/rust/toolchain` (the active default stable
+  toolchain), so the default is reachable by that path in addition to
+  `rustup show active-toolchain`.
+- **Duplicate `rustup` — resolved.** The `/rust/user-cargo-bin/rustup`
+  (1.26.0 host shim) is no longer present. Only `/usr/bin/rustup` (1.29.1,
+  System) is on PATH, so the version-confusion quirk is gone.
+- **`cargo clippy` vendor config — resolved.** The `cargo-clippy` wrapper strips
+  the leading `clippy` token and injects `--offline --locked` plus the vendored
+  source config, so `cargo clippy` resolves against `/rust/vendor` exactly like
+  `cargo build` with no explicit flags.
+
+What changed versus the previously observed state: the default `rustc` moved
+from **1.99.0** to **1.99.1** (`stable-x86_64-unknown-linux-gnu`, active and
+default), and the previously missing tools are now available. See the version
+table below and the "Observed Quirks" notes for details.
 
 ### Toolchain Selection
 
@@ -142,9 +180,12 @@ artifacts that must survive across invocations.
 ### Naming Trap
 
 The default toolchain lives in `/rust/toolchain` (singular) while the _others_
-live in `/rust/toolchains/N` (plural). These are easy to conflate. Always
-use `rustup show active-toolchain` / `rustup toolchain list` rather than
-guessing paths.
+live in `/rust/toolchains/N` (plural). These are easy to conflate. A
+`/rust/toolchains/default` symlink now points at `/rust/toolchain`, so the
+default is also reachable under the plural tree — but the `default` entry is a
+symlink, not a separate toolchain, so it is not listed by
+`rustup toolchain list`. Always use `rustup show active-toolchain` /
+`rustup toolchain list` rather than guessing paths.
 
 ## Observed on This Host (Reference Only)
 
@@ -163,9 +204,9 @@ other hosts.
 | Node                | v20.20.2                                        |
 | npm                 | 12.2.0 (warns about Node version compatibility) |
 | Go                  | go1.27.2-X:nodwarf5 linux/amd64                 |
-| Rust stable         | 1.99.0 (default)                                |
-| Rust nightly        | Available                                       |
-| Rust other versions | 1.95.0, 1.94.0, 1.94, 1.85.0, 1.67.1, 1.64.0    |
+| Rust stable         | 1.99.1 (default; `/rust/toolchain`, symlinked as `/rust/toolchains/default`) |
+| Rust nightly        | 1.101.0-nightly (`/rust/toolchains/6`)                   |
+| Rust other versions | 1.95.0, 1.94.0, 1.94, 1.85.0, 1.67.1, 1.64.0             |
 | make                | 4.4.1                                           |
 | cmake               | 4.4.4                                           |
 | ninja               | 1.13.2                                          |
@@ -209,9 +250,11 @@ other hosts.
   but this pairing is a known mismatch.
 - **cpan off-PATH:** The Perl CPAN module is available, but the `cpan`
   launcher command lives at `/usr/bin/core_perl/cpan` (off the default PATH).
-- **Duplicate rustup binary:** `/usr/bin/rustup` (1.29.1, System) is used by
-  wrapper scripts, while `/rust/user-cargo-bin/rustup` (1.26.0, host shim) is
-  on PATH. The wrapper's `/usr/bin/rustup` is authoritative.
+- **Duplicate rustup binary (resolved):** `/usr/bin/rustup` (1.29.1, System) is
+  the sole `rustup` on PATH and the one the wrapper scripts invoke. The
+  previously observed `/rust/user-cargo-bin/rustup` (1.26.0, host shim) is no
+  longer present in the host `~/.cargo/bin` snapshot, so the two-binary
+  ambiguity is gone and no version confusion can arise.
 - **cargo clippy vendor config mismatch (resolved):** The `cargo` wrapper
   script at `/rust/runtime/bin/cargo` injects `--offline --locked` and the
   vendored source configuration (`source.crates-io.replace-with="vendored-sources"`,
