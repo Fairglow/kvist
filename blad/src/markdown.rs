@@ -63,6 +63,20 @@ impl TerminalBg {
             TerminalBg::Dark
         }
     }
+
+    /// The 256-color index of the code-block background. Deliberately mode-
+    /// aware so a dark terminal gets a dark code panel and a light terminal a
+    /// light one, regardless of the syntect theme in use. The syntect theme
+    /// only contributes foreground token colors (see `to_ansi_line`); it must
+    /// not leak its own background into the output, because a bright syntect
+    /// background placed under bright token text collapses contrast and the
+    /// patch never reaches the line's right edge.
+    const fn code_bg(self) -> u8 {
+        match self {
+            TerminalBg::Dark => 236,  // #262626, a dark panel
+            TerminalBg::Light => 254, // #e4e4e4, a light panel
+        }
+    }
 }
 
 /// Detect the terminal background from environment heuristics. This is
@@ -74,12 +88,13 @@ impl TerminalBg {
 fn detect_terminal_bg() -> TerminalBg {
     // An explicit `COLORFGBG` background field is the strongest env signal.
     if let Some(bg_field) = std::env::var("COLORFGBG").ok().as_deref()
-        && let Some(bg) = bg_field.split(':').next_back() {
-            return match bg {
-                "1" | "15" | "7" => TerminalBg::Light,
-                _ => TerminalBg::default(),
-            };
-        }
+        && let Some(bg) = bg_field.split(':').next_back()
+    {
+        return match bg {
+            "1" | "15" | "7" => TerminalBg::Light,
+            _ => TerminalBg::default(),
+        };
+    }
 
     // COLORTERM and TERM_PROGRAM are weak but the only explicit dark/light
     // markers some terminals expose. A terminal that advertises a light
@@ -321,20 +336,51 @@ fn render_markdown_theme(
                     }
                     writeln!(w)?;
                 } else if let Some(mut highlighter) = hl.take() {
+                    // The code panel's background, mode-appropriate and applied
+                    // around the *whole visual line* (content plus trailing
+                    // padding) so it reaches the right edge and every blank
+                    // line in the block stays solid. The syntect theme
+                    // contributes foreground token colors only, so a light or
+                    // dark terminal always gets a matching panel and token
+                    // text keeps high contrast.
+                    let code_bg = format!("\x1b[48;5;{}m", bg.code_bg());
+                    let reset = "\x1b[0m";
                     for line in code_content.lines() {
-                        if let Ok(ranges) = highlighter.highlight_line(line, &ss) {
-                            let styled = to_ansi_line(&ranges);
-                            writeln!(w, "{}", styled)?;
-                        } else {
-                            writeln!(w, "{}", line)?;
+                        // Measure the raw line's display width (full-width
+                        // characters count double) before ANSI codes are
+                        // added, so the padding is exact.
+                        let content_width = unicode_width::UnicodeWidthStr::width(line);
+                        write!(w, "{}", code_bg)?;
+                        match highlighter.highlight_line(line, &ss) {
+                            Ok(ranges) => {
+                                // A blank line yields no ranges, so the body
+                                // is empty and only the padding fills it.
+                                let styled = to_ansi_line(&ranges, &code_bg);
+                                let padded = pad_code_line(&styled, content_width, terminal_width);
+                                write!(w, "{}", padded)?;
+                            }
+                            Err(_) => {
+                                let padded = pad_code_line(line, content_width, terminal_width);
+                                write!(w, "{}", padded)?;
+                            }
                         }
+                        write!(w, "{}", reset)?;
+                        writeln!(w)?;
                     }
                     writeln!(w)?;
                 } else {
                     // No highlighter (missing syntax or theme): keep the code
-                    // visible as plain text instead of dropping it.
+                    // visible as plain text, but still on the mode-appropriate
+                    // code panel so the block reads as a distinct region.
+                    let code_bg = format!("\x1b[48;5;{}m", bg.code_bg());
+                    let reset = "\x1b[0m";
                     for line in code_content.lines() {
-                        writeln!(w, "{}", line)?;
+                        let content_width = unicode_width::UnicodeWidthStr::width(line);
+                        write!(w, "{}", code_bg)?;
+                        let padded = pad_code_line(line, content_width, terminal_width);
+                        write!(w, "{}", padded)?;
+                        write!(w, "{}", reset)?;
+                        writeln!(w)?;
                     }
                     writeln!(w)?;
                 }
@@ -1048,11 +1094,15 @@ fn syntect_color_to_ansi(c: SColor) -> String {
     format!("\x1b[38;2;{};{};{}m", c.r, c.g, c.b)
 }
 
-fn syntect_bg_color_to_ansi(c: SColor) -> String {
-    format!("\x1b[48;2;{};{};{}m", c.r, c.g, c.b)
-}
-
-fn to_ansi_line(ranges: &[(SStyle, &str)]) -> String {
+fn to_ansi_line(ranges: &[(SStyle, &str)], code_bg: &str) -> String {
+    // Emit the syntect-highlighted text for one line: foreground colors and
+    // bold/italic/underline per token. A full reset (`\x1b[0m`) is needed
+    // between ranges of differing style to clear modifiers that the next
+    // range does not set, but that reset also wipes the code-panel background.
+    // So the background (`code_bg`) is re-asserted after every reset; it is
+    // a constant for the whole line, so this is safe and cheap. No trailing
+    // reset is emitted — the caller closes the background after the padding
+    // so the panel reaches the right edge and blank lines stay solid.
     let mut output = String::new();
     let mut current_style: Option<SStyle> = None;
 
@@ -1060,11 +1110,10 @@ fn to_ansi_line(ranges: &[(SStyle, &str)]) -> String {
         if current_style != Some(*style) {
             if current_style.is_some() {
                 output.push_str("\x1b[0m");
+                // The reset above cleared the panel background; re-assert it.
+                output.push_str(code_bg);
             }
-            let fg = style.foreground;
-            output.push_str(&syntect_color_to_ansi(fg));
-            let bg = style.background;
-            output.push_str(&syntect_bg_color_to_ansi(bg));
+            output.push_str(&syntect_color_to_ansi(style.foreground));
             if style.font_style.contains(FontStyle::BOLD) {
                 output.push_str("\x1b[1m");
             }
@@ -1079,11 +1128,26 @@ fn to_ansi_line(ranges: &[(SStyle, &str)]) -> String {
         output.push_str(text);
     }
 
-    if current_style.is_some() {
-        output.push_str("\x1b[0m");
-    }
-
     output
+}
+
+/// Pad a code line with spaces up to `terminal_width` so the background
+/// wrapping it reaches the right edge. `content_width` is the line's display
+/// width in columns (measured on the raw text, before any ANSI codes are
+/// added), so full-width characters count double and the padding is exact.
+/// Long lines are left alone rather than wrapped or clipped, preserving
+/// verbatim content.
+fn pad_code_line(line: &str, content_width: usize, terminal_width: Option<usize>) -> String {
+    let Some(width) = terminal_width else {
+        return line.to_string();
+    };
+    let width = width.max(1);
+    if content_width >= width {
+        return line.to_string();
+    }
+    let mut out = line.to_string();
+    out.push_str(&" ".repeat(width - content_width));
+    out
 }
 
 #[cfg(test)]

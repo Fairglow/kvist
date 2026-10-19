@@ -317,3 +317,94 @@ fn test_wrap_preserves_indentation() {
         "Long item should wrap"
     );
 }
+
+/// Render at a fixed width and explicit background mode, returning the raw
+/// ANSI output (unstripped) so tests can inspect the emitted SGR codes.
+fn render_width_bg(md: &str, width: usize, bg: super::TerminalBg) -> String {
+    let mut buf = Vec::new();
+    let mut renderer = MarkdownRenderer::new();
+    renderer.set_width(Some(width));
+    renderer.set_background(bg);
+    renderer.render_markdown(md, &mut buf).unwrap();
+    String::from_utf8(buf).unwrap()
+}
+
+#[test]
+fn test_code_panel_background_is_mode_appropriate() {
+    // Dark mode uses the dark code panel (256-color index 236 = #262626);
+    // light mode uses the light code panel (index 254 = #e4e4e4). The
+    // background is applied per line, not taken from the syntect theme.
+    let dark = render_width_bg("```rust\nlet x = 1;\n```", 40, super::TerminalBg::Dark);
+    assert!(
+        dark.contains("\x1b[48;5;236m"),
+        "dark code block must carry the dark panel background"
+    );
+    let light = render_width_bg("```rust\nlet x = 1;\n```", 40, super::TerminalBg::Light);
+    assert!(
+        light.contains("\x1b[48;5;254m"),
+        "light code block must carry the light panel background"
+    );
+    // The syntect theme's own per-token truecolor background (48;2;...) must
+    // not leak through: the panel is a single 256-color background per line.
+    assert!(
+        !dark.contains("48;2;") && !light.contains("48;2;"),
+        "the syntect theme background must not be emitted"
+    );
+}
+
+#[test]
+fn test_code_panel_background_reaches_right_edge() {
+    // Every code line — including blank lines inside the block — must be
+    // padded to the terminal width so the background spans the whole line.
+    let output = render_width_bg(
+        "```text\nshort\n\nlonger line of text\n```",
+        20,
+        super::TerminalBg::Dark,
+    );
+    for line in output.lines() {
+        if line.contains("\x1b[48;5;236m") {
+            let clean = strip_ansi(line);
+            let w = unicode_width::UnicodeWidthStr::width(clean.as_str());
+            assert_eq!(
+                w, 20,
+                "backgrounded code line must span the full width, got {} ({} chars)",
+                w, clean
+            );
+        }
+    }
+}
+
+#[test]
+fn test_code_block_preserves_syntect_foreground() {
+    // The syntect theme must still color the tokens: the output keeps
+    // per-token truecolor foreground codes (38;2;...) alongside the panel
+    // background. A highlighted line has at least one 38;2;... code.
+    let output = render_width_bg("```rust\nlet x = 1;\n```", 40, super::TerminalBg::Dark);
+    assert!(
+        output.contains("38;2;"),
+        "syntect foreground colors must be preserved in code blocks"
+    );
+}
+
+#[test]
+fn test_code_block_blank_line_keeps_background() {
+    // A blank line inside a fenced block is still part of the panel and must
+    // carry the background (via padding) rather than being a bare empty line.
+    let output = render_width_bg("```text\nalpha\n\nbeta\n```", 12, super::TerminalBg::Dark);
+    let lines: Vec<&str> = output.lines().collect();
+    // The blank line sits between "alpha" and "beta"; it must carry the panel
+    // background, not be a truly empty line.
+    let blank = lines
+        .iter()
+        .position(|l| strip_ansi(l).trim().is_empty() && !l.is_empty())
+        .unwrap_or_else(|| {
+            panic!(
+                "expected a padded blank line inside the code block, got: {:?}",
+                lines.iter().map(|l| strip_ansi(l)).collect::<Vec<_>>()
+            )
+        });
+    assert!(
+        lines[blank].contains("\x1b[48;5;236m"),
+        "the blank line must carry the panel background"
+    );
+}

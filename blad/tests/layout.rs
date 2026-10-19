@@ -90,7 +90,12 @@ fn inline_code_and_code_block_whitespace_are_not_reformatted() {
     assert_eq!(plain("`abcdefghijk`", Some(4)), "abcdefghijk\n");
     assert_eq!(
         plain("```text\n  abcdefghijkl\n\n\tindent\n```", Some(4)),
-        "  abcdefghijkl\n\n\tindent\n\n"
+        // The code panel's background must reach the right edge, so every
+        // line — including the blank one — is padded to the terminal width
+        // with spaces that carry the background. The *content* whitespace
+        // (the leading spaces on the first line, the tab on the last) is
+        // still preserved verbatim; only trailing background padding is added.
+        "  abcdefghijkl\n    \n\tindent\n\n"
     );
 }
 
