@@ -36,17 +36,26 @@ fn render_width(md: &str, width: usize) -> String {
 #[test]
 fn test_render_basic() {
     let md = "# Hello\n\nThis is **bold** text.";
-    let output = strip_ansi(&render(md));
-    assert!(output.contains("# "));
+    let output = render(md);
+    // The heading is bold (SGR 1) and blue (34).
+    assert!(output.contains("\x1b[1m"), "heading must be bold: {output:?}");
+    assert!(output.contains("\x1b[34m"), "heading must be blue: {output:?}");
+    // The bold span is bold (SGR 1) and the word "bold" is present.
     assert!(output.contains("bold"));
+    let plain = strip_ansi(&output);
+    assert!(plain.contains("# Hello"));
+    assert!(plain.contains("This is"));
 }
 
 #[test]
 fn test_render_list() {
     let md = "- Item 1\n- Item 2";
     let output = render(md);
-    let bullet_count = output.matches("•").count();
-    assert_eq!(bullet_count, 2);
+    // Each item is a yellow (33) bullet.
+    let bullet_count = output.matches("\x1b[33m•").count();
+    assert_eq!(bullet_count, 2, "both items must be yellow bullets: {output:?}");
+    assert!(output.contains("Item 1"));
+    assert!(output.contains("Item 2"));
 }
 
 #[test]
@@ -57,8 +66,123 @@ fn test_render_table() {
     assert!(output.contains("Col2"));
     assert!(output.contains("A"));
     assert!(output.contains("B"));
+    assert!(output.contains("C"));
+    assert!(output.contains("D"));
     let lines: Vec<&str> = output.lines().collect();
+    // Header + 2 data rows + trailing blank = 4 lines.
     assert!(lines.len() >= 4);
+}
+
+#[test]
+fn test_table_header_is_reverse_video() {
+    // The header row is a full reverse video (SGR 7); data rows are not.
+    let md = "| Col1 | Col2 |\n|------|------|\n| A | B |";
+    let output = render(md);
+    let lines: Vec<&str> = output.lines().collect();
+    assert!(
+        lines[0].contains("\x1b[7m"),
+        "header must be reverse video, got: {:?}",
+        lines[0]
+    );
+    assert!(
+        !lines[1].contains("\x1b[7m"),
+        "data row must not be reverse video, got: {:?}",
+        lines[1]
+    );
+}
+
+#[test]
+fn test_table_zebra_striping_alternates() {
+    // Even data rows (0, 2, …) carry the subtle tint; odd data rows (1, 3, …)
+    // stay on the plain panel background. The tint differs by mode.
+    let md = "| C1 | C2 |\n|----|----|\n| A | B |\n| C | D |\n| E | F |";
+    let mut buf = Vec::new();
+    let mut renderer = MarkdownRenderer::new();
+    renderer.set_background(super::TerminalBg::Dark);
+    renderer.render_markdown(md, &mut buf).unwrap();
+    let output = String::from_utf8(buf).unwrap();
+    let lines: Vec<&str> = output.lines().collect();
+    // Header at 0, data rows at 1 (tint), 2 (plain), 3 (tint), then blank.
+    assert!(
+        lines[1].contains("\x1b[48;5;235m"),
+        "first data row must carry the dark tint, got: {:?}",
+        lines[1]
+    );
+    assert!(
+        !lines[2].contains("\x1b[48;5;235m"),
+        "second data row must be on the plain panel, got: {:?}",
+        lines[2]
+    );
+    assert!(
+        lines[3].contains("\x1b[48;5;235m"),
+        "third data row must carry the dark tint, got: {:?}",
+        lines[3]
+    );
+}
+
+#[test]
+fn test_from_panel_rgb_classifies_luminance() {
+    // The luminance midpoint is 0x7f (127): at or above is light, below is dark.
+    assert_eq!(
+        super::TerminalBg::from_panel_rgb(255, 255, 255),
+        super::TerminalBg::Light
+    );
+    assert_eq!(
+        super::TerminalBg::from_panel_rgb(0, 0, 0),
+        super::TerminalBg::Dark
+    );
+    assert_eq!(
+        super::TerminalBg::from_panel_rgb(127, 127, 127),
+        super::TerminalBg::Light
+    );
+    assert_eq!(
+        super::TerminalBg::from_panel_rgb(126, 126, 126),
+        super::TerminalBg::Dark
+    );
+    assert_eq!(
+        super::TerminalBg::from_panel_rgb(200, 200, 200),
+        super::TerminalBg::Light
+    );
+    assert_eq!(
+        super::TerminalBg::from_panel_rgb(50, 50, 50),
+        super::TerminalBg::Dark
+    );
+}
+
+#[test]
+fn test_link_renders_text_not_url() {
+    // A markdown link renders the link text, not the URL. The URL is not
+    // emitted as visible text (it is the destination, not the content).
+    let output = strip_ansi(&render("[Kvist](https://kvist.example)"));
+    assert!(
+        output.contains("Kvist"),
+        "link text must be rendered: {output:?}"
+    );
+    assert!(
+        !output.contains("https://kvist.example"),
+        "link URL must not be emitted as visible text: {output:?}"
+    );
+}
+
+#[test]
+fn test_strikethrough_is_styled() {
+    // Strikethrough content is wrapped in SGR 9 (strikethrough).
+    let output = render("a ~~gone~~ b");
+    assert!(
+        output.contains("\x1b[9m"),
+        "strikethrough must be styled: {output:?}"
+    );
+    assert!(output.contains("gone"));
+}
+
+#[test]
+fn test_tasklist_items_are_bulleted() {
+    // Task-list items render as bullets; the checkbox state is not a separate
+    // glyph in this renderer, but the item text is preserved.
+    let output = render("- [x] done\n- [ ] todo");
+    assert_eq!(output.matches('•').count(), 2, "both items must be bulleted");
+    assert!(output.contains("done"));
+    assert!(output.contains("todo"));
 }
 
 #[test]
@@ -67,6 +191,10 @@ fn test_render_table_with_code() {
     let output = render(md);
     assert!(output.contains("File"));
     assert!(output.contains("Count"));
+    // Inline code cells are reverse-video (SGR 7).
+    assert!(output.contains("\x1b[7m"), "inline code must be reverse video: {output:?}");
+    assert!(output.contains("A"));
+    assert!(output.contains("B"));
     let lines: Vec<&str> = output.lines().collect();
     assert!(lines.len() >= 4);
 }
@@ -75,7 +203,9 @@ fn test_render_table_with_code() {
 fn test_heading_levels() {
     let md = "# H1\n## H2\n### H3\n#### H4";
     let rendered = render(md);
+    // Every heading is blue (34) and bold (1).
     assert!(rendered.contains("\x1b[34m"));
+    assert!(rendered.contains("\x1b[1m"));
     let output = strip_ansi(&rendered);
     assert!(output.contains("# H1"));
     assert!(output.contains("## H2"));
@@ -87,61 +217,122 @@ fn test_heading_levels() {
 fn test_horizontal_rule() {
     let md = "Before\n\n---\n\nAfter";
     let output = render(md);
-    assert!(output.contains("─"));
+    // The rule is a run of ─ characters, dimmed (90), spanning the terminal width.
+    assert!(output.contains("\x1b[90m"), "rule must be dimmed: {output:?}");
+    assert!(output.contains("─"), "rule must be drawn: {output:?}");
+    let rule_line = output
+        .lines()
+        .find(|l| l.contains("─"))
+        .expect("a rule line must exist");
+    let rule_width = unicode_width::UnicodeWidthStr::width(strip_ansi(rule_line).as_str());
+    assert_eq!(rule_width, 80, "rule must span the terminal width: {rule_line:?}");
 }
 
 #[test]
 fn test_gfm_alerts() {
-    let md = "> [!NOTE]\n> This is a note";
-    let output = render(md);
-    assert!(output.contains("[NOTE]"));
+    // Each alert kind carries its own color: NOTE=96, TIP=92, IMPORTANT=95,
+    // WARNING=93, CAUTION=91. The label is emitted with that color.
+    let note = render("> [!NOTE]\n> This is a note");
+    assert!(note.contains("[NOTE]"), "note label must render: {note:?}");
+    assert!(
+        note.contains("\x1b[96m"),
+        "note must use the NOTE color, got: {note:?}"
+    );
+    let warning = render("> [!WARNING]\n> Careful");
+    assert!(warning.contains("[WARNING]"));
+    assert!(
+        warning.contains("\x1b[93m"),
+        "warning must use the WARNING color, got: {warning:?}"
+    );
+    // A plain blockquote (no alert label) is dimmed (90), not an alert color.
+    let quote = render("> just a quote");
+    assert!(quote.contains("\x1b[90m"), "plain quote must be dimmed: {quote:?}");
+    assert!(!quote.contains("[NOTE]"));
 }
 
 #[test]
 fn test_footnotes() {
     let md = "Text with footnote[^1].\n\n[^1]: Footnote definition";
     let output = render(md);
-    // Footnote reference is rendered with ANSI color, check for parts
-    assert!(output.contains("[1"));
-    assert!(output.contains("]"));
-    assert!(output.contains("Footnote definition"));
+    // The footnote reference [1] is rendered with the footnote color (96).
+    assert!(
+        output.contains("\x1b[96m[1]"),
+        "footnote reference must be colored: {output:?}"
+    );
+    // The definition is rendered dimmed (90) and carries the definition text.
+    assert!(
+        output.contains("Footnote definition"),
+        "footnote definition must render: {output:?}"
+    );
+    assert!(
+        output.contains("\x1b[90m"),
+        "footnote definition must be dimmed: {output:?}"
+    );
 }
 
 #[test]
-fn test_superscript() {
-    let md = "H~2~O and E=mc^2^";
-    let output = render(md);
-    assert!(output.contains("2"));
-    assert!(output.contains("mc"));
+fn test_superscript_and_subscript_are_dimmed() {
+    // pulldown-cmark only parses ^sup^ and ~sub~ as *standalone* elements; an
+    // inline occurrence (e.g. H~2~O) is plain text. A standalone element is
+    // rendered dim (SGR 2), so the discriminating assertion is the dim code.
+    let sup = render("^b^");
+    assert!(sup.contains("\x1b[2m"), "standalone superscript must be dimmed: {sup:?}");
+    assert!(sup.contains("b"));
+    let sub = render("~c~");
+    assert!(sub.contains("\x1b[2m"), "standalone subscript must be dimmed: {sub:?}");
+    assert!(sub.contains("c"));
+    // Inline occurrences are NOT parsed as sup/sub; they pass through verbatim.
+    let inline = strip_ansi(&render("H~2~O and E=mc^2^"));
+    assert_eq!(
+        inline.trim(),
+        "H~2~O and E=mc^2^",
+        "inline sub/sup must stay literal: {inline:?}"
+    );
 }
 
 #[test]
-fn test_inline_math() {
-    let md = "The formula is $E=mc^2$ here";
-    let output = render(md);
-    assert!(output.contains("$E=mc^2$") || output.contains("E=mc^2"));
+fn test_inline_math_is_passed_through_verbatim() {
+    // pulldown-cmark 0.13 has no math option, so $inline$ is never parsed into
+    // an InlineMath event; the delimiters and body reach the output untouched.
+    // This pins the passthrough so adding real math rendering is a deliberate,
+    // reviewed update rather than a silent regression.
+    let output = strip_ansi(&render("The formula is $E=mc^2$ here"));
+    assert_eq!(output.trim(), "The formula is $E=mc^2$ here");
 }
 
 #[test]
-fn test_display_math() {
-    let md = "$$\\frac{1}{2}$$";
-    let output = render(md);
-    assert!(output.contains("\\frac{1}{2}"));
+fn test_display_math_is_passed_through_verbatim() {
+    // $$display$$ is likewise never parsed into a DisplayMath event.
+    let output = strip_ansi(&render("$$\\frac{1}{2}$$"));
+    assert_eq!(output.trim(), "$$\\frac{1}{2}$$");
 }
 
 #[test]
 fn test_autolinks() {
-    let md = "Visit https://example.com for more";
-    let output = render(md);
-    assert!(output.contains("https://example.com"));
+    // Angle-bracket autolinks are parsed into Link(Autolink) events and render
+    // the URL as the link text. A bare URL is NOT an autolink; it is plain text.
+    let output = strip_ansi(&render("Visit <https://example.com> for more"));
+    assert!(
+        output.contains("https://example.com"),
+        "autolink URL must be rendered: {output:?}"
+    );
+    // The surrounding prose is preserved around the link.
+    assert!(output.contains("Visit"));
+    assert!(output.contains("for more"));
 }
 
 #[test]
-fn test_mermaid() {
-    let md = "```mermaid\ngraph TD\n    A --> B\n```";
-    let output = render(md);
-    // Should render either via mmdc or as plain text fallback
-    assert!(output.contains("A") || output.contains("B") || output.contains("Mermaid diagram"));
+fn test_mermaid_block_is_processed() {
+    // A mermaid fence is processed, not echoed as raw source: both the mmdc
+    // placeholder ("[Mermaid diagram rendered via mmdc]") and the plain-text
+    // fallback ("Mermaid diagram:") carry the "Mermaid diagram" marker, so the
+    // assertion discriminates "processed" from "raw source" without depending
+    // on whether mmdc is installed.
+    let output = render("```mermaid\ngraph TD\n    A --> B\n```");
+    assert!(
+        output.contains("Mermaid diagram"),
+        "mermaid block must be processed, got: {output:?}"
+    );
 }
 
 #[test]
