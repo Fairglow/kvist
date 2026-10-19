@@ -1289,6 +1289,7 @@ impl App {
         let mut renderer = MarkdownRenderer::new();
         renderer.set_width(self.content_width());
         renderer.set_syntax_theme(self.theme.syntax_theme.as_deref());
+        renderer.set_panel_bg(crate::markdown::terminal_bg_for_panel(self.theme.panel_bg));
         let rows = renderer.render(&md);
         // Determine if this is a code block (starts with a code row).
         let is_code_block = rows.first().is_some_and(|row| row.is_code);
@@ -2036,6 +2037,7 @@ impl App {
                 let mut renderer = MarkdownRenderer::new();
                 renderer.set_width(target);
                 renderer.set_syntax_theme(self.theme.syntax_theme.as_deref());
+                renderer.set_panel_bg(crate::markdown::terminal_bg_for_panel(self.theme.panel_bg));
                 let rows = renderer.render(&source);
                 let mut next = index + 1;
                 while next < self.lines.len()
@@ -4044,37 +4046,32 @@ table_sep = { fg = "gray" }
         ));
         app.flush_pending_text();
         let lines = rendered_text(&app);
-        // The separator row is made of box-drawing horizontal-line characters
-        // (U+2500), not ASCII dashes. Its exact width depends on how the 4:3
-        // width:height ratio floor allocates space to single-char columns, so
-        // we only check its structure: no dashes, at least one horizontal-line
-        // character, and the column separator between the two cells.
-        let separator_idx = lines
+        // Borderless layout: no `─` separator row at all. The header is
+        // distinguished by its inverted background and the data rows by the
+        // zebra tint, so the body follows the header directly with no rule
+        // between them.
+        let separator_idx = lines.iter().position(|l| l.contains('─'));
+        assert!(
+            separator_idx.is_none(),
+            "no separator row is drawn (the inverted header replaces it), got {separator_idx:?}"
+        );
+        // Header row first, then the data row, each with a column separator.
+        let header_idx = lines
             .iter()
-            .position(|l| l.contains('─'))
-            .expect("a separator row exists");
-        let separator = &lines[separator_idx];
+            .position(|l| l.contains("a") && l.contains("b"))
+            .expect("a header row exists");
+        let data_idx = lines
+            .iter()
+            .position(|l| l.contains("1") && l.contains("2"))
+            .expect("a data row exists");
+        assert!(data_idx > header_idx, "data row follows header");
         assert!(
-            !separator.contains('-'),
-            "separator row uses box-drawing characters, not ASCII dashes: {separator:?}"
+            lines[header_idx].contains(" | "),
+            "header row has a column separator between cells"
         );
         assert!(
-            separator.contains('─'),
-            "separator row has horizontal-line characters: {separator:?}"
-        );
-        assert!(
-            separator.contains(" | "),
-            "separator row has a column separator between cells: {separator:?}"
-        );
-        // Header row is above the separator
-        assert!(
-            lines[separator_idx - 1].contains("a") && lines[separator_idx - 1].contains("b"),
-            "header row precedes separator"
-        );
-        // Data row is below the separator
-        assert!(
-            lines[separator_idx + 1].contains("1") && lines[separator_idx + 1].contains("2"),
-            "data row follows separator"
+            lines[data_idx].contains(" | "),
+            "data row has a column separator between cells"
         );
     }
 

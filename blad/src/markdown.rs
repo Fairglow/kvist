@@ -12,12 +12,146 @@
 //! - Autolinks
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{Color as SColor, FontStyle, Style as SStyle, Theme, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
 use crate::inline::{InlineWriter, Style};
+
+/// Whether the terminal's background is dark or light. Drives the table
+/// zebra striping: a dark background uses subtly brighter tints and a light
+/// background uses subtly darker tints, while the header is always a full
+/// reverse video so it inverts to the complement of the text color in either
+/// mode. Detection is automatic (OSC 11 query, then
+/// `COLORTERM`/`COLORFGBG`/`NO_COLOR`, then the terminal's `TERM_PROGRAM`/`TERM`
+/// heuristics) but can be overridden explicitly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TerminalBg {
+    /// The background is dark (the default assumption).
+    #[default]
+    Dark,
+    /// The background is light.
+    Light,
+}
+
+impl TerminalBg {
+    /// The 256-color index of the subtle data-row tint. A one-step lift from
+    /// the base background is deliberately faint: it separates rows without
+    /// drawing a border, and it stays legible over the standard foreground.
+    /// The header is a full reverse video (see `render_table`) rather than a
+    /// fixed background, because a fixed color can't guarantee contrast for
+    /// every foreground the terminal might use.
+    const fn tint(self) -> u8 {
+        match self {
+            TerminalBg::Dark => 235,  // #4e4e4e, one step above #262626
+            TerminalBg::Light => 254, // #e4e4e4, one step below #f4f4f4
+        }
+    }
+
+    /// Derive a [`TerminalBg`] from an RGB panel background color using the
+    /// standard relative-luminance formula. A panel whose luminance is at or
+    /// above the midpoint (0x7f, the halfway point of an 8-bit channel) is
+    /// treated as light; anything darker is dark. This lets an application
+    /// that owns its panel background (e.g. Skott's themed TUI) feed the exact
+    /// zebra mode instead of relying on terminal-environment detection.
+    pub const fn from_panel_rgb(r: u8, g: u8, b: u8) -> Self {
+        let l = (r as u32 * 299 + g as u32 * 587 + b as u32 * 114) / 1000;
+        if l >= 127 {
+            TerminalBg::Light
+        } else {
+            TerminalBg::Dark
+        }
+    }
+}
+
+/// Detect the terminal background from environment heuristics. This is
+/// side-effect-free (no terminal query, no stdin read) so it can run on every
+/// render without interfering with the interactive viewer's event loop. The
+/// result is deliberately conservative: anything ambiguous is `Dark`, the
+/// overwhelming default. Callers that need a precise answer can use
+/// [`query_background_rgb`].
+fn detect_terminal_bg() -> TerminalBg {
+    // An explicit `COLORFGBG` background field is the strongest env signal.
+    if let Some(bg_field) = std::env::var("COLORFGBG").ok().as_deref()
+        && let Some(bg) = bg_field.split(':').next_back() {
+            return match bg {
+                "1" | "15" | "7" => TerminalBg::Light,
+                _ => TerminalBg::default(),
+            };
+        }
+
+    // COLORTERM and TERM_PROGRAM are weak but the only explicit dark/light
+    // markers some terminals expose. A terminal that advertises a light
+    // palette wins; anything else stays dark.
+    for val in [
+        std::env::var("COLORTERM").ok(),
+        std::env::var("TERM_PROGRAM").ok(),
+        std::env::var("TERM").ok(),
+    ] {
+        let Some(val) = val else { continue };
+        let lower = val.to_ascii_lowercase();
+        if lower.contains("light") {
+            return TerminalBg::Light;
+        }
+    }
+
+    TerminalBg::default()
+}
+
+/// Query the terminal's background color via OSC 11 and parse the response.
+/// Returns `None` if the terminal doesn't answer within a short deadline or
+/// the response is malformed. Callers should only invoke this when they can
+/// safely read stdin (e.g. before entering the alternate screen / raw mode),
+/// never in the middle of a render, because it consumes up to the deadline of
+/// pending input.
+pub fn query_background_rgb() -> Option<(u8, u8, u8)> {
+    use std::io::Read as _;
+    if !std::io::stdout().is_terminal() {
+        return None;
+    }
+    let mut stdout = std::io::stdout().lock();
+    if stdout.write_all(b"\x1b]11;?\x07").is_err() || stdout.flush().is_err() {
+        return None;
+    }
+    drop(stdout);
+
+    let mut buf = [0u8; 64];
+    let mut pos = 0;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(50);
+    while pos < buf.len() && std::time::Instant::now() < deadline {
+        match std::io::stdin().read(&mut buf[pos..]) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => pos += n,
+        }
+    }
+    parse_osc11_rgb(&String::from_utf8_lossy(&buf[..pos]))
+}
+
+fn parse_osc11_rgb(text: &str) -> Option<(u8, u8, u8)> {
+    // The response is an OSC 11 sequence: ESC ] 11 ; rgb:RRRR/GGGG/BBBB ESC \
+    // (or BEL). Some terminals wrap it in a leading ESC (CSI u). Find the
+    // `rgb:` payload and parse the hex triplets.
+    let start = text.find("rgb:")? + "rgb:".len();
+    let tail = &text[start..];
+    let mut parts = tail.splitn(3, '/');
+    let r = parts
+        .next()?
+        .trim_end_matches(|c: char| !c.is_ascii_hexdigit())
+        .parse()
+        .ok()?;
+    let g = parts
+        .next()?
+        .trim_end_matches(|c: char| !c.is_ascii_hexdigit())
+        .parse()
+        .ok()?;
+    let b = parts
+        .next()?
+        .trim_end_matches(|c: char| !c.is_ascii_hexdigit())
+        .parse()
+        .ok()?;
+    Some((r, g, b))
+}
 
 /// A configured markdown renderer that holds rendering options.
 ///
@@ -27,10 +161,14 @@ use crate::inline::{InlineWriter, Style};
 pub struct MarkdownRenderer {
     syntax_theme: Option<String>,
     width: Option<usize>,
+    /// Explicit terminal background. `None` means "auto-detect" on each
+    /// render (a side-effect-free environment lookup).
+    bg: Option<TerminalBg>,
 }
 
 impl MarkdownRenderer {
-    /// Create a new renderer with default options (no syntax theme, no width limit).
+    /// Create a new renderer with default options (no syntax theme, no width
+    /// limit, dark background).
     pub fn new() -> Self {
         Self::default()
     }
@@ -46,9 +184,29 @@ impl MarkdownRenderer {
         self.width = width;
     }
 
+    /// Set the terminal background mode explicitly. Call this when the
+    /// application already knows the background (e.g. Skott, which owns the
+    /// theme). When left unset, the renderer auto-detects from the
+    /// environment on each render.
+    pub fn set_background(&mut self, bg: TerminalBg) {
+        self.bg = Some(bg);
+    }
+
+    /// The effective background: the explicit value if set, otherwise the
+    /// auto-detected one.
+    fn effective_bg(&self) -> TerminalBg {
+        self.bg.unwrap_or_else(detect_terminal_bg)
+    }
+
     /// Render markdown with the renderer's configured options.
     pub fn render_markdown(&self, md: &str, w: &mut impl Write) -> std::io::Result<()> {
-        render_markdown_theme(md, w, self.width, self.syntax_theme.as_deref())
+        render_markdown_theme(
+            md,
+            w,
+            self.width,
+            self.syntax_theme.as_deref(),
+            self.effective_bg(),
+        )
     }
 }
 
@@ -63,6 +221,7 @@ fn render_markdown_theme(
     w: &mut impl Write,
     terminal_width: Option<usize>,
     theme_name: Option<&str>,
+    bg: TerminalBg,
 ) -> std::io::Result<()> {
     let ss = SyntaxSet::load_defaults_newlines();
     let ts = ThemeSet::load_defaults();
@@ -373,7 +532,7 @@ fn render_markdown_theme(
             }
             Event::End(TagEnd::Table) => {
                 in_table = false;
-                render_table(w, &table_rows, terminal_width)?;
+                render_table(w, &table_rows, terminal_width, bg)?;
                 writeln!(w)?;
                 need_blank = true;
                 table_rows.clear();
@@ -521,10 +680,27 @@ fn render_table(
     w: &mut impl Write,
     rows: &[Vec<String>],
     terminal_width: Option<usize>,
+    bg: TerminalBg,
 ) -> std::io::Result<()> {
     if rows.is_empty() {
         return Ok(());
     }
+
+    // The subtle background applied to alternating data rows. A one-step lift
+    // from the panel background is faint enough to read as a row separator
+    // without a border line, and it never fights the foreground. The header
+    // is rendered separately (below) as a full reverse video, which makes it
+    // stand out as the table's anchor and lets the header/data separator
+    // disappear.
+    let tint_code = format!("\x1b[48;5;{}m", bg.tint());
+    // The header is a full reverse video (SGR 7), which inverts both the
+    // foreground and the background together. That makes the header bar the
+    // exact complement of the text color in *any* theme, so contrast is
+    // guaranteed without the renderer having to know the panel's fg or bg —
+    // and it's the only inversion that stays legible when the user swaps
+    // light for dark (or vice versa) mid-session.
+    let header_code = "\x1b[7m";
+    let reset = "\x1b[0m";
 
     // Normalize ragged rows: use the widest row so cell access never runs
     // past a shorter row's actual cell count.
@@ -626,7 +802,13 @@ fn render_table(
         }
     }
 
-    // Render all rows with proper alignment and soft-wrapping
+    // Render all rows with proper alignment and soft-wrapping. The header is
+    // a reverse video (a full inversion that auto-adapts to dark or light and
+    // always keeps great contrast), and the data rows alternate between the
+    // panel background and the subtle tint. Wrapping the *whole* visual line
+    // in the row's background means a multiline (wrapped) cell stays inside one
+    // colored block, so the background itself reads as the row separator and
+    // no border line between rows is needed.
     for (row_idx, row) in rows.iter().enumerate() {
         // First, wrap all cells in this row
         let mut wrapped_row: Vec<Vec<String>> = Vec::new();
@@ -643,8 +825,25 @@ fn render_table(
             .max()
             .unwrap_or(1);
 
-        // Render each line of the wrapped row
+        // Per-row background: the header takes the reverse video, the even
+        // data rows (0, 2, …) take the subtle tint, and the odd data rows stay
+        // on the plain panel background. The tint is subtle; the header
+        // inversion is not, so the header reads as the table's anchor and no
+        // separator line between header and data is needed.
+        let (prefix, suffix) = if row_idx == 0 {
+            (header_code, reset)
+        } else if (row_idx - 1) % 2 == 0 {
+            (tint_code.as_str(), reset)
+        } else {
+            ("", "")
+        };
+
+        // Render each line of the wrapped row, wrapping it in the row's
+        // background so multiline cells stay within one colored block.
         for line_idx in 0..max_lines {
+            if !prefix.is_empty() {
+                write!(w, "{prefix}")?;
+            }
             for (i, wrapped_lines) in wrapped_row.iter().enumerate() {
                 if i > 0 {
                     write!(w, " | ")?;
@@ -657,16 +856,8 @@ fn render_table(
                     write!(w, "{}", " ".repeat(col_widths[i]))?;
                 }
             }
-            writeln!(w)?;
-        }
-
-        // Separator after header row (using Unicode box-drawing)
-        if row_idx == 0 {
-            for (i, &width) in col_widths.iter().enumerate() {
-                if i > 0 {
-                    write!(w, " | ")?;
-                }
-                write!(w, "{}", "─".repeat(width))?;
+            if !suffix.is_empty() {
+                write!(w, "{suffix}")?;
             }
             writeln!(w)?;
         }

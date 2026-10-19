@@ -43,9 +43,10 @@ fn test_table_basic_alignment() {
     assert!(lines[0].contains("Name"));
     assert!(lines[0].contains("Age"));
 
-    // Data rows - after separator
-    assert!(lines[2].contains("Alice"));
-    assert!(lines[3].contains("Bob"));
+    // Data rows — no separator line: the header is distinguished by its
+    // inverted background, so data starts immediately at index 1.
+    assert!(lines[1].contains("Alice"));
+    assert!(lines[2].contains("Bob"));
 
     // All non-empty lines should have same length (proper alignment)
     let non_empty: Vec<&str> = lines.iter().filter(|l| !l.is_empty()).copied().collect();
@@ -63,8 +64,10 @@ fn test_table_empty_cells() {
     let output = strip_ansi(&render_width(md, 80));
     let lines: Vec<&str> = output.lines().collect();
 
-    // Should have 4 rows (header + separator + 2 data)
-    assert!(lines.len() >= 4);
+    // No separator line: header at 0, data rows at 1 and 2. The header is
+    // distinguished by its inverted background, not a border, so the table is
+    // just header + N data rows (plus trailing blank from writeln).
+    assert!(lines.len() >= 3);
 
     // All non-empty lines should have same length (proper alignment)
     let non_empty: Vec<&str> = lines.iter().filter(|l| !l.is_empty()).copied().collect();
@@ -82,9 +85,10 @@ fn test_table_empty_all_cells() {
     let output = strip_ansi(&render_width(md, 80));
     let lines: Vec<&str> = output.lines().collect();
 
+    // No separator line: header at 0, data rows at 1 and 2.
     assert!(lines[0].contains("Col1"));
     assert!(lines[0].contains("Col2"));
-    assert!(lines[3].contains("A"));
+    assert!(lines[2].contains("A"));
 }
 
 #[test]
@@ -120,8 +124,8 @@ fn test_table_no_wrap_when_fits() {
     let output = strip_ansi(&render_width(md, width));
     let lines: Vec<&str> = output.lines().collect();
 
-    // Should be exactly 4 lines (header + separator + 1 data row + trailing blank)
-    assert!(lines.len() >= 4);
+    // No separator line: header + 1 data row + trailing blank = 3 lines.
+    assert!(lines.len() >= 3);
 }
 
 #[test]
@@ -132,13 +136,14 @@ fn test_table_wrapped_rows_have_no_internal_separators() {
     let lines: Vec<&str> = output.lines().collect();
 
     // A wrapped cell spans multiple lines within the SAME cell, so it must not
-    // be broken up by internal row borders. The only separator line is the one
-    // between the header and the body, even when a cell wraps to many lines.
+    // be broken up by internal row borders. No separator lines at all: the
+    // header is distinguished by its inverted background and the data rows by
+    // the zebra tint, so borders are unnecessary even when cells wrap.
     let separator_count = lines.iter().filter(|l| l.starts_with("─")).count();
     assert_eq!(
-        separator_count, 1,
-        "Wrapped rows must not add internal separators, got {} separators. Output: {:?}",
-        separator_count, output
+        separator_count, 0,
+        "No borders are drawn, so no separator lines should appear. Output: {:?}",
+        output
     );
 
     // All wrapped lines still fit within the terminal width.
@@ -240,8 +245,13 @@ fn test_table_header_separated_from_body() {
     let output = strip_ansi(&render_width(md, 80));
     let lines: Vec<&str> = output.lines().collect();
 
-    // Should have a separator between header and body
-    assert!(lines[1].contains("─"), "Missing header separator");
+    // No border between header and body: the header is distinguished by its
+    // inverted background, so the body starts immediately at index 1.
+    assert!(
+        lines[1].contains("Alice"),
+        "Header must be followed directly by the body"
+    );
+    assert!(!lines[1].contains("─"), "No border between header and body");
 }
 
 #[test]
@@ -250,15 +260,17 @@ fn test_table_no_extra_separator_when_not_wrapped() {
     let output = strip_ansi(&render_width(md, 80));
     let lines: Vec<&str> = output.lines().collect();
 
-    // Should have exactly 4 lines: header, separator, 2 data rows
-    // Account for trailing empty line from writeln
-    assert!(lines.len() >= 4);
+    // No separator line: header + 2 data rows + trailing blank = 3 content
+    // lines. The header and body are distinguished by background, not a
+    // border, so the line count drops by one versus the old layout.
+    assert!(lines.len() >= 3);
 
-    // Only one separator line (between header and body)
+    // No borders at all: the inverted header and zebra tint replace the
+    // separator line entirely.
     let separator_count = lines.iter().filter(|l| l.starts_with("─")).count();
     assert_eq!(
-        separator_count, 1,
-        "Should have exactly 1 separator when no wrapping, got {}",
+        separator_count, 0,
+        "No borders are drawn, so no separator lines should appear, got {}",
         separator_count
     );
 }
@@ -281,12 +293,13 @@ fn test_table_widest_column_gets_most_width() {
         "Column with the longest value must be the widest, got commit={w_commit} files={w_files} desc={w_desc}"
     );
 
-    // No internal borders: exactly one separator line (header/body) even
-    // though the wrapped cells span multiple lines.
+    // No internal borders: no separator lines at all, even though the
+    // wrapped cells span multiple lines. The inverted header and zebra tint
+    // carry the visual separation instead.
     let separator_count = lines.iter().filter(|l| l.starts_with("─")).count();
     assert_eq!(
-        separator_count, 1,
-        "Wrapped cells must not add internal borders, got {} separators",
+        separator_count, 0,
+        "No borders are drawn, so no separator lines should appear, got {}",
         separator_count
     );
 

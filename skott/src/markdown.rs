@@ -2,6 +2,7 @@
 //! Wraps Blad's implementation to produce ratatui-compatible output.
 
 use blad::markdown::MarkdownRenderer as BladRenderer;
+use blad::markdown::TerminalBg;
 use ratatui::style::{Color, Modifier, Style as RStyle};
 use ratatui::text::{Line, Span};
 use std::io::Cursor;
@@ -86,6 +87,11 @@ impl Default for MarkdownStyles {
 pub struct MarkdownRenderer {
     syntax_theme: Option<String>,
     width: usize,
+    /// The TUI's actual panel background. When set, it is forwarded to Blad
+    /// so the table zebra striping and inverted header use colors that match
+    /// the real panel, not the ambient terminal background. `None` means the
+    /// TUI didn't declare a panel, so Blad auto-detects from the environment.
+    panel_bg: Option<TerminalBg>,
 }
 
 impl Default for MarkdownRenderer {
@@ -93,6 +99,7 @@ impl Default for MarkdownRenderer {
         Self {
             syntax_theme: None,
             width: 80,
+            panel_bg: None,
         }
     }
 }
@@ -114,6 +121,13 @@ impl MarkdownRenderer {
         self.width = width;
     }
 
+    /// Set the TUI panel background mode. Call this from the theme handler so
+    /// Blad's table zebra striping and inverted header pick colors that match
+    /// the real panel. Pass `None` to fall back to Blad's auto-detection.
+    pub fn set_panel_bg(&mut self, bg: Option<TerminalBg>) {
+        self.panel_bg = bg;
+    }
+
     /// Render markdown with the renderer's configured options.
     ///
     /// Uses the configured width and theme. For one-off rendering with
@@ -126,6 +140,9 @@ impl MarkdownRenderer {
         blade.set_width(Some(self.width));
         if let Some(ref theme) = self.syntax_theme {
             blade.set_syntax_theme(Some(theme.as_str()));
+        }
+        if let Some(bg) = self.panel_bg {
+            blade.set_background(bg);
         }
         let _ = blade.render_markdown(md, &mut output);
         let ansi_bytes = output.into_inner();
@@ -142,6 +159,23 @@ impl MarkdownRenderer {
 /// `MarkdownRenderer` instance instead.
 pub fn render_document(md: &str) -> Vec<RenderedLine> {
     MarkdownRenderer::new().render(md)
+}
+
+/// Derive the Blad [`TerminalBg`] mode from a theme's panel background color.
+///
+/// Theme files always resolve `panel.bg` to a truecolor `Color::Rgb` triple
+/// (see `theme::color::parse_color`), so the luminance of that triple decides
+/// dark versus light. The `terminal` theme, however, declares `panel.bg` as
+/// `Color::Reset` ("use the terminal's own background"), for which the TUI
+/// does not know the panel color — that case returns `None` so Blad falls
+/// back to its own environment detection. Any other non-`Rgb` color likewise
+/// has no luminance to measure, so it also yields `None` and Blad auto-detects
+/// (the conservative choice when the panel color is not an explicit RGB triple).
+pub fn terminal_bg_for_panel(panel_bg: Color) -> Option<TerminalBg> {
+    match panel_bg {
+        Color::Rgb(r, g, b) => Some(TerminalBg::from_panel_rgb(r, g, b)),
+        _ => None,
+    }
 }
 
 /// Parse ANSI escape sequences into ratatui-compatible styled lines.
@@ -239,61 +273,103 @@ fn parse_escape_sequence(line: &str, start: usize, style: &mut RStyle) -> usize 
             // Reset
             *style = RStyle::default();
         } else {
-            for param in params {
-                let param = param.trim();
+            let mut p = 0;
+            while p < params.len() {
+                let param = params[p].trim();
                 if param.is_empty() {
                     *style = RStyle::default();
-                } else if let Ok(code) = param.parse::<u16>() {
-                    match code {
-                        0 => *style = RStyle::default(),
-                        1 => *style = style.add_modifier(Modifier::BOLD),
-                        2 => *style = style.add_modifier(Modifier::DIM),
-                        3 => *style = style.add_modifier(Modifier::ITALIC),
-                        4 => *style = style.add_modifier(Modifier::UNDERLINED),
-                        7 => *style = style.add_modifier(Modifier::REVERSED),
-                        22 => *style = style.remove_modifier(Modifier::BOLD | Modifier::DIM),
-                        23 => *style = style.remove_modifier(Modifier::ITALIC),
-                        24 => *style = style.remove_modifier(Modifier::UNDERLINED),
-                        27 => *style = style.remove_modifier(Modifier::REVERSED),
-                        30..=37 => {
-                            *style = style.fg(ansi_color_to_ratatui(code - 30));
-                        }
-                        39 => *style = style.fg(Color::Reset),
-                        40..=47 => {
-                            *style = style.bg(ansi_color_to_ratatui(code - 40));
-                        }
-                        49 => *style = style.bg(Color::Reset),
-                        90..=97 => {
-                            let base = ansi_color_to_ratatui(code - 90);
-                            *style = style.fg(match base {
-                                Color::Black => Color::DarkGray,
-                                Color::Red => Color::LightRed,
-                                Color::Green => Color::LightGreen,
-                                Color::Yellow => Color::LightYellow,
-                                Color::Blue => Color::LightBlue,
-                                Color::Magenta => Color::LightMagenta,
-                                Color::Cyan => Color::LightCyan,
-                                Color::White => Color::White,
-                                _ => base,
-                            });
-                        }
-                        100..=107 => {
-                            let base = ansi_color_to_ratatui(code - 100);
-                            *style = style.bg(match base {
-                                Color::Black => Color::DarkGray,
-                                Color::Red => Color::LightRed,
-                                Color::Green => Color::LightGreen,
-                                Color::Yellow => Color::LightYellow,
-                                Color::Blue => Color::LightBlue,
-                                Color::Magenta => Color::LightMagenta,
-                                Color::Cyan => Color::LightCyan,
-                                Color::White => Color::White,
-                                _ => base,
-                            });
-                        }
-                        _ => {}
-                    }
+                    p += 1;
+                    continue;
                 }
+                let Ok(code) = param.parse::<u16>() else {
+                    p += 1;
+                    continue;
+                };
+                match code {
+                    0 => *style = RStyle::default(),
+                    1 => *style = style.add_modifier(Modifier::BOLD),
+                    2 => *style = style.add_modifier(Modifier::DIM),
+                    3 => *style = style.add_modifier(Modifier::ITALIC),
+                    4 => *style = style.add_modifier(Modifier::UNDERLINED),
+                    7 => *style = style.add_modifier(Modifier::REVERSED),
+                    22 => *style = style.remove_modifier(Modifier::BOLD | Modifier::DIM),
+                    23 => *style = style.remove_modifier(Modifier::ITALIC),
+                    24 => *style = style.remove_modifier(Modifier::UNDERLINED),
+                    27 => *style = style.remove_modifier(Modifier::REVERSED),
+                    30..=37 => {
+                        *style = style.fg(ansi_color_to_ratatui(code - 30));
+                    }
+                    39 => *style = style.fg(Color::Reset),
+                    40..=47 => {
+                        *style = style.bg(ansi_color_to_ratatui(code - 40));
+                    }
+                    49 => *style = style.bg(Color::Reset),
+                    90..=97 => {
+                        let base = ansi_color_to_ratatui(code - 90);
+                        *style = style.fg(match base {
+                            Color::Black => Color::DarkGray,
+                            Color::Red => Color::LightRed,
+                            Color::Green => Color::LightGreen,
+                            Color::Yellow => Color::LightYellow,
+                            Color::Blue => Color::LightBlue,
+                            Color::Magenta => Color::LightMagenta,
+                            Color::Cyan => Color::LightCyan,
+                            Color::White => Color::White,
+                            _ => base,
+                        });
+                    }
+                    100..=107 => {
+                        let base = ansi_color_to_ratatui(code - 100);
+                        *style = style.bg(match base {
+                            Color::Black => Color::DarkGray,
+                            Color::Red => Color::LightRed,
+                            Color::Green => Color::LightGreen,
+                            Color::Yellow => Color::LightYellow,
+                            Color::Blue => Color::LightBlue,
+                            Color::Magenta => Color::LightMagenta,
+                            Color::Cyan => Color::LightCyan,
+                            Color::White => Color::White,
+                            _ => base,
+                        });
+                    }
+                    38 | 48 => {
+                        // Extended color: `38;5;n` / `48;5;n` (256-color) or
+                        // `38;2;r;g;b` / `48;2;r;g;b` (truecolor). The mode and
+                        // its components live in the following parameters, so
+                        // they are consumed here together.
+                        let is_bg = code == 48;
+                        p += 1;
+                        let mode = params.get(p).and_then(|v| v.trim().parse::<u16>().ok());
+                        p += 1;
+                        let color = match mode {
+                            Some(5) => params
+                                .get(p)
+                                .and_then(|v| v.trim().parse::<u16>().ok())
+                                .and_then(|idx| (idx <= 255).then_some(Color::Indexed(idx as u8))),
+                            Some(2) => {
+                                let r = params.get(p).and_then(|v| v.trim().parse::<u8>().ok());
+                                p += 1;
+                                let g = params.get(p).and_then(|v| v.trim().parse::<u8>().ok());
+                                p += 1;
+                                let b = params.get(p).and_then(|v| v.trim().parse::<u8>().ok());
+                                match (r, g, b) {
+                                    (Some(r), Some(g), Some(b)) => Some(Color::Rgb(r, g, b)),
+                                    _ => None,
+                                }
+                            }
+                            _ => None,
+                        };
+                        if let Some(color) = color {
+                            if is_bg {
+                                *style = style.bg(color);
+                            } else {
+                                *style = style.fg(color);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                p += 1;
             }
         }
     }
@@ -412,6 +488,50 @@ mod tests {
         assert_eq!(spans[0].content.as_ref(), "err");
         assert_eq!(spans[0].style.fg, Some(Color::Red));
         assert!(spans[0].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn sgr_extended_colors_resolve_background_and_foreground() {
+        // Blad's zebra table emits `48;5;n` for the row tint and header bar.
+        // The parser must resolve that 256-color background to a ratatui
+        // `Color::Indexed`, not drop it (which would flatten the zebra away).
+        let spans = parse_ansi_line("\x1b[48;5;235mrow\x1b[0m");
+        assert_eq!(spans[0].content.as_ref(), "row");
+        assert_eq!(spans[0].style.bg, Some(Color::Indexed(235)));
+        // `38;5;n` foreground, `48;2;r;g;b` truecolor background, and a
+        // combined bold + indexed-background span (the header row shape).
+        let spans = parse_ansi_line("\x1b[38;5;33mf\x1b[0m");
+        assert_eq!(spans[0].style.fg, Some(Color::Indexed(33)));
+        let spans = parse_ansi_line("\x1b[48;2;10;20;30mc\x1b[0m");
+        assert_eq!(spans[0].style.bg, Some(Color::Rgb(10, 20, 30)));
+        let spans = parse_ansi_line("\x1b[1;48;5;254mh\x1b[0m");
+        assert_eq!(spans[0].content.as_ref(), "h");
+        assert_eq!(spans[0].style.bg, Some(Color::Indexed(254)));
+        assert!(spans[0].style.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn terminal_bg_for_panel_maps_theme_panel_colors() {
+        // The dark theme's panel is #000010 (near-black) and the light
+        // theme's is white; the conversion must classify each accordingly.
+        use blad::markdown::TerminalBg;
+        assert_eq!(
+            terminal_bg_for_panel(Color::Rgb(0, 0, 16)),
+            Some(TerminalBg::Dark),
+            "#000010 is a dark panel"
+        );
+        assert_eq!(
+            terminal_bg_for_panel(Color::Rgb(255, 255, 255)),
+            Some(TerminalBg::Light),
+            "white is a light panel"
+        );
+        // The `terminal` theme declares panel.bg as Reset (use the terminal's
+        // own background), for which the TUI does not know the color, so the
+        // conversion returns None and Blad auto-detects.
+        assert_eq!(terminal_bg_for_panel(Color::Reset), None);
+        // Any other non-Rgb color (e.g. a legacy named color) has no luminance
+        // to measure, so it also yields None and Blad auto-detects.
+        assert_eq!(terminal_bg_for_panel(Color::Black), None);
     }
 
     #[test]
