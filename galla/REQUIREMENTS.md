@@ -37,6 +37,9 @@ request MUST fail closed.
 
 ## Functional requirements
 
+The following stable requirement identifiers define the mandatory behavior of
+the enforcement component.
+
 ### SR-REQ-BIN-ONLY-SYSTEM
 
 Every execution phase MUST deny listing, traversal, reads, writes and permission

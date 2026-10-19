@@ -7,34 +7,45 @@ component:
   revalidation:
     state: current
     checked_at: "2026-10-17T17:30:00Z"
+    stale_since: null
+    causes: []
 tasks:
-  - id: lifecycle-write-tests
+  - id: "lifecycle-write-tests"
     title: "Pin responsive startup and router selection"
     description: "Reproduce router metadata failure and test input, held prompts, explicit-choice precedence, cancellation and concise status."
-    kind: test
     context: "Router/standalone-alias regressions failed before transport repair. Follow-up FIFO and overlong-initial-prompt regressions also failed before correction. Final targeted run passes 54 tests covering lifecycle, discovery, selection, bounded ignore reads and worker teardown."
     purpose: "Pin observable latency and selection semantics."
     expected_outcome: "An editable prompt appears before discovery and submitted prompts are retained."
+    kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:37:00Z", completed_at: "2026-10-17T13:37:00Z"}
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"
+    timestamps:
+      created_at: "2026-10-17T13:25:48Z"
+      updated_at: "2026-10-17T13:37:00Z"
+      completed_at: "2026-10-17T13:37:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: lifecycle-implement-code
+  - id: "lifecycle-implement-code"
     title: "Move discovery behind the editable prompt"
     description: "Own concurrent cancellable discovery and bootstrap jobs; retain private identity diagnostics and restore the terminal before joins."
-    kind: implementation
     context: "Owned concurrent discovery and cancellable bootstraps are implemented. Initial component nextest: 602 passed, 3 pre-existing skipped. After final review corrections, 54 targeted tests, strict Clippy, formatting and release build pass. Final release/configuration: prompt 4.31-4.86 ms, input 10.72-10.74 ms, quit 92.75-99.95 ms; initialization 1.749 s with active reuse and no inference. No universal latency guarantee."
     purpose: "Remove provider and tool preparation from the input critical path."
     expected_outcome: "Concise startup status, validated execution and terminal restoration before joins."
+    kind: implementation
     status: completed
-    depends_on: [lifecycle-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:37:00Z", completed_at: "2026-10-17T13:37:00Z"}
+    depends_on:
+      - "lifecycle-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"
+    timestamps:
+      created_at: "2026-10-17T13:25:48Z"
+      updated_at: "2026-10-17T13:37:00Z"
+      completed_at: "2026-10-17T13:37:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: lifecycle-security-audit
+  - id: "lifecycle-security-audit"
     title: "Inspect lifecycle ownership and authority"
     description: "Independently inspect source and tests for cancellation, stale results and unchanged validated-resource authority."
     context: "Independent clean-slate lifecycle-observer found a blocking advisory ignore read, overlong initial prompt loss and live-status overwrite; inspected corrections resolve all three. Source assertions only, no observer-run tests or blanket security certification. Retained limitations are in IMPL.md."
@@ -42,12 +53,17 @@ tasks:
     expected_outcome: "Concrete regressions are corrected or explicitly retained."
     kind: security-audit
     status: completed
-    depends_on: [lifecycle-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:49:19Z", completed_at: "2026-10-17T13:49:19Z"}
+    depends_on:
+      - "lifecycle-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"
+    timestamps:
+      created_at: "2026-10-17T13:25:48Z"
+      updated_at: "2026-10-17T13:49:19Z"
+      completed_at: "2026-10-17T13:49:19Z"
     blocked_reason: null
     recovery_state: null
-  - id: lifecycle-compliance-review
+  - id: "lifecycle-compliance-review"
     title: "Compare independent lifecycle observations"
     description: "Derive source-only IMPL evidence, then compare intent and observed evidence in a separate source-blind context."
     context: "Separate source-blind lifecycle-comparator found no concrete unresolved scoped discrepancy against the new observations and attributed runtime evidence. Older IMPL entries were inadvertently displayed during extraction but excluded; source blindness was retained. Initial 602-pass run preceded final corrections; final targeted coverage is 54 passes. Evidence gaps, cooperative filesystem cancellation, retry timing and the pre-existing Rust timeout-message mismatch remain explicit. No acceptance receipt or blanket compliance claim."
@@ -55,60 +71,88 @@ tasks:
     expected_outcome: "A source-blind comparison records discrepancies and verification limits without accepting the bundle."
     kind: compliance-review
     status: completed
-    depends_on: [lifecycle-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"]
-    timestamps: {created_at: "2026-10-17T13:25:48Z", updated_at: "2026-10-17T13:49:19Z", completed_at: "2026-10-17T13:49:19Z"}
+    depends_on:
+      - "lifecycle-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"
+    timestamps:
+      created_at: "2026-10-17T13:25:48Z"
+      updated_at: "2026-10-17T13:49:19Z"
+      completed_at: "2026-10-17T13:49:19Z"
     blocked_reason: null
     recovery_state: null
-  - id: steering-write-tests
+  - id: "steering-write-tests"
     title: "Write failing steering and continuity tests"
     description: "Tests for steering during generation, backoff, tool execution, between tools; repeated steering; edit/withdraw vs claim; concurrent final answer; late events; stop; shutdown; recording failure; budget exhaustion. Assert preservation of original goal/context and completed changes, valid tool-call/result pairing, no stale next-tool dispatch, no automatic effect replay, no new session. Verify guidance reaches subsequent model request."
-    kind: test
+    context: "Steering a running task is newly planned behavior that the current FIFO-only runtime does not implement; these tests pin its semantics from approved intent before any control path exists."
     purpose: "Pin steering semantics and interruption bound with deterministic fake transports."
     expected_outcome: "Tests fail for current FIFO-only behavior and pin exact approved semantics."
-    status: open
+    kind: test
+    status: pending
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"]
-    timestamps: {created_at: "2026-10-17T17:30:00Z", updated_at: "2026-10-17T17:30:00Z"}
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"
+    timestamps:
+      created_at: "2026-10-17T17:30:00Z"
+      updated_at: "2026-10-17T17:30:00Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: steering-implement-code
+  - id: "steering-implement-code"
     title: "Implement coordinated immediate steering"
     description: "Add typed correlated control messages and worker-owned delivery handoff. Use operation-scoped interruption without ending session. Reconcile observed and skipped tool results, append claimed guidance in order, preserve task accounting, resume through context preflight. Expose pending edit/withdraw controls and truthful statuses."
-    kind: implementation
+    context: "The steering tests define behavior the current runtime lacks, so the control path must be implemented to satisfy the approved prompt-steering requirement without resetting an in-flight task."
     purpose: "Enable immediate complementary guidance without resetting the task."
     expected_outcome: "Steering tests pass, existing lifecycle/context tests remain valid, help explains new default."
-    status: open
-    depends_on: [steering-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"]
-    timestamps: {created_at: "2026-10-17T17:30:00Z", updated_at: "2026-10-17T17:30:00Z"}
+    kind: implementation
+    status: pending
+    depends_on:
+      - "steering-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"
+    timestamps:
+      created_at: "2026-10-17T17:30:00Z"
+      updated_at: "2026-10-17T17:30:00Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: steering-security-audit
+  - id: "steering-security-audit"
     title: "Inspect steering control path and execution boundaries"
     description: "Independently inspect cancellation ownership, stale tool dispatch, effect replay, recording-before-effects, budget preservation, event correlation, shutdown and authority invariants."
-    kind: security-audit
+    context: "The steering control path is unreviewed implementation; an independent source-only audit is required to bound its authority and confirm no effect replay or stale dispatch before the task may complete."
     purpose: "Retain independent findings and limitations."
     expected_outcome: "Concrete regressions corrected or explicitly retained."
-    status: open
-    depends_on: [steering-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"]
-    timestamps: {created_at: "2026-10-17T17:30:00Z", updated_at: "2026-10-17T17:30:00Z"}
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "steering-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"
+    timestamps:
+      created_at: "2026-10-17T17:30:00Z"
+      updated_at: "2026-10-17T17:30:00Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: steering-compliance-review
+  - id: "steering-compliance-review"
     title: "Compare independent steering observations"
     description: "Derive source-only IMPL evidence, then compare intent and observed evidence in a separate source-blind context."
-    kind: compliance-review
+    context: "The steering work needs a source-blind compliance comparison to prevent implementer self-certification of the new control path before acceptance."
     purpose: "Prevent implementer self-certification."
     expected_outcome: "Discrepancies and evidence limits recorded for human arbitration."
-    status: open
-    depends_on: [steering-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"]
-    timestamps: {created_at: "2026-10-17T17:30:00Z", updated_at: "2026-10-17T17:30:00Z"}
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "steering-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-PROMPT-STEERING"
+    timestamps:
+      created_at: "2026-10-17T17:30:00Z"
+      updated_at: "2026-10-17T17:30:00Z"
+      completed_at: null
     blocked_reason: null
     recovery_state: null
-  - id: repository-isolation-write-tests
+  - id: "repository-isolation-write-tests"
     title: "Pin nextest repository trial exclusivity"
     description: "Assert the exact repository-test selector and dynamic full-pool reservation; reproduce the missing configuration and measure real start/finish overlap."
     context: "Human requests nextest-only native repository repair; deliberate advisory exception while receipt enforcement is unavailable. Missing-config regression failed first. Eight-way pre-repair native run reproduced the exact peer-registration escape: 20 passed, repository trial failed."
@@ -117,11 +161,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
-    timestamps: {created_at: "2026-10-14T07:53:58Z", updated_at: "2026-10-14T08:06:52Z", completed_at: "2026-10-14T08:06:52Z"}
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"
+    timestamps:
+      created_at: "2026-10-14T07:53:58Z"
+      updated_at: "2026-10-14T08:06:52Z"
+      completed_at: "2026-10-14T08:06:52Z"
     blocked_reason: null
     recovery_state: null
-  - id: repository-isolation-implement-code
+  - id: "repository-isolation-implement-code"
     title: "Reserve every nextest slot for the repository trial"
     description: "Add one default-profile full-pool override, preserve ordinary parallelism and document libtest, nextest and cross-invocation boundaries."
     context: "No production changes, hidden fixture exclusions or weakened sandbox validation. Default and inherited CI runs pass 22 tests at eight and three threads; full parallel workspace passes 1406 with 12 ignored. Runnable start/finish events show zero repository overlap and ordinary concurrency peaks of eight, three and eight."
@@ -129,12 +177,17 @@ tasks:
     expected_outcome: "The repository-wide trial cannot overlap peer tests; inherited profiles retain the same policy."
     kind: implementation
     status: completed
-    depends_on: [repository-isolation-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
-    timestamps: {created_at: "2026-10-14T07:53:58Z", updated_at: "2026-10-14T08:06:52Z", completed_at: "2026-10-14T08:06:52Z"}
+    depends_on:
+      - "repository-isolation-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"
+    timestamps:
+      created_at: "2026-10-14T07:53:58Z"
+      updated_at: "2026-10-14T08:06:52Z"
+      completed_at: "2026-10-14T08:06:52Z"
     blocked_reason: null
     recovery_state: null
-  - id: repository-isolation-security-audit
+  - id: "repository-isolation-security-audit"
     title: "Inspect the scheduling repair's authority"
     description: "Independently inspect configuration selection, bounded regression mechanics and unchanged fail-closed production behavior."
     context: "Independent source-only repository-scheduling-observer established no concrete newly introduced correctness or authority issue. Exact resource-owner lifetime and runtime scheduling are outside its read; external writer and cleanup limitations remain in IMPL.md."
@@ -142,12 +195,17 @@ tasks:
     expected_outcome: "Scoped findings are corrected or explicitly retained."
     kind: security-audit
     status: completed
-    depends_on: [repository-isolation-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
-    timestamps: {created_at: "2026-10-14T07:53:58Z", updated_at: "2026-10-14T08:06:52Z", completed_at: "2026-10-14T08:06:52Z"}
+    depends_on:
+      - "repository-isolation-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"
+    timestamps:
+      created_at: "2026-10-14T07:53:58Z"
+      updated_at: "2026-10-14T08:06:52Z"
+      completed_at: "2026-10-14T08:06:52Z"
     blocked_reason: null
     recovery_state: null
-  - id: repository-isolation-compliance-review
+  - id: "repository-isolation-compliance-review"
     title: "Compare independent scheduling evidence"
     description: "Compare scoped intent with the clean-slate observation and actual nextest overlap evidence in a separate source-blind context."
     context: "Separate source-blind repository-scheduling-comparator found no new scoped mismatch. Rust 1.95 libtest target passes 15 tests; formatter and strict Clippy pass. Runtime evidence uses authoritative ignored-test classification because experimental JSON omits some ignored finish events. Custom overrides, separate invocations, external writers and stale scratch remain limits; no acceptance receipt or blanket certification."
@@ -155,12 +213,17 @@ tasks:
     expected_outcome: "Scheduling scope and observed concurrency limits remain explicit."
     kind: compliance-review
     status: completed
-    depends_on: [repository-isolation-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"]
-    timestamps: {created_at: "2026-10-14T07:53:58Z", updated_at: "2026-10-14T08:06:52Z", completed_at: "2026-10-14T08:06:52Z"}
+    depends_on:
+      - "repository-isolation-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-REPOSITORY-TEST-ISOLATION"
+    timestamps:
+      created_at: "2026-10-14T07:53:58Z"
+      updated_at: "2026-10-14T08:06:52Z"
+      completed_at: "2026-10-14T08:06:52Z"
     blocked_reason: null
     recovery_state: null
-  - id: ci-portable-tools-write-tests
+  - id: "ci-portable-tools-write-tests"
     title: "Reproduce distribution-dependent toolchain evidence"
     description: "Pin valid Ubuntu, Debian and upstream GCC banners, missing version output and mismatched compiler evidence; reproduce omitted System PATH directories in both optional Cargo-bin branches and the native Node chain."
     context: "Follow-up to failed Quality and MSRV jobs in run 38520819701. Deliberate per-bundle advisory exception while receipt enforcement is unavailable. GCC-banner and prepared-PATH regressions failed before repair; all six discovery tests now pass."
@@ -169,11 +232,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE"]
-    timestamps: {created_at: "2026-10-14T06:22:53Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE"
+    timestamps:
+      created_at: "2026-10-14T06:22:53Z"
+      updated_at: "2026-10-14T07:35:16Z"
+      completed_at: "2026-10-14T07:35:16Z"
     blocked_reason: null
     recovery_state: null
-  - id: ci-portable-tools-implement-code
+  - id: "ci-portable-tools-implement-code"
     title: "Repair portable compiler assertions and host prerequisites"
     description: "Compare exact host GCC version evidence in both native trials, preserve shared System PATH directories during Rust preparation and provision sandbox-visible Python, Node and C/C++ in MSRV as in Quality."
     context: "Rust shim and remaining bin precedence are preserved; the human approved administrative-directory exclusion. No new sandbox grant, authority or runtime installation. Strict Clippy and formatting pass; stable and Rust 1.95 workspace each pass 1405 tests with 12 ignored."
@@ -181,12 +248,17 @@ tasks:
     expected_outcome: "Distribution branding does not fail valid compiler evidence, Rust does not hide advertised System tools, and both jobs explicitly install native prerequisites."
     kind: implementation
     status: completed
-    depends_on: [ci-portable-tools-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE"]
-    timestamps: {created_at: "2026-10-14T06:22:53Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    depends_on:
+      - "ci-portable-tools-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE"
+    timestamps:
+      created_at: "2026-10-14T06:22:53Z"
+      updated_at: "2026-10-14T07:35:16Z"
+      completed_at: "2026-10-14T07:35:16Z"
     blocked_reason: null
     recovery_state: null
-  - id: ci-portable-tools-security-audit
+  - id: "ci-portable-tools-security-audit"
     title: "Audit CI-only tool provisioning and test authority"
     description: "Independently inspect fixed host executable queries, strict evidence matching, shared System PATH preservation, host-only provisioning and unchanged sandbox authority."
     context: "Independent ci-portability-observer and bin-policy-observer found no concrete high-confidence scoped regression. Pre-existing weak Node version evidence and resolver-only authority limitations remain explicit in IMPL.md; no whole-component certification."
@@ -194,12 +266,17 @@ tasks:
     expected_outcome: "Scoped findings are corrected or explicitly retained."
     kind: security-audit
     status: completed
-    depends_on: [ci-portable-tools-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE"]
-    timestamps: {created_at: "2026-10-14T06:22:53Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    depends_on:
+      - "ci-portable-tools-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE"
+    timestamps:
+      created_at: "2026-10-14T06:22:53Z"
+      updated_at: "2026-10-14T07:35:16Z"
+      completed_at: "2026-10-14T07:35:16Z"
     blocked_reason: null
     recovery_state: null
-  - id: ci-portable-tools-compliance-review
+  - id: "ci-portable-tools-compliance-review"
     title: "Compare independently observed toolchain repair"
     description: "Derive a source-only observation, then separately compare scoped intent and test evidence without source access."
     context: "Separate source-blind bin-policy-comparator found scoped alignment for bin visibility, prepared-Rust Node discovery, GCC matching and host provisioning. Limits remain explicit. Six opt-in native trials subsequently pass; GitHub has not rerun this unpushed repair. No acceptance receipt or blanket compliance claim."
@@ -207,12 +284,17 @@ tasks:
     expected_outcome: "Scoped discrepancies and verification limits remain explicit."
     kind: compliance-review
     status: completed
-    depends_on: [ci-portable-tools-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE"]
-    timestamps: {created_at: "2026-10-14T06:22:53Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    depends_on:
+      - "ci-portable-tools-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-TOOLCHAIN-DISCOVERY-EVIDENCE"
+    timestamps:
+      created_at: "2026-10-14T06:22:53Z"
+      updated_at: "2026-10-14T07:35:16Z"
+      completed_at: "2026-10-14T07:35:16Z"
     blocked_reason: null
     recovery_state: null
-  - id: ci-regressions-write-tests
+  - id: "ci-regressions-write-tests"
     title: "Reproduce native CI failures"
     description: "Retain failing vendor immutability, missing target, locked-build and diagnostic assertions."
     context: "Requested CI repair; explicit advisory exception while receipt enforcement is unavailable."
@@ -221,11 +303,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"]
-    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T05:23:13Z", completed_at: "2026-10-14T05:23:13Z"}
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps:
+      created_at: "2026-10-14T05:23:13Z"
+      updated_at: "2026-10-14T05:23:13Z"
+      completed_at: "2026-10-14T05:23:13Z"
     blocked_reason: null
     recovery_state: null
-  - id: ci-regressions-implement-code
+  - id: "ci-regressions-implement-code"
     title: "Restore native sandbox CI parity"
     description: "Restore the disjoint vendor snapshot grant, hide the mutable workspace vendor alias through the runner's fixed rule, preserve persistent workspace targets in both native suites, isolate tracing capture and provision CI prerequisites."
     context: "No installation or networking is added to test bodies or the effect sandbox. All 14 native Rust environment tests and the installed inventory trial pass with the current-build runner. Full workspace: 1399 passed, 0 failed, 12 ignored; strict Clippy, formatting and Rust 1.95 check pass. Remote CI has not been rerun."
@@ -233,12 +319,17 @@ tasks:
     expected_outcome: "Native tests pass with immutable dependencies and persistent workspace build output."
     kind: implementation
     status: completed
-    depends_on: [ci-regressions-write-tests]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"]
-    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    depends_on:
+      - "ci-regressions-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps:
+      created_at: "2026-10-14T05:23:13Z"
+      updated_at: "2026-10-14T06:04:00Z"
+      completed_at: "2026-10-14T06:04:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: ci-regressions-security-audit
+  - id: "ci-regressions-security-audit"
     title: "Audit restored Rust resource boundaries"
     description: "Independently review disjoint read-only grants, mutable aliases, tracing isolation and CI-only provisioning."
     context: "Independent repair-observer and mask-observer inspected resource and fixture boundaries. Pre-existing snapshot-growth and diagnostic inconsistencies remain explicitly retained in IMPL.md; no whole-component certification."
@@ -246,12 +337,17 @@ tasks:
     expected_outcome: "Findings are corrected or explicitly retained."
     kind: security-audit
     status: completed
-    depends_on: [ci-regressions-implement-code]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"]
-    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    depends_on:
+      - "ci-regressions-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps:
+      created_at: "2026-10-14T05:23:13Z"
+      updated_at: "2026-10-14T06:04:00Z"
+      completed_at: "2026-10-14T06:04:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: ci-regressions-compliance-review
+  - id: "ci-regressions-compliance-review"
     title: "Compare independently observed CI repair"
     description: "Derive source-only observations, then compare intent with evidence in a separate source-blind context."
     context: "Separate source-blind repair-comparator and mask-comparator reported no new scoped discrepancy. Existing limitations remain explicit; no acceptance receipt or blanket compliance claim."
@@ -259,9 +355,14 @@ tasks:
     expected_outcome: "Scoped discrepancies and verification limits remain explicit."
     kind: compliance-review
     status: completed
-    depends_on: [ci-regressions-security-audit]
-    requirements: ["REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"]
-    timestamps: {created_at: "2026-10-14T05:23:13Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    depends_on:
+      - "ci-regressions-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
+    timestamps:
+      created_at: "2026-10-14T05:23:13Z"
+      updated_at: "2026-10-14T06:04:00Z"
+      completed_at: "2026-10-14T06:04:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "offline-rust-default-write-tests"
@@ -275,7 +376,10 @@ tasks:
     depends_on: []
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
-    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    timestamps:
+      created_at: "2026-10-10T20:49:42Z"
+      updated_at: "2026-10-10T20:49:42Z"
+      completed_at: "2026-10-10T20:49:42Z"
     blocked_reason: null
     recovery_state: null
   - id: "offline-rust-default-implement-code"
@@ -290,7 +394,10 @@ tasks:
       - "offline-rust-default-write-tests"
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
-    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    timestamps:
+      created_at: "2026-10-10T20:49:42Z"
+      updated_at: "2026-10-10T20:49:42Z"
+      completed_at: "2026-10-10T20:49:42Z"
     blocked_reason: null
     recovery_state: null
   - id: "offline-rust-default-security-audit"
@@ -305,7 +412,10 @@ tasks:
       - "offline-rust-default-implement-code"
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
-    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:49:42Z", completed_at: "2026-10-10T20:49:42Z"}
+    timestamps:
+      created_at: "2026-10-10T20:49:42Z"
+      updated_at: "2026-10-10T20:49:42Z"
+      completed_at: "2026-10-10T20:49:42Z"
     blocked_reason: null
     recovery_state: null
   - id: "offline-rust-default-compliance-review"
@@ -320,7 +430,10 @@ tasks:
       - "offline-rust-default-security-audit"
     requirements:
       - "REQUIREMENTS.md#RUN-REQ-RUST-SANDBOX-CHAIN"
-    timestamps: {created_at: "2026-10-10T20:49:42Z", updated_at: "2026-10-10T20:53:41Z", completed_at: "2026-10-10T20:53:41Z"}
+    timestamps:
+      created_at: "2026-10-10T20:49:42Z"
+      updated_at: "2026-10-10T20:53:41Z"
+      completed_at: "2026-10-10T20:53:41Z"
     blocked_reason: null
     recovery_state: null
   - id: "runner-rust-inventory-write-tests"
@@ -1398,8 +1511,8 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - "CONTRACT.md#Skott"
       - "CONTRACT.md#AgentSession"
+      - "CONTRACT.md#Skott"
       - "DESIGN.md#The-agent-loop"
     timestamps:
       created_at: "2026-09-19T01:20:00Z"
@@ -1418,8 +1531,8 @@ tasks:
     depends_on:
       - "skott-session-write-tests"
     requirements:
-      - "CONTRACT.md#Skott"
       - "CONTRACT.md#AgentSession"
+      - "CONTRACT.md#Skott"
       - "REQUIREMENTS.md#Outcomes"
     timestamps:
       created_at: "2026-09-19T01:20:00Z"
@@ -1496,8 +1609,8 @@ tasks:
       - "skott-integration-write-tests"
       - "skott-tui-implement-code"
     requirements:
-      - "CONTRACT.md#Skott"
       - "CONTRACT.md#ContextManager"
+      - "CONTRACT.md#Skott"
       - "CONTRACT.md#ToolRegistry"
     timestamps:
       created_at: "2026-09-19T13:00:00Z"
@@ -1627,8 +1740,8 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - "CONTRACT.md#Skott"
       - "CONTRACT.md#Event"
+      - "CONTRACT.md#Skott"
     timestamps:
       created_at: "2026-09-19T17:40:00Z"
       updated_at: "2026-09-19T18:15:00Z"
@@ -1646,8 +1759,8 @@ tasks:
     depends_on:
       - "skott-per-turn-progress-write-tests"
     requirements:
-      - "CONTRACT.md#Skott"
       - "CONTRACT.md#Event"
+      - "CONTRACT.md#Skott"
     timestamps:
       created_at: "2026-09-19T17:40:00Z"
       updated_at: "2026-09-19T18:15:00Z"
@@ -1768,8 +1881,8 @@ tasks:
       - "skott-exit-codes-and-list-models"
       - "skott-security-audit"
     requirements:
-      - "CONTRACT.md#Skott"
       - "CONTRACT.md#SandboxRequestBuilder"
+      - "CONTRACT.md#Skott"
       - "REQUIREMENTS.md#Acceptance-criteria"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:

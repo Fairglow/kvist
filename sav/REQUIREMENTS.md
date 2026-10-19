@@ -32,6 +32,9 @@ authority through narrow interfaces.
 
 ## Functional requirements
 
+The requirements below define the mandatory behavior of the reusable runtime
+component and its standalone CLI.
+
 ### AR-REQ-ACTIVE-MODEL
 
 Read-only loaded-model discovery MUST recognize llama-server router metadata:

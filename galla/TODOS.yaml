@@ -10,11 +10,11 @@ component:
     stale_since: "2026-10-02T10:27:11Z"
     causes:
       - kind: component-requirements-revision-changed
-        path: REQUIREMENTS.md
+        path: "REQUIREMENTS.md"
         expected_revision: "sha256:bfd660184d2c7b0fb9d0ccee84cb946cd2f69bf53a33efb40ee1503b0a70b6e1"
         observed_revision: "sha256:1323af464fc004721bafc8fd3a0a524eaafb99fc078ea313570d7a04f46660e8"
 tasks:
-  - id: portable-toolchain-write-tests
+  - id: "portable-toolchain-write-tests"
     title: "Pin host-independent Cargo subprocess execution"
     description: "Reproduce missing rustc with a linker-only sandbox PATH, then require private proxy execution of Cargo unit/doctests and a build script for every installed version."
     context: "Human requests CI/local diagnosis and repair. Explicit advisory exception while receipt enforcement is unavailable. Proxy-free Cargo PATH reproduced the exact CI rustc -vV ENOENT locally before repair; final unit/doctest/build-script fixture passes on all eight installed versions."
@@ -23,11 +23,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"]
-    timestamps: {created_at: "2026-10-14T22:00:00Z", updated_at: "2026-10-14T22:17:30Z", completed_at: "2026-10-14T22:17:30Z"}
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+    timestamps:
+      created_at: "2026-10-14T22:00:00Z"
+      updated_at: "2026-10-14T22:17:30Z"
+      completed_at: "2026-10-14T22:17:30Z"
     blocked_reason: null
     recovery_state: null
-  - id: portable-toolchain-implement-code
+  - id: "portable-toolchain-implement-code"
     title: "Resolve and expose complete native tool runtimes"
     description: "Detect host tools, generate read-only sandbox Rust proxies, log host/mount/inside execution evidence and correct consumer-specific environment guidance."
     context: "Detected host paths and private read-only proxies replace System-proxy assumptions; full host/mount/inside logs are retained locally and wired into both CI jobs. All 79 Galla tests passed; final four native/detection tests pass on stable and MSRV, including alternate HOME and explicit RUSTUP_HOME. Skott 22 and maerg 7 native tests pass. No new consumer authority or remote success claimed."
@@ -35,12 +39,17 @@ tasks:
     expected_outcome: "All native programs and Rust subprocesses execute with actionable location evidence."
     kind: implementation
     status: completed
-    depends_on: [portable-toolchain-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"]
-    timestamps: {created_at: "2026-10-14T22:00:00Z", updated_at: "2026-10-14T22:17:30Z", completed_at: "2026-10-14T22:17:30Z"}
+    depends_on:
+      - "portable-toolchain-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+    timestamps:
+      created_at: "2026-10-14T22:00:00Z"
+      updated_at: "2026-10-14T22:17:30Z"
+      completed_at: "2026-10-14T22:17:30Z"
     blocked_reason: null
     recovery_state: null
-  - id: portable-toolchain-security-audit
+  - id: "portable-toolchain-security-audit"
     title: "Inspect explicit native runtime authority"
     description: "Independently inspect the scoped fixture for host mutation, broad mounts, secret logging and unintended consumer-authority changes."
     context: "Independent source-only portable-runtime-observer identified no concrete scoped host-mutation, broad-mount-authority or ambient-secret logging regression. Its CI pipefail finding was fixed with explicit Bash and independently observed by runtime-guard-observer. Unredacted tool diagnostics, snapshot/setup-failure limits and existing System visibility remain explicit in IMPL.md; this is not a full runner audit."
@@ -48,12 +57,17 @@ tasks:
     expected_outcome: "Any scoped discrepancy remains explicit."
     kind: security-audit
     status: completed
-    depends_on: [portable-toolchain-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"]
-    timestamps: {created_at: "2026-10-14T22:00:00Z", updated_at: "2026-10-14T22:17:30Z", completed_at: "2026-10-14T22:17:30Z"}
+    depends_on:
+      - "portable-toolchain-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+    timestamps:
+      created_at: "2026-10-14T22:00:00Z"
+      updated_at: "2026-10-14T22:17:30Z"
+      completed_at: "2026-10-14T22:17:30Z"
     blocked_reason: null
     recovery_state: null
-  - id: portable-toolchain-compliance-review
+  - id: "portable-toolchain-compliance-review"
     title: "Compare independent portable toolchain evidence"
     description: "Derive a source-only implementation record, then compare it with local intent in a separate source-blind context."
     context: "Separate source-blind portable-runtime-comparator found no concrete scoped portability mismatch. It retained that whole-suite evidence predates final mapping guards, subsequent final native reruns pass, source observers executed no tests, and remote rerun/future-host coverage remain unverified. Corrected environment-guide scope aligns with explicit grants. No component acceptance, blanket certification or replacement of blocked runner-wide review."
@@ -61,12 +75,17 @@ tasks:
     expected_outcome: "Observed behavior, discrepancies and unverified future hosts are stated honestly."
     kind: compliance-review
     status: completed
-    depends_on: [portable-toolchain-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"]
-    timestamps: {created_at: "2026-10-14T22:00:00Z", updated_at: "2026-10-14T22:17:30Z", completed_at: "2026-10-14T22:17:30Z"}
+    depends_on:
+      - "portable-toolchain-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
+    timestamps:
+      created_at: "2026-10-14T22:00:00Z"
+      updated_at: "2026-10-14T22:17:30Z"
+      completed_at: "2026-10-14T22:17:30Z"
     blocked_reason: null
     recovery_state: null
-  - id: bin-only-system-write-tests
+  - id: "bin-only-system-write-tests"
     title: "Pin administrative directory exclusion"
     description: "Test filtered layout, merged-bin aliases, denied PATH and overmounts, native access denial and host non-mutation."
     context: "Human explicitly approved sbin exclusion; deliberate advisory exception while receipt enforcement is unavailable. Final workspace includes passing layout-boundary, alias, lexical PATH/grant and native host-non-mutation evidence."
@@ -75,11 +94,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"]
-    timestamps: {created_at: "2026-10-14T06:59:01Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"
+    timestamps:
+      created_at: "2026-10-14T06:59:01Z"
+      updated_at: "2026-10-14T07:35:16Z"
+      completed_at: "2026-10-14T07:35:16Z"
     blocked_reason: null
     recovery_state: null
-  - id: bin-only-system-implement-code
+  - id: "bin-only-system-implement-code"
     title: "Enforce a filtered bin-only System view"
     description: "Filter usr and usr/local without following administrative aliases, reserve inaccessible sbin mounts, reject covering grants and retain filtered self-grants."
     context: "No host mutation, new mount authority or binary-classification claim. Updated the opt-in fixture's retired sbin PATH after validation correctly rejected it; all six opt-in native trials pass."
@@ -87,12 +110,17 @@ tasks:
     expected_outcome: "All three standard administrative paths are inaccessible while ordinary bins remain usable."
     kind: implementation
     status: completed
-    depends_on: [bin-only-system-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"]
-    timestamps: {created_at: "2026-10-14T06:59:01Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    depends_on:
+      - "bin-only-system-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"
+    timestamps:
+      created_at: "2026-10-14T06:59:01Z"
+      updated_at: "2026-10-14T07:35:16Z"
+      completed_at: "2026-10-14T07:35:16Z"
     blocked_reason: null
     recovery_state: null
-  - id: bin-only-system-security-audit
+  - id: "bin-only-system-security-audit"
     title: "Audit filtered System resource authority"
     description: "Independently inspect symlink preservation, administrative aliases, read-only roots, reserved overmounts, bounds and errors."
     context: "Independent bin-policy-observer established no concrete high-confidence scoped regression. Path-based exclusion is not binary classification or race-resistant resolution; limits remain in IMPL.md."
@@ -100,12 +128,17 @@ tasks:
     expected_outcome: "Findings are fixed or explicitly retained."
     kind: security-audit
     status: completed
-    depends_on: [bin-only-system-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"]
-    timestamps: {created_at: "2026-10-14T06:59:01Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    depends_on:
+      - "bin-only-system-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"
+    timestamps:
+      created_at: "2026-10-14T06:59:01Z"
+      updated_at: "2026-10-14T07:35:16Z"
+      completed_at: "2026-10-14T07:35:16Z"
     blocked_reason: null
     recovery_state: null
-  - id: bin-only-system-compliance-review
+  - id: "bin-only-system-compliance-review"
     title: "Compare independent System exclusion evidence"
     description: "Source-only observation followed by separate source-blind comparison with intent and execution evidence."
     context: "Separate source-blind bin-policy-comparator found scoped alignment, not exhaustive all-phase proof. Final stable and Rust 1.95 workspace runs each pass 1405 tests with 12 ignored; six opt-in trials subsequently pass. No acceptance or blanket certification."
@@ -113,12 +146,17 @@ tasks:
     expected_outcome: "Scoped discrepancies and limits remain explicit."
     kind: compliance-review
     status: completed
-    depends_on: [bin-only-system-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"]
-    timestamps: {created_at: "2026-10-14T06:59:01Z", updated_at: "2026-10-14T07:35:16Z", completed_at: "2026-10-14T07:35:16Z"}
+    depends_on:
+      - "bin-only-system-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-BIN-ONLY-SYSTEM"
+    timestamps:
+      created_at: "2026-10-14T06:59:01Z"
+      updated_at: "2026-10-14T07:35:16Z"
+      completed_at: "2026-10-14T07:35:16Z"
     blocked_reason: null
     recovery_state: null
-  - id: workspace-vendor-mask-write-tests
+  - id: "workspace-vendor-mask-write-tests"
     title: "Pin inaccessible workspace vendor evidence"
     description: "Define native alias-read/write/chmod denial, snapshot resolution, host non-mutation and unaffected generic requests."
     context: "Human explicitly requests hiding .kvist/vendored in the sandbox; per-bundle advisory exception while receipt enforcement is unavailable. Native alias-denial assertion failed before implementation; two mask unit tests, all 14 Skott native environment tests and both opt-in Galla native toolchain trials now pass."
@@ -127,11 +165,15 @@ tasks:
     kind: test
     status: completed
     depends_on: []
-    requirements: ["REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"]
-    timestamps: {created_at: "2026-10-14T05:50:27Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"
+    timestamps:
+      created_at: "2026-10-14T05:50:27Z"
+      updated_at: "2026-10-14T06:04:00Z"
+      completed_at: "2026-10-14T06:04:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: workspace-vendor-mask-implement-code
+  - id: "workspace-vendor-mask-implement-code"
     title: "Mask the mutable workspace registry"
     description: "Add fixed prepared-Rust masking after binds, without changing the protocol or relaxing disjoint grants."
     context: "No host changes or arbitrary masking capability."
@@ -139,12 +181,17 @@ tasks:
     expected_outcome: "The workspace alias is inaccessible while the snapshot remains usable."
     kind: implementation
     status: completed
-    depends_on: [workspace-vendor-mask-write-tests]
-    requirements: ["REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"]
-    timestamps: {created_at: "2026-10-14T05:50:27Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    depends_on:
+      - "workspace-vendor-mask-write-tests"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"
+    timestamps:
+      created_at: "2026-10-14T05:50:27Z"
+      updated_at: "2026-10-14T06:04:00Z"
+      completed_at: "2026-10-14T06:04:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: workspace-vendor-mask-security-audit
+  - id: "workspace-vendor-mask-security-audit"
     title: "Audit restrictive mount masking"
     description: "Independently review mask scope, symlinks, mount ordering, privilege denial and host non-mutation."
     context: "Independent mask-observer reported no high-confidence new scoped regression. Pathname inspection is not descriptor-pinned and does not exclude external replacement races; this limit remains explicit in IMPL.md."
@@ -152,12 +199,17 @@ tasks:
     expected_outcome: "Findings are corrected or explicitly retained."
     kind: security-audit
     status: completed
-    depends_on: [workspace-vendor-mask-implement-code]
-    requirements: ["REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"]
-    timestamps: {created_at: "2026-10-14T05:50:27Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    depends_on:
+      - "workspace-vendor-mask-implement-code"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"
+    timestamps:
+      created_at: "2026-10-14T05:50:27Z"
+      updated_at: "2026-10-14T06:04:00Z"
+      completed_at: "2026-10-14T06:04:00Z"
     blocked_reason: null
     recovery_state: null
-  - id: workspace-vendor-mask-compliance-review
+  - id: "workspace-vendor-mask-compliance-review"
     title: "Compare independent mask evidence"
     description: "Source-only observation followed by separate source-blind comparison."
     context: "Separate source-blind mask-comparator reported no new scoped discrepancy. Full workspace subsequently passed with 1399 passed, 0 failed and 12 ignored. No acceptance or blanket certification."
@@ -165,9 +217,14 @@ tasks:
     expected_outcome: "Scoped discrepancies and verification limits remain explicit."
     kind: compliance-review
     status: completed
-    depends_on: [workspace-vendor-mask-security-audit]
-    requirements: ["REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"]
-    timestamps: {created_at: "2026-10-14T05:50:27Z", updated_at: "2026-10-14T06:04:00Z", completed_at: "2026-10-14T06:04:00Z"}
+    depends_on:
+      - "workspace-vendor-mask-security-audit"
+    requirements:
+      - "REQUIREMENTS.md#SR-REQ-WORKSPACE-VENDOR-MASK"
+    timestamps:
+      created_at: "2026-10-14T05:50:27Z"
+      updated_at: "2026-10-14T06:04:00Z"
+      completed_at: "2026-10-14T06:04:00Z"
     blocked_reason: null
     recovery_state: null
   - id: "galla-write-tests"
@@ -301,8 +358,8 @@ tasks:
     status: completed
     depends_on: []
     requirements:
-      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
       - "DESIGN.md#Verification-strategy"
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
     timestamps:
       created_at: "2026-10-10T16:09:07Z"
       updated_at: "2026-10-10T16:15:17Z"
@@ -320,9 +377,9 @@ tasks:
     depends_on:
       - "galla-toolchain-write-tests"
     requirements:
-      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
       - "CONTRACT.md#Compatibility-and-verification"
       - "DESIGN.md#Verification-strategy"
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
     timestamps:
       created_at: "2026-10-10T16:09:07Z"
       updated_at: "2026-10-10T16:15:17Z"
@@ -340,8 +397,8 @@ tasks:
     depends_on:
       - "galla-toolchain-implement-code"
     requirements:
-      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
       - "DESIGN.md#Security-and-resource-design"
+      - "REQUIREMENTS.md#SR-REQ-TOOLCHAIN-E2E"
     timestamps:
       created_at: "2026-10-10T16:09:07Z"
       updated_at: "2026-10-10T16:15:17Z"
