@@ -128,10 +128,41 @@ fn translate_host_element(element: &str, write_root: &str, working_directory: &P
     if element == root {
         return working_directory.to_string_lossy().into_owned();
     }
-    element.replace(
-        &format!("{root}/"),
-        &format!("{}/", working_directory.display()),
-    )
+    // A shell command is a single argv element, so this runs over the whole
+    // string and every embedded write-root path is a candidate. When the working
+    // directory is itself located under the write root, a path that already
+    // resolves under the working directory would be doubled by a plain prefix
+    // replacement: `<write_root>/<rel>/...` would become
+    // `<working_directory>/<rel>/...` = `<write_root>/<rel>/<rel>/...`. Such a
+    // path is `<write_root>/<rel>` where `<rel>` is the working directory
+    // relative to the write root; leave those occurrences untouched and remap
+    // only the rest.
+    let prefix = format!("{root}/");
+    let rel = working_directory
+        .strip_prefix(root)
+        .ok()
+        .map(|rel| rel.to_string_lossy().into_owned());
+    let mut out = String::with_capacity(element.len());
+    let mut rest = element;
+    while let Some(index) = rest.find(&prefix) {
+        out.push_str(&rest[..index]);
+        let remainder = &rest[index + prefix.len()..];
+        let already_under_workdir = matches!(
+            &rel,
+            Some(rel)
+                if !rel.is_empty()
+                    && (remainder == rel || remainder.starts_with(&format!("{rel}/")))
+        );
+        let replacement = if already_under_workdir {
+            prefix.clone()
+        } else {
+            format!("{}/", working_directory.display())
+        };
+        out.push_str(&replacement);
+        rest = remainder;
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Runs one rendered host command, streaming its output and honoring
