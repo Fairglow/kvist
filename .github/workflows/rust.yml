@@ -161,6 +161,11 @@ jobs:
 
       - name: Install Rust 1.95.0
         uses: dtolnay/rust-toolchain@1.95.0
+        with:
+          # The MSRV job's default toolchain is also the sandbox's default
+          # toolchain, and the in-sandbox vendor-snapshot trial runs the full
+          # native chain, including `cargo clippy --all-targets`, on it.
+          components: clippy
 
       - name: Provision native Rust inventory prerequisites on the host
         run: |
