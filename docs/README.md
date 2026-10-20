@@ -2,10 +2,11 @@
 
 This directory holds the design, decision, standards, and deep-dive material
 that the root [`README.md`](../README.md) and the per-component READMEs link
-into. The root README gives the product overview, the CLI contract, and the
-sandboxed-execution and toolchain model; the component READMEs
-(`maerg/`, `sav/`, `galla/`, `skott/`, `blad/`) describe each component's
-purpose and how to build and run it. This directory goes deeper: the
+into. The root README gives the product overview and the component map; the
+component READMEs describe each component's purpose and how to build and run
+it, with the `kvist` CLI contract, sandboxed-execution, and toolchain model
+documented in [`maerg/README.md`](../maerg/README.md). This directory goes
+deeper: the
 authoritative command design, the architectural decisions, the standards
 posture, and the agent runtime analysis.
 

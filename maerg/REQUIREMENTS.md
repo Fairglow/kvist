@@ -276,7 +276,7 @@ integration test vendors (or otherwise provisions) a small real project on the
 host and runs its real build/test offline inside the Bubblewrap sandbox,
 asserting a successful run; legacy language tests MAY self-skip on hosts without
 the live sandbox. Supported languages and their limitations MUST be documented in the
-root README and this component's contract.
+component README and this component's contract.
 
 The current support state is: Rust first-class for verification (exact
 vendored registry, pinned toolchain pending `REQ-RUST-TOOLCHAIN`); C/C++, Go,
