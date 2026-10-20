@@ -1659,7 +1659,7 @@ tasks:
   - id: "skott-tui-progress-eta"
     title: "Add a compaction progress bar with ETA"
     description: "Provide a bounded ETA for the compaction progress bar: forecast how long until the live context reaches the hard limit from the observed context growth rate, and show it when the estimate is meaningful (never fabricate a number when the growth is flat or unknown). Keep the existing compaction progress bar as the source of truth and surface the ETA only when it can be estimated reliably."
-    context: 'The user explicitly requested "Progress bar, at least for compaction, with ETA (when possible)"; only the progress fraction exists today.'
+    context: "The user explicitly requested \"Progress bar, at least for compaction, with ETA (when possible)\"; only the progress fraction exists today."
     purpose: "Let the user anticipate an upcoming compaction and steer accordingly."
     expected_outcome: "The UI shows a compaction ETA when estimable and hides it otherwise, with no speculative or misleading numbers."
     kind: implementation
@@ -1971,7 +1971,7 @@ tasks:
     recovery_state: null
   - id: "skott-shell-command-bounds-write-tests"
     title: "Define shell command bound tests"
-    description: 'Write failing tests that a shell command exactly at the 4096-byte protocol argv bound renders inline, one byte above renders as `exec bash -c "$(cat /context/0)" skott` with the full text in `RenderedTool.shell_script`, the full 16384-byte contract bound renders (with 16385 rejected), the denylist still rejects oversized denied commands, and a staged-script request builds and validates with every argv entry within the 4096-byte bound.'
+    description: "Write failing tests that a shell command exactly at the 4096-byte protocol argv bound renders inline, one byte above renders as `exec bash -c \"$(cat /context/0)\" skott` with the full text in `RenderedTool.shell_script`, the full 16384-byte contract bound renders (with 16385 rejected), the denylist still rejects oversized denied commands, and a staged-script request builds and validates with every argv entry within the 4096-byte bound."
     context: "Frequent agent sessions stopped with `invalid version-one sandbox request: argv entry 2 exceeds the 4096-byte limit` whenever a command exceeded 4 KiB (heredocs, inline scripts), because the entire command travelled as one argv entry although the shell contract admits 16384 bytes."
     purpose: "Pin the full documented command bound as executable before implementation."
     expected_outcome: "The new tests fail on the current inline-only renderer and pass once staged-script rendering exists."
@@ -1990,7 +1990,7 @@ tasks:
     recovery_state: null
   - id: "skott-shell-command-bounds-implement-code"
     title: "Implement staged-script shell rendering"
-    description: 'Render shell commands above the 4096-byte argv bound with `exec bash -c "$(cat /context/0)" skott` and `shell_script` carrying the text (the exec''d bash performs the quoted substitution and execs the real interpreter, preserving the inline form''s process tree, exit status, and $0; a bare `$(cat /context/0)` script would run `cat` and word-split the output); keep commands at or below the bound inline; add `shell_script: Option<String>` to `RenderedTool`; refactor executor staging into `stage_bytes` and stage the script as a mode-0600 file in a mode-0700 private directory in the workspace canonical parent, exposed as the `/context/0` read root; keep the denylist check on the full command before both forms. Verified end-to-end through the real bwrap runner with a 5 KiB python heredoc.'
+    description: "Render shell commands above the 4096-byte argv bound with `exec bash -c \"$(cat /context/0)\" skott` and `shell_script` carrying the text (the exec'd bash performs the quoted substitution and execs the real interpreter, preserving the inline form's process tree, exit status, and $0; a bare `$(cat /context/0)` script would run `cat` and word-split the output); keep commands at or below the bound inline; add `shell_script: Option<String>` to `RenderedTool`; refactor executor staging into `stage_bytes` and stage the script as a mode-0600 file in a mode-0700 private directory in the workspace canonical parent, exposed as the `/context/0` read root; keep the denylist check on the full command before both forms. Verified end-to-end through the real bwrap runner with a 5 KiB python heredoc."
     context: "The failing tests from skott-shell-command-bounds-write-tests define the behavior; the 4096-byte scalar bound is the sandbox protocol's MAX_VALUE_BYTES, and the existing read-root context grant mechanism carries the script without widening any authority."
     purpose: "Make every legal shell command executable inside the sandbox."
     expected_outcome: "All shell-command-bounds tests pass and the full skott suite stays green."
@@ -2315,8 +2315,8 @@ tasks:
       - "skott-reasoning-md-write-tests"
     requirements:
       - "CONTRACT.md#Behavioral-guarantees"
-      - "REQUIREMENTS.md#Functional-requirements"
       - "DESIGN.md#Terminal-UI"
+      - "REQUIREMENTS.md#Functional-requirements"
       - "ROOT_CONTRACT.md#Change-and-compliance-rules"
     timestamps:
       created_at: "2026-10-20T07:30:44Z"
