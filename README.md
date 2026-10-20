@@ -43,8 +43,8 @@ sandboxes, and governance tools.
 
 For a source-backed assessment of what `skott` can reuse or learn from
 Goose, OpenCode, Codex, and other runtimes, see the
-[upstream agent comparison](docs/agent-runtime/upstream-agent-comparison.md).
-The [security-first runner guide](docs/agent-runtime/runner-hardening.md)
+[upstream agent comparison](docs/upstream-agent-comparison.md).
+The [security-first runner guide](docs/runner-hardening.md)
 documents the implemented improvements, native-helper installation, headless
 llama-server usage, authority limits and independent qualification record.
 
@@ -332,12 +332,12 @@ consumer boundary, and private realization live in
 [`sav/CONTRACT.md`](sav/CONTRACT.md), and
 [`sav/DESIGN.md`](sav/DESIGN.md).
 The layered runtime decision is documented in
-[`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md),
+[`docs/architecture.md`](docs/architecture.md),
 the current and planned runtime choices in
-[`docs/agent-runtime/runtime-selection.md`](docs/agent-runtime/runtime-selection.md),
+[`docs/runtime-selection.md`](docs/runtime-selection.md),
 the direct transport is available for local testing, and the Rig 0.42.0
 adoption decision and contained optional adapter gates are in
-[`docs/agent-runtime/rig-evaluation.md`](docs/agent-runtime/rig-evaluation.md).
+[`docs/rig-evaluation.md`](docs/rig-evaluation.md).
 The current host mode is a reliability aid, not a sandbox. `fakeroot`, retry
 notices, and backups likewise do not restrict an agent's authority.
 

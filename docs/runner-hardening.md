@@ -127,7 +127,7 @@ This is not an atomic filesystem snapshot or a substitute for the installed
 namespace boundary.
 
 File-tool schemas and exact bounds are in
-[the component contract](../../skott/CONTRACT.md#native-file-tool-inputs-and-results).
+[the component contract](../skott/CONTRACT.md#native-file-tool-inputs-and-results).
 Read digests cover whole bounded files. Native JSON stdout fits 7000 bytes;
 the combined model-facing result with process metadata fits 8 KiB. Prefer
 small pages and the returned continuation offsets. Exact edits reject stale,

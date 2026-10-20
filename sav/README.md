@@ -58,7 +58,7 @@ provider is actually configured.
 ## Running `sav-run`
 
 `sav-run` is the standalone CLI. The commands below are the authoritative
-interface; see the [User Guide](../docs/agent-runtime/user-guide.md) for full
+interface; see the [User Guide](../docs/user-guide.md) for full
 usage.
 
 ```bash
@@ -88,20 +88,20 @@ profiles are stored at `$XDG_CONFIG_HOME/sav/config.toml`, falling back to
 
 ## Documentation
 
-- [User Guide (Quick Start, Configuration & Usage)](../docs/agent-runtime/user-guide.md)
-- [Architecture](../docs/agent-runtime/architecture.md)
-- [Runtime Selection](../docs/agent-runtime/runtime-selection.md)
-- [Rig Evaluation](../docs/agent-runtime/rig-evaluation.md)
-- [Runner Hardening](../docs/agent-runtime/runner-hardening.md)
+- [User Guide (Quick Start, Configuration & Usage)](../docs/user-guide.md)
+- [Architecture](../docs/architecture.md)
+- [Runtime Selection](../docs/runtime-selection.md)
+- [Rig Evaluation](../docs/rig-evaluation.md)
+- [Runner Hardening](../docs/runner-hardening.md)
 
 The component's intent and realization live in
 [`REQUIREMENTS.md`](REQUIREMENTS.md),
 [`CONTRACT.md`](CONTRACT.md), and
 [`DESIGN.md`](DESIGN.md). The layered runtime decision is documented in
-[`docs/agent-runtime/architecture.md`](../docs/agent-runtime/architecture.md),
+[`docs/architecture.md`](../docs/architecture.md),
 the current and planned runtime choices in
-[`docs/agent-runtime/runtime-selection.md`](../docs/agent-runtime/runtime-selection.md),
+[`docs/runtime-selection.md`](../docs/runtime-selection.md),
 and the Rig 0.42.0 adoption decision and contained optional adapter gates in
-[`docs/agent-runtime/rig-evaluation.md`](../docs/agent-runtime/rig-evaluation.md).
+[`docs/rig-evaluation.md`](../docs/rig-evaluation.md).
 The current host mode is a reliability aid, not a sandbox. `fakeroot`, retry
 notices, and backups likewise do not restrict an agent's authority.

@@ -96,16 +96,16 @@ The current code has three relevant components:
 
 | Component | Current responsibility | Important distinction |
 | --- | --- | --- |
-| [`sav`](../../sav/CONTRACT.md) | Canonical model messages and tool intents, direct local transport, subprocess supervision, profiles, reusable trajectory and loop-detection utilities | A transport proposes tools; it does not authorize them |
-| [`skott`](../../skott/CONTRACT.md) | Interactive TUI, conversation loop, four model-facing tools, context compaction, history, recorder and executor seams | A standalone interactive coding shell, not the whole Kvist task lifecycle |
-| [`galla`](../../galla/CONTRACT.md) | Independent closed-request validation and Linux Bubblewrap enforcement | Enforces approved requests; does not approve tasks or promote results |
+| [`sav`](../sav/CONTRACT.md) | Canonical model messages and tool intents, direct local transport, subprocess supervision, profiles, reusable trajectory and loop-detection utilities | A transport proposes tools; it does not authorize them |
+| [`skott`](../skott/CONTRACT.md) | Interactive TUI, conversation loop, four model-facing tools, context compaction, history, recorder and executor seams | A standalone interactive coding shell, not the whole Kvist task lifecycle |
+| [`galla`](../galla/CONTRACT.md) | Independent closed-request validation and Linux Bubblewrap enforcement | Enforces approved requests; does not approve tasks or promote results |
 
 The maerg task authoring path is also materially different from the
 interactive runner. Its
-[`authoring` broker](../../maerg/src/authoring/mod.rs) has a closed vocabulary,
+[`authoring` broker](../maerg/src/authoring/mod.rs) has a closed vocabulary,
 protects the five component artifacts, confines writes to `src` and `tests`,
 and already provides exact-single-occurrence `edit_file` semantics.
-The [sandboxed applier](../../maerg/src/authoring/apply.rs) revalidates staged
+The [sandboxed applier](../maerg/src/authoring/apply.rs) revalidates staged
 intents and content identities. The interactive runner instead exposes a
 general shell and grants the working directory read-write.
 
@@ -116,21 +116,21 @@ This distinction is central to any upstream-agent integration too.
 
 ### Strengths worth preserving
 
-The [loop](../../skott/src/session.rs) accepts independent
+The [loop](../skott/src/session.rs) accepts independent
 `ModelTransport`, `ToolExecutor`, `EventSink`, and `Recorder` collaborators.
 Effects are sequential. The model does not directly own a filesystem handle or
 subprocess launcher through its message types. This is a useful foundation
 for adapters and deterministic tests, not something to discard lightly.
 
 The default
-[executor](../../skott/src/executor.rs) builds authoring requests with
+[executor](../skott/src/executor.rs) builds authoring requests with
 network denied and delegates process execution to the installed runner.
 Toolchain advertisement checks what reaches the sandbox rather than blindly
 trusting the host `PATH`. Transient model failures have bounded retries and
 growing attempt deadlines; cancellation and output limits already exist.
 The TUI has model/effort selection, live progress, history, replay, Markdown
 rendering, and responsive wrapping. The
-[loop integration tests](../../skott/tests/loop_integration.rs) use a
+[loop integration tests](../skott/tests/loop_integration.rs) use a
 scripted transport and recording executor.
 
 These are substantive strengths. Upstream agents mainly offer richer
@@ -140,15 +140,15 @@ Kvist's human authority, recursive artifacts, or independent compliance model.
 ### Current gaps that change the comparison
 
 **Host execution is implemented.** The
-[CLI](../../skott/src/cli.rs) accepts `--allow-host-execution` and
-`--host-turns`; the [TUI](../../skott/src/tui/mod.rs) selects
-[`HostExecutor`](../../skott/src/host.rs) explicitly. This is not an
+[CLI](../skott/src/cli.rs) accepts `--allow-host-execution` and
+`--host-turns`; the [TUI](../skott/src/tui/mod.rs) selects
+[`HostExecutor`](../skott/src/host.rs) explicitly. This is not an
 automatic sandbox failure fallback, but it is unsandboxed host authority.
 A one-turn cap is not a one-tool cap and does not confine a shell script's
 effects. Protected Kvist task execution should never select this mode.
 
 **Context bounding is heuristic and best effort, not a hard request guarantee.**
-In [context management](../../skott/src/context.rs), text is estimated
+In [context management](../skott/src/context.rs), text is estimated
 at four characters per token and each tool definition contributes a fixed
 eight tokens, irrespective of schema and description size. Session accounting
 uses the conversation without the separately injected system prompt.
@@ -163,7 +163,7 @@ under its own estimator, before instructions, schemas, or output headroom.
 This is a source-derived boundary example, not a model benchmark.
 
 **A session log is not yet a recoverable, trusted execution journal.**
-The [recorder](../../skott/src/session_log.rs) writes structured
+The [recorder](../skott/src/session_log.rs) writes structured
 reasoning and tool data, but does not capture the complete user/assistant
 conversation needed to reconstruct a live session. `Recorder` methods return
 no result; individual recording writes discard errors. `ToolDispatch` is
@@ -178,10 +178,10 @@ be inferred from module comments alone. The TUI can continue without logging
 after an explicit diagnostic, and `--no-logs` exists.
 
 **Read-only replay is different from resume.**
-[History](../../skott/src/history.rs) lists and displays saved text;
+[History](../skott/src/history.rs) lists and displays saved text;
 it does not restore an executable session. A model or effort switch starts a
 fresh worker and resets conversation context
-([session builder](../../skott/src/tui/mod.rs)).
+([session builder](../skott/src/tui/mod.rs)).
 That conservative behavior is preferable to silently reusing incompatible
 provider history, but the user-facing transition could become more explicit.
 
@@ -189,18 +189,18 @@ provider history, but the user-facing transition could become more explicit.
 The loop caps model turns at 50. Growing per-attempt deadlines and retry
 backoff do not constitute one total prompt deadline or token/cost budget.
 The maerg already has a shared `TurnBudget` in
-[`maerg/src/agent.rs`](../../maerg/src/agent.rs), and `sav`
+[`maerg/src/agent.rs`](../maerg/src/agent.rs), and `sav`
 already has action/observation
-[loop-detection helpers](../../sav/src/loop_detection.rs).
+[loop-detection helpers](../sav/src/loop_detection.rs).
 The interactive loop does not currently wire those helpers in. Reuse local
 prior art before adding another dependency.
 
-The component [queue](../../skott/TODOS.yaml) already records
+The component [queue](../skott/TODOS.yaml) already records
 documentation drift and pending independent compliance work. The older
 [architecture guide](architecture.md) and
 [runtime-selection guide](runtime-selection.md) describe some mechanisms as
 planned and retain superseded Rig transport material.
-[ADR 0009](../decisions/0009-brokered-model-transport-and-isolated-effects.md)
+[ADR 0009](decisions/0009-brokered-model-transport-and-isolated-effects.md)
 is explicit that the direct transport is the sole selected transport.
 This report does not reconcile those artifacts or certify the runner.
 
@@ -699,7 +699,7 @@ policy decisions; supporting `tools/call` is not approval of the whole protocol.
 
 ### Licensing and dependency cost
 
-Kvist's [dependency policy](../../deny.toml) already allows MIT and Apache-2.0
+Kvist's [dependency policy](../deny.toml) already allows MIT and Apache-2.0
 alongside AGPL-3.0-or-later, and rejects unapproved Git sources. These upstream
 licenses generally permit reuse with their applicable notices and obligations;
 they do not justify silently changing Kvist's license or removing attribution.

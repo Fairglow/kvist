@@ -7,9 +7,9 @@ sandboxed-execution and toolchain model; the component READMEs
 (`maerg/`, `sav/`, `galla/`, `skott/`, `blad/`) describe each component's
 purpose and how to build and run it. This directory goes deeper: the
 authoritative command design, the architectural decisions, the standards
-posture, and the agent-runtime analysis.
+posture, and the agent runtime analysis.
 
-## Top-level guides
+## Guides
 
 | Document | What it covers |
 | -------- | -------------- |
@@ -20,21 +20,21 @@ posture, and the agent-runtime analysis.
 | [Logging and Observability Guide](logging.md) | How Kvist logs and why: the two audiences (human operators and the runtime), levels, and what is recorded. |
 | [Sandbox Toolchains and Vendoring](sandbox-toolchains-and-vendoring.md) | How toolchains and their dependencies are mounted into the sandbox, how they are discovered and used, and how to add or change vendored dependencies per toolchain. |
 
-## Agent runtime (`agent-runtime/`)
+## Agent runtime
 
 The analysis and design for the reusable agent runtime that `sav` provides and
 `skott` and `maerg` consume.
 
 | Document | What it covers |
 | -------- | -------------- |
-| [Architecture](agent-runtime/architecture.md) | The layered agent architecture organized by authority: which layer owns what, and why the stable abstraction is a set of backend roles rather than "provider." |
-| [Runtime Selection](agent-runtime/runtime-selection.md) | Selection guidance for native, Rig-run, containerized Rig-agent, and external agent drivers. |
-| [Rig Evaluation](agent-runtime/rig-evaluation.md) | The Rig 0.42.0 adoption decision and the contained optional adapter gates. |
-| [Upstream Agent Comparison](agent-runtime/upstream-agent-comparison.md) | A source-backed assessment of what `skott` can reuse or learn from Goose, OpenCode, Codex, and other runtimes. |
-| [Runner Hardening](agent-runtime/runner-hardening.md) | The security-first workspace agent: implemented improvements, native-helper installation, headless llama-server usage, authority limits, and the independent qualification record. |
-| [Runner Hardening Review](agent-runtime/runner-hardening-review.md) | The review and qualification record for the runner hardening work. |
-| [Runner Intent Review](agent-runtime/runner-intent-review.md) | A source-blind comparison of the runner hardening and runtime output bounds. |
-| [User Guide](agent-runtime/user-guide.md) | Standalone agent runtime user guide: building, configuring, and running `sav-run`. |
+| [Architecture](architecture.md) | The layered agent architecture organized by authority: which layer owns what, and why the stable abstraction is a set of backend roles rather than "provider." |
+| [Runtime Selection](runtime-selection.md) | Selection guidance for native, Rig-run, containerized Rig-agent, and external agent drivers. |
+| [Rig Evaluation](rig-evaluation.md) | The Rig 0.42.0 adoption decision and the contained optional adapter gates. |
+| [Upstream Agent Comparison](upstream-agent-comparison.md) | A source-backed assessment of what `skott` can reuse or learn from Goose, OpenCode, Codex, and other runtimes. |
+| [Runner Hardening](runner-hardening.md) | The security-first workspace agent: implemented improvements, native-helper installation, headless llama-server usage, authority limits, and the independent qualification record. |
+| [Runner Hardening Review](runner-hardening-review.md) | The review and qualification record for the runner hardening work. |
+| [Runner Intent Review](runner-intent-review.md) | A source-blind comparison of the runner hardening and runtime output bounds. |
+| [User Guide](user-guide.md) | Standalone agent runtime user guide: building, configuring, and running `sav-run`. |
 
 ## Decisions (`decisions/`)
 
