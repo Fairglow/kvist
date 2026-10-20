@@ -38,8 +38,14 @@ fn test_render_basic() {
     let md = "# Hello\n\nThis is **bold** text.";
     let output = render(md);
     // The heading is bold (SGR 1) and blue (34).
-    assert!(output.contains("\x1b[1m"), "heading must be bold: {output:?}");
-    assert!(output.contains("\x1b[34m"), "heading must be blue: {output:?}");
+    assert!(
+        output.contains("\x1b[1m"),
+        "heading must be bold: {output:?}"
+    );
+    assert!(
+        output.contains("\x1b[34m"),
+        "heading must be blue: {output:?}"
+    );
     // The bold span is bold (SGR 1) and the word "bold" is present.
     assert!(output.contains("bold"));
     let plain = strip_ansi(&output);
@@ -53,7 +59,10 @@ fn test_render_list() {
     let output = render(md);
     // Each item is a yellow (33) bullet.
     let bullet_count = output.matches("\x1b[33m•").count();
-    assert_eq!(bullet_count, 2, "both items must be yellow bullets: {output:?}");
+    assert_eq!(
+        bullet_count, 2,
+        "both items must be yellow bullets: {output:?}"
+    );
     assert!(output.contains("Item 1"));
     assert!(output.contains("Item 2"));
 }
@@ -180,7 +189,11 @@ fn test_tasklist_items_are_bulleted() {
     // Task-list items render as bullets; the checkbox state is not a separate
     // glyph in this renderer, but the item text is preserved.
     let output = render("- [x] done\n- [ ] todo");
-    assert_eq!(output.matches('•').count(), 2, "both items must be bulleted");
+    assert_eq!(
+        output.matches('•').count(),
+        2,
+        "both items must be bulleted"
+    );
     assert!(output.contains("done"));
     assert!(output.contains("todo"));
 }
@@ -192,7 +205,10 @@ fn test_render_table_with_code() {
     assert!(output.contains("File"));
     assert!(output.contains("Count"));
     // Inline code cells are reverse-video (SGR 7).
-    assert!(output.contains("\x1b[7m"), "inline code must be reverse video: {output:?}");
+    assert!(
+        output.contains("\x1b[7m"),
+        "inline code must be reverse video: {output:?}"
+    );
     assert!(output.contains("A"));
     assert!(output.contains("B"));
     let lines: Vec<&str> = output.lines().collect();
@@ -218,14 +234,20 @@ fn test_horizontal_rule() {
     let md = "Before\n\n---\n\nAfter";
     let output = render(md);
     // The rule is a run of ─ characters, dimmed (90), spanning the terminal width.
-    assert!(output.contains("\x1b[90m"), "rule must be dimmed: {output:?}");
+    assert!(
+        output.contains("\x1b[90m"),
+        "rule must be dimmed: {output:?}"
+    );
     assert!(output.contains("─"), "rule must be drawn: {output:?}");
     let rule_line = output
         .lines()
         .find(|l| l.contains("─"))
         .expect("a rule line must exist");
     let rule_width = unicode_width::UnicodeWidthStr::width(strip_ansi(rule_line).as_str());
-    assert_eq!(rule_width, 80, "rule must span the terminal width: {rule_line:?}");
+    assert_eq!(
+        rule_width, 80,
+        "rule must span the terminal width: {rule_line:?}"
+    );
 }
 
 #[test]
@@ -246,7 +268,10 @@ fn test_gfm_alerts() {
     );
     // A plain blockquote (no alert label) is dimmed (90), not an alert color.
     let quote = render("> just a quote");
-    assert!(quote.contains("\x1b[90m"), "plain quote must be dimmed: {quote:?}");
+    assert!(
+        quote.contains("\x1b[90m"),
+        "plain quote must be dimmed: {quote:?}"
+    );
     assert!(!quote.contains("[NOTE]"));
 }
 
@@ -276,10 +301,16 @@ fn test_superscript_and_subscript_are_dimmed() {
     // inline occurrence (e.g. H~2~O) is plain text. A standalone element is
     // rendered dim (SGR 2), so the discriminating assertion is the dim code.
     let sup = render("^b^");
-    assert!(sup.contains("\x1b[2m"), "standalone superscript must be dimmed: {sup:?}");
+    assert!(
+        sup.contains("\x1b[2m"),
+        "standalone superscript must be dimmed: {sup:?}"
+    );
     assert!(sup.contains("b"));
     let sub = render("~c~");
-    assert!(sub.contains("\x1b[2m"), "standalone subscript must be dimmed: {sub:?}");
+    assert!(
+        sub.contains("\x1b[2m"),
+        "standalone subscript must be dimmed: {sub:?}"
+    );
     assert!(sub.contains("c"));
     // Inline occurrences are NOT parsed as sup/sub; they pass through verbatim.
     let inline = strip_ansi(&render("H~2~O and E=mc^2^"));
