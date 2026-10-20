@@ -110,8 +110,26 @@ Code block lines retain their whitespace and do not wrap. Use Left/Right to
 read horizontal overflow; short lines no longer reset the horizontal position.
 Header, footer and content rows are clipped independently so long lines cannot
 scroll the first document lines off the screen. Tabs display at eight-column
-stops. Home/End still move vertically; the planned key change, table-ratio
-sizing, folding, occurrence search and live follow are not part of this fix.
+stops. Home/End still move vertically; the planned key change, folding,
+occurrence search and live follow are not part of these layout corrections.
+
+### Table sizing
+
+Tables keep a hard visual 2:1 width-to-height floor, including empty padding
+beside taller cells. The renderer assumes terminal character cells are twice
+as tall as wide, so each column is at least four display columns wide per line
+of the tallest table row. Actual font dimensions are not detected.
+
+Within the available width, the integer solver minimizes the tallest wrapped
+row. If that cannot fit, it chooses the narrowest layout that preserves the
+aspect floor and allows horizontal overflow; use Left/Right to read it.
+Resizing recomputes the layout. This is exact minimax sizing, not a claim that
+the sum of all row heights is globally minimal.
+
+Cells wrap between whole words, never inside a Unicode grapheme or long file
+path. A long unbroken token may therefore force overflow. Whitespace within a
+cell line becomes one space; `<br>`, `<br/>`, and `<br />` preserve explicit
+breaks and empty lines. Without a configured width, tables stay unwrapped.
 
 ### Navigation
 

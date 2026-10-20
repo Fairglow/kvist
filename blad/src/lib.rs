@@ -10,5 +10,6 @@ pub use markdown::MarkdownRenderer;
 pub use markdown::render_markdown;
 
 mod inline;
+mod table;
 mod terminal_text;
 mod viewport;

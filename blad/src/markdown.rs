@@ -418,6 +418,15 @@ fn render_markdown_theme(
                     inline.text(w, &text, style)?;
                 }
             }
+            Event::InlineHtml(html) if in_table => {
+                if ["<br>", "<br/>", "<br />"]
+                    .iter()
+                    .any(|tag| html.trim().eq_ignore_ascii_case(tag))
+                    && let Some(cell) = table_row_cells.last_mut()
+                {
+                    cell.push('\n');
+                }
+            }
             Event::Code(text) => {
                 if in_table {
                     if let Some(cell) = table_row_cells.last_mut() {
@@ -495,7 +504,7 @@ fn render_markdown_theme(
             Event::HardBreak => {
                 if in_table {
                     if let Some(cell) = table_row_cells.last_mut() {
-                        cell.push(' ');
+                        cell.push('\n');
                     }
                 } else {
                     inline.hard_break(w)?;
@@ -719,9 +728,8 @@ fn render_markdown_theme(
 }
 
 /// Render a table with proper column alignment and soft-wrapping.
-/// Column widths are adapted to fit the terminal width while preserving
-/// readability. Cells wrap to multiple lines when needed.
-/// Target cell aspect ratio is 4:3 (width:height) for readability.
+/// Styling is independent of the integer width/height solver. Geometry takes
+/// precedence over viewport fit; horizontally overflowing tables remain valid.
 fn render_table(
     w: &mut impl Write,
     rows: &[Vec<String>],
@@ -748,104 +756,10 @@ fn render_table(
     let header_code = "\x1b[7m";
     let reset = "\x1b[0m";
 
-    // Normalize ragged rows: use the widest row so cell access never runs
-    // past a shorter row's actual cell count.
-    let num_cols = rows.iter().map(|row| row.len()).max().unwrap_or(0);
-    if num_cols == 0 {
+    let table = crate::table::Table::new(rows);
+    let col_widths = table.widths(terminal_width);
+    if col_widths.is_empty() {
         return Ok(());
-    }
-
-    // Determine natural column widths based on content.
-    let mut col_widths = vec![0usize; num_cols];
-    for row in rows {
-        for (i, cell) in row.iter().enumerate() {
-            if i < num_cols {
-                let width = unicode_width::UnicodeWidthStr::width(cell.as_str());
-                if width > col_widths[i] {
-                    col_widths[i] = width;
-                }
-            }
-        }
-    }
-
-    // Enforce minimum column width: 4:3 width:height ratio means a column
-    // that wraps to H lines must be at least ceil(H * 4/3) columns wide.
-    // Iterate until stable because wrapping changes based on column widths.
-    let mut stable = false;
-    while !stable {
-        stable = true;
-        for row in rows {
-            let mut row_wrapped = Vec::new();
-            for (i, &width) in col_widths.iter().enumerate() {
-                let cell = row.get(i).map_or("", |cell| cell.as_str());
-                row_wrapped.push(wrap_cell(cell, width));
-            }
-            let max_lines = row_wrapped
-                .iter()
-                .map(|lines| lines.len())
-                .max()
-                .unwrap_or(1);
-            for (i, _wrapped_lines) in row_wrapped.iter().enumerate() {
-                let needed = ceil_div(max_lines * 4, 3);
-                if col_widths[i] < needed {
-                    col_widths[i] = needed;
-                    stable = false;
-                }
-            }
-        }
-    }
-
-    // If terminal width is provided, adapt column widths to fit
-    if let Some(term_width) = terminal_width {
-        let separator_space = (num_cols - 1) * 3;
-        let available_width = term_width.saturating_sub(separator_space);
-        let total_natural: usize = col_widths.iter().sum();
-
-        if total_natural > available_width {
-            // Proportional allocation: each column's width scales to how much
-            // space its largest value needs, so the column with the longest
-            // content gets the most room and the shorter columns shrink to
-            // fit. This preserves the unbreakable 4:3 width:height ratio -- a
-            // column whose content is long is given proportionally more width,
-            // so it never wraps to so many lines that it becomes a tall, thin
-            // stub (width/height < 4/3). Short columns keep their 4:3 ratio by
-            // wrapping only a little.
-            let natural_total = total_natural.max(1);
-            let mut widths: Vec<usize> = col_widths
-                .iter()
-                .map(|&cw| {
-                    let w = (cw as u128 * available_width as u128) / natural_total as u128;
-                    w.max(1) as usize
-                })
-                .collect();
-            let mut used: usize = widths.iter().sum();
-            // Reconcile rounding so the table uses exactly the available width.
-            // Give the leftover to the column with the most content (it needs
-            // it most) and take any overflow back from the column with the
-            // least content.
-            while used < available_width {
-                let idx = widths
-                    .iter()
-                    .enumerate()
-                    .max_by_key(|(_, w)| **w)
-                    .map(|(i, _)| i)
-                    .expect("at least one column");
-                widths[idx] += 1;
-                used += 1;
-            }
-            while used > available_width {
-                let idx = widths
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, w)| **w > 1)
-                    .min_by_key(|(_, w)| **w)
-                    .map(|(i, _)| i)
-                    .expect("some column is wider than 1 and can shrink");
-                widths[idx] -= 1;
-                used -= 1;
-            }
-            col_widths = widths;
-        }
     }
 
     // Render all rows with proper alignment and soft-wrapping. The header is
@@ -855,13 +769,11 @@ fn render_table(
     // in the row's background means a multiline (wrapped) cell stays inside one
     // colored block, so the background itself reads as the row separator and
     // no border line between rows is needed.
-    for (row_idx, row) in rows.iter().enumerate() {
+    for (row_idx, row) in table.rows.iter().enumerate() {
         // First, wrap all cells in this row
         let mut wrapped_row: Vec<Vec<String>> = Vec::new();
-        for (i, &width) in col_widths.iter().enumerate() {
-            let cell = row.get(i).map_or("", |cell| cell.as_str());
-            let wrapped = wrap_cell(cell, width);
-            wrapped_row.push(wrapped);
+        for (cell, &width) in row.iter().zip(&col_widths) {
+            wrapped_row.push(cell.wrap(width));
         }
 
         // Find the maximum number of wrapped lines in this row
@@ -910,66 +822,6 @@ fn render_table(
     }
 
     Ok(())
-}
-
-/// Wrap a cell to fit within the given width.
-/// Uses word wrapping, with hard wrapping for words that exceed the width.
-fn ceil_div(a: usize, b: usize) -> usize {
-    a / b + if !a.is_multiple_of(b) { 1 } else { 0 }
-}
-
-fn wrap_cell(cell: &str, width: usize) -> Vec<String> {
-    // Quick check: if cell fits, return as-is
-    if unicode_width::UnicodeWidthStr::width(cell) <= width {
-        return vec![cell.to_string()];
-    }
-
-    let mut result = Vec::new();
-    let mut current = String::new();
-
-    for word in cell.split_whitespace() {
-        let word_width = unicode_width::UnicodeWidthStr::width(word);
-
-        // If the word itself is wider than the column, hard-wrap it
-        if word_width > width {
-            if !current.is_empty() {
-                result.push(current);
-                current = String::new();
-            }
-            // Split the long word into chunks of the given width
-            let word_chars: Vec<char> = word.chars().collect();
-            let mut i = 0;
-            while i < word_chars.len() {
-                let end = i + width;
-                let chunk: String = if end < word_chars.len() {
-                    word_chars[i..end].iter().collect()
-                } else {
-                    word_chars[i..].iter().collect()
-                };
-                result.push(chunk);
-                i = end;
-            }
-        } else if current.is_empty() {
-            current = word.to_string();
-        } else if unicode_width::UnicodeWidthStr::width(current.as_str()) + 1 + word_width <= width
-        {
-            current.push(' ');
-            current.push_str(word);
-        } else {
-            result.push(current);
-            current = word.to_string();
-        }
-    }
-
-    if !current.is_empty() {
-        result.push(current);
-    }
-
-    if result.is_empty() {
-        result.push(String::new());
-    }
-
-    result
 }
 
 /// Pad a cell to the right width.

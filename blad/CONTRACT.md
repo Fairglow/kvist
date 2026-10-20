@@ -96,6 +96,38 @@ Home/End retain their current vertical behavior.
 Each screen row is positioned and clipped independently, including header/footer
 text. Wide graphemes may extend past the content column into the scrollbar area.
 
+### Table layout semantics
+
+Tables MUST preserve their existing borderless, reverse-video header and
+alternating data-row backgrounds, with ` | ` between columns. The width budget
+includes these separators. A row's height is the maximum wrapped cell height;
+shorter cells are padded to that height.
+
+Under the fixed terminal geometry model (display-column width : line height =
+1:2), each column MUST be at least four display columns wide per line of the
+tallest rendered row. This models a visual width : height floor of 2:1.
+Actual font metrics are not queried; the guarantee is relative to that model.
+There is no short-cell exemption.
+
+If a valid layout fits, the renderer MUST choose the smallest possible maximum
+row height within the width budget. If none fits, it MUST overflow horizontally
+using the smallest valid total width, breaking ties by smaller maximum row
+height. Left/Right navigation continues to reveal overflow. With no width
+configured, cells MUST remain unwrapped, with additional width when necessary
+for the aspect floor. Spare viewport space MAY be distributed deterministically
+up to natural column widths; total table height is not a globally optimized
+objective.
+
+Cells MUST wrap greedily between whole whitespace-delimited tokens. Intra-line
+whitespace becomes one space; explicit newlines, including empty lines, remain.
+HTML `<br>`, `<br/>`, and `<br />` tags (case-insensitive) inside table cells
+MUST contribute explicit newlines.
+Unicode display width determines measurement, not byte or character count.
+Tokens MUST NOT be split, even when a long identifier or URL forces overflow.
+Terminal controls are made inert by the same normalization used by viewport
+text. Resizing MUST solve the layout again, not shrink an already valid layout
+below its aspect floor.
+
 ## Behavioral guarantees
 
 - Session listing is deterministic, sorted by creation time (newest first)

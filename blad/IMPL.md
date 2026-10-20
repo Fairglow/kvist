@@ -4,6 +4,104 @@
 
 Date: 2026-10-12
 
+## Scoped table solver observation - 2026-10-20
+
+This supplement supersedes the earlier table-path observations below; other
+historical observations retain their original scope and date.
+
+### Evidence boundary
+
+This independent observation uses `blad/src/table/{mod.rs,cell.rs,tests.rs}`,
+table-related Markdown event handling and rendering, `terminal_text.rs`,
+`lib.rs`, and table-related evidence in `table_rendering.rs`, `viewer.rs`, and
+`markdown_tests.rs`. No intent documents, queues, existing implementation
+records, prior reviews, Git history, or peer implementations informed the
+observations. No source files were edited. This is not safety or compliance
+certification.
+
+### Measurement and wrapping
+
+`Table::new` normalizes ragged rows to the maximum column count by inserting
+empty cells. Each cell splits on literal newlines, preserving empty and trailing
+lines. `TerminalLine` removes recognized SGR sequences from its plain
+representation, expands tabs to eight-column stops, and converts other control
+characters into visible `\u{...}` text.
+
+Cells then split each explicit line using Unicode whitespace and retain owned
+words measured with `unicode-width`. Repeated whitespace collapses to single
+spaces; original tab spacing is not retained. Minimum width is the widest word,
+and natural width is the widest reconstructed explicit line.
+
+Wrapping greedily packs whole words without splitting them. Empty explicit
+lines emit one fragment. `fits_height` uses the same fragment iterator as
+output, stopping after at most `cap + 1` fragments; measurement and rendering
+therefore share the wrapping mechanism.
+
+Markdown table text replaces embedded newlines with spaces and removes
+carriage returns. Soft breaks become spaces; hard breaks and recognized,
+case-insensitive `<br>` forms become explicit newlines. Other inline HTML is
+discarded. Inline-code events append their text without code-specific styling.
+
+### Width allocation
+
+The solver uses a common height cap across all cells, with every column
+constrained to at least four display columns per capped line, including empty
+or short columns. It reserves three columns per inter-column `" | "` separator.
+
+Without a viewport, widths are the greater of each column's natural width and
+four times the largest explicit cell height. A viewport that already
+accommodates these widths returns them unchanged.
+
+Otherwise, a binary search finds a feasible uniform width, establishing the
+height-search upper bound. Increasing integer height caps are evaluated using
+binary searches for each column's smallest feasible width. The first fitting
+cap determines the result. Remaining budget is distributed toward natural
+widths proportionally, using integer largest remainders and column-index
+tie-breaking.
+
+If no candidate fits, the solver retains the smallest total width encountered;
+equal-width later candidates do not replace earlier ones. A rising
+minimum-width lower bound stops further search. Narrow viewports may therefore
+produce horizontal overflow rather than split words or relax the common aspect
+floor.
+
+### Rendering and resource characteristics
+
+Cells are left-aligned, right-padded, and padded vertically to their row's
+tallest cell. Markdown alignment metadata is ignored. There are no outer or
+horizontal borders. Every header fragment receives reverse video; alternating
+body rows receive background tint. Styling wraps the complete rendered line
+and does not enter width calculations. Writer failures propagate as I/O errors.
+
+Searches and fragment iteration have finite, input-derived bounds, not
+viewport-sized iteration. However, repeated feasibility scans can revisit words
+across columns and height caps. The path buffers table strings, normalized word
+storage, and wrapped output for each row, and allocates padding strings. No
+explicit input, allocation, runtime, or cancellation limit appears in this
+scope.
+
+### Executed verification
+
+- `cargo test --offline --locked -p blad --lib table::` - exit 0;
+  **5 passed**, 38 filtered out.
+- `cargo test --offline --locked -p blad --test table_rendering --test viewer` -
+  exit 0; **17 table-rendering tests and 5 viewer tests passed**.
+
+These cover a small exhaustive allocation oracle, wrapping consistency, Unicode
+examples, explicit breaks, overflow, large input, writer errors, and PTY
+horizontal navigation/resizing. Full library/Mermaid tests were not run by this
+observer.
+
+### Concrete concerns and uncertainty
+
+Source SGR styling is discarded during cell normalization. The inspected
+inline-code styling test checks for reverse video anywhere, which the header
+already supplies; it does not establish code-cell styling. Unicode rendering
+ultimately depends on terminal behavior matching library width estimates. The
+viewer's test screen models characters rather than display-width-aware
+graphemes. Finite loops and passing examples do not establish practical resource
+bounds or exhaustive correctness.
+
 ## Scoped CI repair observation - 2026-10-14
 
 Independent clean-slate `repair-observer` read only the enumerated source/test

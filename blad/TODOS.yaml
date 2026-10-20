@@ -1,4 +1,6 @@
 schema_version: 1
+# Recorded revisions below predate the table intent change; no acceptance or
+# independent compliance certification is implied by this implementation work.
 component:
   requirements_revision: "sha256:6685311fdea00a81db0411344216fa36014f93416b9e893f5d29ba8a1400f650"
   contract_revision: "sha256:51b9c61c6ccafe3a2422a5aa20c3856c52fa8a93dec755659212c79bf38ad997"
@@ -9,6 +11,80 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-table-write-tests
+    title: "write_tests: exact table geometry and optimization"
+    description: "Add failing geometry regressions and a brute-force small-case oracle before solver production code."
+    purpose: "Pin visual aspect, minimax height, minimum overflow and wrapping semantics"
+    expected_outcome: "Measured assertions reproduce current ratio and tiny-width failures"
+    kind: test
+    context: "The width-zero regression reproduced the old allocator panic before replacement; exhaustive width enumeration and rendered assertions now pass."
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-030", "REQUIREMENTS.md#R-031", "REQUIREMENTS.md#R-032"]
+    timestamps: {created_at: "2026-10-20T21:31:22Z", updated_at: "2026-10-20T21:40:12Z", completed_at: "2026-10-20T21:40:12Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-table-implement-code
+    title: "implement_code: prepared wrapping and integer constraint solving"
+    description: "Separate measured cells, allocation-free height queries, exact solver and styled output."
+    purpose: "Implement deterministic layout without sacrificing the visual floor"
+    expected_outcome: "The solver satisfies the independent oracle and rendering regressions"
+    kind: implementation
+    context: "Prepared whole-word wrapping and exact integer height-cap solving replace pre-shrink ratio checks; all 78 Blad tests and strict Clippy pass."
+    status: completed
+    depends_on: [blad-table-write-tests]
+    requirements: ["REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-030", "REQUIREMENTS.md#R-031"]
+    timestamps: {created_at: "2026-10-20T21:31:22Z", updated_at: "2026-10-20T21:40:12Z", completed_at: "2026-10-20T21:40:12Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-table-security-audit
+    title: "security_audit: table input and resource boundaries"
+    description: "Review terminal normalization, integer bounds, termination and allocation behavior."
+    purpose: "Review robustness without broadening viewer authority"
+    expected_outcome: "Scoped findings retained without implying acceptance"
+    kind: security-audit
+    context: "Scoped author-side input/resource inspection: inert terminal text, no shell or new authority, bounded content-derived cap enumeration, short-circuit allocation-free height queries, saturating sizes and u128 proportional products. Not independent safety certification."
+    status: completed
+    depends_on: [blad-table-implement-code]
+    requirements: ["REQUIREMENTS.md#R-031", "REQUIREMENTS.md#R-032"]
+    timestamps: {created_at: "2026-10-20T21:31:22Z", updated_at: "2026-10-20T21:40:12Z", completed_at: "2026-10-20T21:40:12Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-table-compliance-review
+    title: "compliance_review: independent observed table evidence"
+    description: "Derive an observed record in a clean context, then compare it to intent in a separate source-blind context."
+    purpose: "Preserve independent evidence and human arbitration"
+    expected_outcome: "Observed behavior and discrepancies documented without self-certification"
+    kind: compliance-review
+    context: |
+      Independent table-observer derived the scoped IMPL.md supplement solely
+      from source/tests, excluding intent, queues, prior records/reviews and Git.
+      Its independent runs passed 5 solver, 17 table-rendering and 5 viewer tests.
+      Separate table-intent-comparison read only local intent and that supplement,
+      plus author execution evidence; it inspected no source or test source.
+      The comparison found scoped support for R-029 through R-032, not general
+      proof, human acceptance, or whole-component certification.
+
+      Findings retained for human arbitration:
+      - The exact objective is minimax row height when fitting, otherwise minimum
+        width followed by maximum row height; total height is not optimized.
+      - The visual guarantee assumes the fixed 1:2 terminal-cell font model.
+      - Prepared cells preserve newlines, but parser Text events normalize them;
+        the mapping of every intended explicit break is not established by the
+        observation. Hard-break events and br variants have a preserving path.
+      - Unicode examples and the character-based PTY model do not prove general
+        grapheme/terminal correctness.
+      - Content-bounded loops and the large-input example do not establish hard
+        runtime, allocation or cancellation limits. Table buffering does not
+        demonstrate the older design's general streaming characterization.
+      - The observation summary does not enumerate every R-032 assertion.
+      No intent or observed record was changed to hide these evidence gaps.
+    status: completed
+    depends_on: [blad-table-security-audit]
+    requirements: ["REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-030", "REQUIREMENTS.md#R-031", "REQUIREMENTS.md#R-032"]
+    timestamps: {created_at: "2026-10-20T21:31:22Z", updated_at: "2026-10-20T21:43:39Z", completed_at: "2026-10-20T21:43:39Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: blad-component-structure-test
     title: "Verify component structure and build"
     description: "Confirm component directory, Cargo.toml, and basic build work"

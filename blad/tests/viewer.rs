@@ -280,6 +280,33 @@ fn code_overflow_is_clipped_and_horizontal_offset_survives_short_lines() {
 }
 
 #[test]
+fn table_overflow_is_accessible_and_resize_preserves_the_first_row() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("table.md");
+    std::fs::write(
+        &path,
+        "| A | B |\n|---|---|\n| x | 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz |",
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&path, 30, 10, false);
+    assert_eq!(viewer.screen.line(1), "A    | B");
+    assert_eq!(viewer.screen.line(2), "x    | 0123456789ABCDEFGHIJKL");
+    viewer.keys(b"\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C");
+    assert_eq!(viewer.screen.line(2), "0123456789ABCDEFGHIJKLMNOPQRS");
+    assert_eq!(viewer.screen.scrolls, 0);
+    viewer.resize(80, 12);
+    assert!(viewer.screen.line(1).starts_with('A'));
+    assert!(
+        viewer
+            .screen
+            .line(2)
+            .ends_with("abcdefghijklmnopqrstuvwxyz")
+    );
+    assert_eq!(viewer.screen.scrolls, 0);
+    viewer.quit();
+}
+
+#[test]
 fn resize_reflows_content_and_tiny_viewport_remains_quittable() {
     let temp = tempfile::tempdir().unwrap();
     let path = temp.path().join("resize.md");

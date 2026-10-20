@@ -1,6 +1,7 @@
 //! Integration tests for table rendering with wrapping and column width adaptation.
 
 use blad::MarkdownRenderer;
+use unicode_width::UnicodeWidthStr;
 
 /// Strip ANSI escape codes for easier testing.
 fn strip_ansi(s: &str) -> String {
@@ -22,7 +23,7 @@ fn strip_ansi(s: &str) -> String {
 
 /// Compute display width of a string (for ASCII this is the char count).
 fn display_width(s: &str) -> usize {
-    s.chars().map(|c| if c == '\t' { 4 } else { 1 }).sum()
+    s.width()
 }
 
 fn render_width(md: &str, width: usize) -> String {
@@ -114,7 +115,12 @@ fn test_table_wraps_to_fit_width() {
     assert!(output.contains("column"));
     assert!(output.contains("header"));
     assert!(output.contains("should wrap"));
-    assert!(output.contains("very long value"));
+    let second_column = lines
+        .iter()
+        .filter_map(|line| line.split_once(" | ").map(|(_, cell)| cell.trim()))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(second_column.contains("This cell has a very long value that should also wrap"));
 }
 
 #[test]
@@ -146,80 +152,34 @@ fn test_table_wrapped_rows_have_no_internal_separators() {
         output
     );
 
-    // All wrapped lines still fit within the terminal width.
-    for line in &lines {
-        assert!(
-            display_width(line) <= width,
-            "Line exceeds terminal width: {:?} ({} chars)",
-            line,
-            display_width(line)
-        );
-    }
+    // The aspect floor, not the viewport width, bounds compression.
+    assert!(lines.iter().any(|line| display_width(line) > width));
 }
 
 #[test]
 fn test_table_column_min_width_ratio() {
-    // Column should not shrink below 4:3 width:height ratio.
-    // If a column wraps to 4 lines, its minimum width is 5 (ceil(4 * 4/3)).
-    let md = "| Item | Description |\n|------|-------------|\n| A | This is a long description that will wrap to multiple lines when rendered |\n| B | Short |";
-    let width = 30;
-    let output = strip_ansi(&render_width(md, width));
-    let lines: Vec<&str> = output.lines().collect();
-
-    // All lines should still fit
-    for line in &lines {
-        assert!(
-            display_width(line) <= width,
-            "Line exceeds terminal width: {} chars",
-            display_width(line)
-        );
+    let md = "| A | B |\n|---|---|\n| x | This is a long description that will wrap to multiple lines when rendered |";
+    for width in [0, 1, 2, 10, 30, 40, 80, usize::MAX] {
+        let output = strip_ansi(&render_width(md, width));
+        let lines: Vec<_> = output.lines().filter(|line| !line.is_empty()).collect();
+        let widths: Vec<_> = lines[0].split(" | ").map(display_width).collect();
+        let height = lines.len() - 1;
+        assert_eq!(widths.len(), 2);
+        assert!(widths.iter().all(|&w| w >= 4 * height), "{output}");
+        assert!(lines.iter().all(|line| line.width() == lines[0].width()));
     }
 }
 
 #[test]
-fn test_table_hard_wrap_long_words() {
-    // Words longer than the column width should be hard-wrapped
+fn test_table_long_words_remain_whole_even_when_the_table_overflows() {
     let md = "| Item | Description |\n|------|-------------|\n| A | ThisIsAVeryLongWordWithoutSpaces |\n| B | Normal text |";
     let width = 30;
     let output = strip_ansi(&render_width(md, width));
     let lines: Vec<&str> = output.lines().collect();
 
-    // All lines should fit within width (hard wrap must have occurred)
-    for line in &lines {
-        assert!(
-            display_width(line) <= width,
-            "Hard wrap should break long words, got line: {:?}",
-            line
-        );
-    }
-
-    // The long word should still be fully present in the output (split across
-    // lines). The exact split point depends on the column width the allocator
-    // chose, so only assert that the whole word is recoverable by removing the
-    // column separators and re-joining the split chunks.
-    // Reconstruct the original long word from the hard-wrapped chunks.
     let long_word = "ThisIsAVeryLongWordWithoutSpaces";
-    let mut recovered = String::new();
-    for line in &lines {
-        let line = line.trim_end();
-        if line.is_empty() {
-            continue;
-        }
-        // The Description column is the last column; take everything after the
-        // last " | " separator.
-        if let Some(pos) = line.rfind(" | ") {
-            recovered.push_str(&line[pos + 3..]);
-        } else if line.starts_with('─') {
-            // separator line; skip
-        } else {
-            recovered.push_str(line);
-        }
-    }
-    assert!(
-        recovered.contains(long_word),
-        "Hard-wrapped chunks must rejoin into the full word, got {:?}",
-        recovered
-    );
+    assert!(output.contains(long_word), "{output}");
+    assert!(lines.iter().any(|line| display_width(line) > width));
 }
 
 #[test]
@@ -276,9 +236,7 @@ fn test_table_no_extra_separator_when_not_wrapped() {
 }
 
 #[test]
-fn test_table_widest_column_gets_most_width() {
-    // The column with the longest value must be allocated the most width, not
-    // crushed to a stub while short columns keep their full natural width.
+fn test_table_long_content_gets_space_without_splitting_file_tokens() {
     let md = "| Commit | Files | What it does |\n|--------|-------|--------------|\n| 826f281 Make cargo clippy resolve the vendored snap | sav/src/offline_rust.rs, skott/tests/rust_build_environment.rs, SANDBOX_ENVIRONMENT.md | Fixes the cargo-clippy wrapper so it strips the clippy subcommand token cargo delegates and injects the offline and locked flags plus the vendored-source config. |";
     let width = 80;
     let output = strip_ansi(&render_width(md, width));
@@ -289,8 +247,8 @@ fn test_table_widest_column_gets_most_width() {
     let cols: Vec<usize> = first.split(" | ").map(|s| s.chars().count()).collect();
     let (w_commit, w_files, w_desc) = (cols[0], cols[1], cols[2]);
     assert!(
-        w_desc > w_commit && w_desc > w_files,
-        "Column with the longest value must be the widest, got commit={w_commit} files={w_files} desc={w_desc}"
+        w_desc > w_commit && w_files >= "skott/tests/rust_build_environment.rs,".width(),
+        "Paragraphs need space and file tokens stay whole: commit={w_commit} files={w_files} desc={w_desc}"
     );
 
     // No internal borders: no separator lines at all, even though the
@@ -303,13 +261,74 @@ fn test_table_widest_column_gets_most_width() {
         separator_count
     );
 
-    // Every line fits the terminal width.
-    for line in &lines {
-        assert!(
-            display_width(line) <= width,
-            "Line exceeds terminal width: {:?} ({} chars)",
-            line,
-            display_width(line)
-        );
+    // A long file token can force overflow; no line loses alignment.
+    assert!(
+        lines
+            .iter()
+            .filter(|line| !line.is_empty())
+            .all(|line| { display_width(line) == display_width(first) })
+    );
+}
+
+#[test]
+fn short_and_empty_columns_have_no_aspect_exemption() {
+    let output = strip_ansi(&render_width("| A | |\n|---|---|\n| | x |", 1));
+    assert_eq!(output, "A    |     \n     | x   \n\n");
+}
+
+#[test]
+fn unicode_words_remain_intact_and_columns_use_display_width() {
+    let md = "| A | B |\n|---|---|\n| e\u{301} 👩‍💻 | 世界 世界 世界 世界 世界 |";
+    let output = strip_ansi(&render_width(md, 25));
+    let lines: Vec<_> = output.lines().filter(|line| !line.is_empty()).collect();
+    assert!(output.contains("e\u{301} 👩‍💻"));
+    assert!(output.contains("世界"));
+    let widths: Vec<_> = lines[0].split(" | ").map(display_width).collect();
+    assert!(widths.iter().all(|&w| w >= 4 * (lines.len() - 1)));
+    assert!(lines.iter().all(|line| line.width() == lines[0].width()));
+}
+
+#[test]
+fn resizing_resolves_height_instead_of_scaling_below_the_floor() {
+    let md =
+        "| A | B |\n|---|---|\n| a b c d e f | one two three four five six seven eight nine ten |";
+    let narrow = strip_ansi(&render_width(md, 10));
+    let wide = strip_ansi(&render_width(md, 100));
+    assert!(narrow.lines().count() > wide.lines().count());
+    assert!(narrow.lines().next().unwrap().width() > 10);
+    assert!(wide.lines().all(|line| line.width() <= 100));
+    assert_eq!(wide, strip_ansi(&render_width(md, 100)));
+}
+
+#[test]
+fn table_writer_failures_are_propagated() {
+    struct BrokenWriter;
+    impl std::io::Write for BrokenWriter {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("table output failed"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
     }
+    let error = MarkdownRenderer::new()
+        .render_markdown("| A |\n|---|\n| x |", &mut BrokenWriter)
+        .unwrap_err();
+    assert_eq!(error.to_string(), "table output failed");
+}
+
+#[test]
+fn explicit_cell_breaks_preserve_empty_lines_and_set_the_common_floor() {
+    let output = strip_ansi(&render_width(
+        "| A | B |\n|---|---|\n| a<br><br />b<BR/> | x |",
+        10,
+    ));
+    let lines: Vec<_> = output.lines().filter(|line| !line.is_empty()).collect();
+    assert_eq!(lines.len(), 5, "{output}");
+    let widths: Vec<_> = lines[0].split(" | ").map(display_width).collect();
+    assert_eq!(widths, [16, 16]);
+    assert!(lines[1].starts_with("a "));
+    assert!(lines[2].split_once(" | ").unwrap().0.trim().is_empty());
+    assert!(lines[3].starts_with("b "));
+    assert!(lines[4].split_once(" | ").unwrap().0.trim().is_empty());
 }

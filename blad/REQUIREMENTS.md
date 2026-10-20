@@ -104,8 +104,34 @@ Blad must provide the following capabilities:
     clipping must not cut ANSI controls or Unicode graphemes, and short lines
     must not reset the shared horizontal offset.
 
-These corrections do not implement the remaining table-ratio/border, search,
-folding or live-follow features proposed in the blad implementation plan.
+29. **R-029 Table geometry:** Every displayed table cell, including empty
+    padding beside another cell in its row, must be at least twice as wide as
+    high visually. Use the explicit conservative terminal model of one display
+    column being half a line high: a column must therefore occupy at least four
+    display columns per line of the tallest rendered row. This is a hard floor,
+    including single-line cells; horizontal overflow takes precedence over
+    fitting the viewport.
+30. **R-030 Table optimization:** When a feasible layout fits the viewport,
+    minimize the maximum rendered row height exactly. Otherwise minimize the
+    total table width satisfying R-029, breaking ties by maximum row height.
+    Account for separators. Use deterministic integer arithmetic; do not claim
+    that proportional space distribution minimizes total table height.
+31. **R-031 Table wrapping:** Prefer whole whitespace-delimited words, preserve
+    explicit cell line breaks (`<br>` variants included) and empty lines,
+    measure Unicode display width,
+    and never split a grapheme. An unbroken token may force horizontal overflow
+    rather than be split. Normalize intra-line whitespace to a single space;
+    normalize terminal controls through the existing inert-text boundary.
+32. **R-032 Solver verification:** Exhaustive small-case width enumeration must
+    independently check feasibility and the exact objectives in R-030. Cover
+    tall adjacent cells, short/empty cells, long tokens, Unicode, explicit
+    breaks, ragged rows, zero/tiny widths, deterministic rounding, resize
+    reflow, I/O failure propagation and large inputs. Measurement and wrapping
+    must share line-breaking semantics without allocating strings during
+    optimization.
+
+These corrections do not implement the remaining border, search, folding or
+live-follow features proposed in the blad implementation plan.
 
 ## Constraints
 
