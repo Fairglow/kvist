@@ -175,9 +175,8 @@ Provider-native enforcement is only a generation aid; returned JSON parsing
 and validation remain a host responsibility.
 
 Detailed authority rationale and delivery ordering live in
-`../../docs/sav/architecture.md`; the historical evaluation evidence
-for the rejected Rig experiment lives in
-`../../docs/sav/rig-evaluation.md` (ADR 0009).
+`../../docs/architecture.md`; the historical evaluation evidence
+for the rejected Rig experiment is recorded in ADR 0009.
 
 ## Failure and recovery
 

@@ -23,3 +23,8 @@ kvist.toml
 /node_modules
 /package-lock.json
 /package.json
+
+# Work documents: one-off findings, evaluations, reviews, and plans that are
+# not part of the Kvist durable set. Kept on disk for reference, excluded from
+# the committed project.
+.work-docs/

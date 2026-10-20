@@ -559,8 +559,8 @@ Successful use produces:
 
 ## Security-first runtime hardening
 
-This extension implements the P0/P1 recommendations in
-`../docs/sav/upstream-agent-comparison.md`. The user's improvement
+This extension implements the P0/P1 recommendations from an upstream
+coding-agent runtime comparison. The user's improvement
 request authorizes these conservative changes; remote authority and automatic
 resume remain deliberately deferred. Advisory intent-review enforcement is not
 implemented and no acceptance receipt is claimed.

@@ -343,8 +343,8 @@ optional Rig adapter is a non-default transport prototype. Live provider
 matrices, independent security audit, and compliance review remain promotion
 gates; optional availability is not a completed interoperability claim.
 Detailed authority and transport decisions live in
-[`docs/sav/architecture.md`](docs/sav/architecture.md) and
-[`docs/sav/rig-evaluation.md`](docs/sav/rig-evaluation.md).
+[`docs/architecture.md`](docs/architecture.md); the Rig evaluation
+evidence is recorded in ADR 0009.
 
 ---
 

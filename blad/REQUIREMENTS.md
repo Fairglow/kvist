@@ -105,7 +105,7 @@ Blad must provide the following capabilities:
     must not reset the shared horizontal offset.
 
 These corrections do not implement the remaining table-ratio/border, search,
-folding or live-follow features proposed in `PLAN.md`.
+folding or live-follow features proposed in the blad implementation plan.
 
 ## Constraints
 

@@ -224,7 +224,7 @@ impl Drop for Viewer {
 
 #[test]
 fn tagged_document_keeps_its_first_line_without_screen_scrolling() {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../COMPLIANCE_REVIEW.md");
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tagged_document.md");
     let mut viewer = Viewer::start(&path, 80, 24, false);
     assert_eq!(viewer.screen.scrolls, 0);
     assert_eq!(

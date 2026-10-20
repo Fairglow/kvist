@@ -400,7 +400,7 @@ To prevent models from hallucinating success or certifying their own code:
 2. **Source-Blind Compliance Review:** A separate reviewer compares the authored intent (`REQUIREMENTS.md`, `CONTRACT.md`) against `IMPL.md` and test results, **without access to the source code**.
 3. **Architectural Arbitration:** The human architect arbitrates any discrepancies between intent and implementation.
 
-For detailed instructions on compliance reviews, refer to [`REVIEW_RUNBOOK.md`](REVIEW_RUNBOOK.md) and [`COMPLIANCE_REVIEW.md`](COMPLIANCE_REVIEW.md).
+For detailed instructions on compliance reviews, refer to [`REVIEW_RUNBOOK.md`](REVIEW_RUNBOOK.md).
 
 ---
 

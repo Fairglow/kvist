@@ -94,8 +94,6 @@ blad show <session-id> --line-numbers
 - [Design](DESIGN.md) - Component design
 - [Requirements](REQUIREMENTS.md) - Functional and non-functional requirements
 - [Contract](CONTRACT.md) - CLI interface specification
-- [Review and implementation plan](PLAN.md) - Findings, proposed design, tasks,
-  and estimates; planned improvements are not current capabilities
 
 ## Development
 

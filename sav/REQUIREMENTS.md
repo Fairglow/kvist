@@ -228,6 +228,5 @@ review.
 
 The consumer boundary is defined in [`CONTRACT.md`](CONTRACT.md), private
 realization in [`DESIGN.md`](DESIGN.md), supplemental authority design in
-[`../../docs/sav/architecture.md`](../../docs/sav/architecture.md),
-and Rig evaluation evidence in
-[`../../docs/sav/rig-evaluation.md`](../../docs/sav/rig-evaluation.md).
+[`../../docs/architecture.md`](../../docs/architecture.md),
+and Rig evaluation evidence in ADR 0009.

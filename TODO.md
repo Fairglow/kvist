@@ -478,9 +478,8 @@ native-loop prerequisites, and deferred hardening remain incomplete.
   processes; provider permission flags are defense in depth, not authorization.
 
 Detailed rationale and task chains are in
-`docs/sav/architecture.md`,
-`docs/sav/rig-evaluation.md`, and
-`sav/TODOS.yaml`.
+`docs/architecture.md` and `sav/TODOS.yaml`; the Rig evaluation
+evidence is recorded in ADR 0009.
 
 ### TODO AGN-05 — Configurable Log Retention & Monotonic Naming
 

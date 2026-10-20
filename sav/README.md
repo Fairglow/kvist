@@ -91,7 +91,6 @@ profiles are stored at `$XDG_CONFIG_HOME/sav/config.toml`, falling back to
 - [User Guide (Quick Start, Configuration & Usage)](../docs/user-guide.md)
 - [Architecture](../docs/architecture.md)
 - [Runtime Selection](../docs/runtime-selection.md)
-- [Rig Evaluation](../docs/rig-evaluation.md)
 - [Runner Hardening](../docs/runner-hardening.md)
 
 The component's intent and realization live in
@@ -100,8 +99,7 @@ The component's intent and realization live in
 [`DESIGN.md`](DESIGN.md). The layered runtime decision is documented in
 [`docs/architecture.md`](../docs/architecture.md),
 the current and planned runtime choices in
-[`docs/runtime-selection.md`](../docs/runtime-selection.md),
-and the Rig 0.42.0 adoption decision and contained optional adapter gates in
-[`docs/rig-evaluation.md`](../docs/rig-evaluation.md).
+[`docs/runtime-selection.md`](../docs/runtime-selection.md), and the Rig 0.42.0
+adoption decision and contained optional adapter gates in ADR 0009.
 The current host mode is a reliability aid, not a sandbox. `fakeroot`, retry
 notices, and backups likewise do not restrict an agent's authority.

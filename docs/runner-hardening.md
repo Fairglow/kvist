@@ -1,7 +1,7 @@
 # Security-first workspace agent
 
 This delivers the near-term context, coding-tool, lifecycle and headless
-recommendations from the [upstream comparison](upstream-agent-comparison.md).
+recommendations from an upstream coding-agent runtime comparison.
 The implementation remains Kvist-owned Rust: no upstream engine, execution
 defaults, licensing terms or credential store was imported.
 
@@ -13,7 +13,7 @@ It exposes no maerg authorization, acceptance, canonical-evidence or promotion
 API. That is not protection against changing those files through the workspace
 shell. The independent comparison found a conflict between this local design
 and the root contract's protected-artifact and shell rules
-([F4](runner-intent-review.md#f4--p1--contradictory-intent-global-protected-artifact-and-shell-rules)).
+(finding F4 of the source-blind intent review).
 Explicit human scope arbitration is required before claiming global conformity;
 no exception or acceptance has been silently recorded. Use the maerg's
 protected broker for governed task authoring.
@@ -164,7 +164,7 @@ qualified. See the independent comparison for the exact remaining scope.
 
 ## Qualification and remaining scope
 
-The [review and qualification record](runner-hardening-review.md) records
+The review and qualification record records
 actual gates, independent reviews and any discrepancies. The live local tests
 qualified bounded streaming plus real read/edit/verify with
 `Tiel-Coder-35B-A3B-MTP-UD-Q4_K_XL` at `http://127.0.0.1:9931`.

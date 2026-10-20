@@ -313,8 +313,8 @@ The layered runtime decision is documented in
 the current and planned runtime choices in
 [`docs/runtime-selection.md`](../docs/runtime-selection.md),
 the direct transport is available for local testing, and the Rig 0.42.0
-adoption decision and contained optional adapter gates are in
-[`docs/rig-evaluation.md`](../docs/rig-evaluation.md).
+adoption decision and contained optional adapter gates are recorded in
+ADR 0009.
 The current host mode is a reliability aid, not a sandbox. `fakeroot`, retry
 notices, and backups likewise do not restrict an agent's authority.
 

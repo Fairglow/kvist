@@ -494,5 +494,5 @@ also builds an inherited workspace with a sibling provider, formats the
 authored crate when the host default includes rustfmt, recompiles edited source,
 executes a newly authored integration test, checks nested provider intent/state
 exclusion and verifies that provider source/root lockfile are unchanged.
-See [Galla toolchain testing review](galla-toolchain-testing-review.md) for
+See the Galla toolchain testing review (retained as a work document) for
 findings, limitations, recorded results and reproduction instructions.
