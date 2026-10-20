@@ -898,7 +898,23 @@ changes start a fresh worker on next submission.
 up to 5000 visible transcript rows, buffers streamed paragraphs/reasoning,
 shows provisional retry notices, completion/failure/cancellation/cap status,
 spinner, estimated context/ETA, provenance-specific speed, scrolling and
-collapse/reveal reasoning.
+collapse/reveal reasoning. Streamed reasoning is buffered and flushed on the
+same fence-aware block boundaries as answer text (`next_block_end`), and each
+complete block renders through the shared `MarkdownRenderer` at the content
+width minus the edge; the rendered rows then carry the reasoning overlay — the
+block's first row prepends the thinking edge (▌), continuations the bar (│),
+the row style carries the muted reasoning foreground so unstyled prose reads
+muted while bullets, headings, inline code, and syntax highlights keep their
+own styling, and rows that already paint their own background (code blocks,
+table zebra rows) keep that patch untouched. Reasoning rows retain their
+Markdown source on the first row, so resize, theme switches, and
+collapse/reveal re-render the block at the current width and theme; reasoning
+rows without a Markdown source re-wrap as plain text as a fallback. Tests
+`reasoning_renders_markdown_structure`,
+`reasoning_fence_with_blank_line_is_one_block`,
+`reasoning_collapse_reveal_preserves_markdown`,
+`reasoning_resize_rerenders_markdown`, and
+`reasoning_theme_cycle_rerenders_with_structure` pin this behavior.
 The subsequently observed `App::stats_line` rendering shows the output-only
 generation speed (`N t/s`) alongside the session-wide average (`avg N t/s`),
 marks a provisional streamed speed with a `~` prefix, and renders `? t/s` when

@@ -99,10 +99,11 @@ with no restart.
 Layout cues are theme-independent and keep content scannable: the transcript
 and prompt panels carry a single top edge (no side or bottom borders), the
 transcript always shows an adaptive right-edge scrollbar whose thumb encodes
-the current window into the full transcript, model reasoning is set apart by a
-left edge (`▌`/`│`) plus its tint, and highlighted code keeps its indentation
-plus the theme's code patch. The echoed prompt is distinct by its bold prompt
-foreground alone.
+the current window into the full transcript, model reasoning renders as
+Markdown like the answer — lists, tables, and code fences keep their
+structure — and is set apart by a left edge (`▌`/`│`) plus its tint, and
+highlighted code keeps its indentation plus the theme's code patch. The
+echoed prompt is distinct by its bold prompt foreground alone.
 
 ## Session history
 

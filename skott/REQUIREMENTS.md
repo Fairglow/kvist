@@ -367,6 +367,10 @@ Successful use produces:
   already-active model starts with no load/switch cost;
 - a live transcript that shows the agent's reasoning, every tool call it makes,
   and the result of each call, without exposing raw transport noise;
+- a live transcript that renders the agent's reasoning with the same Markdown
+  treatment as its answers: line breaks, lists, tables, and language-tagged
+  code fences keep their structure, so thinking reads with the same fidelity
+  as the answer while remaining visually distinct from it;
 - output that fits the terminal width: the transcript, help, menu, session
   history, and replay wrap long lines at word boundaries inside their boxes so
   the borders stay intact, and text blocks keep their indentation, with

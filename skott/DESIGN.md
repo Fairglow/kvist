@@ -668,19 +668,35 @@ phase requires. Resources are bounded well below the runner's maxima.
 
 Startup resolves the selected default or override directory through one
 canonical existing-directory validator shared with headless execution, before
-terminal setup or tool selection. Markdown rows distinguish the source-bearing
-first row from explicit continuation rows; resize replaces only those rows,
-never subsequent plain notices or reasoning. Styled wrapping and clipping use
+terminal setup or tool selection. Markdown rows — answer blocks and reasoning
+blocks alike — distinguish the source-bearing first row from explicit
+continuation rows; resize replaces only those rows, never subsequent plain
+notices. Styled wrapping and clipping use
 terminal cells and whole graphemes. Final rendered rows are wrapped after
 gutter/list/table decoration, and resized transcript retention remains bounded.
 An indivisible glyph wider than the available viewport cannot be made to fit;
 this physical limit is not a promise of universal terminal/font behavior.
 Code keeps complete highlighted spans for final cell wrapping rather than
 clipping tails. Each table cell is split into whole-grapheme chunks and emitted
-on successive rows; decoration is wrapped afterward. Revealed reasoning is
-reflowed at the current width and rejoins bounded visible retention. Evicted
-placeholders discard their corresponding hidden runs so surviving placeholders
-cannot restore the wrong reasoning.
+on successive rows; decoration is wrapped afterward. Streamed reasoning is
+buffered like answer text and flushed on the same fence-aware block boundaries
+(`next_block_end`): a paragraph ends at a blank line, a fenced block ends at
+its matching closer, and blank lines inside a fence are code, never a
+boundary. Each complete reasoning block renders through the same
+`MarkdownRenderer` as answer text at the content width minus the edge, and the
+rendered rows then take the reasoning overlay: the first row of the block
+prepends the thinking edge (▌), continuations the bar (│), every span's
+background is patched to the reasoning tint, and the row style carries the
+muted reasoning foreground so unstyled prose reads muted while bullets,
+headings, inline code, and syntax highlights keep their own styling. Code rows
+keep the theme's code patch background and their highlighted spans untouched,
+so code inside thinking still reads as code. Blank lines are never inserted
+inside a reasoning run, so consecutive blocks share one contiguous tinted
+strip. Reasoning rows retain their Markdown source on the first row, so
+resize, theme switches, and reveal re-render the block at the current width
+and theme instead of re-wrapping flattened text; revealed reasoning rejoins
+bounded visible retention. Evicted placeholders discard their corresponding
+hidden runs so surviving placeholders cannot restore the wrong reasoning.
 Wrapped placeholder continuations are explicitly distinct from the first
 placeholder row and never consume another hidden run during reveal.
 Initial placeholder construction also wraps to the current width with the same
@@ -711,8 +727,9 @@ width: ratatui's `set_line` only styles cells up to the last span, so the
 renderer appends a trailing space span carrying the row's background. All
 output defaults to the standard panel background — black in the default `dark`
 theme, white in `light` — so the transcript reads as one quiet surface. Two
-cues set content apart from it: model reasoning carries a left edge (▌ first
-row, │ continuations) plus a muted tint, and highlighted code keeps its
+cues set content apart from it: model reasoning renders as Markdown like
+answer text but carries a left edge (▌ first row of a block, │ continuations)
+plus a muted tint over the rendered rows, and highlighted code keeps its
 gutter/indentation plus the theme's code patch. The prompt echo is distinct by
 its bold prompt foreground alone. A scrollbar rides the transcript's right
 inner column at all times, sized to the panel's inner height, with a thumb that
@@ -733,7 +750,7 @@ fixed truecolor `Color::Rgb`, never a terminal-palette-dependent ANSI name.
 Loading validates that every colour is fully opaque and that each style's
 foreground differs from its background. Surfaces that paint their own
 widget-level background — `panel`, `reasoning`, `scrollbar`,
-`menu.selected`/`menu.plain`, and the Markdown code patch — *require* an
+`menu.selected`/`menu.plain`, and the Markdown code patch — _require_ an
 explicit `bg` in the file; inline accents (dim, ok, warn, err, info, accent,
 model, spinner, stats, …) are foreground-only because they are always drawn
 over one of those already-explicit surfaces.
@@ -751,9 +768,12 @@ load — the CLI `--theme` flag overrides it per run, the menu's "Theme" item
 opens a picker listing every discovered theme, and Ctrl+S cycles through all
 of them in discovery order: each selection re-reads the theme file from
 disk, so an edited file applies on the next switch, and existing rows are
-restyled in place (prompt rows take the prompt style, reasoning rows are
-rebuilt with the edge and tint, everything else gains the panel background)
-while text, Markdown spans, and code highlights are left untouched.
+restyled in place (prompt rows take the prompt style, everything else gains
+the panel background) while answer text, Markdown spans, and code highlights
+are left untouched. Reasoning Markdown blocks are the exception: they are
+re-rendered from their retained source with the new theme's syntax theme,
+tint, and edge, because the reasoning foreground and tint are part of the
+block's appearance rather than a row-level patch.
 
 Every rendered frame starts with a full-frame base fill — a borderless block
 styled with the theme's panel background and foreground, drawn before any

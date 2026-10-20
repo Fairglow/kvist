@@ -405,10 +405,10 @@ impl App {
     /// Switches to the next theme in `available_themes` (Ctrl+S) and restyles
     /// the surfaces the theme owns: the prompt block and every transcript
     /// row. Content is unchanged — the same lines are simply recoloured,
-    /// rewrapped reasoning keeps its edge, and highlighted code keeps its
-    /// indentation and patch. A theme file that fails to load (edited by hand
-    /// since startup) is reported and left unapplied rather than crashing the
-    /// session.
+    /// reasoning blocks re-render with the new tint and edge, and highlighted
+    /// code keeps its indentation and patch. A theme file that fails to load
+    /// (edited by hand since startup) is reported and left unapplied rather
+    /// than crashing the session.
     pub fn cycle_theme(&mut self) {
         if self.available_themes.is_empty() {
             return;
@@ -435,14 +435,40 @@ impl App {
     }
 
     /// Recolours the live UI for `theme`, without touching transcript text.
+    /// Reasoning Markdown blocks are the exception: they re-render from their
+    /// retained source with the new theme's syntax theme, tint, and edge,
+    /// because the reasoning foreground and tint are part of the block's
+    /// appearance rather than a row-level patch.
     fn apply_theme(&mut self, theme: Theme) {
         self.editor.set_block(prompt_block(&theme));
-        for line in &mut self.lines {
-            let mut restyled = line.clone();
-            restyle_row(&mut restyled, &theme);
-            *line = restyled;
-        }
         self.theme = theme;
+        let mut next: Vec<ScreenLine> = Vec::with_capacity(self.lines.len());
+        let mut index = 0;
+        while index < self.lines.len() {
+            let line = self.lines[index].clone();
+            if line.kind == LineKind::Reasoning
+                && let Some(MarkdownRow::Start(source)) = line.md.clone()
+            {
+                let mut end = index + 1;
+                while end < self.lines.len()
+                    && matches!(self.lines[end].md, Some(MarkdownRow::Continuation))
+                {
+                    end += 1;
+                }
+                let width = self
+                    .content_width()
+                    .saturating_sub(Span::raw(REASONING_EDGE_FIRST).width())
+                    .max(1);
+                next.extend(self.reasoning_block_rows(&source, width));
+                index = end;
+            } else {
+                let mut restyled = line;
+                restyle_row(&mut restyled, &self.theme);
+                next.push(restyled);
+                index += 1;
+            }
+        }
+        self.lines = next;
     }
 
     /// Opens the theme-picker overlay, highlighting the current theme. The
@@ -669,41 +695,46 @@ impl App {
         self.clamp_scroll();
     }
 
-    /// Accumulates streamed reasoning fragments and flushes completed paragraphs.
-    /// Like streamed answer text, a lone newline is a soft break (a space) while
-    /// a blank line is a real paragraph boundary, so thinking flows on rows
-    /// instead of one short row per delta.
+    /// Accumulates streamed reasoning fragments and flushes completed blocks.
+    /// Reasoning is buffered exactly like answer text: a paragraph ends at a
+    /// blank line, a fenced block ends at its matching closer, and blank lines
+    /// inside a fence are code, never a boundary.
     fn stream_reasoning(&mut self, text: &str) {
         let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
         self.pending_reasoning.push_str(&normalized);
         self.flush_reasoning_paragraphs();
     }
 
-    /// Flushes every completed reasoning paragraph in the pending buffer.
+    /// Flushes every completed reasoning block in the pending buffer.
     fn flush_reasoning_paragraphs(&mut self) {
-        while let Some(pos) = self.pending_reasoning.find("\n\n") {
-            let head = self.pending_reasoning[..pos].to_owned();
-            let tail = self.pending_reasoning[pos + 2..].to_owned();
-            self.push_reasoning_lines(&normalize_soft_breaks(&head));
+        while let Some(end) = next_block_end(&self.pending_reasoning) {
+            let block = self.pending_reasoning[..end].to_owned();
+            let tail = self.pending_reasoning[end..].to_owned();
+            self.push_reasoning_block(block);
             self.pending_reasoning = tail;
         }
     }
 
-    /// Flushes all pending reasoning, normalizing soft breaks to spaces so the
-    /// trailing fragment of thinking reads horizontally.
+    /// Flushes all pending reasoning, rendering the trailing fragment (an
+    /// incomplete paragraph or an unclosed fence) as Markdown so it still
+    /// reads with its structure.
     fn flush_pending_reasoning(&mut self) {
         if !self.pending_reasoning.is_empty() {
-            let text = std::mem::take(&mut self.pending_reasoning);
-            self.push_reasoning_lines(&normalize_soft_breaks(&text));
+            let block = std::mem::take(&mut self.pending_reasoning);
+            self.push_reasoning_block(block);
         }
     }
 
-    /// Pushes wrapped reasoning lines, tagged so they can be collapsed later,
-    /// then keeps the transcript bounded and followed. The first row of a
-    /// run carries the thinking edge (▌), continuations the bar (│), and every
-    /// row the reasoning tint — the cues that keep thinking distinct from the
+    /// Renders one reasoning block through the shared Markdown pipeline and
+    /// appends the overlaid rows, tagged so they can be collapsed later, then
+    /// keeps the transcript bounded and followed. The first row of the block
+    /// carries the thinking edge (▌), continuations the bar (│), and every row
+    /// the reasoning tint — the cues that keep thinking distinct from the
     /// black output without a full box.
-    fn push_reasoning_lines(&mut self, text: &str) {
+    fn push_reasoning_block(&mut self, block: String) {
+        if block.trim().is_empty() {
+            return;
+        }
         // Check if we're continuing an existing reasoning context (last non-blank
         // line is reasoning or placeholder). If so, skip the leading blank line
         // so consecutive reasoning blocks share the same background.
@@ -730,8 +761,11 @@ impl App {
                 ));
             }
         }
-        self.lines
-            .extend(self.reasoning_rows(text, self.content_width()));
+        let width = self
+            .content_width()
+            .saturating_sub(Span::raw(REASONING_EDGE_FIRST).width())
+            .max(1);
+        self.lines.extend(self.reasoning_block_rows(&block, width));
         // Don't add a trailing blank line yet — wait to see if more reasoning
         // follows. If the next push is non-reasoning, it will add its own leading
         // blank line (or the reasoning block will be followed by the answer).
@@ -739,10 +773,71 @@ impl App {
         self.follow();
     }
 
-    /// Builds the reasoning rows for `text` at `width`: the first row of the
-    /// run carries the thinking edge (▌), continuations the bar (│), and every
-    /// row is wrapped to the width *minus* the edge so the strip never overruns
-    /// the panel. The tint and muted foreground come from the current theme.
+    /// Builds the reasoning rows for one Markdown `source` at `width`: the
+    /// block renders through the same `MarkdownRenderer` as answer text, then
+    /// the reasoning overlay is applied — the first row of the block prepends
+    /// the thinking edge (▌), continuations the bar (│), the row style carries
+    /// the muted reasoning foreground so unstyled prose reads muted while
+    /// bullets, headings, inline code, and syntax highlights keep their own
+    /// styling, and the strip's ambient fill is the reasoning tint. Rows that
+    /// already carry their own background patch (code blocks, table zebra
+    /// rows) keep it untouched, so code inside thinking still reads as code.
+    /// The raw source is retained on the first row so resize, theme switches,
+    /// and reveal can re-render the block.
+    fn reasoning_block_rows(&self, source: &str, width: usize) -> Vec<ScreenLine> {
+        let mut renderer = MarkdownRenderer::new();
+        renderer.set_width(width);
+        renderer.set_syntax_theme(self.theme.syntax_theme.as_deref());
+        renderer.set_panel_bg(crate::markdown::terminal_bg_for_panel(self.theme.panel_bg));
+        let rows = renderer.render(source);
+        let edge_style = self
+            .theme
+            .reasoning
+            .patch(Style::default().bg(self.theme.reasoning_bg));
+        rows.into_iter()
+            .enumerate()
+            .map(|(index, row)| {
+                let edge = if index == 0 {
+                    REASONING_EDGE_FIRST
+                } else {
+                    REASONING_EDGE_CONT
+                };
+                let mut line = row.line;
+                // Prose rows take the tint on every span; rows that already
+                // paint their own background (code, table zebra) keep it.
+                if !line.spans.iter().any(|span| span.style.bg.is_some()) {
+                    for span in &mut line.spans {
+                        span.style = span
+                            .style
+                            .patch(Style::default().bg(self.theme.reasoning_bg));
+                    }
+                }
+                let mut spans = vec![Span::styled(edge.to_owned(), edge_style)];
+                spans.extend(line.spans);
+                let mut line = Line::from(spans);
+                line.style = edge_style;
+                ScreenLine {
+                    line,
+                    kind: LineKind::Reasoning,
+                    md: Some(if index == 0 {
+                        MarkdownRow::Start(source.to_owned())
+                    } else {
+                        MarkdownRow::Continuation
+                    }),
+                    bg: self.theme.reasoning_bg,
+                    reasoning_first: index == 0,
+                }
+            })
+            .collect()
+    }
+
+    /// Builds plain-text reasoning rows for `text` at `width`: the first row
+    /// of the run carries the thinking edge (▌), continuations the bar (│),
+    /// and every row is wrapped to the width *minus* the edge so the strip
+    /// never overruns the panel. The tint and muted foreground come from the
+    /// current theme. This is the fallback for reasoning rows that carry no
+    /// Markdown source; streamed reasoning renders through
+    /// [`App::reasoning_block_rows`] instead.
     fn reasoning_rows(&self, text: &str, width: usize) -> Vec<ScreenLine> {
         let edge_width = Span::raw(REASONING_EDGE_FIRST).width();
         let text_width = width.saturating_sub(edge_width).max(1);
@@ -789,19 +884,35 @@ impl App {
         } else {
             let mut next: Vec<ScreenLine> = Vec::with_capacity(self.lines.len());
             let mut hidden = std::mem::take(&mut self.hidden_reasoning).into_iter();
+            let width = self
+                .content_width()
+                .saturating_sub(Span::raw(REASONING_EDGE_FIRST).width())
+                .max(1);
             for line in std::mem::take(&mut self.lines) {
                 if line.kind == LineKind::Placeholder {
                     if let Some(run) = hidden.next() {
-                        for row in run {
-                            // Restore the hidden thinking as fresh reasoning
-                            // rows so the edge and tint follow the current
-                            // theme even if it changed while collapsed.
-                            let text = row.line.to_string();
-                            let text = text
-                                .strip_prefix(REASONING_EDGE_FIRST)
-                                .or_else(|| text.strip_prefix(REASONING_EDGE_CONT))
-                                .unwrap_or(&text);
-                            next.extend(self.reasoning_rows(text, self.content_width()));
+                        // Restore the hidden thinking, re-rendering each
+                        // retained Markdown block so the edge and tint follow
+                        // the current theme and width even if either changed
+                        // while collapsed; plain rows re-wrap as before.
+                        let mut rows = run.into_iter();
+                        while let Some(row) = rows.next() {
+                            if let Some(MarkdownRow::Start(source)) = row.md.clone() {
+                                next.extend(self.reasoning_block_rows(&source, width));
+                                for cont in rows.by_ref() {
+                                    debug_assert!(
+                                        matches!(cont.md, Some(MarkdownRow::Continuation)),
+                                        "a reasoning block's continuation rows follow its source row"
+                                    );
+                                }
+                            } else {
+                                let text = row.line.to_string();
+                                let text = text
+                                    .strip_prefix(REASONING_EDGE_FIRST)
+                                    .or_else(|| text.strip_prefix(REASONING_EDGE_CONT))
+                                    .unwrap_or(&text);
+                                next.extend(self.reasoning_rows(text, self.content_width()));
+                            }
                         }
                     }
                 } else if line.kind != LineKind::PlaceholderContinuation {
@@ -2032,40 +2143,52 @@ impl App {
         let mut index = 0;
         while index < self.lines.len() {
             if let Some(MarkdownRow::Start(source)) = self.lines[index].md.clone() {
-                // Re-render a whole Markdown block at the new width, preserving
-                // its block marker on the first row for any later resize.
-                let mut renderer = MarkdownRenderer::new();
-                renderer.set_width(target);
-                renderer.set_syntax_theme(self.theme.syntax_theme.as_deref());
-                renderer.set_panel_bg(crate::markdown::terminal_bg_for_panel(self.theme.panel_bg));
-                let rows = renderer.render(&source);
                 let mut next = index + 1;
                 while next < self.lines.len()
                     && matches!(self.lines[next].md, Some(MarkdownRow::Continuation))
                 {
                     next += 1;
                 }
-                for (offset, row) in rows.into_iter().enumerate() {
-                    let bg = if row.is_code {
-                        self.theme
-                            .markdown
-                            .code_bg
-                            .bg
-                            .unwrap_or(self.theme.panel_bg)
-                    } else {
-                        self.theme.panel_bg
-                    };
-                    wrapped.push(ScreenLine {
-                        line: row.line,
-                        kind: LineKind::Normal,
-                        md: Some(if offset == 0 {
-                            MarkdownRow::Start(source.clone())
+                if self.lines[index].kind == LineKind::Reasoning {
+                    // Re-render the thinking block at the new width with its
+                    // edge and tint, preserving its block marker for any later
+                    // resize.
+                    let width = target
+                        .saturating_sub(Span::raw(REASONING_EDGE_FIRST).width())
+                        .max(1);
+                    wrapped.extend(self.reasoning_block_rows(&source, width));
+                } else {
+                    // Re-render a whole answer Markdown block at the new width,
+                    // preserving its block marker on the first row for any
+                    // later resize.
+                    let mut renderer = MarkdownRenderer::new();
+                    renderer.set_width(target);
+                    renderer.set_syntax_theme(self.theme.syntax_theme.as_deref());
+                    renderer
+                        .set_panel_bg(crate::markdown::terminal_bg_for_panel(self.theme.panel_bg));
+                    let rows = renderer.render(&source);
+                    for (offset, row) in rows.into_iter().enumerate() {
+                        let bg = if row.is_code {
+                            self.theme
+                                .markdown
+                                .code_bg
+                                .bg
+                                .unwrap_or(self.theme.panel_bg)
                         } else {
-                            MarkdownRow::Continuation
-                        }),
-                        bg,
-                        reasoning_first: false,
-                    });
+                            self.theme.panel_bg
+                        };
+                        wrapped.push(ScreenLine {
+                            line: row.line,
+                            kind: LineKind::Normal,
+                            md: Some(if offset == 0 {
+                                MarkdownRow::Start(source.clone())
+                            } else {
+                                MarkdownRow::Continuation
+                            }),
+                            bg,
+                            reasoning_first: false,
+                        });
+                    }
                 }
                 index = next;
             } else {
@@ -2108,9 +2231,11 @@ impl App {
 }
 
 /// Recolours one transcript row for `theme` in place, preserving its text,
-/// kind, and Markdown marker: prompt rows take the prompt style, reasoning
-/// rows are rebuilt with the theme's edge and tint, and every other row
-/// (agent output, notices) keeps its foreground but gains the panel background.
+/// kind, and Markdown marker: prompt rows take the prompt style, plain
+/// reasoning rows (no Markdown source) are rebuilt with the theme's edge and
+/// tint, and every other row (agent output, notices) keeps its foreground but
+/// gains the panel background. Reasoning rows that retain a Markdown source
+/// are re-rendered by [`App::apply_theme`] instead of restyled here.
 fn restyle_row(line: &mut ScreenLine, theme: &Theme) {
     match line.kind {
         LineKind::Reasoning => {
@@ -2255,13 +2380,6 @@ pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
         }
     }
     lines
-}
-
-/// Converts soft line breaks (lone `\r`/`\n`) to spaces so a streamed answer
-/// reads horizontally. Blank lines already delimited paragraphs and never
-/// reach here; paragraph breaks are handled by [`App::flush_paragraphs`].
-fn normalize_soft_breaks(text: &str) -> String {
-    text.replace('\n', " ")
 }
 
 /// Returns the byte length of the next complete Markdown block in `pending`, or
@@ -2628,6 +2746,219 @@ mod tests {
                 .to_string()
                 .starts_with(REASONING_EDGE_FIRST)
         );
+    }
+
+    /// The reasoning rows currently in the transcript, as (text, kind, bg).
+    fn reasoning_rows_of(app: &App) -> Vec<(String, LineKind, Color)> {
+        app.lines
+            .iter()
+            .filter(|line| line.kind == LineKind::Reasoning)
+            .map(|line| (line.line.to_string(), line.kind, line.bg))
+            .collect()
+    }
+
+    #[test]
+    fn reasoning_renders_markdown_structure() {
+        let mut app = clean_app();
+        app.push_event(Event::Reasoning(
+            "Plan the fix:\n- read the failing test\n- inspect the module\n\n```rust\nfn main() {}\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nThen verify.\n".to_owned(),
+        ));
+        app.push_event(Event::Text("done".to_owned()));
+
+        let rows = reasoning_rows_of(&app);
+        assert!(!rows.is_empty(), "reasoning produced transcript rows");
+        // Every reasoning row keeps its edge and its Markdown source marker.
+        for (text, kind, _) in &rows {
+            assert!(
+                text.starts_with(REASONING_EDGE_FIRST) || text.starts_with(REASONING_EDGE_CONT),
+                "reasoning row carries its edge: {text:?}"
+            );
+            assert_eq!(*kind, LineKind::Reasoning);
+        }
+        assert!(
+            app.lines
+                .iter()
+                .filter(|line| line.kind == LineKind::Reasoning)
+                .all(|line| line.md.is_some()),
+            "reasoning rows retain their Markdown source"
+        );
+        // List items stay on separate rows instead of flattening into one
+        // space-joined sentence.
+        let bullet_rows: Vec<&String> = rows
+            .iter()
+            .filter(|(text, _, _)| text.contains("read the failing test"))
+            .map(|(text, _, _)| text)
+            .collect();
+        assert_eq!(
+            bullet_rows.len(),
+            1,
+            "exactly one row holds the first bullet"
+        );
+        assert!(
+            !bullet_rows[0].contains("inspect the module"),
+            "bullets are not flattened onto one row: {:?}",
+            bullet_rows[0]
+        );
+        assert!(
+            rows.iter()
+                .any(|(text, _, _)| text.contains("inspect the module")),
+            "the second bullet keeps its own row"
+        );
+        // The code block keeps its own patch: the strip's ambient fill is the
+        // tint, but the rendered spans still carry a background distinct from
+        // it, so code inside thinking still reads as code.
+        let code_row = rows
+            .iter()
+            .find(|(text, _, _)| text.contains("fn main() {}"))
+            .expect("code row present");
+        assert_eq!(
+            code_row.2, app.theme.reasoning_bg,
+            "the strip's ambient fill is the tint"
+        );
+        let code_line = app
+            .lines
+            .iter()
+            .find(|line| line.line.to_string().contains("fn main() {}"))
+            .expect("code row in the transcript");
+        assert!(
+            code_line.line.spans.iter().any(|span| {
+                span.style.bg.is_some() && span.style.bg != Some(app.theme.reasoning_bg)
+            }),
+            "code inside thinking keeps its patch: {:?}",
+            code_line.line.spans
+        );
+        // The table and the trailing paragraph survive as reasoning rows.
+        assert!(
+            rows.iter()
+                .any(|(text, _, _)| text.contains("Then verify."))
+        );
+    }
+
+    #[test]
+    fn reasoning_fence_with_blank_line_is_one_block() {
+        let mut app = clean_app();
+        app.push_event(Event::Reasoning(
+            "```
+a\n\nb\n```\n"
+                .to_owned(),
+        ));
+        app.push_event(Event::Text("done".to_owned()));
+
+        let rows = reasoning_rows_of(&app);
+        // A blank line inside the fence is code, not a paragraph boundary, so
+        // the whole fence is one block with a single block edge.
+        let block_edges = rows
+            .iter()
+            .filter(|(text, _, _)| text.starts_with(REASONING_EDGE_FIRST))
+            .count();
+        assert_eq!(block_edges, 1, "one fence is one reasoning block: {rows:?}");
+        assert!(rows.iter().any(|(text, _, _)| text.contains("a")));
+        assert!(rows.iter().any(|(text, _, _)| text.contains("b")));
+    }
+
+    #[test]
+    fn reasoning_collapse_reveal_preserves_markdown() {
+        let mut app = clean_app();
+        app.push_event(Event::Reasoning(
+            "first thought\n- item one\n- item two\n".to_owned(),
+        ));
+        app.push_event(Event::Text("done".to_owned()));
+        let before = reasoning_rows_of(&app);
+        assert!(!before.is_empty());
+
+        app.set_collapse_reasoning(true);
+        assert!(
+            !app.lines
+                .iter()
+                .any(|line| line.kind == LineKind::Reasoning),
+            "collapse hides every reasoning row"
+        );
+        assert!(
+            app.lines
+                .iter()
+                .any(|line| line.kind == LineKind::Placeholder),
+            "collapse leaves its placeholder"
+        );
+
+        app.set_collapse_reasoning(false);
+        let after = reasoning_rows_of(&app);
+        assert_eq!(before, after, "reveal restores the rendered reasoning");
+    }
+
+    #[test]
+    fn reasoning_resize_rerenders_markdown() {
+        let mut app = app_at(40);
+        app.lines.clear();
+        app.push_event(Event::Reasoning(
+            "- a fairly long first bullet that wraps at the narrow width\n- second bullet\n"
+                .to_owned(),
+        ));
+        app.push_event(Event::Text("done".to_owned()));
+        let narrow = reasoning_rows_of(&app);
+        assert!(!narrow.is_empty(), "reasoning renders at the narrow width");
+
+        app.resize(80, 24);
+        let wide = reasoning_rows_of(&app);
+        assert!(!wide.is_empty(), "resize keeps the reasoning rows");
+        for (text, _, _) in &wide {
+            assert!(
+                text.starts_with(REASONING_EDGE_FIRST) || text.starts_with(REASONING_EDGE_CONT),
+                "resized reasoning row keeps its edge: {text:?}"
+            );
+        }
+        let first_bullets: Vec<&String> = wide
+            .iter()
+            .filter(|(text, _, _)| text.contains("a fairly long first bullet"))
+            .map(|(text, _, _)| text)
+            .collect();
+        assert_eq!(
+            first_bullets.len(),
+            1,
+            "the first bullet is one row at the wide width"
+        );
+        assert!(
+            wide.iter()
+                .any(|(text, _, _)| text.contains("second bullet")),
+            "the second bullet survives the resize"
+        );
+    }
+
+    #[test]
+    fn reasoning_theme_cycle_rerenders_with_structure() {
+        let dir = tempfile::tempdir().expect("temp themes dir").keep();
+        std::fs::write(dir.join("dark.toml"), TEST_THEME_TOML).expect("write dark theme");
+        std::fs::write(
+            dir.join("light.toml"),
+            TEST_THEME_TOML
+                .replace("#010203", "#ffffff")
+                .replace("white", "black"),
+        )
+        .expect("write light theme");
+
+        let mut app = app();
+        app.set_theme_catalog(Some(dir));
+        app.select_theme(0);
+        app.push_event(Event::Reasoning("- item one\n- item two\n".to_owned()));
+        app.push_event(Event::Text("done".to_owned()));
+        let before: Vec<String> = app.lines.iter().map(|line| line.line.to_string()).collect();
+        app.cycle_theme();
+        let after: Vec<String> = app.lines.iter().map(|line| line.line.to_string()).collect();
+        assert_eq!(before, after, "text is unchanged by a theme switch");
+        // The prose rows carry the new tint and keep their edges; the bullet
+        // rows stay separate.
+        let rows = reasoning_rows_of(&app);
+        assert!(
+            rows.iter().any(|(text, _, _)| text.contains("item one"))
+                && rows.iter().any(|(text, _, _)| text.contains("item two")),
+            "both bullets survive the theme switch"
+        );
+        for (text, _, bg) in &rows {
+            assert!(
+                text.starts_with(REASONING_EDGE_FIRST) || text.starts_with(REASONING_EDGE_CONT),
+                "restyled reasoning row keeps its edge: {text:?}"
+            );
+            assert_eq!(*bg, app.theme.reasoning_bg, "prose rows carry the new tint");
+        }
     }
 
     #[test]

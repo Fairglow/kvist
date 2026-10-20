@@ -1,8 +1,8 @@
 schema_version: 1
 component:
-  requirements_revision: "sha256:1b441ae6726b811e6c709a11118d9d8bd8de94eeb47da46474a928541b08211b"
-  contract_revision: "sha256:6e9bf117523d6373e63e644da7dd731135ff21703219bddb0daad0de6dbeb215"
-  design_revision: "sha256:8c93d73b50532e3d881b2eafc0db694548a72a2db0ad75dc66cd2550892dd8f1"
+  requirements_revision: "sha256:09b01ffb1f8b184ea3f21ab8494919c4e99b476a11e462508bb43188bb69d9a5"
+  contract_revision: "sha256:f9381908a1f3535128eeaa26c476bde9df81f98db4ccc403ee938a87edad65fe"
+  design_revision: "sha256:aa715b2501aa6d380cc9cf3274208cd78214360133679e915c29719bff029204"
   parent_contract: null
   revalidation:
     state: current
@@ -1659,7 +1659,7 @@ tasks:
   - id: "skott-tui-progress-eta"
     title: "Add a compaction progress bar with ETA"
     description: "Provide a bounded ETA for the compaction progress bar: forecast how long until the live context reaches the hard limit from the observed context growth rate, and show it when the estimate is meaningful (never fabricate a number when the growth is flat or unknown). Keep the existing compaction progress bar as the source of truth and surface the ETA only when it can be estimated reliably."
-    context: "The user explicitly requested \"Progress bar, at least for compaction, with ETA (when possible)\"; only the progress fraction exists today."
+    context: 'The user explicitly requested "Progress bar, at least for compaction, with ETA (when possible)"; only the progress fraction exists today.'
     purpose: "Let the user anticipate an upcoming compaction and steer accordingly."
     expected_outcome: "The UI shows a compaction ETA when estimable and hides it otherwise, with no speculative or misleading numbers."
     kind: implementation
@@ -1971,7 +1971,7 @@ tasks:
     recovery_state: null
   - id: "skott-shell-command-bounds-write-tests"
     title: "Define shell command bound tests"
-    description: "Write failing tests that a shell command exactly at the 4096-byte protocol argv bound renders inline, one byte above renders as `exec bash -c \"$(cat /context/0)\" skott` with the full text in `RenderedTool.shell_script`, the full 16384-byte contract bound renders (with 16385 rejected), the denylist still rejects oversized denied commands, and a staged-script request builds and validates with every argv entry within the 4096-byte bound."
+    description: 'Write failing tests that a shell command exactly at the 4096-byte protocol argv bound renders inline, one byte above renders as `exec bash -c "$(cat /context/0)" skott` with the full text in `RenderedTool.shell_script`, the full 16384-byte contract bound renders (with 16385 rejected), the denylist still rejects oversized denied commands, and a staged-script request builds and validates with every argv entry within the 4096-byte bound.'
     context: "Frequent agent sessions stopped with `invalid version-one sandbox request: argv entry 2 exceeds the 4096-byte limit` whenever a command exceeded 4 KiB (heredocs, inline scripts), because the entire command travelled as one argv entry although the shell contract admits 16384 bytes."
     purpose: "Pin the full documented command bound as executable before implementation."
     expected_outcome: "The new tests fail on the current inline-only renderer and pass once staged-script rendering exists."
@@ -1990,7 +1990,7 @@ tasks:
     recovery_state: null
   - id: "skott-shell-command-bounds-implement-code"
     title: "Implement staged-script shell rendering"
-    description: "Render shell commands above the 4096-byte argv bound with `exec bash -c \"$(cat /context/0)\" skott` and `shell_script` carrying the text (the exec'd bash performs the quoted substitution and execs the real interpreter, preserving the inline form's process tree, exit status, and $0; a bare `$(cat /context/0)` script would run `cat` and word-split the output); keep commands at or below the bound inline; add `shell_script: Option<String>` to `RenderedTool`; refactor executor staging into `stage_bytes` and stage the script as a mode-0600 file in a mode-0700 private directory in the workspace canonical parent, exposed as the `/context/0` read root; keep the denylist check on the full command before both forms. Verified end-to-end through the real bwrap runner with a 5 KiB python heredoc."
+    description: 'Render shell commands above the 4096-byte argv bound with `exec bash -c "$(cat /context/0)" skott` and `shell_script` carrying the text (the exec''d bash performs the quoted substitution and execs the real interpreter, preserving the inline form''s process tree, exit status, and $0; a bare `$(cat /context/0)` script would run `cat` and word-split the output); keep commands at or below the bound inline; add `shell_script: Option<String>` to `RenderedTool`; refactor executor staging into `stage_bytes` and stage the script as a mode-0600 file in a mode-0700 private directory in the workspace canonical parent, exposed as the `/context/0` read root; keep the denylist check on the full command before both forms. Verified end-to-end through the real bwrap runner with a 5 KiB python heredoc.'
     context: "The failing tests from skott-shell-command-bounds-write-tests define the behavior; the 4096-byte scalar bound is the sandbox protocol's MAX_VALUE_BYTES, and the existing read-root context grant mechanism carries the script without widening any authority."
     purpose: "Make every legal shell command executable inside the sandbox."
     expected_outcome: "All shell-command-bounds tests pass and the full skott suite stays green."
@@ -2281,6 +2281,86 @@ tasks:
     timestamps:
       created_at: "2026-10-04T21:43:13Z"
       updated_at: "2026-10-04T21:43:13Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "skott-reasoning-md-write-tests"
+    title: "Write failing tests for Markdown reasoning rendering"
+    description: "Pin the new reasoning display before production code: streamed reasoning containing a list, a fenced code block, and a table renders with its structure intact (separate bullet rows, separate code rows on the code patch background, table rows) instead of flattened to space-joined text; a fenced block containing a blank line is not split across flushes; reasoning rows carry the left edge and reasoning tint; collapse then reveal restores the rendered Markdown structure; resize and a theme cycle re-render the reasoning block with its structure and cues preserved."
+    context: "The live TUI flattened every reasoning newline to a space (normalize_soft_breaks) and word-wrapped the result, so model thinking containing lists, tables, or code fences read as a garbled run-on sentence while answer text received full Markdown rendering. REQUIREMENTS 'Functional requirements', CONTRACT 'Behavioral guarantees', and DESIGN 'Terminal UI' now specify the Markdown treatment for reasoning."
+    purpose: "Define the reasoning rendering semantics as failing tests before implementation."
+    expected_outcome: "The new tests fail on the current flattening behavior and pass once reasoning renders through the shared Markdown pipeline with the reasoning overlay."
+    kind: test
+    status: completed
+    depends_on: []
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#Functional-requirements"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-20T07:30:44Z"
+      updated_at: "2026-10-20T08:21:13Z"
+      completed_at: "2026-10-20T08:21:13Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "skott-reasoning-md-implement-code"
+    title: "Render reasoning through the shared Markdown pipeline"
+    description: "Flush streamed reasoning on the same fence-aware block boundaries as answer text (next_block_end), render each complete block through MarkdownRenderer at the content width minus the edge, and overlay the reasoning cues (block-first edge, continuation bar, reasoning tint on every span, muted reasoning foreground for unstyled prose, code patch retained on code rows). Reasoning rows retain their Markdown source so resize, theme switches, and collapse/reveal re-render the block instead of re-wrapping flattened text. Remove normalize_soft_breaks and the plain-text reasoning row builders."
+    context: "The failing tests from skott-reasoning-md-write-tests define the behavior; the answer-text pipeline (flush_paragraphs, push_markdown_block, resize, apply_theme) is the reference implementation the reasoning path reuses."
+    purpose: "Make live thinking read with the same Markdown fidelity as the answer while staying visually distinct."
+    expected_outcome: "All reasoning-rendering tests pass, the existing TUI suites stay green, and the workspace build plus strict clippy are clean."
+    kind: implementation
+    status: completed
+    depends_on:
+      - "skott-reasoning-md-write-tests"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#Functional-requirements"
+      - "DESIGN.md#Terminal-UI"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-20T07:30:44Z"
+      updated_at: "2026-10-20T08:21:13Z"
+      completed_at: "2026-10-20T08:21:13Z"
+    blocked_reason: null
+    recovery_state: null
+  - id: "skott-reasoning-md-security-audit"
+    title: "Audit the reasoning rendering boundaries"
+    description: "Independently inspect the changed reasoning path for untrusted-input hazards (model reasoning text treated as data, never as control: fence parsing bounds, no shell or filesystem interpretation, no secret leakage beyond the existing transcript surface), transcript retention and eviction invariants (bounded rows, placeholder/hidden-run pairing), and any change to authority, sandbox grants, or recording behavior."
+    context: "Internal/implementer review of the changed TUI reasoning path; this is not the source-blind certification and awaits an independent context."
+    purpose: "Preserve independent confirmation that Markdown reasoning rendering weakens no bound and grants no new authority."
+    expected_outcome: "A security audit records satisfied controls, findings, and required fixes or explicit blockers."
+    kind: security-audit
+    status: pending
+    depends_on:
+      - "skott-reasoning-md-implement-code"
+    requirements:
+      - "CONTRACT.md#Security-and-authority"
+      - "REQUIREMENTS.md#Functional-requirements"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-20T07:30:44Z"
+      updated_at: "2026-10-20T07:30:44Z"
+      completed_at: null
+    blocked_reason: null
+    recovery_state: null
+  - id: "skott-reasoning-md-compliance-review"
+    title: "Review reasoning-rendering compliance"
+    description: "Derive observed behavior from source and tests in a clean-slate context, then compare the implementation record with the requirements, contract, and design in a source-blind context, retaining discrepancies for human arbitration."
+    context: "Per the project's current enforcement note, component accept only structurally validates and records revisions; this gate awaits the separate source-blind reviewer and must never be self-certified. A clean-slate IMPL.md update for the Markdown reasoning rendering is outstanding for that reviewer."
+    purpose: "Retain an independent disposition for the reasoning-rendering change."
+    expected_outcome: "A source-blind review records satisfied clauses, discrepancies, and required arbitration."
+    kind: compliance-review
+    status: pending
+    depends_on:
+      - "skott-reasoning-md-security-audit"
+    requirements:
+      - "CONTRACT.md#Behavioral-guarantees"
+      - "REQUIREMENTS.md#Functional-requirements"
+      - "ROOT_CONTRACT.md#Change-and-compliance-rules"
+    timestamps:
+      created_at: "2026-10-20T07:30:44Z"
+      updated_at: "2026-10-20T07:30:44Z"
       completed_at: null
     blocked_reason: null
     recovery_state: null

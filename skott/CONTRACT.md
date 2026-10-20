@@ -1023,6 +1023,14 @@ Options:
   placeholders, and agent-produced content (markdown, tool calls/results,
   notices, terminal status) each carry their own subtle, low-contrast
   background, and single-line tool rows share the agent-content background.
+- Reasoning rows render the streamed reasoning text as Markdown through the
+  same renderer, width, and block semantics as answer text: line breaks,
+  lists, tables, and language-tagged code fences keep their structure, and a
+  fenced block is never split across flushes even when it contains blank
+  lines. Rendered reasoning rows then carry the reasoning cues — a left edge
+  (▌ on the first row of a block, │ on continuations) and the reasoning tint —
+  and retain their Markdown source, so resize and theme changes re-render the
+  block and collapse/reveal restores the rendered structure.
 - The terminal UI starts immediately: model transport setup and the provider
   connection/load run on a background worker while the transcript is shown in a
   starting state, and the first prompt is held and submitted when the worker is
