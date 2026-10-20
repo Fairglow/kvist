@@ -43,10 +43,50 @@ sandboxes, and governance tools.
 
 For a source-backed assessment of what `skott` can reuse or learn from
 Goose, OpenCode, Codex, and other runtimes, see the
-[upstream agent comparison](docs/sav/upstream-agent-comparison.md).
-The [security-first runner guide](docs/sav/runner-hardening.md)
+[upstream agent comparison](docs/agent-runtime/upstream-agent-comparison.md).
+The [security-first runner guide](docs/agent-runtime/runner-hardening.md)
 documents the implemented improvements, native-helper installation, headless
 llama-server usage, authority limits and independent qualification record.
+
+## Components
+
+Kvist is one Cargo workspace of five peer components. The root manifest
+(`Cargo.toml`) builds them all; each component owns a directory with the
+five-artifact intent set (`REQUIREMENTS.md`, `CONTRACT.md`, `DESIGN.md`,
+`TODOS.yaml`, `IMPL.md`) and its own README. The approved decomposition is
+the canonical component table in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+| Component | Directory | Binary          | Role                                                                                                       |
+| --------- | --------- | --------------- | ---------------------------------------------------------------------------------------------------------- |
+| **maerg** | `maerg/`  | `kvist`         | The CLI and workflow engine: project artifacts, discovery, status, queues, task lifecycle, policy, evidence. |
+| **sav**   | `sav/`    | `sav-run`       | Provider-neutral prompt acquisition, command rendering, process supervision, profiles, model transport.     |
+| **galla** | `galla/`  | `galla-runner`  | Independent Linux enforcement boundary: request validation and Bubblewrap isolation.                        |
+| **skott** | `skott/`  | `skott`         | Interactive/headless sandboxed workspace agent shell.                                                      |
+| **blad**  | `blad/`   | `blad`          | Terminal Markdown viewer for skott session transcripts and standalone files.                               |
+
+**Dependency direction.** `maerg` (the `kvist` CLI) depends on `sav` as a
+library and speaks to `galla` only through the versioned sandbox protocol.
+`skott` depends on `sav`, `galla`, and `blad` (its Markdown renderer). `blad`
+depends on `sav`. `galla` is an independent enforcement boundary: nothing
+imports its types, and it receives no maerg authority. The maerg and the
+installed runner communicate only through the versioned protocol, so the
+enforcement boundary stays independently installed and separately approved.
+
+**Standalone use.** `skott` and `blad` are standalone binaries that do not
+require the `kvist` CLI. `skott` is a self-contained agent shell driven by its
+own TOML configuration; `blad` reads skott session transcripts and any
+Markdown file. Both can also be launched from Kvist (`kvist prompt` runs
+`skott`; `blad` views the resulting transcripts). `sav` and `galla` are
+reusable libraries with their own CLIs (`sav-run`, `galla-runner`) and are
+usable independently of the `kvist` CLI.
+
+Component specifics — what each is, its purpose, and how to build and run it —
+live in the component READMEs:
+[`maerg/README.md`](maerg/README.md),
+[`sav/README.md`](sav/README.md),
+[`galla/README.md`](galla/README.md),
+[`skott/README.md`](skott/README.md), and
+[`blad/README.md`](blad/README.md).
 
 ## CLI contract
 
@@ -292,12 +332,12 @@ consumer boundary, and private realization live in
 [`sav/CONTRACT.md`](sav/CONTRACT.md), and
 [`sav/DESIGN.md`](sav/DESIGN.md).
 The layered runtime decision is documented in
-[`docs/sav/architecture.md`](docs/sav/architecture.md),
+[`docs/agent-runtime/architecture.md`](docs/agent-runtime/architecture.md),
 the current and planned runtime choices in
-[`docs/sav/runtime-selection.md`](docs/sav/runtime-selection.md),
+[`docs/agent-runtime/runtime-selection.md`](docs/agent-runtime/runtime-selection.md),
 the direct transport is available for local testing, and the Rig 0.42.0
 adoption decision and contained optional adapter gates are in
-[`docs/sav/rig-evaluation.md`](docs/sav/rig-evaluation.md).
+[`docs/agent-runtime/rig-evaluation.md`](docs/agent-runtime/rig-evaluation.md).
 The current host mode is a reliability aid, not a sandbox. `fakeroot`, retry
 notices, and backups likewise do not restrict an agent's authority.
 

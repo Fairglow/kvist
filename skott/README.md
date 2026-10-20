@@ -1,15 +1,34 @@
 # skott
 
-A first-class, interactive agent shell for Kvist. `skott` lets you talk to
-an AI coding agent in a modern terminal UI while the agent does real work, in the
-style of `gemini` or GitHub `copilot`. Every tool the agent runs executes inside
-the independently installed Bubblewrap sandbox, so it never asks for per-action
-permission — the tools, working directory, and authority boundaries are declared
-once, in configuration.
+A first-class, interactive agent shell. `skott` lets you talk to an AI coding
+agent in a modern terminal UI while the agent does real work, in the style of
+`gemini` or GitHub `copilot`. Every tool the agent runs executes inside the
+independently installed Bubblewrap sandbox, so it never asks for per-action
+permission — the tools, working directory, and authority boundaries are
+declared once, in configuration.
 
-It is a standalone binary (`skott`) that is independent of the `kvist` CLI
-but shares the `sav` bounded mechanisms and the `galla-runner`
-enforcement boundary, so it can also be launched from Kvist.
+It is a standalone binary (`skott`) that is independent of the `kvist` CLI:
+it is driven by its own TOML configuration and needs no Kvist project. It
+shares the `sav` bounded mechanisms and the `galla-runner` enforcement
+boundary, so it can also be launched from Kvist (`kvist prompt` runs the same
+shell). Its Markdown rendering is provided by the `blad` library, so the
+transcript you see in skott is the same rendering `blad` uses to display
+sessions afterwards.
+
+## Prerequisites
+
+**Building.** Rust **1.95** (MSRV) on Linux. `skott` is a workspace member, so
+`cargo build -p skott` at the repository root builds it together with its
+dependencies (`sav`, `galla`, `blad`). No other tools are needed to build or
+run the test suite.
+
+**Running.** An interactive terminal and a TOML configuration (see
+[Configuration](#configuration)). At least one reachable model provider — a
+`llama-server` or `Ollama` endpoint — must be configured. For sandboxed work
+(the default) a verified `galla-runner` and a Bubblewrap backend must be
+installed; skott fails closed rather than falling back to host execution.
+Rust builds additionally need a matching `Cargo.lock` and a vendored
+`.kvist/vendored` registry provisioned on the host.
 
 ## Quick start
 
@@ -34,6 +53,26 @@ context budget. Exact resource identities stay in private session logs rather
 than cluttering the live transcript. **Ctrl+Q** restores the terminal first,
 cancels initialization or active provider work, and then joins owned workers;
 queued prompts do not start during shutdown.
+
+## Prompt steering
+
+When you submit a prompt while an autonomous task is already running, the
+submission is treated as steering guidance for the active task rather than a
+replacement task. The original objective, conversation context, completed
+filesystem effects, and observed tool results are preserved. Steering is
+delivered by appending a user message at a safe interruption point (a turn
+boundary), where it appears in the next model request; the session is not
+replaced. Per-prompt budget exhaustion ends the active task, and steering
+submitted after that point starts a new task instead.
+
+## Headless mode
+
+`skott --headless "..."` runs one sandboxed prompt without a terminal,
+writing the durable session journal and transcript. `--json` emits version-one
+NDJSON events rather than only the final answer. Headless execution is
+sandbox-only: it requires durable logging and rejects `--allow-host-execution`,
+`--host-turns`, and `--no-logs`. `kvist prompt` uses this same headless path
+when no terminal is attached.
 
 ## Configuration
 
@@ -117,7 +156,7 @@ transcript: Ctrl+Home stops auto-follow, and Ctrl+End resumes it.
 History currently displays bounded diagnostic `.log` text, not a structured
 Markdown conversation or an executable checkpoint. Files above 5 MiB are not
 listed, and individual recorded text items may be truncated at 64 KiB.
-The [Markdown transcript proposal](../docs/proposals/skott-markdown-transcripts.md)
+The [Markdown transcript proposal](../docs/proposals/agent-runner-markdown-transcripts.md)
 describes shared rendering, folding, full re-theming and safe continuation;
 those capabilities are proposed, not implemented.
 
@@ -185,6 +224,11 @@ cargo build -p skott
 cargo test -p skott
 cargo clippy -p skott --all-targets
 ```
+
+`skott` renders Markdown through the `blad` library: `blad` is the single
+source of truth for Markdown parsing and rendering, and skott converts blad's
+ANSI output to ratatui-compatible styled lines for the TUI. See
+[`blad/README.md`](../blad/README.md) for the renderer itself.
 
 The component follows the Kvist five-artifact model: [REQUIREMENTS.md](./REQUIREMENTS.md),
 [CONTRACT.md](./CONTRACT.md), [DESIGN.md](./DESIGN.md), and [TODOS.yaml](./TODOS.yaml).
