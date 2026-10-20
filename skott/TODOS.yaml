@@ -12,8 +12,8 @@ component:
 tasks:
   - id: "lifecycle-write-tests"
     title: "Pin responsive startup and router selection"
-    description: "Reproduce router metadata failure and test input, held prompts, explicit-choice precedence, cancellation and concise status."
-    context: "Router/standalone-alias regressions failed before transport repair. Follow-up FIFO and overlong-initial-prompt regressions also failed before correction. Final targeted run passes 54 tests covering lifecycle, discovery, selection, bounded ignore reads and worker teardown."
+    description: "Reproduce router metadata failure and test input, held prompts, explicit-choice precedence, cancellation and concise status. Match reconstructed PTY screen contents across interleaved redraws without accepting erased text or cross-row concatenation."
+    context: "Router/standalone-alias regressions failed before transport repair. Follow-up FIFO and overlong-initial-prompt regressions also failed before correction. Original targeted run passes 54 tests covering lifecycle, discovery, selection, bounded ignore reads and worker teardown. Quality run 39469010298 exposed an ANSI-stripping assertion that confuses interleaved differential redraws with missing input. Three deterministic regressions failed before the test-harness repair; all ten startup-lifecycle tests and 50 repeated parallel runs now pass, as do formatting and targeted strict Clippy. Production behavior and latency deadlines are unchanged; this is not a new compliance or acceptance claim."
     purpose: "Pin observable latency and selection semantics."
     expected_outcome: "An editable prompt appears before discovery and submitted prompts are retained."
     kind: test
@@ -23,7 +23,7 @@ tasks:
       - "REQUIREMENTS.md#RUN-REQ-RESPONSIVE-LIFECYCLE"
     timestamps:
       created_at: "2026-10-17T13:25:48Z"
-      updated_at: "2026-10-17T13:37:00Z"
+      updated_at: "2026-10-20T21:12:59Z"
       completed_at: "2026-10-17T13:37:00Z"
     blocked_reason: null
     recovery_state: null

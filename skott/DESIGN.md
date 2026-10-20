@@ -21,6 +21,14 @@ as regular and bound the read to 64 KiB plus one overflow byte. Log advisory
 fallbacks. Keep live worker status authoritative over outstanding discovery,
 and place an initial prompt in the editor before applying its dispatch guard.
 
+The startup PTY tests reconstruct the fixed-size visible screen before matching
+text. ANSI stripping alone cannot preserve screen contents when differential
+prompt redraws interleave with background status updates. Use the already-locked
+`vte` parser as a test-only dependency, applying cursor movement, cell overwrites
+and erasure; do not match stale text or concatenate separate screen rows.
+Deterministic fixtures cover interleaved redraws and removed text. Keep the
+existing startup and cancellation deadlines and production rendering unchanged.
+
 ## Prompt steering design
 
 When a prompt arrives while a task is active, it is treated as steering rather

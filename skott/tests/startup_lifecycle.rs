@@ -14,6 +14,11 @@ use std::time::{Duration, Instant};
 use nix::fcntl::{FcntlArg, OFlag, fcntl};
 use nix::pty::{Winsize, openpty};
 use serde_json::{Value, json};
+use unicode_width::UnicodeWidthChar;
+use vte::{Params, Parser, Perform};
+
+const TERMINAL_ROWS: u16 = 30;
+const TERMINAL_COLUMNS: u16 = 120;
 
 struct Provider {
     endpoint: String,
@@ -144,34 +149,169 @@ struct Tui {
     _root: tempfile::TempDir,
 }
 
-fn visible_text(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes);
-    let mut chars = text.chars();
-    let mut visible = String::new();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' {
-            match chars.next() {
-                Some('[') => {
-                    for ch in chars.by_ref() {
-                        if ('@'..='~').contains(&ch) {
-                            break;
-                        }
-                    }
-                }
-                Some(']') => {
-                    for ch in chars.by_ref() {
-                        if ch == '\x07' {
-                            break;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        } else if !ch.is_whitespace() {
-            visible.push(ch);
+// Model the screen operations used by the TUI, not just the printable byte history.
+struct Screen {
+    cells: Vec<Vec<char>>,
+    x: usize,
+    y: usize,
+}
+
+impl Screen {
+    fn new() -> Self {
+        Self {
+            cells: vec![vec![' '; usize::from(TERMINAL_COLUMNS)]; usize::from(TERMINAL_ROWS)],
+            x: 0,
+            y: 0,
         }
     }
-    visible
+
+    fn down(&mut self) {
+        if self.y + 1 == self.cells.len() {
+            self.cells.rotate_left(1);
+            self.cells[self.y].fill(' ');
+        } else {
+            self.y += 1;
+        }
+    }
+}
+
+impl Perform for Screen {
+    fn print(&mut self, ch: char) {
+        let width = ch.width().unwrap_or(0);
+        if width == 0 {
+            return;
+        }
+        if self.x + width > self.cells[0].len() {
+            self.x = 0;
+            self.down();
+        }
+        self.cells[self.y][self.x] = ch;
+        for offset in 1..width {
+            self.cells[self.y][self.x + offset] = ' ';
+        }
+        self.x += width;
+    }
+
+    fn execute(&mut self, byte: u8) {
+        match byte {
+            b'\r' => self.x = 0,
+            b'\n' => self.down(),
+            b'\x08' => self.x = self.x.saturating_sub(1),
+            b'\t' => self.x = ((self.x / 8 + 1) * 8).min(self.cells[0].len() - 1),
+            _ => {}
+        }
+    }
+
+    fn csi_dispatch(&mut self, params: &Params, intermediates: &[u8], ignore: bool, action: char) {
+        if ignore || !intermediates.is_empty() {
+            return;
+        }
+        let param = |index, default| {
+            params
+                .iter()
+                .nth(index)
+                .map(|value| usize::from(value[0]))
+                .unwrap_or(default)
+        };
+        let columns = self.cells[0].len();
+        let rows = self.cells.len();
+        match action {
+            'H' | 'f' => {
+                self.y = param(0, 1).saturating_sub(1).min(rows - 1);
+                self.x = param(1, 1).saturating_sub(1).min(columns - 1);
+            }
+            'A' => self.y = self.y.saturating_sub(param(0, 1).max(1)),
+            'B' => self.y = (self.y + param(0, 1).max(1)).min(rows - 1),
+            'C' => self.x = (self.x + param(0, 1).max(1)).min(columns - 1),
+            'D' => self.x = self.x.saturating_sub(param(0, 1).max(1)),
+            'G' => self.x = param(0, 1).saturating_sub(1).min(columns - 1),
+            'd' => self.y = param(0, 1).saturating_sub(1).min(rows - 1),
+            'J' => match param(0, 0) {
+                0 => {
+                    self.cells[self.y][self.x..].fill(' ');
+                    for row in &mut self.cells[self.y + 1..] {
+                        row.fill(' ');
+                    }
+                }
+                1 => {
+                    self.cells[self.y][..=self.x.min(columns - 1)].fill(' ');
+                    for row in &mut self.cells[..self.y] {
+                        row.fill(' ');
+                    }
+                }
+                2 | 3 => self.cells.iter_mut().for_each(|row| row.fill(' ')),
+                _ => {}
+            },
+            'K' => match param(0, 0) {
+                0 => self.cells[self.y][self.x..].fill(' '),
+                1 => self.cells[self.y][..=self.x.min(columns - 1)].fill(' '),
+                2 => self.cells[self.y].fill(' '),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+}
+
+fn visible_text(bytes: &[u8]) -> String {
+    let mut screen = Screen::new();
+    Parser::new().advance(&mut screen, bytes);
+    screen
+        .cells
+        .iter()
+        .map(|row| {
+            row.iter()
+                .filter(|ch| !ch.is_whitespace())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn terminal_output_matches_input_across_interleaved_redraws() {
+    let prompt = "typed-before-discovery";
+    let mut output = Vec::new();
+    let mut typed = String::new();
+    for (index, ch) in prompt.chars().enumerate() {
+        if index == 1 {
+            output.extend_from_slice(b"\x1b[5;1HToolchains: generic");
+        }
+        write!(
+            output,
+            "\x1b[28;{}H\x1b[38;5;15m{ch}\x1b[7m \x1b[0m",
+            index + 1
+        )
+        .unwrap();
+        typed.push(ch);
+        assert!(visible_text(&output).contains(&typed));
+    }
+}
+
+#[test]
+fn terminal_output_does_not_match_erased_input() {
+    let output = b"\x1b[28;1Htyped-before-discovery\x1b[28;1H\x1b[2K";
+    assert!(!visible_text(output).contains("typed-before-discovery"));
+}
+
+#[test]
+fn terminal_output_does_not_match_overwritten_input() {
+    let output = b"\x1b[28;1Htyped-before-discovery\x1b[28;1Hedited";
+    let text = visible_text(output);
+    assert!(text.contains("editedbefore-discovery"));
+    assert!(!text.contains("typed-before-discovery"));
+}
+
+#[test]
+fn terminal_output_does_not_match_cleared_screen() {
+    let output = b"\x1b[28;1Htyped-before-discovery\x1b[2J";
+    assert!(!visible_text(output).contains("typed-before-discovery"));
+}
+
+#[test]
+fn terminal_output_does_not_join_separate_rows() {
+    let output = b"\x1b[1;1Htyped-before-\x1b[2;1Hdiscovery";
+    assert!(!visible_text(output).contains("typed-before-discovery"));
 }
 
 impl Tui {
@@ -209,8 +349,8 @@ impl Tui {
         )).unwrap();
         let pty = openpty(
             Some(&Winsize {
-                ws_row: 30,
-                ws_col: 120,
+                ws_row: TERMINAL_ROWS,
+                ws_col: TERMINAL_COLUMNS,
                 ws_xpixel: 0,
                 ws_ypixel: 0,
             }),

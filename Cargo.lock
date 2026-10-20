@@ -1981,6 +1981,7 @@ dependencies = [
  "tui-textarea-2",
  "unicode-segmentation",
  "unicode-width",
+ "vte 0.15.0",
 ]
 
 [[package]]
