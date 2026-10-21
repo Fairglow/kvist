@@ -11,6 +11,226 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-text-p1-tests
+    title: "write_tests: themes and plain output"
+    description: "Pin palette/capability precedence, all render routes and escape-free dumps."
+    purpose: "Specify accepted output policy before implementation"
+    expected_outcome: "Regressions fail against current theme and dump behavior"
+    context: "Human accepted TEXT_RENDERING_PLAN.md on 2026-10-21; advisory findings acknowledged in DESIGN.md."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: test
+    status: pending
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-038"]
+  - id: blad-text-p1-code
+    title: "implement_code: shared themes and output settings"
+    description: "Resolve CLI policy, share typed settings, preserve host palettes and plain dumps."
+    purpose: "Provide coherent text-only appearance"
+    expected_outcome: "P1 output-policy tests pass"
+    context: "Include immutable asset reuse and absence of render-time input/process effects."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: implementation
+    status: pending
+    depends_on: [blad-text-p1-tests]
+    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-040"]
+  - id: blad-text-p1-audit
+    title: "security_audit: theme and output boundaries"
+    description: "Inspect inert controls, CLI policy, output encoding and failure propagation."
+    purpose: "Review P1 input and authority boundaries"
+    expected_outcome: "Scoped findings and dispositions recorded"
+    context: "No whole-component security certification is implied."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: security-audit
+    status: pending
+    depends_on: [blad-text-p1-code]
+    requirements: ["REQUIREMENTS.md#R-038"]
+  - id: blad-text-p1-review
+    title: "compliance_review: theme and output evidence"
+    description: "Independently derive observed behavior and compare source-blind to local intent."
+    purpose: "Separate implementation from compliance evidence"
+    expected_outcome: "P1 evidence and discrepancies retained"
+    context: "Source-derived observation and source-blind comparison require separate contexts."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: compliance-review
+    status: pending
+    depends_on: [blad-text-p1-audit]
+    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-039"]
+  - id: blad-text-p2-tests
+    title: "write_tests: adjacent script spans"
+    description: "Pin scripts, escaped/code literals, nesting and all-or-nothing fallbacks."
+    purpose: "Specify Unicode script semantics"
+    expected_outcome: "P2 regressions fail before glyph conversion"
+    context: "Freeze exact mappings and parser-extension profile before these tests."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: test
+    status: pending
+    depends_on: [blad-text-p1-review]
+    requirements: ["REQUIREMENTS.md#R-035"]
+  - id: blad-text-p2-code
+    title: "implement_code: parser-aware scripts"
+    description: "Add curated mappings and adjacent-span extension without rewriting source."
+    purpose: "Preserve script meaning in terminal text"
+    expected_outcome: "P2 script regressions pass"
+    context: "Preserve code, escapes and surrounding style state."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: implementation
+    status: pending
+    depends_on: [blad-text-p2-tests]
+    requirements: ["REQUIREMENTS.md#R-035"]
+  - id: blad-text-p2-audit
+    title: "security_audit: script parsing"
+    description: "Inspect delimiter progress, source boundaries, nesting and control handling."
+    purpose: "Review bounded script processing"
+    expected_outcome: "P2 scoped findings retained"
+    context: "Inspect finite progress and whole-span fallback behavior."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: security-audit
+    status: pending
+    depends_on: [blad-text-p2-code]
+    requirements: ["REQUIREMENTS.md#R-038"]
+  - id: blad-text-p2-review
+    title: "compliance_review: script evidence"
+    description: "Derive and compare independent script observations without source/intent mixing."
+    purpose: "Verify P2 evidence independently"
+    expected_outcome: "P2 observations and discrepancies retained"
+    context: "Keep reviewer source and intent contexts independent."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: compliance-review
+    status: pending
+    depends_on: [blad-text-p2-audit]
+    requirements: ["REQUIREMENTS.md#R-035", "REQUIREMENTS.md#R-039"]
+  - id: blad-text-p3-tests
+    title: "write_tests: bounded mathematical text"
+    description: "Pin grammar, grouping, currency/delimiters, source fallbacks and limits."
+    purpose: "Specify math meaning before conversion"
+    expected_outcome: "P3 regressions fail before math implementation"
+    context: "Freeze exact commands, currency policy and limit fixtures before code."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: test
+    status: pending
+    depends_on: [blad-text-p2-review]
+    requirements: ["REQUIREMENTS.md#R-036", "REQUIREMENTS.md#R-038"]
+  - id: blad-text-p3-code
+    title: "implement_code: bounded mathematical projection"
+    description: "Enable math events, preserve raw source and project only the supported grammar."
+    purpose: "Provide unambiguous inline/display math"
+    expected_outcome: "P3 math regressions pass"
+    context: "Do not partially convert unsupported expressions."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: implementation
+    status: pending
+    depends_on: [blad-text-p3-tests]
+    requirements: ["REQUIREMENTS.md#R-036", "REQUIREMENTS.md#R-038"]
+  - id: blad-text-p3-audit
+    title: "security_audit: mathematical parser limits"
+    description: "Inspect progress, recursion/output bounds and no-execution guarantees."
+    purpose: "Review untrusted formula handling"
+    expected_outcome: "P3 scoped findings retained"
+    context: "Exact source excludes visible inert-control escaping and explicit bounded omission."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: security-audit
+    status: pending
+    depends_on: [blad-text-p3-code]
+    requirements: ["REQUIREMENTS.md#R-038"]
+  - id: blad-text-p3-review
+    title: "compliance_review: mathematical evidence"
+    description: "Independently observe formulas and compare source-blind to the declared grammar."
+    purpose: "Preserve independent P3 evidence"
+    expected_outcome: "P3 observations and discrepancies retained"
+    context: "No implementer self-certification."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: compliance-review
+    status: pending
+    depends_on: [blad-text-p3-audit]
+    requirements: ["REQUIREMENTS.md#R-036", "REQUIREMENTS.md#R-039"]
+  - id: blad-text-p4-tests
+    title: "write_tests: native text diagram corpus"
+    description: "Compare pinned engines, record budgets and assert spatial/semantic invariants."
+    purpose: "Admit one backend from evidence"
+    expected_outcome: "Engine selection and failing adapter regressions recorded"
+    context: "Require numeric work/cancellation budgets before backend admission."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: test
+    status: pending
+    depends_on: [blad-text-p1-review]
+    requirements: ["REQUIREMENTS.md#R-037", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-040"]
+  - id: blad-text-p4-code
+    title: "implement_code: native text Mermaid"
+    description: "Vendor admitted engine, remove mmdc and integrate bounded unwrapped diagrams."
+    purpose: "Render real terminal text boxes without runtime tools"
+    expected_outcome: "P4 admitted-family corpus passes"
+    context: "ER is required; unsuitable backend warrants explicit arbitration, not weakened guarantees."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: implementation
+    status: pending
+    depends_on: [blad-text-p4-tests]
+    requirements: ["REQUIREMENTS.md#R-037", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-040"]
+  - id: blad-text-p4-audit
+    title: "security_audit: native diagram boundaries"
+    description: "Inspect backend input/work/grid limits, cancellation, output and dependency scope."
+    purpose: "Review untrusted diagram processing"
+    expected_outcome: "P4 scoped findings and dependency notices retained"
+    context: "Review selected feature graph, not all optional upstream features."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: security-audit
+    status: pending
+    depends_on: [blad-text-p4-code]
+    requirements: ["REQUIREMENTS.md#R-038"]
+  - id: blad-text-p4-review
+    title: "compliance_review: text diagram evidence"
+    description: "Independently derive diagram observations and compare to admitted-family intent."
+    purpose: "Preserve independent P4 evidence"
+    expected_outcome: "P4 observations and discrepancies retained"
+    context: "Parser acceptance alone does not demonstrate spatial output."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: compliance-review
+    status: pending
+    depends_on: [blad-text-p4-audit]
+    requirements: ["REQUIREMENTS.md#R-037", "REQUIREMENTS.md#R-039"]
+  - id: blad-text-p5-tests
+    title: "write_tests: text rendering integration"
+    description: "Cover cross-feature CLI, PTY resize, consumers, dumps and preserved export."
+    purpose: "Pin integrated text-only behavior"
+    expected_outcome: "Integration regressions expose remaining gaps"
+    context: "Include highlighting asset reuse and no rendering subprocess/terminal-input effects."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: test
+    status: pending
+    depends_on: [blad-text-p2-review, blad-text-p3-review, blad-text-p4-review]
+    requirements: ["REQUIREMENTS.md#R-039"]
+  - id: blad-text-p5-code
+    title: "implement_code: finish integrated rendering"
+    description: "Resolve integrated gaps and publish exact CLI and supported-profile documentation."
+    purpose: "Deliver consistent rendering surfaces"
+    expected_outcome: "Integrated behavior and documentation agree"
+    context: "Do not expand unrelated session lifecycle behavior."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: implementation
+    status: pending
+    depends_on: [blad-text-p5-tests]
+    requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-039"]
+  - id: blad-text-p5-audit
+    title: "security_audit: integrated rendering"
+    description: "Review combined controls, resources, subprocess absence and error propagation."
+    purpose: "Review final rendering boundaries"
+    expected_outcome: "Final scoped findings resolved or explicitly retained"
+    context: "Finite tests are evidence, not universal safety proof."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: security-audit
+    status: pending
+    depends_on: [blad-text-p5-code]
+    requirements: ["REQUIREMENTS.md#R-038"]
+  - id: blad-text-p5-review
+    title: "compliance_review: integrated rendering evidence"
+    description: "Derive final source/test record independently and compare source-blind to intent."
+    purpose: "Finish with inspectable independent evidence"
+    expected_outcome: "Final evidence and any human-arbitration discrepancies retained"
+    context: "Use clean-slate documenter then separate source-blind reviewer."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    kind: compliance-review
+    status: pending
+    depends_on: [blad-text-p5-audit]
+    requirements: ["REQUIREMENTS.md#R-039", "REQUIREMENTS.md#R-040"]
   - id: blad-table-text-write-tests
     title: "write_tests: text-only aspect and natural-width caps"
     description: "Reproduce excess padding using the Component Model table; independently enumerate widths under per-cell text constraints."

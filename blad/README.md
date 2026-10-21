@@ -91,6 +91,8 @@ blad show <session-id> --line-numbers
 ## Documentation
 
 - [User's Guide](docs/USAGE.md) - Complete usage documentation
+- [Text-Only Rendering Plan](docs/TEXT_RENDERING_PLAN.md) - Proposed themes,
+  Unicode scripts, limited math, and text-box Mermaid support
 - [Design](DESIGN.md) - Component design
 - [Requirements](REQUIREMENTS.md) - Functional and non-functional requirements
 - [Contract](CONTRACT.md) - CLI interface specification

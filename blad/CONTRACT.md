@@ -36,6 +36,22 @@ The `blad` executable provides:
 | `--log-dir <PATH>` | Directory containing skott session runs (default: `.skott/runs`) |
 | `--dump` | Output plain text without interactive viewer |
 | `--line-numbers` | Show rendered-line numbers in the interactive viewer |
+| `--theme auto\|dark\|light\|terminal` | Appearance; defaults to `auto`, conservatively dark when unknown |
+| `--color auto\|always\|never` | Color policy; defaults to `auto`; explicit `always` overrides `NO_COLOR` |
+| `--math unicode\|source` | Supported mathematical text projection or original TeX; defaults to `unicode` |
+| `--mermaid text\|source` | Supported text diagrams or original source; defaults to `text` |
+| `--diagram-charset unicode\|ascii` | Structural diagram glyphs; defaults to `unicode`; preserves authored Unicode |
+
+`--dump` MUST force escape-free rendered text regardless of color/theme flags.
+Automatic CLI color MUST honor a nonempty `NO_COLOR`, output TTY state and
+`TERM=dumb`. Color depth is independent of appearance. No terminal query is
+required: automatic appearance MAY use environment hints, defaulting to dark.
+Exports MUST retain source Markdown and MUST NOT render its math or diagrams.
+
+The library exposes typed rendering options and host-provided palette/color
+capabilities through `MarkdownRenderer`. Library defaults are deterministic;
+embedding hosts supply their own policy rather than inheriting CLI environment
+guessing. Width, palette, math mode and diagram options persist across reflow.
 
 ### Keyboard shortcuts (interactive viewer)
 
@@ -49,7 +65,8 @@ Blad depends on:
 
 - Skott's session format: `.skott/runs/<session-id>/session.json` and `messages/` directory
 - `$EDITOR` environment variable for edit mode
-- Optional: `mmdc` executable for Mermaid diagram rendering
+- A pinned, vendored native Rust text renderer for admitted Mermaid families;
+  no Mermaid runtime executable or browser is required
 
 ## Data and schemas
 
@@ -99,7 +116,9 @@ text. Wide graphemes may extend past the content column into the scrollbar area.
 ### Table layout semantics
 
 Tables MUST preserve their existing borderless, reverse-video header and
-alternating data-row backgrounds, with ` | ` between columns. The width budget
+alternating data-row backgrounds when styling permits, with ` | ` between
+columns. Terminal-native/monochrome/plain output MAY omit fixed backgrounds
+without changing geometry. The width budget
 includes these separators. A row's height is the maximum wrapped cell height;
 shorter cells are padded to that height.
 
@@ -137,6 +156,36 @@ Terminal controls are made inert by the same normalization used by viewport
 text. Resizing MUST solve the layout again, not shrink an already valid layout
 below its aspect floor.
 
+### Script and mathematical text
+
+Markdown `^...^` and `~...~` spans, including adjacent `E=mc^2^` and `H~2~O`,
+MUST use a curated whole-span Unicode mapping or explicit `^(...)`/`_(...)`
+fallback. Code and escaped notation MUST remain literal. These are Blad dialect
+extensions, not a claim of universal GFM syntax.
+
+Math uses parser-recognized `$...$` and `$$...$$`. The admitted grammar comprises
+literals, nested groups, single/grouped scripts, the documented Greek/operator
+commands, `\frac`, `\sqrt`, `\text`, and paired supported `\left`/`\right`
+delimiters. Fractions and roots MUST retain grouping; unsupported or malformed
+expressions MUST preserve the complete original source and delimiters with a
+visible explanation. Display math is a separate text block, never graphics.
+Escaped dollars and unmatched delimiters remain literal; currency-only
+expressions MUST NOT be converted to mathematics.
+
+### Mermaid text profile
+
+Mermaid fences MUST produce spatial text diagrams for admitted flowchart,
+sequence, state, class and ER syntax. Unsupported semantics MUST retain source
+with an explanation rather than disappear or become a success placeholder.
+The admitted profile and approximated presentation MUST be documented.
+Diagrams MUST retain authored direction, labels and endpoints and MUST NOT
+silently rotate, truncate labels, or wrap completed diagram rows to fit.
+Unicode/ASCII selection affects structural glyphs only.
+
+Resource-limit failures MUST be visible and distinct from unsupported syntax.
+Cancellation and writer failures MUST propagate rather than become source
+fallback successes. No document-triggered external command is permitted.
+
 ## Behavioral guarantees
 
 - Session listing is deterministic, sorted by creation time (newest first)
@@ -153,7 +202,9 @@ below its aspect floor.
 - Invalid session ID: clear error message with available IDs
 - File not found: standard CLI error with path
 - Terminal too small: functional with minimum dimensions, no panic
-- Missing optional tools (mmdc): fallback to plain text with note
+- Unsupported math/diagram syntax: original source with an informative note
+- Rendering resource limit: original source and a distinct limit diagnostic,
+  or an explicit error if bounded source output cannot be produced
 
 ## Security and authority
 

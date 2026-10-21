@@ -65,7 +65,7 @@ viewer session.
 
 - `render_markdown(md, writer)`: Render markdown with syntax highlighting
 - `find_syntax(ss, lang)`: Find syntax definition for a language
-- `render_mermaid(content)`: Attempt to render mermaid diagram via mmdc
+- `render_mermaid(content)`: Bounded native text-diagram adapter
 - `render_table(rows)`: Apply backgrounds and separators to the solved table
 - `write_emphasized(...)`: Write text with ANSI emphasis
 - `to_ansi_line(ranges)`: Convert syntect highlighting to ANSI
@@ -90,7 +90,7 @@ Supported Markdown features:
   - Alert blockquotes ([!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION])
 - Fenced code blocks with syntax highlighting (50+ languages)
 - Inline and display math (LaTeX)
-- Mermaid diagrams (with mmdc integration)
+- Mermaid diagrams (native text-only integration)
 
 ### Interactive viewer
 
@@ -168,15 +168,15 @@ rendered-geometry integration regressions and large prepared-text cases.
    without a terminal.
 3. **Search on rendered content:** Search operates on the rendered ANSI output,
    stripping escape codes before matching.
-4. **Mermaid fallback:** If `mmdc` is not installed, mermaid diagrams are
-   displayed as plain text with a note.
+4. **Mermaid fallback:** Unsupported diagrams retain their source and a visible
+   explanation. No renderer invocation launches `mmdc` or other executables.
 5. **No state management:** Blad is stateless; it reads files and displays
    them without maintaining persistent state.
 
 ## Failure and recovery
 
 - I/O errors are reported clearly to the user
-- Missing optional tools (mmdc) fall back gracefully
+- Unsupported math/diagram syntax retains source with diagnostics
 - Terminal resize events are handled; content reflows
 - Empty or tiny viewports do not panic
 
@@ -193,3 +193,62 @@ rendered-geometry integration regressions and large prepared-text cases.
 - Unit tests for individual rendering functions
 - Manual testing of interactive navigation and search
 - Compatibility testing with various Markdown dialects and extensions
+
+## Accepted text-only rendering design (2026-10-21)
+
+The human accepted `docs/TEXT_RENDERING_PLAN.md` and requested separate milestone
+commits. P0 records intent; P1-P5 cover themes/output, scripts, math, native
+diagrams, and integration respectively. No graphical intermediate is allowed.
+The renderer remains separate from terminal ownership and CLI policy.
+
+Typed render settings carry appearance/palette, color depth, plain-output mode,
+math mode, Mermaid mode and diagram charset. Standalone CLI policy is resolved
+once from flags/environment/TTY state. Embedders pass resolved settings.
+Automatic theme detection uses side-effect-free environment hints; the unsafe
+blocking OSC-query approach is removed rather than moved into the render loop.
+Immutable syntax/theme assets use a shared once-initialized store.
+
+The existing styled-text pipeline and display-column viewport are retained.
+Only renderer-owned SGR may be emitted, with output encoding responsible for
+capability conversion and escape-free plain output. Authored controls are made
+inert before they can become styling. Semantic palette roles cover headings,
+links, alerts, muted text, math, code/table backgrounds, search and chrome.
+Colors must not affect the text or measured width.
+
+Scripts use a shared all-or-nothing character mapping. A parser-aware text
+event extension handles adjacent delimiters without touching code, escapes or
+strikethrough. Unsupported spans retain explicit notation. Math uses the same
+script mapping and a small bounded grammar; preserve the complete original
+source range for fallback, rather than reconstructing its delimiters.
+Initial limits are 16 KiB per formula, nesting depth 32 and 64 KiB projected
+text. No macro expansion, file inclusion or executable TeX is supported.
+
+The Mermaid backend is selected from pinned Merman 0.9.1 and mmdflux 2.6.1
+using the accepted corpus criteria before integration. Prefer Merman's text-only
+feature set because ER is required. One backend only; record actual dependency
+availability, licenses, feature graph and corpus measurements before admission.
+Initial adapter ceilings are 64 KiB source, 256 nodes/participants, 512
+edges/messages, nesting 32, 262,144 grid cells and 2 MiB output. The selected
+engine's deterministic work budget and cancellation control must also be set;
+numeric backend-specific values are recorded with its evaluation.
+Do not admit an unbounded layout algorithm by checking only its final output.
+
+Source-mode bypasses conversion. Unsupported/malformed content gets a visible
+diagnostic and its unmodified source (except inert control presentation).
+Resource limits have distinct diagnostics; oversized source fallback is bounded
+and explicitly reports omitted content. Cancellation/writer failures propagate.
+Diagram rows stay unwrapped; viewport clipping and horizontal scrolling expose
+overflow. Width/charset changes invalidate diagram layout. No persistent cache
+is introduced; any measured need for caching requires a bounded in-memory key
+including source, width, charset, palette and engine/options identity.
+
+Each milestone uses failing tests before production code, followed by scoped
+security inspection and independent source-derived/source-blind evidence.
+Finite test evidence does not establish universal compliance or human acceptance.
+
+P0 advisory input was requested in a separate read-only intent context. Its
+nonbinding findings are acknowledged: freeze exact script/math/diagram profiles
+before their tests/code; source fidelity excludes inert-control escaping and
+explicit bounded omission; backend admission requires measured budgets and
+provisioned dependencies; asset reuse and absence of render-time effects need
+explicit tests. These dispositions are not a Kvist receipt.

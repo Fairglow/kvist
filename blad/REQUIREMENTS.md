@@ -62,8 +62,9 @@ Blad must provide the following capabilities:
     subscript, and alert blockquotes ([!NOTE], [!TIP], etc.).
 16. **R-016 Syntax highlighting:** Highlight fenced code blocks using
     syntect (50+ languages).
-17. **R-017 Mermaid support:** Detect mermaid fenced code blocks and attempt
-    to render using mmdc, with fallback to plain text display.
+17. **R-017 Mermaid support:** Render the admitted Mermaid subset as terminal
+    text boxes, connectors, arrows and labels, without external executables or
+    graphical intermediates. Unsupported content remains visible as source.
 18. **R-018 Math support:** Render inline and display math (LaTeX) with
     distinct styling.
 
@@ -136,6 +137,42 @@ Blad must provide the following capabilities:
 These corrections do not implement the remaining border, search, folding or
 live-follow features proposed in the blad implementation plan.
 
+### Accepted Text-Only Rendering Increment
+
+33. **R-033 Appearance:** Provide coherent dark, light and terminal-native
+    palettes, explicit host-supplied palette settings, and monochrome output.
+    Color depth and appearance are independent; color must not carry meaning
+    alone. Theme changes must not alter rendered text or geometry.
+34. **R-034 Output policy:** Apply one resolved rendering configuration to
+    standalone files, existing session routes and embedded rendering. Honor
+    explicit color overrides and `NO_COLOR` in automatic CLI mode. Dumps must
+    contain rendered text without terminal escapes; exports retain Markdown.
+    Library rendering must neither query terminal input nor launch processes.
+35. **R-035 Script notation:** Render recognized standalone and adjacent
+    superscript/subscript spans with curated Unicode mappings. Unsupported
+    complete spans use explicit `^(...)`/`_(...)` notation. Preserve ordinary
+    prose, escaped delimiters, code, nesting and already-authored Unicode.
+36. **R-036 Math projection:** Render the documented bounded TeX subset,
+    including grouping, scripts, Greek/operators, fractions, roots and text.
+    Preserve the exact original expression and delimiters on unsupported or
+    malformed input; grouping and scope must never be silently changed.
+37. **R-037 Text diagrams:** Admit flowchart, sequence, state, class and ER
+    diagrams only with evidence of spatial text rendering and preservation of
+    labels, endpoints and directions. Keep authored direction and unwrapped
+    diagram rows; horizontal scrolling takes precedence over truncation.
+    Provide Unicode and ASCII structure without transliterating authored labels.
+38. **R-038 Rendering boundaries:** Make document controls inert. Bound math
+    nesting/input and diagram input, semantic complexity, layout work, grid
+    extent and output. Distinguish unsupported content from resource failures,
+    cancellation and writer errors; retain actionable diagnostics.
+39. **R-039 Integration evidence:** Cover configuration precedence, scripts,
+    math, admitted diagram families, exact fallbacks, Unicode, tiny viewports,
+    resize, writer failure and existing embedding consumers. Test semantic and
+    geometric invariants, not success markers alone.
+40. **R-040 Rendering efficiency:** Reuse immutable highlighting assets; avoid
+    unbounded persistent caches and per-render terminal/process effects. Record
+    measured diagram corpus cost and numeric limits before backend admission.
+
 ## Constraints
 
 - **C-001 Dependencies:** Use existing workspace dependencies where
@@ -144,6 +181,8 @@ live-follow features proposed in the blad implementation plan.
     format; it does not define its own session storage format.
 - **C-003 Headless:** No cloud services, telemetry, or runtime daemon
     required for core commands.
+- **C-004 Text only:** Do not generate or display PNG/SVG, including intermediate
+    graphics. Do not require image protocols, Chromium, Node or Graphviz.
 
 ## Out of scope
 
