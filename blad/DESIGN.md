@@ -214,6 +214,27 @@ rendered-geometry integration regressions and large prepared-text cases.
 
 ## Accepted text-only rendering design (2026-10-21)
 
+### P2 script profile
+
+Script spans use literal, unescaped `^` or single `~` delimiters within one
+parser text payload. They do not cross whitespace, code, HTML, math or Markdown
+formatting boundaries. Native Markdown strikethrough retains precedence.
+Surrounding emphasis, heading, link and alert styles are retained. The extension
+uses parser source offsets rather than rewriting Markdown, so decoded entity
+delimiters and backslash-escaped delimiters cannot acquire script semantics.
+Nested script/markup syntax is not interpreted inside a span.
+Touching completed spans such as `^2^^3^` are separate projections; empty or
+unmatched doubled delimiters stay literal. A decoded entity or escaped token
+inside a prospective span breaks its literal source run rather than being
+reinterpreted as syntax.
+
+The exact superscript map is digits `0-9`, `+ - = ( )`, `i` and `n`.
+The exact subscript map is digits `0-9`, `+ - = ( )`, and
+`a e h i j k l m n o p r s t u v x`. Mapping is whole-span: if any character is
+unmapped, the complete content becomes `^(content)` or `_(content)`. No glyph
+substitution is performed in code, escaped notation, or unmatched delimiters.
+This small, stable map is also the script primitive for P3 mathematics.
+
 The human accepted `docs/TEXT_RENDERING_PLAN.md` and requested separate milestone
 commits. P0 records intent; P1-P5 cover themes/output, scripts, math, native
 diagrams, and integration respectively. No graphical intermediate is allowed.

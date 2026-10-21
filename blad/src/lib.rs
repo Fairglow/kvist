@@ -15,6 +15,7 @@ pub use theme::{
 
 mod inline;
 mod output;
+mod scripts;
 mod table;
 mod terminal_text;
 mod viewport;

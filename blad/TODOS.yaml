@@ -61,9 +61,9 @@ tasks:
     purpose: "Specify Unicode script semantics"
     expected_outcome: "P2 regressions fail before glyph conversion"
     context: "Freeze exact mappings and parser-extension profile before these tests."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:31:51Z", completed_at: "2026-10-21T18:31:51Z"}
     kind: test
-    status: pending
+    status: done
     depends_on: [blad-text-p1-review]
     requirements: ["REQUIREMENTS.md#R-035"]
   - id: blad-text-p2-code
@@ -72,9 +72,9 @@ tasks:
     purpose: "Preserve script meaning in terminal text"
     expected_outcome: "P2 script regressions pass"
     context: "Preserve code, escapes and surrounding style state."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:31:51Z", completed_at: "2026-10-21T18:31:51Z"}
     kind: implementation
-    status: pending
+    status: done
     depends_on: [blad-text-p2-tests]
     requirements: ["REQUIREMENTS.md#R-035"]
   - id: blad-text-p2-audit
@@ -83,9 +83,9 @@ tasks:
     purpose: "Review bounded script processing"
     expected_outcome: "P2 scoped findings retained"
     context: "Inspect finite progress and whole-span fallback behavior."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:31:51Z", completed_at: "2026-10-21T18:31:51Z"}
     kind: security-audit
-    status: pending
+    status: done
     depends_on: [blad-text-p2-code]
     requirements: ["REQUIREMENTS.md#R-038"]
   - id: blad-text-p2-review
@@ -93,10 +93,10 @@ tasks:
     description: "Derive and compare independent script observations without source/intent mixing."
     purpose: "Verify P2 evidence independently"
     expected_outcome: "P2 observations and discrepancies retained"
-    context: "Keep reviewer source and intent contexts independent."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    context: "Source-only observation/audit and source-blind comparison in IMPL.md; no proven mismatch; cross-feature evidence retained for P5."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:31:51Z", completed_at: "2026-10-21T18:31:51Z"}
     kind: compliance-review
-    status: pending
+    status: done
     depends_on: [blad-text-p2-audit]
     requirements: ["REQUIREMENTS.md#R-035", "REQUIREMENTS.md#R-039"]
   - id: blad-text-p3-tests

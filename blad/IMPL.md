@@ -4,6 +4,55 @@
 
 Date: 2026-10-12
 
+## Script notation observation - 2026-10-21
+
+A separate clean-slate source observer read only script, parser, inline and
+script-test code, excluding intent, queues, previous records/reviews, history
+and peers. It reported:
+
+- Native superscript/subscript start/end events become one-byte `^`/`~` text
+  delimiters using their source offsets. Adjacent text events merge only when
+  their ranges are contiguous and each exactly matches the source.
+- Recognition requires a nonempty, whitespace-free span with matching single
+  delimiters. Escaping uses preceding-backslash parity. Scanning does not cross
+  formatting, code, or decoded-text event boundaries.
+- Exact mappings: super `0123456789+-=()in` to `⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁱⁿ`;
+  sub `0123456789+-=()aehijklmnoprstuvx` to
+  `₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₐₑₕᵢⱼₖₗₘₙₒₚᵣₛₜᵤᵥₓ`.
+- Projection is whole-span: any unsupported character produces `^(content)` or
+  `_(content)`, without partial substitution or added surrounding spaces.
+- Inline/fenced code bypass projection. Source-mismatch guards prevent decoded
+  escapes/entities from becoming script syntax. Separate surrounding entities
+  do not disable adjacent scripts. Strikethrough remains a formatting boundary
+  and can contain projected scripts.
+- Ordinary projected text retains the current inline style. Table cells collect
+  projected text. Wrapping measures projected Unicode text and retains style
+  spans across grapheme-based splits.
+
+The independent scoped audit found no confirmed panic, nontermination or
+superlinear path. Cursors advance monotonically, map lookup is fixed-size and
+additional merging/projection/word memory is linear; scripts have no separate
+input-size limit. The observer independently ran six script tests and the
+updated library script regression successfully.
+
+Audit evidence gaps prompted additional cases for actual emitted bold/link
+styling, interior entities/escapes, touching spans, the complete glyph maps and
+a 200,000-character unmatched span. A touching-span regression failed before
+the scanner was corrected: `^2^^3^ ~2~~3~` now tests as `²³ ₂₃`, while doubled
+empty openings remain literal. These additions and the existing six script
+tests pass. The local long-input case is a regression/progress check, not a
+wall-clock complexity proof.
+
+Parent verification after those additions: 87 tests passed across library,
+scripts, render-options, layout and table rendering; scoped strict Clippy
+passed. Earlier intent-pinned standalone dim/literal behavior was deliberately
+replaced by the accepted whole-span projection test.
+
+A separate source-blind P2 comparison reported bounded support and no proven
+discrepancy for R-035/R-038/R-039. It retained explicit runtime evidence for
+HTML/math boundaries, heading/alert styles, nesting and authored Unicode as
+P5 integration gaps, rather than claiming whole-component certification.
+
 ## Appearance/output observation - 2026-10-21
 
 Independent source-only contexts observed this milestone without intent,

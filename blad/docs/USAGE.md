@@ -121,6 +121,23 @@ across renders.
 
 ## Interactive Viewer
 
+### Unicode script notation
+
+Blad recognizes both standalone `^2^`/`~2~` and adjacent `E=mc^2^`/`H~2~O`,
+rendering `²`, `₂`, `E=mc²` and `H₂O`. This is a Blad Markdown dialect extension.
+Superscripts map digits, `+ - = ( )`, `i` and `n`. Subscripts map digits,
+`+ - = ( )` and `a e h i j k l m n o p r s t u v x`. Any unmapped character
+causes a whole-span fallback: `x^2q^` becomes `x^(2q)`, never a partially
+converted expression.
+
+Spans stay within one literal parser text run: they do not cross whitespace,
+formatting, code, HTML or math boundaries. Surrounding emphasis stays intact;
+`~~strikethrough~~` retains its meaning. Backslash-escaped delimiters, encoded
+delimiters and code remain literal. Unmatched delimiters are unchanged.
+Touching spans such as `^2^^3^` produce `²³`; empty `^^` stays literal.
+An entity or escaped token inside a prospective span also breaks its literal
+run, leaving that notation unprojected.
+
 The interactive viewer provides navigation, search, and edit capabilities.
 
 Prose and headings wrap to the available terminal columns after reserving the

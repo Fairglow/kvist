@@ -296,28 +296,14 @@ fn test_footnotes() {
 }
 
 #[test]
-fn test_superscript_and_subscript_are_dimmed() {
-    // pulldown-cmark only parses ^sup^ and ~sub~ as *standalone* elements; an
-    // inline occurrence (e.g. H~2~O) is plain text. A standalone element is
-    // rendered dim (SGR 2), so the discriminating assertion is the dim code.
-    let sup = render("^b^");
-    assert!(
-        sup.contains("\x1b[2m"),
-        "standalone superscript must be dimmed: {sup:?}"
-    );
-    assert!(sup.contains("b"));
-    let sub = render("~c~");
-    assert!(
-        sub.contains("\x1b[2m"),
-        "standalone subscript must be dimmed: {sub:?}"
-    );
-    assert!(sub.contains("c"));
-    // Inline occurrences are NOT parsed as sup/sub; they pass through verbatim.
+fn test_superscript_and_subscript_use_whole_span_projection() {
+    assert_eq!(strip_ansi(&render("^b^")).trim(), "^(b)");
+    assert_eq!(strip_ansi(&render("~c~")).trim(), "_(c)");
     let inline = strip_ansi(&render("H~2~O and E=mc^2^"));
     assert_eq!(
         inline.trim(),
-        "H~2~O and E=mc^2^",
-        "inline sub/sup must stay literal: {inline:?}"
+        "H₂O and E=mc²",
+        "adjacent scripts must preserve adjacency: {inline:?}"
     );
 }
 

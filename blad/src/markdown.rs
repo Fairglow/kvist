@@ -172,7 +172,7 @@ fn render_markdown_theme(
         | Options::ENABLE_SUBSCRIPT
         | Options::ENABLE_GFM;
 
-    let parser = Parser::new_ext(md, options);
+    let parser = crate::scripts::events(md, Parser::new_ext(md, options).into_offset_iter());
 
     let mut in_code_block = false;
     let mut code_language = String::new();
@@ -182,7 +182,6 @@ fn render_markdown_theme(
     let mut bold = 0_usize;
     let mut italic = 0_usize;
     let mut strikethrough = 0_usize;
-    let mut dim = 0_usize;
     let mut links = 0_usize;
     let mut quote_colors = Vec::new();
 
@@ -199,12 +198,11 @@ fn render_markdown_theme(
 
     let mut inline = InlineWriter::new(terminal_width);
 
-    for event in parser {
+    for (event, range) in parser {
         let style = Style {
             bold: bold > 0 || in_heading,
             italic: italic > 0,
             strike: strikethrough > 0,
-            dim: dim > 0,
             color: if in_heading {
                 Some(palette.heading)
             } else {
@@ -328,7 +326,12 @@ fn render_markdown_theme(
                 strikethrough = strikethrough.saturating_sub(1);
             }
             Event::Text(text) => {
-                let text = inert_source(&text);
+                let projected = if in_code_block {
+                    std::borrow::Cow::Borrowed(text.as_ref())
+                } else {
+                    crate::scripts::text(&text, md, range)
+                };
+                let text = inert_source(&projected);
                 if in_code_block {
                     code_content.push_str(&text);
                 } else if in_table {
@@ -557,18 +560,6 @@ fn render_markdown_theme(
                         ..Style::default()
                     },
                 )?;
-            }
-            Event::Start(Tag::Superscript) => {
-                dim += 1;
-            }
-            Event::End(TagEnd::Superscript) => {
-                dim = dim.saturating_sub(1);
-            }
-            Event::Start(Tag::Subscript) => {
-                dim += 1;
-            }
-            Event::End(TagEnd::Subscript) => {
-                dim = dim.saturating_sub(1);
             }
             Event::FootnoteReference(id) => {
                 let id = inert_source(&id);
