@@ -104,11 +104,11 @@ pub(super) fn resolve(
                 }
             }
             for path in native_library_layout(&root)? {
-                let (identity, fingerprint) = hash_file(&path, preparation)?;
+                let file_fingerprint = fingerprint(&inspect_path(&path)?);
                 executables.push(TrackedExecutable {
                     path,
-                    identity,
-                    fingerprint,
+                    identity: fingerprint_identity(file_fingerprint),
+                    fingerprint: file_fingerprint,
                 });
             }
         }
@@ -196,7 +196,20 @@ fn track_tree(
 pub(super) fn validate(inventory: &Inventory, preparation: &Preparation<'_>) -> Result<()> {
     for (path, expected) in &inventory.fingerprints {
         preparation.check()?;
-        if fingerprint(&inspect_path(path)?) != *expected {
+        // The no-symlink-ancestor invariant was established once at startup by
+        // `track_tree`, which inspected every node. Re-walking each ancestor per
+        // call is redundant, so a single direct `symlink_metadata` yields the same
+        // dev/ino/size/mtime/ctime fingerprint fields with one syscall instead of
+        // one per path component. Drift detection is unchanged, including in-place
+        // rewrites (which update size/mtime and do not touch the parent directory).
+        let metadata = fs::symlink_metadata(path).map_err(|e| {
+            io_error(
+                "recheck installed Rust inventory entry",
+                Some(&path.to_string_lossy()),
+                e,
+            )
+        })?;
+        if fingerprint(&metadata) != *expected {
             return Err(failure(
                 "installed Rust inventory or target layout drifted since startup; restart after host provisioning",
             ));

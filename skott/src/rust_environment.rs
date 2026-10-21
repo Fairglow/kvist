@@ -52,14 +52,16 @@ pub struct RustEnvironment {
     resources: Arc<Resources>,
 }
 
-/// An installed executable bound at resolve time to its exact bytes.
+/// An installed executable bound at resolve time to its identity and fingerprint.
 ///
-/// `identity` is the authoritative SHA-256 of the file contents captured once,
-/// and it rides on the sandbox grant identity for every call. Per-call
-/// validation compares the cheap `fingerprint` (dev/ino/size/mtime/ctime) only;
-/// any modification, truncation or replacement updates at least one of those
-/// fields, so re-reading and re-hashing hundreds of megabytes per tool call is
-/// unnecessary to keep drift detection strict.
+/// `identity` is the SHA-256 that rides on the sandbox grant identity. It is
+/// derived from the cheap `fingerprint` (dev/ino/size/mtime/ctime) rather than
+/// the file contents, so startup does not re-read hundreds of megabytes of
+/// installed toolchain material. The runner never re-hashes mounted files
+/// against their grant identity (only the bwrap backend is), and per-call
+/// validation compares the `fingerprint`; any modification, truncation or
+/// replacement updates at least one of those fields, so drift detection stays
+/// strict without re-hashing.
 #[derive(Debug)]
 struct TrackedExecutable {
     path: PathBuf,
@@ -216,6 +218,25 @@ fn fingerprint(metadata: &fs::Metadata) -> Fingerprint {
     )
 }
 
+/// A `sha256:` grant identity derived from a file's cheap fingerprint instead
+/// of its contents. Used for the large native standard-library rlibs, whose
+/// contents are never re-hashed by the runner (only the bwrap backend is) and
+/// whose drift is already detected per call through the fingerprint. This keeps
+/// the identity a valid digest bound to the file's inode, size and timestamps
+/// without reading hundreds of megabytes at startup.
+fn fingerprint_identity(fingerprint: Fingerprint) -> String {
+    let (dev, ino, len, mtime, mtime_nsec, ctime, ctime_nsec) = fingerprint;
+    let mut bytes = Vec::with_capacity(7 * 8);
+    bytes.extend_from_slice(&dev.to_le_bytes());
+    bytes.extend_from_slice(&ino.to_le_bytes());
+    bytes.extend_from_slice(&len.to_le_bytes());
+    bytes.extend_from_slice(&mtime.to_le_bytes());
+    bytes.extend_from_slice(&mtime_nsec.to_le_bytes());
+    bytes.extend_from_slice(&ctime.to_le_bytes());
+    bytes.extend_from_slice(&ctime_nsec.to_le_bytes());
+    label(&bytes)
+}
+
 fn hash_file(path: &Path, preparation: &Preparation<'_>) -> Result<(String, Fingerprint)> {
     let mut opened = file(path, MAX_FILE_BYTES)?;
     let before = opened
@@ -250,14 +271,22 @@ fn hash_file(path: &Path, preparation: &Preparation<'_>) -> Result<(String, Fing
     ))
 }
 
-fn track_executable(path: PathBuf, preparation: &Preparation<'_>) -> Result<TrackedExecutable> {
-    if inspect_path(&path)?.permissions().mode() & 0o111 == 0 {
+fn track_executable(path: PathBuf, _preparation: &Preparation<'_>) -> Result<TrackedExecutable> {
+    let metadata = inspect_path(&path)?;
+    if !metadata.is_file() {
+        return Err(failure(format!(
+            "installed Rust executable `{}` must be a regular non-link file",
+            path.display()
+        )));
+    }
+    if metadata.permissions().mode() & 0o111 == 0 {
         return Err(failure(format!(
             "installed Rust executable `{}` is not executable",
             path.display()
         )));
     }
-    let (identity, fingerprint) = hash_file(&path, preparation)?;
+    let fingerprint = fingerprint(&metadata);
+    let identity = fingerprint_identity(fingerprint);
     tracing::trace!(path = %path.display(), %identity, "Rust executable validated");
     Ok(TrackedExecutable {
         path,
@@ -633,10 +662,11 @@ impl RustEnvironment {
             executables.push(track_executable(path, &preparation)?);
         }
         for path in native_library_layout(&root)? {
-            let (file_identity, file_fingerprint) = hash_file(&path, &preparation)?;
+            let metadata = inspect_path(&path)?;
+            let file_fingerprint = fingerprint(&metadata);
             executables.push(TrackedExecutable {
                 path: path.clone(),
-                identity: file_identity,
+                identity: fingerprint_identity(file_fingerprint),
                 fingerprint: file_fingerprint,
             });
         }
