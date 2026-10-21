@@ -1,5 +1,6 @@
 use unicode_width::UnicodeWidthStr;
 
+use super::COLUMNS_PER_LINE;
 use crate::terminal_text::TerminalLine;
 
 struct Word {
@@ -41,11 +42,13 @@ impl Cell {
                 words
             })
             .collect();
-        Self {
+        let mut cell = Self {
             lines,
             minimum,
             natural,
-        }
+        };
+        cell.minimum = cell.aspect_minimum();
+        cell
     }
 
     pub fn explicit_height(&self) -> usize {
@@ -54,6 +57,10 @@ impl Cell {
 
     pub fn fits_height(&self, width: usize, cap: usize) -> bool {
         self.fragments(width).take(cap.saturating_add(1)).count() <= cap
+    }
+
+    pub fn height(&self, width: usize) -> usize {
+        self.fragments(width).count()
     }
 
     pub fn wrap(&self, width: usize) -> Vec<String> {
@@ -69,6 +76,28 @@ impl Cell {
                 line
             })
             .collect()
+    }
+
+    fn aspect_minimum(&self) -> usize {
+        let mut low = self.minimum;
+        let mut high = self.natural;
+        // Natural width is always admissible: geometry must not invent width
+        // for short values or text with unavoidable explicit line breaks.
+        while low < high {
+            let mid = low + (high - low) / 2;
+            let cap = mid / COLUMNS_PER_LINE;
+            let occupied = self
+                .fragments(mid)
+                .filter(|words| !words.is_empty())
+                .take(cap.saturating_add(1))
+                .count();
+            if occupied <= cap {
+                high = mid;
+            } else {
+                low = mid + 1;
+            }
+        }
+        low
     }
 
     fn fragments(&self, width: usize) -> impl Iterator<Item = &[Word]> {

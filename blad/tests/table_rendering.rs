@@ -152,8 +152,7 @@ fn test_table_wrapped_rows_have_no_internal_separators() {
         output
     );
 
-    // The aspect floor, not the viewport width, bounds compression.
-    assert!(lines.iter().any(|line| display_width(line) > width));
+    assert!(lines.iter().all(|line| display_width(line) <= width));
 }
 
 #[test]
@@ -165,7 +164,8 @@ fn test_table_column_min_width_ratio() {
         let widths: Vec<_> = lines[0].split(" | ").map(display_width).collect();
         let height = lines.len() - 1;
         assert_eq!(widths.len(), 2);
-        assert!(widths.iter().all(|&w| w >= 4 * height), "{output}");
+        assert_eq!(widths[0], 1, "{output}");
+        assert!(widths[1] >= 4 * height, "{output}");
         assert!(lines.iter().all(|line| line.width() == lines[0].width()));
     }
 }
@@ -271,9 +271,11 @@ fn test_table_long_content_gets_space_without_splitting_file_tokens() {
 }
 
 #[test]
-fn short_and_empty_columns_have_no_aspect_exemption() {
+fn short_and_empty_columns_never_expand_beyond_their_text() {
     let output = strip_ansi(&render_width("| A | |\n|---|---|\n| | x |", 1));
-    assert_eq!(output, "A    |     \n     | x   \n\n");
+    assert_eq!(output, "A |  \n  | x\n\n");
+    let empty = strip_ansi(&render_width("| A | |\n|---|---|\n| x | |", 100));
+    assert_eq!(empty, "A | \nx | \n\n");
 }
 
 #[test]
@@ -284,7 +286,8 @@ fn unicode_words_remain_intact_and_columns_use_display_width() {
     assert!(output.contains("e\u{301} 👩‍💻"));
     assert!(output.contains("世界"));
     let widths: Vec<_> = lines[0].split(" | ").map(display_width).collect();
-    assert!(widths.iter().all(|&w| w >= 4 * (lines.len() - 1)));
+    assert_eq!(widths[0], "e\u{301} 👩‍💻".width());
+    assert!(widths[1] >= 4 * (lines.len() - 1));
     assert!(lines.iter().all(|line| line.width() == lines[0].width()));
 }
 
@@ -318,7 +321,7 @@ fn table_writer_failures_are_propagated() {
 }
 
 #[test]
-fn explicit_cell_breaks_preserve_empty_lines_and_set_the_common_floor() {
+fn explicit_cell_breaks_preserve_empty_lines_without_inflating_widths() {
     let output = strip_ansi(&render_width(
         "| A | B |\n|---|---|\n| a<br><br />b<BR/> | x |",
         10,
@@ -326,9 +329,51 @@ fn explicit_cell_breaks_preserve_empty_lines_and_set_the_common_floor() {
     let lines: Vec<_> = output.lines().filter(|line| !line.is_empty()).collect();
     assert_eq!(lines.len(), 5, "{output}");
     let widths: Vec<_> = lines[0].split(" | ").map(display_width).collect();
-    assert_eq!(widths, [16, 16]);
+    assert_eq!(widths, [1, 1]);
     assert!(lines[1].starts_with("a "));
     assert!(lines[2].split_once(" | ").unwrap().0.trim().is_empty());
     assert!(lines[3].starts_with("b "));
     assert!(lines[4].split_once(" | ").unwrap().0.trim().is_empty());
+}
+
+#[test]
+fn component_model_columns_are_capped_at_their_text_widths() {
+    let architecture = include_str!("../../ARCHITECTURE.md");
+    let markdown = architecture
+        .split("## Component model\n\n")
+        .nth(1)
+        .unwrap()
+        .split("\n\n")
+        .next()
+        .unwrap();
+    let mut natural = vec![0; 5];
+    for (row, line) in markdown.lines().enumerate() {
+        if row == 1 {
+            continue;
+        }
+        for (column, text) in line.trim_matches('|').split('|').enumerate() {
+            let text = text.replace('`', "");
+            let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            natural[column] = natural[column].max(normalized.width());
+        }
+    }
+    for viewport in [0, 1, 80, 120, 160, 240, 1000, usize::MAX] {
+        let output = strip_ansi(&render_width(markdown, viewport));
+        let widths: Vec<_> = output
+            .lines()
+            .next()
+            .unwrap()
+            .split(" | ")
+            .map(display_width)
+            .collect();
+        assert_eq!(&widths[..2], &natural[..2], "viewport {viewport}: {output}");
+        assert!(widths.iter().zip(&natural).all(|(width, max)| width <= max));
+        assert!(
+            output.lines().filter(|line| !line.is_empty()).all(|line| {
+                line.width() == widths.iter().sum::<usize>() + 3 * (widths.len() - 1)
+            })
+        );
+        assert!(output.contains("kvist.maerg"));
+        assert!(output.contains("maerg/"));
+    }
 }

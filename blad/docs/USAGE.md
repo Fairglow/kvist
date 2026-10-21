@@ -115,10 +115,16 @@ occurrence search and live follow are not part of these layout corrections.
 
 ### Table sizing
 
-Tables keep a hard visual 2:1 width-to-height floor, including empty padding
-beside taller cells. The renderer assumes terminal character cells are twice
-as tall as wide, so each column is at least four display columns wide per line
-of the tallest table row. Actual font dimensions are not detected.
+Table width floors depend on each cell's own soft-wrapped text, not the height
+of neighboring cells. Empty lines and vertical padding never widen a column.
+The renderer assumes terminal character cells are twice as tall as wide, so
+it aims for four display columns per occupied text line (a visual 2:1 ratio).
+Actual font dimensions are not detected.
+
+A column never grows beyond its widest unwrapped text value. Short values and
+explicitly multiline text are left at their natural widths when meeting the
+ratio would require extra padding; entirely empty columns have zero content
+width. Thus a multi-line description cannot inflate an adjacent ID or path.
 
 Within the available width, the integer solver minimizes the tallest wrapped
 row. If that cannot fit, it chooses the narrowest layout that preserves the

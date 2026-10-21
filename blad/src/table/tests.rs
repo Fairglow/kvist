@@ -19,19 +19,43 @@ fn height(table: &Table, widths: &[usize]) -> usize {
         .unwrap_or(1)
 }
 
+fn natural(cell: &Cell) -> usize {
+    cell.wrap(usize::MAX)
+        .iter()
+        .map(|line| line.width())
+        .max()
+        .unwrap_or(0)
+}
+
+fn valid_text_width(cell: &Cell, width: usize) -> bool {
+    let lines = cell.wrap(width);
+    let occupied = lines.iter().filter(|line| !line.is_empty()).count();
+    lines.iter().all(|line| line.width() <= width)
+        && (width >= natural(cell) || width >= 4 * occupied)
+}
+
 // This oracle enumerates actual widths, not height caps or solver bounds.
 fn exhaustive(table: &Table, viewport: usize) {
-    let natural = table.widths(None);
-    let upper = natural.iter().sum::<usize>();
+    let natural: Vec<_> = (0..table.columns.len())
+        .map(|column| {
+            table
+                .rows
+                .iter()
+                .map(|row| natural(&row[column]))
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    assert_eq!(table.widths(None), natural);
     let overhead = table.columns.len().saturating_sub(1) * 3;
     let mut best_fit = usize::MAX;
     let mut best_overflow = (usize::MAX, usize::MAX);
     let mut candidates = vec![vec![]];
-    for _ in &table.columns {
+    for &upper in &natural {
         candidates = candidates
             .into_iter()
             .flat_map(|prefix| {
-                (4..=upper).map(move |w| {
+                (0..=upper).map(move |w| {
                     let mut widths = prefix.clone();
                     widths.push(w);
                     widths
@@ -41,13 +65,11 @@ fn exhaustive(table: &Table, viewport: usize) {
     }
     for widths in candidates {
         let h = height(table, &widths);
-        if widths.iter().any(|&w| w < 4 * h)
-            || table.rows.iter().any(|row| {
-                row.iter()
-                    .zip(&widths)
-                    .any(|(cell, &w)| cell.wrap(w).iter().any(|line| line.width() > w))
-            })
-        {
+        if table.rows.iter().any(|row| {
+            row.iter()
+                .zip(&widths)
+                .any(|(cell, &w)| !valid_text_width(cell, w))
+        }) {
             continue;
         }
         let width = widths.iter().sum::<usize>() + overhead;
@@ -59,7 +81,15 @@ fn exhaustive(table: &Table, viewport: usize) {
     let actual = table.widths(Some(viewport));
     let h = height(table, &actual);
     let width = actual.iter().sum::<usize>() + overhead;
-    assert!(actual.iter().all(|&w| w >= 4 * h), "{actual:?}");
+    assert!(
+        actual.iter().zip(&natural).all(|(w, upper)| w <= upper),
+        "{actual:?}"
+    );
+    assert!(table.rows.iter().all(|row| {
+        row.iter()
+            .zip(&actual)
+            .all(|(cell, &w)| valid_text_width(cell, w))
+    }));
     if best_fit != usize::MAX {
         assert!(width <= viewport, "{actual:?}, viewport {viewport}");
         assert_eq!(h, best_fit, "{actual:?}, viewport {viewport}");
@@ -70,7 +100,15 @@ fn exhaustive(table: &Table, viewport: usize) {
 
 #[test]
 fn exact_solver_matches_exhaustive_small_tables() {
-    let texts = ["", "a", "a b c", "ab cd ef gh", "abcdefgh", "a\nb\n"];
+    let texts = [
+        "",
+        "a",
+        "a b c",
+        "ab cd ef gh",
+        "abcdefgh",
+        "a\nb\n",
+        "\n\n",
+    ];
     for a in texts {
         for b in texts {
             let table = table(&[&["A", "B"], &[a, b]]);
@@ -79,13 +117,65 @@ fn exact_solver_matches_exhaustive_small_tables() {
             }
         }
     }
-    let table = table(&[&["a b c d", "x"], &["y", "ab cd ef gh"]]);
+    let crossed = table(&[&["a b c d", "x"], &["y", "ab cd ef gh"]]);
     for viewport in 0..=30 {
-        exhaustive(&table, viewport);
+        exhaustive(&crossed, viewport);
     }
     let three = Table::new(&[vec!["a b c".into(), "x y z".into(), "q".into()]]);
     for viewport in [0, 14, 19, 25, 40] {
         exhaustive(&three, viewport);
+    }
+    // A short multiline value is exempt at its own natural width, not the
+    // column's larger natural width supplied by a different row.
+    let mixed = table(&[&["a\nb\nc", "one two three"], &["xy", "x"]]);
+    for viewport in 0..=25 {
+        exhaustive(&mixed, viewport);
+    }
+    let paragraphs = table(&[&[
+        "a b c d e f g h i j k l m n o p q r s t",
+        "one two three four five six seven eight nine ten",
+    ]]);
+    for viewport in [0, 40, 45, 50, 60, 70, 80, 90] {
+        exhaustive(&paragraphs, viewport);
+    }
+}
+
+#[test]
+fn cell_floor_matches_exhaustive_text_geometry() {
+    let mut texts: Vec<String> = [
+        "",
+        "\n\n",
+        "a\nb\nc",
+        "世界 世界 世界",
+        "e\u{301} 👩‍💻",
+        "ab\n\ncd\n",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .collect();
+    for mut shape in 0..243 {
+        let mut words = Vec::new();
+        for _ in 0..5 {
+            words.push("x".repeat(shape % 3 + 1));
+            shape /= 3;
+        }
+        texts.push(words.join(" "));
+    }
+    for text in texts {
+        let cell = Cell::new(&text);
+        let expected = (0..=natural(&cell))
+            .find(|&width| valid_text_width(&cell, width))
+            .unwrap();
+        assert_eq!(cell.minimum, expected, "{text:?}");
+        assert_eq!(
+            Cell::new(&format!("\n\n{text}\n\n")).minimum,
+            expected,
+            "{text:?}"
+        );
+        assert!(
+            (expected..=natural(&cell)).all(|width| valid_text_width(&cell, width)),
+            "{text:?}"
+        );
     }
 }
 
@@ -124,9 +214,11 @@ fn empty_ragged_and_unbounded_tables() {
     assert!(table(&[]).widths(Some(0)).is_empty());
     assert!(table(&[&[]]).widths(None).is_empty());
     let t = table(&[&["x", "y"], &["z"]]);
-    assert_eq!(t.widths(Some(0)), [4, 4]);
+    assert_eq!(t.widths(Some(0)), [1, 1]);
     assert_eq!(t.rows[1][1].wrap(4), [""]);
-    assert_eq!(table(&[&["x\nx\nx", ""]]).widths(None), [12, 12]);
+    assert_eq!(table(&[&["x\nx\nx", ""]]).widths(None), [1, 0]);
+    assert_eq!(table(&[&["", ""]]).widths(Some(0)), [0, 0]);
+    assert_eq!(table(&[&["", ""]]).widths(Some(100)), [0, 0]);
     assert_eq!(t.widths(Some(usize::MAX)), t.widths(None));
 }
 
@@ -142,6 +234,30 @@ fn large_input_and_large_viewport_do_not_expand_the_search_space() {
     let words = "word ".repeat(10_000);
     let t = Table::new(&[vec!["x".to_owned(), words]]);
     let widths = t.widths(Some(0));
-    assert!(widths.iter().all(|&w| w >= 4 * height(&t, &widths)));
+    assert_eq!(widths[0], 1);
+    assert!(
+        t.rows[0]
+            .iter()
+            .zip(&widths)
+            .all(|(cell, &w)| valid_text_width(cell, w))
+    );
     assert_eq!(t.widths(Some(usize::MAX)), t.widths(None));
+}
+
+#[test]
+fn column_floors_ignore_neighbors_and_empty_explicit_height() {
+    let description = "one two three four five six seven eight nine ten";
+    let plain = table(&[&["id", "p/", description]]);
+    let padded = table(&[&["id", "p/", &format!("\n\n{description}\n\n")]]);
+    assert_eq!(plain.widths(Some(0)), padded.widths(Some(0)));
+    for viewport in [0, 1, 12, 30, 80, usize::MAX] {
+        let widths = plain.widths(Some(viewport));
+        assert_eq!(&widths[..2], [2, 2]);
+        assert!(
+            plain.rows[0]
+                .iter()
+                .zip(&widths)
+                .all(|(cell, &w)| valid_text_width(cell, w))
+        );
+    }
 }

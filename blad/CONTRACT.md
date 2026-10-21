@@ -104,17 +104,26 @@ includes these separators. A row's height is the maximum wrapped cell height;
 shorter cells are padded to that height.
 
 Under the fixed terminal geometry model (display-column width : line height =
-1:2), each column MUST be at least four display columns wide per line of the
-tallest rendered row. This models a visual width : height floor of 2:1.
-Actual font metrics are not queried; the guarantee is relative to that model.
-There is no short-cell exemption.
+1:2), each cell's width floor MUST come from its own nonempty wrapped text
+lines: four display columns per occupied text line, capped at the cell's
+natural width (its widest normalized explicit line without soft wrapping).
+Empty explicit lines and vertical padding MUST NOT contribute to this floor.
+A fully unwrapped value MUST NOT be widened solely for aspect ratio. This
+models a visual 2:1 text ratio where possible without adding artificial width;
+actual font metrics are not queried.
+
+Each column's lower bound MUST be the maximum of its cells' text-derived
+floors. Its upper bound MUST be the maximum of its cells' natural widths.
+An entirely empty column MUST occupy zero content columns; separators remain.
+Neither a tall neighboring cell nor unused viewport space may widen a column
+beyond that upper bound.
 
 If a valid layout fits, the renderer MUST choose the smallest possible maximum
 row height within the width budget. If none fits, it MUST overflow horizontally
 using the smallest valid total width, breaking ties by smaller maximum row
 height. Left/Right navigation continues to reveal overflow. With no width
-configured, cells MUST remain unwrapped, with additional width when necessary
-for the aspect floor. Spare viewport space MAY be distributed deterministically
+configured, columns MUST use exactly their natural widths without soft
+wrapping. Spare viewport space MAY be distributed deterministically
 up to natural column widths; total table height is not a globally optimized
 objective.
 

@@ -289,9 +289,9 @@ fn table_overflow_is_accessible_and_resize_preserves_the_first_row() {
     )
     .unwrap();
     let mut viewer = Viewer::start(&path, 30, 10, false);
-    assert_eq!(viewer.screen.line(1), "A    | B");
-    assert_eq!(viewer.screen.line(2), "x    | 0123456789ABCDEFGHIJKL");
-    viewer.keys(b"\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C");
+    assert_eq!(viewer.screen.line(1), "A | B");
+    assert_eq!(viewer.screen.line(2), "x | 0123456789ABCDEFGHIJKLMNO");
+    viewer.keys(b"\x1b[C\x1b[C\x1b[C\x1b[C");
     assert_eq!(viewer.screen.line(2), "0123456789ABCDEFGHIJKLMNOPQRS");
     assert_eq!(viewer.screen.scrolls, 0);
     viewer.resize(80, 12);

@@ -1,7 +1,8 @@
 //! Exact integer constraints for borderless, whole-word-wrapped tables.
 //!
 //! A display column is modeled as half a line high. A visual 2:1 cell
-//! therefore needs four display columns per rendered line, including padding.
+//! therefore targets four columns per occupied text line, capped at natural
+//! text width. Empty height and neighboring cells never widen a column.
 
 mod cell;
 
@@ -58,14 +59,9 @@ impl Table {
         if self.columns.is_empty() {
             return Vec::new();
         }
-        let floor = self.explicit_height.saturating_mul(COLUMNS_PER_LINE);
-        let mut previous: Vec<_> = self
-            .columns
-            .iter()
-            .map(|column| column.natural.max(floor))
-            .collect();
+        let natural: Vec<_> = self.columns.iter().map(|column| column.natural).collect();
         let Some(viewport) = viewport else {
-            return previous;
+            return natural;
         };
         let overhead = self
             .columns
@@ -73,75 +69,52 @@ impl Table {
             .saturating_sub(1)
             .saturating_mul(SEPARATOR_WIDTH);
         let budget = viewport.saturating_sub(overhead);
-        if total(&previous) <= budget {
-            return previous;
+        if total(&natural) <= budget {
+            return natural;
         }
 
-        let uniform = self.uniform_width();
-        let mut best = Vec::new();
-        let mut best_total = usize::MAX;
-        for cap in self.explicit_height..=uniform / COLUMNS_PER_LINE {
-            let floor = cap.saturating_mul(COLUMNS_PER_LINE);
-            let lower_total = self.columns.iter().fold(0usize, |sum, column| {
-                sum.saturating_add(column.minimum.max(floor))
-            });
-            if lower_total >= best_total {
-                break;
-            }
-            for (column, width) in previous.iter_mut().enumerate() {
-                *width = self.required_width(column, cap, *width);
-            }
-            let used = total(&previous);
-            if used <= budget {
-                self.distribute(&mut previous, budget - used);
-                return previous;
-            }
-            if used < best_total {
-                best.clone_from(&previous);
-                best_total = used;
-            }
+        let mut widths: Vec<_> = self.columns.iter().map(|column| column.minimum).collect();
+        if total(&widths) >= budget {
+            return widths;
         }
-        best
-    }
 
-    fn uniform_width(&self) -> usize {
-        let floor = self.explicit_height.saturating_mul(COLUMNS_PER_LINE);
-        let mut low = self
-            .columns
-            .iter()
-            .map(|column| column.minimum)
-            .max()
-            .unwrap_or(0)
-            .max(floor);
+        let mut low = self.explicit_height;
         let mut high = self
-            .columns
+            .rows
             .iter()
-            .map(|column| column.natural)
+            .flat_map(|row| row.iter().zip(&widths).map(|(cell, &w)| cell.height(w)))
             .max()
-            .unwrap_or(0)
-            .max(low);
+            .unwrap_or(1);
         while low < high {
             let mid = low + (high - low) / 2;
-            let cap = mid / COLUMNS_PER_LINE;
-            if self
-                .rows
-                .iter()
-                .flatten()
-                .all(|cell| cell.fits_height(mid, cap))
-            {
+            if self.fits_budget(mid, budget) {
                 high = mid;
             } else {
                 low = mid + 1;
             }
         }
-        low
+        for (column, width) in widths.iter_mut().enumerate() {
+            *width = self.required_width(column, low);
+        }
+        let spare = budget - total(&widths);
+        self.distribute(&mut widths, spare);
+        widths
     }
 
-    fn required_width(&self, column: usize, cap: usize, previous: usize) -> usize {
-        let mut low = self.columns[column]
-            .minimum
-            .max(cap.saturating_mul(COLUMNS_PER_LINE));
-        let mut high = previous.max(low);
+    fn fits_budget(&self, cap: usize, budget: usize) -> bool {
+        let mut used = 0usize;
+        for column in 0..self.columns.len() {
+            used = used.saturating_add(self.required_width(column, cap));
+            if used > budget {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn required_width(&self, column: usize, cap: usize) -> usize {
+        let mut low = self.columns[column].minimum;
+        let mut high = self.columns[column].natural;
         while low < high {
             let mid = low + (high - low) / 2;
             if self

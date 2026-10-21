@@ -104,13 +104,15 @@ Blad must provide the following capabilities:
     clipping must not cut ANSI controls or Unicode graphemes, and short lines
     must not reset the shared horizontal offset.
 
-29. **R-029 Table geometry:** Every displayed table cell, including empty
-    padding beside another cell in its row, must be at least twice as wide as
-    high visually. Use the explicit conservative terminal model of one display
-    column being half a line high: a column must therefore occupy at least four
-    display columns per line of the tallest rendered row. This is a hard floor,
-    including single-line cells; horizontal overflow takes precedence over
-    fitting the viewport.
+29. **R-029 Table geometry:** Compute each cell's aspect floor from its own
+    nonempty soft-wrapped text lines, never from neighboring cells, vertical
+    padding or empty explicit lines. Use the terminal model of one display
+    column being half a line high: require four display columns per occupied
+    text line, but never more than that cell's natural unwrapped width. Short
+    and explicitly multiline values are exempt once fully unwrapped. A column
+    uses the maximum of its cells' floors and must never exceed its widest
+    natural text value; an entirely empty column has width zero. Horizontal
+    overflow takes precedence over compressing below the text-derived floor.
 30. **R-030 Table optimization:** When a feasible layout fits the viewport,
     minimize the maximum rendered row height exactly. Otherwise minimize the
     total table width satisfying R-029, breaking ties by maximum row height.
@@ -124,7 +126,8 @@ Blad must provide the following capabilities:
     normalize terminal controls through the existing inert-text boundary.
 32. **R-032 Solver verification:** Exhaustive small-case width enumeration must
     independently check feasibility and the exact objectives in R-030. Cover
-    tall adjacent cells, short/empty cells, long tokens, Unicode, explicit
+    tall adjacent cells without widening short columns, the Component Model
+    table from `ARCHITECTURE.md`, short/empty cells, long tokens, Unicode, explicit
     breaks, ragged rows, zero/tiny widths, deterministic rounding, resize
     reflow, I/O failure propagation and large inputs. Measurement and wrapping
     must share line-breaking semantics without allocating strings during

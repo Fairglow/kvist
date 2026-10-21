@@ -4,6 +4,95 @@
 
 Date: 2026-10-12
 
+## Scoped text-derived table bounds observation - 2026-10-21
+
+This supplement supersedes the table-bound observations dated 2026-10-20
+below. Earlier observations remain as historical evidence, not the current
+table-bound description.
+
+### Evidence boundary
+
+Clean-slate observation used `blad/src/table/{mod.rs,cell.rs,tests.rs}`,
+table-related event handling and rendering in `blad/src/markdown.rs`,
+`blad/src/terminal_text.rs`, `blad/src/lib.rs`,
+`blad/tests/{table_rendering.rs,viewer.rs}`, and table-related assertions in
+`blad/src/markdown_tests.rs`. No intent documents, queues, existing
+implementation records, prior reviews, Git state/history, or peer
+implementations were consulted. The `include_str!` architecture fixture
+remained opaque; its referencing test was executed without following the
+fixture. No files were edited. This is source/test observation, not compliance
+certification.
+
+### Measurement and bounds
+
+Cells split on literal newlines, preserving empty and trailing explicit lines.
+Each line passes through `TerminalLine`: recognized SGR sequences are removed
+from plain text, tabs expand to eight-column stops, and other control characters
+become visible escape notation. Cells then tokenize with `split_whitespace`,
+collapsing whitespace between words to single spaces. Word widths use
+`unicode_width`.
+
+Wrapping greedily packs whole words with one intervening space; it never splits
+a word. An empty explicit line produces one empty fragment. Measurement and
+emitted wrapping share this fragment iterator.
+
+Each cell's natural width is its widest normalized explicit line, not its
+column's natural width. Starting at the longest-word width, a binary search
+derives the cell floor using four display columns per occupied wrapped fragment.
+Empty fragments do not count toward that aspect calculation. The cell's own
+natural width is always admissible, even when unavoidable explicit breaks
+prevent satisfying the four-column ratio.
+
+Column floors and natural widths are respective maxima across their cells.
+Neighboring cells' heights and empty explicit lines do not enlarge a cell's
+aspect floor. However, empty fragments still count toward measured height,
+height-cap feasibility, and rendered row height; they can therefore influence
+selected widths through the global height search.
+
+Ragged rows receive empty cells. Zero-width columns remain zero: there is no
+synthetic one-column minimum. Separators between columns still consume three
+columns.
+
+### Selection and optimization scope
+
+Without a viewport, or when natural widths fit, selection returns natural widths
+without expansion. Otherwise, the content budget is viewport width minus three
+columns per separator, using saturating subtraction. If column floors exhaust
+or exceed that budget, selection returns those floors, allowing horizontal
+overflow.
+
+For the remaining case, an outer binary search selects the smallest feasible
+maximum row height, bounded below by maximum explicit cell height and above by
+maximum cell height at column floors. Each feasibility check independently
+binary-searches the smallest width per column permitting every cell in that
+column to meet the height cap.
+
+Spare budget is distributed proportionally to remaining flexibility toward
+column natural widths, using integer shares and largest fractional remainders;
+ties favor earlier columns. The optimization is maximum row height when fitting,
+otherwise minimum total width/overflow, not total table height, individual
+row-height balance, or a separate aesthetic objective.
+
+### Rendering, verification, and limits
+
+Rendering right-pads cells to display width, pads shorter cells to their row's
+maximum height, and joins columns with ` | `. It draws no borders, reverses the
+header, alternates data-row tint, and propagates writer errors. Recognized
+case-insensitive `<br>` variants and hard breaks preserve cell newlines; soft
+breaks become spaces. Overflow is not clipped by `render_table`.
+
+Commands ran sequentially with `TMPDIR="$PWD"` exported:
+
+- `cargo test --offline --locked -p blad --lib table::` - **7 passed**,
+  0 failed; 38 filtered out.
+- `cargo test --offline --locked -p blad --test table_rendering --test viewer` -
+  **18 table-rendering and 5 viewer tests passed**, 0 failed.
+
+Evidence includes finite exhaustive width enumeration, Unicode and explicit-break
+cases, deterministic spare allocation, and PTY overflow/resize behavior. It does
+not establish exhaustive correctness for all text or physical-terminal Unicode
+behavior. Full-library/Mermaid tests were not run by this observer.
+
 ## Scoped table solver observation - 2026-10-20
 
 This supplement supersedes the earlier table-path observations below; other

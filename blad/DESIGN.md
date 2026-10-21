@@ -113,39 +113,45 @@ Whole-word greedy wrapping has a nonincreasing height as width increases; allowi
 width-dependent hard word splits would invalidate that search invariant.
 No new dependency or generic continuous constraint engine is needed.
 
-Let `h_rc(w_c)` be a prepared cell's exact wrapped height, `H` the maximum row
-height, `n` the number of columns, and `B = viewport - 3(n-1)` the saturating
-content budget. The constraints are integer `w_c >= 4H` and
-`h_rc(w_c) <= H` for every cell. The common floor includes blank cell padding;
-checking only each cell's own text height misses tall adjacent cells.
+Let `h_rc(w)` be a prepared cell's exact rendered height and `t_rc(w)` its
+number of nonempty wrapped text lines (excluding empty explicit lines and
+vertical padding). Let `N_rc` be its natural width and `L_rc` its longest
+word. Binary-search the smallest integer cell floor `m_rc` in `[L_rc, N_rc]`
+such that `w >= 4 t_rc(w)` or `w >= N_rc`. The latter is an explicit
+natural-width exemption: no value is expanded solely for shape, even if short
+text or many explicit breaks cannot achieve the aspect ratio. For empty text,
+both bounds are zero. The predicate is monotone because whole-word wrapping
+never gains occupied lines as width grows.
 
-For a candidate height cap `H`, binary-search each column for its smallest width
-that satisfies both constraints. The searches start at the larger of the
-longest word and `4H`; unwrapped width or the preceding cap's solution is a
-valid upper bound. This independently yields the exact smallest sum `S(H)`
-for that cap. Enumerate caps in ascending order; the first with `S(H) <= B`
-is the exact minimax-height solution. Otherwise retain the smallest `S(H)`
-(earlier cap wins ties) for minimum-width overflow. Separator overhead is fixed.
-All arithmetic is integer, with saturating size arithmetic at representational
-limits and `u128` proportional products.
+The column bounds are `m_c = max_r m_rc` and `N_c = max_r N_rc`.
+They constrain each width independently: `m_c <= w_c <= N_c`.
+In particular, there is no table-wide or row-wide aspect floor. All-empty
+columns have zero width, and vertical padding is only a rendering concern.
 
-To bound enumeration without a viewport-dependent search explosion,
-binary-search the smallest feasible *uniform* column width `U`. It provides
-a feasible table of width `nU`. Any cap above `floor(U/4)` already requires
-more than that content width and cannot improve the overflow optimum or
-precede the first feasible viewport solution. Start at the largest explicit
-line count, since smaller caps are impossible. Stop earlier if the sum of
-`max(4H, longest_word_c)` reaches the best overflow width: that nondecreasing
-lower bound cannot improve width or the earlier cap's tie-break.
-Height queries short-circuit
-on exceeding the cap and allocate no rendered text. The solver is polynomial
-and bounded by content, not the numeric viewport width; it does not enumerate
-column-width combinations.
+Let `H` be a maximum rendered-row-height cap and
+`B = viewport - 3(n-1)` the saturating content budget. For a candidate `H`,
+binary-search each column in `[m_c, N_c]` for the smallest width with
+`h_rc(w_c) <= H` for every cell. This yields the exact least content width
+`S(H)` at that cap. Since `m_c` no longer depends on `H`, `S(H)` is
+nonincreasing: binary-search for the smallest cap with `S(H) <= B`.
+The cap lies between the maximum explicit-line count and the maximum actual
+height at the column floors. Short-circuit infeasible candidates once their
+width sum exceeds the budget. If even the floors exceed the budget, return
+them directly: no other valid vector can have a smaller total width.
+With no viewport or sufficient width, return natural widths directly.
+Integer sums saturate at representational limits; proportional products use
+`u128`.
+
+Height queries short-circuit on exceeding the cap and allocate no rendered
+text. Bounds depend on content, not the numeric viewport width. After cell
+preparation, with `T` words/explicit lines, maximum natural width `W` and
+maximum floor height `H_max`, the solve costs
+`O(T log(W+1) log(H_max+1) + n log n)` including surplus sorting; it does not
+enumerate width combinations or height caps.
 
 After solving the cap and floor, distribute surplus up to natural widths by
 integer proportional flexibility and largest remainders, with column index as
 the stable tie-break. Increasing a width cannot invalidate feasibility.
-Without a viewport, use unwrapped widths raised to the common aspect floor.
 Minimax height is deliberate: minimizing the sum of row maxima couples the
 columns, so simple proportional water-filling does not prove that different
 objective. No such global optimum is claimed.

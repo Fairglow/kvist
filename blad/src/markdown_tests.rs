@@ -415,7 +415,7 @@ fn test_table_narrow_terminal() {
     let plain = strip_ansi(&output);
     let lines: Vec<&str> = plain.lines().collect();
 
-    // The viewport cannot compress the header below the visual aspect floor.
+    // Only the long header's own wrapped text sets its aspect floor.
     let header_height = output
         .lines()
         .take_while(|line| line.starts_with("\x1b[7m"))
@@ -424,8 +424,9 @@ fn test_table_narrow_terminal() {
         .split(" | ")
         .map(unicode_width::UnicodeWidthStr::width)
         .collect();
-    assert!(widths.iter().all(|&width| width >= 4 * header_height));
-    assert!(lines[0].len() > 30);
+    assert_eq!(widths[0], "Short".len());
+    assert!(widths[1] >= 4 * header_height);
+    assert!(lines[0].len() <= 30);
 
     // The long header must be present in the output, wrapped across lines.
     assert!(plain.contains("Very Long"));

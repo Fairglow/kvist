@@ -11,6 +11,79 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-table-text-write-tests
+    title: "write_tests: text-only aspect and natural-width caps"
+    description: "Reproduce excess padding using the Component Model table; independently enumerate widths under per-cell text constraints."
+    purpose: "Pin corrected geometry without weakening wrapping or height optimization"
+    expected_outcome: "Regressions fail before replacement of the shared row-height floor"
+    kind: test
+    context: "The actual Component Model regression reproduced widths [20, 20] instead of natural [11, 6] before replacement. The updated oracle independently enumerates text-feasible widths; short/empty, explicit-break, Unicode, resize and text-shape regressions pass."
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-030", "REQUIREMENTS.md#R-032"]
+    timestamps: {created_at: "2026-10-21T05:36:40Z", updated_at: "2026-10-21T05:42:01Z", completed_at: "2026-10-21T05:42:01Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-table-text-implement-code
+    title: "implement_code: independent text-derived bounds"
+    description: "Compute per-cell aspect floors capped at natural widths and binary-search the monotone minimax-height objective."
+    purpose: "Remove artificial width caused by blank height"
+    expected_outcome: "Columns remain within their text bounds at every viewport width"
+    kind: implementation
+    context: "Cell preparation computes independent aspect floors, ignoring blank height and exempting natural width. Column floors and caps feed a monotone binary height search; no height-cap enumeration remains. Full Blad tests, strict Clippy and Skott compilation pass."
+    status: completed
+    depends_on: [blad-table-text-write-tests]
+    requirements: ["REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-030", "REQUIREMENTS.md#R-031"]
+    timestamps: {created_at: "2026-10-21T05:36:40Z", updated_at: "2026-10-21T05:42:01Z", completed_at: "2026-10-21T05:42:01Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-table-text-security-audit
+    title: "security_audit: corrected search and empty-text bounds"
+    description: "Inspect zero-width columns, integer operations, monotone predicates and allocation-free bounded searches."
+    purpose: "Retain resource and input robustness"
+    expected_outcome: "Scoped inspection recorded without safety certification"
+    kind: security-audit
+    context: "Author-side scoped input/resource inspection: zero-width cells remain finite and empty, natural caps bound all searches, midpoint arithmetic is overflow-safe, height/text-line queries short-circuit without rendered-string allocations, and no I/O or authority boundary changed. No independent safety certification or hard resource bound is claimed."
+    status: completed
+    depends_on: [blad-table-text-implement-code]
+    requirements: ["REQUIREMENTS.md#R-031", "REQUIREMENTS.md#R-032"]
+    timestamps: {created_at: "2026-10-21T05:36:40Z", updated_at: "2026-10-21T05:42:01Z", completed_at: "2026-10-21T05:42:01Z"}
+    blocked_reason: null
+    recovery_state: null
+  - id: blad-table-text-compliance-review
+    title: "compliance_review: independent text-bound evidence"
+    description: "Derive a clean source/test observation and compare it to corrected intent in a separate source-blind context."
+    purpose: "Preserve independent evidence and human arbitration"
+    expected_outcome: "Observed behavior and any discrepancies retained without acceptance claims"
+    kind: compliance-review
+    context: |
+      Independent text-table-observer derived the 2026-10-21 IMPL.md supplement
+      from allowed source and tests, excluding intent, queue, prior records,
+      reviews and Git. Its runs passed 7 solver, 18 table-rendering and 5 PTY
+      viewer tests. The architecture fixture remained opaque to the observer.
+
+      Separate source-blind text-table-intent-comparison compared only current
+      local intent, that supplement and supplied execution evidence. It found
+      support for per-cell occupied-text floors, each cell's natural exemption,
+      independent column caps, zero-width empty columns, exact minimax search,
+      minimum-width overflow and the actual Component Model regression.
+      Empty explicit lines still affect rendered height and minimax feasibility,
+      not the aspect floor; this was found consistent with the corrected intent.
+      No concrete scoped intent/evidence discrepancy was identified.
+
+      Finite enumeration and summarized coverage are not universal proof, and
+      physical-terminal Unicode behavior remains outside the evidence. These
+      limits are retained without asserting safety, human acceptance or
+      whole-component compliance. Earlier table observations remain historical.
+
+      Author verification passed all 81 Blad tests, strict Clippy, Skott
+      consumer compilation, workspace formatting and whitespace checks.
+    status: completed
+    depends_on: [blad-table-text-security-audit]
+    requirements: ["REQUIREMENTS.md#R-029", "REQUIREMENTS.md#R-030", "REQUIREMENTS.md#R-032"]
+    timestamps: {created_at: "2026-10-21T05:36:40Z", updated_at: "2026-10-21T05:45:32Z", completed_at: "2026-10-21T05:45:32Z"}
+    blocked_reason: null
+    recovery_state: null
   - id: blad-table-write-tests
     title: "write_tests: exact table geometry and optimization"
     description: "Add failing geometry regressions and a brute-force small-case oracle before solver production code."
