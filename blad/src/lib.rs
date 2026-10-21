@@ -14,6 +14,7 @@ pub use theme::{
 };
 
 mod inline;
+mod math;
 mod output;
 mod scripts;
 mod table;

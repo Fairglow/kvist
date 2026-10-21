@@ -105,9 +105,9 @@ tasks:
     purpose: "Specify math meaning before conversion"
     expected_outcome: "P3 regressions fail before math implementation"
     context: "Freeze exact commands, currency policy and limit fixtures before code."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:44:25Z", completed_at: "2026-10-21T18:44:25Z"}
     kind: test
-    status: pending
+    status: done
     depends_on: [blad-text-p2-review]
     requirements: ["REQUIREMENTS.md#R-036", "REQUIREMENTS.md#R-038"]
   - id: blad-text-p3-code
@@ -116,9 +116,9 @@ tasks:
     purpose: "Provide unambiguous inline/display math"
     expected_outcome: "P3 math regressions pass"
     context: "Do not partially convert unsupported expressions."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:44:25Z", completed_at: "2026-10-21T18:44:25Z"}
     kind: implementation
-    status: pending
+    status: done
     depends_on: [blad-text-p3-tests]
     requirements: ["REQUIREMENTS.md#R-036", "REQUIREMENTS.md#R-038"]
   - id: blad-text-p3-audit
@@ -127,9 +127,9 @@ tasks:
     purpose: "Review untrusted formula handling"
     expected_outcome: "P3 scoped findings retained"
     context: "Exact source excludes visible inert-control escaping and explicit bounded omission."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:44:25Z", completed_at: "2026-10-21T18:44:25Z"}
     kind: security-audit
-    status: pending
+    status: done
     depends_on: [blad-text-p3-code]
     requirements: ["REQUIREMENTS.md#R-038"]
   - id: blad-text-p3-review
@@ -137,10 +137,10 @@ tasks:
     description: "Independently observe formulas and compare source-blind to the declared grammar."
     purpose: "Preserve independent P3 evidence"
     expected_outcome: "P3 observations and discrepancies retained"
-    context: "No implementer self-certification."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    context: "Source-only observation/audit and source-blind comparison in IMPL.md; supported with explicit P4/P5 integration and remediation-observation reservations."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:44:25Z", completed_at: "2026-10-21T18:44:25Z"}
     kind: compliance-review
-    status: pending
+    status: done
     depends_on: [blad-text-p3-audit]
     requirements: ["REQUIREMENTS.md#R-036", "REQUIREMENTS.md#R-039"]
   - id: blad-text-p4-tests

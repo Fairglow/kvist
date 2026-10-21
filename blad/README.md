@@ -15,8 +15,9 @@ rendering blad uses to display sessions afterwards.
 ## Features
 
 - **Full CommonMark + GFM rendering:** Headers, bold, italic, strikethrough,
-  links, images, code blocks, tables, blockquotes, task lists, footnotes,
-  superscript/subscript, math expressions
+  links, images, code blocks, tables, blockquotes, task lists and footnotes
+- **Text notation:** Curated Unicode sub/superscripts and bounded mathematical
+  text, with whole-expression source fallback for unsupported TeX
 - **Syntax highlighting:** 50+ languages via syntect
 - **Appearance:** Dark, light, or terminal-native palettes; explicit color
   capabilities for embedding applications and escape-free rendered dumps

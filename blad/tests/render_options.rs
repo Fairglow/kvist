@@ -58,6 +58,9 @@ fn authored_terminal_controls_are_inert_even_in_highlighted_code() {
     assert!(output.contains("\\u{1b}[31mred\\u{7}"), "{output:?}");
     assert!(output.contains("\\u{1b}[2J"), "{output:?}");
     assert!(!output.contains('\x1b'));
+    let output = render("a&#13;b\n\n```text\nx\ry\r\nz\n```", RenderOptions::plain());
+    assert!(!output.contains('\r'), "{output:?}");
+    assert!(output.contains("\\u{d}"), "{output:?}");
 }
 
 #[test]

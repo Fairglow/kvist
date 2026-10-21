@@ -114,6 +114,10 @@ impl InlineWriter {
         self.column > 0
     }
 
+    pub fn has_content(&self) -> bool {
+        self.has_text || !self.word.text.is_empty()
+    }
+
     pub fn set_indent(&mut self, indent: usize) {
         self.indent = self.width.map_or(indent, |width| indent.min(width - 1));
     }

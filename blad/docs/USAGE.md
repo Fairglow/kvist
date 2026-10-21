@@ -138,6 +138,67 @@ Touching spans such as `^2^^3^` produce `²³`; empty `^^` stays literal.
 An entity or escaped token inside a prospective span also breaks its literal
 run, leaving that notation unprojected.
 
+### Limited mathematical text
+
+Parser-recognized `$...$` and `$$...$$` project a deliberately small TeX-like
+grammar into terminal text. Inline formulas stay atomic; display formulas are
+separate, unwrapped text blocks. Use horizontal scrolling for overflow.
+`--math source` preserves original expression text and delimiters.
+
+| Source | Terminal text |
+|--------|---------------|
+| `$E=mc^2$` | `E=mc²` |
+| `$\alpha_i^{n+1}$` | `αᵢⁿ⁺¹` |
+| `$\frac{a+b}{c}$` | `(a+b)/(c)` |
+| `$\sqrt{x+1}$` | `√(x+1)` |
+| `$\frac{a}{b}^2$` | `((a)/(b))²` |
+| `$x/\frac{a}{b}$` | `x/((a)/(b))` |
+| `$x^{a+b}$` | `x^(a+b)` |
+
+Groups retain binding. Scripts accept a single atom or braced expression, with
+at most one of each position per atom. `\text{...}` accepts literal text,
+balanced literal braces and escaped punctuation, not nested commands.
+`\left`/`\right` accept matching `()`, `[]`, `\{\}`, `||`,
+`\langle`/`\rangle`, and `\lVert`/`\rVert` (also `\Vert` or `\|`).
+Delimiter size is not graphical. Escaped `\{ \} \$ \% \_ \# \&` are literal.
+Spacing `\, \; \: \quad \qquad \space` produces a space; `\!` is omitted.
+
+The complete admitted command vocabulary, beyond structural commands above:
+
+| Category | Commands (each prefixed with `\`) |
+|----------|-----------------------------------|
+| Lower-case Greek | `alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega` |
+| Greek variants | `varepsilon vartheta varpi varrho varsigma varphi` |
+| Upper-case Greek | `Gamma Delta Theta Lambda Xi Pi Sigma Upsilon Phi Psi Omega` |
+| Arithmetic/comparison | `times cdot div pm mp le leq ge geq ne neq approx equiv sim propto infty` |
+| Sets/logic | `in notin subset subseteq supset supseteq cup cap emptyset forall exists neg land lor` |
+| Arrows | `to rightarrow leftarrow leftrightarrow Rightarrow Leftarrow Leftrightarrow mapsto` |
+| Calculus/other | `sum prod int oint partial nabla degree ldots cdots` |
+| Named functions | `sin cos tan log ln lim exp max min det gcd` |
+
+Conventional TeX variants remain distinct: `\epsilon` → `ϵ`, `\varepsilon` →
+`ε`, `\phi` → `ϕ`, and `\varphi` → `φ`. This is not full TeX: matrices,
+environments, macros, includes, optional root indices and unknown commands
+retain the **whole original expression** with an `unsupported` explanation.
+Recognized but malformed expressions receive a distinct `invalid` explanation.
+Syntax the Markdown parser does not recognize as math stays literal.
+No partial projection, execution, external resources or graphical output occurs.
+
+Inline signed numeric amounts such as `$12.50$` stay literal. Ambiguous
+numeric-leading dollar spans immediately followed by another digit also stay
+literal when they contain no TeX/script/group syntax, preserving `$5 and $10`.
+Explicit display `$$5$$` is math. Escaped or unmatched dollars and code stay
+literal.
+
+Limits are inclusive: 16,384 input bytes per formula, 32 structural nesting
+levels and 65,536 projected UTF-8 bytes. A resource failure has a distinct
+diagnostic; source fallback above 16,384 bytes explicitly reports omitted bytes
+at a valid UTF-8 boundary. Other fallback retains complete original delimiters
+and source; tables still apply their normal whitespace normalization. Terminal
+controls are always shown inertly. Source mode skips projection.
+CRLF line endings normalize to LF; standalone carriage returns are visible
+`\u{d}` text rather than terminal cursor movement.
+
 The interactive viewer provides navigation, search, and edit capabilities.
 
 Prose and headings wrap to the available terminal columns after reserving the

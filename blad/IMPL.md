@@ -4,6 +4,61 @@
 
 Date: 2026-10-12
 
+## Mathematical text observation - 2026-10-21
+
+An independent clean-slate source observer inspected math, shared scripts,
+parser integration, inline writing and mathematical tests without intent,
+queues, prior records/reviews, project documents, history or peer/backend code.
+It independently executed 46 library and 12 mathematics tests successfully.
+Its bounded source observation reported:
+
+- Markdown enables math events alongside tables and prose scripts. Unicode
+  projection is a recursive parser, not TeX execution. It accepts literal
+  characters, nonempty braced groups, fractions, square roots, limited literal
+  `\text`, matched `\left`/`\right` delimiters, escapes and spacing commands.
+- Greek mappings distinguish epsilon/phi and their variants, plus theta, pi,
+  rho and sigma variants. Upper-case Greek and fixed operator/function maps
+  exist. Unknown commands, root indices, macros, comments/alignment and commands
+  inside `\text` fall back visibly.
+- Groups become parentheses, fractions `(numerator)/(denominator)` and roots
+  `√(argument)`. Fraction and text bases receive parentheses before scripts.
+  At most one subscript and one superscript attach to each atom, in source
+  order; shared mapping is whole-span with explicit fallback.
+- Projection accepts 16,384 input bytes, nesting through 32 and checked strings
+  through 65,536 bytes. Loops consume input or terminate; no non-progress loop
+  or unchecked recursive depth was identified.
+- Failure discards partial projection and retains delimited source with
+  distinct unsupported/invalid/resource diagnostics. Resource fallback truncates
+  source above 16,384 bytes at a UTF-8 boundary with an omitted-byte count.
+  Source/currency modes bypass projection and its limits, not document-wide
+  allocation limits.
+- Currency preserves signed digit/comma/period strings, with a broader
+  numeric-leading rule when the closing dollar immediately precedes another
+  digit. `$1+2$3` therefore also stays literal; display math bypasses this rule.
+- Original offsets refer to sanitized Markdown. Inline presentations are
+  atomic buffered spans; display presentations are unwrapped blocks; table
+  presentations enter cell strings. Writer errors propagate when flushed.
+  No external execution appeared in inspected math paths.
+
+The audit identified ambiguity for `x/\frac{a}{b}` and requested a lone-CR
+source/fallback probe. Added regressions failed before correction: fraction
+operands now test as `x/((a)/(b))` and `((a)/(b))c`, and lone CR becomes visible
+`\u{d}` while CRLF normalizes to LF, including source mode, entities and code.
+These are test-observed remediations; the final clean-source P5 observation
+must include them. The original grouping/Greek and source/limit regressions
+were also failing before their corresponding implementation.
+
+Latest parent verification: 112 tests passed across library, math, scripts,
+render-options, integration, layout, table-rendering and PTY viewer suites;
+scoped strict Clippy passed. The separate 16-test backend corpus also passed
+in the earlier full suite, with its opt-in measurement test ignored by default.
+
+A separate source-blind P3 comparison reported bounded support with no
+demonstrated outstanding R-036/R-038/R-039 mismatch. It explicitly retained
+independent reconfirmation of the two audit remediations, cancellation
+propagation and wider integration coverage for P4/P5; passing parent tests
+were not substituted for independent source observation.
+
 ## Script notation observation - 2026-10-21
 
 A separate clean-slate source observer read only script, parser, inline and

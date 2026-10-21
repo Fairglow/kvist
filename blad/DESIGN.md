@@ -235,6 +235,49 @@ unmapped, the complete content becomes `^(content)` or `_(content)`. No glyph
 substitution is performed in code, escaped notation, or unmatched delimiters.
 This small, stable map is also the script primitive for P3 mathematics.
 
+### P3 mathematical text profile
+
+Enable parser math events and retain their complete source-offset slices,
+including dollar delimiters, for source mode and whole-expression fallback.
+The private recursive-descent projector accepts literal Unicode, grouped
+expressions, one subscript and one superscript per atom, grouped `\frac`
+arguments, grouped `\sqrt`, literal `\text`, and matching `\left`/`\right`
+parentheses, brackets, escaped braces, bars and angle brackets. Fractions are
+always `(numerator)/(denominator)` and roots `√(radicand)`; ordinary groups keep
+parentheses, while script groups use the P2 whole-span mapper. Unsupported
+commands, duplicate scripts, mismatched groups/delimiters, missing arguments
+and executable/macro/include syntax reject the entire projection. There is
+no partial conversion, macro expansion, external resource loading or execution.
+Fractions also receive whole-expression parentheses when embedded in another
+expression or used as a script base: `x/\frac{a}{b}` is `x/((a)/(b))`, not
+`x/(a)/(b)`. The P3 independent audit identified this binding case; a failing
+regression preceded its correction.
+
+Greek commands cover the conventional lower-case alphabet, common variants,
+and conventional upper-case forms. Operator commands cover the documented
+arithmetic, comparison, set/logic, arrows, calculus and named-function table in
+`docs/USAGE.md`. Escaped TeX punctuation is literal. Small spacing commands
+produce a space (negative spacing is omitted); sizing is not graphical.
+`\text` permits plain characters, balanced literal braces and escaped
+punctuation, not nested commands.
+
+For inline currency conservatism, signed numeric amounts with decimal/thousands
+separators remain source. A numeric-leading inline span whose closing dollar
+immediately precedes another digit and has no TeX/script/group syntax also
+remains source, preserving ambiguous prose such as `$5 and $10`. Explicit
+display math is not currency. Escaped/unmatched dollars and code stay literal.
+
+The projector rejects input above 16,384 UTF-8 bytes, structural nesting above
+32 and projected output above 65,536 UTF-8 bytes. These are inclusive ceilings.
+Resource fallback emits at most 16,384 source bytes at a UTF-8 boundary plus
+an explicit omitted-byte count and diagnostic. Other fallback preserves the
+original source and delimiters, subject to ordinary table whitespace rules and
+inert-control representation. Source mode skips projection entirely.
+CRLF is normalized to LF before parsing; standalone carriage returns are
+escaped visibly, including decoded entities and code/fallback content.
+Inline formulas and fallbacks remain atomic text spans; display formulas are
+separate unwrapped blocks. Existing horizontal overflow handles long formulas.
+
 The human accepted `docs/TEXT_RENDERING_PLAN.md` and requested separate milestone
 commits. P0 records intent; P1-P5 cover themes/output, scripts, math, native
 diagrams, and integration respectively. No graphical intermediate is allowed.

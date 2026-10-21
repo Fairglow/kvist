@@ -308,20 +308,15 @@ fn test_superscript_and_subscript_use_whole_span_projection() {
 }
 
 #[test]
-fn test_inline_math_is_passed_through_verbatim() {
-    // pulldown-cmark 0.13 has no math option, so $inline$ is never parsed into
-    // an InlineMath event; the delimiters and body reach the output untouched.
-    // This pins the passthrough so adding real math rendering is a deliberate,
-    // reviewed update rather than a silent regression.
+fn test_inline_math_projects_the_admitted_grammar() {
     let output = strip_ansi(&render("The formula is $E=mc^2$ here"));
-    assert_eq!(output.trim(), "The formula is $E=mc^2$ here");
+    assert_eq!(output.trim(), "The formula is E=mc² here");
 }
 
 #[test]
-fn test_display_math_is_passed_through_verbatim() {
-    // $$display$$ is likewise never parsed into a DisplayMath event.
+fn test_display_math_preserves_fraction_grouping() {
     let output = strip_ansi(&render("$$\\frac{1}{2}$$"));
-    assert_eq!(output.trim(), "$$\\frac{1}{2}$$");
+    assert_eq!(output.trim(), "(1)/(2)");
 }
 
 #[test]

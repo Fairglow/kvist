@@ -168,6 +168,7 @@ fn render_markdown_theme(
         | Options::ENABLE_TASKLISTS
         | Options::ENABLE_HEADING_ATTRIBUTES
         | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_MATH
         | Options::ENABLE_SUPERSCRIPT
         | Options::ENABLE_SUBSCRIPT
         | Options::ENABLE_GFM;
@@ -195,10 +196,25 @@ fn render_markdown_theme(
 
     let mut at_start = true;
     let mut need_blank = false;
+    let mut last_display = false;
 
     let mut inline = InlineWriter::new(terminal_width);
 
     for (event, range) in parser {
+        if last_display
+            && matches!(
+                &event,
+                Event::Text(_)
+                    | Event::Code(_)
+                    | Event::InlineMath(_)
+                    | Event::FootnoteReference(_)
+            )
+            && !in_table
+        {
+            writeln!(w)?;
+            last_display = false;
+            need_blank = false;
+        }
         let style = Style {
             bold: bold > 0 || in_heading,
             italic: italic > 0,
@@ -372,7 +388,10 @@ fn render_markdown_theme(
             }
             Event::End(TagEnd::Paragraph) => {
                 inline.finish(w)?;
-                writeln!(w)?;
+                if !last_display {
+                    writeln!(w)?;
+                }
+                last_display = false;
                 inline.reset(
                     0,
                     if list_level > 0 {
@@ -586,26 +605,58 @@ fn render_markdown_theme(
                 inline.reset(0, 0);
             }
             Event::InlineMath(tex) => {
-                inline.code(
-                    &format!("${tex}"),
-                    Style {
-                        color: Some(palette.math),
-                        ..style
-                    },
-                );
+                let original = md.get(range.clone()).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "math source range is invalid",
+                    )
+                })?;
+                let currency = crate::math::currency(&tex, md[range.end..].chars().next());
+                let text = crate::math::present(&tex, original, settings.math, currency);
+                if in_table {
+                    if let Some(cell) = table_row_cells.last_mut() {
+                        cell.push_str(&text);
+                    }
+                } else {
+                    inline.code(
+                        &text,
+                        Style {
+                            color: Some(palette.math),
+                            ..style
+                        },
+                    );
+                }
             }
             Event::DisplayMath(tex) => {
-                inline.finish(w)?;
-                inline.reset(0, 0);
-                if !at_start {
-                    writeln!(w)?;
+                let original = md.get(range).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "math source range is invalid",
+                    )
+                })?;
+                let text = crate::math::present(&tex, original, settings.math, false);
+                if in_table {
+                    if let Some(cell) = table_row_cells.last_mut() {
+                        cell.push_str(&text);
+                    }
+                } else {
+                    let had_content = inline.has_content();
+                    inline.finish(w)?;
+                    inline.reset(0, 0);
+                    if had_content {
+                        writeln!(w)?;
+                        writeln!(w)?;
+                    } else if need_blank {
+                        writeln!(w)?;
+                    }
+                    palette.math.write(w, false)?;
+                    writeln!(w, "{text}\x1b[0m")?;
+                    need_blank = true;
+                    last_display = true;
                 }
-                palette.math.write(w, false)?;
-                write!(w, "${} $\x1b[0m", tex)?;
-                writeln!(w)?;
-                need_blank = true;
             }
             Event::Start(Tag::Paragraph) => {
+                last_display = false;
                 if inline.has_prefix() {
                     need_blank = false;
                 } else if need_blank {
@@ -826,13 +877,17 @@ fn get_terminal_theme(ts: &ThemeSet) -> Option<&syntect::highlighting::Theme> {
 pub(crate) fn inert_source(source: &str) -> std::borrow::Cow<'_, str> {
     if !source
         .chars()
-        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+        .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
     {
         return std::borrow::Cow::Borrowed(source);
     }
     let mut output = String::with_capacity(source.len());
-    for character in source.chars() {
-        if character.is_control() && !matches!(character, '\n' | '\r' | '\t') {
+    let mut characters = source.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\r' && characters.peek() == Some(&'\n') {
+            continue;
+        }
+        if character.is_control() && !matches!(character, '\n' | '\t') {
             use std::fmt::Write;
             let _ = write!(output, "\\u{{{:x}}}", u32::from(character));
         } else {
