@@ -11,7 +11,7 @@ pub(crate) struct Style {
     pub strike: bool,
     pub reverse: bool,
     pub dim: bool,
-    pub color: Option<u8>,
+    pub color: Option<crate::theme::Color>,
 }
 
 impl Style {
@@ -32,7 +32,7 @@ impl Style {
             }
         }
         if let Some(color) = self.color {
-            write!(w, "\x1b[{color}m")?;
+            color.write(w, false)?;
         }
         write!(w, "{text}\x1b[0m")
     }

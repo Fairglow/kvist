@@ -6,6 +6,7 @@ use crossterm::{
     terminal::{Clear, ClearType},
 };
 
+use crate::RenderOptions;
 use crate::markdown::MarkdownRenderer;
 use crate::terminal_text::TerminalLine;
 
@@ -14,14 +15,33 @@ pub(crate) struct Document {
     pub content_width: usize,
     pub gutter: usize,
     max_width: usize,
+    chrome: String,
+    search: String,
 }
 
 impl Document {
+    #[cfg(test)]
     pub fn render(
         source: &str,
         columns: u16,
         numbers: bool,
         width_limit: Option<usize>,
+    ) -> io::Result<Self> {
+        Self::render_with_options(
+            source,
+            columns,
+            numbers,
+            width_limit,
+            &RenderOptions::default(),
+        )
+    }
+
+    pub fn render_with_options(
+        source: &str,
+        columns: u16,
+        numbers: bool,
+        width_limit: Option<usize>,
+        options: &RenderOptions,
     ) -> io::Result<Self> {
         let available = usize::from(columns.saturating_sub(1));
         let mut gutter = if numbers { 2 } else { 0 };
@@ -30,7 +50,7 @@ impl Document {
                 limit.min(available.saturating_sub(gutter))
             });
             let mut output = Vec::new();
-            let mut renderer = MarkdownRenderer::new();
+            let mut renderer = MarkdownRenderer::with_options(options.clone());
             renderer.set_width(Some(content_width));
             renderer.render_markdown(source, &mut output)?;
             let rendered = String::from_utf8(output)
@@ -48,10 +68,23 @@ impl Document {
                     content_width,
                     gutter,
                     max_width,
+                    chrome: Self::style(options, options.palette().chrome, false)?,
+                    search: Self::style(options, options.palette().search, true)?,
                 });
             }
             gutter = required;
         }
+    }
+
+    fn style(options: &RenderOptions, color: crate::Color, reverse: bool) -> io::Result<String> {
+        let mut bytes = Vec::new();
+        let mut output = crate::output::Output::new(&mut bytes, options);
+        color.write(&mut output, false)?;
+        if reverse {
+            write!(output, "\x1b[7m")?;
+        }
+        output.flush()?;
+        String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
     }
 
     pub fn max_x(&self) -> usize {
@@ -75,10 +108,12 @@ pub(crate) fn paint(w: &mut impl Write, document: &Document, frame: Frame<'_>) -
         return w.flush();
     }
     queue!(w, MoveTo(0, 0))?;
+    write!(w, "{}", document.chrome)?;
     write!(
         w,
         "{}",
-        TerminalLine::new(frame.header).clip(0, usize::from(frame.columns))
+        TerminalLine::new(&crate::markdown::inert_source(frame.header))
+            .clip(0, usize::from(frame.columns))
     )?;
     let height = usize::from(frame.rows.saturating_sub(2));
     for (index, line) in document.lines.iter().enumerate().skip(frame.y).take(height) {
@@ -93,16 +128,18 @@ pub(crate) fn paint(w: &mut impl Write, document: &Document, frame: Frame<'_>) -
             )?;
         }
         if frame.matches.contains(&index) {
-            write!(w, "\x1b[33;44m")?;
+            write!(w, "{}", document.search)?;
         }
         write!(w, "{}", line.clip(frame.x, document.content_width))?;
     }
     if frame.rows > 1 {
         queue!(w, MoveTo(0, frame.rows - 1))?;
+        write!(w, "{}", document.chrome)?;
         write!(
             w,
             "{}",
-            TerminalLine::new(frame.footer).clip(0, usize::from(frame.columns))
+            TerminalLine::new(&crate::markdown::inert_source(frame.footer))
+                .clip(0, usize::from(frame.columns))
         )?;
     }
     if height > 0 && document.lines.len() > height {

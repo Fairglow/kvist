@@ -18,6 +18,8 @@ rendering blad uses to display sessions afterwards.
   links, images, code blocks, tables, blockquotes, task lists, footnotes,
   superscript/subscript, math expressions
 - **Syntax highlighting:** 50+ languages via syntect
+- **Appearance:** Dark, light, or terminal-native palettes; explicit color
+  capabilities for embedding applications and escape-free rendered dumps
 - **Interactive viewer:** Keyboard navigation, mouse wheel, search with
   highlight, scrollbar
 - **Edit mode:** Press `e` to edit files in your preferred editor
@@ -37,8 +39,8 @@ attach each child to its own controlling PTY, so they run unchanged from an
 interactive terminal or a noninteractive CI runner.
 
 **Running.** A terminal. No network access, no skott configuration, and no Kvist
-project are required. Edit mode requires `$EDITOR`. Mermaid rendering is
-optional and uses the `mmdc` executable when present.
+project are required. Edit mode requires `$EDITOR`. Markdown rendering never
+queries stdin or launches document-selected commands.
 
 ## Usage
 
@@ -66,6 +68,13 @@ blad show <session-id> --dump
 
 # Show rendered-line numbers in the interactive viewer
 blad show <session-id> --line-numbers
+
+# Choose appearance independently of terminal color capability
+blad --theme light view README.md
+blad --theme terminal --color never view README.md
+
+# Plain rendered text, even when color is explicitly requested
+blad --color always --dump view README.md
 ```
 
 ## Keyboard Shortcuts
@@ -91,7 +100,7 @@ blad show <session-id> --line-numbers
 ## Documentation
 
 - [User's Guide](docs/USAGE.md) - Complete usage documentation
-- [Text-Only Rendering Plan](docs/TEXT_RENDERING_PLAN.md) - Proposed themes,
+- [Text-Only Rendering Plan](docs/TEXT_RENDERING_PLAN.md) - Accepted themes,
   Unicode scripts, limited math, and text-box Mermaid support
 - [Design](DESIGN.md) - Component design
 - [Requirements](REQUIREMENTS.md) - Functional and non-functional requirements

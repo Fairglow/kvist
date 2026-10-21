@@ -196,3 +196,52 @@ fn blad_export_session() {
     assert!(exported.contains("User"));
     assert!(exported.contains("Assistant"));
 }
+
+#[test]
+fn every_session_route_uses_the_same_escape_free_dump_policy() {
+    let temp = tempfile::tempdir().unwrap();
+    let id = "2026-10-09T10-00-00Z-1234-0";
+    create_test_session(temp.path(), id, "2026-10-09T10:00:00Z");
+    fs::write(
+        temp.path().join(id).join("messages/000002.md"),
+        "# Answer\n\n**bold**\n\n```rust\nfn main() {}\n```",
+    )
+    .unwrap();
+    for route in [vec!["show", id], vec!["stream", id], vec![id]] {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_blad"))
+            .arg("--log-dir")
+            .arg(temp.path())
+            .args(["--theme", "light", "--color", "always", "--dump"])
+            .args(route)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let text = String::from_utf8(output.stdout).unwrap();
+        assert!(!text.contains('\x1b'), "{text:?}");
+        assert!(text.contains("# Answer"));
+        assert!(text.contains("bold") && !text.contains("**bold**"));
+        assert!(text.contains("fn main()"));
+    }
+}
+
+#[test]
+fn listing_session_metadata_cannot_emit_terminal_controls() {
+    let temp = tempfile::tempdir().unwrap();
+    let id = "2026-10-09T10-00-00Z-1234-0";
+    create_test_session(temp.path(), id, "2026-10-09T10:00:00Z");
+    let manifest_path = temp.path().join(id).join("session.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["model"] = serde_json::json!("model\u{1b}[2J\u{7}");
+    fs::write(manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_blad"))
+        .arg("--log-dir")
+        .arg(temp.path())
+        .args(["--dump", "list"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(!text.contains('\x1b') && !text.contains('\x07'), "{text:?}");
+    assert!(text.contains("\\u{1b}[2J\\u{7}"));
+}

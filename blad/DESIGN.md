@@ -17,6 +17,24 @@ and renders them to ANSI-colored terminal output.
 
 ## Internal structure
 
+Appearance lives in `theme.rs`: deterministic `RenderOptions` and semantic
+`Palette` values are host inputs, not renderer environment policy. CLI policy is
+resolved once in `main.rs`; options are forwarded through sessions, viewer
+resize and editor re-entry. `output.rs` streams only renderer-owned SGR through
+the chosen color encoder. Authored text is made inert both before parsing and
+after parser entity decoding; generated and authored controls never share that
+trust boundary. Plain output strips every style without changing geometry.
+Syntect syntax/theme assets are immutable `OnceLock` values shared across
+renders. Editor errors propagate rather than being printed as successful
+completion.
+
+The P1 independent audit found entity-decoded controls, unescaped listing
+metadata and editor errors discarded by legacy code. Regression tests pinned
+the control failures, fixes were applied, and a separate clean-source
+observation confirmed the narrowed boundary. Existing search-navigation offset
+handling is not expanded by this milestone. Search overlay composition and
+editor integration evidence are retained for P5.
+
 ```
 blad/
 ├── src/
@@ -252,3 +270,9 @@ before their tests/code; source fidelity excludes inert-control escaping and
 explicit bounded omission; backend admission requires measured budgets and
 provisioned dependencies; asset reuse and absence of render-time effects need
 explicit tests. These dispositions are not a Kvist receipt.
+
+The installed `kvist component accept blad` cannot record revisions while the
+project is invalid because of an existing Skott queue timestamp inconsistency.
+The accepted human scope is retained here; existing revision digests are not
+forged or silently replaced. Historical Blad multiline queue contexts use
+chomped block scalars so they satisfy the installed queue validator.

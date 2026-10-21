@@ -4,6 +4,67 @@
 
 Date: 2026-10-12
 
+## Appearance/output observation - 2026-10-21
+
+Independent source-only contexts observed this milestone without intent,
+queue, prior implementation records, reviews, chat history or Git history.
+This is observed evidence, not implementer certification.
+
+`theme.rs` exposes explicit themes, color depths, semantic palettes,
+plain-output selection, and math/diagram settings through `RenderOptions`,
+re-exported by `lib.rs`. Renderer defaults do not inspect environment
+variables. `MarkdownRenderer` retains width, syntax-theme selection, and
+rendering options independently; unknown explicit syntax-theme names return
+`InvalidInput`.
+
+Rendering passes through `Output`, which incrementally buffers ESC sequences,
+rejects unexpected sequence syntax and sequences exceeding 64 bytes, converts
+extended colors to the selected depth, and propagates writer/flush failures.
+Plain output removes parsed SGR; `ColorDepth::None` removes colors but retains
+other styling.
+
+Code panels use theme/palette backgrounds and syntax-token foregrounds; table
+output uses reverse-video headers and alternating backgrounds. Terminal
+appearance omits built-in fixed panel backgrounds. Prose wrapping and viewport
+clipping preserve grapheme boundaries.
+
+File, session-show, and session-stream routes receive shared options. Viewer
+resize and editor re-entry forward options, line-number selection, and width
+limit. The CLI resolves environment hints without terminal queries.
+
+The first independent audit found decoded-entity controls, raw listing
+metadata and discarded editor errors. Regression tests reproduced the first
+two failures before remediation. A narrower clean-source observer subsequently
+reported:
+
+- **Entities:** Decoded prose/table payloads cross `inert_source`, escaping
+  BEL/DEL/ESC as visible `\u{…}`. Numeric entities therefore cannot inject
+  SGR/cursor controls. CR/LF/tab remain. `Output` alone is not a BEL/DEL sanitizer.
+- **Metadata:** Listing escapes id/model.
+- **Errors:** Editor launch/status/reread/reopened-viewer errors propagate;
+  CLI reports failure and exits 1. Void convenience wrappers instead print
+  errors.
+- **Evidence/limits:** Entity/list regressions cover these controls.
+  Id-control/editor-failure paths lack runtime coverage here. Requested suites:
+  **17 passed**.
+
+Latest parent-executed evidence: 93 scoped tests passed (`--lib`,
+`render_options`, `integration`, `layout`, `table_rendering`, `viewer`);
+Skott's consumer check and scoped Clippy with warnings denied passed.
+Syntax assets are process-reused; rendering still buffers code blocks,
+tables, pending words and viewport documents. Repeated edits recursively enter
+the viewer. Streaming remains a snapshot. Export preserves source Markdown.
+The audit also recorded pre-existing discarded search-navigation offsets and
+search indication being overwritten by content SGR resets; these are not
+evidence of completed search improvements.
+
+The separate source-blind P1 comparison reported no proven in-scope mismatch
+and a bounded supported verdict, not component certification. It retained
+evidence reservations for the full CLI precedence matrix, palette/chrome and
+geometry coverage across every route, editor failure/ID controls, and executable
+reuse/no-render-time-effects checks. P5 must close these integration-evidence
+gaps; later conversion milestones are not P1 failures.
+
 ## Scoped text-derived table bounds observation - 2026-10-21
 
 This supplement supersedes the table-bound observations dated 2026-10-20

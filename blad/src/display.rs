@@ -6,61 +6,86 @@
 
 use std::io::{self, IsTerminal, Write};
 
-use crate::markdown::{MarkdownRenderer, render_markdown};
+use crate::RenderOptions;
+use crate::markdown::MarkdownRenderer;
 use crate::session::{Message, Session, load_messages};
 use crate::terminal_text::TerminalLine;
 use crate::viewport::{Document, Frame, paint};
 
+/// List session metadata without interpreting authored terminal controls.
+pub fn list_sessions(sessions: &[Session]) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    for session in sessions {
+        writeln!(
+            stdout,
+            "{} - {} - {} messages - {}",
+            crate::markdown::inert_source(&session.id),
+            crate::markdown::inert_source(session.model.as_deref().unwrap_or("unknown")),
+            session.message_count,
+            if session.completed {
+                "completed"
+            } else {
+                "active"
+            }
+        )?;
+    }
+    Ok(())
+}
+
 /// Show a completed session transcript.
 pub fn show_session(session: &Session) -> io::Result<()> {
-    println!("Session: {}", session.id);
+    show_session_with_options(session, &RenderOptions::default())
+}
+
+/// Show a session with one explicit rendering policy for every message.
+pub fn show_session_with_options(session: &Session, options: &RenderOptions) -> io::Result<()> {
+    let mut stdout = io::stdout().lock();
+    writeln!(
+        stdout,
+        "Session: {}",
+        crate::markdown::inert_source(&session.id)
+    )?;
     if let Some(model) = &session.model {
-        println!("Model: {}", model);
+        writeln!(stdout, "Model: {}", crate::markdown::inert_source(model))?;
     }
     if let Some(created_at) = &session.created_at {
-        println!("Started: {}", created_at);
+        writeln!(
+            stdout,
+            "Started: {}",
+            crate::markdown::inert_source(created_at)
+        )?;
     }
-    println!("Messages: {}", session.message_count);
-    println!();
+    writeln!(stdout, "Messages: {}\n", session.message_count)?;
 
     let messages = load_messages(session);
-    let mut stdout = io::stdout();
+    let renderer = MarkdownRenderer::with_options(options.clone());
     for msg in &messages {
-        print_message(msg, &mut stdout)?;
+        print_message(msg, &mut stdout, &renderer)?;
     }
     Ok(())
 }
 
 /// Dump a completed session transcript to plain text (no ANSI).
 pub fn dump_session(session: &Session) -> io::Result<()> {
-    println!("Session: {}", session.id);
-    if let Some(model) = &session.model {
-        println!("Model: {}", model);
-    }
-    if let Some(created_at) = &session.created_at {
-        println!("Started: {}", created_at);
-    }
-    println!("Messages: {}", session.message_count);
-    println!();
-
-    let messages = load_messages(session);
-    let mut stdout = io::stdout();
-    for msg in &messages {
-        dump_message(msg, &mut stdout)?;
-    }
-    Ok(())
+    show_session_with_options(session, &RenderOptions::plain())
 }
 
 /// Stream a live or recently-completed session.
 pub fn stream_session(session: &Session) -> io::Result<()> {
+    stream_session_with_options(session, &RenderOptions::default())
+}
+
+/// Render the existing stream snapshot using explicit host settings.
+pub fn stream_session_with_options(session: &Session, options: &RenderOptions) -> io::Result<()> {
     let messages = load_messages(session);
-    let mut stdout = io::stdout();
+    let mut stdout = io::stdout().lock();
+    let renderer = MarkdownRenderer::with_options(options.clone());
     for msg in &messages {
-        print_message(msg, &mut stdout)?;
+        print_message(msg, &mut stdout, &renderer)?;
     }
 
     if !session.completed {
-        println!("\n(session still active - re-run to see updates)");
+        writeln!(stdout, "\n(session still active - re-run to see updates)")?;
     }
     Ok(())
 }
@@ -82,26 +107,46 @@ pub fn view_markdown(content: &str) {
 
 /// View a markdown file with optional edit support.
 pub fn view_markdown_file(path: Option<&std::path::Path>, content: &str, line_numbers: bool) {
-    // Pass original markdown to interactive viewer - it handles rendering internally
-    if is_tty() && is_stdin_tty() {
-        interactive_viewer(path, content, line_numbers);
+    let options = if is_tty() {
+        RenderOptions::default()
     } else {
-        // Non-interactive: render to stdout and exit
-        if let Err(error) = dump_markdown(content) {
-            eprintln!("Failed to display Markdown: {error}");
-        }
+        RenderOptions::plain()
+    };
+    if let Err(error) = view_markdown_file_with_options(path, content, line_numbers, &options) {
+        eprintln!("Failed to display Markdown: {error}");
+    }
+}
+
+/// View a file with settings retained through resize and editing.
+pub fn view_markdown_file_with_options(
+    path: Option<&std::path::Path>,
+    content: &str,
+    line_numbers: bool,
+    options: &RenderOptions,
+) -> io::Result<()> {
+    if is_tty() && is_stdin_tty() {
+        run_viewer(path, content, line_numbers, None, options)
+    } else {
+        MarkdownRenderer::with_options(options.clone())
+            .render_markdown(content, &mut io::stdout().lock())
     }
 }
 
 /// View a markdown file with terminal width awareness.
 pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, terminal_width: usize) {
     if is_tty() && is_stdin_tty() {
-        if let Err(error) = run_viewer(path, content, false, Some(terminal_width)) {
+        if let Err(error) = run_viewer(
+            path,
+            content,
+            false,
+            Some(terminal_width),
+            &RenderOptions::default(),
+        ) {
             eprintln!("Failed to display Markdown: {error}");
         }
     } else {
         let mut output = Vec::new();
-        let mut renderer = MarkdownRenderer::new();
+        let mut renderer = MarkdownRenderer::with_options(RenderOptions::plain());
         renderer.set_width(Some(terminal_width));
         if let Err(error) = renderer
             .render_markdown(content, &mut output)
@@ -114,19 +159,8 @@ pub fn view_markdown_width(path: Option<&std::path::Path>, content: &str, termin
 
 /// Dump a standalone markdown file to plain text (no ANSI).
 pub fn dump_markdown(content: &str) -> io::Result<()> {
-    // Render markdown to a buffer, output directly
-    let mut output = Vec::new();
-    render_markdown(content, &mut output)?;
-    let rendered = String::from_utf8(output)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-    io::stdout().write_all(rendered.as_bytes())
-}
-
-/// Interactive viewer with navigation and search.
-fn interactive_viewer(path: Option<&std::path::Path>, content: &str, line_numbers: bool) {
-    if let Err(error) = run_viewer(path, content, line_numbers, None) {
-        eprintln!("Failed to display Markdown: {error}");
-    }
+    MarkdownRenderer::with_options(RenderOptions::plain())
+        .render_markdown(content, &mut io::stdout().lock())
 }
 
 struct TerminalGuard {
@@ -194,11 +228,13 @@ fn run_viewer(
     content: &str,
     line_numbers: bool,
     width_limit: Option<usize>,
+    options: &RenderOptions,
 ) -> io::Result<()> {
     use crossterm::event::{self, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 
     let (mut cols, mut rows) = crossterm::terminal::size()?;
-    let mut document = Document::render(content, cols, line_numbers, width_limit)?;
+    let mut document =
+        Document::render_with_options(content, cols, line_numbers, width_limit, options)?;
 
     let mut scroll_offset: usize = 0;
     let mut scroll_x: usize = 0;
@@ -396,7 +432,7 @@ fn run_viewer(
                         KeyCode::Char('e') if path.is_some() => {
                             terminal.restore()?;
                             if let Some(path) = path {
-                                edit_and_rerender(path, line_numbers, width_limit);
+                                return edit_and_rerender(path, line_numbers, width_limit, options);
                             }
                             return Ok(());
                         }
@@ -422,7 +458,13 @@ fn run_viewer(
                 cols = columns;
                 rows = height;
                 visible_lines = usize::from(rows.saturating_sub(2));
-                document = Document::render(content, cols, line_numbers, width_limit)?;
+                document = Document::render_with_options(
+                    content,
+                    cols,
+                    line_numbers,
+                    width_limit,
+                    options,
+                )?;
                 search_matches = find_matches(&document.lines, &search_query);
                 search_index = search_index.min(search_matches.len().saturating_sub(1));
             }
@@ -444,34 +486,31 @@ fn scroll_to_match(current_offset: usize, target_line: usize, visible_lines: usi
     }
 }
 
-fn edit_and_rerender(path: &std::path::Path, line_numbers: bool, width_limit: Option<usize>) {
+fn edit_and_rerender(
+    path: &std::path::Path,
+    line_numbers: bool,
+    width_limit: Option<usize>,
+    options: &RenderOptions,
+) -> io::Result<()> {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nvim".to_string());
     let args: Vec<&str> = editor.split_whitespace().collect();
     let Some(program) = args.first() else {
-        eprintln!("Cannot open editor: EDITOR is empty");
-        return;
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "cannot open editor: EDITOR is empty",
+        ));
     };
-    let result = std::process::Command::new(program)
+    let status = std::process::Command::new(program)
         .args(&args[1..])
         .arg(path)
-        .status();
-
-    match result {
-        Ok(status) if status.success() => {
-            // Re-read and re-render
-            match std::fs::read_to_string(path) {
-                Ok(content) => {
-                    if let Err(error) = run_viewer(Some(path), &content, line_numbers, width_limit)
-                    {
-                        eprintln!("Failed to display edited Markdown: {error}");
-                    }
-                }
-                Err(e) => eprintln!("Failed to re-read file: {}", e),
-            }
-        }
-        Ok(status) => eprintln!("Editor exited with status: {}", status),
-        Err(e) => eprintln!("Failed to run editor: {}", e),
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::other(format!(
+            "editor exited with status: {status}"
+        )));
     }
+    let content = std::fs::read_to_string(path)?;
+    run_viewer(Some(path), &content, line_numbers, width_limit, options)
 }
 
 /// Export a session to a combined markdown document.
@@ -517,7 +556,11 @@ pub fn export_session(session: &Session, output: Option<&std::path::Path>) -> io
 }
 
 /// Print a single message with its label.
-fn print_message(msg: &Message, w: &mut impl Write) -> std::io::Result<()> {
+fn print_message(
+    msg: &Message,
+    w: &mut impl Write,
+    renderer: &MarkdownRenderer,
+) -> std::io::Result<()> {
     let kind_label = match msg.kind.as_str() {
         "user" => "User",
         "assistant" => "Assistant",
@@ -534,36 +577,14 @@ fn print_message(msg: &Message, w: &mut impl Write) -> std::io::Result<()> {
         _ => "",
     };
 
-    writeln!(w, "--- {}{} ---", kind_label, disposition)?;
+    writeln!(
+        w,
+        "--- {}{} ---",
+        crate::markdown::inert_source(kind_label),
+        disposition
+    )?;
     // Parse markdown and highlight fenced code blocks
-    render_markdown(&msg.content, w)?;
-    if !msg.content.ends_with('\n') {
-        writeln!(w)?;
-    }
-    Ok(())
-}
-
-/// Dump a single message to plain text (no ANSI).
-fn dump_message(msg: &Message, w: &mut impl Write) -> std::io::Result<()> {
-    let kind_label = match msg.kind.as_str() {
-        "user" => "User",
-        "assistant" => "Assistant",
-        "reasoning" => "Thinking",
-        "tool_dispatch" => "Tool Call",
-        "tool_result" => "Tool Result",
-        "notice" => "Notice",
-        _ => &msg.kind,
-    };
-
-    let disposition = match &msg.disposition {
-        Some(d) if d == "final" => " (final)",
-        Some(d) if d == "interim" => " (interim)",
-        _ => "",
-    };
-
-    writeln!(w, "--- {}{} ---", kind_label, disposition)?;
-    // Output content as-is (no ANSI)
-    write!(w, "{}", msg.content)?;
+    renderer.render_markdown(&msg.content, w)?;
     if !msg.content.ends_with('\n') {
         writeln!(w)?;
     }

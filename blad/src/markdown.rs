@@ -12,20 +12,20 @@
 //! - Autolinks
 
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
-use std::io::{IsTerminal, Write};
+use std::io::Write;
+use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
-use syntect::highlighting::{Color as SColor, FontStyle, Style as SStyle, Theme, ThemeSet};
+use syntect::highlighting::{Color as SColor, FontStyle, Style as SStyle, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
 use crate::inline::{InlineWriter, Style};
+use crate::theme::{RenderOptions, Theme};
 
 /// Whether the terminal's background is dark or light. Drives the table
 /// zebra striping: a dark background uses subtly brighter tints and a light
 /// background uses subtly darker tints, while the header is always a full
 /// reverse video so it inverts to the complement of the text color in either
-/// mode. Detection is automatic (OSC 11 query, then
-/// `COLORTERM`/`COLORFGBG`/`NO_COLOR`, then the terminal's `TERM_PROGRAM`/`TERM`
-/// heuristics) but can be overridden explicitly.
+/// mode. Embedding applications provide their panel appearance explicitly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TerminalBg {
     /// The background is dark (the default assumption).
@@ -36,19 +36,6 @@ pub enum TerminalBg {
 }
 
 impl TerminalBg {
-    /// The 256-color index of the subtle data-row tint. A one-step lift from
-    /// the base background is deliberately faint: it separates rows without
-    /// drawing a border, and it stays legible over the standard foreground.
-    /// The header is a full reverse video (see `render_table`) rather than a
-    /// fixed background, because a fixed color can't guarantee contrast for
-    /// every foreground the terminal might use.
-    const fn tint(self) -> u8 {
-        match self {
-            TerminalBg::Dark => 235,  // #4e4e4e, one step above #262626
-            TerminalBg::Light => 254, // #e4e4e4, one step below #f4f4f4
-        }
-    }
-
     /// Derive a [`TerminalBg`] from an RGB panel background color using the
     /// standard relative-luminance formula. A panel whose luminance is at or
     /// above the midpoint (0x7f, the halfway point of an 8-bit channel) is
@@ -63,109 +50,6 @@ impl TerminalBg {
             TerminalBg::Dark
         }
     }
-
-    /// The 256-color index of the code-block background. Deliberately mode-
-    /// aware so a dark terminal gets a dark code panel and a light terminal a
-    /// light one, regardless of the syntect theme in use. The syntect theme
-    /// only contributes foreground token colors (see `to_ansi_line`); it must
-    /// not leak its own background into the output, because a bright syntect
-    /// background placed under bright token text collapses contrast and the
-    /// patch never reaches the line's right edge.
-    const fn code_bg(self) -> u8 {
-        match self {
-            TerminalBg::Dark => 236,  // #262626, a dark panel
-            TerminalBg::Light => 254, // #e4e4e4, a light panel
-        }
-    }
-}
-
-/// Detect the terminal background from environment heuristics. This is
-/// side-effect-free (no terminal query, no stdin read) so it can run on every
-/// render without interfering with the interactive viewer's event loop. The
-/// result is deliberately conservative: anything ambiguous is `Dark`, the
-/// overwhelming default. Callers that need a precise answer can use
-/// [`query_background_rgb`].
-fn detect_terminal_bg() -> TerminalBg {
-    // An explicit `COLORFGBG` background field is the strongest env signal.
-    if let Some(bg_field) = std::env::var("COLORFGBG").ok().as_deref()
-        && let Some(bg) = bg_field.split(':').next_back()
-    {
-        return match bg {
-            "1" | "15" | "7" => TerminalBg::Light,
-            _ => TerminalBg::default(),
-        };
-    }
-
-    // COLORTERM and TERM_PROGRAM are weak but the only explicit dark/light
-    // markers some terminals expose. A terminal that advertises a light
-    // palette wins; anything else stays dark.
-    for val in [
-        std::env::var("COLORTERM").ok(),
-        std::env::var("TERM_PROGRAM").ok(),
-        std::env::var("TERM").ok(),
-    ] {
-        let Some(val) = val else { continue };
-        let lower = val.to_ascii_lowercase();
-        if lower.contains("light") {
-            return TerminalBg::Light;
-        }
-    }
-
-    TerminalBg::default()
-}
-
-/// Query the terminal's background color via OSC 11 and parse the response.
-/// Returns `None` if the terminal doesn't answer within a short deadline or
-/// the response is malformed. Callers should only invoke this when they can
-/// safely read stdin (e.g. before entering the alternate screen / raw mode),
-/// never in the middle of a render, because it consumes up to the deadline of
-/// pending input.
-pub fn query_background_rgb() -> Option<(u8, u8, u8)> {
-    use std::io::Read as _;
-    if !std::io::stdout().is_terminal() {
-        return None;
-    }
-    let mut stdout = std::io::stdout().lock();
-    if stdout.write_all(b"\x1b]11;?\x07").is_err() || stdout.flush().is_err() {
-        return None;
-    }
-    drop(stdout);
-
-    let mut buf = [0u8; 64];
-    let mut pos = 0;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(50);
-    while pos < buf.len() && std::time::Instant::now() < deadline {
-        match std::io::stdin().read(&mut buf[pos..]) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => pos += n,
-        }
-    }
-    parse_osc11_rgb(&String::from_utf8_lossy(&buf[..pos]))
-}
-
-fn parse_osc11_rgb(text: &str) -> Option<(u8, u8, u8)> {
-    // The response is an OSC 11 sequence: ESC ] 11 ; rgb:RRRR/GGGG/BBBB ESC \
-    // (or BEL). Some terminals wrap it in a leading ESC (CSI u). Find the
-    // `rgb:` payload and parse the hex triplets.
-    let start = text.find("rgb:")? + "rgb:".len();
-    let tail = &text[start..];
-    let mut parts = tail.splitn(3, '/');
-    let r = parts
-        .next()?
-        .trim_end_matches(|c: char| !c.is_ascii_hexdigit())
-        .parse()
-        .ok()?;
-    let g = parts
-        .next()?
-        .trim_end_matches(|c: char| !c.is_ascii_hexdigit())
-        .parse()
-        .ok()?;
-    let b = parts
-        .next()?
-        .trim_end_matches(|c: char| !c.is_ascii_hexdigit())
-        .parse()
-        .ok()?;
-    Some((r, g, b))
 }
 
 /// A configured markdown renderer that holds rendering options.
@@ -176,9 +60,7 @@ fn parse_osc11_rgb(text: &str) -> Option<(u8, u8, u8)> {
 pub struct MarkdownRenderer {
     syntax_theme: Option<String>,
     width: Option<usize>,
-    /// Explicit terminal background. `None` means "auto-detect" on each
-    /// render (a side-effect-free environment lookup).
-    bg: Option<TerminalBg>,
+    options: RenderOptions,
 }
 
 impl MarkdownRenderer {
@@ -188,8 +70,26 @@ impl MarkdownRenderer {
         Self::default()
     }
 
-    /// Set the syntax highlighting theme (e.g., "Monokai", "Dracula").
-    /// Pass `None` to disable syntax highlighting.
+    /// Create a renderer using explicit host-resolved settings.
+    pub fn with_options(options: RenderOptions) -> Self {
+        Self {
+            options,
+            ..Self::default()
+        }
+    }
+
+    /// Read the host-resolved settings.
+    pub fn options(&self) -> &RenderOptions {
+        &self.options
+    }
+
+    /// Replace settings without losing width or syntax-theme selection.
+    pub fn set_options(&mut self, options: RenderOptions) {
+        self.options = options;
+    }
+
+    /// Select an installed syntect theme. `None` restores the appearance default.
+    /// An unknown explicit name produces an error when rendering.
     pub fn set_syntax_theme(&mut self, theme: Option<&str>) {
         self.syntax_theme = theme.map(|s| s.to_owned());
     }
@@ -201,27 +101,25 @@ impl MarkdownRenderer {
 
     /// Set the terminal background mode explicitly. Call this when the
     /// application already knows the background (e.g. Skott, which owns the
-    /// theme). When left unset, the renderer auto-detects from the
-    /// environment on each render.
+    /// theme). Library defaults are deterministic and never query the terminal.
     pub fn set_background(&mut self, bg: TerminalBg) {
-        self.bg = Some(bg);
-    }
-
-    /// The effective background: the explicit value if set, otherwise the
-    /// auto-detected one.
-    fn effective_bg(&self) -> TerminalBg {
-        self.bg.unwrap_or_else(detect_terminal_bg)
+        self.options.theme = match bg {
+            TerminalBg::Dark => Theme::Dark,
+            TerminalBg::Light => Theme::Light,
+        };
     }
 
     /// Render markdown with the renderer's configured options.
     pub fn render_markdown(&self, md: &str, w: &mut impl Write) -> std::io::Result<()> {
+        let mut output = crate::output::Output::new(w, &self.options);
         render_markdown_theme(
             md,
-            w,
+            &mut output,
             self.width,
             self.syntax_theme.as_deref(),
-            self.effective_bg(),
-        )
+            &self.options,
+        )?;
+        output.flush()
     }
 }
 
@@ -236,16 +134,35 @@ fn render_markdown_theme(
     w: &mut impl Write,
     terminal_width: Option<usize>,
     theme_name: Option<&str>,
-    bg: TerminalBg,
+    settings: &RenderOptions,
 ) -> std::io::Result<()> {
-    let ss = SyntaxSet::load_defaults_newlines();
-    let ts = ThemeSet::load_defaults();
+    static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
+    static THEMES: OnceLock<ThemeSet> = OnceLock::new();
+    let ss = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
+    let ts = THEMES.get_or_init(ThemeSet::load_defaults);
+    let palette = settings.palette();
+    let code_bg = palette
+        .code_background
+        .map(|color| color.sequence(true))
+        .transpose()?
+        .unwrap_or_default();
     let theme = if let Some(name) = theme_name {
-        ts.themes.get(name).cloned()
+        Some(ts.themes.get(name).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!("unknown syntax theme: {name}"),
+            )
+        })?)
+    } else if settings.theme == Theme::Light {
+        ts.themes
+            .get("InspiredGitHub")
+            .or_else(|| ts.themes.get("Solarized (light)"))
     } else {
-        get_terminal_theme(&ts)
+        get_terminal_theme(ts)
     };
 
+    let safe_source = inert_source(md);
+    let md = safe_source.as_ref();
     let options = Options::ENABLE_TABLES
         | Options::ENABLE_STRIKETHROUGH
         | Options::ENABLE_TASKLISTS
@@ -266,6 +183,7 @@ fn render_markdown_theme(
     let mut italic = 0_usize;
     let mut strikethrough = 0_usize;
     let mut dim = 0_usize;
+    let mut links = 0_usize;
     let mut quote_colors = Vec::new();
 
     let mut list_item_count = 0;
@@ -288,9 +206,12 @@ fn render_markdown_theme(
             strike: strikethrough > 0,
             dim: dim > 0,
             color: if in_heading {
-                Some(34)
+                Some(palette.heading)
             } else {
-                quote_colors.last().copied()
+                quote_colors
+                    .last()
+                    .copied()
+                    .or_else(|| (links > 0).then_some(palette.link))
             },
             ..Style::default()
         };
@@ -311,8 +232,7 @@ fn render_markdown_theme(
                 if code_language == "mermaid" {
                     // Mermaid diagrams: collect content, render later
                     // Try to use mmdc if available, fallback to plain text
-                } else if let (Some(syntax), Some(theme)) =
-                    (find_syntax(&ss, &code_language), theme.as_ref())
+                } else if let (Some(syntax), Some(theme)) = (find_syntax(ss, &code_language), theme)
                 {
                     hl = Some(HighlightLines::new(syntax, theme));
                 }
@@ -321,7 +241,10 @@ fn render_markdown_theme(
                 in_code_block = false;
                 if code_language == "mermaid" {
                     // Try to render mermaid diagram
-                    let result = render_mermaid(&code_content);
+                    let result: std::io::Result<String> = Err(std::io::Error::new(
+                        std::io::ErrorKind::Unsupported,
+                        "text diagram backend not yet admitted",
+                    ));
                     match result {
                         Ok(ascii) => {
                             writeln!(w, "{}", ascii)?;
@@ -343,7 +266,6 @@ fn render_markdown_theme(
                     // contributes foreground token colors only, so a light or
                     // dark terminal always gets a matching panel and token
                     // text keeps high contrast.
-                    let code_bg = format!("\x1b[48;5;{}m", bg.code_bg());
                     let reset = "\x1b[0m";
                     for line in code_content.lines() {
                         // Measure the raw line's display width (full-width
@@ -351,7 +273,7 @@ fn render_markdown_theme(
                         // added, so the padding is exact.
                         let content_width = unicode_width::UnicodeWidthStr::width(line);
                         write!(w, "{}", code_bg)?;
-                        match highlighter.highlight_line(line, &ss) {
+                        match highlighter.highlight_line(line, ss) {
                             Ok(ranges) => {
                                 // A blank line yields no ranges, so the body
                                 // is empty and only the padding fills it.
@@ -372,7 +294,6 @@ fn render_markdown_theme(
                     // No highlighter (missing syntax or theme): keep the code
                     // visible as plain text, but still on the mode-appropriate
                     // code panel so the block reads as a distinct region.
-                    let code_bg = format!("\x1b[48;5;{}m", bg.code_bg());
                     let reset = "\x1b[0m";
                     for line in code_content.lines() {
                         let content_width = unicode_width::UnicodeWidthStr::width(line);
@@ -392,6 +313,8 @@ fn render_markdown_theme(
             Event::End(TagEnd::Strong) => {
                 bold = bold.saturating_sub(1);
             }
+            Event::Start(Tag::Link { .. }) => links += 1,
+            Event::End(TagEnd::Link) => links = links.saturating_sub(1),
             Event::Start(Tag::Emphasis) => {
                 italic += 1;
             }
@@ -405,6 +328,7 @@ fn render_markdown_theme(
                 strikethrough = strikethrough.saturating_sub(1);
             }
             Event::Text(text) => {
+                let text = inert_source(&text);
                 if in_code_block {
                     code_content.push_str(&text);
                 } else if in_table {
@@ -428,6 +352,7 @@ fn render_markdown_theme(
                 }
             }
             Event::Code(text) => {
+                let text = inert_source(&text);
                 if in_table {
                     if let Some(cell) = table_row_cells.last_mut() {
                         cell.push_str(&text);
@@ -479,7 +404,7 @@ fn render_markdown_theme(
                     prefix,
                     Style {
                         bold: true,
-                        color: Some(34),
+                        color: Some(palette.heading),
                         ..Style::default()
                     },
                 )?;
@@ -542,7 +467,7 @@ fn render_markdown_theme(
                     terminal_width.map_or(indent_width, |width| indent_width.min(width.max(1) - 1));
                 let indent = " ".repeat(indent_width);
                 if list_item_count > 1 {
-                    write!(w, "\r\n")?;
+                    writeln!(w)?;
                 }
                 write!(w, "{indent}")?;
                 inline.reset(indent_width, 0);
@@ -550,7 +475,7 @@ fn render_markdown_theme(
                     w,
                     "• ",
                     Style {
-                        color: Some(33),
+                        color: Some(palette.list_marker),
                         ..Style::default()
                     },
                 )?;
@@ -563,7 +488,7 @@ fn render_markdown_theme(
                 if !at_start {
                     writeln!(w)?;
                 }
-                write!(w, "\x1b[90m")?;
+                palette.muted.write(w, false)?;
                 for _ in 0..terminal_width.unwrap_or(80).max(1) {
                     write!(w, "─")?;
                 }
@@ -587,7 +512,7 @@ fn render_markdown_theme(
             }
             Event::End(TagEnd::Table) => {
                 in_table = false;
-                render_table(w, &table_rows, terminal_width, bg)?;
+                render_table(w, &table_rows, terminal_width, settings)?;
                 writeln!(w)?;
                 need_blank = true;
                 table_rows.clear();
@@ -616,11 +541,11 @@ fn render_markdown_theme(
                 }
                 at_start = false;
                 let (color, label) = match kind {
-                    pulldown_cmark::BlockQuoteKind::Note => (96, "NOTE"),
-                    pulldown_cmark::BlockQuoteKind::Tip => (92, "TIP"),
-                    pulldown_cmark::BlockQuoteKind::Important => (95, "IMPORTANT"),
-                    pulldown_cmark::BlockQuoteKind::Warning => (93, "WARNING"),
-                    pulldown_cmark::BlockQuoteKind::Caution => (91, "CAUTION"),
+                    pulldown_cmark::BlockQuoteKind::Note => (palette.alerts[0], "NOTE"),
+                    pulldown_cmark::BlockQuoteKind::Tip => (palette.alerts[1], "TIP"),
+                    pulldown_cmark::BlockQuoteKind::Important => (palette.alerts[2], "IMPORTANT"),
+                    pulldown_cmark::BlockQuoteKind::Warning => (palette.alerts[3], "WARNING"),
+                    pulldown_cmark::BlockQuoteKind::Caution => (palette.alerts[4], "CAUTION"),
                 };
                 quote_colors.push(color);
                 inline.reset(0, 0);
@@ -646,10 +571,11 @@ fn render_markdown_theme(
                 dim = dim.saturating_sub(1);
             }
             Event::FootnoteReference(id) => {
+                let id = inert_source(&id);
                 inline.code(
                     &format!("[{id}]"),
                     Style {
-                        color: Some(96),
+                        color: Some(palette.link),
                         ..style
                     },
                 );
@@ -660,7 +586,7 @@ fn render_markdown_theme(
                 if !at_start {
                     writeln!(w)?;
                 }
-                write!(w, "\x1b[90m")?;
+                palette.muted.write(w, false)?;
             }
             Event::End(TagEnd::FootnoteDefinition) => {
                 inline.finish(w)?;
@@ -672,7 +598,7 @@ fn render_markdown_theme(
                 inline.code(
                     &format!("${tex}"),
                     Style {
-                        color: Some(95),
+                        color: Some(palette.math),
                         ..style
                     },
                 );
@@ -683,7 +609,8 @@ fn render_markdown_theme(
                 if !at_start {
                     writeln!(w)?;
                 }
-                write!(w, "\x1b[95m${} $\x1b[0m", tex)?;
+                palette.math.write(w, false)?;
+                write!(w, "${} $\x1b[0m", tex)?;
                 writeln!(w)?;
                 need_blank = true;
             }
@@ -708,8 +635,8 @@ fn render_markdown_theme(
                     writeln!(w)?;
                 }
                 at_start = false;
-                write!(w, "\x1b[90m")?;
-                quote_colors.push(90);
+                palette.muted.write(w, false)?;
+                quote_colors.push(palette.muted);
             }
             Event::End(TagEnd::BlockQuote(_)) => {
                 inline.finish(w)?;
@@ -734,7 +661,7 @@ fn render_table(
     w: &mut impl Write,
     rows: &[Vec<String>],
     terminal_width: Option<usize>,
-    bg: TerminalBg,
+    settings: &RenderOptions,
 ) -> std::io::Result<()> {
     if rows.is_empty() {
         return Ok(());
@@ -746,7 +673,12 @@ fn render_table(
     // is rendered separately (below) as a full reverse video, which makes it
     // stand out as the table's anchor and lets the header/data separator
     // disappear.
-    let tint_code = format!("\x1b[48;5;{}m", bg.tint());
+    let tint_code = settings
+        .palette()
+        .table_background
+        .map(|color| color.sequence(true))
+        .transpose()?
+        .unwrap_or_default();
     // The header is a full reverse video (SGR 7), which inverts both the
     // foreground and the background together. That makes the header bar the
     // exact complement of the text color in *any* theme, so contrast is
@@ -882,7 +814,7 @@ fn find_syntax<'a>(ss: &'a SyntaxSet, lang: &str) -> Option<&'a syntect::parsing
         .or_else(|| ss.syntaxes().first())
 }
 
-fn get_terminal_theme(ts: &ThemeSet) -> Option<Theme> {
+fn get_terminal_theme(ts: &ThemeSet) -> Option<&syntect::highlighting::Theme> {
     let candidates = [
         "base16-ocean.dark",
         "base16-default.dark",
@@ -893,53 +825,30 @@ fn get_terminal_theme(ts: &ThemeSet) -> Option<Theme> {
 
     for name in candidates {
         if let Some(theme) = ts.themes.get(name) {
-            return Some(theme.clone());
+            return Some(theme);
         }
     }
 
-    ts.themes
-        .values()
-        .next()
-        .cloned()
-        .or_else(|| ThemeSet::load_defaults().themes.values().next().cloned())
+    ts.themes.values().next()
 }
 
-/// Try to render a mermaid diagram to ASCII using mmdc.
-fn render_mermaid(content: &str) -> std::io::Result<String> {
-    // Try to use mmdc (mermaid-cli) if available
-    let output = std::process::Command::new("mmdc")
-        .args(["-i", "-", "-o", "-"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .spawn();
-
-    match output {
-        Ok(mut child) => {
-            // Write mermaid content to stdin
-            if let Some(mut stdin) = child.stdin.take() {
-                use std::io::Write;
-                stdin.write_all(content.as_bytes())?;
-            }
-
-            // Read output
-            let result = child.wait_with_output()?;
-            if result.status.success() {
-                let _svg = String::from_utf8_lossy(&result.stdout).to_string();
-                // For now, just return a placeholder since we can't easily
-                // convert SVG to ASCII in Rust without dependencies
-                Ok("[Mermaid diagram rendered via mmdc]".to_string())
-            } else {
-                Err(std::io::Error::other(format!(
-                    "mmdc failed: {}",
-                    String::from_utf8_lossy(&result.stderr)
-                )))
-            }
-        }
-        Err(e) => Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("mmdc not found: {}", e),
-        )),
+pub(crate) fn inert_source(source: &str) -> std::borrow::Cow<'_, str> {
+    if !source
+        .chars()
+        .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
+    {
+        return std::borrow::Cow::Borrowed(source);
     }
+    let mut output = String::with_capacity(source.len());
+    for character in source.chars() {
+        if character.is_control() && !matches!(character, '\n' | '\r' | '\t') {
+            use std::fmt::Write;
+            let _ = write!(output, "\\u{{{:x}}}", u32::from(character));
+        } else {
+            output.push(character);
+        }
+    }
+    std::borrow::Cow::Owned(output)
 }
 
 fn syntect_color_to_ansi(c: SColor) -> String {

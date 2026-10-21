@@ -17,9 +17,9 @@ tasks:
     purpose: "Specify accepted output policy before implementation"
     expected_outcome: "Regressions fail against current theme and dump behavior"
     context: "Human accepted TEXT_RENDERING_PLAN.md on 2026-10-21; advisory findings acknowledged in DESIGN.md."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:21:46Z", completed_at: "2026-10-21T18:21:46Z"}
     kind: test
-    status: pending
+    status: done
     depends_on: []
     requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-038"]
   - id: blad-text-p1-code
@@ -28,9 +28,9 @@ tasks:
     purpose: "Provide coherent text-only appearance"
     expected_outcome: "P1 output-policy tests pass"
     context: "Include immutable asset reuse and absence of render-time input/process effects."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:21:46Z", completed_at: "2026-10-21T18:21:46Z"}
     kind: implementation
-    status: pending
+    status: done
     depends_on: [blad-text-p1-tests]
     requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-040"]
   - id: blad-text-p1-audit
@@ -39,9 +39,9 @@ tasks:
     purpose: "Review P1 input and authority boundaries"
     expected_outcome: "Scoped findings and dispositions recorded"
     context: "No whole-component security certification is implied."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:21:46Z", completed_at: "2026-10-21T18:21:46Z"}
     kind: security-audit
-    status: pending
+    status: done
     depends_on: [blad-text-p1-code]
     requirements: ["REQUIREMENTS.md#R-038"]
   - id: blad-text-p1-review
@@ -49,10 +49,10 @@ tasks:
     description: "Independently derive observed behavior and compare source-blind to local intent."
     purpose: "Separate implementation from compliance evidence"
     expected_outcome: "P1 evidence and discrepancies retained"
-    context: "Source-derived observation and source-blind comparison require separate contexts."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    context: "Separate observers and source-blind comparison recorded in IMPL.md; no proven P1 mismatch; integration evidence reservations retained for P5."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:21:46Z", completed_at: "2026-10-21T18:21:46Z"}
     kind: compliance-review
-    status: pending
+    status: done
     depends_on: [blad-text-p1-audit]
     requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-039"]
   - id: blad-text-p2-tests
@@ -276,7 +276,7 @@ tasks:
     purpose: "Preserve independent evidence and human arbitration"
     expected_outcome: "Observed behavior and any discrepancies retained without acceptance claims"
     kind: compliance-review
-    context: |
+    context: |-
       Independent text-table-observer derived the 2026-10-21 IMPL.md supplement
       from allowed source and tests, excluding intent, queue, prior records,
       reviews and Git. Its runs passed 7 solver, 18 table-rendering and 5 PTY
@@ -349,7 +349,7 @@ tasks:
     purpose: "Preserve independent evidence and human arbitration"
     expected_outcome: "Observed behavior and discrepancies documented without self-certification"
     kind: compliance-review
-    context: |
+    context: |-
       Independent table-observer derived the scoped IMPL.md supplement solely
       from source/tests, excluding intent, queues, prior records/reviews and Git.
       Its independent runs passed 5 solver, 17 table-rendering and 5 viewer tests.

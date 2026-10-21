@@ -88,6 +88,11 @@ blad export 20261012T120000 --output transcript.md
 | `--log-dir PATH` | Directory containing skott sessions (default: `.skott/runs`) |
 | `--dump` | Output plain text without interactive viewer |
 | `--line-numbers` | Show rendered-line numbers in the interactive viewer |
+| `--theme auto\|dark\|light\|terminal` | Appearance; auto uses `COLORFGBG`, otherwise dark |
+| `--color auto\|always\|never` | Color independently of appearance; auto honors TTY, `NO_COLOR`, `TERM=dumb` |
+| `--math unicode\|source` | Mathematical projection policy |
+| `--mermaid text\|source` | Diagram projection policy |
+| `--diagram-charset unicode\|ascii` | Diagram structural glyphs, not authored labels |
 
 ```bash
 # View session without interactive viewer
@@ -96,6 +101,23 @@ blad show 20261012T120000 --dump
 # Specify custom log directory
 blad list --log-dir /path/to/logs
 ```
+
+Dark and light appearances choose matching syntax highlighting and subtle panel
+fills. Terminal-native appearance leaves code and table backgrounds unchanged.
+Automatic color uses `COLORTERM=truecolor`/`24bit`, then `TERM=*256color*`, then
+the standard sixteen colors. A nonempty `NO_COLOR` disables automatic colors;
+explicit `--color always` overrides it. Monochrome retains emphasis.
+`--dump` removes **all** styling, including authored terminal escapes, and
+renders message bodies consistently for files, sessions and stream snapshots.
+`export` instead preserves the original Markdown.
+
+Library callers use `MarkdownRenderer::with_options(RenderOptions { .. })`.
+The options contain a host-provided semantic `Palette`, `ColorDepth`, appearance,
+and projection choices. Library defaults never inspect environment variables,
+read stdin, issue OSC queries, or launch subprocesses. Existing width, syntax
+theme and panel-background setters remain available; unknown explicit syntax
+themes return `InvalidInput`. Syntax definitions and built-in themes are reused
+across renders.
 
 ## Interactive Viewer
 
