@@ -14,10 +14,23 @@ use skott::session::ToolExecutor;
 use skott::toolchain::HostProbe;
 use skott::{ProfileSetting, SandboxExecutor, SandboxPaths, ToolPolicy, ToolProfile, ToolRegistry};
 
+/// The manifest directory of the crate under test for the current
+/// invocation.
+///
+/// Cargo sets `CARGO_MANIFEST_DIR` in the test process environment at run
+/// time, so it stays correct even when a previously built test binary is
+/// reused after the repository has moved. The compile-time `env!` value is
+/// only a fallback for running the test binary outside of cargo.
+fn manifest_dir() -> PathBuf {
+    std::env::var("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
 fn fixture() -> tempfile::TempDir {
     tempfile::Builder::new()
         .prefix(".toolchain-discover-test-")
-        .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+        .tempdir_in(manifest_dir())
         .unwrap()
 }
 
@@ -44,7 +57,7 @@ fn runner() -> PathBuf {
     if let Some(path) = std::env::var_os("CARGO_TARGET_DIR") {
         roots.push(PathBuf::from(path));
     }
-    roots.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target"));
+    roots.push(manifest_dir().join("../target"));
     roots.push(PathBuf::from("/opt/target"));
     roots
         .iter()

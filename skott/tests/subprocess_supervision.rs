@@ -11,6 +11,19 @@ use skott::sandbox::{BuildRequest, build_request, default_resources, execute};
 use skott::{HostExecutor, SandboxPaths, ToolExecutor, ToolOutcome, ToolPolicy, ToolRegistry};
 use tempfile::{Builder, TempDir};
 
+/// The manifest directory of the crate under test for the current
+/// invocation.
+///
+/// Cargo sets `CARGO_MANIFEST_DIR` in the test process environment at run
+/// time, so it stays correct even when a previously built test binary is
+/// reused after the repository has moved. The compile-time `env!` value is
+/// only a fallback for running the test binary outside of cargo.
+fn manifest_dir() -> PathBuf {
+    std::env::var("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
 fn fixture(script: &str, limit: u64) -> (TempDir, SandboxPaths, SandboxRequest) {
     let dir = Builder::new()
         .prefix(".subprocess-test-")
@@ -24,7 +37,7 @@ fn fixture(script: &str, limit: u64) -> (TempDir, SandboxPaths, SandboxRequest) 
     // Never rewrite an executable while concurrent spawns may inherit its write
     // handle. Per-test commands are ordinary input files for an immutable launcher.
     std::fs::hard_link(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/subprocess_runner.sh"),
+        manifest_dir().join("tests/fixtures/subprocess_runner.sh"),
         &runner,
     )
     .unwrap();

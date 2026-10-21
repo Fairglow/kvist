@@ -2,14 +2,28 @@
 //! real, vendored project root. It skips gracefully when the checkout is not a
 //! Rust project root or has not been vendored yet (`.kvist` is gitignored).
 
-use std::path::Path;
+use std::path::PathBuf;
 
 use kvist::language_vendoring::enforce_vendoring;
 use kvist::vendoring::VendorManifest;
 
+/// The manifest directory of the crate under test for the current
+/// invocation.
+///
+/// Cargo sets `CARGO_MANIFEST_DIR` in the test process environment at run
+/// time, so it stays correct even when a previously built test binary is
+/// reused after the repository has moved. The compile-time `env!` value is
+/// only a fallback for running the test binary outside of cargo.
+fn manifest_dir() -> PathBuf {
+    std::env::var("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
 #[test]
 fn enforces_vendoring_for_the_real_project_when_vendored() {
-    let project = Path::new(env!("CARGO_MANIFEST_DIR"))
+    let manifest = manifest_dir();
+    let project = manifest
         .parent()
         .expect("workspace root is the parent of the maerg crate");
     if !project.join("Cargo.lock").is_file() {

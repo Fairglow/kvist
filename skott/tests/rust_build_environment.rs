@@ -12,10 +12,23 @@ use skott::session::ToolExecutor;
 use skott::toolchain::HostProbe;
 use skott::{ProfileSetting, SandboxExecutor, SandboxPaths, ToolPolicy, ToolProfile, ToolRegistry};
 
+/// The manifest directory of the crate under test for the current
+/// invocation.
+///
+/// Cargo sets `CARGO_MANIFEST_DIR` in the test process environment at run
+/// time, so it stays correct even when a previously built test binary is
+/// reused after the repository has moved. The compile-time `env!` value is
+/// only a fallback for running the test binary outside of cargo.
+fn manifest_dir() -> PathBuf {
+    std::env::var("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
 fn fixture() -> tempfile::TempDir {
     tempfile::Builder::new()
         .prefix(".rust-environment-test-")
-        .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+        .tempdir_in(manifest_dir())
         .unwrap()
 }
 
@@ -52,7 +65,7 @@ fn runner() -> PathBuf {
     if let Some(path) = std::env::var_os("CARGO_TARGET_DIR") {
         roots.push(PathBuf::from(path));
     }
-    roots.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target"));
+    roots.push(manifest_dir().join("../target"));
     roots.push(PathBuf::from("/opt/target"));
     roots
         .iter()
@@ -301,11 +314,7 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
         .with_ansi(false)
         .finish();
     let _guard = tracing::subscriber::set_default(subscriber);
-    let workdir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .canonicalize()
-        .unwrap();
+    let workdir = manifest_dir().parent().unwrap().canonicalize().unwrap();
     assert!(
         workdir.join(".kvist/vendored").is_dir(),
         "provision repository dependencies on the host"
@@ -327,7 +336,7 @@ fn native_repository_tests_execute_inside_the_workspace_sandbox() {
 
 #[test]
 fn repository_trial_requires_global_nextest_exclusivity() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.config/nextest.toml");
+    let path = manifest_dir().join("../.config/nextest.toml");
     let contents = fs::read_to_string(path).expect("read repository nextest configuration");
     let config: toml::Value = toml::from_str(&contents).expect("parse nextest configuration");
     let overrides = config["profile"]["default"]["overrides"]

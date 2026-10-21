@@ -1287,9 +1287,15 @@ mod tests {
     use std::os::unix::fs::symlink;
 
     fn fixture() -> tempfile::TempDir {
+        // Prefer the run-time `CARGO_MANIFEST_DIR` (set by cargo) so the
+        // fixture directory stays correct when a previously built test binary
+        // is reused after the repository has moved; the compile-time value is
+        // the fallback.
+        let manifest = std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string());
         tempfile::Builder::new()
             .prefix(".rust-resource-test-")
-            .tempdir_in(env!("CARGO_MANIFEST_DIR"))
+            .tempdir_in(manifest)
             .unwrap()
     }
 

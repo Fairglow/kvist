@@ -105,7 +105,13 @@ impl Sandbox {
         )
         .canonicalize()
         .unwrap();
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+        // Prefer the run-time `CARGO_MANIFEST_DIR` (set by cargo) so the
+        // repository path stays correct when a previously built test binary is
+        // reused after the repository has moved; the compile-time value is the
+        // fallback.
+        let manifest = std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string());
+        let repository = Path::new(&manifest)
             .parent()
             .unwrap()
             .canonicalize()

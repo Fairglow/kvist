@@ -23,11 +23,22 @@ use kvist::sandbox::{
 const POLICY_IDENTITY: &str =
     "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
+/// The manifest directory of the crate under test for the current
+/// invocation.
+///
+/// Cargo sets `CARGO_MANIFEST_DIR` in the test process environment at run
+/// time, so it stays correct even when a previously built test binary is
+/// reused after the repository has moved. The compile-time `env!` value is
+/// only a fallback for running the test binary outside of cargo.
+fn manifest_dir() -> PathBuf {
+    std::env::var("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
 /// The workspace root is the parent of the maerg crate manifest.
 fn workspace_root() -> Option<PathBuf> {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(PathBuf::from)
+    manifest_dir().parent().map(PathBuf::from)
 }
 
 /// Candidate roots that may hold the built sandbox runner.
@@ -93,11 +104,11 @@ fn locate_backend() -> Option<PathBuf> {
 
 /// Root of the enclosing git worktree.
 fn git_worktree_root() -> Option<PathBuf> {
-    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest = manifest_dir();
     let output = Command::new("git")
         .args([
             "-C",
-            manifest_dir.to_string_lossy().as_ref(),
+            manifest.to_string_lossy().as_ref(),
             "rev-parse",
             "--show-toplevel",
         ])

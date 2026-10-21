@@ -10,17 +10,31 @@
 //! `kvist.toml` is project-local (not committed); when it is absent there is
 //! no policy to inspect and the test passes.
 
-use std::path::Path;
+use std::path::PathBuf;
 
 use kvist::config;
 
 /// Placeholder echo binaries that can never execute component tests.
 const PLACEHOLDER_PROGRAMS: [&str; 3] = ["echo", "/bin/echo", "/usr/bin/echo"];
 
-fn project_root() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
+/// The manifest directory of the crate under test for the current
+/// invocation.
+///
+/// Cargo sets `CARGO_MANIFEST_DIR` in the test process environment at run
+/// time, so it stays correct even when a previously built test binary is
+/// reused after the repository has moved. The compile-time `env!` value is
+/// only a fallback for running the test binary outside of cargo.
+fn manifest_dir() -> PathBuf {
+    std::env::var("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
+fn project_root() -> PathBuf {
+    manifest_dir()
         .parent()
         .expect("workspace root exists")
+        .to_path_buf()
 }
 
 #[test]
@@ -33,7 +47,7 @@ fn project_test_policy_has_no_placeholder_commands() {
         return;
     }
 
-    let project = config::load(root).expect("project configuration loads");
+    let project = config::load(&root).expect("project configuration loads");
     let policy = project
         .test_policy
         .as_ref()
@@ -69,7 +83,7 @@ fn project_test_policy_digest_covers_command_set() {
         return;
     }
 
-    let project = config::load(root).expect("project configuration loads");
+    let project = config::load(&root).expect("project configuration loads");
     let policy = project
         .test_policy
         .as_ref()

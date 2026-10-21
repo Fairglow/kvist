@@ -224,8 +224,12 @@ impl Drop for Viewer {
 
 #[test]
 fn tagged_document_keeps_its_first_line_without_screen_scrolling() {
-    let path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tagged_document.md");
+    // Prefer the run-time `CARGO_MANIFEST_DIR` (set by cargo) so the fixture
+    // path stays correct when a previously built test binary is reused after
+    // the repository has moved; the compile-time value is the fallback.
+    let manifest = std::env::var("CARGO_MANIFEST_DIR")
+        .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_string());
+    let path = std::path::Path::new(&manifest).join("tests/fixtures/tagged_document.md");
     let mut viewer = Viewer::start(&path, 80, 24, false);
     assert_eq!(viewer.screen.scrolls, 0);
     assert_eq!(

@@ -271,8 +271,23 @@ pub fn resolve_local_test_model() -> (String, Option<LocalModel>) {
     )
 }
 
+/// The manifest directory of the crate under test for the current
+/// invocation.
+///
+/// Cargo sets `CARGO_MANIFEST_DIR` in the test process environment at run
+/// time, so it stays correct even when a previously built test binary is
+/// reused after the repository has moved (for example a build from a
+/// temporary checkout served by a shared target directory). The
+/// compile-time `env!` value is only a fallback for running the test binary
+/// outside of cargo.
+fn manifest_dir() -> PathBuf {
+    std::env::var("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
+}
+
 pub fn repository_root() -> PathBuf {
-    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let manifest = manifest_dir();
     if manifest.join("VISION.md").is_file() {
         manifest
     } else if manifest
