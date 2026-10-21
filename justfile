@@ -46,6 +46,7 @@ release:
 # Uses cargo metadata to detect the actual target directory (supports pooled targets)
 install: release
     TARGET_DIR=$(cargo metadata --format-version 1 --no-deps | python3 -c "import sys, json; print(json.load(sys.stdin)['target_directory'])") && \
+    sudo install -D -m 755 "${TARGET_DIR}/release/blad" /usr/local/bin/blad && \
     sudo install -D -m 755 "${TARGET_DIR}/release/kvist" /usr/local/bin/kvist && \
     sudo install -D -m 755 "${TARGET_DIR}/release/galla-runner" /usr/local/bin/galla-runner && \
     sudo install -D -m 755 "${TARGET_DIR}/release/sav-run" /usr/local/bin/sav-run && \
