@@ -149,9 +149,9 @@ tasks:
     purpose: "Admit one backend from evidence"
     expected_outcome: "Engine selection and failing adapter regressions recorded"
     context: "Require numeric work/cancellation budgets before backend admission."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:52:21Z", completed_at: "2026-10-21T18:52:21Z"}
     kind: test
-    status: pending
+    status: done
     depends_on: [blad-text-p1-review]
     requirements: ["REQUIREMENTS.md#R-037", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-040"]
   - id: blad-text-p4-code
@@ -160,9 +160,9 @@ tasks:
     purpose: "Render real terminal text boxes without runtime tools"
     expected_outcome: "P4 admitted-family corpus passes"
     context: "ER is required; unsuitable backend warrants explicit arbitration, not weakened guarantees."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:52:21Z", completed_at: "2026-10-21T18:52:21Z"}
     kind: implementation
-    status: pending
+    status: done
     depends_on: [blad-text-p4-tests]
     requirements: ["REQUIREMENTS.md#R-037", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-040"]
   - id: blad-text-p4-audit
@@ -171,9 +171,9 @@ tasks:
     purpose: "Review untrusted diagram processing"
     expected_outcome: "P4 scoped findings and dependency notices retained"
     context: "Review selected feature graph, not all optional upstream features."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:52:21Z", completed_at: "2026-10-21T18:52:21Z"}
     kind: security-audit
-    status: pending
+    status: done
     depends_on: [blad-text-p4-code]
     requirements: ["REQUIREMENTS.md#R-038"]
   - id: blad-text-p4-review
@@ -181,10 +181,10 @@ tasks:
     description: "Independently derive diagram observations and compare to admitted-family intent."
     purpose: "Preserve independent P4 evidence"
     expected_outcome: "P4 observations and discrepancies retained"
-    context: "Parser acceptance alone does not demonstrate spatial output."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    context: "Independent spatial/source observation, executed corpus and source-blind comparison recorded in IMPL.md; no proven mismatch; final remediation reconfirmation retained for P5."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:52:21Z", completed_at: "2026-10-21T18:52:21Z"}
     kind: compliance-review
-    status: pending
+    status: done
     depends_on: [blad-text-p4-audit]
     requirements: ["REQUIREMENTS.md#R-037", "REQUIREMENTS.md#R-039"]
   - id: blad-text-p5-tests

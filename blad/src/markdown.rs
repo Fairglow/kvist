@@ -111,6 +111,31 @@ impl MarkdownRenderer {
 
     /// Render markdown with the renderer's configured options.
     pub fn render_markdown(&self, md: &str, w: &mut impl Write) -> std::io::Result<()> {
+        self.render_controlled(md, w, None)
+    }
+
+    /// Render with host-controlled cooperative cancellation.
+    ///
+    /// Cancellation and deadlines return `Interrupted`; output may already
+    /// have been written. No thread, subprocess or terminal query is started.
+    pub fn render_markdown_with_cancellation(
+        &self,
+        md: &str,
+        w: &mut impl Write,
+        cancellation: &crate::RenderCancellation,
+    ) -> std::io::Result<()> {
+        self.render_controlled(md, w, Some(cancellation))
+    }
+
+    fn render_controlled(
+        &self,
+        md: &str,
+        w: &mut impl Write,
+        cancellation: Option<&crate::RenderCancellation>,
+    ) -> std::io::Result<()> {
+        if let Some(control) = cancellation {
+            control.checkpoint()?;
+        }
         let mut output = crate::output::Output::new(w, &self.options);
         render_markdown_theme(
             md,
@@ -118,8 +143,13 @@ impl MarkdownRenderer {
             self.width,
             self.syntax_theme.as_deref(),
             &self.options,
+            cancellation,
         )?;
-        output.flush()
+        output.flush()?;
+        if let Some(control) = cancellation {
+            control.checkpoint()?;
+        }
+        Ok(())
     }
 }
 
@@ -135,6 +165,7 @@ fn render_markdown_theme(
     terminal_width: Option<usize>,
     theme_name: Option<&str>,
     settings: &RenderOptions,
+    cancellation: Option<&crate::RenderCancellation>,
 ) -> std::io::Result<()> {
     static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
     static THEMES: OnceLock<ThemeSet> = OnceLock::new();
@@ -201,6 +232,9 @@ fn render_markdown_theme(
     let mut inline = InlineWriter::new(terminal_width);
 
     for (event, range) in parser {
+        if let Some(control) = cancellation {
+            control.checkpoint()?;
+        }
         if last_display
             && matches!(
                 &event,
@@ -243,10 +277,8 @@ fn render_markdown_theme(
                     CodeBlockKind::Fenced(s) => code_language = s.to_string(),
                     CodeBlockKind::Indented => code_language.clear(),
                 }
-                if code_language == "mermaid" {
-                    // Mermaid diagrams: collect content, render later
-                    // Try to use mmdc if available, fallback to plain text
-                } else if let (Some(syntax), Some(theme)) = (find_syntax(ss, &code_language), theme)
+                if code_language != "mermaid"
+                    && let (Some(syntax), Some(theme)) = (find_syntax(ss, &code_language), theme)
                 {
                     hl = Some(HighlightLines::new(syntax, theme));
                 }
@@ -254,23 +286,13 @@ fn render_markdown_theme(
             Event::End(TagEnd::CodeBlock) => {
                 in_code_block = false;
                 if code_language == "mermaid" {
-                    // Try to render mermaid diagram
-                    let result: std::io::Result<String> = Err(std::io::Error::new(
-                        std::io::ErrorKind::Unsupported,
-                        "text diagram backend not yet admitted",
-                    ));
-                    match result {
-                        Ok(ascii) => {
-                            writeln!(w, "{}", ascii)?;
-                        }
-                        Err(_) => {
-                            // Fallback: show as plain text
-                            writeln!(w, "Mermaid diagram:")?;
-                            for line in code_content.lines() {
-                                writeln!(w, "    {}", line)?;
-                            }
-                        }
-                    }
+                    crate::diagram::write(
+                        &code_content,
+                        w,
+                        settings,
+                        terminal_width,
+                        cancellation,
+                    )?;
                     writeln!(w)?;
                 } else if let Some(mut highlighter) = hl.take() {
                     // The code panel's background, mode-appropriate and applied
@@ -875,9 +897,11 @@ fn get_terminal_theme(ts: &ThemeSet) -> Option<&syntect::highlighting::Theme> {
 }
 
 pub(crate) fn inert_source(source: &str) -> std::borrow::Cow<'_, str> {
+    let control =
+        |c: char| c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}');
     if !source
         .chars()
-        .any(|c| c.is_control() && !matches!(c, '\n' | '\t'))
+        .any(|c| control(c) && !matches!(c, '\n' | '\t'))
     {
         return std::borrow::Cow::Borrowed(source);
     }
@@ -887,7 +911,7 @@ pub(crate) fn inert_source(source: &str) -> std::borrow::Cow<'_, str> {
         if character == '\r' && characters.peek() == Some(&'\n') {
             continue;
         }
-        if character.is_control() && !matches!(character, '\n' | '\t') {
+        if control(character) && !matches!(character, '\n' | '\t') {
             use std::fmt::Write;
             let _ = write!(output, "\\u{{{:x}}}", u32::from(character));
         } else {

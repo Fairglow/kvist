@@ -335,15 +335,12 @@ fn test_autolinks() {
 
 #[test]
 fn test_mermaid_block_is_processed() {
-    // A mermaid fence is processed, not echoed as raw source: both the mmdc
-    // placeholder ("[Mermaid diagram rendered via mmdc]") and the plain-text
-    // fallback ("Mermaid diagram:") carry the "Mermaid diagram" marker, so the
-    // assertion discriminates "processed" from "raw source" without depending
-    // on whether mmdc is installed.
     let output = render("```mermaid\ngraph TD\n    A --> B\n```");
+    assert!(output.contains('┌') && output.contains('└'), "{output:?}");
+    assert!(output.contains('A') && output.contains('B'), "{output:?}");
     assert!(
-        output.contains("Mermaid diagram"),
-        "mermaid block must be processed, got: {output:?}"
+        !output.contains("A --> B") && !output.contains("placeholder"),
+        "{output:?}"
     );
 }
 

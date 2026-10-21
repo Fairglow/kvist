@@ -278,6 +278,54 @@ escaped visibly, including decoded entities and code/fallback content.
 Inline formulas and fallbacks remain atomic text spans; display formulas are
 separate unwrapped blocks. Existing horizontal overflow handles long formulas.
 
+### P4 backend admission
+
+Admit pinned Merman 0.9.1 with defaults disabled and only `ascii` plus the
+flowchart, sequence, state, class and ER selectors. Mmdflux 2.6.1 lacks the
+required ER family; retaining five families justifies Merman's larger graph.
+The active graph excludes graphical renderer crates. Approved `kvist vendor`
+provisioning updated the canonical locked snapshot; its documented host
+acquisition fallback was used when sandbox toolchain discovery failed.
+This added 73 locked crates, about 47 MB unpacked. Merman/Dugong are
+MIT OR Apache-2.0 with retained translated-source notices; transitive
+MPL-2.0, Unicode, BSD and Zlib notices remain distribution obligations.
+
+The adapter rejects rather than pretending success when the scene requires a
+non-spatial relation summary. Five-family fixtures admit labelled spatial
+diagrams, branches/cycles, groups/control frames, notes, class members and ER
+attributes/keys. Browser interactions, directives/front matter, accessibility
+declarations, rich HTML, endpoint-product shorthand and unsupported model
+features are gated explicitly. Some composite-state crossings/cycles,
+namespace-plus-external-note combinations and relation topologies remain
+unsupported. Styling and elaborate shapes are text approximations. The exact
+profile is documented in `docs/USAGE.md`.
+
+Enforced rejection ceilings: 65,536 source bytes, 8,192 lexical units, 256
+nodes/participants/containers, 512 edges/messages, nesting 32, 32,768 model
+items, 262,144 model-text bytes, 262,144 grid/document cells, 2,097,152 output
+bytes, 256 bytes per grapheme and 2,000,000 deterministic layout-work units.
+Model admission checks run after parsing, not before model allocation.
+Each call uses a fresh child control with a 500 ms cooperative deadline;
+earlier ancestor deadlines also apply. This is checkpoint cancellation, not
+hard preemption or a memory sandbox. Reaching a ceiling is an explicit
+resource failure, not a promise that every smaller scene succeeds. Source
+fallback is bounded to 65,536 bytes with an explicit omitted-byte count.
+Source mode bypasses the engine.
+
+The public `RenderCancellation` wrapper lets hosts retain a clone and cancel
+controlled document rendering. It does not expose backend types. Cancellation
+and deadlines propagate as `Interrupted`; writer errors preserve their original
+kind. Unsupported/invalid/resource engine errors get distinct visible source
+fallbacks. Diagram output crosses the inert-text boundary again, since labels
+may have been decoded by the engine. Completed rows never viewport-wrap or
+rotate; width does not alter canonical diagram geometry.
+
+Admission measurements (optimized test profile, 100 repetitions per family):
+flowchart 0.847 ms, sequence 0.234 ms, state 0.782 ms, class 0.243 ms and ER
+0.450 ms average; cold flowchart 6.85 ms; corpus process peak RSS 17,944 KiB.
+A 16-node chain took 8.07 ms; 64-256-node chains explicitly exhausted work in
+76-81 ms. These measured fixtures are not universal latency guarantees.
+
 The human accepted `docs/TEXT_RENDERING_PLAN.md` and requested separate milestone
 commits. P0 records intent; P1-P5 cover themes/output, scripts, math, native
 diagrams, and integration respectively. No graphical intermediate is allowed.

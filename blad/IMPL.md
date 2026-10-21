@@ -4,6 +4,68 @@
 
 Date: 2026-10-12
 
+## Native text diagrams observation - 2026-10-21
+
+An independent clean-slate observer inspected only the adapter, integration,
+diagram tests and selected manifest/dependency graph. It excluded intent,
+queues, implementation records, reviews/chat/history and peer code. Its
+source-derived findings:
+
+- Five model families produce tested spatial ASCII/Unicode boxes/connectors:
+  flowchart, sequence, state, class and ER. Tests cover labels, directions,
+  groups/frames, notes, class members and ER attributes. This establishes a
+  tested subset, not universal Mermaid semantic fidelity.
+- Width is deliberately ignored, preserving canonical unwrapped/unrotated rows;
+  one measured ER row was 170 columns wide. Authored Unicode remains Unicode.
+- Directives, rich HTML, endpoint products and selected interaction/metadata
+  fields are gated. Engine reports must be diagrammatic, non-fallback and omit
+  standalone `relations:` summaries. This rejects known summaries but is not a
+  proof that every possible accepted detail survives. Styling is ignored.
+- Preflight limits source to 65,536 bytes, lexical units to 8,192 and nesting
+  to 32. **After parsing**, model admission limits nodes/participants to 256,
+  edges/messages to 512, items to 32,768 and text to 262,144 bytes.
+- Renderer policy requests 262,144 grid/document cells, 2,097,152 encoded-output
+  bytes, 2,000,000 work units and 256 bytes/grapheme. Tests exercise lowered
+  work/grid/output limits across all families and exact encoded-output
+  boundaries; dependency internals were not audited.
+- Each diagram uses a child 500 ms cooperative deadline. Cancellation/deadline
+  errors become `Interrupted`, never source-fallback success. This is not hard
+  preemption or a wall-clock/memory bound; parsing/preprocessing/writer work can
+  occur between checkpoints.
+- Unsupported/invalid/resource diagnostics retain source, capped at 65,536
+  bytes on a UTF-8 boundary with explicit omitted bytes. Source mode bypasses
+  the cap. Writer errors propagate without rolling back existing output.
+- Selected Merman 0.9.1 disables defaults and enables only ASCII plus five
+  family selectors. HTML/CSS/URL/ICU parsing appears in the active graph;
+  URL parsing alone is not networking. Optional graphical/editor/analysis
+  packages in the lockfile are inactive. Adapter code contains no process,
+  file, network or graphical-intermediate effects; this is not a complete
+  dependency-source effects audit.
+
+The observer independently ran seven end-to-end and 16 backend tests, plus the
+opt-in corpus characterization. Repeated family means were approximately
+0.24-0.88 ms; 64/128/256-node chains failed explicitly with work limits in
+75-81 ms. It inspected the selected feature graph independently.
+
+Its audit found that rejected/source diagrams could still emit bidi override/
+isolate characters. A new end-to-end regression reproduced this before the
+shared inert boundary was extended to U+202A-U+202E and U+2066-U+2069.
+Additional encoded-label and malformed-diagnostic probes now pass without
+terminal controls. Latest targeted evidence: nine end-to-end plus 16 backend
+tests pass; strict all-target Clippy passes. Final P5 observation must include
+this remediation.
+
+Earlier full integration evidence: 137 tests passed, one opt-in timing test
+ignored, and the Skott consumer check passed. Backend provisioning/admission
+measurements and license obligations are recorded in DESIGN.md, not fabricated
+as independent compliance evidence.
+
+A separate source-blind P4 comparison found no proven mismatch for the bounded
+R-017/R-037/R-038/R-039/R-040/C-004 scope. It supported five-family spatial
+admission, independent geometry and documented limits, while retaining
+independent P5 reconfirmation of remediation evidence and explicitly not
+claiming universal fidelity or a dependency-internals audit.
+
 ## Mathematical text observation - 2026-10-21
 
 An independent clean-slate source observer inspected math, shared scripts,

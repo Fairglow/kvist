@@ -307,14 +307,49 @@ Blad renders full CommonMark and GitHub Flavored Markdown (GFM):
 
 ### Mermaid Diagrams
 
-Blad detects ` ```mermaid ` code blocks and attempts to render them using
-`mmdc` (mermaid-cli). If `mmdc` is not installed, the diagram source is
-displayed as plain text.
+Blad renders ` ```mermaid ` fences directly into terminal text using pinned
+Merman 0.9.1. No PNG/SVG, graphical intermediates, browsers, runtime tools or
+network calls are involved. `--diagram-charset ascii` changes structural glyphs,
+not authored Unicode. `--mermaid source` skips the engine and shows source.
 
-Install mermaid-cli:
-```bash
-npm install -g @mermaid-js/mermaid-cli
-```
+| Family/header | Admitted examples | Boundaries/approximations |
+|---------------|-------------------|--------------------------|
+| `flowchart` / `graph` | Labelled boxes/decisions, arrows/edge labels, branches/cycles, subgraphs, multiline labels; LR/RL/TB/TD/BT | Shapes are terminal approximations; endpoint-product `&` shorthand, callbacks, icons/images and animation are unsupported |
+| `sequenceDiagram` | Ordered participants, messages/replies, nested loop/alt/else frames, `Note over` | Actors use participant boxes; actor properties, links and extended actor types are unsupported |
+| `stateDiagram` / `stateDiagram-v2` | Transitions, root cycles, simple composites, attached notes; LR/RL/TB/BT | Some composite crossings/cycles exceed the admitted routing profile |
+| `classDiagram` | Members/methods/visibility, interface annotations, inheritance, labelled directed relations, namespaces, attached notes; LR/RL/TB/BT | Namespace-plus-external-note combinations and some relation topologies fall back |
+| `erDiagram` | Entities, attributes, key tokens/comments, labelled cardinality relations; LR/RL/TB/BT | Cardinalities are textual; some relation topologies fall back |
+
+This is an admitted **subset**, not full Mermaid compatibility. Styles are not
+represented in plain diagrams. Rich HTML other than line breaks, configuration
+directives/front matter, accessibility metadata and browser interactions are
+unsupported. Conservative source-level gates can also reject such syntax in
+comments/literals. A non-spatial `relations:` summary is rejected rather than
+presented as a successfully rendered diagram.
+
+Direction, endpoint identity and labels are retained. Labels can wrap **inside**
+their boxes; completed diagram rows never viewport-wrap, rotate or truncate to
+fit the terminal. Canonical geometry is unchanged by resize: use Left/Right for
+overflow. Unsupported syntax, invalid syntax and resource limits each show
+distinct explanations plus source, with explicit byte omissions if source
+exceeds the 65,536-byte fallback ceiling.
+
+Rejection ceilings are 65,536 source bytes, 8,192 lexical units, 256
+nodes/participants/containers, 512 edges/messages, nesting 32, 32,768 model
+items, 262,144 model-text bytes, 262,144 grid/document cells, 2,097,152 output
+bytes, 256 bytes/grapheme and 2,000,000 layout-work units. A 500 ms cooperative
+deadline supplements these bounds; it is not hard preemption or a memory
+sandbox. Smaller scenes can still be unsupported or exceed routing budgets.
+Model size checks run after parsing; these are not pre-allocation memory limits.
+Terminal protocol controls and bidirectional override/isolate controls are made
+visible in diagram output, diagnostics and source presentations.
+
+Library hosts may call `render_markdown_with_cancellation` with a cloneable
+`RenderCancellation`, optionally configured with a shorter deadline. A retained
+clone can request cancellation; cancellation/deadlines return `Interrupted`,
+never a successful source fallback. Writer failures retain their original
+error. Output can already have been written when either error occurs. Rendering
+itself creates no worker thread.
 
 ## Examples
 
@@ -365,10 +400,9 @@ escape sequences are stripped before matching.
 
 ### Mermaid diagrams not rendering
 
-Ensure `mmdc` is installed and in your PATH:
-```bash
-which mmdc
-```
+Read the visible diagnostic: unsupported syntax, invalid syntax and resource
+limits have different causes. Simplify the scene or use `--mermaid source`.
+There is no external Mermaid executable to install.
 
 ### No color output
 

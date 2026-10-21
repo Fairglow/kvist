@@ -27,7 +27,8 @@ rendering blad uses to display sessions afterwards.
 - **Session viewing:** Read and display skott agent session transcripts
 - **Live streaming:** Follow an active session transcript as it streams
 - **Export:** Export sessions to combined Markdown documents
-- **Mermaid support:** Detects and attempts to render mermaid diagrams
+- **Text-only Mermaid:** Spatial Unicode/ASCII boxes, connectors and labels for
+  admitted flowchart, sequence, state, class and ER diagrams; no graphics/tools
 - **GFM alerts:** Color-coded [!NOTE], [!TIP], [!IMPORTANT], [!WARNING], [!CAUTION]
 
 ## Prerequisites

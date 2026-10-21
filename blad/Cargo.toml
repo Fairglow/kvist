@@ -32,6 +32,7 @@ syntect = { version = "5.3", default-features = false, features = ["default-fanc
 tabled = { version = "0.22.0", features = ["ansi", "ansi-str", "ansitok"] }
 unicode-segmentation = "1.13"
 unicode-width = "0.2"
+merman = { version = "=0.9.1", default-features = false, features = ["ascii", "diagram-flowchart", "diagram-sequence", "diagram-state", "diagram-class", "diagram-er"] }
 
 [dev-dependencies]
 nix = { version = "0.31", default-features = false, features = ["fs", "poll", "process", "signal", "term"] }
