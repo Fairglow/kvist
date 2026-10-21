@@ -218,3 +218,26 @@ fn entity_decoded_labels_and_malformed_diagnostics_are_terminal_safe() {
         assert!(!output.is_empty());
     }
 }
+
+#[test]
+fn cancellation_during_document_writes_stays_an_error() {
+    struct Cancelling(blad::RenderCancellation);
+    impl std::io::Write for Cancelling {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.cancel();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let cancellation = blad::RenderCancellation::new();
+    let error = MarkdownRenderer::new()
+        .render_markdown_with_cancellation(
+            "# Heading\n\n$x^2$\n\n```mermaid\nflowchart LR\nA --> B\n```",
+            &mut Cancelling(cancellation.clone()),
+            &cancellation,
+        )
+        .unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+}

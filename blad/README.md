@@ -77,6 +77,12 @@ blad --theme terminal --color never view README.md
 
 # Plain rendered text, even when color is explicitly requested
 blad --color always --dump view README.md
+
+# Text boxes/arrows, with ASCII structural glyphs
+blad --diagram-charset ascii view diagrams.md
+
+# Inspect unprojected expressions and diagram source
+blad --math source --mermaid source view document.md
 ```
 
 ## Keyboard Shortcuts
@@ -122,3 +128,9 @@ Blad is the single source of truth for Markdown parsing and rendering in the
 workspace. `skott` depends on the `blad` library and converts blad's ANSI output
 to ratatui-compatible styled lines for its TUI. See
 [`skott/README.md`](../skott/README.md) for the consumer side.
+
+The supported script, math and Mermaid profiles and their explicit fallback/
+resource behavior are documented in the [User's Guide](docs/USAGE.md).
+These are bounded text projections, not full TeX or full Mermaid compatibility.
+Library hosts can supply their own palette/capabilities and cooperative
+cancellation without inheriting CLI environment detection.

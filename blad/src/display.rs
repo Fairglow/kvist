@@ -230,6 +230,27 @@ fn run_viewer(
     width_limit: Option<usize>,
     options: &RenderOptions,
 ) -> io::Result<()> {
+    let mut source = std::borrow::Cow::Borrowed(content);
+    loop {
+        match viewer_session(path, &source, line_numbers, width_limit, options)? {
+            ViewerAction::Quit => return Ok(()),
+            ViewerAction::Edit(path) => source = std::borrow::Cow::Owned(edit_file(path)?),
+        }
+    }
+}
+
+enum ViewerAction<'a> {
+    Quit,
+    Edit(&'a std::path::Path),
+}
+
+fn viewer_session<'a>(
+    path: Option<&'a std::path::Path>,
+    content: &str,
+    line_numbers: bool,
+    width_limit: Option<usize>,
+    options: &RenderOptions,
+) -> io::Result<ViewerAction<'a>> {
     use crossterm::event::{self, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 
     let (mut cols, mut rows) = crossterm::terminal::size()?;
@@ -432,9 +453,8 @@ fn run_viewer(
                         KeyCode::Char('e') if path.is_some() => {
                             terminal.restore()?;
                             if let Some(path) = path {
-                                return edit_and_rerender(path, line_numbers, width_limit, options);
+                                return Ok(ViewerAction::Edit(path));
                             }
-                            return Ok(());
                         }
                         KeyCode::Char('q') | KeyCode::Esc => {
                             break;
@@ -473,7 +493,8 @@ fn run_viewer(
         }
     }
 
-    terminal.restore()
+    terminal.restore()?;
+    Ok(ViewerAction::Quit)
 }
 
 fn scroll_to_match(current_offset: usize, target_line: usize, visible_lines: usize) -> usize {
@@ -486,12 +507,7 @@ fn scroll_to_match(current_offset: usize, target_line: usize, visible_lines: usi
     }
 }
 
-fn edit_and_rerender(
-    path: &std::path::Path,
-    line_numbers: bool,
-    width_limit: Option<usize>,
-    options: &RenderOptions,
-) -> io::Result<()> {
+fn edit_file(path: &std::path::Path) -> io::Result<String> {
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nvim".to_string());
     let args: Vec<&str> = editor.split_whitespace().collect();
     let Some(program) = args.first() else {
@@ -509,8 +525,7 @@ fn edit_and_rerender(
             "editor exited with status: {status}"
         )));
     }
-    let content = std::fs::read_to_string(path)?;
-    run_viewer(Some(path), &content, line_numbers, width_limit, options)
+    std::fs::read_to_string(path)
 }
 
 /// Export a session to a combined markdown document.

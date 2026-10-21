@@ -192,3 +192,64 @@ fn nearest(rgb: (u8, u8, u8), count: u16) -> u8 {
         })
         .unwrap_or(0) as u8
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bytewise_encoding_preserves_text_and_matches_whole_writes() {
+        let source = "α\x1b[1;38;2;255;128;0m世界\x1b[0m end";
+        for depth in [
+            ColorDepth::None,
+            ColorDepth::Ansi16,
+            ColorDepth::Ansi256,
+            ColorDepth::TrueColor,
+        ] {
+            let options = RenderOptions {
+                color_depth: depth,
+                ..RenderOptions::default()
+            };
+            let mut expected = Vec::new();
+            let mut output = Output::new(&mut expected, &options);
+            output.write_all(source.as_bytes()).unwrap();
+            output.flush().unwrap();
+            let mut actual = Vec::new();
+            let mut output = Output::new(&mut actual, &options);
+            for byte in source.as_bytes() {
+                output.write_all(&[*byte]).unwrap();
+            }
+            output.flush().unwrap();
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn malformed_incomplete_and_overlong_renderer_controls_fail() {
+        let options = RenderOptions::default();
+        for source in ["\x1b]11;?", "\x1b[38;2;999;0;0m", "\x1b[38;5;999m"] {
+            assert_eq!(
+                Output::new(&mut Vec::new(), &options)
+                    .write_all(source.as_bytes())
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::InvalidData
+            );
+        }
+        let mut bytes = Vec::new();
+        let mut output = Output::new(&mut bytes, &options);
+        output.write_all(b"\x1b[").unwrap();
+        assert_eq!(
+            output.flush().unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        let source = format!("\x1b[{}m", "1".repeat(65));
+        assert_eq!(
+            Output::new(&mut Vec::new(), &options)
+                .write_all(source.as_bytes())
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+}

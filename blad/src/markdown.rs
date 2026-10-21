@@ -19,7 +19,17 @@ use syntect::highlighting::{Color as SColor, FontStyle, Style as SStyle, ThemeSe
 use syntect::parsing::SyntaxSet;
 
 use crate::inline::{InlineWriter, Style};
+pub(crate) use crate::terminal_text::inert_source;
 use crate::theme::{RenderOptions, Theme};
+
+fn syntax_assets() -> (&'static SyntaxSet, &'static ThemeSet) {
+    static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
+    static THEMES: OnceLock<ThemeSet> = OnceLock::new();
+    (
+        SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines),
+        THEMES.get_or_init(ThemeSet::load_defaults),
+    )
+}
 
 /// Whether the terminal's background is dark or light. Drives the table
 /// zebra striping: a dark background uses subtly brighter tints and a light
@@ -167,10 +177,7 @@ fn render_markdown_theme(
     settings: &RenderOptions,
     cancellation: Option<&crate::RenderCancellation>,
 ) -> std::io::Result<()> {
-    static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
-    static THEMES: OnceLock<ThemeSet> = OnceLock::new();
-    let ss = SYNTAXES.get_or_init(SyntaxSet::load_defaults_newlines);
-    let ts = THEMES.get_or_init(ThemeSet::load_defaults);
+    let (ss, ts) = syntax_assets();
     let palette = settings.palette();
     let code_bg = palette
         .code_background
@@ -307,7 +314,7 @@ fn render_markdown_theme(
                         // Measure the raw line's display width (full-width
                         // characters count double) before ANSI codes are
                         // added, so the padding is exact.
-                        let content_width = unicode_width::UnicodeWidthStr::width(line);
+                        let content_width = crate::terminal_text::width_with_tabs(line);
                         write!(w, "{}", code_bg)?;
                         match highlighter.highlight_line(line, ss) {
                             Ok(ranges) => {
@@ -332,7 +339,7 @@ fn render_markdown_theme(
                     // code panel so the block reads as a distinct region.
                     let reset = "\x1b[0m";
                     for line in code_content.lines() {
-                        let content_width = unicode_width::UnicodeWidthStr::width(line);
+                        let content_width = crate::terminal_text::width_with_tabs(line);
                         write!(w, "{}", code_bg)?;
                         let padded = pad_code_line(line, content_width, terminal_width);
                         write!(w, "{}", padded)?;
@@ -894,31 +901,6 @@ fn get_terminal_theme(ts: &ThemeSet) -> Option<&syntect::highlighting::Theme> {
     }
 
     ts.themes.values().next()
-}
-
-pub(crate) fn inert_source(source: &str) -> std::borrow::Cow<'_, str> {
-    let control =
-        |c: char| c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}');
-    if !source
-        .chars()
-        .any(|c| control(c) && !matches!(c, '\n' | '\t'))
-    {
-        return std::borrow::Cow::Borrowed(source);
-    }
-    let mut output = String::with_capacity(source.len());
-    let mut characters = source.chars().peekable();
-    while let Some(character) = characters.next() {
-        if character == '\r' && characters.peek() == Some(&'\n') {
-            continue;
-        }
-        if control(character) && !matches!(character, '\n' | '\t') {
-            use std::fmt::Write;
-            let _ = write!(output, "\\u{{{:x}}}", u32::from(character));
-        } else {
-            output.push(character);
-        }
-    }
-    std::borrow::Cow::Owned(output)
 }
 
 fn syntect_color_to_ansi(c: SColor) -> String {

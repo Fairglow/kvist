@@ -119,7 +119,7 @@ theme and panel-background setters remain available; unknown explicit syntax
 themes return `InvalidInput`. Syntax definitions and built-in themes are reused
 across renders.
 
-## Interactive Viewer
+## Text Rendering
 
 ### Unicode script notation
 
@@ -199,6 +199,8 @@ controls are always shown inertly. Source mode skips projection.
 CRLF line endings normalize to LF; standalone carriage returns are visible
 `\u{d}` text rather than terminal cursor movement.
 
+## Interactive Viewer
+
 The interactive viewer provides navigation, search, and edit capabilities.
 
 Prose and headings wrap to the available terminal columns after reserving the
@@ -265,12 +267,18 @@ to exit search mode and keep the matches highlighted.
 | `Esc` | Cancel search |
 
 The footer shows match position (e.g., "3/12 matches" for match 3 of 12).
+Matching rows keep their configured search indication across heading, emphasis
+and syntax-highlighting resets, including monochrome reverse-video cues.
 
 ### Edit Mode
 
 In the viewer for a file (not a session), press `e` to open the file in
 your configured editor. After saving and closing the editor, Blad
 re-renders the file with your changes.
+Appearance, color capability and projection options persist across editing
+and resize. Re-entry releases the previous viewport instead of accumulating
+recursive viewers. Editor launch, exit-status and reread failures propagate,
+with terminal state restored.
 
 Blad uses the `$EDITOR` environment variable. If not set, it defaults to
 `nvim`.
@@ -406,4 +414,10 @@ There is no external Mermaid executable to install.
 
 ### No color output
 
-Check that your terminal supports ANSI colors. Most modern terminals do.
+Automatic color is disabled for redirected stdout, nonempty `NO_COLOR` and
+`TERM=dumb`. Use `--color always` for intentional colored redirection, or
+`--color never` for monochrome emphasis. `--dump` always overrides color and
+removes styling. `--theme` changes appearance, not color capability.
+
+Exports remain raw source Markdown, not sanitized rendered terminal text.
+Treat authored terminal controls in exported files as untrusted source.

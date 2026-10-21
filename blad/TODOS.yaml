@@ -19,7 +19,7 @@ tasks:
     context: "Human accepted TEXT_RENDERING_PLAN.md on 2026-10-21; advisory findings acknowledged in DESIGN.md."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:21:46Z", completed_at: "2026-10-21T18:21:46Z"}
     kind: test
-    status: done
+    status: completed
     depends_on: []
     requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-038"]
   - id: blad-text-p1-code
@@ -30,7 +30,7 @@ tasks:
     context: "Include immutable asset reuse and absence of render-time input/process effects."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:21:46Z", completed_at: "2026-10-21T18:21:46Z"}
     kind: implementation
-    status: done
+    status: completed
     depends_on: [blad-text-p1-tests]
     requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-040"]
   - id: blad-text-p1-audit
@@ -41,7 +41,7 @@ tasks:
     context: "No whole-component security certification is implied."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:21:46Z", completed_at: "2026-10-21T18:21:46Z"}
     kind: security-audit
-    status: done
+    status: completed
     depends_on: [blad-text-p1-code]
     requirements: ["REQUIREMENTS.md#R-038"]
   - id: blad-text-p1-review
@@ -52,7 +52,7 @@ tasks:
     context: "Separate observers and source-blind comparison recorded in IMPL.md; no proven P1 mismatch; integration evidence reservations retained for P5."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:21:46Z", completed_at: "2026-10-21T18:21:46Z"}
     kind: compliance-review
-    status: done
+    status: completed
     depends_on: [blad-text-p1-audit]
     requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-039"]
   - id: blad-text-p2-tests
@@ -63,7 +63,7 @@ tasks:
     context: "Freeze exact mappings and parser-extension profile before these tests."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:31:51Z", completed_at: "2026-10-21T18:31:51Z"}
     kind: test
-    status: done
+    status: completed
     depends_on: [blad-text-p1-review]
     requirements: ["REQUIREMENTS.md#R-035"]
   - id: blad-text-p2-code
@@ -74,7 +74,7 @@ tasks:
     context: "Preserve code, escapes and surrounding style state."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:31:51Z", completed_at: "2026-10-21T18:31:51Z"}
     kind: implementation
-    status: done
+    status: completed
     depends_on: [blad-text-p2-tests]
     requirements: ["REQUIREMENTS.md#R-035"]
   - id: blad-text-p2-audit
@@ -85,7 +85,7 @@ tasks:
     context: "Inspect finite progress and whole-span fallback behavior."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:31:51Z", completed_at: "2026-10-21T18:31:51Z"}
     kind: security-audit
-    status: done
+    status: completed
     depends_on: [blad-text-p2-code]
     requirements: ["REQUIREMENTS.md#R-038"]
   - id: blad-text-p2-review
@@ -96,7 +96,7 @@ tasks:
     context: "Source-only observation/audit and source-blind comparison in IMPL.md; no proven mismatch; cross-feature evidence retained for P5."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:31:51Z", completed_at: "2026-10-21T18:31:51Z"}
     kind: compliance-review
-    status: done
+    status: completed
     depends_on: [blad-text-p2-audit]
     requirements: ["REQUIREMENTS.md#R-035", "REQUIREMENTS.md#R-039"]
   - id: blad-text-p3-tests
@@ -107,7 +107,7 @@ tasks:
     context: "Freeze exact commands, currency policy and limit fixtures before code."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:44:25Z", completed_at: "2026-10-21T18:44:25Z"}
     kind: test
-    status: done
+    status: completed
     depends_on: [blad-text-p2-review]
     requirements: ["REQUIREMENTS.md#R-036", "REQUIREMENTS.md#R-038"]
   - id: blad-text-p3-code
@@ -118,7 +118,7 @@ tasks:
     context: "Do not partially convert unsupported expressions."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:44:25Z", completed_at: "2026-10-21T18:44:25Z"}
     kind: implementation
-    status: done
+    status: completed
     depends_on: [blad-text-p3-tests]
     requirements: ["REQUIREMENTS.md#R-036", "REQUIREMENTS.md#R-038"]
   - id: blad-text-p3-audit
@@ -129,7 +129,7 @@ tasks:
     context: "Exact source excludes visible inert-control escaping and explicit bounded omission."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:44:25Z", completed_at: "2026-10-21T18:44:25Z"}
     kind: security-audit
-    status: done
+    status: completed
     depends_on: [blad-text-p3-code]
     requirements: ["REQUIREMENTS.md#R-038"]
   - id: blad-text-p3-review
@@ -140,7 +140,7 @@ tasks:
     context: "Source-only observation/audit and source-blind comparison in IMPL.md; supported with explicit P4/P5 integration and remediation-observation reservations."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:44:25Z", completed_at: "2026-10-21T18:44:25Z"}
     kind: compliance-review
-    status: done
+    status: completed
     depends_on: [blad-text-p3-audit]
     requirements: ["REQUIREMENTS.md#R-036", "REQUIREMENTS.md#R-039"]
   - id: blad-text-p4-tests
@@ -151,7 +151,7 @@ tasks:
     context: "Require numeric work/cancellation budgets before backend admission."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:52:21Z", completed_at: "2026-10-21T18:52:21Z"}
     kind: test
-    status: done
+    status: completed
     depends_on: [blad-text-p1-review]
     requirements: ["REQUIREMENTS.md#R-037", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-040"]
   - id: blad-text-p4-code
@@ -162,7 +162,7 @@ tasks:
     context: "ER is required; unsuitable backend warrants explicit arbitration, not weakened guarantees."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:52:21Z", completed_at: "2026-10-21T18:52:21Z"}
     kind: implementation
-    status: done
+    status: completed
     depends_on: [blad-text-p4-tests]
     requirements: ["REQUIREMENTS.md#R-037", "REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-040"]
   - id: blad-text-p4-audit
@@ -173,7 +173,7 @@ tasks:
     context: "Review selected feature graph, not all optional upstream features."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:52:21Z", completed_at: "2026-10-21T18:52:21Z"}
     kind: security-audit
-    status: done
+    status: completed
     depends_on: [blad-text-p4-code]
     requirements: ["REQUIREMENTS.md#R-038"]
   - id: blad-text-p4-review
@@ -184,7 +184,7 @@ tasks:
     context: "Independent spatial/source observation, executed corpus and source-blind comparison recorded in IMPL.md; no proven mismatch; final remediation reconfirmation retained for P5."
     timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:52:21Z", completed_at: "2026-10-21T18:52:21Z"}
     kind: compliance-review
-    status: done
+    status: completed
     depends_on: [blad-text-p4-audit]
     requirements: ["REQUIREMENTS.md#R-037", "REQUIREMENTS.md#R-039"]
   - id: blad-text-p5-tests
@@ -192,10 +192,10 @@ tasks:
     description: "Cover cross-feature CLI, PTY resize, consumers, dumps and preserved export."
     purpose: "Pin integrated text-only behavior"
     expected_outcome: "Integration regressions expose remaining gaps"
-    context: "Include highlighting asset reuse and no rendering subprocess/terminal-input effects."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    context: "Cross-feature, CLI, PTY, cache, stdin/tool-independence and export coverage added. Search-overlay and tab-padding regressions failed before their fixes. Final suite: 155 passed, two optional characterization tests ignored."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T19:12:37Z", completed_at: "2026-10-21T19:12:37Z"}
     kind: test
-    status: pending
+    status: completed
     depends_on: [blad-text-p2-review, blad-text-p3-review, blad-text-p4-review]
     requirements: ["REQUIREMENTS.md#R-039"]
   - id: blad-text-p5-code
@@ -203,10 +203,10 @@ tasks:
     description: "Resolve integrated gaps and publish exact CLI and supported-profile documentation."
     purpose: "Deliver consistent rendering surfaces"
     expected_outcome: "Integrated behavior and documentation agree"
-    context: "Do not expand unrelated session lifecycle behavior."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    context: "Shared inert-source/cache paths, compositional search overlays, iterative settings-preserving editor re-entry and consistent tab-stop padding implemented. Exact profiles, measured timings and residual limits documented."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T19:12:37Z", completed_at: "2026-10-21T19:12:37Z"}
     kind: implementation
-    status: pending
+    status: completed
     depends_on: [blad-text-p5-tests]
     requirements: ["REQUIREMENTS.md#R-033", "REQUIREMENTS.md#R-034", "REQUIREMENTS.md#R-039"]
   - id: blad-text-p5-audit
@@ -214,10 +214,10 @@ tasks:
     description: "Review combined controls, resources, subprocess absence and error propagation."
     purpose: "Review final rendering boundaries"
     expected_outcome: "Final scoped findings resolved or explicitly retained"
-    context: "Finite tests are evidence, not universal safety proof."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    context: "Independent source-only integration observation and narrow tab-remediation observation retained in IMPL.md. Prior control/math/diagram fixes reconfirmed; final padding defect reproduced and corrected. Whole-document, dependency-audit and legacy behavior caveats retained."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T19:12:37Z", completed_at: "2026-10-21T19:12:37Z"}
     kind: security-audit
-    status: pending
+    status: completed
     depends_on: [blad-text-p5-code]
     requirements: ["REQUIREMENTS.md#R-038"]
   - id: blad-text-p5-review
@@ -225,10 +225,10 @@ tasks:
     description: "Derive final source/test record independently and compare source-blind to intent."
     purpose: "Finish with inspectable independent evidence"
     expected_outcome: "Final evidence and any human-arbitration discrepancies retained"
-    context: "Use clean-slate documenter then separate source-blind reviewer."
-    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T18:01:38Z", completed_at: null}
+    context: "Separate source-blind comparison supports R-033 through R-040 and related consumer semantics without a demonstrated in-scope contradiction. Finite evidence, cooperative limits, minimum-toolchain gap and legacy behavior remain explicit in IMPL.md; no whole-component certification or fabricated receipt."
+    timestamps: {created_at: "2026-10-21T18:01:38Z", updated_at: "2026-10-21T19:14:51Z", completed_at: "2026-10-21T19:14:51Z"}
     kind: compliance-review
-    status: pending
+    status: completed
     depends_on: [blad-text-p5-audit]
     requirements: ["REQUIREMENTS.md#R-039", "REQUIREMENTS.md#R-040"]
   - id: blad-table-text-write-tests

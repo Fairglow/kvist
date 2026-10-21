@@ -112,10 +112,22 @@ struct Viewer {
     slave: OwnedFd,
     parser: Parser,
     screen: Screen,
+    raw: Vec<u8>,
 }
 
 impl Viewer {
     fn start(path: &std::path::Path, columns: u16, rows: u16, numbers: bool) -> Self {
+        Self::start_with(path, columns, rows, numbers, &[], &[])
+    }
+
+    fn start_with(
+        path: &std::path::Path,
+        columns: u16,
+        rows: u16,
+        numbers: bool,
+        args: &[&str],
+        environment: &[(&str, &str)],
+    ) -> Self {
         let pty = openpty(
             Some(&Winsize {
                 ws_row: rows,
@@ -132,6 +144,7 @@ impl Viewer {
         command
             .args(["--ctty", "--wait", env!("CARGO_BIN_EXE_blad"), "view"])
             .arg(path);
+        command.args(args).envs(environment.iter().copied());
         if numbers {
             command.arg("--line-numbers");
         }
@@ -147,6 +160,7 @@ impl Viewer {
             slave: pty.slave,
             parser: Parser::new(),
             screen: Screen::new(usize::from(columns), usize::from(rows)),
+            raw: Vec::new(),
         };
         viewer.read_frame();
         viewer
@@ -168,6 +182,7 @@ impl Viewer {
             match self.master.read(&mut bytes) {
                 Ok(0) => break,
                 Ok(count) => {
+                    self.raw.extend_from_slice(&bytes[..count]);
                     self.parser.advance(&mut self.screen, &bytes[..count]);
                     received = true;
                 }
@@ -212,6 +227,29 @@ impl Viewer {
             std::thread::sleep(Duration::from_millis(10));
         }
         panic!("viewer did not quit");
+    }
+
+    fn wait_failure(&mut self) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while Instant::now() < deadline {
+            if let Some(status) = self.child.try_wait().unwrap() {
+                assert_eq!(status.code(), Some(1), "{status}");
+                let terminal = nix::sys::termios::tcgetattr(&self.slave).unwrap();
+                assert!(
+                    terminal
+                        .local_flags
+                        .contains(nix::sys::termios::LocalFlags::ICANON)
+                );
+                assert!(
+                    terminal
+                        .local_flags
+                        .contains(nix::sys::termios::LocalFlags::ECHO)
+                );
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("viewer did not report edit failure");
     }
 }
 
@@ -341,4 +379,149 @@ fn resize_reflows_content_and_tiny_viewport_remains_quittable() {
     assert!(empty.screen.line(9).contains("L0-0 of 0"));
     assert_eq!(empty.screen.scrolls, 0);
     empty.quit();
+}
+
+#[test]
+fn tty_color_policy_and_light_theme_survive_resize() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("appearance.md");
+    std::fs::write(&path, "# Heading\n\n```rust\nlet x = 1;\n```").unwrap();
+    for (no_color, term, colors) in [
+        ("", "xterm-256color", true),
+        ("1", "xterm-256color", false),
+        ("", "dumb", false),
+    ] {
+        let mut viewer = Viewer::start_with(
+            &path,
+            40,
+            12,
+            false,
+            &["--theme", "light", "--color", "auto"],
+            &[("NO_COLOR", no_color), ("TERM", term), ("COLORTERM", "")],
+        );
+        for resized in [false, true] {
+            if resized {
+                viewer.raw.clear();
+                viewer.resize(60, 14);
+            }
+            let raw = String::from_utf8_lossy(&viewer.raw);
+            assert_eq!(raw.contains("\x1b[34m"), colors, "{raw:?}");
+            assert_eq!(raw.contains("\x1b[48;5;254m"), colors, "{raw:?}");
+            assert_eq!(viewer.screen.line(1), "# Heading");
+        }
+        viewer.quit();
+    }
+}
+
+#[test]
+fn ascii_diagram_overflow_remains_scrollable_and_canonical_on_resize() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("diagram.md");
+    std::fs::write(
+        &path,
+        "```mermaid\nflowchart LR\nA[First long label] --> B[Second long label]\n```",
+    )
+    .unwrap();
+    let mut viewer = Viewer::start_with(&path, 30, 10, false, &["--diagram-charset", "ascii"], &[]);
+    let label_row = (1..9)
+        .find(|&row| viewer.screen.line(row).contains("First long label"))
+        .unwrap();
+    assert!(!viewer.screen.line(label_row).contains("Second long label"));
+    viewer.keys(&b"\x1b[C".repeat(60));
+    assert!(
+        viewer.screen.line(label_row).contains("Second long label"),
+        "{}",
+        viewer.screen.line(label_row)
+    );
+    viewer.resize(80, 12);
+    assert!(
+        viewer.screen.line(label_row).contains("First long label")
+            && viewer.screen.line(label_row).contains("Second long label")
+    );
+    assert_eq!(viewer.screen.scrolls, 0);
+    viewer.quit();
+}
+
+#[test]
+fn editing_reenters_without_losing_projection_or_appearance_options() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("edit.md");
+    std::fs::write(&path, "# Initial\n\n$x^2$").unwrap();
+    let editor = temp.path().join("editor");
+    std::fs::write(&editor, "#!/bin/sh\ncat > \"$1\" <<'EOF'\n# Edited H~2~O\n\n$x^2$\n\n```rust\nlet x = 1;\n```\n\n```mermaid\nflowchart LR\nA --> B\n```\nEOF\n").unwrap();
+    std::fs::set_permissions(&editor, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let mut viewer = Viewer::start_with(
+        &path,
+        80,
+        24,
+        false,
+        &[
+            "--theme",
+            "light",
+            "--color",
+            "always",
+            "--math",
+            "source",
+            "--mermaid",
+            "source",
+        ],
+        &[
+            ("EDITOR", editor.to_str().unwrap()),
+            ("TERM", "xterm-256color"),
+            ("COLORTERM", ""),
+        ],
+    );
+    for _ in 0..5 {
+        viewer.raw.clear();
+        viewer.keys(b"e");
+        assert_eq!(viewer.screen.line(1), "# Edited H₂O");
+        assert_eq!(viewer.screen.line(3), "$x^2$");
+        let raw = String::from_utf8_lossy(&viewer.raw);
+        assert!(
+            raw.contains("\x1b[48;5;254m") && raw.contains("flowchart LR"),
+            "{raw:?}"
+        );
+    }
+    viewer.resize(60, 20);
+    assert_eq!(viewer.screen.line(3), "$x^2$");
+    viewer.quit();
+}
+
+#[test]
+fn editor_failures_propagate_and_restore_terminal_state() {
+    use std::os::unix::fs::PermissionsExt;
+    let temp = tempfile::tempdir().unwrap();
+    let moving_editor = temp.path().join("move-editor");
+    std::fs::write(&moving_editor, "#!/bin/sh\nmv \"$1\" \"$1.moved\"\n").unwrap();
+    std::fs::set_permissions(&moving_editor, std::fs::Permissions::from_mode(0o700)).unwrap();
+    for editor in [
+        "/does-not-exist-blad-editor",
+        "/bin/false",
+        moving_editor.to_str().unwrap(),
+    ] {
+        let path = temp.path().join("failure.md");
+        std::fs::write(&path, "# Initial").unwrap();
+        let mut viewer = Viewer::start_with(&path, 40, 12, false, &[], &[("EDITOR", editor)]);
+        viewer.keys(b"e");
+        viewer.wait_failure();
+        assert!(String::from_utf8_lossy(&viewer.raw).contains("Failed to display markdown"));
+    }
+}
+
+#[test]
+fn fitting_code_tabs_do_not_acquire_phantom_horizontal_scroll() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("tabs.md");
+    for syntax in ["text", "rust"] {
+        std::fs::write(&path, format!("```{syntax}\n\tX\n```")).unwrap();
+        for numbers in [false, true] {
+            let mut viewer = Viewer::start(&path, 20, 8, numbers);
+            let expected = if numbers { "1         X" } else { "        X" };
+            assert_eq!(viewer.screen.line(1), expected);
+            viewer.keys(&b"\x1b[C".repeat(10));
+            assert_eq!(viewer.screen.line(1), expected);
+            viewer.quit();
+        }
+    }
 }

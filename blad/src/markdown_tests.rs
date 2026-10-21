@@ -345,6 +345,22 @@ fn test_mermaid_block_is_processed() {
 }
 
 #[test]
+fn syntax_assets_are_shared_across_repeated_and_cloned_renderers() {
+    let (syntaxes, themes) = super::syntax_assets();
+    let mut renderer = MarkdownRenderer::new();
+    for background in [super::TerminalBg::Dark, super::TerminalBg::Light] {
+        renderer.set_background(background);
+        renderer
+            .clone()
+            .render_markdown("```rust\nlet x = 1;\n```", &mut Vec::new())
+            .unwrap();
+        let (next_syntaxes, next_themes) = super::syntax_assets();
+        assert!(std::ptr::eq(syntaxes, next_syntaxes));
+        assert!(std::ptr::eq(themes, next_themes));
+    }
+}
+
+#[test]
 fn test_heading_blank_line() {
     // Heading followed by paragraph with blank line in source should have
     // blank line in output

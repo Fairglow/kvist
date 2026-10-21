@@ -127,10 +127,16 @@ pub(crate) fn paint(w: &mut impl Write, document: &Document, frame: Frame<'_>) -
                 TerminalLine::new(&prefix).clip(0, usize::from(frame.columns.saturating_sub(1)))
             )?;
         }
-        if frame.matches.contains(&index) {
-            write!(w, "{}", document.search)?;
-        }
-        write!(w, "{}", line.clip(frame.x, document.content_width))?;
+        let overlay = if frame.matches.contains(&index) {
+            document.search.as_str()
+        } else {
+            ""
+        };
+        write!(
+            w,
+            "{}",
+            line.clip_with_overlay(frame.x, document.content_width, overlay)
+        )?;
     }
     if frame.rows > 1 {
         queue!(w, MoveTo(0, frame.rows - 1))?;
@@ -165,6 +171,79 @@ pub(crate) fn paint(w: &mut impl Write, document: &Document, frame: Frame<'_>) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn code_tabs_do_not_create_padding_only_horizontal_overflow() {
+        for syntax in ["text", "rust"] {
+            for numbers in [false, true] {
+                for plain in [false, true] {
+                    let source = format!("```{syntax}\n\tX\n\tX\tY\n```");
+                    let options = RenderOptions {
+                        plain,
+                        ..RenderOptions::default()
+                    };
+                    let document =
+                        Document::render_with_options(&source, 20, numbers, None, &options)
+                            .unwrap();
+                    assert_eq!(
+                        document.max_x(),
+                        0,
+                        "{syntax} numbers={numbers} plain={plain}"
+                    );
+                    assert!(
+                        document
+                            .lines
+                            .iter()
+                            .all(|line| line.width() <= document.content_width)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn configured_chrome_search_and_reflow_keep_host_policy() {
+        let palette = crate::Palette {
+            chrome: crate::Color::Rgb(1, 2, 3),
+            search: crate::Color::Rgb(4, 5, 6),
+            ..crate::Palette::default()
+        };
+        let options = RenderOptions {
+            palette: Some(palette),
+            ..RenderOptions::default()
+        };
+        for columns in [12, 80] {
+            let document =
+                Document::render_with_options("# Match", columns, false, None, &options).unwrap();
+            let mut output = Vec::new();
+            paint(
+                &mut output,
+                &document,
+                Frame {
+                    columns,
+                    rows: 5,
+                    y: 0,
+                    x: 0,
+                    header: "title",
+                    footer: "footer",
+                    matches: &[0],
+                },
+            )
+            .unwrap();
+            let output = String::from_utf8(output).unwrap();
+            assert!(output.contains("\x1b[38;2;1;2;3m"), "{output:?}");
+            let heading = output.find("Match").unwrap();
+            let prior = &output[..heading];
+            assert!(
+                prior.rfind("\x1b[38;2;4;5;6m") > prior.rfind("\x1b[34m"),
+                "{output:?}"
+            );
+            assert!(
+                prior.rfind("\x1b[7m") > prior.rfind("\x1b[0m"),
+                "{output:?}"
+            );
+        }
+    }
 
     #[test]
     fn gutter_and_width_limit_are_reserved_before_wrapping() {

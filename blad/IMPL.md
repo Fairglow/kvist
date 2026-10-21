@@ -4,6 +4,99 @@
 
 Date: 2026-10-12
 
+## Text-only integration observation - 2026-10-21
+
+An independent clean-slate observer inspected final application source/tests
+without intent, queue, prior implementation records, reviews, chat, Git history
+or peer implementations. Table-solver and dependency internals were outside
+its scope. This section retains its source-derived report, not an author-side
+compliance certification:
+
+- Typed settings and semantic roles cover content and viewer chrome.
+  Color reduction/plain encoding is streaming; monochrome may retain emphasis,
+  while dump removes styling. File/session/show/stream and embedding routes use
+  shared rendering. Export deliberately retains raw Markdown, including any
+  authored controls, rather than rendering or sanitizing source.
+- Syntax/theme assets are process-wide immutable caches; highlighting state
+  remains local to a code block. Repeated/cloned-renderer tests compare asset
+  identities. No diagram cache or application-owned render subprocess, worker,
+  temporary file, network operation or graphical intermediate was observed.
+  Explicit editor execution and interactive terminal ownership are separate.
+- Parser-offset scripts protect code, escapes, entity/formatting boundaries
+  and use whole-span mapping/fallback. Math uses the documented finite command
+  vocabulary, explicit grouping and per-formula input/depth/output checks.
+  Fraction-operand binding and lone-CR fixes from the earlier audit were
+  independently reconfirmed in source and passing coverage.
+- Five Mermaid families use native spatial text admission, separate charset
+  selection and canonical geometry rather than viewport reflow. Limits and
+  cooperative cancellation remain explicit, not hard preemption or a memory
+  sandbox. The earlier bidi, decoded-label, source and diagnostic boundary
+  remediations were independently reconfirmed.
+- Shared inert-source processing covers both authored input and decoded text.
+  C0/C1 and bidi controls cannot become document-triggered terminal protocols;
+  CRLF normalizes and lone CR becomes a visible escape.
+- Search overlays are reapplied after embedded style transitions/resets.
+  Configured appearance/projection survives reflow and repeated editor
+  re-entry. An outer viewer loop releases previous documents/guards instead
+  of growing recursive frames. Editor launch/status/reread errors propagate,
+  and restoration precedes editor launch.
+- CLI/PTY tests cover explicit policy, color depths, environment hints,
+  `NO_COLOR`, `TERM=dumb`, plain precedence, absent runtime tools, untouched
+  non-TTY stdin cursor, preserved exports, resize, clipping, editing and
+  error restoration. PTY geometry uses ASCII fixtures; it is not exhaustive
+  physical-terminal/font validation.
+
+The observer independently executed the full Blad suite (**153 passed**,
+two optional characterization tests ignored), formatter, strict all-target
+Clippy and Skott consumer compilation successfully. It did not execute timing
+tests, so the measurements in DESIGN.md are parent-run evidence, not the
+observer's own characterization.
+
+The audit found one actionable integration defect: code-panel padding measured
+tabs differently from viewport expansion. At 20 columns, fitting `tab + X`
+could acquire seven padding-only scroll columns. Parent regressions reproduced
+this before correction: the two-tab unit fixture had `max_x = 13` instead
+of zero, and PTY Right movement shifted fitting text.
+
+A separate narrow clean-source observer inspected only tab measurement,
+normalization, the two code-padding paths and their regressions. It confirmed
+both paths now share eight-column stops with `TerminalLine`, with styling
+excluded from measured width and padding restricted to remaining columns.
+It independently ran the library and PTY tab regressions successfully across
+text/Rust syntax, gutter and plain/color combinations. No remaining defect
+was observed in that scope. Unicode equivalence was source-derived for that
+observer; parent-executed helper assertions also cover CJK, combining marks
+and joined emoji.
+
+Final parent verification after that remediation: **155 passed**, two optional
+characterization tests ignored; formatter, strict all-target Clippy, Skott
+consumer compilation and whitespace-diff checks passed.
+
+Residual limits and pre-existing behavior remain explicit:
+
+- Whole-document work/memory is not capped. Sanitized source, buffered words,
+  code blocks, tables and viewport documents can grow; many individually
+  admitted formulas/diagrams accumulate work. Blocking writers, highlighting,
+  parsing and first asset initialization are not hard interruptible.
+- Existing ordered-list bullet simplification, omitted checkbox state/URLs,
+  ignored raw HTML and flattened table-cell styling do not become complete
+  CommonMark/GFM support through these milestones.
+- Legacy search-navigation calls discard the calculated jump result. This
+  pre-existing finding is retained, not silently fixed as rendering integration.
+- Raw-source exports intentionally bypass the terminal trust boundary.
+  The selected dependency internals were not comprehensively audited.
+- Gates ran on the active toolchain, not a separate minimum-Rust-1.95 build.
+
+A separate source-blind P5 reviewer compared only current local requirements,
+contract, design and these dated source/evidence observations, not source,
+test code, manifests, peers or history. It supported R-033 through R-040 and
+related R-017/R-018 consumer semantics without a demonstrated outstanding
+in-scope contradiction. It distinguished independent 153-test execution and
+the narrow remediation checks from parent-run 155-test verification/timings.
+The residual limits above remain limitations, not certification. Human plan
+acceptance is separate; project-tool revision recording remains blocked by
+the unrelated Skott queue timestamp, and no receipt is claimed.
+
 ## Native text diagrams observation - 2026-10-21
 
 An independent clean-slate observer inspected only the adapter, integration,

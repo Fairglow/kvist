@@ -2,10 +2,24 @@
 
 **Date:** 2026-10-21
 
-**Status:** Accepted by the human on 2026-10-21 for milestone-by-milestone
-implementation with separate commits. Local requirements/contract/design and
-the queue record the executable breakdown. Acceptance of this plan does not
-claim completed features, a selected dependency, review receipts or compliance.
+**Status:** P0-P5 implemented on 2026-10-21 after human acceptance, with a
+separate commit per packet. Requirements, contract, design, queue and dated
+independent observations/comparisons record the delivered boundary. The
+proposal below is retained as the accepted plan; README/USAGE and CONTRACT.md
+describe current interfaces.
+
+Merman 0.9.1 was selected for native text diagrams; math uses a small local
+bounded parser. Final integration covers shared policies, cache reuse,
+stdin/tool independence, exports, PTY reflow/editing and error paths. The final
+source audit's tab-padding defect was reproduced, fixed and independently
+reobserved. Source-blind comparison found no demonstrated in-scope mismatch,
+while retaining finite-evidence and legacy-behavior limitations in IMPL.md.
+
+Project-tool revision recording is still blocked by an unrelated invalid
+timestamp in Skott's queue. Blad's own completion values use the actual
+`completed` schema spelling; no acceptance receipt or new revision digest is
+fabricated. Per-diagram/formula budgets are not whole-document memory or hard
+wall-time limits, and supported subsets are not full Mermaid/TeX.
 
 ## 1. Outcome and scope
 
@@ -274,7 +288,9 @@ checks nor advisory feedback certify compliance or human acceptance.
 - Normalized visible text is identical across color modes at the same layout
   settings; dump contains no ESC/control protocols or added styling.
 - Check TTY/non-TTY behavior, `NO_COLOR`, explicit overrides, ANSI16/256/RGB,
-  bounded background-query timeout/malformed response, and absent stdin TTY.
+  environment-only appearance hints, and absent stdin TTY. The accepted
+  implementation removes background querying entirely rather than retaining
+  an OSC-response/timeout path.
 - Script examples include `H~2~O`, `E=mc^2^`, unsupported alphabets, mixed
   supported/unsupported spans, nested emphasis, code, and table cells.
 - Math examples include Greek/operators, grouped fractions/roots, scripts,

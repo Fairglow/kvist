@@ -204,7 +204,7 @@ fn every_session_route_uses_the_same_escape_free_dump_policy() {
     create_test_session(temp.path(), id, "2026-10-09T10:00:00Z");
     fs::write(
         temp.path().join(id).join("messages/000002.md"),
-        "# Answer\n\n**bold**\n\n```rust\nfn main() {}\n```",
+        "# Answer\n\n**bold**\n\n```rust\nfn main() {}\n```\n\nH~2~O $x^2$\n\n```mermaid\nflowchart LR\nA[Input] --> B[Output]\n```",
     )
     .unwrap();
     for route in [vec!["show", id], vec!["stream", id], vec![id]] {
@@ -221,6 +221,7 @@ fn every_session_route_uses_the_same_escape_free_dump_policy() {
         assert!(text.contains("# Answer"));
         assert!(text.contains("bold") && !text.contains("**bold**"));
         assert!(text.contains("fn main()"));
+        assert!(text.contains("H₂O x²") && text.contains('┌'), "{text:?}");
     }
 }
 
@@ -233,6 +234,7 @@ fn listing_session_metadata_cannot_emit_terminal_controls() {
     let mut manifest: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
     manifest["model"] = serde_json::json!("model\u{1b}[2J\u{7}");
+    manifest["session_id"] = serde_json::json!("id\u{1b}[31m\u{7}");
     fs::write(manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_blad"))
         .arg("--log-dir")
@@ -244,4 +246,34 @@ fn listing_session_metadata_cannot_emit_terminal_controls() {
     let text = String::from_utf8(output.stdout).unwrap();
     assert!(!text.contains('\x1b') && !text.contains('\x07'), "{text:?}");
     assert!(text.contains("\\u{1b}[2J\\u{7}"));
+    assert!(text.contains("id\\u{1b}[31m\\u{7}"), "{text:?}");
+}
+
+#[test]
+fn export_preserves_source_math_scripts_and_diagrams_even_with_render_flags() {
+    let temp = tempfile::tempdir().unwrap();
+    let id = "2026-10-09T10-00-00Z-1234-0";
+    create_test_session(temp.path(), id, "2026-10-09T10:00:00Z");
+    let source = "H~2~O $\\frac{1}{2}$\n\n```mermaid\nflowchart LR\nA --> B\n```";
+    fs::write(temp.path().join(id).join("messages/000002.md"), source).unwrap();
+    let path = temp.path().join("export.md");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_blad"))
+        .arg("--log-dir")
+        .arg(temp.path())
+        .args([
+            "--dump",
+            "--math",
+            "unicode",
+            "--mermaid",
+            "text",
+            "export",
+            id,
+            "--output",
+        ])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let exported = fs::read_to_string(path).unwrap();
+    assert!(exported.contains(source) && !exported.contains('┌') && !exported.contains("H₂O"));
 }

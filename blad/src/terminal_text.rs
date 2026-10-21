@@ -1,6 +1,49 @@
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+pub(crate) fn inert_source(source: &str) -> std::borrow::Cow<'_, str> {
+    let control =
+        |c: char| c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}');
+    if !source
+        .chars()
+        .any(|c| control(c) && !matches!(c, '\n' | '\t'))
+    {
+        return std::borrow::Cow::Borrowed(source);
+    }
+    let mut output = String::with_capacity(source.len());
+    let mut characters = source.chars().peekable();
+    while let Some(character) = characters.next() {
+        if character == '\r' && characters.peek() == Some(&'\n') {
+            continue;
+        }
+        if control(character) && !matches!(character, '\n' | '\t') {
+            use std::fmt::Write;
+            let _ = write!(output, "\\u{{{:x}}}", u32::from(character));
+        } else {
+            output.push(character);
+        }
+    }
+    std::borrow::Cow::Owned(output)
+}
+
+pub(crate) fn width_with_tabs(source: &str) -> usize {
+    source
+        .split('\t')
+        .enumerate()
+        .fold(0, |column, (index, part)| {
+            let column = if index == 0 {
+                column
+            } else {
+                column.saturating_add(tab_spaces(column))
+            };
+            column.saturating_add(part.width())
+        })
+}
+
+fn tab_spaces(column: usize) -> usize {
+    8 - column % 8
+}
+
 pub(crate) struct TerminalLine {
     text: String,
     styles: Vec<(usize, String)>,
@@ -31,7 +74,7 @@ impl TerminalLine {
             match c {
                 '\t' => {
                     column += text[measured_until..].width();
-                    let spaces = 8 - column % 8;
+                    let spaces = tab_spaces(column);
                     text.extend(std::iter::repeat_n(' ', spaces));
                     column += spaces;
                     measured_until = text.len();
@@ -60,11 +103,15 @@ impl TerminalLine {
     }
 
     pub fn clip(&self, start: usize, width: usize) -> String {
+        self.clip_with_overlay(start, width, "")
+    }
+
+    pub fn clip_with_overlay(&self, start: usize, width: usize, overlay: &str) -> String {
         if width == 0 {
             return String::new();
         }
         let end = start.saturating_add(width);
-        let mut result = String::new();
+        let mut result = overlay.to_owned();
         let mut styles = self.styles.iter().peekable();
         let mut column = 0;
         for (offset, grapheme) in self.text.grapheme_indices(true) {
@@ -76,6 +123,7 @@ impl TerminalLine {
                 && *position <= offset
             {
                 result.push_str(style);
+                result.push_str(overlay);
                 styles.next();
             }
             if column >= start && next <= end {
@@ -85,6 +133,7 @@ impl TerminalLine {
                 {
                     result.push_str(&self.text[part..*position]);
                     result.push_str(style);
+                    result.push_str(overlay);
                     part = *position;
                     styles.next();
                 }
@@ -94,6 +143,7 @@ impl TerminalLine {
                     && *position < offset + grapheme.len()
                 {
                     result.push_str(style);
+                    result.push_str(overlay);
                     styles.next();
                 }
                 if next > start {
@@ -137,6 +187,9 @@ mod tests {
         assert_eq!(clipped("a\tb", 0, 20), "a       b");
         assert_eq!(clipped("\x1b[2Jx\x07", 0, 30), "\\u{1b}[2Jx\\u{7}");
         assert_eq!(clipped("abc", 0, 0), "");
+        for source in ["\tX", "\tX\tY", "世界\tX", "e\u{301}\tX", "👩‍💻\tX"] {
+            assert_eq!(width_with_tabs(source), TerminalLine::new(source).width());
+        }
     }
 
     #[test]

@@ -35,6 +35,27 @@ observation confirmed the narrowed boundary. Existing search-navigation offset
 handling is not expanded by this milestone. Search overlay composition and
 editor integration evidence are retained for P5.
 
+P5 composes the configured search overlay after each content SGR transition,
+so syntax resets cannot erase a matching row's indication. Terminal text owns
+the shared inert-source boundary. Syntax-cache identity is executable evidence,
+not a per-render reload. The viewer edit path returns a typed action to an outer
+loop; previous viewport documents and terminal guards are dropped before the
+editor runs, avoiding recursive viewer frames while retaining all render options.
+Editor/status/reread errors continue to propagate.
+The final source audit also found that raw Unicode width treated tabs
+differently from viewport expansion, causing code-panel padding to manufacture
+horizontal overflow. Both highlighting and plain-code paths now use the same
+eight-column tab-stop primitive as terminal text. Library and PTY regressions
+failed first and then passed; a separate narrow source observer confirmed the
+correction. Authored code whitespace is not rewritten.
+
+P5 text characterization (14,900 UTF-8 source bytes, 100 repeated mixed
+heading/script/math/code/table sections; optimized test profile): cold render
+31.80 ms, warm mean 5.45 ms truecolor, 5.50 ms ANSI256 and 5.36 ms ANSI16.
+These are measured corpus timings, not universal latency guarantees. Immutable
+asset identity, empty-tool-PATH rendering, unchanged stdin cursor, PTY palette/
+projection persistence and whole-output geometry have executable coverage.
+
 ```
 blad/
 ├── src/

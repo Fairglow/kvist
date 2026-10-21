@@ -22,7 +22,7 @@ fn plain_output_contains_rendered_text_but_no_controls() {
 
 #[test]
 fn color_depth_never_changes_visible_geometry() {
-    let source = "# Heading\n\n> [!WARNING]\n> Careful\n\n```rust\nlet x = 1;\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |";
+    let source = "# Heading\n\n> [!WARNING]\n> Careful\n\nH~2~O $\\alpha_i^2$ and $\\frac{a}{b}$\n\n```rust\nlet x = 1;\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n```mermaid\nflowchart LR\nA[Input] --> B[Output]\n```";
     let expected = render(source, RenderOptions::plain());
     for theme in [Theme::Dark, Theme::Light, Theme::Terminal] {
         for color_depth in [
@@ -119,10 +119,11 @@ fn a_host_palette_overrides_each_rendered_semantic_role() {
         alerts: [Color::Rgb(13, 14, 15); 5],
         code_background: Some(Color::Rgb(16, 17, 18)),
         table_background: Some(Color::Rgb(19, 20, 21)),
+        math: Color::Rgb(22, 23, 24),
         ..Palette::default()
     };
     let output = render(
-        "# H\n\n[link](https://example.test)\n\n---\n\n- item\n\n> [!NOTE]\n> note\n\n```text\ncode\n```\n\n| A |\n|---|\n| B |\n",
+        "# H\n\n[link](https://example.test)\n\n---\n\n- item\n\n> [!NOTE]\n> note\n\n$x^2$\n\n```text\ncode\n```\n\n| A |\n|---|\n| B |\n",
         RenderOptions {
             palette: Some(palette),
             ..RenderOptions::default()
@@ -136,6 +137,7 @@ fn a_host_palette_overrides_each_rendered_semantic_role() {
         "38;2;13;14;15",
         "48;2;16;17;18",
         "48;2;19;20;21",
+        "38;2;22;23;24",
     ] {
         assert!(output.contains(color), "missing {color}: {output:?}");
     }
