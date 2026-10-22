@@ -123,7 +123,8 @@ impl InlineWriter {
     }
 
     fn effective_width(&self) -> Option<usize> {
-        self.width.map(|width| width.saturating_sub(self.border_width()))
+        self.width
+            .map(|width| width.saturating_sub(self.border_width()))
     }
 
     pub fn reset(&mut self, column: usize, indent: usize) {

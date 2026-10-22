@@ -167,7 +167,8 @@ pub fn extract_links(source: &str) -> Vec<Link> {
                 for url in bare_urls(&text) {
                     if !links.iter().any(|l| l.destination == url) {
                         links.push(
-                            Link::new(url.clone(), url).with_source_line(line_of(source, range.start)),
+                            Link::new(url.clone(), url)
+                                .with_source_line(line_of(source, range.start)),
                         );
                     }
                 }
@@ -197,8 +198,7 @@ fn bare_urls(text: &str) -> Vec<String> {
             let mut end = i;
             while end < text.len() {
                 let c = text.as_bytes()[end];
-                if c.is_ascii_whitespace()
-                    || matches!(c, b'"' | b'\'' | b'<' | b'>' | b'(' | b')')
+                if c.is_ascii_whitespace() || matches!(c, b'"' | b'\'' | b'<' | b'>' | b'(' | b')')
                 {
                     break;
                 }

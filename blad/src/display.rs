@@ -7,7 +7,7 @@
 use std::io::{self, IsTerminal, Write};
 
 use crate::RenderOptions;
-use crate::links::{extract_links, resolve_file, Link};
+use crate::links::{Link, extract_links, resolve_file};
 use crate::markdown::{MarkdownRenderer, inert_source};
 use crate::session::{Message, Session, load_messages};
 use crate::terminal_text::TerminalLine;
@@ -229,9 +229,7 @@ impl Drop for TerminalGuard {
 /// The destination is passed as a single argument; `xdg-open` is the only
 /// external process spawned, and no shell interpretation is involved.
 fn open_url(url: &str) -> io::Result<()> {
-    let status = std::process::Command::new("xdg-open")
-        .arg(url)
-        .status()?;
+    let status = std::process::Command::new("xdg-open").arg(url).status()?;
     if !status.success() {
         return Err(io::Error::other(format!("failed to open URL: {url}")));
     }

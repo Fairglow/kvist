@@ -320,11 +320,7 @@ fn dump_shows_interim_disposition_and_sanitises_unknown_kinds() {
     // Give the assistant message an `interim` disposition and add a message
     // whose kind carries a terminal control escape.
     let messages_dir = temp.path().join(id).join("messages");
-    fs::write(
-        messages_dir.join("000002.md"),
-        "Here is an interim answer.",
-    )
-    .unwrap();
+    fs::write(messages_dir.join("000002.md"), "Here is an interim answer.").unwrap();
     fs::write(messages_dir.join("000003.md"), "tool output").unwrap();
     let manifest_path = temp.path().join(id).join("session.json");
     let mut manifest: serde_json::Value =
@@ -354,7 +350,10 @@ fn dump_shows_interim_disposition_and_sanitises_unknown_kinds() {
     assert!(output.status.success(), "{:?}", output.stderr);
     let text = String::from_utf8(output.stdout).unwrap();
     // The interim disposition must be visible, not silently dropped.
-    assert!(text.contains("[interim]"), "interim disposition must be shown:\n{text}");
+    assert!(
+        text.contains("[interim]"),
+        "interim disposition must be shown:\n{text}"
+    );
     // The control codes in the unknown kind must be escaped, not emitted raw.
     assert!(
         !text.contains('\x1b') && !text.contains('\x07'),

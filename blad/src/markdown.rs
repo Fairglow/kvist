@@ -333,8 +333,7 @@ fn render_markdown_theme(
                                     write!(w, "{}", padded)?;
                                 }
                                 Err(_) => {
-                                    let padded =
-                                        pad_code_line(line, content_width, terminal_width);
+                                    let padded = pad_code_line(line, content_width, terminal_width);
                                     write!(w, "{}", padded)?;
                                 }
                             }
@@ -954,7 +953,9 @@ fn rule_style(md: &str, range: std::ops::Range<usize>) -> (char, bool) {
 fn footnote_marker(id: &str) -> String {
     const SUPER: &[char] = &['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
     if !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) {
-        id.chars().map(|c| SUPER[(c as u8 - b'0') as usize]).collect()
+        id.chars()
+            .map(|c| SUPER[(c as u8 - b'0') as usize])
+            .collect()
     } else {
         format!("[{id}]")
     }
