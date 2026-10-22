@@ -3,6 +3,7 @@
 //! Blad reads and displays Skott's structured session transcripts.
 
 pub mod display;
+pub mod links;
 pub mod markdown;
 pub mod session;
 pub mod theme;

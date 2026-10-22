@@ -22,8 +22,10 @@ rendering blad uses to display sessions afterwards.
 - **Appearance:** Dark, light, or terminal-native palettes; explicit color
   capabilities for embedding applications and escape-free rendered dumps
 - **Interactive viewer:** Keyboard navigation, mouse wheel, search with
-  highlight, scrollbar
+  highlight, scrollbar, link navigation (Tab/Shift+Tab), Space for page down
 - **Edit mode:** Press `e` to edit files in your preferred editor
+- **Link following:** Press `f` to enter link mode, Tab to cycle links, Enter
+  to open linked files or URLs in browser
 - **Session viewing:** Read and display skott agent session transcripts
 - **Live streaming:** Follow an active session transcript as it streams
 - **Export:** Export sessions to combined Markdown documents
@@ -90,7 +92,7 @@ blad --math source --mermaid source view document.md
 ### Navigation
 
 - `↑`/`k` - Up, `↓`/`j` - Down
-- `PageUp`/`u` - Page up, `PageDown`/`d` - Page down
+- `PageUp`/`u` - Page up, `PageDown`/`d`/`Space` - Page down
 - `g`/`H` - Top, `G`/`L` - Bottom
 - Mouse wheel - Scroll
 
@@ -100,9 +102,17 @@ blad --math source --mermaid source view document.md
 - `n` - Next match, `p` - Previous match
 - `Enter` - Exit search, `Esc` - Cancel
 
+### Link Navigation
+
+- `f` - Enter link navigation mode
+- `Tab` - Next link, `Shift+Tab` - Previous link
+- `Enter` - Follow link (open file or URL)
+- `Esc` - Exit link mode
+
 ### Other
 
 - `e` - Edit file
+- `b` - Return to the previous file
 - `q`/`Esc` - Quit
 
 ## Documentation

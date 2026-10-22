@@ -7,7 +7,8 @@
 use std::io::{self, IsTerminal, Write};
 
 use crate::RenderOptions;
-use crate::markdown::MarkdownRenderer;
+use crate::links::{extract_links, resolve_file, Link};
+use crate::markdown::{MarkdownRenderer, inert_source};
 use crate::session::{Message, Session, load_messages};
 use crate::terminal_text::TerminalLine;
 use crate::viewport::{Document, Frame, paint};
@@ -223,6 +224,57 @@ impl Drop for TerminalGuard {
     }
 }
 
+/// Open a URL in the default browser.
+///
+/// The destination is passed as a single argument; `xdg-open` is the only
+/// external process spawned, and no shell interpretation is involved.
+fn open_url(url: &str) -> io::Result<()> {
+    let status = std::process::Command::new("xdg-open")
+        .arg(url)
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::other(format!("failed to open URL: {url}")));
+    }
+    Ok(())
+}
+
+/// Follow a link in the viewer context.
+///
+/// URL links are handed to the default browser and the viewer stays put.
+/// Anchor links are not yet resolved to a scroll offset, so the viewer stays
+/// put as well. File links are resolved against the current document's
+/// directory and opened in the viewer.
+fn follow_link(link: &Link, current_path: Option<&std::path::Path>) -> ViewerAction {
+    match link.kind {
+        crate::links::LinkKind::Url => {
+            if let Err(e) = open_url(&link.destination) {
+                eprintln!("Error opening URL: {e}");
+            }
+            ViewerAction::Stay
+        }
+        crate::links::LinkKind::Anchor => ViewerAction::Stay,
+        crate::links::LinkKind::File => {
+            let base = current_path.and_then(std::path::Path::parent);
+            ViewerAction::OpenFile(resolve_file(base, &link.destination))
+        }
+    }
+}
+
+enum ViewerAction {
+    Quit,
+    Stay,
+    Edit(std::path::PathBuf),
+    OpenFile(std::path::PathBuf),
+    Back,
+}
+
+/// A file open in the viewer: its path (when it came from a file) and the
+/// content currently displayed.
+struct OpenFile {
+    path: Option<std::path::PathBuf>,
+    content: String,
+}
+
 fn run_viewer(
     path: Option<&std::path::Path>,
     content: &str,
@@ -230,27 +282,55 @@ fn run_viewer(
     width_limit: Option<usize>,
     options: &RenderOptions,
 ) -> io::Result<()> {
-    let mut source = std::borrow::Cow::Borrowed(content);
+    // The open files form a navigation stack: the top entry is always the
+    // active one. Following a file link pushes a new entry; `b` pops back.
+    let mut stack = vec![OpenFile {
+        path: path.map(|p| p.to_path_buf()),
+        content: content.to_string(),
+    }];
+
     loop {
-        match viewer_session(path, &source, line_numbers, width_limit, options)? {
+        let active = &stack[stack.len() - 1];
+        let action = viewer_session(
+            active.path.as_deref(),
+            &active.content,
+            line_numbers,
+            width_limit,
+            options,
+        )?;
+        // The immutable borrow of `stack` ends here; the match arms may mutate.
+        match action {
             ViewerAction::Quit => return Ok(()),
-            ViewerAction::Edit(path) => source = std::borrow::Cow::Owned(edit_file(path)?),
+            ViewerAction::Stay => {}
+            ViewerAction::Edit(path) => {
+                // The file path is unchanged by an edit; only the content is.
+                let top = stack.last_mut().expect("navigation stack is never empty");
+                top.content = edit_file(&path)?;
+            }
+            ViewerAction::OpenFile(path) => match std::fs::read_to_string(&path) {
+                Ok(content) => stack.push(OpenFile {
+                    path: Some(path),
+                    content,
+                }),
+                Err(e) => eprintln!("Error opening file: {e}"),
+            },
+            ViewerAction::Back => {
+                // Popping the last entry is a no-op: there is nothing to go back to.
+                if stack.len() > 1 {
+                    stack.pop();
+                }
+            }
         }
     }
 }
 
-enum ViewerAction<'a> {
-    Quit,
-    Edit(&'a std::path::Path),
-}
-
-fn viewer_session<'a>(
-    path: Option<&'a std::path::Path>,
+fn viewer_session(
+    path: Option<&std::path::Path>,
     content: &str,
     line_numbers: bool,
     width_limit: Option<usize>,
     options: &RenderOptions,
-) -> io::Result<ViewerAction<'a>> {
+) -> io::Result<ViewerAction> {
     use crossterm::event::{self, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
 
     let (mut cols, mut rows) = crossterm::terminal::size()?;
@@ -266,6 +346,11 @@ fn viewer_session<'a>(
     let mut search_query = String::new();
     let mut search_matches: Vec<usize> = Vec::new();
     let mut search_index = 0;
+
+    // Link navigation state
+    let links = extract_links(content);
+    let mut link_mode = false;
+    let mut link_index = 0;
 
     let mut terminal = TerminalGuard::enter()?;
 
@@ -293,6 +378,13 @@ fn viewer_session<'a>(
         // Header
         let header = if search_mode || (!search_query.is_empty() && !search_matches.is_empty()) {
             format!("=== Search: {} ===", search_query)
+        } else if link_mode && !links.is_empty() {
+            format!(
+                "=== Links: {}/{} - {} ===",
+                link_index + 1,
+                links.len(),
+                links[link_index].text
+            )
         } else if let Some(p) = path {
             format!("=== Blad: {} ===", p.display())
         } else {
@@ -392,6 +484,27 @@ fn viewer_session<'a>(
                         }
                         _ => {}
                     }
+                } else if link_mode {
+                    match code {
+                        KeyCode::Tab => {
+                            link_index = (link_index + 1) % links.len();
+                        }
+                        KeyCode::BackTab => {
+                            if link_index > 0 {
+                                link_index -= 1;
+                            } else {
+                                link_index = links.len() - 1;
+                            }
+                        }
+                        KeyCode::Enter => {
+                            let action = follow_link(&links[link_index], path);
+                            return Ok(action);
+                        }
+                        KeyCode::Esc => {
+                            link_mode = false;
+                        }
+                        _ => {}
+                    }
                 } else {
                     match code {
                         KeyCode::Up | KeyCode::Char('k') => {
@@ -405,7 +518,7 @@ fn viewer_session<'a>(
                         KeyCode::PageUp | KeyCode::Char('u') => {
                             scroll_offset = scroll_offset.saturating_sub(visible_lines);
                         }
-                        KeyCode::PageDown | KeyCode::Char('d') => {
+                        KeyCode::PageDown | KeyCode::Char('d') | KeyCode::Char(' ') => {
                             scroll_offset = (scroll_offset + visible_lines)
                                 .min(total_lines.saturating_sub(visible_lines));
                         }
@@ -450,11 +563,20 @@ fn viewer_session<'a>(
                                 visible_lines,
                             );
                         }
-                        KeyCode::Char('e') if path.is_some() => {
-                            terminal.restore()?;
-                            if let Some(path) = path {
-                                return Ok(ViewerAction::Edit(path));
+                        KeyCode::Char('f') => {
+                            if !links.is_empty() {
+                                link_mode = true;
+                                link_index = 0;
                             }
+                        }
+                        KeyCode::Char('e') => {
+                            if let Some(path) = path {
+                                terminal.restore()?;
+                                return Ok(ViewerAction::Edit(path.to_path_buf()));
+                            }
+                        }
+                        KeyCode::Char('b') => {
+                            return Ok(ViewerAction::Back);
                         }
                         KeyCode::Char('q') | KeyCode::Esc => {
                             break;
@@ -552,9 +674,15 @@ pub fn export_session(session: &Session, output: Option<&std::path::Path>) -> io
             "notice" => "Notice",
             _ => &msg.kind,
         };
-        doc.push_str(&format!("## {}\n\n", kind_label));
+        doc.push_str(&format!("## {}\n\n", inert_source(kind_label)));
         doc.push_str(&msg.content);
-        doc.push_str("\n\n---\n\n");
+        // A blank line before the separator keeps a message whose last line is
+        // not blank from being read as a setext heading by any Markdown
+        // consumer of the export.
+        if !msg.content.ends_with('\n') {
+            doc.push('\n');
+        }
+        doc.push_str("\n---\n\n");
     }
 
     match output {
@@ -587,21 +715,13 @@ fn print_message(
     };
 
     let disposition = match &msg.disposition {
-        Some(d) if d == "final" => " (final)",
-        Some(d) if d == "interim" => " (interim)",
+        Some(d) if d == "final" => " [final]",
+        Some(d) if d == "interim" => " [interim]",
         _ => "",
     };
 
-    writeln!(
-        w,
-        "--- {}{} ---",
-        crate::markdown::inert_source(kind_label),
-        disposition
-    )?;
-    // Parse markdown and highlight fenced code blocks
+    writeln!(w, "### {}{}", inert_source(kind_label), disposition)?;
     renderer.render_markdown(&msg.content, w)?;
-    if !msg.content.ends_with('\n') {
-        writeln!(w)?;
-    }
+    writeln!(w)?;
     Ok(())
 }

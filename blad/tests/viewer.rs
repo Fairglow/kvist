@@ -525,3 +525,72 @@ fn fitting_code_tabs_do_not_acquire_phantom_horizontal_scroll() {
         }
     }
 }
+
+#[test]
+fn following_a_file_link_opens_the_target_and_back_returns() {
+    let temp = tempfile::tempdir().unwrap();
+    let linked = temp.path().join("linked.md");
+    let source = temp.path().join("source.md");
+    std::fs::write(&linked, "# Linked Title\n\nlinked body").unwrap();
+    std::fs::write(
+        &source,
+        "# Source Title\n\n[open the linked file](linked.md)",
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&source, 80, 24, false);
+    assert!(viewer.screen.line(0).contains("source.md"));
+    // Enter link mode; the header announces the link count and first link.
+    viewer.keys(b"f");
+    assert!(
+        viewer.screen.line(0).contains("Links: 1/1"),
+        "link mode header not shown: {}",
+        viewer.screen.line(0)
+    );
+    // Follow the link; the viewer must open the linked file.
+    viewer.keys(b"\r");
+    assert!(
+        viewer.screen.line(0).contains("linked.md"),
+        "expected the linked file header, got: {}",
+        viewer.screen.line(0)
+    );
+    assert_eq!(viewer.screen.line(1), "# Linked Title");
+    // Back navigation must return to the original document.
+    viewer.keys(b"b");
+    assert!(
+        viewer.screen.line(0).contains("source.md"),
+        "expected the source file header, got: {}",
+        viewer.screen.line(0)
+    );
+    assert_eq!(viewer.screen.line(1), "# Source Title");
+    viewer.quit();
+}
+
+#[test]
+fn link_mode_is_inert_without_links_and_esc_exits_it() {
+    let temp = tempfile::tempdir().unwrap();
+    // A document with no links: `f` must not enter link mode.
+    let no_links = temp.path().join("nolinks.md");
+    std::fs::write(&no_links, "# No Links Here\n\njust plain prose").unwrap();
+    let mut viewer = Viewer::start(&no_links, 80, 24, false);
+    viewer.keys(b"f");
+    assert!(
+        !viewer.screen.line(0).contains("Links:"),
+        "link mode must not start without links: {}",
+        viewer.screen.line(0)
+    );
+    viewer.quit();
+    // A document with a link: `f` enters link mode, Esc leaves it without
+    // following, and the header reverts to the file title.
+    let with_link = temp.path().join("withlink.md");
+    std::fs::write(&with_link, "# Titled\n\n[link](https://example.com)").unwrap();
+    let mut viewer = Viewer::start(&with_link, 80, 24, false);
+    viewer.keys(b"f");
+    assert!(viewer.screen.line(0).contains("Links: 1/1"));
+    viewer.keys(b"\x1b");
+    assert!(
+        viewer.screen.line(0).contains("withlink.md"),
+        "Esc must exit link mode: {}",
+        viewer.screen.line(0)
+    );
+    viewer.quit();
+}

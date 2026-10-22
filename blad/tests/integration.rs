@@ -277,3 +277,88 @@ fn export_preserves_source_math_scripts_and_diagrams_even_with_render_flags() {
     let exported = fs::read_to_string(path).unwrap();
     assert!(exported.contains(source) && !exported.contains('┌') && !exported.contains("H₂O"));
 }
+
+#[test]
+fn export_keeps_a_final_line_without_a_blank_line_from_becoming_a_setext_heading() {
+    // A message whose last line is not blank, immediately followed by the
+    // `---` separator, must not be read back as a setext heading.
+    let temp = tempfile::tempdir().unwrap();
+    let id = "2026-10-09T10-00-00Z-1234-0";
+    create_test_session(temp.path(), id, "2026-10-09T10:00:00Z");
+    fs::write(
+        temp.path().join(id).join("messages/000001.md"),
+        "Please help me with this task.", // no trailing newline
+    )
+    .unwrap();
+    let path = temp.path().join("export.md");
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_blad"))
+        .arg("--log-dir")
+        .arg(temp.path())
+        .args(["--dump", "export", id, "--output"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let exported = fs::read_to_string(path).unwrap();
+    // The message body must remain a paragraph, not a `## Please help me...`
+    // heading, and must be separated from the `---` rule by a blank line.
+    assert!(
+        exported.contains("Please help me with this task.\n\n---"),
+        "message body must be separated from the rule by a blank line:\n{exported}"
+    );
+    assert!(
+        !exported.contains("## Please help"),
+        "message body must not become a setext heading:\n{exported}"
+    );
+}
+
+#[test]
+fn dump_shows_interim_disposition_and_sanitises_unknown_kinds() {
+    let temp = tempfile::tempdir().unwrap();
+    let id = "2026-10-09T10-00-00Z-1234-0";
+    create_test_session(temp.path(), id, "2026-10-09T10:00:00Z");
+    // Give the assistant message an `interim` disposition and add a message
+    // whose kind carries a terminal control escape.
+    let messages_dir = temp.path().join(id).join("messages");
+    fs::write(
+        messages_dir.join("000002.md"),
+        "Here is an interim answer.",
+    )
+    .unwrap();
+    fs::write(messages_dir.join("000003.md"), "tool output").unwrap();
+    let manifest_path = temp.path().join(id).join("session.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["entries"][1]["disposition"] = serde_json::json!("interim");
+    manifest["entries"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "id": "message-000003",
+            "sequence": 3,
+            "kind": "tool\x1b[2J\x07result",
+            "media_type": "text/markdown",
+            "path": "messages/000003.md",
+            "bytes": 5,
+            "complete": true,
+            "truncated": false
+        }));
+    fs::write(manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_blad"))
+        .arg("--log-dir")
+        .arg(temp.path())
+        .args(["--dump", id])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let text = String::from_utf8(output.stdout).unwrap();
+    // The interim disposition must be visible, not silently dropped.
+    assert!(text.contains("[interim]"), "interim disposition must be shown:\n{text}");
+    // The control codes in the unknown kind must be escaped, not emitted raw.
+    assert!(
+        !text.contains('\x1b') && !text.contains('\x07'),
+        "control codes in an unknown kind must be sanitised:\n{text:?}"
+    );
+    assert!(text.contains("tool\\u{1b}[2J\\u{7}result"), "{text:?}");
+}

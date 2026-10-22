@@ -55,9 +55,10 @@ guessing. Width, palette, math mode and diagram options persist across reflow.
 
 ### Keyboard shortcuts (interactive viewer)
 
-Navigation: `↑`/`k`, `↓`/`j`, `PageUp`/`u`, `PageDown`/`d`, `g`/`H` (top), `G`/`L` (bottom), mouse wheel.
+Navigation: `↑`/`k`, `↓`/`j`, `PageUp`/`u`, `PageDown`/`d`/`Space`, `g`/`H` (top), `G`/`L` (bottom), mouse wheel.
 Search: `/` enter search mode, type query, `Enter` exit, `n`/`p` navigate matches, `Esc` cancel.
-Other: `e` edit file (requires `$EDITOR`), `q`/`Esc` quit.
+Links: `f` enter link mode, `Tab`/`Shift+Tab` cycle links, `Enter` follow the selected link, `Esc` exit link mode.
+Other: `e` edit file (requires `$EDITOR`), `b` return to the previous file, `q`/`Esc` quit.
 
 ## Required interfaces
 

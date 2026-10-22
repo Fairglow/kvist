@@ -246,11 +246,28 @@ breaks and empty lines. Without a configured width, tables stay unwrapped.
 | `↑` / `k` | Scroll up one line |
 | `↓` / `j` | Scroll down one line |
 | `PageUp` / `u` | Scroll up one page |
-| `PageDown` / `d` | Scroll down one page |
+| `PageDown` / `d` / `Space` | Scroll down one page |
 | `g` / `H` | Go to top |
 | `G` / `L` | Go to bottom |
 | Mouse wheel | Scroll |
+| `b` | Return to the previous file |
 | `q` / `Esc` | Quit viewer |
+
+### Link Navigation
+
+Press `f` to enter link navigation mode. The header shows the current link.
+Use `Tab` to move to the next link, `Shift+Tab` for the previous link.
+Press `Enter` to follow the link:
+
+- **File links** (relative or absolute paths) open the linked file in Blad.
+  A relative path is resolved against the directory of the file you are
+  viewing. Press `b` to return to the previous file.
+- **URL links** (`http://`, `https://`, `mailto:`, `tel:`) open in your
+  default browser via `xdg-open`.
+- **Anchor links** (`#heading`) are recognised but not yet resolved to a
+  scroll position.
+
+Press `Esc` to exit link mode without following.
 
 ### Search
 
