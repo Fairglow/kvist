@@ -347,8 +347,14 @@ fn viewer_session(
     let mut search_matches: Vec<usize> = Vec::new();
     let mut search_index = 0;
 
-    // Link navigation state
+    // Link navigation state. Each link is mapped to the rendered line its
+    // display text first appears on, so Enter can follow the link at the
+    // cursor without entering link mode.
     let links = extract_links(content);
+    let mut link_lines: Vec<Option<usize>> = links
+        .iter()
+        .map(|link| rendered_line_of(&document.lines, &link.text))
+        .collect();
     let mut link_mode = false;
     let mut link_index = 0;
 
@@ -578,6 +584,20 @@ fn viewer_session(
                         KeyCode::Char('b') => {
                             return Ok(ViewerAction::Back);
                         }
+                        // Enter follows the first link at or below the top of
+                        // the viewport, so links can be jumped to without
+                        // entering link mode.
+                        KeyCode::Enter => {
+                            if let Some(index) = links
+                                .iter()
+                                .enumerate()
+                                .filter_map(|(i, _)| link_lines[i].map(|line| (i, line)))
+                                .find(|(_, line)| *line >= scroll_offset)
+                                .map(|(i, _)| i)
+                            {
+                                return Ok(follow_link(&links[index], path));
+                            }
+                        }
                         KeyCode::Char('q') | KeyCode::Esc => {
                             break;
                         }
@@ -609,6 +629,11 @@ fn viewer_session(
                 )?;
                 search_matches = find_matches(&document.lines, &search_query);
                 search_index = search_index.min(search_matches.len().saturating_sub(1));
+                // Reflow moved links to new rendered lines.
+                link_lines = links
+                    .iter()
+                    .map(|link| rendered_line_of(&document.lines, &link.text))
+                    .collect();
             }
             Ok(_) => {}
             Err(error) => return Err(error),
@@ -617,6 +642,16 @@ fn viewer_session(
 
     terminal.restore()?;
     Ok(ViewerAction::Quit)
+}
+
+/// Find the rendered line a link's display text first appears on, so Enter can
+/// follow the link at the cursor. Returns `None` if the text is not found (for
+/// example when a link label wraps across lines or is clipped).
+fn rendered_line_of(lines: &[TerminalLine], text: &str) -> Option<usize> {
+    if text.is_empty() {
+        return None;
+    }
+    lines.iter().position(|line| line.plain().contains(text))
 }
 
 fn scroll_to_match(current_offset: usize, target_line: usize, visible_lines: usize) -> usize {

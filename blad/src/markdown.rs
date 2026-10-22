@@ -20,7 +20,7 @@ use syntect::parsing::SyntaxSet;
 
 use crate::inline::{InlineWriter, Style};
 pub(crate) use crate::terminal_text::inert_source;
-use crate::theme::{RenderOptions, Theme};
+use crate::theme::{ColorDepth, RenderOptions, Theme};
 
 fn syntax_assets() -> (&'static SyntaxSet, &'static ThemeSet) {
     static SYNTAXES: OnceLock<SyntaxSet> = OnceLock::new();
@@ -196,7 +196,7 @@ fn render_markdown_theme(
             .get("InspiredGitHub")
             .or_else(|| ts.themes.get("Solarized (light)"))
     } else {
-        get_terminal_theme(ts)
+        get_terminal_theme(ts, settings.color_depth)
     };
 
     let safe_source = inert_source(md);
@@ -226,6 +226,9 @@ fn render_markdown_theme(
 
     let mut list_item_count = 0;
     let mut list_level: usize = 0;
+    // The start number of each open list, so an ordered list that does not
+    // begin at 1 is enumerated from its actual first number.
+    let mut list_starts: Vec<Option<usize>> = Vec::new();
     let mut in_heading = false;
 
     let mut in_table = false;
@@ -301,14 +304,16 @@ fn render_markdown_theme(
                         cancellation,
                     )?;
                     writeln!(w)?;
-                } else if let Some(mut highlighter) = hl.take() {
-                    // The code panel's background, mode-appropriate and applied
-                    // around the *whole visual line* (content plus trailing
-                    // padding) so it reaches the right edge and every blank
-                    // line in the block stays solid. The syntect theme
-                    // contributes foreground token colors only, so a light or
-                    // dark terminal always gets a matching panel and token
-                    // text keeps high contrast.
+                } else {
+                    // A full-width frame line directly above and below the
+                    // block gives the code a distinct, closed shape. It is
+                    // only drawn when a width budget exists (the viewer); with
+                    // no width there is no panel to frame. The bottom frame
+                    // replaces the block's trailing blank line, so it sits
+                    // flush against the last code line.
+                    if terminal_width.is_some() {
+                        write_code_frame(w, &code_bg, terminal_width)?;
+                    }
                     let reset = "\x1b[0m";
                     for line in code_content.lines() {
                         // Measure the raw line's display width (full-width
@@ -316,37 +321,39 @@ fn render_markdown_theme(
                         // added, so the padding is exact.
                         let content_width = crate::terminal_text::width_with_tabs(line);
                         write!(w, "{}", code_bg)?;
-                        match highlighter.highlight_line(line, ss) {
-                            Ok(ranges) => {
-                                // A blank line yields no ranges, so the body
-                                // is empty and only the padding fills it.
-                                let styled = to_ansi_line(&ranges, &code_bg);
-                                let padded = pad_code_line(&styled, content_width, terminal_width);
-                                write!(w, "{}", padded)?;
+                        if let Some(highlighter) = hl.as_mut() {
+                            match highlighter.highlight_line(line, ss) {
+                                Ok(ranges) => {
+                                    // A blank line yields no ranges, so the
+                                    // body is empty and only the padding
+                                    // fills it.
+                                    let styled = to_ansi_line(&ranges, &code_bg);
+                                    let padded =
+                                        pad_code_line(&styled, content_width, terminal_width);
+                                    write!(w, "{}", padded)?;
+                                }
+                                Err(_) => {
+                                    let padded =
+                                        pad_code_line(line, content_width, terminal_width);
+                                    write!(w, "{}", padded)?;
+                                }
                             }
-                            Err(_) => {
-                                let padded = pad_code_line(line, content_width, terminal_width);
-                                write!(w, "{}", padded)?;
-                            }
+                        } else {
+                            // No highlighter (missing syntax or theme): keep
+                            // the code visible as plain text, but still on
+                            // the mode-appropriate code panel.
+                            let padded = pad_code_line(line, content_width, terminal_width);
+                            write!(w, "{}", padded)?;
                         }
                         write!(w, "{}", reset)?;
                         writeln!(w)?;
                     }
-                    writeln!(w)?;
-                } else {
-                    // No highlighter (missing syntax or theme): keep the code
-                    // visible as plain text, but still on the mode-appropriate
-                    // code panel so the block reads as a distinct region.
-                    let reset = "\x1b[0m";
-                    for line in code_content.lines() {
-                        let content_width = crate::terminal_text::width_with_tabs(line);
-                        write!(w, "{}", code_bg)?;
-                        let padded = pad_code_line(line, content_width, terminal_width);
-                        write!(w, "{}", padded)?;
-                        write!(w, "{}", reset)?;
+                    hl = None;
+                    if terminal_width.is_some() {
+                        write_code_frame(w, &code_bg, terminal_width)?;
+                    } else {
                         writeln!(w)?;
                     }
-                    writeln!(w)?;
                 }
                 inline.reset(0, 0);
             }
@@ -486,7 +493,7 @@ fn render_markdown_theme(
                     inline.hard_break(w)?;
                 }
             }
-            Event::Start(Tag::List(_)) => {
+            Event::Start(Tag::List(start)) => {
                 inline.finish(w)?;
                 inline.reset(0, 0);
                 if need_blank {
@@ -496,10 +503,13 @@ fn render_markdown_theme(
                     writeln!(w)?;
                 }
                 list_level += 1;
+                list_starts.push(start.map(|n| n as usize));
+                list_item_count = 0;
             }
             Event::End(TagEnd::List(_)) => {
                 inline.finish(w)?;
                 list_level = list_level.saturating_sub(1);
+                list_starts.pop();
                 writeln!(w)?;
                 inline.reset(
                     0,
@@ -522,9 +532,21 @@ fn render_markdown_theme(
                 }
                 write!(w, "{indent}")?;
                 inline.reset(indent_width, 0);
+                // Ordered items are enumerated from the list's start number;
+                // unordered items alternate bullet glyph by nesting level so
+                // depth reads at a glance.
+                let marker = match list_starts.last().copied().flatten() {
+                    Some(start) => format!("{}. ", start.saturating_add(list_item_count - 1)),
+                    None => match list_level % 3 {
+                        1 => "• ",
+                        2 => "◦ ",
+                        _ => "– ",
+                    }
+                    .to_string(),
+                };
                 inline.text(
                     w,
-                    "• ",
+                    &marker,
                     Style {
                         color: Some(palette.list_marker),
                         ..Style::default()
@@ -539,9 +561,15 @@ fn render_markdown_theme(
                 if !at_start {
                     writeln!(w)?;
                 }
+                // Differentiate rule styles by their delimiter so `***` reads
+                // as stronger than `---` and `~~~` as a squiggle.
+                let (glyph, strong) = rule_style(md, range);
+                if strong {
+                    write!(w, "\x1b[1m")?;
+                }
                 palette.muted.write(w, false)?;
                 for _ in 0..terminal_width.unwrap_or(80).max(1) {
-                    write!(w, "─")?;
+                    write!(w, "{glyph}")?;
                 }
                 write!(w, "\x1b[0m")?;
                 writeln!(w)?;
@@ -600,6 +628,9 @@ fn render_markdown_theme(
                 };
                 quote_colors.push(color);
                 inline.reset(0, 0);
+                // The alert shares the blockquote's left-edge bar, tinted by
+                // the alert's own color, so it stands out from prose.
+                inline.set_border(Some('│'));
                 inline.text(
                     w,
                     &format!("[{label}] "),
@@ -611,20 +642,34 @@ fn render_markdown_theme(
             }
             Event::FootnoteReference(id) => {
                 let id = inert_source(&id);
+                // A superscript marker, sharing the exact tag of its
+                // definition so the two are visually linked. Falls back to
+                // `[n]` when the id has no single superscript glyph.
                 inline.code(
-                    &format!("[{id}]"),
+                    &footnote_marker(&id),
                     Style {
                         color: Some(palette.link),
                         ..style
                     },
                 );
             }
-            Event::Start(Tag::FootnoteDefinition(_)) => {
+            Event::Start(Tag::FootnoteDefinition(id)) => {
                 inline.finish(w)?;
                 inline.reset(0, 0);
                 if !at_start {
                     writeln!(w)?;
                 }
+                // The definition line is prefixed with the same tag as the
+                // reference, so the reader can match them without color.
+                let id = inert_source(&id);
+                inline.text(
+                    w,
+                    &format!("{} ", footnote_marker(&id)),
+                    Style {
+                        color: Some(palette.muted),
+                        ..Style::default()
+                    },
+                )?;
                 palette.muted.write(w, false)?;
             }
             Event::End(TagEnd::FootnoteDefinition) => {
@@ -706,16 +751,23 @@ fn render_markdown_theme(
                     writeln!(w)?;
                 }
                 at_start = false;
+                // A left-edge bar makes the quote read as a distinct block
+                // rather than just indented text.
+                inline.set_border(Some('│'));
                 palette.muted.write(w, false)?;
                 quote_colors.push(palette.muted);
             }
             Event::End(TagEnd::BlockQuote(_)) => {
                 inline.finish(w)?;
                 quote_colors.pop();
+                inline.set_border(None);
                 write!(w, "\x1b[0m")?;
                 writeln!(w)?;
                 inline.reset(0, 0);
-                need_blank = true;
+                // The bar already separates the quote from surrounding text;
+                // do not also force a blank line, which produced double
+                // spacing above and below the block.
+                need_blank = false;
             }
             _ => {}
         }
@@ -885,21 +937,53 @@ fn find_syntax<'a>(ss: &'a SyntaxSet, lang: &str) -> Option<&'a syntect::parsing
         .or_else(|| ss.syntaxes().first())
 }
 
-fn get_terminal_theme(ts: &ThemeSet) -> Option<&syntect::highlighting::Theme> {
-    let candidates = [
-        "base16-ocean.dark",
-        "base16-default.dark",
-        "solarized-dark",
-        "monokai",
-        "gruvbox-dark",
-    ];
+/// Choose the rule glyph and strength from the delimiter used in the source.
+/// `***` is a stronger double line; `---` (and `___`) is a thin line.
+/// (`~~~` is a code-fence delimiter in CommonMark, never a rule.)
+fn rule_style(md: &str, range: std::ops::Range<usize>) -> (char, bool) {
+    let source = md.get(range.clone()).unwrap_or("");
+    if source.trim().starts_with('*') {
+        ('━', true)
+    } else {
+        ('─', false)
+    }
+}
 
+/// Render a footnote id as a superscript marker, falling back to `[id]` when
+/// the id is not a plain number (only digits 0-9 have superscript glyphs).
+fn footnote_marker(id: &str) -> String {
+    const SUPER: &[char] = &['⁰', '¹', '²', '³', '⁴', '⁵', '⁶', '⁷', '⁸', '⁹'];
+    if !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()) {
+        id.chars().map(|c| SUPER[(c as u8 - b'0') as usize]).collect()
+    } else {
+        format!("[{id}]")
+    }
+}
+
+fn get_terminal_theme(ts: &ThemeSet, depth: ColorDepth) -> Option<&syntect::highlighting::Theme> {
+    // base16-ocean is a subtle-gray truecolor theme: at 256-color and truecolor
+    // depth its token colors are distinct, but quantized to 16 colors almost
+    // every token collapses to the same white, so syntax highlighting appears
+    // to "not work". Solarized (dark) keeps its keyword/string/comment colors
+    // distinct even at 16 colors, so it is the right default there.
+    let candidates: &[&str] = match depth {
+        ColorDepth::None | ColorDepth::Ansi16 => &[
+            "Solarized (dark)",
+            "base16-ocean.dark",
+            "base16-eighties.dark",
+        ],
+        _ => &[
+            "base16-ocean.dark",
+            "base16-default.dark",
+            "Solarized (dark)",
+            "base16-eighties.dark",
+        ],
+    };
     for name in candidates {
-        if let Some(theme) = ts.themes.get(name) {
+        if let Some(theme) = ts.themes.get(*name) {
             return Some(theme);
         }
     }
-
     ts.themes.values().next()
 }
 
@@ -942,6 +1026,20 @@ fn to_ansi_line(ranges: &[(SStyle, &str)], code_bg: &str) -> String {
     }
 
     output
+}
+
+/// Write a full-width frame line (the code panel's background, no text) above
+/// or below a code block so the block reads as a closed rectangle.
+fn write_code_frame(
+    w: &mut impl Write,
+    code_bg: &str,
+    terminal_width: Option<usize>,
+) -> std::io::Result<()> {
+    let width = terminal_width.unwrap_or(80).max(1);
+    write!(w, "{code_bg}")?;
+    write!(w, "{}", " ".repeat(width))?;
+    write!(w, "\x1b[0m")?;
+    writeln!(w)
 }
 
 /// Pad a code line with spaces up to `terminal_width` so the background

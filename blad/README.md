@@ -109,6 +109,10 @@ blad --math source --mermaid source view document.md
 - `Enter` - Follow link (open file or URL)
 - `Esc` - Exit link mode
 
+Links can also be followed without link mode: press `Enter` to open the first
+link at or below the top of the viewport. Bare URLs (`https://…`) are
+recognised as links as well as bracketed and named links.
+
 ### Other
 
 - `e` - Edit file

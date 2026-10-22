@@ -32,10 +32,13 @@ pub struct Link {
     pub destination: String,
     /// How to follow the destination.
     pub kind: LinkKind,
+    /// The zero-based source line the link begins on, used to map a link to
+    /// its rendered line for cursor-following.
+    pub source_line: usize,
 }
 
 impl Link {
-    /// Classify a raw destination and build the link.
+    /// Classify a raw destination and build the link on line `source_line`.
     ///
     /// The classification is total: every destination is exactly one of
     /// [`LinkKind::Anchor`], [`LinkKind::Url`] or [`LinkKind::File`].
@@ -45,7 +48,14 @@ impl Link {
             text,
             destination,
             kind,
+            source_line: 0,
         }
+    }
+
+    /// Record the source line a link begins on.
+    pub fn with_source_line(mut self, line: usize) -> Self {
+        self.source_line = line;
+        self
     }
 
     /// True when the destination is an internal `#fragment` link.
@@ -119,22 +129,30 @@ pub fn extract_links(source: &str) -> Vec<Link> {
     let mut links = Vec::new();
     let mut current_text = String::new();
     let mut in_link = false;
+    let mut in_code = false;
     let mut link_destination = String::new();
+    let mut link_line = 0;
 
-    for event in parser {
+    for (event, range) in parser.into_offset_iter() {
         match event {
             Event::Start(Tag::Link { dest_url, .. }) => {
                 in_link = true;
                 link_destination = dest_url.to_string();
                 current_text.clear();
+                link_line = line_of(source, range.start);
             }
             Event::End(TagEnd::Link) => {
                 if in_link && !current_text.is_empty() {
-                    links.push(Link::new(current_text.clone(), link_destination.clone()));
+                    links.push(
+                        Link::new(current_text.clone(), link_destination.clone())
+                            .with_source_line(link_line),
+                    );
                 }
                 in_link = false;
                 link_destination.clear();
             }
+            Event::Start(Tag::CodeBlock(_)) => in_code = true,
+            Event::End(TagEnd::CodeBlock) => in_code = false,
             // Capture every inline payload inside the label: plain text,
             // inline code and raw inline HTML.
             Event::Text(text) | Event::Code(text) if in_link => {
@@ -143,6 +161,17 @@ pub fn extract_links(source: &str) -> Vec<Link> {
             Event::InlineHtml(html) if in_link => {
                 current_text.push_str(&html);
             }
+            // Bare autolinks: a plain-text run that is not already inside a
+            // link or a code block may contain a bare `http(s)://` URL.
+            Event::Text(text) if !in_link && !in_code => {
+                for url in bare_urls(&text) {
+                    if !links.iter().any(|l| l.destination == url) {
+                        links.push(
+                            Link::new(url.clone(), url).with_source_line(line_of(source, range.start)),
+                        );
+                    }
+                }
+            }
             // Emphasis and other inline containers carry their own Text/Code
             // children, which the arms above already capture.
             _ => {}
@@ -150,6 +179,49 @@ pub fn extract_links(source: &str) -> Vec<Link> {
     }
 
     links
+}
+
+/// The zero-based line containing byte offset `pos`.
+fn line_of(source: &str, pos: usize) -> usize {
+    source[..pos.min(source.len())].matches('\n').count()
+}
+
+/// Find bare `http://` and `https://` URLs in a plain-text run, trimming
+/// trailing punctuation that is not part of the URL.
+fn bare_urls(text: &str) -> Vec<String> {
+    let mut urls = Vec::new();
+    let mut i = 0;
+    while i < text.len() {
+        if text[i..].starts_with("https://") || text[i..].starts_with("http://") {
+            let start = i;
+            let mut end = i;
+            while end < text.len() {
+                let c = text.as_bytes()[end];
+                if c.is_ascii_whitespace()
+                    || matches!(c, b'"' | b'\'' | b'<' | b'>' | b'(' | b')')
+                {
+                    break;
+                }
+                end += 1;
+            }
+            // Trim trailing sentence punctuation that is not part of the URL.
+            while end > start {
+                let c = text.as_bytes()[end - 1];
+                if matches!(c, b'.' | b',' | b';' | b'!' | b'?' | b':') {
+                    end -= 1;
+                } else {
+                    break;
+                }
+            }
+            if end > start {
+                urls.push(text[start..end].to_string());
+            }
+            i = end;
+        } else {
+            i += 1;
+        }
+    }
+    urls
 }
 
 #[cfg(test)]
@@ -270,5 +342,32 @@ mod tests {
         assert_eq!(links[0].destination, "1.md");
         assert_eq!(links[1].destination, "2.md");
         assert_eq!(links[2].destination, "#x");
+    }
+
+    #[test]
+    fn extracts_bare_autolinks() {
+        let links = extract_links("See https://example.com and [named](other.md)");
+        assert_eq!(links.len(), 2);
+        assert!(links.iter().any(|l| l.destination == "https://example.com"));
+        assert!(links.iter().any(|l| l.text == "named"));
+    }
+
+    #[test]
+    fn bare_autolink_trims_trailing_punctuation() {
+        let links = extract_links("Visit https://example.com/path. Then stop.");
+        assert_eq!(links[0].destination, "https://example.com/path");
+    }
+
+    #[test]
+    fn bare_autolinks_are_not_extracted_from_code_blocks() {
+        let links = extract_links("```\nhttps://in-code.com\n```\nand https://real.com");
+        assert!(links.iter().any(|l| l.destination == "https://real.com"));
+        assert!(!links.iter().any(|l| l.destination == "https://in-code.com"));
+    }
+
+    #[test]
+    fn link_source_line_tracks_its_line() {
+        let links = extract_links("first line\n\nsecond https://x.com line");
+        assert_eq!(links[0].source_line, 2);
     }
 }

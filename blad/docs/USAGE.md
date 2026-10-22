@@ -267,6 +267,10 @@ Press `Enter` to follow the link:
 - **Anchor links** (`#heading`) are recognised but not yet resolved to a
   scroll position.
 
+You do not need link mode to follow a link: pressing `Enter` in normal mode
+opens the first link at or below the top of the viewport. Bare URLs
+(`https://…`) are treated as links in addition to bracketed and named links.
+
 Press `Esc` to exit link mode without following.
 
 ### Search
@@ -325,10 +329,21 @@ Blad renders full CommonMark and GitHub Flavored Markdown (GFM):
   - [!WARNING] - Yellow
   - [!CAUTION] - Red
 - Task lists
-- Footnotes
+- Footnotes (references are superscripted and the definition is prefixed with
+  the same marker)
 - Superscript and subscript
 - Math expressions (inline `$...$` and display `$$...$$`)
-- Horizontal rules
+- Horizontal rules (`***` renders as a stronger double line than `---`)
+
+### Rendering appearance
+
+- **Code blocks** are framed with a full-width panel line above and below so
+  the block reads as a closed rectangle, and are syntax-highlighted (the
+  highlighting theme is chosen to stay legible at the terminal's color depth).
+- **Blockquotes** carry a left-edge bar so they stand out from surrounding
+  prose; GFM alerts use the same bar tinted with the alert's color.
+- **Lists** are enumerated for ordered lists, and unordered lists alternate
+  the bullet glyph by nesting level.
 
 ### Mermaid Diagrams
 

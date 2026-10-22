@@ -279,15 +279,16 @@ fn test_gfm_alerts() {
 fn test_footnotes() {
     let md = "Text with footnote[^1].\n\n[^1]: Footnote definition";
     let output = render(md);
-    // The footnote reference [1] is rendered with the footnote color (96).
+    // The footnote reference is a superscript marker (¹) in the footnote
+    // color, sharing the exact tag of its definition.
     assert!(
-        output.contains("\x1b[96m[1]"),
-        "footnote reference must be colored: {output:?}"
+        output.contains("\x1b[96m¹"),
+        "footnote reference must be a superscript in the footnote color: {output:?}"
     );
-    // The definition is rendered dimmed (90) and carries the definition text.
+    // The definition line is prefixed with the same tag and rendered dimmed.
     assert!(
-        output.contains("Footnote definition"),
-        "footnote definition must render: {output:?}"
+        strip_ansi(&output).contains("¹ Footnote definition"),
+        "footnote definition must be prefixed with the reference tag: {output:?}"
     );
     assert!(
         output.contains("\x1b[90m"),

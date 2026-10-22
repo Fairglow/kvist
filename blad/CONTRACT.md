@@ -57,7 +57,7 @@ guessing. Width, palette, math mode and diagram options persist across reflow.
 
 Navigation: `↑`/`k`, `↓`/`j`, `PageUp`/`u`, `PageDown`/`d`/`Space`, `g`/`H` (top), `G`/`L` (bottom), mouse wheel.
 Search: `/` enter search mode, type query, `Enter` exit, `n`/`p` navigate matches, `Esc` cancel.
-Links: `f` enter link mode, `Tab`/`Shift+Tab` cycle links, `Enter` follow the selected link, `Esc` exit link mode.
+Links: `f` enter link mode, `Tab`/`Shift+Tab` cycle links, `Enter` follow the selected link, `Esc` exit link mode. `Enter` outside link mode follows the first link at or below the top of the viewport, so links can be jumped to without a special mode.
 Other: `e` edit file (requires `$EDITOR`), `b` return to the previous file, `q`/`Esc` quit.
 
 ## Required interfaces

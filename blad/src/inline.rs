@@ -89,6 +89,7 @@ pub(crate) struct InlineWriter {
     has_text: bool,
     pending_space: bool,
     word: Word,
+    border: Option<char>,
 }
 
 impl InlineWriter {
@@ -100,12 +101,36 @@ impl InlineWriter {
             has_text: false,
             pending_space: false,
             word: Word::default(),
+            border: None,
         }
+    }
+
+    /// Set a left-edge border character (e.g. `│` for blockquotes). The border
+    /// and a following space occupy two columns on every wrapped line, so the
+    /// effective wrap width is reduced accordingly.
+    pub fn set_border(&mut self, char: Option<char>) {
+        self.border = char;
+    }
+
+    fn border_width(&self) -> usize {
+        // The border needs two columns plus at least one for content; it is
+        // omitted on a terminal too narrow to hold it so lines never exceed
+        // the width budget.
+        match self.width {
+            Some(w) if w < 3 => 0,
+            _ => usize::from(self.border.is_some()) * 2,
+        }
+    }
+
+    fn effective_width(&self) -> Option<usize> {
+        self.width.map(|width| width.saturating_sub(self.border_width()))
     }
 
     pub fn reset(&mut self, column: usize, indent: usize) {
         self.column = column;
-        self.indent = self.width.map_or(indent, |width| indent.min(width - 1));
+        self.indent = self
+            .effective_width()
+            .map_or(indent, |width| indent.min(width.saturating_sub(1)));
         self.has_text = false;
         self.pending_space = false;
     }
@@ -165,8 +190,14 @@ impl InlineWriter {
 
     fn write_indent(&mut self, w: &mut impl Write) -> io::Result<()> {
         if self.column == 0 {
+            if self.border_width() > 0
+                && let Some(border) = self.border
+            {
+                write!(w, "{border} ")?;
+                self.column = 2;
+            }
             write!(w, "{}", " ".repeat(self.indent))?;
-            self.column = self.indent;
+            self.column += self.indent;
         }
         Ok(())
     }
@@ -177,7 +208,7 @@ impl InlineWriter {
         }
         let word_width = self.word.text.width();
         let separator = usize::from(self.pending_space && self.has_text);
-        if let Some(width) = self.width
+        if let Some(width) = self.effective_width()
             && self.has_text
             && self
                 .column
@@ -195,7 +226,7 @@ impl InlineWriter {
         self.pending_space = false;
 
         let mut span_index = 0;
-        if let Some(width) = self.width
+        if let Some(width) = self.effective_width()
             && !self.word.atomic
             && self.column.saturating_add(word_width) > width
         {

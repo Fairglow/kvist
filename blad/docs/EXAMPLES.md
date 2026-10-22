@@ -87,20 +87,20 @@ fn main() {
 
 ### GFM Alerts
 
-[!NOTE]
-This is a note with important information.
+> [!NOTE]
+> This is a note with important information.
 
-[!TIP]
-Here's a helpful tip for users.
+> [!TIP]
+> Here's a helpful tip for users.
 
-[!IMPORTANT]
-This information is crucial to know.
+> [!IMPORTANT]
+> This information is crucial to know.
 
-[!WARNING]
-Be careful with this setting.
+> [!WARNING]
+> Be careful with this setting.
 
-[!CAUTION]
-This action cannot be undone.
+> [!CAUTION]
+> This action cannot be undone.
 
 ## Task Lists
 
@@ -231,9 +231,7 @@ A horizontal rule separates sections.
 
 ***
 
-Another style.
-
----
+A stronger rule, rendered as a double line.
 
 ## Lists
 

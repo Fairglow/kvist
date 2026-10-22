@@ -95,7 +95,9 @@ fn inline_code_and_code_block_whitespace_are_not_reformatted() {
         // with spaces that carry the background. The *content* whitespace
         // (the leading spaces on the first line, the tab on the last) is
         // still preserved verbatim; only trailing background padding is added.
-        "  abcdefghijkl\n    \n\tindent\n\n"
+        // A full-width frame line is drawn directly above and below the block
+        // (the bottom frame replaces the block's trailing blank line).
+        "    \n  abcdefghijkl\n    \n\tindent\n    \n"
     );
 }
 

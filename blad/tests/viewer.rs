@@ -311,12 +311,14 @@ fn code_overflow_is_clipped_and_horizontal_offset_survives_short_lines() {
     )
     .unwrap();
     let mut viewer = Viewer::start(&path, 30, 10, false);
-    assert_eq!(viewer.screen.line(1), "0123456789ABCDEFGHIJKLMNOPQRS");
-    assert_eq!(viewer.screen.line(2), "x");
+    // Row 1 is the code panel's top frame line; the first code line is row 2.
+    assert_eq!(viewer.screen.line(1).trim(), "");
+    assert_eq!(viewer.screen.line(2), "0123456789ABCDEFGHIJKLMNOPQRS");
+    assert_eq!(viewer.screen.line(3), "x");
     assert_eq!(viewer.screen.scrolls, 0);
     viewer.keys(b"\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C\x1b[C");
-    assert_eq!(viewer.screen.line(1), "ABCDEFGHIJKLMNOPQRSTUVWXYZabc");
-    assert_eq!(viewer.screen.line(2), "");
+    assert_eq!(viewer.screen.line(2), "ABCDEFGHIJKLMNOPQRSTUVWXYZabc");
+    assert_eq!(viewer.screen.line(3), "");
     assert_eq!(viewer.screen.scrolls, 0);
     viewer.quit();
 }
@@ -517,10 +519,12 @@ fn fitting_code_tabs_do_not_acquire_phantom_horizontal_scroll() {
         std::fs::write(&path, format!("```{syntax}\n\tX\n```")).unwrap();
         for numbers in [false, true] {
             let mut viewer = Viewer::start(&path, 20, 8, numbers);
-            let expected = if numbers { "1         X" } else { "        X" };
-            assert_eq!(viewer.screen.line(1), expected);
+            // The code panel's top frame line occupies line 1, so the code
+            // line `X` is line 2 (and the gutter shows `2` with line numbers).
+            let expected = if numbers { "2         X" } else { "        X" };
+            assert_eq!(viewer.screen.line(2), expected);
             viewer.keys(&b"\x1b[C".repeat(10));
-            assert_eq!(viewer.screen.line(1), expected);
+            assert_eq!(viewer.screen.line(2), expected);
             viewer.quit();
         }
     }
@@ -590,6 +594,35 @@ fn link_mode_is_inert_without_links_and_esc_exits_it() {
     assert!(
         viewer.screen.line(0).contains("withlink.md"),
         "Esc must exit link mode: {}",
+        viewer.screen.line(0)
+    );
+    viewer.quit();
+}
+
+#[test]
+fn enter_follows_the_link_at_the_cursor_without_link_mode() {
+    let temp = tempfile::tempdir().unwrap();
+    let linked = temp.path().join("linked.md");
+    let source = temp.path().join("source.md");
+    std::fs::write(&linked, "# Linked Title\n\nlinked body").unwrap();
+    // The link is on the first content line, at the top of the viewport.
+    std::fs::write(&source, "intro\n[open](linked.md)").unwrap();
+    let mut viewer = Viewer::start(&source, 80, 24, false);
+    assert!(viewer.screen.line(0).contains("source.md"));
+    // Enter in normal mode follows the first link at or below the top of the
+    // viewport — no `f` link mode required.
+    viewer.keys(b"\r");
+    assert!(
+        viewer.screen.line(0).contains("linked.md"),
+        "Enter must follow the link at the cursor, got: {}",
+        viewer.screen.line(0)
+    );
+    assert_eq!(viewer.screen.line(1), "# Linked Title");
+    // Back navigation returns to the source.
+    viewer.keys(b"b");
+    assert!(
+        viewer.screen.line(0).contains("source.md"),
+        "back must return to the source, got: {}",
         viewer.screen.line(0)
     );
     viewer.quit();
