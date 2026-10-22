@@ -19,13 +19,14 @@ rendering blad uses to display sessions afterwards.
 - **Text notation:** Curated Unicode sub/superscripts and bounded mathematical
   text, with whole-expression source fallback for unsupported TeX
 - **Syntax highlighting:** 50+ languages via syntect
-- **Appearance:** Dark, light, or terminal-native palettes; explicit color
+- **Appearance:** Dark, light, or terminal-native palettes and `--theme-file`
+  JSON overrides; explicit color
   capabilities for embedding applications and escape-free rendered dumps
 - **Interactive viewer:** Keyboard navigation, mouse wheel, search with
   highlight, scrollbar, link navigation (Tab/Shift+Tab), Space for page down
 - **Edit mode:** Press `e` to edit files in your preferred editor
-- **Link following:** Press `f` to enter link mode, Tab to cycle links, Enter
-  to open linked files or URLs in browser
+- **Link following:** Tab/Shift+Tab and Enter without a special mode, or click
+  inline/named links; local/cross-file heading jumps and open-file tabs
 - **Session viewing:** Read and display skott agent session transcripts
 - **Live streaming:** Follow an active session transcript as it streams
 - **Export:** Export sessions to combined Markdown documents
@@ -76,6 +77,7 @@ blad show <session-id> --line-numbers
 # Choose appearance independently of terminal color capability
 blad --theme light view README.md
 blad --theme terminal --color never view README.md
+blad --theme-file blad/docs/theme.example.json view README.md
 
 # Plain rendered text, even when color is explicitly requested
 blad --color always --dump view README.md
@@ -104,7 +106,7 @@ blad --math source --mermaid source view document.md
 
 ### Link Navigation
 
-- `f` - Enter link navigation mode
+- `f` - Enter optional link navigation mode
 - `Tab` - Next link, `Shift+Tab` - Previous link
 - `Enter` - Follow link (open file or URL)
 - `Esc` - Exit link mode
@@ -112,11 +114,14 @@ blad --math source --mermaid source view document.md
 Links can also be followed without link mode: press `Enter` to open the first
 link at or below the top of the viewport. Bare URLs (`https://…`) are
 recognised as links as well as bracketed and named links.
+Tab/Shift+Tab select links directly; inline/named links also accept a left
+mouse click. `#heading` and `other.md#heading` jump to their headings.
 
 ### Other
 
 - `e` - Edit file
 - `b` - Return to the previous file
+- `Alt+Left` / `Alt+Right` - Switch open-file tabs (top row)
 - `q`/`Esc` - Quit
 
 ## Documentation

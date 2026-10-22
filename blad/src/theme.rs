@@ -43,7 +43,8 @@ impl Color {
 }
 
 /// Built-in appearance. Library defaults never inspect the environment.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Theme {
     /// Dark panels and dark-compatible highlighting.
     #[default]
@@ -121,6 +122,8 @@ pub struct Palette {
     pub code_background: Option<Color>,
     /// Alternating table-row background, or no fixed fill.
     pub table_background: Option<Color>,
+    /// Blockquote fill, or no fixed background.
+    pub quote_background: Option<Color>,
 }
 
 impl Default for Palette {
@@ -136,12 +139,14 @@ impl Default for Palette {
             search: Color::Ansi(3),
             code_background: Some(Color::Ansi(236)),
             table_background: Some(Color::Ansi(235)),
+            quote_background: Some(Color::Ansi(235)),
         }
     }
 }
 
 impl Palette {
-    pub(crate) fn for_theme(theme: Theme) -> Self {
+    /// Built-in semantic defaults for an explicitly resolved appearance.
+    pub fn for_theme(theme: Theme) -> Self {
         let mut palette = Self::default();
         if theme != Theme::Dark {
             palette.alerts = [6, 2, 5, 3, 1].map(Color::Ansi);
@@ -151,9 +156,11 @@ impl Palette {
         if theme == Theme::Light {
             palette.code_background = Some(Color::Ansi(254));
             palette.table_background = Some(Color::Ansi(254));
+            palette.quote_background = Some(Color::Ansi(254));
         } else if theme == Theme::Terminal {
             palette.code_background = None;
             palette.table_background = None;
+            palette.quote_background = None;
         }
         palette
     }

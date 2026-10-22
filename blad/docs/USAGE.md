@@ -89,6 +89,7 @@ blad export 20261012T120000 --output transcript.md
 | `--dump` | Output plain text without interactive viewer |
 | `--line-numbers` | Show rendered-line numbers in the interactive viewer |
 | `--theme auto\|dark\|light\|terminal` | Appearance; auto uses `COLORFGBG`, otherwise dark |
+| `--theme-file PATH` | Explicit JSON appearance/palette overrides, up to 64 KiB |
 | `--color auto\|always\|never` | Color independently of appearance; auto honors TTY, `NO_COLOR`, `TERM=dumb` |
 | `--math unicode\|source` | Mathematical projection policy |
 | `--mermaid text\|source` | Diagram projection policy |
@@ -103,13 +104,32 @@ blad list --log-dir /path/to/logs
 ```
 
 Dark and light appearances choose matching syntax highlighting and subtle panel
-fills. Terminal-native appearance leaves code and table backgrounds unchanged.
+fills. Terminal-native appearance leaves code, table and quote backgrounds unchanged.
 Automatic color uses `COLORTERM=truecolor`/`24bit`, then `TERM=*256color*`, then
 the standard sixteen colors. A nonempty `NO_COLOR` disables automatic colors;
 explicit `--color always` overrides it. Monochrome retains emphasis.
 `--dump` removes **all** styling, including authored terminal escapes, and
 renders message bodies consistently for files, sessions and stream snapshots.
 `export` instead preserves the original Markdown.
+
+### Theme files
+
+```bash
+blad --theme-file blad/docs/theme.example.json view README.md
+```
+
+Files are strict JSON objects with optional `theme` (`dark`, `light`,
+`terminal`) and a partial `palette`. Unspecified roles inherit the selected
+appearance. Explicit non-auto `--theme` overrides the file's appearance, while
+its palette overrides remain in force. Color policy, `NO_COLOR` and `--dump`
+still apply independently. There is no implicit file discovery.
+
+Palette roles: `heading`, `link`, `muted`, `list_marker`, `math`, `chrome`,
+`search`, `alerts` (five colors in NOTE/TIP/IMPORTANT/WARNING/CAUTION order),
+`code_background`, `table_background`, `quote_background`. A color is an ANSI
+index 0–255 or `"#RRGGBB"`. Backgrounds also accept `null` for no fixed fill.
+Unknown keys, invalid values/JSON, files above 65,536 bytes and read errors
+are reported as failures, never silently ignored.
 
 Library callers use `MarkdownRenderer::with_options(RenderOptions { .. })`.
 The options contain a host-provided semantic `Palette`, `ColorDepth`, appearance,
@@ -251,12 +271,18 @@ breaks and empty lines. Without a configured width, tables stay unwrapped.
 | `G` / `L` | Go to bottom |
 | Mouse wheel | Scroll |
 | `b` | Return to the previous file |
+| `Alt+Left` / `Alt+Right` | Switch open-file tabs, retaining scroll positions |
 | `q` / `Esc` | Quit viewer |
 
 ### Link Navigation
 
-Press `f` to enter link navigation mode. The header shows the current link.
-Use `Tab` to move to the next link, `Shift+Tab` for the previous link.
+The top row lists open files; brackets mark the active tab, shown first so it
+stays visible in narrow terminals. Opening an existing file reuses its tab.
+Search/link status and navigation errors appear in the footer.
+
+Use `Tab` to select the next link, `Shift+Tab` for the previous link, without
+entering a special mode. The selected link's rows are highlighted.
+Optional `f` link mode remains available.
 Press `Enter` to follow the link:
 
 - **File links** (relative or absolute paths) open the linked file in Blad.
@@ -264,12 +290,19 @@ Press `Enter` to follow the link:
   viewing. Press `b` to return to the previous file.
 - **URL links** (`http://`, `https://`, `mailto:`, `tel:`) open in your
   default browser via `xdg-open`.
-- **Anchor links** (`#heading`) are recognised but not yet resolved to a
-  scroll position.
+- **Anchor links** (`#heading`) jump to local headings; `other.md#heading`
+  opens the file and jumps there. Heading slugs are lowercase, replace spaces
+  with hyphens, preserve Unicode/hyphens/underscores, and omit punctuation.
+  Duplicate slugs gain `-1`, `-2`, etc. Explicit `{#id}` headings also work.
+  Percent-encoded UTF-8 paths/fragments are decoded; missing headings and
+  invalid escapes produce visible diagnostics without discarding the document.
 
 You do not need link mode to follow a link: pressing `Enter` in normal mode
 opens the first link at or below the top of the viewport. Bare URLs
 (`https://…`) are treated as links in addition to bracketed and named links.
+Left-click inline/named links to follow them directly, including wrapped labels.
+Pointer hit testing currently covers prose/heading labels; table links and bare
+URLs retain keyboard following rather than recorded mouse hit-test spans.
 
 Press `Esc` to exit link mode without following.
 
@@ -300,6 +333,14 @@ Appearance, color capability and projection options persist across editing
 and resize. Re-entry releases the previous viewport instead of accumulating
 recursive viewers. Editor launch, exit-status and reread failures propagate,
 with terminal state restored.
+This is a whole-file handoff, not an embedded or per-section editor.
+
+Blockquotes retain a left edge on every row, including paragraph separators,
+code and tables; dark/light themes add a subtle full-row fill. Alerts use their
+own colored edges and labels. Numeric footnote references and definitions share
+superscript tags, with `[name]` fallback for nonnumeric tags. Ordered lists resume
+the parent's numbering after nested lists. `***` is a heavy rule; `---`/`___`
+are thin rules, and `~~~` remains a CommonMark code fence.
 
 Blad uses the `$EDITOR` environment variable. If not set, it defaults to
 `nvim`.
@@ -359,6 +400,13 @@ not authored Unicode. `--mermaid source` skips the engine and shows source.
 | `stateDiagram` / `stateDiagram-v2` | Transitions, root cycles, simple composites, attached notes; LR/RL/TB/BT | Some composite crossings/cycles exceed the admitted routing profile |
 | `classDiagram` | Members/methods/visibility, interface annotations, inheritance, labelled directed relations, namespaces, attached notes; LR/RL/TB/BT | Namespace-plus-external-note combinations and some relation topologies fall back |
 | `erDiagram` | Entities, attributes, key tokens/comments, labelled cardinality relations; LR/RL/TB/BT | Cardinalities are textual; some relation topologies fall back |
+
+ER cardinalities deliberately use textual Mermaid endpoint tags, not graphical
+crow's-foot glyphs: `||` means exactly one, `o|` zero or one, `|{` one or more,
+and `o{` zero or more. Thus `SESSION ||--o{ MESSAGE : contains` retains both
+endpoint tags around the routed connector. The literal `o{` is intentional,
+not an unparsed fragment. Attribute rows currently use the backend's verbose
+text representation rather than graphical ER notation.
 
 This is an admitted **subset**, not full Mermaid compatibility. Styles are not
 represented in plain diagrams. Rich HTML other than line breaks, configuration

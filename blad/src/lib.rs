@@ -20,6 +20,7 @@ mod inline;
 mod math;
 mod mermaid;
 mod output;
+mod render_writer;
 mod scripts;
 mod table;
 mod terminal_text;

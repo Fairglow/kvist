@@ -1,0 +1,9 @@
+{
+  "theme": "dark",
+  "palette": {
+    "heading": "#82AAFF",
+    "link": "#89DDFF",
+    "quote_background": 235,
+    "alerts": [14, 10, 13, 11, 9]
+  }
+}

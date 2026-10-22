@@ -173,6 +173,30 @@ live-follow features proposed in the blad implementation plan.
     unbounded persistent caches and per-render terminal/process effects. Record
     measured diagram corpus cost and numeric limits before backend admission.
 
+### Accepted viewer polish
+
+41. **R-041 Navigation:** Follow inline/reference links without entering a
+    separate mode, including left-clicked prose/heading labels; resolve local
+    heading fragments (including duplicate headings,
+    explicit IDs and file fragments), retain open-file tabs and per-tab scroll
+    positions, and make missing destinations visible without losing the document.
+42. **R-042 Theme files:** Load an explicitly selected, bounded JSON theme file
+    with strict validation, semantic palette overrides and no implicit discovery.
+    Explicit CLI appearance overrides file appearance; color/dump policy remains
+    independent and survives navigation, editing and resize.
+43. **R-043 Rendering polish:** Preserve parent ordered-list counters across
+    nested lists; retain alternating bullets, matching superscript footnote tags,
+    visible alert colors, syntax highlighting and code-panel cap rows.
+    Blockquotes have a persistent left edge and optional palette background
+    across their content rows, without duplicate surrounding blank lines.
+    Theme and color changes must not alter text geometry.
+
+`~~~` remains a CommonMark code fence, not a custom horizontal rule. `***`
+uses a heavy rule. Editing remains a whole-file external-editor handoff: an
+embedded or section editor is deferred rather than introducing another editing
+and persistence model. ER cardinalities remain explicit textual Mermaid
+notation; graphical crow's-foot endpoints are not required.
+
 ## Constraints
 
 - **C-001 Dependencies:** Use existing workspace dependencies where

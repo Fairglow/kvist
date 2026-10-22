@@ -758,3 +758,119 @@ counted as passing evidence. In particular, the ambient external Mermaid
 test was not run. Editor invocation, supplied-width display routing, search
 jumps, and terminal-guard failure recovery remain source observations rather
 than independently executed assertions in this record.
+
+## Observed viewer polish increment (2026-10-22)
+
+This supplement was derived by a separate clean-slate source documenter from
+current Rust sources and test assertions, excluding intent, queues, prior
+implementation records, reviews and Git history. That observer ran no tests.
+It supersedes earlier navigation/search observations only within this scope;
+it is not a compliance certification.
+
+### Navigation and tabs
+
+Normal Tab/Shift+Tab selects links cyclically and brings their recorded row into
+view. Enter follows the selection or the first eligible link at/below the
+viewport top; it is not a freely positioned text cursor. Optional `f` link mode
+remains. Search applies the calculated case-insensitive match scroll offset.
+Explicit Markdown link source offsets are carried through inline styles into
+rendered row/column spans, including wrapped slices. Mouse hit testing accounts
+for header, gutter and horizontal/vertical offsets and checks half-open ranges.
+Selected links highlight their containing rows. Tests distinguish duplicate
+linked labels from each other and from identical unlinked prose.
+
+Heading IDs lowercase text/code labels, replace whitespace with hyphens, retain
+Unicode alphanumerics plus hyphens/underscores, and discard other punctuation.
+Duplicate generated IDs gain suffixes; explicit IDs are additional aliases.
+Heading positions are recorded by the renderer. Empty fragments target row zero;
+missing fragments produce visible status text.
+
+File destinations split path and fragment before UTF-8 percent decoding.
+Relative paths resolve against the current document. Canonical paths reuse
+existing tabs, each retaining vertical/horizontal offsets. Alt+Left/Right cycles
+tabs and pushes visit history; `b` pops it. Same-document anchor jumps do not
+create history entries. URLs invoke `xdg-open` and expose failures as status.
+
+Evidence: `src/display.rs:243-387,459-469,577-824,841-868`,
+`src/inline.rs:19-23,185-235`, `src/render_writer.rs:105-120`,
+`src/links.rs:246-294,332-344`, `src/markdown.rs:454-467`,
+`tests/viewer.rs:538-780`.
+
+### Appearance and rendering
+
+Explicit JSON theme files are bounded to 65,536 bytes. Unknown fields/palette
+keys and malformed colors fail. Colors accept ANSI indices 0-255 or six-digit
+hex strings; alerts require five colors. Only backgrounds accept null.
+Explicit dark/light/terminal choices override file appearance; auto uses file
+appearance, then `COLORFGBG`. Palette overrides follow built-in defaults.
+Color policy remains independent and dumps escape-free. Tests assert theme
+retention through tabs, editing and resizing.
+
+A writer-level quote decorator applies nested borders, fill and padding across
+prose, code, tables and internal blanks; resets reassert quote fill. Narrow
+widths reduce borders. Tests assert spacing, alert color and width bounds.
+
+Syntax aliases include Bash/Python and unknown syntax falls back to plain text.
+Default dark Ansi16 highlighting prefers Solarized dark; light prefers
+InspiredGitHub. Width-bounded code blocks retain cap rows, padded backgrounds
+and unwrapped content. Tests require multiple
+foreground colors for Bash and Python at Ansi16.
+
+Per-list counter stacks retain parent numbering after nested lists. Unordered
+bullets cycle through three glyphs. Numeric footnote IDs become superscript
+digits; other IDs use bracketed names consistently in references, definitions
+and table cells.
+
+Evidence: `src/theme_file.rs:8-88`, `src/main.rs:85-128`,
+`src/theme.rs:147-165`, `src/render_writer.rs:45-99`,
+`src/markdown.rs:284-363,514-581,672-714,927-1098`,
+`tests/polish.rs`, `tests/viewer.rs:743-780`.
+
+The Skott consumer test asserts three rows for a one-line fence: top cap,
+source and bottom cap, each with a background-bearing span. It does not prove
+token-color diversity or full-width fill.
+Evidence: `../skott/src/tui/app.rs:4082-4106`.
+
+### Evidence limits
+
+The source observer obtained no runtime, real-browser or platform evidence.
+Table cells do not carry recorded inline link spans; bare-URL extraction also
+does not establish mouse hit-test spans. Keyboard row lookup retains a text
+fallback for these cases. The pointer test does not combine gutters,
+horizontal scrolling, wrapped labels and Unicode in one fixture. Tab history
+is not same-document anchor history.
+
+Implementation-session verification (not independently executed by the source
+observer): the full workspace test command, workspace build, strict Blad/Skott
+all-target Clippy and targeted polish/viewer tests completed successfully.
+The scoped input audit additionally found that malformed theme keys could
+reach CLI error output as controls; error diagnostics now escape controls,
+with root/palette-key regressions and inclusive-size-bound coverage.
+
+### Separate source-blind comparison and human disposition
+
+A separate reviewer compared only R-041 through R-043 and related local intent
+against the observed supplement and reported execution evidence, without
+reading source or test implementations. Navigation, tab state, theme-file
+semantics and rendering polish otherwise aligned with the increment.
+
+The reviewer identified a concrete wording mismatch: observed heading slugs
+preserved underscores, while the contract's punctuation rule did not explicitly
+exempt them. The human chose **preserve underscores** when explicitly asked to
+arbitrate; the contract now names that exception. This is a human disposition,
+not an automatic change to hide a comparison finding.
+
+Reservations remain: real-browser behavior and a combined Unicode, wrapping,
+gutter and horizontal-scroll mouse fixture are not established by the cited
+evidence. Table-cell/bare-URL mouse spans remain outside the documented
+prose/heading pointer scope. The final post-diagnostic-fix workspace rerun was
+still pending at comparison time. No historical whole-component compliance or
+Kvist acceptance is claimed.
+
+Final implementation-session rerun completed successfully after the diagnostic
+correction: `cargo fmt --all -- --check`, `cargo test --workspace --offline
+--locked --quiet` (1,588 passed, 14 pre-existing ignored across 89 successful
+suites), `cargo build --workspace --offline --locked --quiet`, and `cargo clippy
+-p blad -p skott --all-targets --offline --locked --quiet -- -D warnings`.
+`git diff --check` also passed. These are execution results from the
+implementation session, not tests independently executed by either reviewer.

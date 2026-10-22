@@ -214,6 +214,52 @@ rendered-geometry integration regressions and large prepared-text cases.
 
 ## Failure and recovery
 
+### Viewer polish increment
+
+Use renderer-owned navigation metadata, recorded when inline link spans and
+heading prefixes are actually emitted, rather than searching label text (which
+confuses duplicates, prose, code and wrapped labels). Preserve metadata on reflow.
+Bare URL selection retains a text fallback. Share parser options between link
+extraction and rendering. Decode UTF-8 percent escapes before path/fragment
+resolution; do not invoke a shell.
+
+Keep an indexed open-file list with per-tab viewport offsets and a history of
+visited tabs. Render the active tab first in the clipped top row so it remains
+visible in narrow viewports. Search/link status and errors belong in the footer.
+Navigation failures retain the current document and expose a diagnostic.
+Editing hands the complete file to the existing editor after terminal release.
+
+Theme-file loading is explicit, bounded to 65,536 bytes using a limited reader,
+strictly deserialized with serde_json, and applied once before CLI dispatch.
+Partial palette overrides inherit the resolved base theme. Color depth and
+plain-output settings remain independent.
+
+A line-buffering quote writer decorates all quote content (including code,
+tables and nested quotes), reasserts background after SGR resets, and pads only
+to the available width. The parser reduces inner layout budgets by the border
+width. Ordered lists keep one next-item counter per open list.
+No new dependencies are required. Test malformed themes, duplicate/wrapped
+links, same/cross-file fragments, tabs/back/resize, nested numbering, quote
+geometry/spacing and existing showcase styling before production changes.
+
+This increment records a deliberate per-bundle advisory exception while the
+planned advisory mechanism is unavailable. This is not a human acceptance,
+Kvist receipt or compliance claim.
+
+Scoped audit: theme values are typed colors rather than terminal sequences;
+JSON reads are bounded, percent decoding fails explicitly, viewport diagnostics
+cross the inert-text boundary and external actions require explicit user input
+with separate subprocess arguments. Malformed theme keys exposed a CLI
+diagnostic-control gap; theme error output now escapes controls, with failing
+root/palette-key inputs covered by regressions. This audit is not an
+independent compliance finding.
+
+The separate source-blind comparison found an ambiguity in the heading-slug
+contract's punctuation rule. Explicit human arbitration selected preserving
+underscores; the contract now lists that exception, matching the existing
+documented slug implementation. The original finding and evidence reservations
+remain in `IMPL.md`; no automated acceptance is implied.
+
 - I/O errors are reported clearly to the user
 - Unsupported math/diagram syntax retains source with diagnostics
 - Terminal resize events are handled; content reflows

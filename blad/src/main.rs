@@ -19,6 +19,7 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 
 const DEFAULT_LOG_DIR: &str = ".skott/runs";
+mod theme_file;
 
 #[derive(Parser)]
 #[clap(name = "blad", about = "Skott session viewer and markdown browser")]
@@ -38,6 +39,10 @@ pub struct Cli {
     /// Terminal appearance; auto uses environment hints without querying stdin
     #[clap(long, global = true, value_enum, default_value = "auto")]
     theme: ThemeChoice,
+
+    /// Load an explicit JSON theme/palette file (maximum 64 KiB)
+    #[clap(long, global = true, value_name = "PATH")]
+    theme_file: Option<PathBuf>,
 
     /// Color policy; plain dumps always override this setting
     #[clap(long, global = true, value_enum, default_value = "auto")]
@@ -77,13 +82,21 @@ enum ColorChoice {
     Never,
 }
 
-fn render_options(cli: &Cli) -> RenderOptions {
+fn render_options(cli: &Cli) -> std::io::Result<RenderOptions> {
+    let file = cli
+        .theme_file
+        .as_deref()
+        .map(theme_file::ThemeFile::load)
+        .transpose()?;
     let colorfgbg = std::env::var("COLORFGBG").unwrap_or_default();
     let theme = match cli.theme {
-        ThemeChoice::Auto => match colorfgbg.split(';').next_back() {
-            Some("7" | "15") => Theme::Light,
-            _ => Theme::Dark,
-        },
+        ThemeChoice::Auto => file
+            .as_ref()
+            .and_then(|file| file.theme)
+            .unwrap_or_else(|| match colorfgbg.split(';').next_back() {
+                Some("7" | "15") => Theme::Light,
+                _ => Theme::Dark,
+            }),
         ThemeChoice::Dark => Theme::Dark,
         ThemeChoice::Light => Theme::Light,
         ThemeChoice::Terminal => Theme::Terminal,
@@ -102,15 +115,17 @@ fn render_options(cli: &Cli) -> RenderOptions {
         _ if term.contains("256color") => ColorDepth::Ansi256,
         _ => ColorDepth::Ansi16,
     };
-    RenderOptions {
+    Ok(RenderOptions {
         theme,
         color_depth,
         plain: cli.dump,
         math: cli.math,
         mermaid: cli.mermaid,
         diagram_charset: cli.diagram_charset,
-        ..RenderOptions::default()
-    }
+        palette: file
+            .map(|file| file.palette(blad::Palette::for_theme(theme)))
+            .transpose()?,
+    })
 }
 
 fn display_file(path: &std::path::Path, content: &str, cli: &Cli, options: &RenderOptions) {
@@ -172,7 +187,12 @@ fn fail(message: &str) -> ! {
 fn main() {
     let cli = Cli::parse();
     let log_dir = resolve_log_dir(&cli);
-    let options = render_options(&cli);
+    let options = render_options(&cli).unwrap_or_else(|error| {
+        fail(&format!(
+            "Failed to load theme: {}",
+            error.to_string().escape_debug()
+        ))
+    });
 
     // Smart shortcut: if no subcommand but a target was given, try show then view
     if cli.command.is_none() {

@@ -11,7 +11,7 @@
 //! - Fenced code blocks with language tags
 //! - Autolinks
 
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Parser, Tag, TagEnd};
 use std::io::Write;
 use std::sync::OnceLock;
 use syntect::easy::HighlightLines;
@@ -121,6 +121,14 @@ impl MarkdownRenderer {
 
     /// Render markdown with the renderer's configured options.
     pub fn render_markdown(&self, md: &str, w: &mut impl Write) -> std::io::Result<()> {
+        self.render_controlled(md, w, None).map(|_| ())
+    }
+
+    pub(crate) fn render_navigation(
+        &self,
+        md: &str,
+        w: &mut impl Write,
+    ) -> std::io::Result<crate::render_writer::Navigation> {
         self.render_controlled(md, w, None)
     }
 
@@ -135,6 +143,7 @@ impl MarkdownRenderer {
         cancellation: &crate::RenderCancellation,
     ) -> std::io::Result<()> {
         self.render_controlled(md, w, Some(cancellation))
+            .map(|_| ())
     }
 
     fn render_controlled(
@@ -142,12 +151,12 @@ impl MarkdownRenderer {
         md: &str,
         w: &mut impl Write,
         cancellation: Option<&crate::RenderCancellation>,
-    ) -> std::io::Result<()> {
+    ) -> std::io::Result<crate::render_writer::Navigation> {
         if let Some(control) = cancellation {
             control.checkpoint()?;
         }
         let mut output = crate::output::Output::new(w, &self.options);
-        render_markdown_theme(
+        let navigation = render_markdown_theme(
             md,
             &mut output,
             self.width,
@@ -159,7 +168,7 @@ impl MarkdownRenderer {
         if let Some(control) = cancellation {
             control.checkpoint()?;
         }
-        Ok(())
+        Ok(navigation)
     }
 }
 
@@ -176,7 +185,10 @@ fn render_markdown_theme(
     theme_name: Option<&str>,
     settings: &RenderOptions,
     cancellation: Option<&crate::RenderCancellation>,
-) -> std::io::Result<()> {
+) -> std::io::Result<crate::render_writer::Navigation> {
+    let mut tracked = crate::render_writer::RenderWriter::new(w, terminal_width, settings);
+    let w = &mut tracked;
+    let mut terminal_width = terminal_width;
     let (ss, ts) = syntax_assets();
     let palette = settings.palette();
     let code_bg = palette
@@ -201,17 +213,10 @@ fn render_markdown_theme(
 
     let safe_source = inert_source(md);
     let md = safe_source.as_ref();
-    let options = Options::ENABLE_TABLES
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_TASKLISTS
-        | Options::ENABLE_HEADING_ATTRIBUTES
-        | Options::ENABLE_FOOTNOTES
-        | Options::ENABLE_MATH
-        | Options::ENABLE_SUPERSCRIPT
-        | Options::ENABLE_SUBSCRIPT
-        | Options::ENABLE_GFM;
+    let options = crate::links::parser_options();
 
     let parser = crate::scripts::events(md, Parser::new_ext(md, options).into_offset_iter());
+    let mut heading_anchors = crate::links::heading_anchors(md);
 
     let mut in_code_block = false;
     let mut code_language = String::new();
@@ -222,9 +227,10 @@ fn render_markdown_theme(
     let mut italic = 0_usize;
     let mut strikethrough = 0_usize;
     let mut links = 0_usize;
+    let mut link_source = None;
     let mut quote_colors = Vec::new();
 
-    let mut list_item_count = 0;
+    let mut list_counts: Vec<usize> = Vec::new();
     let mut list_level: usize = 0;
     // The start number of each open list, so an ordered list that does not
     // begin at 1 is enumerated from its actual first number.
@@ -271,6 +277,7 @@ fn render_markdown_theme(
                     .copied()
                     .or_else(|| (links > 0).then_some(palette.link))
             },
+            link: link_source,
             ..Style::default()
         };
         match event {
@@ -322,7 +329,8 @@ fn render_markdown_theme(
                         let content_width = crate::terminal_text::width_with_tabs(line);
                         write!(w, "{}", code_bg)?;
                         if let Some(highlighter) = hl.as_mut() {
-                            match highlighter.highlight_line(line, ss) {
+                            let syntax_line = format!("{line}\n");
+                            match highlighter.highlight_line(&syntax_line, ss) {
                                 Ok(ranges) => {
                                     // A blank line yields no ranges, so the
                                     // body is empty and only the padding
@@ -362,8 +370,14 @@ fn render_markdown_theme(
             Event::End(TagEnd::Strong) => {
                 bold = bold.saturating_sub(1);
             }
-            Event::Start(Tag::Link { .. }) => links += 1,
-            Event::End(TagEnd::Link) => links = links.saturating_sub(1),
+            Event::Start(Tag::Link { .. }) => {
+                links += 1;
+                link_source = Some(range.start);
+            }
+            Event::End(TagEnd::Link) => {
+                links = links.saturating_sub(1);
+                link_source = None;
+            }
             Event::Start(Tag::Emphasis) => {
                 italic += 1;
             }
@@ -446,6 +460,11 @@ fn render_markdown_theme(
                     writeln!(w)?;
                 }
                 at_start = false;
+                if let Some(ids) = heading_anchors.remove(&range.start) {
+                    for id in ids {
+                        w.mark_anchor(id);
+                    }
+                }
                 in_heading = true;
                 let prefix = match level {
                     HeadingLevel::H1 => "# ",
@@ -495,7 +514,9 @@ fn render_markdown_theme(
             Event::Start(Tag::List(start)) => {
                 inline.finish(w)?;
                 inline.reset(0, 0);
-                if need_blank {
+                if list_level > 0 {
+                    writeln!(w)?;
+                } else if need_blank {
                     writeln!(w)?;
                     need_blank = false;
                 } else if !at_start {
@@ -503,12 +524,13 @@ fn render_markdown_theme(
                 }
                 list_level += 1;
                 list_starts.push(start.map(|n| n as usize));
-                list_item_count = 0;
+                list_counts.push(0);
             }
             Event::End(TagEnd::List(_)) => {
                 inline.finish(w)?;
                 list_level = list_level.saturating_sub(1);
                 list_starts.pop();
+                list_counts.pop();
                 writeln!(w)?;
                 inline.reset(
                     0,
@@ -521,7 +543,12 @@ fn render_markdown_theme(
             }
             Event::Start(Tag::Item) => {
                 inline.finish(w)?;
-                list_item_count += 1;
+                let list_item_count = if let Some(count) = list_counts.last_mut() {
+                    *count += 1;
+                    *count
+                } else {
+                    1
+                };
                 let indent_width = 2 * list_level.saturating_sub(1);
                 let indent_width =
                     terminal_width.map_or(indent_width, |width| indent_width.min(width.max(1) - 1));
@@ -560,8 +587,6 @@ fn render_markdown_theme(
                 if !at_start {
                     writeln!(w)?;
                 }
-                // Differentiate rule styles by their delimiter so `***` reads
-                // as stronger than `---` and `~~~` as a squiggle.
                 let (glyph, strong) = rule_style(md, range);
                 if strong {
                     write!(w, "\x1b[1m")?;
@@ -617,6 +642,7 @@ fn render_markdown_theme(
                 if !at_start {
                     writeln!(w)?;
                 }
+                need_blank = false;
                 at_start = false;
                 let (color, label) = match kind {
                     pulldown_cmark::BlockQuoteKind::Note => (palette.alerts[0], "NOTE"),
@@ -626,10 +652,12 @@ fn render_markdown_theme(
                     pulldown_cmark::BlockQuoteKind::Caution => (palette.alerts[4], "CAUTION"),
                 };
                 quote_colors.push(color);
+                w.push_quote(color);
+                terminal_width = w.inner_width();
+                inline.set_width(terminal_width);
                 inline.reset(0, 0);
                 // The alert shares the blockquote's left-edge bar, tinted by
                 // the alert's own color, so it stands out from prose.
-                inline.set_border(Some('│'));
                 inline.text(
                     w,
                     &format!("[{label}] "),
@@ -641,6 +669,12 @@ fn render_markdown_theme(
             }
             Event::FootnoteReference(id) => {
                 let id = inert_source(&id);
+                if in_table {
+                    if let Some(cell) = table_row_cells.last_mut() {
+                        cell.push_str(&footnote_marker(&id));
+                    }
+                    continue;
+                }
                 // A superscript marker, sharing the exact tag of its
                 // definition so the two are visually linked. Falls back to
                 // `[n]` when the id has no single superscript glyph.
@@ -743,37 +777,37 @@ fn render_markdown_theme(
             Event::Start(Tag::BlockQuote(_)) => {
                 inline.finish(w)?;
                 inline.reset(0, 0);
-                if need_blank {
-                    writeln!(w)?;
-                    need_blank = false;
-                } else if !at_start {
+                if !at_start {
                     writeln!(w)?;
                 }
-                at_start = false;
+                need_blank = false;
+                at_start = true;
                 // A left-edge bar makes the quote read as a distinct block
                 // rather than just indented text.
-                inline.set_border(Some('│'));
+                w.push_quote(palette.muted);
+                terminal_width = w.inner_width();
+                inline.set_width(terminal_width);
                 palette.muted.write(w, false)?;
                 quote_colors.push(palette.muted);
             }
             Event::End(TagEnd::BlockQuote(_)) => {
                 inline.finish(w)?;
                 quote_colors.pop();
-                inline.set_border(None);
-                write!(w, "\x1b[0m")?;
-                writeln!(w)?;
+                w.pop_quote();
+                terminal_width = w.inner_width();
+                inline.set_width(terminal_width);
                 inline.reset(0, 0);
                 // The bar already separates the quote from surrounding text;
                 // do not also force a blank line, which produced double
                 // spacing above and below the block.
-                need_blank = false;
+                need_blank = true;
             }
             _ => {}
         }
     }
     inline.finish(w)?;
-
-    Ok(())
+    w.flush()?;
+    Ok(std::mem::take(&mut w.navigation))
 }
 
 /// Render a table with proper column alignment and soft-wrapping.
@@ -937,7 +971,7 @@ fn find_syntax<'a>(ss: &'a SyntaxSet, lang: &str) -> Option<&'a syntect::parsing
 }
 
 /// Choose the rule glyph and strength from the delimiter used in the source.
-/// `***` is a stronger double line; `---` (and `___`) is a thin line.
+/// `***` is a heavy line; `---` (and `___`) is a thin line.
 /// (`~~~` is a code-fence delimiter in CommonMark, never a rule.)
 fn rule_style(md: &str, range: std::ops::Range<usize>) -> (char, bool) {
     let source = md.get(range.clone()).unwrap_or("");
@@ -1023,7 +1057,7 @@ fn to_ansi_line(ranges: &[(SStyle, &str)], code_bg: &str) -> String {
             }
             current_style = Some(*style);
         }
-        output.push_str(text);
+        output.push_str(text.strip_suffix('\n').unwrap_or(text));
     }
 
     output

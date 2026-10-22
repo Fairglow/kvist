@@ -37,6 +37,7 @@ The `blad` executable provides:
 | `--dump` | Output plain text without interactive viewer |
 | `--line-numbers` | Show rendered-line numbers in the interactive viewer |
 | `--theme auto\|dark\|light\|terminal` | Appearance; defaults to `auto`, conservatively dark when unknown |
+| `--theme-file <PATH>` | Explicit JSON palette file, at most 64 KiB; no auto-discovery |
 | `--color auto\|always\|never` | Color policy; defaults to `auto`; explicit `always` overrides `NO_COLOR` |
 | `--math unicode\|source` | Supported mathematical text projection or original TeX; defaults to `unicode` |
 | `--mermaid text\|source` | Supported text diagrams or original source; defaults to `text` |
@@ -57,8 +58,28 @@ guessing. Width, palette, math mode and diagram options persist across reflow.
 
 Navigation: `↑`/`k`, `↓`/`j`, `PageUp`/`u`, `PageDown`/`d`/`Space`, `g`/`H` (top), `G`/`L` (bottom), mouse wheel.
 Search: `/` enter search mode, type query, `Enter` exit, `n`/`p` navigate matches, `Esc` cancel.
-Links: `f` enter link mode, `Tab`/`Shift+Tab` cycle links, `Enter` follow the selected link, `Esc` exit link mode. `Enter` outside link mode follows the first link at or below the top of the viewport, so links can be jumped to without a special mode.
-Other: `e` edit file (requires `$EDITOR`), `b` return to the previous file, `q`/`Esc` quit.
+Links: `Tab`/`Shift+Tab` select links directly, `Enter` follows the selection
+or the first link at/below the viewport. Left-clicking prose/heading inline/named labels
+follows their destination. Optional `f` link mode remains.
+Heading fragments use lowercase heading text, preserve Unicode, hyphens and underscores,
+replace spaces with hyphens, omit punctuation and suffix duplicates with `-1`,
+`-2`, etc.; explicit heading IDs are also supported. Percent-encoded fragments
+and file paths are decoded as UTF-8; malformed encoding is an actionable error.
+Other: `e` hands the whole file to `$EDITOR`, `b` returns to the previous tab,
+`Alt+Left`/`Alt+Right` switch open-file tabs, `q`/`Esc` quit.
+The top row lists open files with the active tab bracketed. Opening an existing
+file reuses its tab; switching tabs preserves vertical/horizontal position.
+Missing files/anchors and browser errors appear in the footer.
+
+Theme files are JSON objects (serde_json's JSON dialect) with optional `theme`
+(`dark`, `light`, `terminal`) and `palette` objects. Palette keys are `heading`,
+`link`, `muted`, `list_marker`, `math`, `alerts` (five colors), `chrome`,
+`search`, `code_background`, `table_background`, and `quote_background`.
+Colors are `"#RRGGBB"` strings or integer ANSI indices 0–255; nullable
+backgrounds accept `null`. Unknown keys, malformed colors, oversized/unreadable
+files and invalid JSON MUST fail explicitly. Unspecified roles inherit the
+resolved appearance. An explicit non-auto `--theme` overrides file appearance;
+file palette overrides still apply. No file controls process execution.
 
 ## Required interfaces
 

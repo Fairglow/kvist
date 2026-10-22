@@ -47,6 +47,10 @@ impl Screen {
             .trim_end()
             .to_string()
     }
+
+    fn content_line(&self, row: usize) -> String {
+        self.line(row).trim_end_matches([' ', '░', '█']).to_string()
+    }
 }
 
 impl Perform for Screen {
@@ -546,9 +550,9 @@ fn following_a_file_link_opens_the_target_and_back_returns() {
     // Enter link mode; the header announces the link count and first link.
     viewer.keys(b"f");
     assert!(
-        viewer.screen.line(0).contains("Links: 1/1"),
+        viewer.screen.line(23).contains("Links: 1/1"),
         "link mode header not shown: {}",
-        viewer.screen.line(0)
+        viewer.screen.line(23)
     );
     // Follow the link; the viewer must open the linked file.
     viewer.keys(b"\r");
@@ -578,7 +582,7 @@ fn link_mode_is_inert_without_links_and_esc_exits_it() {
     let mut viewer = Viewer::start(&no_links, 80, 24, false);
     viewer.keys(b"f");
     assert!(
-        !viewer.screen.line(0).contains("Links:"),
+        !viewer.screen.line(23).contains("Links:"),
         "link mode must not start without links: {}",
         viewer.screen.line(0)
     );
@@ -589,7 +593,7 @@ fn link_mode_is_inert_without_links_and_esc_exits_it() {
     std::fs::write(&with_link, "# Titled\n\n[link](https://example.com)").unwrap();
     let mut viewer = Viewer::start(&with_link, 80, 24, false);
     viewer.keys(b"f");
-    assert!(viewer.screen.line(0).contains("Links: 1/1"));
+    assert!(viewer.screen.line(23).contains("Links: 1/1"));
     viewer.keys(b"\x1b");
     assert!(
         viewer.screen.line(0).contains("withlink.md"),
@@ -625,5 +629,153 @@ fn enter_follows_the_link_at_the_cursor_without_link_mode() {
         "back must return to the source, got: {}",
         viewer.screen.line(0)
     );
+    viewer.quit();
+}
+
+#[test]
+fn anchors_tabs_and_back_preserve_document_position() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.md");
+    let target = temp.path().join("other file.md");
+    std::fs::write(
+        &source,
+        format!(
+            "[jump](#destination)\n\n{}\n\n## Destination\n\n[other](other%20file.md#target)\n\n{}",
+            "filler\n\n".repeat(40),
+            "tail\n\n".repeat(20)
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &target,
+        format!(
+            "# Other\n\n{}\n\n## Target\n\n{}",
+            "filler\n\n".repeat(30),
+            "tail\n\n".repeat(20)
+        ),
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&source, 80, 12, false);
+    viewer.keys(b"\r");
+    assert_eq!(viewer.screen.content_line(1), "## Destination");
+    viewer.keys(b"\t\r");
+    assert_eq!(viewer.screen.content_line(1), "## Target");
+    assert!(
+        viewer.screen.line(0).contains("source.md")
+            && viewer.screen.line(0).contains("other file.md")
+    );
+    viewer.keys(b"\x1b[1;3D");
+    assert_eq!(viewer.screen.content_line(1), "## Destination");
+    viewer.keys(b"\x1b[1;3C");
+    assert_eq!(viewer.screen.content_line(1), "## Target");
+    viewer.keys(b"b");
+    assert_eq!(viewer.screen.content_line(1), "## Destination");
+    viewer.quit();
+}
+
+#[test]
+fn named_duplicate_and_wrapped_links_select_without_mode() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.md");
+    std::fs::write(temp.path().join("first.md"), "# First").unwrap();
+    std::fs::write(temp.path().join("second.md"), "# Second").unwrap();
+    std::fs::write(
+        &source,
+        "same\n\n[same][first] and [same][second]\n\n[first]: first.md\n[second]: second.md",
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&source, 40, 12, false);
+    viewer.keys(b"\t\t\r");
+    assert_eq!(viewer.screen.line(1), "# Second");
+    viewer.keys(b"b");
+    std::fs::write(
+        &source,
+        "[a very long label that wraps across multiple rows](first.md)",
+    )
+    .unwrap();
+    viewer.quit();
+    let mut viewer = Viewer::start(&source, 16, 10, false);
+    viewer.keys(b"\r");
+    assert_eq!(viewer.screen.line(1), "# First");
+    viewer.quit();
+}
+
+#[test]
+fn missing_anchor_is_visible_and_search_moves_the_viewport() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.md");
+    std::fs::write(
+        &source,
+        format!(
+            "[missing](#absent)\n\n{}\n\nneedle\n\n{}",
+            "filler\n\n".repeat(30),
+            "tail\n\n".repeat(20)
+        ),
+    )
+    .unwrap();
+    let mut viewer = Viewer::start(&source, 80, 12, false);
+    viewer.keys(b"\r");
+    assert!(
+        viewer.screen.line(11).contains("anchor not found"),
+        "{}",
+        viewer.screen.line(11)
+    );
+    viewer.keys(b"/needle\r");
+    assert!((1..11).any(|row| viewer.screen.line(row).contains("needle")));
+    viewer.quit();
+}
+
+#[test]
+fn mouse_follows_named_links_and_does_not_activate_plain_duplicates() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.md");
+    std::fs::write(temp.path().join("target.md"), "# Target").unwrap();
+    std::fs::write(&source, "same\n\n[same](target.md)").unwrap();
+    let mut viewer = Viewer::start(&source, 40, 12, false);
+    viewer.keys(b"\x1b[<0;2;2M");
+    assert_eq!(viewer.screen.line(1), "same");
+    viewer.keys(b"\x1b[<0;2;4M");
+    assert_eq!(viewer.screen.line(1), "# Target");
+    viewer.quit();
+}
+
+#[test]
+fn theme_file_settings_survive_tabs_edit_and_resize() {
+    let temp = tempfile::tempdir().unwrap();
+    let source = temp.path().join("source.md");
+    let theme = temp.path().join("theme.json");
+    std::fs::write(&source, "# Source\n\n[target](target.md)").unwrap();
+    std::fs::write(
+        temp.path().join("target.md"),
+        "# Target\n\n```python\nprint('yes')\n```",
+    )
+    .unwrap();
+    std::fs::write(
+        &theme,
+        r##"{"theme":"light","palette":{"heading":"#010203"}}"##,
+    )
+    .unwrap();
+    let mut viewer = Viewer::start_with(
+        &source,
+        50,
+        14,
+        false,
+        &["--theme-file", theme.to_str().unwrap(), "--color", "always"],
+        &[("COLORTERM", "truecolor"), ("EDITOR", "/bin/true")],
+    );
+    viewer.keys(b"\r");
+    for action in [b"e".as_slice(), b"\x1b[1;3D\x1b[1;3C".as_slice()] {
+        viewer.raw.clear();
+        viewer.keys(action);
+        let raw = String::from_utf8_lossy(&viewer.raw);
+        assert!(
+            raw.contains("\x1b[38;2;1;2;3m") && raw.contains("\x1b[48;5;254m"),
+            "{raw:?}"
+        );
+        assert_eq!(viewer.screen.line(1), "# Target");
+    }
+    viewer.raw.clear();
+    viewer.resize(70, 16);
+    assert!(String::from_utf8_lossy(&viewer.raw).contains("\x1b[38;2;1;2;3m"));
     viewer.quit();
 }

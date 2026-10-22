@@ -231,7 +231,7 @@ A horizontal rule separates sections.
 
 ***
 
-A stronger rule, rendered as a double line.
+A stronger rule, rendered as a heavy line. `~~~` is a code fence, not a rule.
 
 ## Lists
 

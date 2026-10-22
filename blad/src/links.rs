@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 /// The class of a link destination, used to decide how to follow it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +35,8 @@ pub struct Link {
     /// The zero-based source line the link begins on, used to map a link to
     /// its rendered line for cursor-following.
     pub source_line: usize,
+    /// Parser source offset used by renderer-owned navigation metadata.
+    pub source_offset: usize,
 }
 
 impl Link {
@@ -49,6 +51,7 @@ impl Link {
             destination,
             kind,
             source_line: 0,
+            source_offset: 0,
         }
     }
 
@@ -125,13 +128,14 @@ pub fn resolve_file(base: Option<&Path>, destination: &str) -> PathBuf {
 /// Inline code and emphasis inside a link label are captured as text, so the
 /// label of ``[`foo.rs`](foo.rs)`` is `foo.rs` rather than an empty string.
 pub fn extract_links(source: &str) -> Vec<Link> {
-    let parser = Parser::new(source);
+    let parser = Parser::new_ext(source, parser_options());
     let mut links = Vec::new();
     let mut current_text = String::new();
     let mut in_link = false;
     let mut in_code = false;
     let mut link_destination = String::new();
     let mut link_line = 0;
+    let mut link_offset = 0;
 
     for (event, range) in parser.into_offset_iter() {
         match event {
@@ -140,13 +144,14 @@ pub fn extract_links(source: &str) -> Vec<Link> {
                 link_destination = dest_url.to_string();
                 current_text.clear();
                 link_line = line_of(source, range.start);
+                link_offset = range.start;
             }
             Event::End(TagEnd::Link) => {
                 if in_link && !current_text.is_empty() {
-                    links.push(
-                        Link::new(current_text.clone(), link_destination.clone())
-                            .with_source_line(link_line),
-                    );
+                    let mut link = Link::new(current_text.clone(), link_destination.clone())
+                        .with_source_line(link_line);
+                    link.source_offset = link_offset;
+                    links.push(link);
                 }
                 in_link = false;
                 link_destination.clear();
@@ -166,10 +171,10 @@ pub fn extract_links(source: &str) -> Vec<Link> {
             Event::Text(text) if !in_link && !in_code => {
                 for url in bare_urls(&text) {
                     if !links.iter().any(|l| l.destination == url) {
-                        links.push(
-                            Link::new(url.clone(), url)
-                                .with_source_line(line_of(source, range.start)),
-                        );
+                        let mut link = Link::new(url.clone(), url)
+                            .with_source_line(line_of(source, range.start));
+                        link.source_offset = range.start;
+                        links.push(link);
                     }
                 }
             }
@@ -193,7 +198,9 @@ fn bare_urls(text: &str) -> Vec<String> {
     let mut urls = Vec::new();
     let mut i = 0;
     while i < text.len() {
-        if text[i..].starts_with("https://") || text[i..].starts_with("http://") {
+        if text.as_bytes()[i..].starts_with(b"https://")
+            || text.as_bytes()[i..].starts_with(b"http://")
+        {
             let start = i;
             let mut end = i;
             while end < text.len() {
@@ -224,9 +231,118 @@ fn bare_urls(text: &str) -> Vec<String> {
     urls
 }
 
+pub(crate) fn parser_options() -> Options {
+    Options::ENABLE_TABLES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_HEADING_ATTRIBUTES
+        | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_MATH
+        | Options::ENABLE_SUPERSCRIPT
+        | Options::ENABLE_SUBSCRIPT
+        | Options::ENABLE_GFM
+}
+
+pub(crate) fn heading_anchors(source: &str) -> std::collections::BTreeMap<usize, Vec<String>> {
+    let mut anchors = std::collections::BTreeMap::new();
+    let mut used = std::collections::BTreeSet::new();
+    let mut suffixes = std::collections::BTreeMap::<String, usize>::new();
+    let mut heading = None;
+    let mut label = String::new();
+    for (event, range) in Parser::new_ext(source, parser_options()).into_offset_iter() {
+        match event {
+            Event::Start(Tag::Heading { id, .. }) => {
+                heading = Some((range.start, id.map(|id| id.to_string())));
+                label.clear();
+            }
+            Event::Text(text) | Event::Code(text) if heading.is_some() => label.push_str(&text),
+            Event::SoftBreak | Event::HardBreak if heading.is_some() => label.push(' '),
+            Event::End(TagEnd::Heading(_)) => {
+                if let Some((offset, explicit)) = heading.take() {
+                    let base: String = label
+                        .to_lowercase()
+                        .chars()
+                        .filter_map(|ch| {
+                            if ch.is_whitespace() {
+                                Some('-')
+                            } else if ch.is_alphanumeric() || matches!(ch, '-' | '_') {
+                                Some(ch)
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+                    let mut id = base.clone();
+                    let suffix = suffixes.entry(base.clone()).or_default();
+                    while used.contains(&id) {
+                        *suffix += 1;
+                        id = format!("{base}-{suffix}");
+                    }
+                    used.insert(id.clone());
+                    let mut ids = vec![id];
+                    if let Some(explicit) = explicit {
+                        used.insert(explicit.clone());
+                        ids.push(explicit);
+                    }
+                    anchors.insert(offset, ids);
+                }
+            }
+            _ => {}
+        }
+    }
+    anchors
+}
+
+pub(crate) fn decode_destination(value: &str) -> std::io::Result<String> {
+    let mut decoded = Vec::with_capacity(value.len());
+    let mut bytes = value.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte == b'%' {
+            let high = bytes.next().and_then(|ch| (ch as char).to_digit(16));
+            let low = bytes.next().and_then(|ch| (ch as char).to_digit(16));
+            let (Some(high), Some(low)) = (high, low) else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "invalid percent encoding in link",
+                ));
+            };
+            decoded.push((high * 16 + low) as u8);
+        } else {
+            decoded.push(byte);
+        }
+    }
+    String::from_utf8(decoded)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unicode_bare_urls_and_named_references_are_extracted() {
+        let links = extract_links(
+            "世界 https://example.com/世界 and [GitHub][gh]\n\n[gh]: https://github.com",
+        );
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0].destination, "https://example.com/世界");
+        assert_eq!(links[1].text, "GitHub");
+    }
+
+    #[test]
+    fn heading_ids_disambiguate_duplicates_and_preserve_unicode() {
+        let anchors = heading_anchors("# Hello, 世界!\n\n## Hello, 世界!\n\n## Explicit {#custom}");
+        let ids: Vec<_> = anchors.values().flatten().map(String::as_str).collect();
+        assert_eq!(ids, ["hello-世界", "hello-世界-1", "explicit", "custom"]);
+    }
+
+    #[test]
+    fn destinations_decode_utf8_without_accepting_bad_escapes() {
+        assert_eq!(decode_destination("a%20b%23%E4%B8%96").unwrap(), "a b#世");
+        for invalid in ["%", "%2", "%GG", "%FF"] {
+            assert!(decode_destination(invalid).is_err(), "{invalid}");
+        }
+    }
 
     #[test]
     fn extracts_basic_url_link() {

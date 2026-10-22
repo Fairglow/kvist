@@ -11,6 +11,7 @@ use crate::markdown::MarkdownRenderer;
 use crate::terminal_text::TerminalLine;
 
 pub(crate) struct Document {
+    pub navigation: crate::render_writer::Navigation,
     pub lines: Vec<TerminalLine>,
     pub content_width: usize,
     pub gutter: usize,
@@ -52,7 +53,7 @@ impl Document {
             let mut output = Vec::new();
             let mut renderer = MarkdownRenderer::with_options(options.clone());
             renderer.set_width(Some(content_width));
-            renderer.render_markdown(source, &mut output)?;
+            let navigation = renderer.render_navigation(source, &mut output)?;
             let rendered = String::from_utf8(output)
                 .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
             let lines: Vec<_> = rendered.lines().map(TerminalLine::new).collect();
@@ -64,6 +65,7 @@ impl Document {
             if required <= gutter {
                 let max_width = lines.iter().map(TerminalLine::width).max().unwrap_or(0);
                 return Ok(Self {
+                    navigation,
                     lines,
                     content_width,
                     gutter,

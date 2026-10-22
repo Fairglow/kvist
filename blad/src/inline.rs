@@ -1,6 +1,7 @@
 use std::io::{self, Write};
 use std::ops::Range;
 
+use crate::render_writer::InlineOutput;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -12,10 +13,14 @@ pub(crate) struct Style {
     pub reverse: bool,
     pub dim: bool,
     pub color: Option<crate::theme::Color>,
+    pub link: Option<usize>,
 }
 
 impl Style {
-    fn write(self, w: &mut impl Write, text: &str) -> io::Result<()> {
+    fn write(self, w: &mut impl InlineOutput, text: &str) -> io::Result<()> {
+        if let Some(source) = self.link {
+            w.mark_link(source, text);
+        }
         if self == Self::default() {
             return write!(w, "{text}");
         }
@@ -63,7 +68,7 @@ impl Word {
 
     fn write_part(
         &self,
-        w: &mut impl Write,
+        w: &mut impl InlineOutput,
         range: Range<usize>,
         span_index: &mut usize,
     ) -> io::Result<()> {
@@ -89,7 +94,6 @@ pub(crate) struct InlineWriter {
     has_text: bool,
     pending_space: bool,
     word: Word,
-    border: Option<char>,
 }
 
 impl InlineWriter {
@@ -101,36 +105,17 @@ impl InlineWriter {
             has_text: false,
             pending_space: false,
             word: Word::default(),
-            border: None,
         }
     }
 
-    /// Set a left-edge border character (e.g. `│` for blockquotes). The border
-    /// and a following space occupy two columns on every wrapped line, so the
-    /// effective wrap width is reduced accordingly.
-    pub fn set_border(&mut self, char: Option<char>) {
-        self.border = char;
-    }
-
-    fn border_width(&self) -> usize {
-        // The border needs two columns plus at least one for content; it is
-        // omitted on a terminal too narrow to hold it so lines never exceed
-        // the width budget.
-        match self.width {
-            Some(w) if w < 3 => 0,
-            _ => usize::from(self.border.is_some()) * 2,
-        }
-    }
-
-    fn effective_width(&self) -> Option<usize> {
-        self.width
-            .map(|width| width.saturating_sub(self.border_width()))
+    pub fn set_width(&mut self, width: Option<usize>) {
+        self.width = width.map(|width| width.max(1));
     }
 
     pub fn reset(&mut self, column: usize, indent: usize) {
         self.column = column;
         self.indent = self
-            .effective_width()
+            .width
             .map_or(indent, |width| indent.min(width.saturating_sub(1)));
         self.has_text = false;
         self.pending_space = false;
@@ -148,7 +133,7 @@ impl InlineWriter {
         self.indent = self.width.map_or(indent, |width| indent.min(width - 1));
     }
 
-    pub fn text(&mut self, w: &mut impl Write, text: &str, style: Style) -> io::Result<()> {
+    pub fn text(&mut self, w: &mut impl InlineOutput, text: &str, style: Style) -> io::Result<()> {
         for piece in text.split_inclusive([' ', '\t', '\r', '\n']) {
             let body = piece.trim_end_matches([' ', '\t', '\r', '\n']);
             self.word.push(body, style);
@@ -164,24 +149,24 @@ impl InlineWriter {
         self.word.atomic = true;
     }
 
-    pub fn soft_break(&mut self, w: &mut impl Write) -> io::Result<()> {
+    pub fn soft_break(&mut self, w: &mut impl InlineOutput) -> io::Result<()> {
         self.flush_word(w)?;
         self.pending_space = true;
         Ok(())
     }
 
-    pub fn finish(&mut self, w: &mut impl Write) -> io::Result<()> {
+    pub fn finish(&mut self, w: &mut impl InlineOutput) -> io::Result<()> {
         self.flush_word(w)?;
         self.pending_space = false;
         Ok(())
     }
 
-    pub fn hard_break(&mut self, w: &mut impl Write) -> io::Result<()> {
+    pub fn hard_break(&mut self, w: &mut impl InlineOutput) -> io::Result<()> {
         self.finish(w)?;
         self.newline(w)
     }
 
-    fn newline(&mut self, w: &mut impl Write) -> io::Result<()> {
+    fn newline(&mut self, w: &mut impl InlineOutput) -> io::Result<()> {
         writeln!(w)?;
         self.column = 0;
         self.has_text = false;
@@ -191,25 +176,19 @@ impl InlineWriter {
 
     fn write_indent(&mut self, w: &mut impl Write) -> io::Result<()> {
         if self.column == 0 {
-            if self.border_width() > 0
-                && let Some(border) = self.border
-            {
-                write!(w, "{border} ")?;
-                self.column = 2;
-            }
             write!(w, "{}", " ".repeat(self.indent))?;
             self.column += self.indent;
         }
         Ok(())
     }
 
-    fn flush_word(&mut self, w: &mut impl Write) -> io::Result<()> {
+    fn flush_word(&mut self, w: &mut impl InlineOutput) -> io::Result<()> {
         if self.word.text.is_empty() {
             return Ok(());
         }
         let word_width = self.word.text.width();
         let separator = usize::from(self.pending_space && self.has_text);
-        if let Some(width) = self.effective_width()
+        if let Some(width) = self.width
             && self.has_text
             && self
                 .column
@@ -227,7 +206,7 @@ impl InlineWriter {
         self.pending_space = false;
 
         let mut span_index = 0;
-        if let Some(width) = self.effective_width()
+        if let Some(width) = self.width
             && !self.word.atomic
             && self.column.saturating_add(word_width) > width
         {

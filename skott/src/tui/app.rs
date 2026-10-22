@@ -4085,19 +4085,24 @@ table_sep = { fg = "gray" }
         let before = app.lines.len();
         app.push_event(Event::Text("```rust\nfn main() {}\n```".to_owned()));
         app.flush_pending_text();
-        // A fenced block at the start of the transcript renders without a leading
-        // blank (nothing before it): the highlighted source row and a trailing
-        // blank. Blad does not emit a language-label row. That's 2 rows total.
+        // Blad's code panel has shaded cap rows, not a language-label row.
         let lines = rendered_text(&app);
         assert_eq!(
             lines.len() - before,
-            2,
-            "a fence block at the start has no leading blank: {lines:?}"
+            3,
+            "a fenced panel has top cap, source and bottom cap: {lines:?}"
         );
         assert!(
-            lines[0].contains("fn main() {}"),
+            lines[1].contains("fn main() {}"),
             "the source is shown: {lines:?}"
         );
+        assert!(lines[0].trim().is_empty() && lines[2].trim().is_empty());
+        for row in &app.lines[before..] {
+            assert!(
+                row.line.spans.iter().any(|span| span.style.bg.is_some()),
+                "every code-panel row retains its background"
+            );
+        }
     }
 
     #[test]

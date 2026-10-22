@@ -11,6 +11,50 @@ component:
     checked_at: "2026-10-17T17:30:00Z"
     causes: []
 tasks:
+  - id: blad-polish-tests
+    title: "write_tests: viewer polish regressions"
+    description: "Cover navigation, tabs, strict theme files, quotes and nested numbering."
+    purpose: "Specify accepted polish behavior before production changes"
+    expected_outcome: "New regression tests fail first, then cover the repaired behavior"
+    context: "Human requested review and completion of the viewer improvement list."
+    timestamps: {created_at: "2026-10-22T21:10:00Z", updated_at: "2026-10-22T21:17:08Z", completed_at: "2026-10-22T21:17:08Z"}
+    kind: test
+    status: completed
+    depends_on: []
+    requirements: ["REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-042", "REQUIREMENTS.md#R-043"]
+  - id: blad-polish-code
+    title: "implement_code: viewer polish"
+    description: "Implement accepted navigation, palette-file and rendering behavior."
+    purpose: "Complete accepted viewer polish without adding another editor"
+    expected_outcome: "Navigation, theme-file and rendering regressions pass"
+    context: "Includes the directly affected Skott code-panel consumer assertion."
+    timestamps: {created_at: "2026-10-22T21:10:00Z", updated_at: "2026-10-22T21:23:00Z", completed_at: "2026-10-22T21:23:00Z"}
+    kind: implementation
+    status: completed
+    depends_on: [blad-polish-tests]
+    requirements: ["REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-042", "REQUIREMENTS.md#R-043"]
+  - id: blad-polish-audit
+    title: "security_audit: viewer polish boundaries"
+    description: "Inspect theme bounds, inert text, path decoding and subprocess arguments."
+    purpose: "Review the increment's input and authority boundaries"
+    expected_outcome: "Scoped findings and dispositions retained"
+    context: "Scoped audit and theme diagnostic-control correction recorded in DESIGN.md; no whole-component certification."
+    timestamps: {created_at: "2026-10-22T21:10:00Z", updated_at: "2026-10-22T21:23:00Z", completed_at: "2026-10-22T21:23:00Z"}
+    kind: security-audit
+    status: completed
+    depends_on: [blad-polish-code]
+    requirements: ["REQUIREMENTS.md#R-038", "REQUIREMENTS.md#R-042"]
+  - id: blad-polish-review
+    title: "compliance_review: viewer polish evidence"
+    description: "Derive clean-source observations and compare them source-blind with intent."
+    purpose: "Keep source observation separate from intended behavior"
+    expected_outcome: "Independent observations and discrepancies retained"
+    context: "Independent observations and source-blind comparison are in IMPL.md; human arbitration preserved underscores in heading slugs. No whole-component certification or acceptance."
+    timestamps: {created_at: "2026-10-22T21:10:00Z", updated_at: "2026-10-22T21:29:00Z", completed_at: "2026-10-22T21:29:00Z"}
+    kind: compliance-review
+    status: completed
+    depends_on: [blad-polish-audit]
+    requirements: ["REQUIREMENTS.md#R-041", "REQUIREMENTS.md#R-042", "REQUIREMENTS.md#R-043"]
   - id: blad-text-p1-tests
     title: "write_tests: themes and plain output"
     description: "Pin palette/capability precedence, all render routes and escape-free dumps."

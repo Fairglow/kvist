@@ -7,7 +7,7 @@
 use std::io::{self, IsTerminal, Write};
 
 use crate::RenderOptions;
-use crate::links::{Link, extract_links, resolve_file};
+use crate::links::{Link, extract_links};
 use crate::markdown::{MarkdownRenderer, inert_source};
 use crate::session::{Message, Session, load_messages};
 use crate::terminal_text::TerminalLine;
@@ -168,6 +168,7 @@ struct TerminalGuard {
     raw: bool,
     alternate: bool,
     hidden: bool,
+    mouse: bool,
 }
 
 impl TerminalGuard {
@@ -176,6 +177,7 @@ impl TerminalGuard {
             raw: false,
             alternate: false,
             hidden: false,
+            mouse: false,
         };
         crossterm::terminal::enable_raw_mode()?;
         guard.raw = true;
@@ -183,11 +185,21 @@ impl TerminalGuard {
         crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
         guard.hidden = true;
         crossterm::execute!(io::stdout(), crossterm::cursor::Hide)?;
+        guard.mouse = true;
+        crossterm::execute!(io::stdout(), crossterm::event::EnableMouseCapture)?;
         Ok(guard)
     }
 
     fn restore(&mut self) -> io::Result<()> {
         let mut error = None;
+        if self.mouse {
+            match crossterm::execute!(io::stdout(), crossterm::event::DisableMouseCapture) {
+                Ok(()) => self.mouse = false,
+                Err(failure) => {
+                    error.get_or_insert(failure);
+                }
+            }
+        }
         if self.hidden {
             match crossterm::execute!(io::stdout(), crossterm::cursor::Show) {
                 Ok(()) => self.hidden = false,
@@ -239,21 +251,32 @@ fn open_url(url: &str) -> io::Result<()> {
 /// Follow a link in the viewer context.
 ///
 /// URL links are handed to the default browser and the viewer stays put.
-/// Anchor links are not yet resolved to a scroll offset, so the viewer stays
-/// put as well. File links are resolved against the current document's
-/// directory and opened in the viewer.
-fn follow_link(link: &Link, current_path: Option<&std::path::Path>) -> ViewerAction {
+/// Fragments resolve to renderer-owned heading positions. File links are
+/// resolved against the current document's directory.
+fn follow_link(link: &Link, current_path: Option<&std::path::Path>) -> io::Result<ViewerAction> {
     match link.kind {
         crate::links::LinkKind::Url => {
-            if let Err(e) = open_url(&link.destination) {
-                eprintln!("Error opening URL: {e}");
-            }
-            ViewerAction::Stay
+            open_url(&link.destination)?;
+            Ok(ViewerAction::Stay)
         }
-        crate::links::LinkKind::Anchor => ViewerAction::Stay,
+        crate::links::LinkKind::Anchor => Ok(ViewerAction::Jump(crate::links::decode_destination(
+            &link.destination[1..],
+        )?)),
         crate::links::LinkKind::File => {
             let base = current_path.and_then(std::path::Path::parent);
-            ViewerAction::OpenFile(resolve_file(base, &link.destination))
+            let (file, fragment) = link
+                .destination
+                .split_once('#')
+                .map_or((link.destination.as_str(), None), |(file, fragment)| {
+                    (file, Some(fragment))
+                });
+            let file = crate::links::decode_destination(file)?;
+            let path =
+                base.map_or_else(|| std::path::PathBuf::from(&file), |base| base.join(&file));
+            Ok(ViewerAction::OpenFile(
+                path,
+                fragment.map(crate::links::decode_destination).transpose()?,
+            ))
         }
     }
 }
@@ -262,7 +285,9 @@ enum ViewerAction {
     Quit,
     Stay,
     Edit(std::path::PathBuf),
-    OpenFile(std::path::PathBuf),
+    OpenFile(std::path::PathBuf, Option<String>),
+    Jump(String),
+    Switch(isize),
     Back,
 }
 
@@ -271,6 +296,13 @@ enum ViewerAction {
 struct OpenFile {
     path: Option<std::path::PathBuf>,
     content: String,
+    position: Position,
+}
+
+#[derive(Default)]
+struct Position {
+    y: usize,
+    x: usize,
 }
 
 fn run_viewer(
@@ -280,63 +312,132 @@ fn run_viewer(
     width_limit: Option<usize>,
     options: &RenderOptions,
 ) -> io::Result<()> {
-    // The open files form a navigation stack: the top entry is always the
-    // active one. Following a file link pushes a new entry; `b` pops back.
-    let mut stack = vec![OpenFile {
-        path: path.map(|p| p.to_path_buf()),
+    let mut files = vec![OpenFile {
+        path: path.map(std::fs::canonicalize).transpose()?,
         content: content.to_string(),
+        position: Position::default(),
     }];
+    let mut active = 0;
+    let mut history = Vec::new();
+    let mut status = String::new();
+    let mut anchor = None;
 
     loop {
-        let active = &stack[stack.len() - 1];
+        let title = tab_title(&files, active);
+        let file = &mut files[active];
         let action = viewer_session(
-            active.path.as_deref(),
-            &active.content,
+            file.path.as_deref(),
+            &file.content,
             line_numbers,
             width_limit,
             options,
+            &title,
+            &mut file.position,
+            &mut status,
+            anchor.take(),
         )?;
-        // The immutable borrow of `stack` ends here; the match arms may mutate.
         match action {
             ViewerAction::Quit => return Ok(()),
-            ViewerAction::Stay => {}
+            ViewerAction::Stay | ViewerAction::Jump(_) => {}
             ViewerAction::Edit(path) => {
-                // The file path is unchanged by an edit; only the content is.
-                let top = stack.last_mut().expect("navigation stack is never empty");
-                top.content = edit_file(&path)?;
+                files[active].content = edit_file(&path)?;
             }
-            ViewerAction::OpenFile(path) => match std::fs::read_to_string(&path) {
-                Ok(content) => stack.push(OpenFile {
-                    path: Some(path),
-                    content,
-                }),
-                Err(e) => eprintln!("Error opening file: {e}"),
+            ViewerAction::OpenFile(path, fragment) => match std::fs::canonicalize(&path) {
+                Ok(path) => {
+                    let existing = files
+                        .iter()
+                        .position(|file| file.path.as_ref() == Some(&path));
+                    let target = if let Some(index) = existing {
+                        Ok(index)
+                    } else {
+                        std::fs::read_to_string(&path).map(|content| {
+                            files.push(OpenFile {
+                                path: Some(path),
+                                content,
+                                position: Position::default(),
+                            });
+                            files.len() - 1
+                        })
+                    };
+                    match target {
+                        Ok(index) => {
+                            if index != active {
+                                history.push(active);
+                                active = index;
+                            }
+                            anchor = fragment;
+                        }
+                        Err(error) => status = format!("Error opening file: {error}"),
+                    }
+                }
+                Err(error) => status = format!("Error opening file {}: {error}", path.display()),
             },
             ViewerAction::Back => {
-                // Popping the last entry is a no-op: there is nothing to go back to.
-                if stack.len() > 1 {
-                    stack.pop();
+                if let Some(previous) = history.pop() {
+                    active = previous;
+                }
+            }
+            ViewerAction::Switch(direction) => {
+                let next = (active as isize + direction).rem_euclid(files.len() as isize) as usize;
+                if next != active {
+                    history.push(active);
+                    active = next;
                 }
             }
         }
     }
 }
 
+fn tab_title(files: &[OpenFile], active: usize) -> String {
+    let label = |index: usize| {
+        files[index]
+            .path
+            .as_deref()
+            .and_then(std::path::Path::file_name)
+            .map_or_else(
+                || "Markdown".to_string(),
+                |name| name.to_string_lossy().into_owned(),
+            )
+    };
+    let mut title = format!("=== Blad: [{}]", label(active));
+    for index in 0..files.len() {
+        if index != active {
+            title.push_str(&format!(" | {}", label(index)));
+        }
+    }
+    title
+}
+
+#[allow(clippy::too_many_arguments)]
 fn viewer_session(
     path: Option<&std::path::Path>,
     content: &str,
     line_numbers: bool,
     width_limit: Option<usize>,
     options: &RenderOptions,
+    title: &str,
+    position: &mut Position,
+    status: &mut String,
+    anchor: Option<String>,
 ) -> io::Result<ViewerAction> {
-    use crossterm::event::{self, Event, KeyCode, KeyEvent, MouseEvent, MouseEventKind};
+    use crossterm::event::{
+        self, Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
 
     let (mut cols, mut rows) = crossterm::terminal::size()?;
     let mut document =
         Document::render_with_options(content, cols, line_numbers, width_limit, options)?;
 
-    let mut scroll_offset: usize = 0;
-    let mut scroll_x: usize = 0;
+    let mut scroll_offset = position.y;
+    let mut scroll_x = position.x;
+    if let Some(anchor) = anchor {
+        if let Some(row) = anchor_row(&document, &anchor) {
+            scroll_offset = row;
+            scroll_x = 0;
+        } else {
+            *status = format!("anchor not found: #{anchor}");
+        }
+    }
     let mut visible_lines = usize::from(rows.saturating_sub(2));
 
     // Search state
@@ -345,16 +446,13 @@ fn viewer_session(
     let mut search_matches: Vec<usize> = Vec::new();
     let mut search_index = 0;
 
-    // Link navigation state. Each link is mapped to the rendered line its
-    // display text first appears on, so Enter can follow the link at the
-    // cursor without entering link mode.
-    let links = extract_links(content);
-    let mut link_lines: Vec<Option<usize>> = links
-        .iter()
-        .map(|link| rendered_line_of(&document.lines, &link.text))
-        .collect();
+    // Source offsets identify actual rendered link spans, including duplicates.
+    let safe_content = inert_source(content);
+    let links = extract_links(&safe_content);
+    let mut link_lines = link_rows(&document, &links);
     let mut link_mode = false;
     let mut link_index = 0;
+    let mut selected_link = None;
 
     let mut terminal = TerminalGuard::enter()?;
 
@@ -372,27 +470,28 @@ fn viewer_session(
     }
 
     loop {
+        let mut pending_follow = None;
         let lines = &document.lines;
         let total_lines = lines.len();
         scroll_offset = scroll_offset.min(total_lines.saturating_sub(visible_lines));
         scroll_x = scroll_x.min(document.max_x());
+        position.y = scroll_offset;
+        position.x = scroll_x;
         let start = scroll_offset;
         let end = scroll_offset.saturating_add(visible_lines).min(total_lines);
 
         // Header
-        let header = if search_mode || (!search_query.is_empty() && !search_matches.is_empty()) {
+        let context = if search_mode || (!search_query.is_empty() && !search_matches.is_empty()) {
             format!("=== Search: {} ===", search_query)
-        } else if link_mode && !links.is_empty() {
+        } else if (link_mode || selected_link.is_some()) && !links.is_empty() {
             format!(
                 "=== Links: {}/{} - {} ===",
                 link_index + 1,
                 links.len(),
                 links[link_index].text
             )
-        } else if let Some(p) = path {
-            format!("=== Blad: {} ===", p.display())
         } else {
-            "=== Blad Markdown Viewer ===".to_string()
+            String::new()
         };
 
         // Calculate meaningful percentage based on scroll position
@@ -419,19 +518,25 @@ fn viewer_session(
             end,
             total_lines
         );
-        let footer = format!(
-            "  [{:5.1}%]{}{}{}",
-            pct,
-            line_info,
-            search_info,
-            if scroll_offset == 0 {
-                " TOP"
-            } else if end >= total_lines {
-                " BOTTOM"
-            } else {
-                " SCROLL"
-            }
-        );
+        let footer = if !status.is_empty() {
+            status.clone()
+        } else if !context.is_empty() {
+            context
+        } else {
+            format!(
+                "  [{:5.1}%]{}{}{}",
+                pct,
+                line_info,
+                search_info,
+                if scroll_offset == 0 {
+                    " TOP"
+                } else if end >= total_lines {
+                    " BOTTOM"
+                } else {
+                    " SCROLL"
+                }
+            )
+        };
         paint(
             &mut io::stdout().lock(),
             &document,
@@ -440,15 +545,35 @@ fn viewer_session(
                 rows,
                 y: scroll_offset,
                 x: scroll_x,
-                header: &header,
+                header: title,
                 footer: &footer,
-                matches: &search_matches,
+                matches: &highlight_rows(
+                    &document,
+                    &links,
+                    selected_link.or_else(|| link_mode.then_some(link_index)),
+                    &search_matches,
+                ),
             },
         )?;
 
         // Event handling
         match event::read() {
-            Ok(Event::Key(KeyEvent { code, .. })) => {
+            Ok(Event::Key(KeyEvent {
+                code, modifiers, ..
+            })) => {
+                if modifiers.contains(KeyModifiers::ALT)
+                    && matches!(code, KeyCode::Left | KeyCode::Right)
+                {
+                    status.clear();
+                    return Ok(ViewerAction::Switch(if code == KeyCode::Left {
+                        -1
+                    } else {
+                        1
+                    }));
+                }
+                if !matches!(code, KeyCode::Enter) {
+                    status.clear();
+                }
                 if search_mode {
                     match code {
                         KeyCode::Char(c) => {
@@ -456,7 +581,7 @@ fn viewer_session(
                             search_matches = find_matches(lines, &search_query);
                             if !search_matches.is_empty() {
                                 search_index = 0;
-                                scroll_to_match(
+                                scroll_offset = scroll_to_match(
                                     scroll_offset,
                                     search_matches[search_index],
                                     visible_lines,
@@ -468,7 +593,7 @@ fn viewer_session(
                             search_matches = find_matches(lines, &search_query);
                             if !search_matches.is_empty() {
                                 search_index = 0;
-                                scroll_to_match(
+                                scroll_offset = scroll_to_match(
                                     scroll_offset,
                                     search_matches[search_index],
                                     visible_lines,
@@ -501,8 +626,8 @@ fn viewer_session(
                             }
                         }
                         KeyCode::Enter => {
-                            let action = follow_link(&links[link_index], path);
-                            return Ok(action);
+                            pending_follow = Some(link_index);
+                            link_mode = false;
                         }
                         KeyCode::Esc => {
                             link_mode = false;
@@ -553,7 +678,7 @@ fn viewer_session(
                         }
                         KeyCode::Char('n') if !search_matches.is_empty() => {
                             search_index = (search_index + 1).min(search_matches.len() - 1);
-                            scroll_to_match(
+                            scroll_offset = scroll_to_match(
                                 scroll_offset,
                                 search_matches[search_index],
                                 visible_lines,
@@ -561,7 +686,7 @@ fn viewer_session(
                         }
                         KeyCode::Char('p') if !search_matches.is_empty() => {
                             search_index = search_index.saturating_sub(1);
-                            scroll_to_match(
+                            scroll_offset = scroll_to_match(
                                 scroll_offset,
                                 search_matches[search_index],
                                 visible_lines,
@@ -571,6 +696,24 @@ fn viewer_session(
                             if !links.is_empty() {
                                 link_mode = true;
                                 link_index = 0;
+                            }
+                        }
+                        KeyCode::Tab | KeyCode::BackTab if !links.is_empty() => {
+                            link_index = match selected_link {
+                                Some(index) if code == KeyCode::Tab => (index + 1) % links.len(),
+                                Some(index) => (index + links.len() - 1) % links.len(),
+                                None if code == KeyCode::BackTab => link_lines
+                                    .iter()
+                                    .rposition(|row| row.is_some_and(|row| row <= scroll_offset))
+                                    .unwrap_or(links.len() - 1),
+                                None => link_lines
+                                    .iter()
+                                    .position(|row| row.is_some_and(|row| row >= scroll_offset))
+                                    .unwrap_or(0),
+                            };
+                            selected_link = Some(link_index);
+                            if let Some(row) = link_lines[link_index] {
+                                scroll_offset = scroll_to_match(scroll_offset, row, visible_lines);
                             }
                         }
                         KeyCode::Char('e') => {
@@ -586,15 +729,24 @@ fn viewer_session(
                         // the viewport, so links can be jumped to without
                         // entering link mode.
                         KeyCode::Enter => {
-                            if let Some(index) = links
-                                .iter()
-                                .enumerate()
-                                .filter_map(|(i, _)| link_lines[i].map(|line| (i, line)))
-                                .find(|(_, line)| *line >= scroll_offset)
-                                .map(|(i, _)| i)
-                            {
-                                return Ok(follow_link(&links[index], path));
-                            }
+                            pending_follow = selected_link.or_else(|| {
+                                links
+                                    .iter()
+                                    .position(|link| {
+                                        document
+                                            .navigation
+                                            .links
+                                            .get(&link.source_offset)
+                                            .is_some_and(|spans| {
+                                                spans.iter().any(|span| span.row >= scroll_offset)
+                                            })
+                                    })
+                                    .or_else(|| {
+                                        link_lines.iter().position(|row| {
+                                            row.is_some_and(|row| row >= scroll_offset)
+                                        })
+                                    })
+                            });
                         }
                         KeyCode::Char('q') | KeyCode::Esc => {
                             break;
@@ -603,7 +755,29 @@ fn viewer_session(
                     }
                 }
             }
-            Ok(Event::Mouse(MouseEvent { kind, .. })) => match kind {
+            Ok(Event::Mouse(MouseEvent {
+                kind, column, row, ..
+            })) => match kind {
+                MouseEventKind::Down(MouseButton::Left)
+                    if row > 0
+                        && row < rows.saturating_sub(1)
+                        && usize::from(column) >= document.gutter =>
+                {
+                    let target_row = scroll_offset + usize::from(row - 1);
+                    let target_column = scroll_x + usize::from(column) - document.gutter;
+                    pending_follow = links.iter().position(|link| {
+                        document
+                            .navigation
+                            .links
+                            .get(&link.source_offset)
+                            .is_some_and(|spans| {
+                                spans.iter().any(|span| {
+                                    span.row == target_row
+                                        && (span.start..span.end).contains(&target_column)
+                                })
+                            })
+                    });
+                }
                 MouseEventKind::ScrollUp => {
                     scroll_offset = scroll_offset.saturating_sub(1);
                 }
@@ -628,20 +802,71 @@ fn viewer_session(
                 search_matches = find_matches(&document.lines, &search_query);
                 search_index = search_index.min(search_matches.len().saturating_sub(1));
                 // Reflow moved links to new rendered lines.
-                link_lines = links
-                    .iter()
-                    .map(|link| rendered_line_of(&document.lines, &link.text))
-                    .collect();
+                link_lines = link_rows(&document, &links);
             }
             Ok(_) => {}
             Err(error) => return Err(error),
         }
+        if let Some(index) = pending_follow {
+            status.clear();
+            match follow_link(&links[index], path) {
+                Ok(ViewerAction::Jump(anchor)) => {
+                    if let Some(row) = anchor_row(&document, &anchor) {
+                        scroll_offset = row;
+                        scroll_x = 0;
+                    } else {
+                        *status = format!("anchor not found: #{anchor}");
+                    }
+                    selected_link = None;
+                }
+                Ok(ViewerAction::Stay) => {}
+                Ok(action) => return Ok(action),
+                Err(error) => *status = format!("Error following link: {error}"),
+            }
+        }
     }
-
     terminal.restore()?;
     Ok(ViewerAction::Quit)
 }
 
+fn link_rows(document: &Document, links: &[Link]) -> Vec<Option<usize>> {
+    links
+        .iter()
+        .map(|link| {
+            document
+                .navigation
+                .links
+                .get(&link.source_offset)
+                .and_then(|spans| spans.first().map(|span| span.row))
+                .or_else(|| rendered_line_of(&document.lines, &link.text))
+        })
+        .collect()
+}
+
+fn anchor_row(document: &Document, anchor: &str) -> Option<usize> {
+    if anchor.is_empty() {
+        Some(0)
+    } else {
+        document.navigation.anchors.get(anchor).copied()
+    }
+}
+
+fn highlight_rows(
+    document: &Document,
+    links: &[Link],
+    selected: Option<usize>,
+    search: &[usize],
+) -> Vec<usize> {
+    let mut rows = search.to_vec();
+    if let Some(link) = selected.and_then(|index| links.get(index))
+        && let Some(spans) = document.navigation.links.get(&link.source_offset)
+    {
+        rows.extend(spans.iter().map(|span| span.row));
+    }
+    rows.sort_unstable();
+    rows.dedup();
+    rows
+}
 /// Find the rendered line a link's display text first appears on, so Enter can
 /// follow the link at the cursor. Returns `None` if the text is not found (for
 /// example when a link label wraps across lines or is clipped).
