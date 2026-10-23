@@ -120,6 +120,39 @@ fn record_validation_is_atomic_and_eof_is_not_completion() {
 }
 
 #[test]
+fn oversized_initial_metadata_never_reserves_a_filename_and_serialization_is_bounded() {
+    use serde::ser::{Serialize, SerializeSeq, Serializer};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct LazySequence<'a>(&'a AtomicUsize);
+    impl Serialize for LazySequence<'_> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+            let mut sequence = serializer.serialize_seq(Some(1_000_000))?;
+            for _ in 0..1_000_000 {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                sequence.serialize_element(&0)?;
+            }
+            sequence.end()
+        }
+    }
+    let dir = tempfile::tempdir().expect("directory");
+    let path = dir.path().join("run");
+    assert!(RunJournal::create(&path, "r", json!({"text":"x".repeat(65_536)})).is_err());
+    assert!(
+        !path.exists(),
+        "invalid input must not consume a no-clobber identity"
+    );
+    let mut writer = RunJournal::create(&path, "r", json!({})).expect("valid retry");
+    let before = fs::read(&path).expect("before");
+    let count = AtomicUsize::new(0);
+    assert!(writer.record(&LazySequence(&count)).is_err());
+    assert!(
+        count.load(Ordering::Relaxed) < 65_536,
+        "stop serializing at the byte bound"
+    );
+    assert_eq!(fs::read(&path).expect("unchanged"), before);
+}
+
+#[test]
 fn follower_keeps_original_descriptor_and_limits_batches() {
     let dir = tempfile::tempdir().expect("directory");
     let path = dir.path().join("run");
