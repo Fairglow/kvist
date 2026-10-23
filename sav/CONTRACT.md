@@ -11,7 +11,9 @@
 policy, selected model configuration, terminal or application task type is
 provided. Hosts declare descriptions and repeatable observations; those do not
 authorize effects or permit automatic tool replay. Required recorder errors
-stop execution before subsequent effects.
+stop execution before subsequent effects. `Recorder::model_event` receives
+each provisional `ModelStreamEvent` fallibly before presentation, so a
+host-owned live journal can retain partial progress without authorizing it.
 
 `NativeRuntime::run_controlled` takes a cloneable `ControlMailbox` capability.
 `steer` requires an active run; `submit` atomically classifies idle submissions
@@ -91,6 +93,11 @@ compliance evidence.
 ## Provided interfaces
 
 ### Live diagnostic journals and private controls
+
+Record serialization itself stops at the 64-KiB line bound. Invalid initial
+metadata is rejected before creating a file, so it cannot consume a no-clobber
+run identity. Serializable application events must also fit the JSON parser's
+default nesting bound; validation failure does not append partial bytes.
 
 `run_supervised_observed` supervises one opaque external-agent command with a
 caller-supplied cancellation token and a fallible per-stream bounded-byte

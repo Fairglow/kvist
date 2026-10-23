@@ -44,6 +44,7 @@ impl RunJournal {
                 "run ID must be a bounded identifier and metadata an object",
             ));
         }
+        let initial = encode_record(run_id, 1, &json!({"type":"run_start","data":metadata}))?;
         let file = open_regular(path, true)?;
         let mut writer = Self {
             file,
@@ -54,7 +55,7 @@ impl RunJournal {
             finished: false,
             poisoned: false,
         };
-        writer.append(json!({"type":"run_start", "data":metadata}))?;
+        writer.write_record(initial, 1)?;
         writer.checkpoint()?;
         Ok(writer)
     }
@@ -66,8 +67,9 @@ impl RunJournal {
 
     /// Appends a bounded application event; reserved lifecycle events are rejected.
     pub fn record(&mut self, event: &impl Serialize) -> Result<()> {
-        let event =
-            serde_json::to_value(event).map_err(|_| invalid("event cannot be serialized"))?;
+        let encoded = encode_bounded(event)?;
+        let event: Value = serde_json::from_slice(&encoded)
+            .map_err(|_| invalid("event cannot be parsed within the JSON nesting bound"))?;
         validate_event(&event)?;
         if matches!(event["type"].as_str(), Some("run_start" | "run_end")) {
             return Err(invalid(
@@ -112,22 +114,17 @@ impl RunJournal {
             .sequence
             .checked_add(1)
             .ok_or_else(|| invalid("journal sequence exhausted"))?;
-        let record = JournalRecord {
-            schema_version: 1,
-            run_id: self.run_id.clone(),
-            sequence,
-            event,
-        };
-        let mut bytes =
-            serde_json::to_vec(&record).map_err(|_| invalid("event cannot be serialized"))?;
-        bytes.push(b'\n');
-        if bytes.len() > MAX_RECORD_BYTES
-            || self.bytes.saturating_add(bytes.len() as u64) > MAX_JOURNAL_BYTES
-        {
+        let bytes = encode_record(&self.run_id, sequence, &event)?;
+        self.write_record(bytes, sequence)
+    }
+
+    fn write_record(&mut self, bytes: Vec<u8>, sequence: u64) -> Result<()> {
+        if self.bytes.saturating_add(bytes.len() as u64) > MAX_JOURNAL_BYTES {
             return Err(invalid(
                 "live journal exceeds its record or total byte limit",
             ));
         }
+
         if let Err(source) = self.file.write_all(&bytes) {
             self.poisoned = true;
             return Err(io_error(&self.path, "append live journal", source));
@@ -136,6 +133,47 @@ impl RunJournal {
         self.bytes += bytes.len() as u64;
         Ok(())
     }
+}
+
+fn encode_record(run_id: &str, sequence: u64, event: &Value) -> Result<Vec<u8>> {
+    #[derive(Serialize)]
+    struct Record<'a> {
+        schema_version: u32,
+        run_id: &'a str,
+        sequence: u64,
+        event: &'a Value,
+    }
+    let mut bytes = encode_bounded(&Record {
+        schema_version: 1,
+        run_id,
+        sequence,
+        event,
+    })?;
+    bytes.push(b'\n');
+    Ok(bytes)
+}
+
+fn encode_bounded(value: &impl Serialize) -> Result<Vec<u8>> {
+    struct BoundedBytes(Vec<u8>);
+    impl Write for BoundedBytes {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            if bytes.len() >= MAX_RECORD_BYTES.saturating_sub(self.0.len()) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "live journal record exceeds 65536 bytes",
+                ));
+            }
+            self.0.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut output = BoundedBytes(Vec::with_capacity(4096));
+    serde_json::to_writer(&mut output, value)
+        .map_err(|_| invalid("event is not serializable within the 65536-byte record bound"))?;
+    Ok(output.0)
 }
 
 /// A bounded follower of the original regular file, including partial live tails.
