@@ -21,6 +21,7 @@ mod interrupt;
 pub mod loop_detection;
 mod model;
 pub mod offline_rust;
+pub mod observation;
 mod profile;
 mod prompt;
 mod setup;
