@@ -1805,6 +1805,7 @@ mod tests {
                 component_dir: Some(".".into()),
                 task_id: Some("t1".to_owned()),
                 stream: true,
+                allow_control: false,
             },
         };
         assert!(is_streaming_command(&task_run));
@@ -1855,6 +1856,7 @@ mod tests {
                 component_dir: Some(".".into()),
                 task_id: None,
                 stream: false,
+                allow_control: false,
             },
         };
         inject_command_focus(&mut run, Some("maerg"));
@@ -2422,6 +2424,7 @@ mod tests {
                 component_dir: Some(".".into()),
                 task_id: Some("t1".to_owned()),
                 stream: false,
+                allow_control: false,
             },
         };
         assert!(destructive_gate(&plain_run).is_none());

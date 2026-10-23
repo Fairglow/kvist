@@ -43,8 +43,9 @@ fn supervised_cli_never_auto_executes_a_suggested_task_and_exposes_recovery_and_
     assert!(
         output_text(&missing_task).contains("TASK_ID")
             || output_text(&missing_task).contains("task id"),
-        "missing-task diagnostic must request an explicit task ID: {}",
-        output_text(&missing_task)
+        "missing-task diagnostic must request an explicit task ID: {}\ndoctor: {}",
+        output_text(&missing_task),
+        output_text(&run_kvist(project.path(), &["doctor"]))
     );
 
     let task_help = run_kvist(project.path(), &["task", "--help"]);

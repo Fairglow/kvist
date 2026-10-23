@@ -1073,6 +1073,37 @@ pub fn execute_with_timeout(
     options: ExecutionOptions,
     expected_runner: &RunnerIdentity,
 ) -> Result<ExecutionResult> {
+    execute_with_timeout_inner(config, request, options, expected_runner, None)
+}
+
+/// Executes an approved effect with an explicit run-owner cancellation token.
+/// Cancellation terminates its process group without implying rollback.
+pub fn execute_with_cancellation(
+    config: &SandboxConfig,
+    request: ExecutionRequest<'_>,
+    options: ExecutionOptions,
+    expected_runner: &RunnerIdentity,
+    cancellation: &sav::CancellationToken,
+) -> Result<ExecutionResult> {
+    execute_with_timeout_inner(
+        config,
+        request,
+        options,
+        expected_runner,
+        Some(cancellation),
+    )
+}
+
+fn execute_with_timeout_inner(
+    config: &SandboxConfig,
+    request: ExecutionRequest<'_>,
+    options: ExecutionOptions,
+    expected_runner: &RunnerIdentity,
+    cancellation: Option<&sav::CancellationToken>,
+) -> Result<ExecutionResult> {
+    if cancellation.is_some_and(sav::CancellationToken::is_cancelled) {
+        return Err(KvistError::Sav(sav::Error::Cancelled));
+    }
     let project_root = request.project_root;
     let vcs_selection = request.vcs_selection;
 
@@ -1382,7 +1413,7 @@ pub fn execute_with_timeout(
             reason: format!("cannot encode sandbox request: {error}"),
         })?;
 
-    run_launched_bounded(
+    run_launched_bounded_controlled(
         &launch,
         config,
         EXECUTE_ARGUMENT,
@@ -1390,6 +1421,7 @@ pub fn execute_with_timeout(
         options.timeout,
         options.output_limit,
         options.live_stdout,
+        cancellation,
     )
 }
 
@@ -2475,10 +2507,36 @@ fn run_launched_bounded(
     stdin_bytes: Option<&[u8]>,
     timeout: Option<Duration>,
     output_limit: Option<usize>,
+    live_stdout: Option<LiveStdoutSink>,
+) -> Result<ExecutionResult> {
+    run_launched_bounded_controlled(
+        launch,
+        config,
+        argument,
+        stdin_bytes,
+        timeout,
+        output_limit,
+        live_stdout,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_launched_bounded_controlled(
+    launch: &VerifiedRunnerLaunch,
+    config: &SandboxConfig,
+    argument: &str,
+    stdin_bytes: Option<&[u8]>,
+    timeout: Option<Duration>,
+    output_limit: Option<usize>,
     mut live_stdout: Option<LiveStdoutSink>,
+    cancellation: Option<&sav::CancellationToken>,
 ) -> Result<ExecutionResult> {
     let mut attempts = 0;
     let child = loop {
+        if cancellation.is_some_and(sav::CancellationToken::is_cancelled) {
+            return Err(KvistError::Sav(sav::Error::Cancelled));
+        }
         let res = launch
             .command(config)
             .arg(argument)
@@ -2598,10 +2656,15 @@ fn run_launched_bounded(
                 .map_err(|source| sandbox_error(config, "wait for sandbox runner", source))?;
         }
 
-        if sav::take_interrupted() {
-            tracing::info!(runner = %config.runner, "sandbox execution interrupted by signal");
-            // The shared handler already signalled the group; give it a short
-            // grace period to exit before escalating.
+        if sav::take_interrupted() || cancellation.is_some_and(sav::CancellationToken::is_cancelled)
+        {
+            tracing::info!(runner = %config.runner, "sandbox execution cancellation requested");
+            match killpg(Pid::from_raw(pgid), Signal::SIGTERM) {
+                Ok(()) | Err(Errno::ESRCH) => {}
+                Err(error) => {
+                    return Err(sandbox_error(config, "cancel sandbox process group", error));
+                }
+            }
             for _ in 0..20 {
                 let exited = child
                     .try_wait()
@@ -3460,6 +3523,33 @@ mod tests {
             started.elapsed() < Duration::from_secs(1),
             "a descendant retaining an output descriptor must not delay return"
         );
+    }
+
+    #[test]
+    fn explicit_cancellation_reaches_a_quiet_effect_without_a_process_signal() {
+        let (_directory, config, launch) = launched_test_runner("#!/bin/sh\nexec sleep 30\n");
+        let cancellation = sav::CancellationToken::new();
+        let token = cancellation.clone();
+        let worker = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(50));
+            token.cancel();
+        });
+        let started = Instant::now();
+        let result = run_launched_bounded_controlled(
+            &launch,
+            &config,
+            "--test",
+            None,
+            Some(Duration::from_secs(3)),
+            Some(1024),
+            None,
+            Some(&cancellation),
+        )
+        .expect("cancelled runner");
+        worker.join().expect("canceller");
+        assert!(result.cancelled);
+        assert!(!result.timed_out);
+        assert!(started.elapsed() < Duration::from_secs(3));
     }
 
     #[test]

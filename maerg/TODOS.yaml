@@ -17,27 +17,27 @@ tasks:
   - id: shared-runtime-write-tests
     title: "Pin shared resolution and live protected diagnostics"
     description: "Test shared profile selection, live model/broker/effect records, bounded controls and refusal of unsupported external backends before implementation."
-    context: "Human approved ADR 0015; maerg retains all protected task authority."
+    context: "Human approved ADR 0015. shared_registry, live_runtime, control_cli, agent, task_commands, sandbox and dogfood_boundary evidence covers typed selections, early opaque refusal, live redaction, quiet-generation guidance, explicit effect cancellation and protected lifecycle. The refreshed offline locked full workspace suite passed. No acceptance receipt is implied."
     purpose: "Prevent consolidation from replacing the narrow broker."
     expected_outcome: "Deterministic tests fail before implementation."
     kind: test
-    status: pending
+    status: completed
     depends_on: []
     requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:53:20Z", completed_at: "2026-10-23T22:53:20Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-implement-code
     title: "Integrate shared mechanisms beneath task authority"
     description: "Resolve shared profiles and emit live journal/control state while retaining context, broker, acquisition, verification and canonical evidence ownership."
-    context: "No workspace-shell or host-subprocess fallback."
+    context: "Shared profile pinning, native conversation/context/retry/control integration, required live diagnostics and task --allow-control are wired without workspace-shell or opaque-agent fallback. Protected broker, acquisition, verification and canonical evidence remain local. Full workspace tests and strict Clippy passed; independent gates remain separate."
     purpose: "Enable independent inspection without weakening protected execution."
     expected_outcome: "Protected regression tests and new live diagnostics pass."
     kind: implementation
-    status: pending
+    status: completed
     depends_on: [shared-runtime-write-tests]
     requirements: ["REQUIREMENTS.md#REQ-SHARED-RUNTIME"]
-    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:00:00Z", completed_at: null}
+    timestamps: {created_at: "2026-10-23T22:00:00Z", updated_at: "2026-10-23T22:53:20Z", completed_at: "2026-10-23T22:53:20Z"}
     blocked_reason: null
     recovery_state: null
   - id: shared-runtime-security-audit

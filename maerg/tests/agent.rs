@@ -184,6 +184,7 @@ fn execute_agent_runs_the_model_turn_on_the_host_and_captures_the_response() {
     // The profile command embeds the numeric loopback endpoint; the brokered
     // transport extracts it and performs the turn on the host.
     let profile = AgentProfile {
+        resolved_profile: None,
         role: Role::Developer,
         profile: "default".to_owned(),
         command_template: command.clone(),
@@ -272,6 +273,7 @@ fn execute_agent_surfaces_a_proposed_decision_and_pauses() {
     );
 
     let profile = AgentProfile {
+        resolved_profile: None,
         role: Role::Developer,
         profile: "default".to_owned(),
         command_template: command.clone(),

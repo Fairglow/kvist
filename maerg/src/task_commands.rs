@@ -3990,6 +3990,17 @@ pub fn run_task(
     task_id: &str,
     stream: bool,
 ) -> Result<String> {
+    run_task_with_controls(project_dir, component_path, task_id, stream, false)
+}
+
+/// Runs a protected task, optionally exposing separately authorized private controls.
+pub fn run_task_with_controls(
+    project_dir: &Path,
+    component_path: &Path,
+    task_id: &str,
+    stream: bool,
+    allow_control: bool,
+) -> Result<String> {
     let context = validate_context(project_dir, component_path)?;
     let config = crate::config::load(project_dir)?;
     if config.sandbox.is_none() {
@@ -4182,7 +4193,7 @@ pub fn run_task(
         // The approved runner identity and capability-confirmed probe are passed
         // so a successful non-loopback turn can be authorized and applied as a
         // bounded authoring sandbox request.
-        let run_result = crate::agent::execute_agent(
+        let run_result = crate::agent::execute_agent_with_controls(
             agent_profile,
             sandbox_config,
             Some(&approved_runner),
@@ -4199,6 +4210,7 @@ pub fn run_task(
                 role,
                 policy_identity: &policy_identity,
             },
+            allow_control,
         )?;
         let agent_timestamp =
             Timestamp::now().map_err(|source| KvistError::TaskClock { source })?;
@@ -4519,6 +4531,17 @@ pub fn run_task_or_item(
     task_spec: Option<&str>,
     stream: bool,
 ) -> Result<String> {
+    run_task_or_item_with_controls(project_dir, component_path, task_spec, stream, false)
+}
+
+/// Runs a task selection with explicit per-attempt private control opt-in.
+pub fn run_task_or_item_with_controls(
+    project_dir: &Path,
+    component_path: &Path,
+    task_spec: Option<&str>,
+    stream: bool,
+    allow_control: bool,
+) -> Result<String> {
     let context = validate_context(project_dir, component_path)?;
     let queue = read_queue(&context.component_dir)?;
 
@@ -4532,7 +4555,13 @@ pub fn run_task_or_item(
                     "Cancelled: did not run the suggested task `{task_id}`."
                 ));
             }
-            return run_task(project_dir, component_path, &task_id, stream);
+            return run_task_with_controls(
+                project_dir,
+                component_path,
+                &task_id,
+                stream,
+                allow_control,
+            );
         }
         Some(spec) => spec,
     };
@@ -4588,7 +4617,13 @@ pub fn run_task_or_item(
 
     let total = target_tasks.len();
     if total == 1 {
-        return run_task(project_dir, component_path, &target_tasks[0], stream);
+        return run_task_with_controls(
+            project_dir,
+            component_path,
+            &target_tasks[0],
+            stream,
+            allow_control,
+        );
     }
 
     let mut completed_count = 0;
@@ -4598,7 +4633,7 @@ pub fn run_task_or_item(
             "\n▶ [{step}/{total}] Running task `{task_id}` in `{}`...",
             component_path.display()
         );
-        match run_task(project_dir, component_path, task_id, stream) {
+        match run_task_with_controls(project_dir, component_path, task_id, stream, allow_control) {
             Ok(output) => {
                 println!("✓ [{step}/{total}] Task `{task_id}` completed successfully.");
                 completed_count += 1;

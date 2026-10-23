@@ -2,6 +2,13 @@
 
 # Kvist Maerg Requirements
 
+## Shared registry configuration acceptance (ADR 0015)
+
+Setup MUST persist shared profile references rather than copied commands.
+Shared resolution MUST pin typed provider/endpoint/model/executable data and
+bind it into source evidence. Role policy and protected-task authority MUST
+remain maerg-owned, including refusal of external coding agents.
+
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
 RECOMMENDED, MAY, and OPTIONAL in this document are to be interpreted as
 described in BCP 14 (RFC 2119 and RFC 8174) when, and only when, they appear in
@@ -40,6 +47,9 @@ complete.
 
 ## Functional requirements
 
+The following stable requirement identifiers define the mandatory behavior of
+the root component.
+
 ### REQ-SHARED-RUNTIME
 
 Maerg MUST consume shared provider/profile resolution and native runtime
@@ -54,9 +64,6 @@ recording failure MUST prevent later effects. Read-only observers MUST not own
 execution. Optional controls MUST be explicitly authorized, record guidance,
 preserve approved context/grants and accounting, and never promise rollback or
 resume of unknown effects. Diagnostics remain distinct from canonical evidence.
-
-The following stable requirement identifiers define the mandatory behavior of
-the root component.
 
 ### REQ-ARTIFACT-MODEL
 

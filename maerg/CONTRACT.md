@@ -10,7 +10,8 @@ profile, with role policy remaining local. No provider/model facts are copied
 by setup. Selection is resolved once while loading configuration; exact registry
 source bytes contribute to the configuration digest. `resolve_role_profile`
 and `resolve_named_profile` expose pinned typed backend data to the execution
-host. External-agent refusal for protected tasks remains mandatory; parsing or
+host. Each shared role also retains its `resolved_profile` snapshot in the
+serialized approval input. External-agent refusal for protected tasks remains mandatory; parsing or
 qualification never grants process authority.
 
 The key words MUST, MUST NOT, REQUIRED, SHALL, SHALL NOT, SHOULD, SHOULD NOT,
@@ -33,7 +34,17 @@ generic command supervision, or reusable provider profiles.
 
 ## Provided interfaces
 
+The command and diagnostic surfaces below expose project workflow without
+delegating task approval or effect authority to their clients.
+
 ### Live task diagnostics and controls
+
+Explicit cancellation is carried into an executing sandbox effect and
+terminates/reaps its owned process group; steering alone never cancels that
+effect. The sandbox execution API exposes an additional explicit-token entry
+point while existing callers retain signal-only behavior. A token already
+cancelled refuses to spawn; cancellation never authorizes replay or implies
+rollback.
 
 `task run --allow-control` explicitly enables a private ephemeral local control
 capability for each selected protected run. Without it the run has no control
@@ -51,6 +62,8 @@ accept controls. Guidance is recorded before it reaches model context, all
 pending assistant calls receive results, and the original wall/token/turn
 accounting is retained. Completion closes the control capability. There is no
 automatic replay/resume. An observer never needs control access.
+
+### Command surface
 
 The `kvist` executable provides (the authoritative design is
 [`docs/command-set.md`](../docs/command-set.md)):
@@ -74,7 +87,7 @@ The `kvist` executable provides (the authoritative design is
 - `component commit ACCEPTANCE_ID`
 - `task next [COMPONENT_DIR]`
 - `task transition [COMPONENT_DIR] TASK_ID STATUS [--reason TEXT]`
-- `task run [COMPONENT_DIR] [TASK_ID] [--stream]`, where TASK_ID is an exact
+- `task run [COMPONENT_DIR] [TASK_ID] [--stream] [--allow-control]`, where TASK_ID is an exact
   task ID, an item prefix selecting every task of that item, or `all` (every
   uncompleted task of the component, run sequentially, stopping at the first
   failure)
